@@ -66,7 +66,10 @@ export function useProcessIssues({
   onShowIssues,
   sources = NO_SOURCES,
   liveRevisions,
+  issueExtra,
 }: {
+  /** Drawn under each confirmed issue in the page's Issues section (the status track). */
+  issueExtra?: (issue: IssueRow) => ReactNode;
   /** The AI insights stored for this version (A46); they join the list marked AI. */
   aiInsights?: readonly AiInsight[];
   bundle: ProcessBundle;
@@ -189,6 +192,8 @@ export function useProcessIssues({
 
   const section = (view: "issues") => (
     <IssuesRegister
+      issueExtra={issueExtra}
+      includeClosed={Boolean(issueExtra)}
       layout="page"
       view={view}
       stepIds={stepIds}

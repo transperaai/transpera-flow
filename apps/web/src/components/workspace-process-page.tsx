@@ -7,8 +7,9 @@ import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
+import { loadIdeaIssueIds, loadLastChange } from "@/lib/process-page/data";
 import { loadProcessFirstPrinciples } from "@/lib/first-principles/data";
-import { processRatings } from "@/lib/processes/rows";
+import { processRatings, trailOf } from "@/lib/processes/rows";
 import { loadWorkspaceAnalysisRules } from "@/lib/rules/data";
 import { loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
@@ -34,6 +35,14 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     currentUserId(),
     loadMemberNames(live.workspace.id),
   ]);
+  // Who last published the live version, and which of this process's issues an AI idea is waiting for.
+  const [lastChange, ideaIssueIds] = await Promise.all([
+    isUnpublished(live) ? null : loadLastChange(live.revision.id, memberNames),
+    loadIdeaIssueIds(
+      live.workspace.id,
+      issues.filter((i) => i.process_id === live.process.id || i.links.some((l) => l.process_id === live.process.id)).map((i) => i.id),
+    ),
+  ]);
   // First principles of the version on screen, and whether the draft has answers live doesn't (A54).
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const fpIds = [shown.revision.id, ...(draft && draft !== shown ? [draft.revision.id] : [])];
@@ -45,6 +54,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const draftChanged = fpDraft !== null && JSON.stringify(fpDraft.doc) !== JSON.stringify(fpShown.doc);
   const base = `/w/${slug}`;
   const hrefs = Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}`]));
+  const byId = new Map(processes.map((p) => [p.id, { id: p.id, name: p.name, parentId: p.parentId ?? null }]));
   const ratings = processRatings(processes, issues, [...live.steps, ...(live.otherProcesses ?? []).flatMap((p) => p.steps)]);
   return (
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit={canEdit && !earlier}>
@@ -67,6 +77,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       editHref={canEdit ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
+      ideaIssueIds={ideaIssueIds}
+      aboutInfo={{ trail: trailOf({ id: live.process.id, parentId: live.process.parent_process_id }, byId).map((t) => t.name), hasDraft: draft !== null && !isUnpublished(live), lastChange }}
       ai={{ view: aiViews[shown.revision.id] ?? null, configured: aiConfigured(), hasFirstPrinciples: fpShown.doc !== null && !isBlank(fpShown.doc), versionNumber: isUnpublished(live) ? null : shown.revision.number }}
       firstPrinciples={{ doc: fpShown.doc, href: `${base}/p/${live.process.id}/first-principles`, draftChanged, inheritedFrom: fpShown.inheritedFrom }}
       inside={processes.filter((p) => p.parentId === live.process.id).map((p) => ({ id: p.id, name: p.name, href: hrefs[p.id]! }))}
