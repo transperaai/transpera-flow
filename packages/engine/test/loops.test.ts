@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLoops, northbeamModel, simulate, type EngineModel, type EngineStep } from "../src";
+import { detectLoops, larkspurModel, northbeamModel, simulate, type EngineModel, type EngineStep } from "../src";
 import { largeModel } from "./fixtures/large-model";
 
 // Issue #174: rework loops (same-step redo and back-edges) and the per-step
@@ -195,6 +195,27 @@ describe("loop outputs are unbiased and add up", () => {
     expect(l.extraCycleHoursPerLooper.mean).toBeLessThan(470);
   });
 
+  it("counts loopers when they are sent back, so a 300 h wait over 20 weeks still gives 1 / (1 - p) rounds", () => {
+    const m = model([step("a", [to("done")], { rework: 0.3, wait: 300, waitDist: { kind: "constant" } })], { horizonWeeks: 20, leadsPerWeek: 1 });
+    const l = simulate(m, 30, 1).loops![0]!;
+    expect(l.share.mean).toBeGreaterThan(0.26);
+    expect(l.share.mean).toBeLessThan(0.34);
+    expect(l.meanRounds.mean).toBeGreaterThan(1.33);
+    expect(l.meanRounds.mean).toBeLessThan(1.53);
+    expect(l.extraCycleHoursPerLooper.mean).toBeGreaterThan(400);
+    expect(l.extraCycleHoursPerLooper.mean).toBeLessThan(465);
+  });
+
+  it("gives Larkspur's content plan a share near the step's own measured rework rate", () => {
+    const r = simulate(larkspurModel(), 30, 1);
+    const l = r.loops!.find((x) => x.id === "redo:content_plan")!;
+    const st = r.steps.content_plan!;
+    const rate = st.reworks / st.departures;
+    expect(Math.abs(l.share.mean - rate)).toBeLessThan(0.03);
+    expect(l.meanRounds.mean).toBeGreaterThan(1.1);
+    expect(l.meanRounds.mean).toBeLessThan(1.4);
+  });
+
   it("counts items that join a loop part-way, whatever order the edges are drawn in", () => {
     const edges = (flip: boolean): EngineStep[] => [
       step("a", flip ? [to("c", 0.5), to("b", 0.5)] : [to("b", 0.5), to("c", 0.5)]),
@@ -242,13 +263,30 @@ describe("loop outputs are unbiased and add up", () => {
       [step("a", [to("b")]), step("b", [to("c")]), step("c", [to("b", 0.2), to("d", 0.8)]), step("d", [to("b", 0.25), to("done", 0.75)])],
       { leadsPerWeek: 4, horizonWeeks: 300 },
     );
-    // Visits to b per item: geometric with return chance 1 - 0.8 * 0.75 = 0.4, so 1 / 0.6 = 1.667 visits to b, repeats 0.667.
-    // Hours per visit of b: always b and c (2 h); d only on 80% of the visits: 2.8 h. Repeat hours per item = 0.667 * 2.8.
-    const expected = 4 * (52 / 12) * (0.4 / 0.6) * 2.8;
+    // Rework is a visit beyond an item's first to that step. Visits to b: 1 / (1 - 0.4) = 1.667 (it returns with chance 0.2 + 0.8 * 0.25),
+    // so 0.667 repeats of b and of c; d is visited 0.8 * 1.667 = 1.333 times, 0.333 repeats. 1.667 hours an item.
+    const expected = 4 * (52 / 12) * (5 / 3);
     const r = simulate(m, 20, 1);
     expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(expected * 0.93);
     expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeLessThan(expected * 1.07);
     expect(r.loops!.reduce((a, l) => a + l.extraHandsOnHoursPerMonthTotal.mean, 0)).toBeCloseTo(r.rework!.extraHandsOnHoursPerMonthTotal.mean, 6);
+  });
+
+  it("does not count first visits as rework in nested loops (inner loop inside an outer one)", () => {
+    // a -> b -> c -> {b 0.3, d 0.7}; d -> {a 0.2, done 0.8}: the inner loop is b, c; the outer one a, b, c, d. 1 h each.
+    const m = model(
+      [step("a", [to("b")]), step("b", [to("c")]), step("c", [to("b", 0.3), to("d", 0.7)]), step("d", [to("a", 0.2), to("done", 0.8)])],
+      { leadsPerWeek: 4, horizonWeeks: 300 },
+    );
+    const loops = detectLoops(m);
+    expect(loops.find((l) => l.id === "back:c>b")!.body).toEqual(["b", "c"]);
+    expect(loops.find((l) => l.id === "back:d>a")!.body).toEqual(["a", "b", "c", "d"]);
+    // Visits per item: a and d 1 / 0.8 = 1.25 (0.25 repeats each); b and c 1.25 / 0.7 = 1.786 (0.786 repeats each). 2.071 h an item.
+    const perItem = 2 * 0.25 + 2 * (1.25 / 0.7 - 1);
+    const expected = 4 * (52 / 12) * perItem;
+    const r = simulate(m, 20, 1);
+    expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(expected * 0.93);
+    expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeLessThan(expected * 1.07);
   });
 
   it("puts a pinned person with no role under 'unassigned'", () => {

@@ -626,21 +626,24 @@ export interface ReplicationResult {
 }
 
 /**
- * One rework loop in one replication (loops.ts). "Entered" items are those that
- * came in at any step of the loop and left it in the measured window (items
- * still inside at the horizon aren't counted); "went round" is those sent back
- * at least once. Hands-on hours are over the measured window, in the innermost
- * loop a repeat pass is on. Working hours.
+ * One rework loop in one replication (loops.ts), counted as events in the
+ * measured window so long loops aren't under-counted. "Went round" is first
+ * send-backs of a stay in the loop (an item that joined at any step); "entered"
+ * is those plus stays that ended with none; "rounds" is every send-back.
+ * Hands-on hours and `extraElapsed` are over the window, each repeat pass in the
+ * innermost loop it is on. Working hours.
  */
 export interface LoopReplication {
   entered: number;
   /** Items that went round at least once. */
   went: number;
-  /** Times round, summed over items. */
+  /** Send-backs in the window, and of those the ones by an item already on a repeat pass (`again`) and the items on a repeat pass that left (`left`). */
   rounds: number;
+  again: number;
+  left: number;
   /** Hands-on hours on repeat passes by role id (a person-pinned step with no role counts to the person's first role). */
   roleHours: Record<string, number>;
-  /** Elapsed hours (queue, hands-on and waiting) spent on repeat passes, summed over the items that left (innermost loop only). */
+  /** Elapsed hours (queue, hands-on and waiting) spent on repeat passes, as each repeat pass ends (innermost loop only). */
   extraElapsed: number;
 }
 

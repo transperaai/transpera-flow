@@ -109,12 +109,8 @@ interface SimEntity extends TraceEntity {
   svc: number;
   /** Set for a servicing task. */
   task?: Task;
-  /**
-   * Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits, and in `lv` its rounds and
-   * the elapsed hours its repeat passes added, two numbers a loop. Null until it first reaches a step in a loop.
-   */
+  /** Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits. Null until it first reaches a step in a loop. */
   lp: Uint8Array | null;
-  lv: Float64Array | null;
 }
 
 /** Bits of `SimEntity.lp`: in the loop's region now; went round at least once on this stay (so it is on a repeat pass). */
@@ -127,10 +123,17 @@ interface LoopRun {
   idx: number;
   body: Set<string>;
   redo: boolean;
-  /** Items that left the loop's region in the measured window (resolved), those that went round, and their rounds and extra elapsed hours. */
-  entered: number;
+  /**
+   * Counted as events in the measured window, so long loops aren't under-counted: items sent back for the first
+   * time on a stay (went), every send-back (rounds), and stays that ended without one (clean). Repeat-pass elapsed
+   * hours as each pass ends.
+   */
   went: number;
+  clean: number;
   rounds: number;
+  /** Decisions made while on a repeat pass: sent back again, or left. Rounds per looper is 1 + again / left, whatever the horizon cuts off. */
+  again: number;
+  left: number;
   extraElapsed: number;
   /** Hands-on hours on repeat passes in the measured window, by role (each pass counted in the innermost loop it is on). */
   roleHours: Map<string, number>;
@@ -773,9 +776,11 @@ export function runOnce(
     idx,
     body: new Set(def.body),
     redo: def.kind === "redo",
-    entered: 0,
     went: 0,
+    clean: 0,
     rounds: 0,
+    again: 0,
+    left: 0,
     extraElapsed: 0,
     roleHours: new Map(),
   }));
@@ -1511,7 +1516,7 @@ export function runOnce(
     scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
     const sla = l.link.sla;
     const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.interval === null };
-    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, lp: null, lv: null };
+    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, lp: null };
     if (keepTrace) {
       e.trace = [];
       e.servicing = { process: l.link.process, client: c.key };
@@ -1678,7 +1683,6 @@ export function runOnce(
       let f = e.lp;
       if (!f) {
         f = e.lp = new Uint8Array(nLoops);
-        e.lv = new Float64Array(2 * nLoops);
       }
       for (let i = 0; i < lps.length; i++) f[lps[i]!.idx]! |= LP_INSIDE;
     }
@@ -1841,9 +1845,11 @@ export function runOnce(
     if (lp) {
       // Time at a step on a repeat pass is what the loop adds to the item's cycle time (in the innermost loop it is on).
       const L = repeatLoop(lps, lp);
-      if (L) {
-        e.lv![2 * L.idx + 1]! += t - e.seg!.tQ;
-        if (t >= 0) reworkElapsed += t - Math.max(0, e.seg!.tQ);
+      if (L && t >= 0) {
+        // Counted whole when the pass ends (as a rate), not clipped to the window, so passes that began before it aren't shortened.
+        const x = t - e.seg!.tQ;
+        L.extraElapsed += x;
+        reworkElapsed += x;
       }
     }
     if (e.task && t >= 0) {
@@ -1860,7 +1866,7 @@ export function runOnce(
       if (lp) {
         for (let i = 0; i < lps.length; i++) {
           const L = lps[i]!;
-          if (L.redo && L.def.from === s.id) goRound(e, L);
+          if (L.redo && L.def.from === s.id) goRound(e, L, t);
         }
       }
       queueAt(e, st, t, t);
@@ -1894,7 +1900,7 @@ export function runOnce(
     if (lp) {
       for (let i = 0; i < lps.length; i++) {
         const L = lps[i]!;
-        if (!L.redo && L.def.from === s.id && L.def.to === target.id) goRound(e, L);
+        if (!L.redo && L.def.from === s.id && L.def.to === target.id) goRound(e, L, t);
         else if (L.redo || !L.body.has(target.id)) leaveLoop(e, L, t);
       }
     }
@@ -1910,31 +1916,31 @@ export function runOnce(
   }
 
   /** An item goes round a loop once more: it is on a repeat pass until it leaves the loop. */
-  function goRound(e: SimEntity, L: LoopRun) {
-    e.lp![L.idx]! |= LP_WENT;
-    e.lv![2 * L.idx]!++;
+  function goRound(e: SimEntity, L: LoopRun, t: number) {
+    const f = e.lp!;
+    if (t >= 0) {
+      L.rounds++;
+      if (f[L.idx]! & LP_WENT) L.again++;
+      else L.went++;
+    }
+    f[L.idx]! |= LP_WENT;
   }
 
   /**
-   * An item leaves a loop's region: its stay is settled, if that happens in the
-   * measured window (so the share is of items that finished in it, whenever
-   * they came in), and the loop forgets it, so a later stay counts afresh.
+   * An item leaves a loop's region, and the loop forgets it, so a later stay
+   * counts afresh. A stay that ends with no send-back, in the measured window,
+   * is a clean one. Together with first send-backs these are the settled first
+   * passes, so the share is not weighted to the quick ones (a looper is counted
+   * when it is sent back, not when it finally leaves).
    */
   function leaveLoop(e: SimEntity, L: LoopRun, t: number) {
     const f = e.lp!;
-    const v = e.lv!;
     if (!(f[L.idx]! & LP_INSIDE)) return;
     if (t >= 0) {
-      L.entered++;
-      if (f[L.idx]! & LP_WENT) {
-        L.went++;
-        L.rounds += v[2 * L.idx]!;
-        L.extraElapsed += v[2 * L.idx + 1]!;
-      }
+      if (f[L.idx]! & LP_WENT) L.left++;
+      else L.clean++;
     }
     f[L.idx] = 0;
-    v[2 * L.idx] = 0;
-    v[2 * L.idx + 1] = 0;
   }
 
   /**
@@ -1974,7 +1980,9 @@ export function runOnce(
       });
     }
     for (const L of loopRuns) {
-      L.entered = 0;
+      L.clean = 0;
+      L.again = 0;
+      L.left = 0;
       L.went = 0;
       L.rounds = 0;
       L.extraElapsed = 0;
@@ -2022,7 +2030,7 @@ export function runOnce(
     }
     items.sort((a, b) => a.tQ - b.tQ);
     for (const { st, tQ } of items) {
-      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), lp: null, lv: null };
+      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), lp: null };
       entities.push(e);
       queueAt(e, st, tQ, 0);
     }
@@ -2060,7 +2068,7 @@ export function runOnce(
     if (ev.type === "arrive") {
       scheduleArrival();
       const sv = drawService(ev.t < 0 ? mixWarmup : mix);
-      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, lp: null, lv: null };
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, lp: null };
       if (keepTrace) entities.push(e);
       if (ev.t >= 0) services[sv]!.counts.arrivals++;
       enterTarget(e, entryTargets[sv]!, ev.t);
@@ -2238,9 +2246,11 @@ export function runOnce(
   const loopsOut: Record<string, LoopReplication> = {};
   for (const L of loopRuns) {
     loopsOut[L.def.id] = {
-      entered: L.entered,
+      entered: L.went + L.clean,
       went: L.went,
       rounds: L.rounds,
+      again: L.again,
+      left: L.left,
       roleHours: Object.fromEntries(L.roleHours),
       extraElapsed: L.extraElapsed,
     };
@@ -2258,7 +2268,7 @@ export function runOnce(
     lostRevenue += l * sv.value;
     if (sv.id !== null) serviceOut[sv.id] = sv.counts;
   }
-  const toTrace = ({ seg: _seg, svc, task: _task, lp: _lp, lv: _lv, ...entity }: SimEntity): TraceEntity => {
+  const toTrace = ({ seg: _seg, svc, task: _task, lp: _lp, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
     return id !== null ? { ...entity, service: id } : entity;
   };
@@ -2450,6 +2460,16 @@ function ratioStat(nums: number[], dens: number[]): Stat {
   return { mean, p10: band.p10, p90: band.p90 };
 }
 
+/**
+ * Times round per item that goes round: 1 + (send-backs of items already on a repeat pass) / (their leaving), each a decision made at
+ * a moment in the window, so passes still running at the horizon (the long ones) aren't missed. 0 when no item went round.
+ */
+function meanRounds(reps: LoopReplication[]): Stat {
+  if (!reps.some((r) => r.went > 0)) return { mean: 0, p10: 0, p90: 0 };
+  const s = ratioStat(reps.map((r) => r.again), reps.map((r) => r.left));
+  return { mean: 1 + s.mean, p10: 1 + s.p10, p90: 1 + s.p90 };
+}
+
 /** Each rework loop across replications (loops.ts): the share that go round, how often, and what the repeat passes cost. */
 function loopResults(model: EngineModel, runs: ReplicationResult[]): LoopResult[] {
   const weeks = model.horizonWeeks;
@@ -2468,7 +2488,7 @@ function loopResults(model: EngineModel, runs: ReplicationResult[]): LoopResult[
       from: def.from,
       to: def.to,
       share: ratioStat(reps.map((r) => r.went), reps.map((r) => r.entered)),
-      meanRounds: ratioStat(reps.map((r) => r.rounds), reps.map((r) => r.went)),
+      meanRounds: meanRounds(reps),
       extraHandsOnHoursPerMonth,
       extraHandsOnHoursPerMonthTotal: stat(reps.map((r) => perMonth(Object.values(r.roleHours).reduce((a, b) => a + b, 0)))),
       extraCycleHours: ratioStat(reps.map((r) => r.extraElapsed), reps.map((r) => r.entered)),

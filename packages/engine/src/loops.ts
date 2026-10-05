@@ -30,8 +30,10 @@ export interface Loop {
   from: string;
   to: string;
   /**
-   * Every step on some path from `to` to `from`, `steps` among them. Time an
-   * item spends in these on a repeat pass is what the loop's hours and days count.
+   * Every step on some path from `to` forward to `from` that does not pass through
+   * `to` again, `steps` among them (a nested outer loop's other steps are not in an
+   * inner loop). Time an item spends in these on a repeat pass is what the loop's
+   * hours and days count.
    */
   body: string[];
 }
@@ -62,10 +64,12 @@ export function detectLoops(model: EngineModel): Loop[] {
   // Canonical order: edges are followed in the order of the steps they lead to, not the order they were drawn, so the same graph gives the same loops.
   const order = new Map(model.steps.map((s, i) => [s.id, i]));
   for (const adj of [fwd, back]) for (const list of adj.values()) list.sort((a, b) => order.get(a)! - order.get(b)!);
-  const reach = (from: string, adj: Map<string, string[]>): Set<string> => {
+  /** Steps reachable from `from` along `adj`, which are not expanded past `stop` (it is included, if reached). */
+  const reach = (from: string, adj: Map<string, string[]>, stop?: string): Set<string> => {
     const seen = new Set<string>([from]);
     const todo = [from];
     for (let id = todo.pop(); id !== undefined; id = todo.pop()) {
+      if (id === stop && id !== from) continue;
       for (const n of adj.get(id)!) {
         if (!seen.has(n)) {
           seen.add(n);
@@ -102,7 +106,7 @@ export function detectLoops(model: EngineModel): Loop[] {
       const seen = state.get(to);
       if (seen === 1) {
         const inFwd = reach(to, fwd);
-        const inBack = reach(top, back);
+        const inBack = reach(top, back, to);
         const body = model.steps.filter((s) => inFwd.has(s.id) && inBack.has(s.id)).map((s) => s.id);
         out.push({ id: `back:${top}>${to}`, kind: "back-edge", steps: stack.slice(stack.indexOf(to)), from: top, to, body });
       } else if (seen === undefined) {
