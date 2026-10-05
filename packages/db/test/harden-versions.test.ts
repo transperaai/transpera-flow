@@ -10,6 +10,7 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 
 let db: TestDb;
 let editor: { id: string; claims: Record<string, unknown> };
+let other: { id: string; claims: Record<string, unknown> };
 const ws = NORTHBEAM_WORKSPACE_ID;
 const proc = NORTHBEAM_PROCESS_ID;
 
@@ -39,6 +40,15 @@ const asEditor = <T>(fn: (c: pg.Client) => Promise<T>) => db.as(editor.claims, f
 const refused = (sql: string, params: unknown[] = [], message?: RegExp) =>
   expect(asEditor((c) => c.query(sql, params))).rejects.toThrow(message ?? /./);
 
+/** Run the statements in one transaction as the editor and commit: the commit is refused (the deferred check or a guard). */
+async function refusedChain(statements: [string, unknown[]][], message: RegExp) {
+  await expect(
+    commitAs(async (c) => {
+      for (const [sql, params] of statements) await c.query(sql, params);
+    }),
+  ).rejects.toThrow(message);
+}
+
 let v1: string; // superseded
 let v2: string; // published, live
 let v3: string; // the open draft
@@ -46,6 +56,7 @@ let v3: string; // the open draft
 beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   editor = await createUser(db, "editor@harden.example.com");
+  other = await createUser(db, "other@harden.example.com");
   await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
   v1 = NORTHBEAM_REVISION_ID;
   v2 = (await commitAs((c) => rpc(c, "open_draft", proc))).revision_id as string;
@@ -116,7 +127,69 @@ describe("versions: history is kept (direct writes by an editor)", () => {
   });
 
   it("refuses publishing a draft directly while another version is published", async () => {
-    await refused("update public.process_revisions set status = 'published' where id = $1", [v3], /one published version/);
+    // Even with the fields publish_process would write, the unique index allows one published version.
+    await refused("update public.process_revisions set status = 'published', published_by = auth.uid(), published_at = now(), number = 99 where id = $1", [v3], /./);
+  });
+
+  it("refuses superseding a published version and changing anything else in the same update", async () => {
+    const someone = other.id;
+    await refused("update public.process_revisions set status = 'superseded', layout = '{\"x\":1}'::jsonb where id = $1", [v2], /kept as it was/);
+    await refused("update public.process_revisions set status = 'superseded', number = 999 where id = $1", [v2], /kept as it was/);
+    await refused("update public.process_revisions set status = 'superseded', published_by = $2 where id = $1", [v2, someone], /kept as it was/);
+    await refused("update public.process_revisions set status = 'superseded', published_at = now() - interval '1 year' where id = $1", [v2], /kept as it was/);
+    await refused("update public.process_revisions set status = 'superseded', created_by = $2 where id = $1", [v2, someone], /kept as it was/);
+  });
+
+  it("refuses a bare supersede of the live version when the transaction commits (the live pointer must follow)", async () => {
+    await expect(commitAs((c) => c.query("update public.process_revisions set status = 'superseded' where id = $1", [v2]))).rejects.toThrow(/live version of a process is its published version/);
+    expect((await q("select status from process_revisions where id = $1", [v2]))[0].status).toBe("published");
+  });
+
+  it("refuses publishing a draft with forged published_by, published_at or number, after superseding live", async () => {
+    const someone = other.id;
+    const publish = (set: string, params: unknown[] = []) =>
+      refusedChain(
+        [
+          ["update public.process_revisions set status = 'superseded' where id = $1", [v2]],
+          [`update public.process_revisions set status = 'published', ${set} where id = $1`, [v3, ...params]],
+          ["update public.processes set live_revision_id = $1 where id = $2", [v3, proc]],
+        ],
+        /A draft is published by publishing it/,
+      );
+    await publish("published_by = $2, published_at = now(), number = 99", [someone]);
+    await publish("published_by = auth.uid(), published_at = now() - interval '1 year', number = 99");
+    await publish("published_by = auth.uid(), published_at = now(), number = 999");
+    await publish("published_by = null, published_at = now(), number = 99");
+  });
+
+  it("refuses a draft's number, author and dates changing, and a forged draft insert", async () => {
+    const someone = other.id;
+    await refused("update public.process_revisions set number = 77 where id = $1", [v3], /number, author and dates/);
+    await refused("update public.process_revisions set created_by = $2 where id = $1", [v3, someone], /number, author and dates/);
+    await refused("update public.process_revisions set created_at = now() - interval '1 year' where id = $1", [v3], /number, author and dates/);
+    await refused("update public.process_revisions set published_by = auth.uid() where id = $1", [v3], /number, author and dates/);
+    const [scratch] = await q("insert into processes (workspace_id, name) values ($1, 'Scratch 2') returning id", [ws]);
+    await refused("insert into public.process_revisions (workspace_id, process_id, number, created_by) values ($1, $2, 1, $3)", [ws, scratch.id, someone], /made by the person saving it/);
+    await refused("insert into public.process_revisions (workspace_id, process_id, number, published_at) values ($1, $2, 1, now())", [ws, scratch.id], /made by the person saving it/);
+    await refused("insert into public.process_revisions (workspace_id, process_id, number, created_at) values ($1, $2, 1, now() - interval '1 day')", [ws, scratch.id], /made by the person saving it/);
+  });
+
+  it("allows the whole of a publish written by hand (the audit trigger still records it): it is what publish_process does", async () => {
+    // Documented, not a hole: the same writes publish_process makes. The version and pointer stay consistent and the audit entry is written.
+    await commitAs(async (c) => {
+      await c.query("update public.process_revisions set status = 'superseded' where id = $1", [v2]);
+      await c.query(
+        "update public.process_revisions set status = 'published', published_by = auth.uid(), published_at = now(), number = (select max(number) + 1 from public.process_revisions where process_id = $2 and id <> $1) where id = $1",
+        [v3, proc],
+      );
+      await c.query("update public.processes set live_revision_id = $1, draft_revision_id = null where id = $2", [v3, proc]);
+    });
+    expect((await q("select live_revision_id from processes where id = $1", [proc]))[0].live_revision_id).toBe(v3);
+    const [audit] = await q("select count(*)::int as n from audit_log where target_id = $1 and action = 'publish'", [proc]);
+    expect(audit.n).toBeGreaterThan(0);
+    // Put the world back: v2 live again as a new draft published by the function, v3 superseded.
+    v2 = v3;
+    v3 = (await commitAs((c) => rpc(c, "open_draft", proc))).revision_id as string;
   });
 
   it("still lets an editor insert, edit and delete a draft, and move a published version to superseded", async () => {
@@ -159,6 +232,32 @@ describe("processes: version pointers", () => {
       await c.query("update public.processes set draft_revision_id = null where id = $1", [proc]);
       await c.query("update public.processes set draft_revision_id = $1 where id = $2", [v3, proc]);
     });
+  });
+});
+
+describe("processes: insert", () => {
+  it("refuses a process made with version pointers, or with a forged created_by or created_at", async () => {
+    const someone = other.id;
+    await refused("insert into public.processes (workspace_id, name, live_revision_id) values ($1, 'Forged', $2)", [ws, v2], /no versions yet/);
+    await refused("insert into public.processes (workspace_id, name, draft_revision_id) values ($1, 'Forged', $2)", [ws, v3], /no versions yet/);
+    await refused("insert into public.processes (workspace_id, name, created_by) values ($1, 'Forged', $2)", [ws, someone], /no versions yet/);
+    await refused("insert into public.processes (workspace_id, name, created_at) values ($1, 'Forged', now() - interval '1 year')", [ws], /no versions yet/);
+  });
+
+  it("lets an editor make a process the ordinary way, and a version of it", async () => {
+    await commitAs(async (c) => {
+      const r = await c.query("insert into public.processes (workspace_id, name, source) values ($1, 'Fresh', 'mcp') returning id, created_by", [ws]);
+      expect(r.rows[0].created_by).toBe(editor.id);
+      await c.query("insert into public.process_revisions (workspace_id, process_id, number, status) values ($1, $2, 1, 'draft')", [ws, r.rows[0].id]);
+    });
+  });
+
+  it("lets an editor delete a process with a published version (the cascade is the system's)", async () => {
+    const [p] = await q("insert into processes (workspace_id, name) values ($1, 'To delete') returning id", [ws]);
+    const [r] = await q("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 1, 'published') returning id", [ws, p.id]);
+    await q("update processes set live_revision_id = $1 where id = $2", [r.id, p.id]);
+    await commitAs((c) => c.query("delete from public.processes where id = $1", [p.id]));
+    expect(await q("select id from process_revisions where id = $1", [r.id])).toHaveLength(0);
   });
 });
 
@@ -207,7 +306,7 @@ describe("the system is not refused", () => {
   it("the guards are not executable by signed-in roles", async () => {
     const rows = await q(
       `select routine_name from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC')
-         and routine_name in ('version_rules_guard', 'process_rules_guard')`,
+         and routine_name in ('version_rules_guard', 'version_pointer_check', 'process_rules_guard')`,
     );
     expect(rows).toEqual([]);
   });

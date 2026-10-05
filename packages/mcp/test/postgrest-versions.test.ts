@@ -102,7 +102,7 @@ describe.skipIf(!POSTGREST_URL)("process versions and provenance over PostgREST 
   });
 
   it("refuses publishing a draft directly while another version is published", async () => {
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { status: "published" }, /one published version/);
+    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { status: "published" }, /published by publishing it/);
     expect(await statusOf(ids.v3)).toBe("draft");
   });
 
@@ -127,6 +127,42 @@ describe.skipIf(!POSTGREST_URL)("process versions and provenance over PostgREST 
     await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { source: "import" }, /Who made a process/);
     await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { name: "Renamed", source: "template" }, /Who made a process/);
     expect(await processRow()).toEqual(before);
+  });
+
+  it("refuses superseding the live version with other columns changed, or by itself (the live pointer must follow)", async () => {
+    const bits: Row[] = [{ layout: { x: 1 } }, { number: 999 }, { published_by: editorId }, { published_at: "2020-01-01T00:00:00Z" }, { created_by: editorId }, { created_at: "2020-01-01T00:00:00Z" }];
+    for (const extra of bits) {
+      await expectRefused("PATCH", `process_revisions?id=eq.${ids.v2}`, { status: "superseded", ...extra }, /kept as it was/);
+    }
+    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v2}`, { status: "superseded" }, /live version of a process is its published version/);
+    expect(await statusOf(ids.v2)).toBe("published");
+  });
+
+  it("refuses publishing a draft by hand with a forged person, time or number", async () => {
+    for (const forged of [{ published_by: editorId }, { published_at: "2020-01-01T00:00:00Z" }, { number: 99 }, {}]) {
+      // The unique index (or the rule) refuses; either way it is a 4xx and the draft stays a draft.
+      const r = await rest("PATCH", `process_revisions?id=eq.${ids.v3}`, { status: "published", ...forged });
+      expect(r.status).toBeGreaterThanOrEqual(400);
+    }
+    expect(await statusOf(ids.v3)).toBe("draft");
+  });
+
+  it("refuses changing a draft's number, author or dates, and inserting a forged draft", async () => {
+    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { number: 77 }, /number, author and dates/);
+    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { created_by: editorId }, /number, author and dates/);
+    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { created_at: "2020-01-01T00:00:00Z" }, /number, author and dates/);
+    await expectRefused("POST", "process_revisions", { workspace_id: ids.ws, process_id: ids.other, number: 5, created_by: randomUUID() }, /made by the person saving it/);
+    await expectRefused("POST", "process_revisions", { workspace_id: ids.ws, process_id: ids.other, number: 5, published_by: editorId }, /made by the person saving it/);
+  });
+
+  it("refuses making a process with version pointers or a forged created_by or created_at", async () => {
+    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged A", live_revision_id: ids.v2 }, /no versions yet/);
+    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged B", draft_revision_id: ids.v3 }, /no versions yet/);
+    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged C", created_by: randomUUID() }, /no versions yet/);
+    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged D", created_at: "2020-01-01T00:00:00Z" }, /no versions yet/);
+    const ok = await rest("POST", "processes", { workspace_id: ids.ws, name: "Made the usual way", source: "mcp" });
+    expect(ok.status).toBe(201);
+    expect(((ok.json as Row[])[0] as Row).created_by).toBe(editorId);
   });
 
   it("still lets the editor change an ordinary column and a draft", async () => {
