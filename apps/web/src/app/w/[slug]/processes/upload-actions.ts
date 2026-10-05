@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { checkProcessFileText, processTextFrom, type ProcessFileCheck } from "@transpera-flow/db/process-file";
-import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, ToolError } from "@transpera-flow/mcp";
+import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, takeLinkFetch, ToolError } from "@transpera-flow/mcp";
 import { isId } from "@/lib/editor/validate";
 import { sourceLabel, uploadSizeProblem, type CreateUploadInput, type CreateUploadResult, type PreviewInput, type PreviewResult, type UploadPreview } from "@/lib/processes/upload";
 import { NOTICE_COOKIE, noticeValue } from "@/lib/processes/upload-notice";
@@ -67,6 +67,9 @@ export async function previewUpload(workspaceId: string, _slug: string, input: P
   let source: string;
   if (input.kind === "link") {
     source = sourceLabel(input.url);
+    // Each fetch is counted before it is made (10 a minute per person), so pasting links in a loop can't use the server as a crawler.
+    const turn = await takeLinkFetch(who.ctx);
+    if (!turn.allowed) return { error: turn.message };
     try {
       content = await fetchPublicPage(input.url);
     } catch (e) {
