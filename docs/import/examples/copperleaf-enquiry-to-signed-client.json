@@ -1,0 +1,814 @@
+{
+  "format": "transpera-process/2",
+  "name": "Enquiry to signed client",
+  "kind": "pipeline",
+  "description": "From a new enquiry (website form, email or referral) to the onboarding call with a signed client, as Grace Adeyemi and Tom Whitfield describe it.",
+  "entity_name": "enquiry",
+  "sources": [
+    {
+      "id": "interview-grace",
+      "title": "Copperleaf interview: Grace Adeyemi",
+      "kind": "transcript",
+      "speakers": [
+        "Interviewer",
+        "Grace Adeyemi",
+        "Ellie Marsh"
+      ]
+    },
+    {
+      "id": "interview-tom",
+      "title": "Copperleaf interview: Tom Whitfield",
+      "kind": "transcript",
+      "speakers": [
+        "Interviewer",
+        "Tom Whitfield"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "enquiry",
+      "name": "Enquiry arrives",
+      "type": "start",
+      "notes": "Three routes in (website form to the shared inbox, a direct email, a referral phone call); after the first look they all look the same."
+    },
+    {
+      "id": "first-look",
+      "name": "First look at enquiry",
+      "type": "step",
+      "role": "Managing director",
+      "person": "Grace Adeyemi",
+      "notes": "Grace looks at every enquiry herself: is it a real business, is there a budget. She replies usually before lunch, the next morning if she is out. No time given: \"It's a coffee-length thing. I don't time it\" (Grace, 00:03:55), and \"No. Ask me something I can measure.\" (00:04:09).",
+      "hands_on_hours": 0.25,
+      "assumed": {
+        "hands_on_hours": "Grace does not time it, but calls it \"a coffee-length thing\" (00:03:55) done as part of the morning, so a quarter of an hour. Assumed: a quarter of an hour (Austin said to assume)."
+      }
+    },
+    {
+      "id": "book-call",
+      "name": "Wait for a diary slot",
+      "type": "wait",
+      "wait_hours": 18.75,
+      "wait_range": {
+        "min": 15,
+        "max": 22.5
+      },
+      "notes": "Calendar time between agreeing to talk and the call. Grace: sometimes next day if someone cancels, sometimes four days. Referrals get bumped to about next day, then the same as the rest (00:05:24).",
+      "evidence": {
+        "wait_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:04:21",
+            "quote": "It's usually two or three days out before we can get them in.",
+            "value": 18.75
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:02:35",
+            "quote": "Two or three days, whatever.",
+            "value": 18.75
+          }
+        ]
+      },
+      "assumed": {
+        "wait_hours": "Two to three days converted at a 7.5 hour working day (Austin: Copperleaf works a 37.5 hour week): 15 to 22.5 hours, 18.75 typical."
+      }
+    },
+    {
+      "id": "call",
+      "name": "Discovery call",
+      "type": "step",
+      "role": "Managing director",
+      "person": "Grace Adeyemi",
+      "hands_on_hours": 1,
+      "notes": "Tom sits in on the big ones only. Grace does not record calls; she types notes. Only prospects who already spend on ads get an audit; Grace guessed \"maybe a fifth\" skip it (00:07:23), then said not to hold her to it and the interviewer left it out, so every enquiry is shown going through the audit.",
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:05:59",
+            "quote": "An hour, give or take.",
+            "value": 1
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:01:53",
+            "quote": "I'd say about an hour.",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit",
+      "name": "Audit ad accounts",
+      "type": "step",
+      "role": "Paid media specialist",
+      "hands_on_hours": 4,
+      "wait_hours": 0,
+      "tool": "Ad platforms",
+      "notes": "Ellie mostly, Kofi if Ellie is slammed: account structure, spend, what is wasted. Grace first said \"it varies a lot, depends whether it's a tidy account or a horror show\" (00:07:55). Tom has \"seen her do one in an afternoon and I've seen her at it for two days\" (00:03:36).",
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:08:10",
+            "quote": "Yeah, roughly.",
+            "value": 4
+          }
+        ],
+        "wait_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:08:25",
+            "quote": "No, Ellie just picks it up the same day or the next, that's not a thing.",
+            "value": 0
+          }
+        ]
+      },
+      "assumed": {
+        "hands_on_hours": "The interviewer proposed four hours (\"So four hours for the audit?\", 00:08:05) and Grace agreed after saying it varies a lot; Austin confirmed four hours. Tom has seen one take an afternoon and another two days."
+      }
+    },
+    {
+      "id": "deck",
+      "name": "Pitch deck",
+      "type": "step",
+      "role": "Designer",
+      "notes": "Maddie Kerr does the deck; Grace gave no time for it (\"I honestly couldn't tell you. She just gets it done.\", 00:09:16). Grace briefs her the day before it is due. Tom looks at the deck before it goes out (\"it's a glance\", 00:04:26).",
+      "hands_on_hours": 2,
+      "assumed": {
+        "hands_on_hours": "Nobody has timed it (\"I honestly couldn't tell you. She just gets it done.\", Grace, 00:09:16). Maddie is briefed the day before it is due (00:23:30), so it fits inside a day; Assumed: two hours (Austin said to assume)."
+      }
+    },
+    {
+      "id": "proposal",
+      "name": "Write proposal",
+      "type": "step",
+      "role": "Managing director",
+      "person": "Grace Adeyemi",
+      "waiting_now": 5,
+      "notes": "Queueing, not a fixed wait: proposals \"sit on my desk a week because I'm pitching\" (Grace, 00:11:29), \"If I had two of me it'd be a day.\" (00:11:54). Promise to the client: \"we promise a proposal within five working days of the call\" (Grace, 00:12:41), counted from the call. Tom says a second version often needs his pricing again.",
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:10:47",
+            "quote": "The writing is the two, three hours.",
+            "value": 2.5
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:04:39",
+            "quote": "it's a day and a half, all in.",
+            "value": 11.25
+          }
+        ],
+        "rework_rate": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:12:10",
+            "quote": "one proposal in four needs a second version.",
+            "value": 0.25
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:05:47",
+            "quote": "second versions, half the time.",
+            "value": 0.5
+          }
+        ],
+        "waiting_now": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:11:10",
+            "quote": "I've got five proposals on my desk at the moment.",
+            "value": 5
+          }
+        ],
+        "sla_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:12:41",
+            "quote": "we promise a proposal within five working days of the call.",
+            "value": 37.5
+          }
+        ]
+      },
+      "assumed": {
+        "hands_on_hours": "Grace's 2.5 h (two to three) is the writing alone; Tom's \"day and a half\" is working time, not elapsed (he confirmed at 00:05:30), 1.5 days at a 7.5 hour day (Austin: 37.5 hour week) = 11.25 h, and includes tailoring, scope back-and-forth with the client, chasing Maddie and sorting the numbers with him.",
+        "sla_hours": "Five working days at a 7.5 hour day (Austin: 37.5 hour week) is 37.5 hours. The promise runs from the call, so it covers the audit, the deck and this step; it is kept here because this is the step that sends it.",
+        "wait_hours": "No wait nobody works on: the week on Grace's desk is queueing behind her pitching (\"They sit on my desk a week because I'm pitching.\", 00:11:29; \"If I had two of me it'd be a day.\", 00:11:54), which the simulation produces from her capacity and the five waiting."
+      },
+      "sla_hours": 37.5,
+      "wait_hours": 0
+    },
+    {
+      "id": "pricing",
+      "name": "Pricing sign-off",
+      "type": "step",
+      "role": "Account director",
+      "person": "Tom Whitfield",
+      "hands_on_hours": 0.33,
+      "wait_hours": 0,
+      "notes": "Grace never mentions this step (\"She thinks the proposal goes straight out. It doesn't.\", Tom, 00:06:36). A strange one takes \"an hour of me swearing at a spreadsheet\" (00:07:06). Done in the gaps: \"It's not a queue\" (00:07:32). Separate from the day and a half of proposal work (00:19:35).",
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:07:06",
+            "quote": "No, twenty. Twenty minutes, that's the honest one.",
+            "value": 0.33
+          }
+        ],
+        "wait_hours": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:07:32",
+            "quote": "Not really. If it's in my inbox by lunch it's done by the end of the day.",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "client-wait",
+      "name": "Client considers proposal",
+      "type": "wait",
+      "wait_range": {
+        "min": 7.5,
+        "max": 75
+      },
+      "notes": "Grace chases around day ten. Proposals that go silent are called lost after a month, and silence is counted as lost (\"We don't track it\", 00:14:19). Tom: \"That's about right. Some are quicker.\" (00:08:29).",
+      "assumed": {
+        "wait_hours": "Grace gave only a ceiling, \"within two weeks\", which is 10 working days at 7.5 h = 75 h, and \"Some come back in a day\" (7.5 h). The ceiling is used as the wait, with the range; the typical wait is not stated."
+      },
+      "wait_hours": 75,
+      "evidence": {
+        "wait_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:13:15",
+            "quote": "The client decision takes, well, within two weeks usually.",
+            "value": 75
+          }
+        ]
+      }
+    },
+    {
+      "id": "decides",
+      "name": "Client decides",
+      "type": "decision"
+    },
+    {
+      "id": "contract",
+      "name": "Send contract",
+      "type": "step",
+      "role": "Account director",
+      "person": "Tom Whitfield",
+      "notes": "From a template with the scope pasted in; Tom does it now, Grace used to. The three contracts counted are waiting on the client's signature, which \"can take ages, it's up to them\" (Grace, 00:15:27); Tom: \"it can be a week, it can be the same day\"; Harlow and Pike took three days but \"Don't average that, it's one client.\" (00:12:02). Tom nudges people to sign, which is time inside this step.",
+      "waiting_now": 3,
+      "evidence": {
+        "wait_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:14:33",
+            "quote": "Tom does contracts now, more like two days.",
+            "value": 15
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:10:30",
+            "quote": "They're out in a day.",
+            "value": 7.5
+          }
+        ],
+        "waiting_now": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:11:39",
+            "quote": "Three contracts waiting on signatures right now.",
+            "value": 3
+          }
+        ]
+      },
+      "assumed": {
+        "wait_hours": "Elapsed time from a yes to the contract going out, in working days at a 7.5 hour day (Austin: 37.5 hour week): Grace says two days (15 h), batched; Tom says a working day (7.5 h, confirmed at 00:11:26). Hands-on time to prepare one is not stated."
+      }
+    },
+    {
+      "id": "onboarding",
+      "name": "Onboarding call",
+      "type": "step",
+      "role": "Account director",
+      "notes": "Tom plus whoever runs the account (Ellie or Kofi for paid media), so two people attend. Big accounts get a half-day workshop on top: \"the big ones are a proper workshop, half a day, on top of the prep\" (Tom, 00:13:39). Tom: the call is an hour, the reading up on the client, audit and proposal makes it two hours with prep, so the two figures count different things.",
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:15:44",
+            "quote": "Onboarding call is an hour",
+            "value": 1
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:12:53",
+            "quote": "Two hours with prep.",
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "not-a-fit",
+      "name": "Not a fit",
+      "type": "end"
+    },
+    {
+      "id": "lost",
+      "name": "Lost",
+      "type": "end"
+    },
+    {
+      "id": "onboarded",
+      "name": "Client onboarded",
+      "type": "end"
+    }
+  ],
+  "links": [
+    {
+      "from": "enquiry",
+      "to": "first-look"
+    },
+    {
+      "from": "first-look",
+      "to": "book-call",
+      "label": "Worth a call",
+      "probability": 0.67,
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:03:03",
+          "quote": "A third are tyre-kickers, honestly. Maybe a bit more some weeks, it depends what's been in the news, but a third, call it.",
+          "value": 0.67
+        }
+      ]
+    },
+    {
+      "from": "first-look",
+      "to": "not-a-fit",
+      "label": "Tyre-kicker",
+      "probability": 0.33,
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:03:03",
+          "quote": "A third are tyre-kickers, honestly. Maybe a bit more some weeks, it depends what's been in the news, but a third, call it.",
+          "value": 0.33
+        }
+      ]
+    },
+    {
+      "from": "book-call",
+      "to": "call"
+    },
+    {
+      "from": "audit",
+      "to": "deck"
+    },
+    {
+      "from": "call",
+      "to": "audit"
+    },
+    {
+      "from": "deck",
+      "to": "proposal"
+    },
+    {
+      "from": "proposal",
+      "to": "pricing"
+    },
+    {
+      "from": "pricing",
+      "to": "client-wait"
+    },
+    {
+      "from": "client-wait",
+      "to": "decides"
+    },
+    {
+      "from": "decides",
+      "to": "contract",
+      "label": "Says yes",
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:13:40",
+          "quote": "We win about half. Maybe a bit under, this year, but about half.",
+          "value": 0.5
+        },
+        {
+          "source": "interview-tom",
+          "speaker": "Tom Whitfield",
+          "time": "00:08:42",
+          "quote": "We win one in three.",
+          "value": 0.33
+        }
+      ]
+    },
+    {
+      "from": "decides",
+      "to": "lost",
+      "label": "Says no or goes quiet",
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:14:03",
+          "quote": "Half won, half lost.",
+          "value": 0.5
+        },
+        {
+          "source": "interview-tom",
+          "speaker": "Tom Whitfield",
+          "time": "00:08:42",
+          "quote": "We win one in three.",
+          "value": 0.67
+        }
+      ]
+    },
+    {
+      "from": "contract",
+      "to": "onboarding"
+    },
+    {
+      "from": "onboarding",
+      "to": "onboarded"
+    }
+  ],
+  "company": {
+    "people": [
+      {
+        "name": "Ellie Marsh",
+        "fte": 0.8,
+        "evidence": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:17:18",
+            "quote": "Ellie's going to four days from November, she asked and I said yes.",
+            "value": 0.8
+          }
+        ],
+        "assumed": "Four days of five is 0.8. The change starts in November (Grace: \"the first Monday I think\"), so accept it from then."
+      },
+      {
+        "name": "Kofi Mensah",
+        "fte": 0.8,
+        "evidence": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:15:15",
+            "quote": "Kofi is four days, always has been.",
+            "value": 0.8
+          },
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:18:11",
+            "quote": "Kofi's off from the seventh of December to the twenty-fourth. That's booked, he's going to see family abroad."
+          }
+        ],
+        "assumed": "Four days of five is 0.8. The year, 2026, is taken from the pack date (30 Sep 2026). The transcripts only say \"Kofi\"; the surname is from Austin.",
+        "leave": [
+          {
+            "start_date": "2026-12-07",
+            "end_date": "2026-12-24",
+            "note": "Family abroad; booked"
+          }
+        ]
+      },
+      {
+        "name": "Ruby Chen",
+        "roles": [
+          "Paid media specialist"
+        ],
+        "evidence": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:15:47",
+            "quote": "Ruby starts on the ninth, not the second."
+          },
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:17:46",
+            "quote": "We've hired Ruby Chen, paid media, she starts on the second of November."
+          }
+        ],
+        "assumed": "Grace first said 2 November; Tom later said HR moved it to 9 November (\"Ruby starts on the ninth, not the second.\"). The later correction is used.",
+        "start_date": "2026-11-09"
+      },
+      {
+        "name": "Maddie Kerr",
+        "roles": [
+          "Designer"
+        ],
+        "evidence": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:08:58",
+            "quote": "She's freelance-ish, she's Maddie Kerr but she's not on the team list, it's complicated."
+          }
+        ],
+        "assumed": "Freelance-ish and not on the team list, so her hours and FTE are not stated; accept only if she should be in the company model."
+      }
+    ],
+    "roles": [
+      {
+        "name": "Designer",
+        "evidence": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:08:41",
+            "quote": "Maddie, our designer, does the pitch deck."
+          },
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:09:49",
+            "quote": "No, we've never had one in the system."
+          }
+        ]
+      }
+    ],
+    "clients": [
+      {
+        "name": "Ashgrove Garden Centre",
+        "services": [
+          "PPC management",
+          "Paid social"
+        ],
+        "mrr": 3600,
+        "evidence": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:18:52",
+            "quote": "They've added paid social, so they're on thirty-six hundred now, PPC and paid social together.",
+            "value": 3600
+          }
+        ]
+      },
+      {
+        "name": "Harlow and Pike Opticians",
+        "services": [
+          "Paid social"
+        ],
+        "mrr": 2500,
+        "notes": "Signed last week; the exact day is in the CRM.",
+        "evidence": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:19:24",
+            "quote": "New one, Harlow and Pike Opticians, paid social, about two and a half grand a month, signed last week.",
+            "value": 2500
+          },
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:19:24",
+            "quote": "Tom's their account director."
+          }
+        ],
+        "assumed": "Approximate: Grace does not know the exact figure (\"it's in the contract\").",
+        "assignments": {
+          "Account director": "Tom Whitfield"
+        }
+      },
+      {
+        "name": "Brambleway Farm Shop",
+        "notes": "Left last month and went in-house.",
+        "evidence": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:16:20",
+            "quote": "We lost them last month. They went in-house."
+          },
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:16:39",
+            "quote": "Correct. We should probably tidy that up, they're still on the list."
+          }
+        ],
+        "active": false
+      }
+    ],
+    "demand": {
+      "lead_sources": [
+        {
+          "name": "Website enquiries",
+          "volume_per_week": 9,
+          "evidence": [
+            {
+              "source": "interview-grace",
+              "speaker": "Grace Adeyemi",
+              "time": "00:20:22",
+              "quote": "Website enquiries, eight, maybe ten a week.",
+              "value": 9
+            }
+          ],
+          "assumed": "Nine is the middle of eight to ten; Grace says it goes up and down."
+        },
+        {
+          "name": "LinkedIn",
+          "evidence": [
+            {
+              "source": "interview-grace",
+              "speaker": "Grace Adeyemi",
+              "time": "00:21:14",
+              "quote": "LinkedIn's new, that's about two a week, since the summer.",
+              "value": 2
+            },
+            {
+              "source": "interview-tom",
+              "speaker": "Tom Whitfield",
+              "time": "00:16:59",
+              "quote": "LinkedIn is more like one a week.",
+              "value": 1
+            }
+          ],
+          "assumed": "Volume left out: Grace says two a week, Tom says one a week (a feel from the inbox). Settle it before accepting."
+        }
+      ],
+      "seasonality": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0.5
+      ],
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:21:34",
+          "quote": "December's dead, half of a normal month.",
+          "value": 0.5
+        }
+      ],
+      "assumed": "Only December was described, at half; the other months are left at 1 (no effect)."
+    }
+  },
+  "proposals": [
+    {
+      "type": "issue",
+      "title": "Proposals wait about a week on Grace's desk",
+      "detail": "Grace pitches all week and writes proposals on a Friday, so five sit waiting. Tom calls it where the time goes; the writing itself is a few hours.",
+      "issue_type": "bottleneck",
+      "steps": [
+        "proposal"
+      ],
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:11:29",
+          "quote": "They sit on my desk a week because I'm pitching."
+        },
+        {
+          "source": "interview-tom",
+          "speaker": "Tom Whitfield",
+          "time": "00:13:59",
+          "quote": "The bit that irritates me is the proposal sitting on Grace's desk for a week."
+        }
+      ]
+    },
+    {
+      "type": "issue",
+      "title": "Proposals need a second version because the budget comes up late",
+      "detail": "Grace puts it at one in four, Tom at half. Both say the cause is the client's budget or scope changing after the first version.",
+      "issue_type": "failure",
+      "steps": [
+        "proposal"
+      ],
+      "evidence": [
+        {
+          "source": "interview-tom",
+          "speaker": "Tom Whitfield",
+          "time": "00:14:18",
+          "quote": "Half of them come back for a rewrite because we haven't asked the budget question early enough."
+        },
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:12:10",
+          "quote": "Usually because the client comes back with a different budget or somebody's added a stakeholder halfway through."
+        }
+      ]
+    },
+    {
+      "type": "issue",
+      "title": "The pitch deck is briefed the day before it is due",
+      "detail": "Most of the time, Grace says, but she has no percentage. She puts it down to giving Maddie too little notice.",
+      "issue_type": "delay",
+      "steps": [
+        "deck"
+      ],
+      "evidence": [
+        {
+          "source": "interview-grace",
+          "speaker": "Grace Adeyemi",
+          "time": "00:23:30",
+          "quote": "I'm always chasing Maddie for the deck the day before it's due."
+        }
+      ]
+    },
+    {
+      "type": "issue",
+      "title": "Chasing clients to sign takes a lot of Tom's time",
+      "detail": "Tom nudges people to sign contracts; he gives no time for it: it sits inside the wait for signatures.",
+      "issue_type": "manual",
+      "steps": [
+        "contract"
+      ],
+      "evidence": [
+        {
+          "source": "interview-tom",
+          "speaker": "Tom Whitfield",
+          "time": "00:18:53",
+          "quote": "I spend a surprising amount of time nudging people to sign."
+        }
+      ]
+    }
+  ],
+  "first_principles": {
+    "requirements": [
+      {
+        "text": "Every proposal goes past Tom for a margin check before it goes to the client.",
+        "owner": "Tom Whitfield",
+        "why": "A check on margin before the client sees the price.",
+        "step": "pricing",
+        "evidence": [
+          {
+            "source": "interview-tom",
+            "speaker": "Tom Whitfield",
+            "time": "00:06:36",
+            "quote": "Every proposal goes past me for the margin check before it goes to the client."
+          }
+        ],
+        "assumed": "Tom does the check and says it has always been his; nobody said who set the rule."
+      },
+      {
+        "text": "A proposal reaches the client within five working days of the discovery call.",
+        "why": "It is promised in the email Grace sends after the call.",
+        "step": "proposal",
+        "evidence": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:12:41",
+            "quote": "we promise a proposal within five working days of the call."
+          }
+        ]
+      }
+    ]
+  }
+}

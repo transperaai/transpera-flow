@@ -191,6 +191,28 @@
             "time": "00:00:30",
             "quote": "About fifteen minutes an enquiry, and I do it the same day."
           }
+        ],
+        "leave": [
+          {
+            "start_date": "2026-12-21",
+            "end_date": "2026-12-31",
+            "note": "Christmas"
+          }
+        ]
+      }
+    ],
+    "clients": [
+      {
+        "name": "Northgate Foods",
+        "assignments": {
+          "Managing director": "Maya Chen"
+        },
+        "evidence": [
+          {
+            "source": "sales-sop",
+            "time": "page 4",
+            "quote": "Maya looks after Northgate Foods herself."
+          }
         ]
       }
     ],

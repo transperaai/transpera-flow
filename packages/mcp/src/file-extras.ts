@@ -174,13 +174,28 @@ function planCompany(company: NonNullable<ProcessFile["company"]>, model: Compan
   for (const p of company.people) {
     const roles = known(p.roles, model.roles, "role", `Person '${p.name}'`, fileRoles);
     run(`Person '${p.name}'`, () =>
-      buildPersonSuggestion(model, { name: p.name, ...(roles ? { roles } : {}), fte: p.fte, capacity_hours_week: p.hours_per_week, cost_rate: p.cost_rate, email: p.email, start_date: p.start_date, ...prov(p) }, sink),
+      buildPersonSuggestion(model, { name: p.name, ...(roles ? { roles } : {}), fte: p.fte, capacity_hours_week: p.hours_per_week, cost_rate: p.cost_rate, email: p.email, start_date: p.start_date, ...(p.leave ? { leave: p.leave } : {}), ...prov(p) }, sink),
     );
   }
   for (const c of company.clients) {
     const services = known(c.services, model.services, "service", `Client '${c.name}'`, fileServices);
+    // An assignment names a role and a person the company already has; one that doesn't resolve is said and left off.
+    const assignments: Record<string, string> = {};
+    for (const [role, person] of Object.entries(c.assignments ?? {})) {
+      try {
+        matchNamed(model.roles, role, "role");
+        matchNamed(model.people, person, "person");
+        assignments[role] = person;
+      } catch {
+        plan.notes.push(`Client '${c.name}': ${role} ${person} was left off: the role or the person isn't one of yours yet.`);
+      }
+    }
     run(`Client '${c.name}'`, () =>
-      buildClientSuggestion(model, { name: c.name, ...(services ? { services } : {}), mrr: c.mrr, start_date: c.start_date, health: c.health, notes: c.notes, ...prov(c) }, sink),
+      buildClientSuggestion(
+        model,
+        { name: c.name, ...(services ? { services } : {}), mrr: c.mrr, start_date: c.start_date, health: c.health, notes: c.notes, ...(c.active !== undefined ? { active: c.active } : {}), ...(Object.keys(assignments).length ? { assignments } : {}), ...prov(c) },
+        sink,
+      ),
     );
   }
   const d = company.demand;

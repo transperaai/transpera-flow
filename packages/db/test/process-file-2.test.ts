@@ -528,6 +528,34 @@ describe("text and structure", () => {
 
   it("sectionCounts counts what each section will make", () => {
     const file = checkProcessFile(example()).file!;
-    expect(v2.sectionCounts(file)).toEqual({ sources: 3, company: 4, proposals: 1, firstPrinciples: 3 });
+    expect(v2.sectionCounts(file)).toEqual({ sources: 3, company: 5, proposals: 1, firstPrinciples: 3 });
+  });
+});
+
+describe("company: leave, whether a client is still a client, and who looks after them", () => {
+  const withCompany = (company: unknown) => ({ ...base(), company });
+
+  it("reads a person's booked leave, a client's active flag and its assignments", () => {
+    const checked = checkProcessFile(
+      withCompany({
+        people: [{ name: "Kofi", leave: [{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family" }], evidence: [cite()] }],
+        clients: [{ name: "Brambleway", active: false, assignments: { "Account director": "Tom" }, evidence: [cite()] }],
+      }),
+    );
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings).toEqual([]);
+    expect(checked.file!.company!.people[0]!.leave).toEqual([{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family" }]);
+    expect(checked.file!.company!.clients[0]).toMatchObject({ active: false, assignments: { "Account director": "Tom" } });
+    const validate = new Ajv2020({ strict: false }).compile(JSON.parse(published("transpera-process-2.schema.json")));
+    expect(validate(withCompany({ people: [{ name: "Kofi", leave: [{ start_date: "2026-12-07", end_date: "2026-12-24" }] }], clients: [{ name: "B", active: false, assignments: { Role: "Person" } }] }))).toBe(true);
+  });
+
+  it("says plainly what is wrong with each", () => {
+    const err = (company: unknown) => errorsOf(withCompany(company)).join("\n");
+    expect(err({ people: [{ name: "K", leave: [{ start_date: "2026-12-24", end_date: "2026-12-07" }] }] })).toMatch(/leave 1 ends \(2026-12-07\) before it starts \(2026-12-24\)/);
+    expect(err({ people: [{ name: "K", leave: [{ start_date: "2026-12-24" }] }] })).toMatch(/leave 1 needs a start_date and an end_date/);
+    expect(err({ people: [{ name: "K", leave: "December" }] })).toMatch(/leave should be a list/);
+    expect(err({ clients: [{ name: "B", active: "no" }] })).toMatch(/active should be true or false/);
+    expect(err({ clients: [{ name: "B", assignments: ["Tom"] }] })).toMatch(/assignments should be a role and a person/);
   });
 });
