@@ -14,7 +14,7 @@ export async function uploadSourceFile(workspaceId: string, sourceId: string, fi
   if (!check.ok) return { status: "error", message: check.error };
   const supabase = createClient();
   if (!supabase) return { status: "error", message: "Uploading files needs a workspace. Sign in to upload one." };
-  const path = storagePath(workspaceId, crypto.randomUUID(), safeFileName(file.name, check.type));
+  const path = storagePath(workspaceId, sourceId, crypto.randomUUID(), safeFileName(file.name, check.type));
   // The content type is ours, from the checked extension, not the browser's guess.
   const { error } = await supabase.storage.from("sources").upload(path, file, { contentType: SOURCE_FILE_MIME[check.type], upsert: false, cacheControl: "60" });
   if (error) {

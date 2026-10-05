@@ -130,6 +130,34 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
     expect(await one("select count(*)::int n from processes where workspace_id = $1 and archived_at is not null", [ids.ws])).toEqual({ n: 0 });
   });
 
+  it("while archived, a draft, a publish and a restored version are refused; who archived it can't be forged", async () => {
+    const x = await made("X", "pipeline");
+    const y = await made("Y", "pipeline");
+    const first = (await one("select live_revision_id from processes where id = $1", [x])).live_revision_id as string;
+    await publishWith(x, []);
+    // X's draft links Y; X is archived; publishing X must not move Y off the company map.
+    const opened = (await editor.rpc("open_draft", { target_process: x })).data as { revision_id: string };
+    expect((await editor.from("steps").insert({ id: randomUUID(), revision_id: opened.revision_id, workspace_id: ids.ws, process_id: x, name: "Linked", kind: "subprocess", child_process_id: y, x: 0, y: 0 })).error).toBeNull();
+    const forged = await editor.from("processes").update({ archived_at: new Date().toISOString(), archived_by: randomUUID() }).eq("id", x).select("archived_by");
+    expect(forged.error).toBeNull();
+    expect(forged.data![0]!.archived_by).not.toBeNull();
+    expect(forged.data![0]!.archived_by).toBe((await one("select archived_by from processes where id = $1", [x])).archived_by);
+    const message = "X is archived. Restore it from Processes (Archived) before changing it.";
+    expect((await editor.rpc("publish_process", { target_process: x })).error?.message).toMatch(/^X is archived\. Restore it from Processes \(Archived\) before (changing|publishing) it\.$/);
+    expect((await editor.rpc("open_draft", { target_process: x })).error?.message).toBe(message);
+    expect((await editor.rpc("restore_version", { target_process: x, source_revision: first, replace_draft: true })).error?.message).toBe(message);
+    expect((await editor.from("processes").update({ archived_by: randomUUID() }).eq("id", x).select("id")).error?.code).toBe("55000");
+    expect(await mapCards()).toContain(y);
+    expect(await mapCards()).not.toContain(x);
+  });
+
+  it("refuses archiving a service's way in, naming the service", async () => {
+    const sales = await made("Inbound", "pipeline");
+    await admin.query("insert into services (workspace_id, name, entry_process_id) values ($1, 'SEO', $2)", [ids.ws, sales]);
+    const r = await editor.from("processes").update({ archived_at: new Date().toISOString() }).eq("id", sales).select("id");
+    expect({ code: r.error?.code, message: r.error?.message }).toEqual({ code: "55000", message: "Inbound is where new work for SEO comes in. Choose another process for it in Settings, Services, then archive it." });
+  });
+
   it("a viewer and anon can't make, rename, re-kind, archive or restore a process", async () => {
     const target = await made("Audit", "pipeline");
     const ins = await viewer.from("processes").insert({ workspace_id: ids.ws, name: "Viewer made", kind: "pipeline" }).select("id");
@@ -151,7 +179,7 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
 
   it("an editor keeps a file's details on a source; a viewer and anon can't", async () => {
     const source = (await one("insert into sources (workspace_id, kind, title) values ($1, 'sop', 'Onboarding SOP') returning id", [ids.ws])).id as string;
-    const path = `${ids.ws}/${randomUUID()}/Onboarding SOP.pdf`;
+    const path = `${ids.ws}/${source}/${randomUUID()}/Onboarding SOP.pdf`;
     const file = { file_path: path, file_name: "Onboarding SOP.pdf", file_type: "pdf", file_size: 2048, body: "1. Send the welcome pack." };
     expect((await viewer.from("sources").update(file).eq("id", source).select("id")).data).toEqual([]);
     expect((await anon.from("sources").update(file).eq("id", source).select("id")).error?.code).toBe("42501");
@@ -159,7 +187,7 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
     expect((await editor.from("sources").update(file).eq("id", source).select("id")).data).toHaveLength(1);
     expect(await loadSourceFile(viewer as never, source)).toEqual({ path, name: "Onboarding SOP.pdf", type: "pdf", size: 2048 });
     // The database's checks hold over the API too: another workspace's folder, another kind, over 10 MB.
-    const other = await editor.from("sources").update({ ...file, file_path: `${randomUUID()}/${randomUUID()}/x.pdf` }).eq("id", source).select("id");
+    const other = await editor.from("sources").update({ ...file, file_path: `${randomUUID()}/${source}/${randomUUID()}/x.pdf` }).eq("id", source).select("id");
     expect(other.error?.code).toBe("23514");
     expect((await editor.from("sources").update({ ...file, file_type: "html" }).eq("id", source).select("id")).error?.code).toBe("23514");
     expect((await editor.from("sources").update({ ...file, file_size: 10 * 1024 * 1024 + 1 }).eq("id", source).select("id")).error?.code).toBe("23514");

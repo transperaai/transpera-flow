@@ -138,3 +138,30 @@ describe("process admin", () => {
     await page.close();
   }, 60_000);
 });
+
+describe("an archived process's page", () => {
+  async function banner(opts: { canEdit: boolean; refuse?: string }) {
+    const page = await browser.newPage();
+    await page.route("https://processes.test/", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><div id="root"></div>` }));
+    await page.goto("https://processes.test/");
+    await page.addScriptTag({ content: script });
+    await page.evaluate((o) => window.mountArchivedBanner(o), opts);
+    await page.waitForSelector("[data-archived-banner]");
+    return page;
+  }
+
+  it("says when it was archived and that it is read only; an editor restores it, and a refusal is shown", async () => {
+    const page = await banner({ canEdit: true, refuse: "Another process is called Monthly reporting. Rename one of them, then restore it." });
+    expect(await page.locator("[data-archived-banner]").innerText()).toContain("Archived on 3 Oct. Monthly reporting is off the company map, the lists and the simulation, and read only.");
+    await page.getByRole("button", { name: "Restore Monthly reporting" }).click();
+    expect(await page.getByRole("alert").innerText()).toBe("Another process is called Monthly reporting. Rename one of them, then restore it.");
+    expect(await calls(page)).toEqual([["restore", "50000000-0000-4000-8000-000000000003"]]);
+    await page.close();
+  }, 60_000);
+
+  it("offers a viewer no Restore", async () => {
+    const page = await banner({ canEdit: false });
+    expect(await page.getByRole("button").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+});

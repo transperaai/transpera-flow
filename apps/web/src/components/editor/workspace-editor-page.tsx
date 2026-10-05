@@ -42,7 +42,8 @@ export async function WorkspaceEditorPage({
   // The company map is read at the Overview, not at a process page of its own.
   const base = company ? `/w/${slug}` : `/w/${slug}/p/${processId}`;
   const canEdit = await canEditWorkspace(live.workspace.id);
-  if (!canEdit) redirect(base);
+  // An archived process (issue #182) is read only until it is restored: its page says so.
+  if (!canEdit || live.process.archived_at) redirect(base);
   const [scenarios, blocks, sources, viewer, fpChanged, tours] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),

@@ -210,10 +210,12 @@ const BUCKET = "sources";
 /**
  * Keep a file the browser has just uploaded to Storage (issue #182, B19 2/2) as a source's original, and its text as the
  * source's full text. The upload itself went straight to the private `sources` bucket as the signed-in user (its storage
- * policies: editors of the workspace only, into the workspace's own folder; at most 10 MB and the five types). Here, as that
- * user: the path must be one made for this source's workspace; the file is read back from Storage and checked by its name AND
- * its content, whatever type the browser declared; its text is read on the server; then the source is updated (RLS: editors
- * only). A file refused at any point is deleted again, and a file it replaces is deleted once the new one is kept.
+ * policies: editors of the workspace only, as themselves, into this source's folder, under a name no source keeps yet; at most
+ * 10 MB and the five types; and nobody but the uploader can read it until a source keeps it). Here, as that user: the path must
+ * be a new one made for this source; the file is read back from Storage and checked by its name AND its content, whatever type
+ * the browser declared; its text is read on the server; then the source is updated (RLS: editors only). The upload is deleted
+ * on any refusal or error, and a file it replaces is deleted once the new one is kept. An upload abandoned before this runs is
+ * readable by its uploader only (the sweep in docs/supabase-notes.md clears them).
  */
 export async function attachSourceFile(sourceId: unknown, path: unknown, name: unknown): Promise<AttachFileResult> {
   if (!isId(sourceId) || typeof name !== "string") return invalid;
@@ -222,8 +224,9 @@ export async function attachSourceFile(sourceId: unknown, path: unknown, name: u
   const { data: source, error: readError } = await supabase.from("sources").select("id, workspace_id, file_path").eq("id", sourceId).maybeSingle();
   if (readError) return failure(readError);
   if (!source) return { status: "error", message: "That source isn't there any more." };
-  const where = parseStoragePath(path, source.workspace_id);
-  if (!where) return invalid;
+  const where = parseStoragePath(path, source.workspace_id, source.id);
+  // Only a new upload for this very source (never the file it already keeps).
+  if (!where || where.path === source.file_path) return invalid;
   const storage = supabase.storage.from(BUCKET);
   const refuse = async (message: string): Promise<AttachFileResult> => {
     await storage.remove([where.path]);
@@ -231,9 +234,14 @@ export async function attachSourceFile(sourceId: unknown, path: unknown, name: u
   };
 
   const { data: blob, error: downloadError } = await storage.download(where.path);
-  if (downloadError || !blob) return { status: "error", message: "Couldn't find the uploaded file. Upload it again." };
+  if (downloadError || !blob) return refuse("Couldn't read the uploaded file. Upload it again.");
   if (blob.size > MAX_SOURCE_FILE_BYTES) return refuse(TOO_BIG);
-  const read = await extractSourceText(where.name, new Uint8Array(await blob.arrayBuffer()));
+  let read: Awaited<ReturnType<typeof extractSourceText>>;
+  try {
+    read = await extractSourceText(where.name, new Uint8Array(await blob.arrayBuffer()));
+  } catch {
+    return refuse("Couldn't read that file. Try again.");
+  }
   if (!read.ok) return refuse(read.error);
 
   const file: SourceFile = { path: where.path, name: displayName(name), type: read.type, size: blob.size };

@@ -30,11 +30,10 @@ export async function createProcess(workspaceId: string, slug: string, _prev: Cr
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return { error: "Your session has ended. Sign in again." };
 
-  // The company map isn't an ordinary process: its name doesn't count (the MCP server's import ignores it too). An archived
-  // process keeps its name: restore it rather than make a second one.
-  const { data: existing } = await supabase.from("processes").select("name, archived_at").eq("workspace_id", workspaceId).eq("is_company", false);
-  const same = (existing ?? []).find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
-  if (same) return { error: same.archived_at ? `There is an archived process called '${name}'. Restore it from Processes (Archived), or choose another name.` : `There is already a process called '${name}'.` };
+  // The company map isn't an ordinary process: its name doesn't count (the MCP server's import ignores it too). Nor does an
+  // archived one's (issue #182): names are unique among the processes in use, and restoring checks again.
+  const { data: existing } = await supabase.from("processes").select("name").eq("workspace_id", workspaceId).eq("is_company", false).is("archived_at", null);
+  if ((existing ?? []).some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) return { error: `There is already a process called '${name}'.` };
 
   const { data: proc, error } = await supabase
     .from("processes")

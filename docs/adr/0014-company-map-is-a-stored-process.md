@@ -219,7 +219,7 @@ Austin (5 Oct 2026): everything can be added by hand, including taking a process
 
 - **What it is.** `processes.archived_at` (and `archived_by`), set by an ordinary update as an editor (RLS: owners, editors and agency
   admins; viewers and anon change nothing). A trigger stamps `now()` and the caller; archiving again keeps the first stamp; restoring
-  clears both. `listProcesses` leaves archived processes out unless asked (`includeArchived`), so every list, the library, the
+  clears both; `archived_by` is never taken from the caller, and a new process never starts archived. `listProcesses` leaves archived processes out unless asked (`includeArchived`), so every list, the library, the
   Overview, the simulation and MCP's `list_processes` skip them. Their versions, history, issues and sources are kept, and the
   process still opens by its id (Processes, Archived, links to it).
 - **The company map follows, as a system version.** Archiving takes the process's card off the company map ("Archived Sales"; an
@@ -231,7 +231,14 @@ Austin (5 Oct 2026): everything can be added by hand, including taking a process
   ordinary process, which only the company map has today, and a silent change to someone's map) or to let the holder keep a link to
   an archived process (which the simulation would then have to skip, so the holder's numbers would change with no change to its
   map). Refusing keeps "an archived process is never part of the live tree" true without writing anyone's process, and the fix is
-  one ordinary edit. The Processes page says so before asking the database. The company map itself can't be archived.
+  one ordinary edit. The Processes page says so before asking the database. The company map itself can't be archived. For the same
+  reason (the simulation must not change behind anyone's back) a pipeline that is a service's way in, or client work a service
+  generates, is refused too, naming the services.
+- **Archived means read only.** While archived, the database refuses opening a draft (even one already open), restoring a version
+  and publishing (so a draft opened before the archive can't move what it links); the app opens the process read only with a
+  banner ("Archived on 3 Oct", Restore for editors) and no Edit or History actions.
+- **Names.** An archived process gives its name up: names are unique among the processes in use (the app's checks, the library's
+  `create_library_process` and the import's `import_new_process`). Restoring is refused while another process has the name.
 - **It can't come back in by another road.** `holder_allows` refuses placing an archived process in a draft ("Sales is archived:
   restore it from Processes (Archived) before placing it"); a draft that linked it before it was archived can't be published
   (`refuse_archived_placements`, on every road to a new live version); `restore_version` skips its card on a restored company map

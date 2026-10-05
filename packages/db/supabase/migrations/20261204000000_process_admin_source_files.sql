@@ -16,8 +16,8 @@
 --   * `private.process_archive_map` and its trigger (after update of `archived_at`): archiving takes the process's card off
 --     the company map as a system version ("Archived Sales"; an open draft of the map loses the card too), restoring puts it
 --     back at the bottom of its column ("Restored Sales"), through the map's existing sync (`private.company_map_apply`).
---   * While archived, nothing changes the process: `private.refuse_archived_revision` (before insert on `process_revisions`: no
---     draft opened, no version restored into it) and `private.refuse_archived_publish` (before its `live_revision_id` moves: an
+--   * While archived, nothing changes the process: `private.refuse_archived_revision` (before insert or update on
+--     `process_revisions`: no draft opened, no version restored into a new or an open draft) and `private.refuse_archived_publish` (before its `live_revision_id` moves: an
 --     old draft can't be published), each with its trigger; `public.open_draft` (full copy of 20261006000000's, changed) refuses
 --     it too, even when a draft is already open.
 --   * `private.refuse_archived_placements` and its trigger (before update of `live_revision_id`, every caller): publishing (or
@@ -208,8 +208,8 @@ revoke all on function private.process_archive_guard() from public, anon, authen
 create trigger process_archive_guard before insert or update of archived_at, archived_by on public.processes
   for each row execute function private.process_archive_guard();
 
--- While a process is archived nothing changes it: no new version (a draft opened, a version restored or duplicated into it)
--- and no new live version (publishing a draft opened before it was archived). Every caller and road.
+-- While a process is archived nothing changes it: no version made or changed (a draft opened, a version restored into a new
+-- or an open draft) and no new live version (publishing a draft opened before it was archived). Every caller and road.
 create function private.refuse_archived_revision() returns trigger
 language plpgsql security definer
 set search_path = ''
@@ -227,7 +227,7 @@ $$;
 
 revoke all on function private.refuse_archived_revision() from public, anon, authenticated;
 
-create trigger refuse_archived_revision before insert on public.process_revisions
+create trigger refuse_archived_revision before insert or update on public.process_revisions
   for each row execute function private.refuse_archived_revision();
 
 create function private.refuse_archived_publish() returns trigger

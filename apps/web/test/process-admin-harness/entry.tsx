@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { NewProcessButton } from "@/components/new-process-dialog";
+import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { ProcessesList } from "@/components/processes/processes-list";
 import type { ArchivedProcess, ProcessAdminOps, ProcessKind } from "@/lib/processes/admin";
 import { processRows, type ProcessFacts } from "@/lib/processes/rows";
@@ -14,6 +15,8 @@ import { processRows, type ProcessFacts } from "@/lib/processes/rows";
 declare global {
   interface Window {
     mountProcessAdmin: (opts: { canEdit: boolean; refuseArchive?: string }) => void;
+    /** An archived process's banner; `refuse` makes Restore answer with that message. */
+    mountArchivedBanner: (opts: { canEdit: boolean; refuse?: string }) => void;
     /** Every write the page asked for, as the server action would have received it. */
     calls: unknown[][];
   }
@@ -87,4 +90,12 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
 window.calls = [];
 window.mountProcessAdmin = (opts) => {
   createRoot(document.getElementById("root")!).render(<Harness {...opts} />);
+};
+
+window.mountArchivedBanner = ({ canEdit, refuse }) => {
+  const restore = async () => {
+    window.calls.push(["restore", id(3)]);
+    return refuse ? ({ status: "error", message: refuse } as const) : ({ status: "ok" } as const);
+  };
+  createRoot(document.getElementById("root")!).render(<ArchivedBanner name="Monthly reporting" archivedAt="2026-10-03T09:00:00Z" restore={canEdit ? restore : undefined} />);
 };

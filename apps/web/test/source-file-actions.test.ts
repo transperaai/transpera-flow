@@ -89,7 +89,7 @@ beforeEach(() => {
 describe("attachSourceFile", () => {
   it("keeps a checked file and its text on the source", async () => {
     fake.object = new Blob(["Maya: twice a week."], { type: "text/html" });
-    const path = `${WS}/${U}/Q3 notes.txt`;
+    const path = `${WS}/${SRC}/${U}/Q3 notes.txt`;
     expect(await attachSourceFile(SRC, path, "Q3 notes.txt")).toEqual({
       status: "ok",
       file: { path, name: "Q3 notes.txt", type: "txt", size: 19 },
@@ -99,17 +99,27 @@ describe("attachSourceFile", () => {
     expect(fake.removed).toEqual([]);
   });
 
-  it("takes only a path in the source's own workspace folder, made the app's way", async () => {
+  it("takes only a new path in the source's own folder of its workspace, made the app's way", async () => {
     fake.object = new Blob(["hi"]);
-    for (const path of [`b1111111-0000-4000-8000-000000000001/${U}/a.txt`, `${WS}/a.txt`, `${WS}/${U}/page.html`, `${WS}/${U}/../x.txt`]) {
+    for (const path of [`b1111111-0000-4000-8000-000000000001/${U}/a.txt`, `${WS}/a.txt`, `${WS}/${SRC}/${U}/page.html`, `${WS}/${SRC}/${U}/../x.txt`]) {
       expect(await attachSourceFile(SRC, path, "a.txt"), path).toEqual({ status: "error", message: "That source isn't valid." });
     }
+    // Not the file it already keeps.
+    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${SRC}/${U}/a.txt` };
+    expect(await attachSourceFile(SRC, `${WS}/${SRC}/${U}/a.txt`, "a.txt")).toEqual({ status: "error", message: "That source isn't valid." });
     expect(fake.updated).toEqual([]);
+    expect(fake.removed).toEqual([]);
+  });
+
+  it("deletes the upload when it can't be read back", async () => {
+    const path = `${WS}/${SRC}/${U}/notes.txt`;
+    expect(await attachSourceFile(SRC, path, "notes.txt")).toEqual({ status: "error", message: "Couldn't read the uploaded file. Upload it again." });
+    expect(fake.removed).toEqual([[path]]);
   });
 
   it("refuses an upload that isn't what its name says, and deletes it", async () => {
     fake.object = new Blob(["%PDF-1.4 not text"], { type: "text/plain" });
-    const path = `${WS}/${U}/notes.txt`;
+    const path = `${WS}/${SRC}/${U}/notes.txt`;
     expect(await attachSourceFile(SRC, path, "notes.txt")).toEqual({ status: "error", message: "That file isn't really a .txt file. Save it as one and upload it again." });
     expect(fake.removed).toEqual([[path]]);
     expect(fake.updated).toEqual([]);
@@ -117,7 +127,7 @@ describe("attachSourceFile", () => {
 
   it("refuses one over 10 MB, and deletes it", async () => {
     fake.object = new Blob([new Uint8Array(10 * 1024 * 1024 + 1).fill(0x61)]);
-    const path = `${WS}/${U}/big.csv`;
+    const path = `${WS}/${SRC}/${U}/big.csv`;
     expect(await attachSourceFile(SRC, path, "big.csv")).toEqual({ status: "error", message: "That file is over 10 MB. Split it, or keep it elsewhere and add a link to it." });
     expect(fake.removed).toEqual([[path]]);
   });
@@ -125,29 +135,29 @@ describe("attachSourceFile", () => {
   it("deletes the upload when the source can't be changed (a viewer), and the old file once a new one is kept", async () => {
     fake.object = new Blob(["new text"]);
     fake.updateRows = 0;
-    const path = `${WS}/${U}/v2.md`;
+    const path = `${WS}/${SRC}/${U}/v2.md`;
     expect(await attachSourceFile(SRC, path, "v2.md")).toEqual({ status: "error", message: "You don't have permission to change sources here." });
     expect(fake.removed).toEqual([[path]]);
     fake.removed = [];
     fake.updateRows = 1;
-    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${U}/v1.md` };
+    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${SRC}/${U}/v1.md` };
     expect((await attachSourceFile(SRC, path, "v2.md")).status).toBe("ok");
-    expect(fake.removed).toEqual([[`${WS}/${U}/v1.md`]]);
+    expect(fake.removed).toEqual([[`${WS}/${SRC}/${U}/v1.md`]]);
   });
 });
 
 describe("downloading and deleting", () => {
   it("gives a short-lived link that always downloads, under the file's own name", async () => {
-    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${U}/Q3 notes.txt` };
+    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${SRC}/${U}/Q3 notes.txt` };
     expect(await sourceFileLink(SRC)).toEqual({ status: "ok", url: "https://storage.example/signed" });
-    expect(fake.signed).toEqual([[`${WS}/${U}/Q3 notes.txt`, 60, { download: "Q3 notes.txt" }]]);
+    expect(fake.signed).toEqual([[`${WS}/${SRC}/${U}/Q3 notes.txt`, 60, { download: "Q3 notes.txt" }]]);
     fake.source = { id: SRC, workspace_id: WS, file_path: null };
     expect(await sourceFileLink(SRC)).toEqual({ status: "error", message: "This source has no file." });
   });
 
   it("deletes a source's file with it", async () => {
-    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${U}/Q3 notes.txt` };
+    fake.source = { id: SRC, workspace_id: WS, file_path: `${WS}/${SRC}/${U}/Q3 notes.txt` };
     expect(await deleteSource(SRC)).toEqual({ status: "ok" });
-    expect(fake.removed).toEqual([[`${WS}/${U}/Q3 notes.txt`]]);
+    expect(fake.removed).toEqual([[`${WS}/${SRC}/${U}/Q3 notes.txt`]]);
   });
 });

@@ -122,7 +122,7 @@ export class MemorySourceStore implements SourceStore {
     if (!check.ok) return { status: "error", message: check.error };
     if (check.type === "xlsx" || check.type === "pdf") return { status: "error", message: "The demo reads .txt, .md and .csv files only. In a workspace, spreadsheets and PDFs are read too." };
     const text = (decodeText(bytes) ?? "").replace(/\r\n?/g, "\n").trim().slice(0, MAX_BODY) || null;
-    const meta: SourceFile = { path: `${this.workspaceId}/${crypto.randomUUID()}/${file.name}`, name: displayName(file.name), type: check.type, size: bytes.length };
+    const meta: SourceFile = { path: `${this.workspaceId}/${sourceId}/${crypto.randomUUID()}/${file.name}`, name: displayName(file.name), type: check.type, size: bytes.length };
     this.files.set(sourceId, { meta, blob: file });
     this.rows.set(sourceId, { ...row, body: text, updated_at: this.now() });
     return { status: "ok", file: meta, body: text };

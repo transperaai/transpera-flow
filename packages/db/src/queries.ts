@@ -271,7 +271,7 @@ export async function loadProcessBundle(
   };
 }
 
-const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, live_revision_id, parent_process_id, is_company" as const;
+const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, live_revision_id, parent_process_id, is_company, archived_at" as const;
 
 /** Where a process sits: the process whose LIVE version holds it by a link (B12, ADR 0014). */
 export interface Placement {
@@ -308,7 +308,7 @@ export async function listProcesses(
   workspaceId: string,
   { includeCompany = false, includeArchived = false }: { includeCompany?: boolean; includeArchived?: boolean } = {},
 ): Promise<(ProcessRow & { draft_revision_id: string | null; archived_at: string | null })[]> {
-  let q = db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id, archived_at`).eq("workspace_id", workspaceId);
+  let q = db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id`).eq("workspace_id", workspaceId);
   if (!includeCompany) q = q.eq("is_company", false);
   // An archived process (B19, migration 20261204000000) is off every list, the map and the simulation until it is restored.
   if (!includeArchived) q = q.is("archived_at", null);

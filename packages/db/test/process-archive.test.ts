@@ -269,6 +269,8 @@ describe("while it is archived, nothing changes it", () => {
     const w = await world([["Sales", "pipeline"], ["Audit", "pipeline"]]);
     const first = await liveOf(w.p.Audit);
     await publishWith(w.ws, w.p.Audit, []);
+    const firstSales = await liveOf(w.p.Sales);
+    await publishWith(w.ws, w.p.Sales, []);
     await openDraft(w.p.Sales);
     await archive(editor.claims, w.p.Sales);
     await archive(editor.claims, w.p.Audit);
@@ -278,6 +280,8 @@ describe("while it is archived, nothing changes it", () => {
     await refused(commitAs(editor.claims, (c) => rpc(c, "open_draft", w.p.Audit)), "55000", message);
     await refused(commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Audit, first, false)), "55000", message);
     await refused(commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Audit, first, true)), "55000", message);
+    // Into the draft already open, too.
+    await refused(commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Sales, firstSales, true)), "55000", message);
     // Restored, it can be edited and published again.
     await unarchive(editor.claims, w.p.Audit);
     expect(await openDraft(w.p.Audit)).toEqual(expect.any(String));

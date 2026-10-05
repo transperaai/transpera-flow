@@ -53,7 +53,8 @@ export async function renameProcess(processId: unknown, name: unknown): Promise<
   const proc = await readProcess(supabase, processId);
   if (!proc) return { status: "error", message: "That process isn't there any more. Reload the page." };
   if (proc.name === clean.name) return { status: "ok" };
-  const { data: others } = await supabase.from("processes").select("id, name").eq("workspace_id", proc.workspace_id).eq("is_company", false).neq("id", processId);
+  // Names are unique among the processes in use (an archived one gives its name up; restoring it checks again).
+  const { data: others } = await supabase.from("processes").select("id, name").eq("workspace_id", proc.workspace_id).eq("is_company", false).is("archived_at", null).neq("id", processId);
   if ((others ?? []).some((p) => p.name.trim().toLowerCase() === clean.name.toLowerCase())) return { status: "error", message: `There is already a process called '${clean.name}'.` };
   return update(supabase, processId, { name: clean.name });
 }

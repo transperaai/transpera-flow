@@ -4,7 +4,7 @@ import { MAX_BODY } from "@/lib/sources/validate";
 import { EMPTY, TOO_BIG, WRONG_TYPE, checkSourceFile, displayName, fileTypeOf, parseStoragePath, safeFileName } from "@/lib/sources/file-check";
 
 vi.mock("server-only", () => ({}));
-const { extractSourceText, workbookText, xmlText } = await import("@/lib/sources/extract");
+const { MAX_PDF_PAGES, attributes, extractSourceText, scanXml, workbookText, xmlText } = await import("@/lib/sources/extract");
 
 // A source's original file (issue #182, B19 2/2): the five kinds accepted, checked by name and by content (never by the type
 // the browser declares), the 10 MB limit, the name it is kept under, and the text read out of each kind on the server. Storage
@@ -12,6 +12,7 @@ const { extractSourceText, workbookText, xmlText } = await import("@/lib/sources
 
 const WS = "a0000000-0000-4000-8000-000000000001";
 const U = "b0000000-0000-4000-8000-000000000002";
+const SRC = "c0000000-0000-4000-8000-000000000003";
 const bytes = (s: string) => new TextEncoder().encode(s);
 
 /** A small but real PDF with one line of text per page (offsets in the cross-reference table computed). */
@@ -89,19 +90,21 @@ describe("where a file is kept", () => {
     expect(displayName("C:\\Users\\maya\\Café menu.csv")).toBe("Café menu.csv");
   });
 
-  it("accepts back only a path in the caller's workspace folder, made the way it makes them", () => {
-    expect(parseStoragePath(`${WS}/${U}/Q3 notes.txt`, WS)).toEqual({ path: `${WS}/${U}/Q3 notes.txt`, name: "Q3 notes.txt", type: "txt" });
+  it("accepts back only a new path in this source's own folder of the caller's workspace, made the way it makes them", () => {
+    expect(parseStoragePath(`${WS}/${SRC}/${U}/Q3 notes.txt`, WS, SRC)).toEqual({ path: `${WS}/${SRC}/${U}/Q3 notes.txt`, name: "Q3 notes.txt", type: "txt" });
     for (const bad of [
-      `b1111111-0000-4000-8000-000000000001/${U}/a.txt`,
-      `${WS}/a.txt`,
-      `${WS}/not-a-uuid/a.txt`,
-      `${WS}/${U}/sub/a.txt`,
-      `${WS}/${U}/page.html`,
-      `${WS}/${U}/../a.txt`,
-      `${WS}/${U}/Café.txt`,
+      `b1111111-0000-4000-8000-000000000001/${SRC}/${U}/a.txt`,
+      `${WS}/${U}/${U}/a.txt`, // another source's folder
+      `${WS}/${U}/a.txt`,
+      `${WS}/${SRC}/a.txt`,
+      `${WS}/${SRC}/not-a-uuid/a.txt`,
+      `${WS}/${SRC}/${U}/sub/a.txt`,
+      `${WS}/${SRC}/${U}/page.html`,
+      `${WS}/${SRC}/${U}/../a.txt`,
+      `${WS}/${SRC}/${U}/Café.txt`,
       42,
     ]) {
-      expect(parseStoragePath(bad, WS), String(bad)).toBeNull();
+      expect(parseStoragePath(bad, WS, SRC), String(bad)).toBeNull();
     }
   });
 });
@@ -143,6 +146,42 @@ describe("reading the text", () => {
     expect((await extractSourceText("x.xlsx", bomb)).ok).toBe(false);
   });
 
+  it("reads a hostile workbook in time proportional to its size: unclosed rows, cells and attributes", async () => {
+    const shapes = {
+      "80,000 unclosed rows": "<row r=\"1\"><c r=\"A1\"><v>1</v></c>" + "<row".repeat(80_000),
+      "80,000 rows that never close": '<row r="1">'.repeat(80_000),
+      "80,000 unclosed attributes": `<row r="1"><c ${'r="A'.repeat(80_000)}></c></row>`,
+      "80,000 unclosed comments": "<!--".repeat(80_000),
+      "80,000 cells that never close": '<c r="A1" t="s"><v>0'.repeat(80_000),
+    };
+    for (const [what, xml] of Object.entries(shapes)) {
+      const started = performance.now();
+      const r = await extractSourceText("hostile.xlsx", xlsx([{ name: "S", xml }], ["<t>x</t>"]));
+      expect(performance.now() - started, what).toBeLessThan(1_000);
+      expect(typeof r.ok, what).toBe("boolean");
+    }
+    // The scanner on its own: two million unclosed tags in well under a second.
+    const started = performance.now();
+    let opened = 0;
+    scanXml("<row".repeat(2_000_000), { open: () => opened++, close: () => {}, text: () => {} });
+    expect(opened).toBe(0);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(attributes(` r="A1" t='s' name="a &amp; b" broken="x`)).toEqual(new Map([["r", "A1"], ["t", "s"], ["name", "a & b"]]));
+  });
+
+  it("refuses a workbook that takes too long to read, or holds too much XML", async () => {
+    const rows = Array.from({ length: 20_000 }, (_, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c></row>`).join("");
+    expect(await extractSourceText("big.xlsx", xlsx([{ name: "S", xml: rows }]), { xlsx: 0 })).toEqual({
+      ok: false,
+      error: "That spreadsheet took too long to read. Save a smaller copy and upload it again.",
+    });
+    expect((await extractSourceText("big.xlsx", xlsx([{ name: "S", xml: rows }]))).ok).toBe(true);
+    // 60 MB of sheet XML packs small; it is refused unread.
+    const huge = xlsx([{ name: "S", xml: " ".repeat(60 * 1024 * 1024) }]);
+    expect(huge.length).toBeLessThan(1024 * 1024);
+    expect(await extractSourceText("huge.xlsx", huge)).toEqual({ ok: false, error: "That spreadsheet is too big to read. Save a smaller copy (fewer sheets or rows) and upload it again." });
+  });
+
   it("reads a PDF's text, page by page", async () => {
     expect(await extractSourceText("sop.pdf", pdf(["Step one: send the welcome pack.", "Step two: book the kickoff (30 min)."]))).toEqual({
       ok: true,
@@ -151,6 +190,14 @@ describe("reading the text", () => {
     });
     expect(await extractSourceText("broken.pdf", bytes("%PDF-1.4\nnot really"))).toMatchObject({ ok: false });
   });
+
+  it("reads at most MAX_PDF_PAGES pages and says so, and refuses a PDF that takes too long", async () => {
+    const many = pdf(Array.from({ length: MAX_PDF_PAGES + 2 }, (_, i) => `Page ${i + 1}`));
+    const r = await extractSourceText("long.pdf", many);
+    expect(r.ok && r.text.split("\n\n").length).toBe(MAX_PDF_PAGES + 1);
+    expect(r.ok && r.text.endsWith(`[Only the first ${MAX_PDF_PAGES} of ${MAX_PDF_PAGES + 2} pages were read. The whole file is kept.]`)).toBe(true);
+    expect(await extractSourceText("slow.pdf", many, { pdf: 0 })).toEqual({ ok: false, error: "That PDF took too long to read. Save a smaller copy and upload it again." });
+  }, 30_000);
 
   it("cuts very long text, and says so", async () => {
     const r = await extractSourceText("long.txt", new Uint8Array(MAX_BODY + 10).fill(0x61));

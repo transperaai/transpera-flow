@@ -58,17 +58,20 @@ export function displayName(name: string): string {
   return base.slice(0, 200) || "file";
 }
 
-/** Where a file is kept: `<workspace id>/<a new uuid>/<safe name>` (the folder the storage policies read). */
-export function storagePath(workspaceId: string, uuid: string, name: string): string {
-  return `${workspaceId}/${uuid}/${name}`;
+/**
+ * Where a file is kept: `<workspace id>/<source id>/<a new uuid>/<safe name>` (the folders the storage policies read: members
+ * can read it only once that source keeps it).
+ */
+export function storagePath(workspaceId: string, sourceId: string, uuid: string, name: string): string {
+  return `${workspaceId}/${sourceId}/${uuid}/${name}`;
 }
 
-/** A path from the browser, if it is one this workspace may have made; its kind comes from its name. */
-export function parseStoragePath(path: unknown, workspaceId: string): { path: string; name: string; type: SourceFileType } | null {
-  if (typeof path !== "string" || path.length > 200) return null;
+/** A path from the browser, if it is one made for this source of this workspace; its kind comes from its name. */
+export function parseStoragePath(path: unknown, workspaceId: string, sourceId: string): { path: string; name: string; type: SourceFileType } | null {
+  if (typeof path !== "string" || path.length > 250) return null;
   const parts = path.split("/");
-  if (parts.length !== 3 || parts[0] !== workspaceId || !UUID.test(parts[1]!)) return null;
-  const name = parts[2]!;
+  if (parts.length !== 4 || parts[0] !== workspaceId || parts[1] !== sourceId || !UUID.test(parts[2]!)) return null;
+  const name = parts[3]!;
   const type = fileTypeOf(name);
   if (!type || safeFileName(name, type) !== name) return null;
   return { path, name, type };

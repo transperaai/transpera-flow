@@ -27,7 +27,7 @@ A process that sits inside a step of another process, with its own page, version
 _Avoid_: Sub-map, nested process
 
 **Archived process**:
-A process taken out of use without deleting it: off the company map, the lists and the simulation, with its versions, history, issues and sources kept. Restore brings it back, with a card on the company map. A process inside another ordinary process, or holding others, can't be archived until it is taken out. Example: "Old audit", archived when the agency stopped selling audits.
+A process taken out of use without deleting it: off the company map, the lists and the simulation, read only, with its versions, history, issues and sources kept. Its name is free for another process. Restore brings it back, with a card on the company map. A process inside another ordinary process, holding others, or still used by a service can't be archived until that is undone. Example: "Old audit", archived when the agency stopped selling audits.
 _Avoid_: Deleted process, hidden process (nothing deletes a process)
 
 **Block**:
