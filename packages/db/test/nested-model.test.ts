@@ -200,18 +200,15 @@ describe("toEngineModel with a child process", () => {
     expect(() => modelOf(bundle)).toThrow(/no longer sits inside this process|inside itself/);
   });
 
-  it("says so, as a ModelError, when a step holds a child that has since moved out of the process", () => {
+  it("simulates a child through the step's link, whatever its parent column says (B12: a link is what nests it)", () => {
+    // Placed from the library: the child's (legacy) parent column names nothing, or another process. The holder step's link is
+    // what puts it here, so the model is still the flat one, and so are the numbers.
     const { bundle } = withChildProcess();
-    const moved = (bundle.otherProcesses ?? []).map((p) => (p.process.name === "Delivery" ? { ...p, process: { ...p.process, parent_process_id: null } } : p));
-    const err = (() => {
-      try {
-        modelOf({ ...bundle, otherProcesses: moved });
-      } catch (e) {
-        return e;
-      }
-    })();
-    expect(err).toBeInstanceOf(ModelError);
-    expect((err as Error).message).toMatch(/no longer sits inside this process/);
+    for (const parent of [null, randomUUID()]) {
+      const linked = (bundle.otherProcesses ?? []).map((p) => (p.process.name === "Delivery" ? { ...p, process: { ...p.process, parent_process_id: parent } } : p));
+      expect(modelOf({ ...bundle, otherProcesses: linked })).toEqual(modelOf(flat()));
+      expect(simulate(modelOf({ ...bundle, otherProcesses: linked }), 3, 1)).toEqual(simulate(modelOf(flat()), 3, 1));
+    }
   });
 
   it("is not picked as the pipeline a servicing process runs beside", () => {

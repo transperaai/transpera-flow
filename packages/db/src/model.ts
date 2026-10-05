@@ -123,11 +123,10 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
       groups[step.id] = { name: step.name, ...parentOf(step), entry: entryStep.id, next };
       continue;
     }
+    // The step's link is what puts the child here (B12): the revision being simulated says what it holds, whatever holds the
+    // child elsewhere. (A process is in at most one live version; the database refuses a second on publish.)
     const child = ctx.parts.get(step.child_process_id!);
-    if (!child) throw new ModelError(`'${step.name}' holds a child process that has no published version yet, or that no longer sits inside this process (it was moved); publish it, or remove or replace this step`);
-    if (child.process.parent_process_id !== ctx.stack[ctx.stack.length - 1]) {
-      throw new ModelError(`'${step.name}' holds '${child.process.name}', which no longer sits inside this process (it was moved); remove or replace that step`);
-    }
+    if (!child) throw new ModelError(`'${step.name}' holds a process that has no published version yet; publish it, or remove or replace this step`);
     if (ctx.stack.includes(child.process.id)) throw new ModelError(`Child process '${child.process.name}' is inside itself`);
     let sub: Graph;
     try {
@@ -311,13 +310,14 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
 }
 
 /**
- * The child processes steps of this run's processes may hold, by id, at their
- * live revisions: every one the bundle carries (`loadServicingContext` loads
- * the descendants of the processes a run needs).
+ * The processes steps of this run's processes may hold, by id, at their live
+ * revisions: every one the bundle carries (`loadServicingContext` loads the
+ * ones the run's revisions link to, any depth). Only a holder step's link
+ * brings one into the run.
  */
 function heldProcesses(bundle: ProcessBundle): Map<string, ProcessPart> {
   const parts = new Map<string, ProcessPart>();
-  for (const p of bundle.otherProcesses ?? []) if (p.process.parent_process_id) parts.set(p.process.id, p);
+  for (const p of bundle.otherProcesses ?? []) parts.set(p.process.id, p);
   return parts;
 }
 

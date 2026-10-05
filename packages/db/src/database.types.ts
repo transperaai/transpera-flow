@@ -2907,7 +2907,17 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      process_placements: {
+        Row: {
+          holder_is_company: boolean | null
+          holder_name: string | null
+          holder_process_id: string | null
+          process_id: string | null
+          step_id: string | null
+          workspace_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       add_source: {
@@ -2931,6 +2941,17 @@ export type Database = {
       can_edit_workspace: { Args: { ws: string }; Returns: boolean }
       can_manage_workspace: { Args: { ws: string }; Returns: boolean }
       can_read_workspace: { Args: { ws: string }; Returns: boolean }
+      create_library_process: {
+        Args: {
+          p_description?: string
+          p_entity_name?: string
+          p_kind: string
+          p_name: string
+          p_source?: string
+          p_workspace: string
+        }
+        Returns: Json
+      }
       create_workspace: {
         Args: { ws_name: string; ws_settings?: Json; ws_slug: string }
         Returns: string

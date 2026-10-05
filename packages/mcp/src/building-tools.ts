@@ -559,6 +559,8 @@ async function createProcessWithDraft(
   ctx: ToolContext,
   ws: WorkspaceRef,
   input: { name: string; kind: "pipeline" | "servicing"; entity_name: string; description: string | null; source: "mcp" | "import" | "template"; parent_process_id?: string },
+  /** For the process library (B12): made with `create_library_process`, so the company map gives it no card of its own (the person places it). */
+  { offMap = false }: { offMap?: boolean } = {},
 ): Promise<{ proc: ProcessWithDraft; draft: Draft }> {
   const existing = await listProcesses(ctx.db, ws.id);
   const clash = existing.find((p) => normalizeName(p.name) === normalizeName(input.name));
@@ -567,19 +569,38 @@ async function createProcessWithDraft(
       { id: clash.id, name: clash.name },
     ]);
   }
-  const { data, error } = await ctx.db
-    .from("processes")
-    .insert({
-      workspace_id: ws.id,
-      name: input.name,
-      kind: input.kind,
-      entity_name: input.entity_name,
-      description: input.description,
-      source: input.source,
-      ...(input.parent_process_id ? { parent_process_id: input.parent_process_id } : {}),
-    })
-    .select("id, workspace_id, name, kind, entity_name, description, live_revision_id, draft_revision_id, parent_process_id")
-    .single();
+  const columns = "id, workspace_id, name, kind, entity_name, description, live_revision_id, draft_revision_id, parent_process_id";
+  let made: { data: unknown; error: { code?: string; message: string } | null };
+  if (offMap && !input.parent_process_id) {
+    const { data: reply, error: rpcError } = await ctx.db.rpc("create_library_process", {
+      p_workspace: ws.id,
+      p_name: input.name,
+      p_kind: input.kind,
+      p_entity_name: input.entity_name,
+      p_description: input.description ?? undefined,
+      p_source: input.source,
+    });
+    if (rpcError) throw writeError(rpcError, "create processes");
+    const r = reply as { status: string; process_id?: string };
+    if (r.status === "name_taken") throw new ToolError("name_taken", `'${ws.name}' already has a process called '${input.name}'`);
+    if (r.status !== "created" || !r.process_id) throw new ToolError("forbidden", `Couldn't create '${input.name}' in '${ws.name}' (${r.status}).`);
+    made = await ctx.db.from("processes").select(columns).eq("id", r.process_id).single();
+  } else {
+    made = await ctx.db
+      .from("processes")
+      .insert({
+        workspace_id: ws.id,
+        name: input.name,
+        kind: input.kind,
+        entity_name: input.entity_name,
+        description: input.description,
+        source: input.source,
+        ...(input.parent_process_id ? { parent_process_id: input.parent_process_id } : {}),
+      })
+      .select(columns)
+      .single();
+  }
+  const { data, error } = made;
   if (error) throw writeError(error, "create processes");
   const proc = data as unknown as ProcessWithDraft;
   const draft = await openDraft(ctx, proc);
@@ -987,6 +1008,38 @@ export async function importNewProcess(ctx: ToolContext, workspaceId: string, js
   const prepared = await prepareNewProcess(scope, json);
   await prepared.ensure(null);
   return prepared.write();
+}
+
+/** create_from_template's work: a new process with the template's steps in its draft (`offMap`: see createProcessWithDraft). */
+async function fromTemplate(ctx: ToolContext, ws: WorkspaceRef, template: string, name: string | undefined, assumptions: string[], opts: { offMap?: boolean } = {}) {
+  const t = resolveName(PROCESS_TEMPLATES, template, "template");
+  const finalName = name ?? t.name;
+  if (!name) assumptions.push(`name defaulted to '${t.name}'.`);
+  const { proc, draft } = await createProcessWithDraft(ctx, ws, { name: finalName, kind: t.kind, entity_name: t.entity_name, description: t.description, source: "template" }, opts);
+  const owner = { revision_id: draft.revision_id, workspace_id: ws.id, process_id: proc.id };
+  const plan = planImport({ steps: t.steps, edges: t.edges }, { steps: [], edges: [], retired: [] }, owner, await stampOf(ctx), { newId, origin: `template '${t.name}'` });
+  assumptions.push(...plan.assumptions);
+  await applyPlan(ctx, draft.revision_id, plan);
+  const bundle = await loadDraft(ctx, ws, proc, draft);
+  return { t, proc, draft, bundle };
+}
+
+/**
+ * A new process from a template, for the process library in the web app's editors (B12, #164): what `create_from_template`
+ * does, as the signed-in user through RLS, except that the company map gives the new process no card of its own: the person
+ * places it, by a link, in the draft they are editing. Never publishes. Returns the new process's id, name and kind.
+ */
+export async function createProcessFromTemplate(
+  ctx: ToolContext,
+  workspaceId: string,
+  template: string,
+  name?: string,
+): Promise<{ id: string; name: string; kind: "pipeline" | "servicing" }> {
+  const assumptions: string[] = [];
+  const ws = await resolveWorkspace(ctx, workspaceId, assumptions);
+  await requireCanEdit(ctx, ws);
+  const { proc } = await fromTemplate(ctx, ws, template, name, assumptions, { offMap: true });
+  return { id: proc.id, name: proc.name, kind: proc.kind as "pipeline" | "servicing" };
 }
 
 /** The ids of the processes that hold `proc`, nearest first. */
@@ -1713,16 +1766,8 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
     },
     (args) =>
       runTool(async (assumptions) => {
-        const t = resolveName(PROCESS_TEMPLATES, args.template, "template");
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
-        const name = args.name ?? t.name;
-        if (!args.name) assumptions.push(`name defaulted to '${t.name}'.`);
-        const { proc, draft } = await createProcessWithDraft(ctx, ws, { name, kind: t.kind, entity_name: t.entity_name, description: t.description, source: "template" });
-        const owner = { revision_id: draft.revision_id, workspace_id: ws.id, process_id: proc.id };
-        const plan = planImport({ steps: t.steps, edges: t.edges }, { steps: [], edges: [], retired: [] }, owner, await stampOf(ctx), { newId, origin: `template '${t.name}'` });
-        assumptions.push(...plan.assumptions);
-        await applyPlan(ctx, draft.revision_id, plan);
-        const bundle = await loadDraft(ctx, ws, proc, draft);
+        const { t, proc, draft, bundle } = await fromTemplate(ctx, ws, args.template, args.name, assumptions);
         const items = checklist(bundle.steps);
         return {
           ...header({ ws, proc, draft }),

@@ -182,6 +182,8 @@ export {
   loadProcessBundle,
   loadProcessBySlug,
   loadServicingContext,
+  listPlacements,
+  type Placement,
   isUnpublished,
   unpublishedLive,
   UNPUBLISHED_REVISION_ID,
