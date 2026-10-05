@@ -23,7 +23,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const { live, draft, processes } = process;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
-  const [canEdit, scenarios, issues, sources, rules, liveRevisions, solutions, viewerId, memberNames, lastChange, ideaIssueIds] = await Promise.all([
+  const [canEdit, scenarios, issues, sources, rules, liveRevisions, solutions, viewerId, memberNames] = await Promise.all([
     canEditWorkspace(live.workspace.id),
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceIssues(live.workspace.id),
@@ -34,8 +34,14 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     loadWorkspaceSolutions(live.workspace.id, live.process.id),
     currentUserId(),
     loadMemberNames(live.workspace.id),
-    loadLastChange(live.process.id),
-    loadIdeaIssueIds(live.workspace.id),
+  ]);
+  // Who last published the live version, and which of this process's issues an AI idea is waiting for.
+  const [lastChange, ideaIssueIds] = await Promise.all([
+    isUnpublished(live) ? null : loadLastChange(live.revision.id, memberNames),
+    loadIdeaIssueIds(
+      live.workspace.id,
+      issues.filter((i) => i.process_id === live.process.id || i.links.some((l) => l.process_id === live.process.id)).map((i) => i.id),
+    ),
   ]);
   // First principles of the version on screen, and whether the draft has answers live doesn't (A54).
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);

@@ -5,7 +5,7 @@
 // (i)s: the headings and a line under each say what it is.
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { SimulationResult } from "@transpera-flow/engine";
 import { formatDays, formatHours, formatNumber, formatPercent } from "@/lib/format";
 import { issueHref } from "@/lib/issues/pages";
@@ -48,12 +48,12 @@ export function TimeSplit({ rows, result }: { rows: TimeSplitRow[]; result: Simu
                 <span aria-hidden className="flex h-3 gap-0.5" style={{ width: `${Math.max(2, (r.total / max) * 100)}%` }}>
                   {(
                     [
-                      [r.handsOn, "bg-accent"],
-                      [r.waitingForPerson, "bg-fg-3/60"],
-                      [r.fixedWait, "bg-line-2"],
+                      [r.handsOn, "bg-accent", undefined],
+                      [r.waitingForPerson, "bg-fg-3/70", undefined],
+                      [r.fixedWait, "border border-fg-3", HATCH],
                     ] as const
-                  ).map(([h, bg], i) =>
-                    h > 0 ? <span key={i} className={`block h-full min-w-px rounded-sm ${bg}`} style={{ flexGrow: h, flexBasis: 0 }} /> : null,
+                  ).map(([h, cls, style], i) =>
+                    h > 0 ? <span key={i} className={`block h-full min-w-px rounded-sm ${cls}`} style={{ flexGrow: h, flexBasis: 0, ...style }} /> : null,
                   )}
                 </span>
                 <span className="text-right text-xs tabular-nums">
@@ -65,8 +65,8 @@ export function TimeSplit({ rows, result }: { rows: TimeSplitRow[]; result: Simu
           </ul>
           <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-fg-3">
             <Key className="bg-accent" label="Hands-on" />
-            <Key className="bg-fg-3/60" label="Waiting for a person" />
-            <Key className="bg-line-2" label="Waiting on others" />
+            <Key className="bg-fg-3/70" label="Waiting for a person" />
+            <Key className="border border-fg-3" style={HATCH} label="Waiting on others (hatched)" />
           </p>
         </>
       )}
@@ -74,9 +74,12 @@ export function TimeSplit({ rows, result }: { rows: TimeSplitRow[]; result: Simu
   );
 }
 
-const Key = ({ className, label }: { className: string; label: string }) => (
+/** A diagonal hatch in the muted text colour, so a wait on others differs from a wait for a person by pattern as well as lightness, in both themes. */
+const HATCH = { backgroundImage: "repeating-linear-gradient(135deg, var(--fg-3) 0 1.5px, transparent 1.5px 4px)" } as const;
+
+const Key = ({ className, label, style }: { className: string; label: string; style?: CSSProperties }) => (
   <span className="inline-flex items-center gap-1">
-    <i aria-hidden className={`size-2 rounded-sm ${className}`} />
+    <i aria-hidden className={`size-2.5 rounded-sm ${className}`} style={style} />
     {label}
   </span>
 );
@@ -106,7 +109,11 @@ export function CycleSpreadPanel({ spread, hoursPerWeek, result }: { spread: Cyc
             ))}
           </ul>
           <p className="mt-2 text-xs text-fg-3">
-            {spread.ratio >= 1.05 ? `A slow item takes ${formatNumber(spread.ratio, 1)} times as long as a typical one.` : "Slow items take about as long as typical ones."}
+            {spread.p50 <= 0
+              ? `Most items finish straight away; the slowest tenth take ${formatDays(spread.p90, hoursPerWeek)} or more.`
+              : spread.ratio >= 1.05
+                ? `A slow item takes ${formatNumber(spread.ratio, 1)} times as long as a typical one.`
+                : "Slow items take about as long as typical ones."}
           </p>
         </>
       )}
@@ -127,7 +134,14 @@ export function KeyPersonPanel({ rows, result }: { rows: KeyPersonRow[]; result:
           {rows.map((r) => (
             <li key={r.id} className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm" data-key-person={r.id}>
               <span className="min-w-0 truncate">{r.step}</span>
-              {r.person ? <span className="font-medium">{r.person}</span> : <span className="font-medium text-crit">Nobody can do it</span>}
+              {r.person ? (
+                <span className="font-medium">
+                  {r.person}
+                  {r.placeholder && <span className="font-normal text-fg-3"> (placeholder, no named person)</span>}
+                </span>
+              ) : (
+                <span className="font-medium text-crit">Nobody can do it</span>
+              )}
             </li>
           ))}
         </ul>
@@ -162,7 +176,7 @@ export function ReworkLoopsPanel({
               <p className="text-sm font-semibold">{r.title}</p>
               {r.steps.length > 1 && <p className="text-xs text-fg-3">Steps in the loop: {r.steps.join(" › ")}</p>}
               <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-sm sm:grid-cols-3">
-                <Fact label="Goes round" value={r.share.mean > 0 ? formatPercent(r.share.mean) : "Rarely"} sub={r.meanRounds.mean > 0 ? `${formatNumber(r.meanRounds.mean, 1)} times each` : undefined} />
+                <Fact label="Goes round" value={r.share.mean > 0 ? formatPercent(r.share.mean) : "Never in this run"} sub={r.meanRounds.mean > 0 ? `${formatNumber(r.meanRounds.mean, 1)} times each` : undefined} />
                 <Fact label="Extra work" value={`${formatNumber(r.hoursPerMonth.mean, r.hoursPerMonth.mean < 10 ? 1 : 0)} h a month`} />
                 <Fact label="Adds to cycle" value={formatDays(r.extraCycleHours.mean, hoursPerWeek)} sub="per item" />
               </dl>

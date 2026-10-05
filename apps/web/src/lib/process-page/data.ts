@@ -1,28 +1,38 @@
 import "server-only";
-import { loadProposals } from "@transpera-flow/db";
 import { createClient } from "@/lib/supabase/server";
-import { authorLabel, type AuthorKind } from "@/lib/history/versions";
 
-/** Who last published the process and when, for "About this process". Null when it was never published or can't be read. */
-export async function loadLastChange(processId: string): Promise<{ at: string | null; by: string } | null> {
+/**
+ * When the live version was published and by whom, for "About this process". Reads that one revision directly; the name
+ * comes from the workspace's member names (user id to person name), "A team member" for a member with no person linked, and
+ * "The system" for a version nobody published. Null when it can't be read.
+ */
+export async function loadLastChange(liveRevisionId: string, memberNames: Readonly<Record<string, string>>): Promise<{ at: string | null; by: string } | null> {
   try {
     const db = await createClient();
-    const { data, error } = await db.rpc("revision_history", { target_process: processId });
+    const { data, error } = await db.from("process_revisions").select("published_at, published_by").eq("id", liveRevisionId).eq("status", "published").maybeSingle();
     if (error) throw error;
-    const latest = (data ?? []).filter((r) => r.status === "published").sort((a, b) => b.number - a.number)[0];
-    if (!latest) return null;
-    return { at: latest.published_at, by: authorLabel({ authorKind: (latest.author_kind as AuthorKind | null) ?? null, authorName: latest.author_name }) };
+    if (!data) return null;
+    return { at: data.published_at, by: data.published_by ? (memberNames[data.published_by] ?? "A team member") : "The system" };
   } catch (err) {
     console.error("Couldn't read the last change; showing none.", err instanceof Error ? err.message : err);
     return null;
   }
 }
 
-/** The ids of issues an AI solution idea is waiting for ("Solution idea" on the status track). Empty if they can't be read. */
-export async function loadIdeaIssueIds(workspaceId: string): Promise<string[]> {
+/** Which of these issues an AI solution idea is waiting for ("Solution idea" on the status track): only the issue ids, no idea contents. */
+export async function loadIdeaIssueIds(workspaceId: string, issueIds: readonly string[]): Promise<string[]> {
+  if (issueIds.length === 0) return [];
   try {
-    const waiting = await loadProposals(await createClient(), workspaceId, "pending");
-    return [...new Set(waiting.flatMap((p) => (p.kind === "solution_idea" && p.issue_id ? [p.issue_id] : [])))];
+    const db = await createClient();
+    const { data, error } = await db
+      .from("suggestion_proposals")
+      .select("issue_id")
+      .eq("workspace_id", workspaceId)
+      .eq("kind", "solution_idea")
+      .eq("status", "pending")
+      .in("issue_id", [...issueIds]);
+    if (error) throw error;
+    return [...new Set((data ?? []).flatMap((r) => (r.issue_id ? [r.issue_id] : [])))];
   } catch (err) {
     console.error("Couldn't read the AI ideas; showing none.", err instanceof Error ? err.message : err);
     return [];

@@ -18,7 +18,7 @@ export interface TimeSplitRow {
   handsOnShare: number;
 }
 
-/** Hands-on versus waiting per step, the steps with the most waiting first. Needs a run that carries step facts. */
+/** Hands-on versus waiting per step, the steps whose visit takes longest in total first. Needs a run that carries step facts. */
 export function timeSplitRows(model: EngineModel, result: SimulationResult | null, stepIds: ReadonlySet<string>, max = 8): TimeSplitRow[] {
   if (!result?.stepFacts) return [];
   return model.steps
@@ -39,6 +39,8 @@ export interface KeyPersonRow {
   step: string;
   /** Who is the only one that can do it; null when nobody can. */
   person: string | null;
+  /** The name is one the simulation made up for a role with no named people ("Reviewer 1"), not a person in People. */
+  placeholder: boolean;
 }
 
 /** Steps only one person can do (and any nobody can do), in process order. */
@@ -47,8 +49,9 @@ export function keyPersonRows(model: EngineModel, result: SimulationResult | nul
   return model.steps.flatMap((s): KeyPersonRow[] => {
     const f = result.stepFacts![s.id];
     if (!f || !stepIds.has(s.id)) return [];
-    if (f.keyPerson) return [{ id: s.id, step: s.name, person: f.keyPerson.personName }];
-    return f.nobodyCanDo ? [{ id: s.id, step: s.name, person: null }] : [];
+    // Without named people the engine makes one up per head-count, keyed "<role>#<n>"; a person in People never has a # in the id.
+    if (f.keyPerson) return [{ id: s.id, step: s.name, person: f.keyPerson.personName, placeholder: f.keyPerson.personId.includes("#") }];
+    return f.nobodyCanDo ? [{ id: s.id, step: s.name, person: null, placeholder: false }] : [];
   });
 }
 

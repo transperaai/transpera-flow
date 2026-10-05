@@ -10,8 +10,12 @@ export type TrackStage = 0 | 1 | 2 | 3 | 4;
 
 export interface LinkedSolution {
   solution: Pick<SolutionRow, "id" | "name" | "process_id" | "changed_step_ids">;
+  /** The verdict that counts: the person's own, else the simulation's. */
   verdict: SolutionVerdict | null;
-  /** Share of simulated runs that meet the target, 0 to 100. */
+  /** The simulation's own verdict, and the person's; when they differ the page says so. */
+  autoVerdict: SolutionVerdict | null;
+  userVerdict: SolutionVerdict | null;
+  /** Share of simulated runs that meet the target, 0 to 100 (the simulation's). */
   holdsPct: number | null;
   /** True when the verdict is the person's own rather than the simulation's. */
   yours: boolean;
@@ -22,7 +26,9 @@ export interface IssueTrack {
   stage: TrackStage | null;
   closed: "wont_fix" | "not_a_problem" | null;
   solutions: LinkedSolution[];
-  /** At Verified: the verdict that verified it (the first linked solution that passed). */
+  /** The solution the issue was resolved by, when one was picked and is linked. */
+  implementing: LinkedSolution | null;
+  /** At Verified: the implementing solution, whose check passed. */
   verified: LinkedSolution | null;
 }
 
@@ -31,7 +37,14 @@ export function linkedSolutions(data: Pick<SolutionsData, "solutions" | "links">
   const byId = new Map(data.solutions.map((s) => [s.id, s]));
   return data.links
     .filter((l: SolutionIssueRow) => l.issue_id === issueId && byId.has(l.solution_id))
-    .map((l) => ({ solution: byId.get(l.solution_id)!, verdict: effectiveVerdict(l), holdsPct: l.holds_pct, yours: l.user_verdict !== null }))
+    .map((l) => ({
+      solution: byId.get(l.solution_id)!,
+      verdict: effectiveVerdict(l),
+      autoVerdict: l.auto_verdict,
+      userVerdict: l.user_verdict,
+      holdsPct: l.holds_pct,
+      yours: l.user_verdict !== null,
+    }))
     .sort((a, b) => byId.get(b.solution.id)!.created_at.localeCompare(byId.get(a.solution.id)!.created_at) || a.solution.id.localeCompare(b.solution.id));
 }
 
@@ -41,16 +54,18 @@ export function linkedSolutions(data: Pick<SolutionsData, "solutions" | "links">
  * - Solution idea: an AI idea is waiting for it, or a solution is linked that has no verdict yet.
  * - Being built: a solution has been tested against it (a verdict, or the issue is in Testing solutions).
  * - Implemented: the issue is resolved by a solution or a change to the process.
- * - Verified: implemented, and a linked solution passed its check.
+ * - Verified: resolved by a solution, and that solution (the one picked when it was resolved, not another linked one)
+ *   passed its check (a person's Pass counts; where it overrides a simulation Fail the page shows both).
  * Won't fix, and resolved as not a problem, leave the track.
  */
-export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how">, solutions: readonly LinkedSolution[], hasIdea = false): IssueTrack {
-  const base = { solutions: [...solutions], verified: null };
+export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how" | "resolved_solution_id">, solutions: readonly LinkedSolution[], hasIdea = false): IssueTrack {
+  const base = { solutions: [...solutions], implementing: null, verified: null };
   if (issue.status === "wont_fix") return { ...base, stage: null, closed: "wont_fix" };
   if (issue.status === "resolved") {
     if (issue.resolved_how === "not_a_problem") return { ...base, stage: null, closed: "not_a_problem" };
-    const passed = solutions.find((s) => s.verdict === "pass") ?? null;
-    return passed ? { ...base, stage: 4, closed: null, verified: passed } : { ...base, stage: 3, closed: null };
+    const implementing = issue.resolved_how === "solution" && issue.resolved_solution_id ? (solutions.find((s) => s.solution.id === issue.resolved_solution_id) ?? null) : null;
+    const resolved = { ...base, implementing, closed: null };
+    return implementing?.verdict === "pass" ? { ...resolved, stage: 4, verified: implementing } : { ...resolved, stage: 3 };
   }
   if (issue.status === "testing" || solutions.some((s) => s.verdict !== null)) return { ...base, stage: 2, closed: null };
   if (solutions.length > 0 || hasIdea) return { ...base, stage: 1, closed: null };

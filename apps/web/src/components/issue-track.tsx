@@ -9,7 +9,7 @@ import { TRACK_STAGES, type IssueTrack } from "@/lib/process-page/track";
 import { solutionHref } from "@/lib/solutions/cards";
 
 export function IssueTrackView({ track, base, buildHref }: { track: IssueTrack; base: string; /** Where "Build solution" opens the Editor, for those who can edit an issue still open. */ buildHref?: string | null }) {
-  const { stage, closed, solutions, verified } = track;
+  const { stage, closed, solutions, verified, implementing } = track;
   return (
     <div className="mt-2 flex flex-col gap-1.5 border-t border-line pt-2" data-track={stage ?? closed}>
       {stage === null ? (
@@ -34,8 +34,19 @@ export function IssueTrackView({ track, base, buildHref }: { track: IssueTrack; 
       {verified && (
         <p className="text-xs" data-verified>
           <span className="font-semibold">Before and after:</span> <VerdictWord verdict={verified.verdict} />
-          {verified.holdsPct !== null && <span className="text-fg-2"> · holds in {Math.round(verified.holdsPct)}% of runs</span>}
           {verified.yours && <span className="text-fg-3"> (your verdict)</span>}
+          {verified.holdsPct !== null && (
+            <span className="text-fg-2">
+              {" "}
+              · {verified.yours && verified.autoVerdict === "fail" ? "simulation: " : ""}holds in {Math.round(verified.holdsPct)}% of runs
+            </span>
+          )}
+        </p>
+      )}
+      {stage === 3 && implementing && (
+        <p className="text-xs text-fg-2" data-check>
+          Check of {implementing.solution.name}: <VerdictWord verdict={implementing.verdict} className="text-xs" />
+          {implementing.holdsPct !== null && ` · holds in ${Math.round(implementing.holdsPct)}% of runs`}
         </p>
       )}
       {solutions.length > 0 && (

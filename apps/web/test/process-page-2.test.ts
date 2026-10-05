@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { simulate, type EngineModel, type EngineStep } from "@transpera-flow/engine";
-import type { IssueRow, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import type { IssueRow, SolutionIssueRow, SolutionRow, StepRow } from "@transpera-flow/db";
 import { AboutProcess } from "@/components/about-process";
 import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
@@ -46,7 +46,7 @@ const link = (solution_id: string, issue_id: string, extra: Partial<SolutionIssu
   created_by: null,
   ...extra,
 });
-const issue = (status: IssueRow["status"], resolved_how: IssueRow["resolved_how"] = null) => ({ status, resolved_how });
+const issue = (status: IssueRow["status"], resolved_how: IssueRow["resolved_how"] = null, resolved_solution_id: string | null = null) => ({ status, resolved_how, resolved_solution_id });
 
 describe("the issue status track", () => {
   it("has the five stages in order", () => {
@@ -65,14 +65,34 @@ describe("the issue status track", () => {
     expect(trackOf(issue("open"), linkedSolutions(data, "i")).stage).toBe(2);
     expect(trackOf(issue("testing"), []).stage).toBe(2);
   });
-  it("a resolved issue is Implemented, and Verified once a linked solution passed (the person's verdict wins)", () => {
+  it("a resolved issue is Implemented, and Verified once the solution it was resolved by passed", () => {
     expect(trackOf(issue("resolved", "process_change"), []).stage).toBe(3);
     const failed = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", user_verdict: "fail" })] };
-    expect(trackOf(issue("resolved", "solution"), linkedSolutions(failed, "i")).stage).toBe(3);
+    expect(trackOf(issue("resolved", "solution", "a"), linkedSolutions(failed, "i")).stage).toBe(3);
     const passed = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", holds_pct: 92 })] };
-    const t = trackOf(issue("resolved", "solution"), linkedSolutions(passed, "i"));
+    const t = trackOf(issue("resolved", "solution", "a"), linkedSolutions(passed, "i"));
     expect(t.stage).toBe(4);
     expect(t.verified?.holdsPct).toBe(92);
+  });
+  it("a pass by a solution that did not fix the issue does not verify it", () => {
+    const data = { solutions: [sol("a"), sol("bb")], links: [link("a", "i", { auto_verdict: "fail" }), link("bb", "i", { auto_verdict: "pass" })] };
+    const t = trackOf(issue("resolved", "solution", "a"), linkedSolutions(data, "i"));
+    expect(t.stage).toBe(3);
+    expect(t.verified).toBeNull();
+    // Resolved by a solution with none picked, or by a change to the process: nothing to verify against.
+    expect(trackOf(issue("resolved", "solution", null), linkedSolutions(data, "i")).stage).toBe(3);
+    expect(trackOf(issue("resolved", "process_change", "bb"), linkedSolutions(data, "i")).stage).toBe(3);
+  });
+  it("a person's Pass over a simulation Fail verifies, and shows both", () => {
+    const data = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "fail", holds_pct: 20, user_verdict: "pass" })] };
+    const t = trackOf(issue("resolved", "solution", "a"), linkedSolutions(data, "i"));
+    expect(t.stage).toBe(4);
+    expect(t.verified?.solution.id).toBe("a");
+    const html = renderToStaticMarkup(createElement(IssueTrackView, { track: t, base: "/demo" }));
+    expect(html).toMatch(/Pass.*\(your verdict\).*simulation: holds in 20% of runs/);
+    // A person's Pass where the simulation could not check it, or agreed, is a plain verified pass.
+    const unchecked = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: null, user_verdict: "pass" })] };
+    expect(trackOf(issue("resolved", "solution", "a"), linkedSolutions(unchecked, "i")).stage).toBe(4);
   });
   it("won't fix and not a problem leave the track", () => {
     expect(trackOf(issue("wont_fix"), [])).toMatchObject({ stage: null, closed: "wont_fix" });
@@ -86,7 +106,7 @@ describe("the issue status track", () => {
 
   it("renders the track with the current stage marked, the verdict and a build link", () => {
     const data = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", holds_pct: 90 })] };
-    const done = renderToStaticMarkup(createElement(IssueTrackView, { track: trackOf(issue("resolved", "solution"), linkedSolutions(data, "i")), base: "/demo" }));
+    const done = renderToStaticMarkup(createElement(IssueTrackView, { track: trackOf(issue("resolved", "solution", "a"), linkedSolutions(data, "i")), base: "/demo" }));
     for (const label of TRACK_STAGES) expect(done).toContain(label);
     expect(done).toContain('data-state="here"');
     expect(done).toContain("Before and after");
@@ -116,32 +136,44 @@ describe("About this process", () => {
   it("reads as plain attributes", () => {
     expect(aboutLine(about)).toEqual([
       { label: "Type", value: "Pipeline" },
-      { label: "Owner", value: "Maya Collins" },
+      { label: "Requirements owner", value: "Maya Collins" },
       { label: "Size", value: "6 steps, 3 roles" },
       { label: "On the company map", value: "Inside Sales" },
       { label: "Version", value: "Live is version 4, draft open" },
-      { label: "Sources", value: "2 sources, 75% of numbers cited" },
-      { label: "Last changed", value: "29 Sep 2026 by Maya Collins" },
+      { label: "Sources", value: "2 sources, 3 of 4 step numbers cited" },
+      { label: "Last published", value: "29 Sep 2026 by Maya Collins" },
     ]);
   });
   it("says so when things are missing", () => {
     const rows = aboutLine({ ...about, owner: null, trail: [], version: null, draft: false, sources: 0, cited: null, lastChange: null, steps: 1, roles: 1 });
-    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "Not named yet", "1 step, 1 role", "Top level", "Not published yet", "None linked", "No changes recorded"]);
+    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "Not named yet", "1 step, 1 role", "Top level", "Not published yet", "None linked", "Not published yet"]);
     expect(aboutLine({ ...about, sources: null }).some((r) => r.label === "Sources")).toBe(false);
+    expect(aboutLine({ ...about, lastChange: null }).at(-1)).toEqual({ label: "Last published", value: "Not recorded" });
   });
-  it("counts numbers cited by evidence or measured, out of those with a recorded origin", () => {
-    expect(citedNumbers([undefined, {}])).toBeNull();
-    expect(
-      citedNumbers([
-        { work_hours: { source: "entered", evidence: [{ source_id: "s", quote: "q" } as never] }, wait_hours: { source: "estimated" } },
-        { work_hours: { source: "measured" }, rework: { source: "entered", evidence: [] } },
-      ]),
-    ).toEqual({ cited: 2, of: 4 });
+  it("counts cited step numbers out of all of them, whether or not an origin is recorded", () => {
+    const st = (id: string, provenance: StepRow["provenance"] = {}, kind: StepRow["kind"] = "task") => ({ id, kind, child_process_id: null, provenance });
+    expect(citedNumbers([], [])).toBeNull();
+    // Ten steps carry thirty numbers; one has a cited source: 1 of 30.
+    const ten = Array.from({ length: 10 }, (_, i) => st(`s${i}`, i === 0 ? { work_hours: { source: "entered", evidence: [{ source_id: "s", quote: "q" } as never] } } : {}));
+    expect(citedNumbers(ten, [])).toEqual({ cited: 1, of: 30 });
+    // Measured data counts; an estimate or an empty list of evidence does not; start and end steps carry no numbers.
+    const mixed = [
+      st("a", { work_hours: { source: "measured" }, wait_hours: { source: "estimated" }, rework_rate: { source: "entered", evidence: [] } }),
+      st("start", {}, "start"),
+      st("end", {}, "end"),
+    ];
+    expect(citedNumbers(mixed, [])).toEqual({ cited: 1, of: 3 });
+    // A step with two ways out also counts its branch odds.
+    const split = [st("a", { branch_odds: { source: "measured" } })];
+    expect(citedNumbers(split, [{ from_step_id: "a" }, { from_step_id: "a" }])).toEqual({ cited: 1, of: 4 });
+    expect(citedNumbers(split, [{ from_step_id: "a" }])).toEqual({ cited: 0, of: 3 });
   });
-  it("names the owner most requirements name", () => {
+  it("names the owner most requirements name, both when two tie, and shared when more", () => {
     const req = (id: string | null, text = "") => ({ text: "", owner_person_id: id, owner_text: text, why: "", verdict: "keep" as const, step_id: null });
-    const doc = { requirements: [req("a"), req(null, "Finance"), req("a")] } as never;
-    expect(ownerOf(doc, (id) => (id === "a" ? "Rosa Diaz" : null))).toBe("Rosa Diaz");
+    const who = (id: string) => ({ a: "Rosa Diaz", b: "Maya Collins", c: "Priya Shah" })[id] ?? null;
+    expect(ownerOf({ requirements: [req("a"), req(null, "Finance"), req("a")] } as never, who)).toBe("Rosa Diaz");
+    expect(ownerOf({ requirements: [req("a"), req("b")] } as never, who)).toBe("Maya Collins and Rosa Diaz");
+    expect(ownerOf({ requirements: [req("a"), req("b"), req("c")] } as never, who)).toBe("Shared");
     expect(ownerOf(null, () => null)).toBeNull();
   });
   it("renders in a labelled section with no (i)", () => {
@@ -201,6 +233,8 @@ describe("the supporting data", () => {
     const r = simulate(one, 3, 1);
     const rows = keyPersonRows(one, r, ids);
     expect(rows.map((x) => x.id)).toEqual(["draft"]);
+    // No named people here, so the name is the engine's own ("Solo 1"), flagged as a placeholder.
+    expect(rows[0]!.placeholder).toBe(true);
     expect(rows[0]!.person).toBeTruthy();
     expect(keyPersonRows(model, simulate(model, 3, 1), ids)).toEqual([]);
   });
@@ -231,7 +265,7 @@ describe("the supporting data panels", () => {
     createElement("div", null, [
       createElement(TimeSplit, { key: 1, rows: timeSplitRows(model, result, ids), result }),
       createElement(CycleSpreadPanel, { key: 2, spread: cycleSpread(result), hoursPerWeek: 40, result }),
-      createElement(KeyPersonPanel, { key: 3, rows: [{ id: "draft", step: "Draft", person: "Pat" }, { id: "x", step: "Send", person: null }], result }),
+      createElement(KeyPersonPanel, { key: 3, rows: [{ id: "draft", step: "Draft", person: "Pat", placeholder: false }, { id: "x", step: "Send", person: null, placeholder: false }, { id: "y", step: "Check", person: "Reviewer 1", placeholder: true }], result }),
       createElement(ReworkLoopsPanel, { key: 4, rows, result, hoursPerWeek: 40, base: "/demo" }),
     ]),
   );
@@ -241,8 +275,18 @@ describe("the supporting data panels", () => {
     expect(html).toContain("Typical (median)");
     expect(html).toContain("Pat");
     expect(html).toContain("Nobody can do it");
+    expect(html).toContain("Reviewer 1");
+    expect(html).toContain("placeholder, no named person");
+    expect(html).toContain("Waiting on others (hatched)");
     expect(html).toContain("REVIEW sends work back to DRAFT");
     expect(html).toContain("Redo at REVIEW");
+  });
+  it("words a loop that never happens and a cycle with a zero median plainly", () => {
+    const never = { ...rows[0]!, share: { mean: 0, p10: 0, p90: 0 } };
+    expect(renderToStaticMarkup(createElement(ReworkLoopsPanel, { rows: [never], result, hoursPerWeek: 40, base: "/demo" }))).toContain("Never in this run");
+    const zero = renderToStaticMarkup(createElement(CycleSpreadPanel, { spread: { p50: 0, p90: 20, ratio: 0 }, hoursPerWeek: 40, result }));
+    expect(zero).toContain("Most items finish straight away");
+    expect(zero).not.toContain("about as long");
   });
   it("says what is missing instead of an empty chart", () => {
     const empty = renderToStaticMarkup(createElement(ReworkLoopsPanel, { rows: [], result, hoursPerWeek: 40, base: "/demo" }));
