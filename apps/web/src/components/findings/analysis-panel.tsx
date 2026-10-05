@@ -2,18 +2,20 @@
 
 // The analysis panel (issue #175, B17; decision D40) at the top of a page's findings: "Analyse", what AI last wrote (its
 // read), whether that is out of date, what it cost and which model wrote it, the AI findings waiting for review (Accept,
-// Edit, Dismiss), and "Add a finding" for a finding by hand. AI runs only when someone presses Analyse, and a stored
-// analysis is shown until the model changes, then marked out of date. Viewers see the read; the review list and the
-// buttons are for owners and editors.
+// Edit, Dismiss; the facts each one cites open under it first), and "Add a finding" for a finding by hand. AI runs only
+// when someone presses Analyse, and a stored analysis is shown until what it read changes (the model, its facts, first
+// principles, sources or the Anthropic model), then marked out of date. "Analyse again" runs it even when nothing changed
+// (it still counts against the day's runs). Viewers see the read; the review list and the buttons are for owners and editors.
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Sparkles } from "lucide-react";
+import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import { readCitations, type FindingDraft, type FindingRow } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { formatCost } from "@/lib/ai/cost";
+import { factsChanged } from "@/lib/ai/facts-digest";
 import { AI_NOT_SET_UP, type AiMode, type AiPanelData } from "@/lib/ai/types";
 import type { AiRunReply } from "@/lib/ai/reply";
 import type { FindingsState } from "@/lib/findings/use-findings";
@@ -38,6 +40,7 @@ export function AnalysisPanel({
   canRun = true,
   firstPrinciplesHref,
   short = false,
+  facts = null,
 }: {
   mode: AiMode;
   scope: "company" | "process";
@@ -49,8 +52,10 @@ export function AnalysisPanel({
   /** Where a finding added here sits by default: this process, or null across the company. */
   defaultProcessId: string | null;
   stepName: (id: string) => string | null;
-  /** Run the analysis (a Server Action, or the demo's stand-in). */
-  analyse: () => Promise<AiRunReply>;
+  /** Run the analysis (a Server Action, or the demo's stand-in); `force` runs it even when nothing it reads has changed. */
+  analyse: (force: boolean) => Promise<AiRunReply>;
+  /** The page's facts (null until its run is in): an analysis whose facts differ is out of date. */
+  facts?: readonly { key: string; rating: string; type: string }[] | null;
   /** False on an earlier version or a draft, where nothing can be run. */
   canRun?: boolean;
   firstPrinciplesHref?: string;
@@ -62,7 +67,9 @@ export function AnalysisPanel({
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [whole, setWhole] = useState(false);
   const [dialog, setDialog] = useState<{ mode: "add" } | { mode: "review"; finding: FindingRow } | null>(null);
-  const { view, configured, hasFirstPrinciples, stale } = ai;
+  const { view, configured, hasFirstPrinciples } = ai;
+  const stale = useMemo(() => Boolean(view && (ai.stale || factsChanged(view.modelHash, facts))), [view, ai.stale, facts]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const demo = mode === "demo";
   const canEdit = mode !== "readonly" && findings.canEdit;
   const runnable = canRun && canEdit && (demo || (configured && hasFirstPrinciples));
@@ -72,7 +79,8 @@ export function AnalysisPanel({
     setMessage(null);
     start(async () => {
       try {
-        const out = await analyse();
+        // "Analyse again" forces a run: the person asked for one, whatever the cache says.
+        const out = await analyse(Boolean(view));
         setMessage({ kind: out.status, text: out.message });
         if (out.status === "ok" && !demo) router.refresh();
       } catch {
@@ -139,13 +147,24 @@ export function AnalysisPanel({
             </Button>
           )}
           {canEdit && canRun && (
-            <Button variant="outline" size="sm" disabled={!runnable || pending} onClick={run} title={!runnable ? (!configured ? AI_NOT_SET_UP : "Write first principles first") : undefined} data-analyse>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!runnable || pending}
+              onClick={run}
+              title={!runnable ? (!configured ? AI_NOT_SET_UP : "Write first principles first") : view ? "Runs AI again even if nothing has changed. It counts towards the day's AI runs." : undefined}
+              data-analyse
+            >
               {pending ? "Analysing…" : view ? "Analyse again" : "Analyse"}
             </Button>
           )}
         </span>
       </div>
-      {stale && <p className="text-xs text-muted-foreground">The {scope === "company" ? "company model" : "process"} has changed since this was written. Analyse again to bring it up to date.</p>}
+      {stale && (
+        <p className="text-xs text-muted-foreground">
+          What this read has changed since it was written (the {scope === "company" ? "company model" : "process"}, the facts from its run, its first principles or sources). Analyse again to bring it up to date.
+        </p>
+      )}
       {body}
       {view && (
         <p className="text-xs text-muted-foreground" data-analysis-footer>
@@ -170,29 +189,54 @@ export function AnalysisPanel({
             </p>
             <ul className="flex flex-col gap-2">
               {review.map((f) => {
-                const facts = readCitations(f.facts);
+                const cited = readCitations(f.facts);
                 const step = f.step_id ? stepName(f.step_id) : null;
+                const shown = open[f.id] ?? false;
                 return (
-                  <li key={f.id} data-proposed={f.id} className="flex flex-col gap-1.5 rounded-lg border bg-background/60 p-3 sm:flex-row sm:items-start sm:justify-between">
+                  <li key={f.id} data-proposed={f.id} className="flex min-w-0 flex-col gap-2 rounded-lg border bg-background/60 p-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex min-w-0 flex-col gap-1">
-                      <b className="text-sm font-semibold">{f.title}</b>
+                      <b className="text-sm font-semibold break-words">{f.title}</b>
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                         <RatingPill rating={f.rating} />
-                        {step && <span>{step}</span>}
-                        <span>
-                          Rests on {facts.length} fact{facts.length === 1 ? "" : "s"}
-                        </span>
+                        {step && <span className="break-words">{step}</span>}
                       </span>
-                      {f.evidence && <p className="text-xs text-muted-foreground">{f.evidence}</p>}
+                      {f.evidence && <p className="text-xs break-words text-muted-foreground">{f.evidence}</p>}
+                      {cited.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 self-start text-xs font-medium text-foreground hover:underline"
+                            aria-expanded={shown}
+                            aria-controls={`cited-${f.id}`}
+                            onClick={() => setOpen((o) => ({ ...o, [f.id]: !shown }))}
+                            data-cited-toggle
+                          >
+                            <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", shown && "rotate-90")} />
+                            Rests on {cited.length} {cited.length === 1 ? (cited[0]!.kind === "quote" ? "quote" : "fact") : "facts and quotes"}
+                          </button>
+                          {shown && (
+                            <ul id={`cited-${f.id}`} className="flex flex-col gap-1 border-l-2 pl-3 text-xs text-muted-foreground" data-cited>
+                              {cited.map((c, i) => (
+                                <li key={`${c.key}-${i}`} className="break-words">
+                                  <span className="font-medium text-foreground">{c.kind === "quote" ? "Quote: " : "Fact: "}</span>
+                                  {c.kind === "quote" ? `"${c.text}"` : c.text}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Cites no facts</span>
+                      )}
                     </div>
-                    <span className="flex shrink-0 gap-1">
-                      <Button size="sm" disabled={findings.busy} onClick={() => void findings.accept(f.id)}>
+                    <span className="flex shrink-0 flex-wrap gap-1">
+                      <Button size="sm" disabled={findings.busy} onClick={() => void findings.accept(f.id)} aria-label={`Accept: ${f.title}`}>
                         Accept
                       </Button>
-                      <Button size="sm" variant="outline" disabled={findings.busy} onClick={() => setDialog({ mode: "review", finding: f })}>
+                      <Button size="sm" variant="outline" disabled={findings.busy} onClick={() => setDialog({ mode: "review", finding: f })} aria-label={`Edit: ${f.title}`}>
                         Edit
                       </Button>
-                      <Button size="sm" variant="ghost" disabled={findings.busy} onClick={() => void findings.dismiss(f.id)}>
+                      <Button size="sm" variant="ghost" disabled={findings.busy} onClick={() => void findings.dismiss(f.id)} aria-label={`Dismiss: ${f.title}`}>
                         Dismiss
                       </Button>
                     </span>

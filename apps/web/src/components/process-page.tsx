@@ -389,7 +389,8 @@ export function ProcessPage({
                 options={scope.options}
                 defaultProcessId={bundle.process.id}
                 stepName={(id) => stepNameOf.get(id) ?? null}
-                analyse={() => (mode === "demo" ? demoAnalyse(findingsState, bundle.process.id) : analyseProcess(bundle.process.id))}
+                analyse={(force) => (mode === "demo" ? demoAnalyse(findingsState, bundle.process.id) : analyseProcess(bundle.process.id, force))}
+                facts={issuesUi.facts}
                 canRun={!old && !unpublished}
                 firstPrinciplesHref={firstPrinciples?.href}
               />

@@ -554,7 +554,8 @@ export function Overview({
               options={findingOptions}
               defaultProcessId={null}
               stepName={(id) => stepNames.get(id) ?? null}
-              analyse={() => (mode === "demo" ? demoAnalyse(findingsState, live.process.id) : analyseCompany(live.workspace.id))}
+              analyse={(force) => (mode === "demo" ? demoAnalyse(findingsState, live.process.id) : analyseCompany(live.workspace.id, force))}
+              facts={facts}
               canRun={viewingMapVersion === null}
               firstPrinciplesHref={hrefs[live.process.id] ? `${hrefs[live.process.id]}/first-principles` : undefined}
               short

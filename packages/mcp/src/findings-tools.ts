@@ -2,12 +2,14 @@
 // (AI's, proposed until someone accepts them, and those added by hand), the latest AI analysis, the sources and the
 // solutions. With get_process (the model), run_scenario (runs), list_issues (issues) and get_first_principles, Claude
 // outside the app can make the same assessment the app's "Analyse" makes. Every tool reads as the token's user: RLS
-// decides what is visible (docs/adr/0002-mcp-acts-as-user-via-pre-request.md). Read-only.
+// decides what is visible (docs/adr/0002-mcp-acts-as-user-via-pre-request.md). Read-only. Every list is bounded: facts are
+// the worst first up to a limit with their sentences trimmed, findings and sources come a page at a time with the total,
+// and solutions leave out their copied maps.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { findingKey, listProcesses, loadFirstPrinciples, loadIssues, readCitations, type FindingRow } from "@transpera-flow/db";
-import { absenceTest, detectIssues, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig } from "@transpera-flow/engine";
+import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig } from "@transpera-flow/engine";
 import { loadLiveModel, processSteps } from "./analysis-tools";
 import { resolveProcess, resolveWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
@@ -20,6 +22,30 @@ const SEED = 1;
 const ABSENCE_BUDGET_MS = 5000;
 const SHADOW_BUDGET_MS = 5000;
 const MAX_SOURCE_TEXT = 4000;
+/** How much one call returns: facts listed, a fact's sentences, and a page of findings or sources. */
+const MAX_FACTS = 100;
+const DEFAULT_FACTS = 40;
+const MAX_FACT_TEXT = 600;
+const MAX_PAGE = 200;
+const DEFAULT_PAGE = 50;
+
+const trim = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+const pageArgs = {
+  limit: z.number().int().min(1).max(MAX_PAGE).optional().describe(`How many to return (default ${DEFAULT_PAGE}, at most ${MAX_PAGE}).`),
+  offset: z.number().int().min(0).optional().describe("How many to skip, for the next page (default 0; use next_offset from the last call)."),
+};
+/** The page asked for, and what to say about it. */
+function pageOf(args: { limit?: number; offset?: number }) {
+  const limit = args.limit ?? DEFAULT_PAGE;
+  const offset = args.offset ?? 0;
+  return { limit, offset, range: [offset, offset + limit - 1] as const };
+}
+const paged = (total: number, page: { limit: number; offset: number }, shown: number) => ({
+  total,
+  offset: page.offset,
+  limit: page.limit,
+  next_offset: page.offset + shown < total ? page.offset + shown : null,
+});
 
 const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
@@ -38,8 +64,12 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         "What the simulation measures for a process's live version, as the app shows it under \"Facts from the run\": how busy each role and person is, " +
         "queues and waits, rework, missed deadlines, key-person risk (the absence test), client health and churn drivers, and whether the success measures " +
         "are met. Facts are evidence, not findings. Each has a key (what a finding cites), a rating, its evidence sentence and a cost per month where it has one. " +
-        "Rated with the app's documented default cut-offs.",
-      inputSchema: { process: processArg, workspace: workspaceArg },
+        `Rated with the app's documented default cut-offs. Worst first; up to ${DEFAULT_FACTS} by default (count says how many there are), sentences trimmed to ${MAX_FACT_TEXT} characters.`,
+      inputSchema: {
+        process: processArg,
+        workspace: workspaceArg,
+        limit: z.number().int().min(1).max(MAX_FACTS).optional().describe(`How many facts to return, worst first (default ${DEFAULT_FACTS}, at most ${MAX_FACTS}).`),
+      },
       annotations: { readOnlyHint: true },
     },
     (args) =>
@@ -61,20 +91,25 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const roleIds = [...new Set(rate().flatMap((d) => (d.key.startsWith("capacity:") && d.roleId ? [d.roleId] : [])))];
         const shadowPrices = roleIds.length ? shadowPricesFor(loaded.model, roleIds, { reps: REPS, seed: SEED, timeBudgetMs: SHADOW_BUDGET_MS }) : undefined;
         const steps = new Map(loaded.bundle.steps.concat((loaded.bundle.otherProcesses ?? []).flatMap((o) => o.steps)).map((s) => [s.id, s.name]));
-        const facts = rate(shadowPrices).map((d) => ({
+        // Worst rating first, then dearest, so a limit keeps what matters.
+        const all = rate(shadowPrices).sort((a, b) => RATINGS.indexOf(b.rating) - RATINGS.indexOf(a.rating) || compareCostsDesc(a.cost, b.cost));
+        const limit = args.limit ?? DEFAULT_FACTS;
+        const facts = all.slice(0, limit).map((d) => ({
           key: d.key,
           type: d.type,
           rating: d.rating,
           title: d.title,
-          evidence: d.evidence,
+          evidence: trim(d.evidence, MAX_FACT_TEXT),
           step: d.stepId ? { id: d.stepId, name: steps.get(d.stepId) ?? null } : null,
-          cost: { ...d.cost, currency, estimate: true },
+          cost: { per_month: d.cost.perMonth, hours_per_month: d.cost.hoursPerMonth, how: trim(d.cost.method, 300), currency, estimate: true },
         }));
+        if (all.length > facts.length) assumptions.push(`Showing the worst ${facts.length} of ${all.length} facts; pass a larger limit for more.`);
         return {
           workspace: { id: ws.id, name: ws.name },
           process: { id: proc.id, name: proc.name },
           revision: { id: loaded.bundle.revision.id, number: loaded.bundle.revision.number },
-          count: facts.length,
+          count: all.length,
+          shown: facts.length,
           facts,
         };
       }),
@@ -87,11 +122,13 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
       description:
         "The workspace's findings: what AI or a person concluded from the facts. AI findings are \"proposed\" until someone accepts or dismisses them in the app; " +
         "findings added by hand are \"accepted\". Each has a rating, where it sits (a process, or across the company), a step, its evidence, why it matters, " +
-        "the facts and quotes it rests on, and the issue it became if someone acknowledged it. Default: proposed and accepted.",
+        "the facts and quotes it rests on, and the issue it became if someone acknowledged it. Default: proposed and accepted. " +
+        `Oldest first, a page at a time (${DEFAULT_PAGE} by default): total and next_offset say when there are more.`,
       inputSchema: {
         status: z.array(z.enum(["proposed", "accepted", "dismissed", "superseded"])).optional().describe("Which statuses to list (default proposed and accepted)."),
         process: z.string().optional().describe("Only findings in this process (id or name)."),
         workspace: workspaceArg,
+        ...pageArgs,
       },
       annotations: { readOnlyHint: true },
     },
@@ -101,9 +138,15 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const proc = args.process ? await resolveProcess(ctx, ws, args.process, assumptions) : null;
         const statuses = args.status?.length ? args.status : ["proposed", "accepted"];
         if (!args.status) assumptions.push("status defaulted to proposed and accepted.");
-        let q = ctx.db.from("findings").select("*").eq("workspace_id", ws.id).in("status", statuses).order("created_at", { ascending: true });
+        const page = pageOf(args);
+        let q = ctx.db
+          .from("findings")
+          .select("id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, source_ids, edited, created_at, decided_at", { count: "exact" })
+          .eq("workspace_id", ws.id)
+          .in("status", statuses);
         if (proc) q = q.eq("process_id", proc.id);
-        const rows = check(await q) as unknown as FindingRow[];
+        const res = await q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(...page.range);
+        const rows = check(res) as unknown as Pick<FindingRow, "id" | "process_id" | "step_id" | "origin" | "status" | "rating" | "type" | "title" | "evidence" | "why" | "facts" | "source_ids" | "edited" | "created_at" | "decided_at">[];
         const [processes, issues] = await Promise.all([listProcesses(ctx.db, ws.id), loadIssues(ctx.db, ws.id)]);
         const stepNames = new Map<string, string>();
         for (const p of processes.filter((p) => rows.some((r) => r.process_id === p.id))) for (const s of await processSteps(ctx, p)) stepNames.set(s.id, s.name);
@@ -113,6 +156,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
           return {
             id: f.id,
             origin: f.origin === "ai" ? "ai" : "by_hand",
+            ...(f.origin === "ai" ? { edited_by_a_person: f.edited } : {}),
             status: f.status,
             rating: f.rating,
             type: f.type,
@@ -122,14 +166,14 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
             process: f.process_id ? { id: f.process_id, name: processes.find((p) => p.id === f.process_id)?.name ?? null } : null,
             across_the_company: f.process_id === null,
             step: f.step_id ? { id: f.step_id, name: stepNames.get(f.step_id) ?? null } : null,
-            rests_on: readCitations(f.facts),
+            rests_on: readCitations(f.facts).map((c) => ({ ...c, text: trim(c.text, MAX_FACT_TEXT) })),
             source_ids: f.source_ids,
             issue: issue ? { id: issue.id, number: issue.number, status: issue.status } : null,
             created_at: f.created_at,
             decided_at: f.decided_at,
           };
         });
-        return { workspace: { id: ws.id, name: ws.name }, count: findings.length, findings };
+        return { workspace: { id: ws.id, name: ws.name }, count: findings.length, ...paged(res.count ?? findings.length, page, findings.length), findings };
       }),
   );
 
@@ -191,26 +235,31 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
       title: "List sources",
       description:
         "The workspace's sources (interview transcripts, notes, SOPs, data) and what each is linked to (a process, a step, an issue, a solution). " +
-        `Each source's text is included up to ${MAX_SOURCE_TEXT} characters (text_truncated says when there is more). Filter by process.`,
-      inputSchema: { process: z.string().optional().describe("Only sources linked to this process or its steps (id or name)."), workspace: workspaceArg },
+        `Each source's text is included up to ${MAX_SOURCE_TEXT} characters (text_truncated says when there is more). Filter by process. ` +
+        `Oldest first, a page at a time (${DEFAULT_PAGE} by default): total and next_offset say when there are more.`,
+      inputSchema: { process: z.string().optional().describe("Only sources linked to this process or its steps (id or name)."), workspace: workspaceArg, ...pageArgs },
       annotations: { readOnlyHint: true },
     },
     (args) =>
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = args.process ? await resolveProcess(ctx, ws, args.process, assumptions) : null;
-        const [sources, links] = await Promise.all([
-          ctx.db.from("sources").select("id, kind, title, speakers, recorded_at, body, created_at").eq("workspace_id", ws.id).order("created_at", { ascending: true }),
-          ctx.db.from("source_links").select("source_id, kind, process_id, step_id, issue_id, solution_id, insight_key").eq("workspace_id", ws.id),
-        ]);
-        const linkRows = check(links);
-        let wanted: Set<string> | null = null;
+        const page = pageOf(args);
+        // With a process, the sources linked to it or its steps (its links first, so the page is of those sources only).
+        let wanted: string[] | null = null;
         if (proc) {
-          const stepIds = new Set((await processSteps(ctx, proc)).map((s) => s.id));
-          wanted = new Set(linkRows.filter((l) => l.process_id === proc.id || (l.step_id && stepIds.has(l.step_id))).map((l) => l.source_id));
+          const stepIds = (await processSteps(ctx, proc)).map((s) => s.id);
+          const onProcess = check(await ctx.db.from("source_links").select("source_id").eq("workspace_id", ws.id).eq("process_id", proc.id));
+          const onSteps = stepIds.length ? check(await ctx.db.from("source_links").select("source_id").eq("workspace_id", ws.id).in("step_id", stepIds)) : [];
+          wanted = [...new Set([...onProcess, ...onSteps].map((l) => l.source_id))];
         }
-        const out = check(sources)
-          .filter((s) => !wanted || wanted.has(s.id))
+        if (wanted && !wanted.length) return { workspace: { id: ws.id, name: ws.name }, count: 0, ...paged(0, page, 0), sources: [] };
+        let q = ctx.db.from("sources").select("id, kind, title, speakers, recorded_at, body, created_at", { count: "exact" }).eq("workspace_id", ws.id);
+        if (wanted) q = q.in("id", wanted);
+        const res = await q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(...page.range);
+        const rows = check(res);
+        const linkRows = rows.length ? check(await ctx.db.from("source_links").select("source_id, kind, process_id, step_id, issue_id, solution_id, insight_key").in("source_id", rows.map((s) => s.id))) : [];
+        const out = rows
           .map((s) => ({
             id: s.id,
             kind: s.kind,
@@ -221,7 +270,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
             text_truncated: (s.body ?? "").length > MAX_SOURCE_TEXT,
             links: linkRows.filter((l) => l.source_id === s.id).map(({ source_id, ...l }) => (void source_id, l)),
           }));
-        return { workspace: { id: ws.id, name: ws.name }, count: out.length, sources: out };
+        return { workspace: { id: ws.id, name: ws.name }, count: out.length, ...paged(res.count ?? out.length, page, out.length), sources: out };
       }),
   );
 
@@ -231,7 +280,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
       title: "List solutions",
       description:
         "The workspace's solutions: changed copies of a process tested against its issues, each with the issues it is for, the automatic verdict and the " +
-        "team's own verdict per issue. Filter by process.",
+        "team's own verdict per issue, and which steps it changed (get_process reads a process's steps). Filter by process.",
       inputSchema: { process: z.string().optional().describe("Only solutions of this process (id or name)."), workspace: workspaceArg },
       annotations: { readOnlyHint: true },
     },
@@ -239,15 +288,16 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = args.process ? await resolveProcess(ctx, ws, args.process, assumptions) : null;
-        let q = ctx.db.from("solutions").select("*").eq("workspace_id", ws.id).order("created_at", { ascending: true });
+        // Not the copied map (`steps`): it can be large, and the changed step ids say what the solution changed.
+        let q = ctx.db.from("solutions").select("id, process_id, base_revision_id, name, notes, changed_step_ids, lever_changes, created_at, updated_at").eq("workspace_id", ws.id).order("created_at", { ascending: true });
         if (proc) q = q.eq("process_id", proc.id);
-        const solutions = check(await q) as unknown as { id: string; process_id: string; name: string }[];
+        const solutions = check(await q);
         const ids = solutions.map((s) => s.id);
-        const links = ids.length ? (check(await ctx.db.from("solution_issues").select("*").in("solution_id", ids)) as unknown as { solution_id: string }[]) : [];
+        const links = ids.length ? check(await ctx.db.from("solution_issues").select("solution_id, issue_id, auto_verdict, holds_pct, auto_note, user_verdict, user_notes").in("solution_id", ids)) : [];
         return {
           workspace: { id: ws.id, name: ws.name },
           count: solutions.length,
-          solutions: solutions.map((s) => ({ ...s, issues: links.filter((l) => l.solution_id === s.id) })),
+          solutions: solutions.map((s) => ({ ...s, issues: links.filter((l) => l.solution_id === s.id).map(({ solution_id, ...l }) => (void solution_id, l)) })),
         };
       }),
   );

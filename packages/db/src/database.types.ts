@@ -853,12 +853,14 @@ export type Database = {
           created_by: string | null
           decided_at: string | null
           decided_by: string | null
+          edited: boolean
           evidence: string
           facts: Json
           id: string
           origin: string
           process_id: string | null
           rating: string
+          run_id: string | null
           source_ids: string[]
           status: string
           step_id: string | null
@@ -876,12 +878,14 @@ export type Database = {
           created_by?: string | null
           decided_at?: string | null
           decided_by?: string | null
+          edited?: boolean
           evidence?: string
           facts?: Json
           id?: string
           origin: string
           process_id?: string | null
           rating: string
+          run_id?: string | null
           source_ids?: string[]
           status: string
           step_id?: string | null
@@ -899,12 +903,14 @@ export type Database = {
           created_by?: string | null
           decided_at?: string | null
           decided_by?: string | null
+          edited?: boolean
           evidence?: string
           facts?: Json
           id?: string
           origin?: string
           process_id?: string | null
           rating?: string
+          run_id?: string | null
           source_ids?: string[]
           status?: string
           step_id?: string | null
@@ -916,6 +922,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "findings_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ai_runs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "findings_analysis_id_fkey"
             columns: ["analysis_id"]

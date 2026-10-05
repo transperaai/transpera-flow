@@ -144,11 +144,11 @@ export function Insights(props: InsightsProps) {
                 onMouseLeave={() => onLight(null)}
                 onFocus={() => onLight(light)}
                 onBlur={() => onLight(null)}
-                className="group flex items-stretch gap-2 rounded-xl border bg-card shadow-token transition-colors focus-within:bg-muted/50 hover:bg-muted/50"
+                className="group flex flex-col rounded-xl border bg-card shadow-token transition-colors focus-within:bg-muted/50 hover:bg-muted/50 sm:flex-row sm:items-stretch sm:gap-2"
                 style={{ borderLeft: `3px solid ${RATING_STRIPE[i.rating]}` }}
               >
                 <button type="button" onClick={() => setOpen(i.key)} className="flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <b className="font-semibold">{i.title}</b>
+                  <b className="font-semibold break-words">{i.title}</b>
                   <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
                     <RatingPill rating={i.rating} />
                     <span className="tabular-nums" data-cost title={i.cost.method}>
@@ -156,9 +156,10 @@ export function Insights(props: InsightsProps) {
                     </span>
                     <span className="min-w-0">{i.number}</span>
                   </span>
-                  {where && <span className="truncate text-xs text-muted-foreground">{where}</span>}
+                  {where && <span className="text-xs break-words text-muted-foreground">{where}</span>}
                 </button>
-                <span className="flex shrink-0 items-center gap-2 pr-3 text-xs text-muted-foreground">
+                {/* On a phone the tag and the issue sit under the text, so the title keeps the width. */}
+                <span className="-mt-1 flex flex-wrap items-center gap-2 px-4 pb-3 text-xs text-muted-foreground sm:mt-0 sm:shrink-0 sm:flex-nowrap sm:pr-3 sm:pb-0 sm:pl-0">
                   <SourceTag insight={i} />
                   {i.issue &&
                     (link ? (
@@ -168,7 +169,7 @@ export function Insights(props: InsightsProps) {
                     ) : (
                       <span className="font-medium text-foreground">{issueLabel(i.issue)}</span>
                     ))}
-                  <ChevronRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
+                  <ChevronRight aria-hidden className="ml-auto size-4 transition-transform group-hover:translate-x-0.5 sm:ml-0" />
                 </span>
               </li>
             );
@@ -226,7 +227,7 @@ function Chip({ on, disabled, onClick, count, dot, children }: { on: boolean; di
 function SourceTag({ insight }: { insight: Insight }) {
   const kind = insight.source.kind;
   return (
-    <span className="inline-flex max-w-28 items-center gap-1 truncate rounded-md bg-muted px-1.5 py-0.5 sm:max-w-none" data-source={kind}>
+    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 whitespace-nowrap" data-source={kind}>
       {kind === "ai" && <Sparkles aria-hidden className="size-3 text-accent" />}
       {kind === "manual" && <PenLine aria-hidden className="size-3" />}
       {insight.source.name}
@@ -265,6 +266,7 @@ function InsightDialog({
   const link = insight?.issue ? issueHref(registerHref, insight.issue) : null;
   const ai = insight?.source.kind === "ai";
   const manual = insight?.source.kind === "manual";
+  const edited = insight?.source.kind === "ai" && insight.source.edited === true;
   const cited = insight ? citationsOf(insight.detection) : [];
   return (
     <Dialog open={!!insight} onOpenChange={(o) => !o && onClose()}>
@@ -284,11 +286,19 @@ function InsightDialog({
                 <RatingPill rating={insight.rating} />
                 <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs">
                   {ai && <Sparkles aria-hidden className="size-3 text-accent" />}
-                  {ai ? "AI analysis" : manual ? "Added by hand" : `Rule: ${insight.source.name}`}
+                  {ai ? (edited ? "AI, edited by your team" : "AI analysis") : manual ? "Added by hand" : `Found by the “${insight.source.name}” check`}
                 </span>
               </div>
               <DialogTitle>{insight.title}</DialogTitle>
-              <DialogDescription>{manual ? "A finding someone added by hand." : ai ? "A finding AI proposed and someone accepted." : "What the analysis found, acknowledged before findings came in."}</DialogDescription>
+              <DialogDescription>
+                {manual
+                  ? "A finding someone added by hand."
+                  : ai
+                    ? edited
+                      ? "A finding AI proposed, then someone edited and accepted."
+                      : "A finding AI proposed and someone accepted."
+                    : "What a check of the run found, acknowledged before findings came in."}
+              </DialogDescription>
             </DialogHeader>
             <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
               <dt className="text-xs font-medium text-muted-foreground uppercase">{manual ? "What we found" : "The number"}</dt>
@@ -321,10 +331,12 @@ function InsightDialog({
               <dt className="text-xs font-medium text-muted-foreground uppercase">How it&apos;s worked out</dt>
               <dd className="text-muted-foreground">
                 {ai
-                  ? "AI read the facts from 30 simulated runs, the first principles and linked sources, and wrote this. Every number in it was checked against the run."
+                  ? edited
+                    ? "AI read the facts from 30 simulated runs, the first principles and linked sources, and wrote it; someone then changed it. The facts it rests on are as AI cited them, but the edited words weren't checked against the run."
+                    : "AI read the facts from 30 simulated runs, the first principles and linked sources, and wrote this. Every number in it was checked against the run."
                   : manual
                     ? "Someone who knows the business wrote it. Its words are theirs; nothing checks its numbers."
-                    : `The ${insight.source.name} rule found it in 30 simulated runs.`}
+                    : `The “${insight.source.name}” check found it in 30 simulated runs.`}
               </dd>
               {cited.length > 0 && (
                 <>

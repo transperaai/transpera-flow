@@ -9,9 +9,20 @@ const PRICES: Record<string, { input: number; output: number; cacheRead: number;
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
 };
 
+/**
+ * The prices of a model by the id the API served it under: the id asked for, or that id with a snapshot date or a
+ * context-window suffix ("claude-opus-5-5-20261001", "claude-opus-5-5[1m]"). A fallback model that answered instead
+ * isn't priced (undefined).
+ */
+export function pricesOf(model: string | null | undefined): (typeof PRICES)[string] | undefined {
+  if (!model) return undefined;
+  const id = model.trim().toLowerCase().replace(/\[[^\]]*\]$/, "").replace(/-\d{8}$/, "");
+  return Object.hasOwn(PRICES, id) ? PRICES[id] : undefined;
+}
+
 /** The cost of a stored analysis's model calls (its `usage` list), in US dollars; null when the model isn't priced or nothing was used. */
 export function costOfUsage(model: string | null, usage: Json | unknown): number | null {
-  const price = model ? PRICES[model] : undefined;
+  const price = pricesOf(model);
   if (!price || !Array.isArray(usage) || !usage.length) return null;
   let total = 0;
   for (const u of usage) {

@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { createServicingProcess } from "@/app/w/[slug]/process-actions";
 import { isUnpublished } from "@transpera-flow/db";
 import { isBlank } from "@transpera-flow/engine";
-import { aiConfigured, loadAiViews, loadLatestAiViews, loadWorkspaceFindings } from "@/lib/ai/data";
-import { analysisModelHash, isStale } from "@/lib/ai/model-hash";
+import { aiConfigured, loadAiViews, loadLatestAiViews, loadWorkspaceAiSettings, loadWorkspaceFindings } from "@/lib/ai/data";
+import { analysisBaseHash, isStale } from "@/lib/ai/model-hash";
+import { NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
@@ -23,7 +24,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const { live, draft, processes } = process;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
-  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, findings] = await Promise.all([
+  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, findings, aiSettings] = await Promise.all([
     canEditWorkspace(live.workspace.id),
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceIssues(live.workspace.id),
@@ -34,6 +35,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     currentUserId(),
     loadMemberNames(live.workspace.id),
     loadWorkspaceFindings(live.workspace.id),
+    loadWorkspaceAiSettings(live.workspace.id),
   ]);
   // Who last published the live version, and which of this process's issues an AI idea is waiting for.
   const [lastChange, ideaIssueIds] = await Promise.all([
@@ -55,7 +57,9 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     : earlier
       ? ((await loadAiViews([shown.revision.id]))[shown.revision.id] ?? null)
       : ((await loadLatestAiViews([live.process.id]))[live.process.id] ?? null);
-  const stale = !earlier && isStale(aiView, { hash: aiView ? analysisModelHash(live, fpShown.doc, "process") : null, revisionId: live.revision.id });
+  // Out of date once what it read changed (model, first principles, Anthropic model, sources); the page adds the facts.
+  const baseHash = aiView && !earlier ? analysisBaseHash(live, fpShown.doc, "process", { readSources: aiSettings.read_sources, model: NARRATION_MODEL }) : null;
+  const stale = !earlier && isStale(aiView, { base: baseHash, revisionId: live.revision.id });
   const fpDraft = draft && draft !== shown && !earlier ? fp[draft.revision.id]! : null;
   const draftChanged = fpDraft !== null && JSON.stringify(fpDraft.doc) !== JSON.stringify(fpShown.doc);
   const base = `/w/${slug}`;

@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { AI_DAILY_RUN_LIMIT, DEFAULT_AI_SETTINGS, toEngineModel, type ProposedFinding, type SaveAiAnalysisInput } from "@transpera-flow/db";
-import { absenceTest, simulate } from "@transpera-flow/engine";
+import { absenceTest, simulate, successMeasureSource } from "@transpera-flow/engine";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
+import { perceptionGapDetections } from "@/lib/issues/perception";
+import { rerate, visibleFindings } from "@/lib/rules/edit";
 import type { AiDraftRequest, AiModel } from "@/lib/ai/analyse";
 import { aiInputForRun } from "@/lib/ai/input";
-import { analysisModelHash, isStale } from "@/lib/ai/model-hash";
+import { factsChanged, factsDigest, isAnalysedFact } from "@/lib/ai/facts-digest";
+import { analysisBaseHash, isStale, joinAnalysisHash, sourceCitations } from "@/lib/ai/model-hash";
 import { replyOf } from "@/lib/ai/reply";
 import { proposedFindings, runAnalysis, stepProcesses, type AiRunDeps } from "@/lib/ai/service";
 import { demoFirstPrinciples } from "@/lib/first-principles/demo-seed";
@@ -20,7 +24,11 @@ const bundle = demoBundle();
 const model = toEngineModel(bundle);
 const result = simulate(model, 10, 1);
 const fp = demoFirstPrinciples();
-const facts = aiInputForRun({ bundle, model, result, firstPrinciples: fp })!.input.facts;
+const made = aiInputForRun({ bundle, model, result, firstPrinciples: fp })!;
+const facts = made.input.facts;
+/** What an analysis of this run stores as its hash, with the base the fakes use. */
+const FULL = joinAnalysisHash("base-1", factsDigest(made.findings));
+const READS = { readSources: false, model: "claude-opus-5-5" };
 const AUDIT = bundle.steps.find((s) => s.name === "Audit & proposal")!.id;
 
 function fakeModel(output: unknown = { read: ["Fine."], insights: [], review: [] }): AiModel & { calls: AiDraftRequest[] } {
@@ -42,7 +50,7 @@ const finding = () => ({
   review: [],
 });
 
-type Deps = AiRunDeps & { saved: SaveAiAnalysisInput[]; proposed: { analysisId: string; findings: ProposedFinding[] }[]; built: number };
+type Deps = AiRunDeps & { saved: SaveAiAnalysisInput[]; proposed: { analysisId: string; runId: string; findings: ProposedFinding[] }[]; built: number };
 
 function deps(over: Partial<AiRunDeps> = {}): Deps {
   const saved: SaveAiAnalysisInput[] = [];
@@ -56,7 +64,7 @@ function deps(over: Partial<AiRunDeps> = {}): Deps {
     settings: { ...DEFAULT_AI_SETTINGS },
     canWrite: true,
     existing: null,
-    modelHash: "hash-1",
+    baseHash: "base-1",
     reserve: async () => ({ status: "ok", runId: "run-1" }),
     build: async () => {
       d.built++;
@@ -67,8 +75,8 @@ function deps(over: Partial<AiRunDeps> = {}): Deps {
       saved.push(row);
       return "analysis-1";
     },
-    propose: async (analysisId, findings) => {
-      proposed.push({ analysisId, findings });
+    propose: async (analysisId, runId, findings) => {
+      proposed.push({ analysisId, runId, findings });
       return { added: findings.length };
     },
     saved,
@@ -85,7 +93,7 @@ describe("runAnalysis: when it runs", () => {
     const out = await runAnalysis(d);
     expect(out.status).toBe("stored");
     expect(d.saved).toHaveLength(1);
-    expect(d.saved[0]).toMatchObject({ workspace_id: "w", process_id: "p", revision_id: "r1", status: "ok", trigger: "manual", summary: ["Fine."], model: "fake", model_hash: "hash-1" });
+    expect(d.saved[0]).toMatchObject({ workspace_id: "w", process_id: "p", revision_id: "r1", status: "ok", trigger: "manual", summary: ["Fine."], model: "fake", model_hash: FULL });
     expect(d.saved[0]!.input_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
@@ -123,24 +131,41 @@ describe("runAnalysis: when it runs", () => {
   });
 });
 
-describe("runAnalysis: cached until the model changes", () => {
-  it("returns the stored analysis while the model hashes the same, without simulating, reserving or calling the model", async () => {
+describe("runAnalysis: cached until what it read changes", () => {
+  it("returns the stored analysis while everything it read hashes the same, without reserving or calling the model", async () => {
     let reserved = 0;
     const m = fakeModel();
-    const d = deps({ existing: { input_hash: "x", status: "ok", model_hash: "hash-1" }, model: m, reserve: async () => (reserved++, { status: "ok", runId: "r" }) });
+    const d = deps({ existing: { input_hash: "x", status: "ok", model_hash: FULL }, model: m, reserve: async () => (reserved++, { status: "ok", runId: "r" }) });
     expect(await runAnalysis(d)).toEqual({ status: "skipped", why: "unchanged" });
-    expect([d.built, reserved, m.calls.length, d.saved.length]).toEqual([0, 0, 0, 0]);
+    expect([reserved, m.calls.length, d.saved.length]).toEqual([0, 0, 0]);
   });
 
-  it("runs again once the model has changed", async () => {
+  it("runs again once the base changed (model, first principles, Anthropic model, sources)", async () => {
     const m = fakeModel();
-    const d = deps({ existing: { input_hash: "x", status: "ok", model_hash: "hash-0" }, model: m });
+    const d = deps({ existing: { input_hash: "x", status: "ok", model_hash: FULL }, baseHash: "base-2", model: m });
     expect((await runAnalysis(d)).status).toBe("stored");
     expect(m.calls).toHaveLength(1);
-    expect(d.saved[0]!.model_hash).toBe("hash-1");
+    expect(d.saved[0]!.model_hash).toBe(joinAnalysisHash("base-2", factsDigest(made.findings)));
   });
 
-  it("also skips when the facts it would send are the ones the stored analysis read (an analysis from before the hash)", async () => {
+  it("runs again once the run's facts changed, though the model is the same", async () => {
+    const m = fakeModel();
+    const d = deps({ existing: { input_hash: "x", status: "ok", model_hash: joinAnalysisHash("base-1", "0".repeat(32)) }, model: m });
+    expect((await runAnalysis(d)).status).toBe("stored");
+    expect(d.saved[0]!.model_hash).toBe(FULL);
+  });
+
+  it("'Analyse again' (force) runs even when nothing changed, and still reserves a run", async () => {
+    let reserved = 0;
+    const m = fakeModel();
+    const d = deps({ force: true, existing: { input_hash: "x", status: "ok", model_hash: FULL }, model: m, reserve: async () => (reserved++, { status: "ok", runId: "r2" }) });
+    expect((await runAnalysis(d)).status).toBe("stored");
+    expect([reserved, m.calls.length]).toEqual([1, 1]);
+    const refused = deps({ force: true, existing: { input_hash: "x", status: "ok", model_hash: FULL }, reserve: async () => ({ status: "cooldown", retryAfterSeconds: 30 }) });
+    expect(await runAnalysis(refused)).toMatchObject({ status: "skipped", why: "cooldown" });
+  });
+
+  it("matches an analysis stored without a hash (before B17) by what it was sent", async () => {
     const first = deps();
     await runAnalysis(first);
     const existing = { input_hash: first.saved[0]!.input_hash, status: "ok", model_hash: null };
@@ -153,26 +178,84 @@ describe("runAnalysis: cached until the model changes", () => {
   });
 
   it("redoes a stored failure (it can't be 'unchanged' if nothing was written)", async () => {
-    const existing = { input_hash: "x", status: "failed", model_hash: "hash-1" };
+    const existing = { input_hash: "x", status: "failed", model_hash: FULL };
     expect((await runAnalysis(deps({ existing }))).status).toBe("stored");
   });
 
-  it("hashes the model, not the calendar: the same bundle gives the same hash, a changed step or first principles another", () => {
-    const a = analysisModelHash(bundle, fp, "process");
-    expect(a).toMatch(/^[0-9a-f]{64}$/);
-    expect(analysisModelHash(bundle, fp, "process")).toBe(a);
+  it("hashes what it reads, not the calendar: a changed step, first principles, scope, Anthropic model or sources switch changes it", () => {
+    const a = analysisBaseHash(bundle, fp, "process", READS);
+    expect(a).toMatch(/^[0-9a-f]{32}$/);
+    expect(analysisBaseHash(bundle, fp, "process", READS)).toBe(a);
     const slower = { ...bundle, steps: bundle.steps.map((s) => (s.id === AUDIT ? { ...s, work_hours: (s.work_hours ?? 1) + 1 } : s)) };
-    expect(analysisModelHash(slower, fp, "process")).not.toBe(a);
-    expect(analysisModelHash(bundle, { ...fp, why: { ...fp.why, root: "Something else" } }, "process")).not.toBe(a);
-    expect(analysisModelHash(bundle, fp, "company")).not.toBe(a);
+    expect(analysisBaseHash(slower, fp, "process", READS)).not.toBe(a);
+    expect(analysisBaseHash(bundle, { ...fp, why: { ...fp.why, root: "Something else" } }, "process", READS)).not.toBe(a);
+    expect(analysisBaseHash(bundle, fp, "company", READS)).not.toBe(a);
+    expect(analysisBaseHash(bundle, fp, "process", { ...READS, model: "claude-opus-5-6" })).not.toBe(a);
+    expect(analysisBaseHash(bundle, fp, "process", { ...READS, readSources: true })).not.toBe(a);
   });
 
-  it("marks a stored analysis out of date when the model hashes differently, or (without a hash) when it read another version", () => {
-    expect(isStale(null, { hash: "a", revisionId: "r1" })).toBe(false);
-    expect(isStale({ modelHash: "a", revisionId: "r1" }, { hash: "a", revisionId: "r2" })).toBe(false);
-    expect(isStale({ modelHash: "a", revisionId: "r1" }, { hash: "b", revisionId: "r1" })).toBe(true);
-    expect(isStale({ modelHash: null, revisionId: "r1" }, { hash: "b", revisionId: "r1" })).toBe(false);
-    expect(isStale({ modelHash: null, revisionId: "r1" }, { hash: "b", revisionId: "r2" })).toBe(true);
+  it("with sources read, a changed quote or a different source changes the hash; with them off, it doesn't", () => {
+    expect(sourceCitations(bundle, "process").length).toBeGreaterThan(0);
+    type Citation = Record<string, unknown>;
+    const edit = (change: (c: Citation) => Citation): typeof bundle => ({
+      ...bundle,
+      steps: bundle.steps.map((s) => ({
+        ...s,
+        provenance: Object.fromEntries(
+          Object.entries(s.provenance ?? {}).map(([k, v]) => [k, { ...v, ...(v && Array.isArray(v.evidence) ? { evidence: v.evidence.map((c) => change(c as Citation)) } : {}) }]),
+        ) as typeof s.provenance,
+      })),
+    });
+    const on = { ...READS, readSources: true };
+    const a = analysisBaseHash(bundle, fp, "process", on);
+    const reworded = edit((c) => ({ ...c, quote: `${String(c.quote)} (said again)` }));
+    const resourced = edit((c) => ({ ...c, source_id: "00000000-0000-4000-8000-00000000abcd" }));
+    expect(analysisBaseHash(reworded, fp, "process", on)).not.toBe(a);
+    expect(analysisBaseHash(resourced, fp, "process", on)).not.toBe(a);
+    expect(analysisBaseHash(reworded, fp, "process", READS)).toBe(analysisBaseHash(bundle, fp, "process", READS));
+  });
+
+  it("digests the facts by key and rating, in any order, leaving out what AI isn't given", () => {
+    const d = factsDigest(made.findings);
+    expect(d).toMatch(/^[0-9a-f]{32}$/);
+    expect(factsDigest([...made.findings].reverse())).toBe(d);
+    const first = made.findings[0]!;
+    expect(factsDigest([{ ...first, rating: first.rating === "risk" ? "bad" : "risk" }, ...made.findings.slice(1)])).not.toBe(d);
+    expect(factsDigest(made.findings.slice(1))).not.toBe(d);
+    // A page's own facts (perception gaps, broken scenarios, the forecast) don't count, nor a fact's wording.
+    const extra = [
+      { ...first, key: "gap:x", type: "perception_gap" as const },
+      { ...first, key: "scenario:y", type: "broken_scenario" as const },
+      { ...first, key: "forecast:z", type: "capacity" as const },
+    ];
+    expect(extra.some(isAnalysedFact)).toBe(false);
+    expect(factsDigest([...made.findings, ...extra])).toBe(d);
+    expect(factsDigest(made.findings.map((f) => ({ ...f, title: "reworded" })))).toBe(d);
+  });
+
+  it("digests a page's facts as the server digests what it gives AI, so an unchanged run doesn't read as out of date", () => {
+    // The process page's list: the rule facts with its perception gaps (and any broken scenarios) beside them.
+    const rules = ANALYSIS_DEFAULTS;
+    const successMeasures = successMeasureSource(fp, bundle.process.id);
+    const page = visibleFindings(rules, [...rerate(model, result, rules, bundle.process.id, undefined, { successMeasures }), ...perceptionGapDetections(bundle.steps)]);
+    const server = aiInputForRun({ bundle, model, result, firstPrinciples: fp })!.findings;
+    expect(page.length).toBeGreaterThanOrEqual(server.length);
+    expect(factsDigest(page)).toBe(factsDigest(server));
+  });
+
+  it("marks a stored analysis out of date when the base or the facts differ, or (without a hash) when it read another version", () => {
+    expect(isStale(null, { base: "a", revisionId: "r1" })).toBe(false);
+    expect(isStale({ modelHash: "a.f", revisionId: "r1" }, { base: "a", revisionId: "r2" })).toBe(false);
+    expect(isStale({ modelHash: "a.f", revisionId: "r1" }, { base: "b", revisionId: "r1" })).toBe(true);
+    expect(isStale({ modelHash: "a.f", revisionId: "r1" }, { base: "a", facts: "g", revisionId: "r1" })).toBe(true);
+    expect(isStale({ modelHash: "a.f", revisionId: "r1" }, { base: "a", facts: null, revisionId: "r1" })).toBe(false);
+    expect(isStale({ modelHash: null, revisionId: "r1" }, { base: "b", revisionId: "r1" })).toBe(false);
+    expect(isStale({ modelHash: null, revisionId: "r1" }, { base: "b", revisionId: "r2" })).toBe(true);
+    // The page's half: its facts against the stored digest, once its run is in.
+    expect(factsChanged(FULL, made.findings)).toBe(false);
+    expect(factsChanged(FULL, made.findings.slice(1))).toBe(true);
+    expect(factsChanged(FULL, null)).toBe(false);
+    expect(factsChanged(null, made.findings)).toBe(false);
   });
 });
 
@@ -225,7 +308,7 @@ describe("runAnalysis: the cost bound", () => {
       return { status: "ok" as const, runId: "r" };
     };
     await runAnalysis(deps({ reserve, model: null }));
-    await runAnalysis(deps({ reserve, existing: { input_hash: "x", status: "ok", model_hash: "hash-1" } }));
+    await runAnalysis(deps({ reserve, existing: { input_hash: "x", status: "ok", model_hash: FULL } }));
     await runAnalysis(deps({ reserve, build: async () => ({ bundle, model, result, firstPrinciples: null }) }));
     expect(reserved).toBe(0);
   });
@@ -238,6 +321,8 @@ describe("runAnalysis: proposed findings", () => {
     expect(out).toMatchObject({ status: "stored", added: 1 });
     expect(d.proposed).toHaveLength(1);
     expect(d.proposed[0]!.analysisId).toBe("analysis-1");
+    // Each run's proposals carry the run, so a later run on the same version can supersede what it didn't propose again.
+    expect(d.proposed[0]!.runId).toBe("run-1");
     expect(d.proposed[0]!.findings[0]).toMatchObject({
       processId: bundle.process.id,
       stepId: AUDIT,

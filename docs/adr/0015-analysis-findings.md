@@ -29,28 +29,41 @@ assessment of what is actually wrong, and he wants to add his own findings.
   can pass the number check as a figure) and each quote with one (`quote-a`). Its output gives each insight `facts: [ids]`;
   unknown ids are ignored, and a finding that cites none of the facts when the run has some is dropped like one that
   cites an invented number (`lib/ai/analyse.ts`). Every number is still checked as ADR 0011 and 0013 say.
-- **Cached until the model changes.** An analysis is stored with `model_hash`: SHA-256 of the engine model built at a
-  fixed start date (so the calendar doesn't change it), the first principles, the scope and the prompt version
-  (`lib/ai/model-hash.ts`). Pressing Analyse while the hash is unchanged returns the stored analysis without simulating,
-  reserving or calling the model. The pages load the latest analysis of the process (any version) and mark it **out of
-  date** once the model hashes differently (rows from before have no hash and are compared by version).
+- **Cached until what it read changes.** An analysis is stored with `model_hash`, two parts joined by a dot
+  (`lib/ai/model-hash.ts`): the base, a SHA-256 the server works out of the engine model built at a fixed start date (so
+  the calendar doesn't change it), the first principles, the scope, the prompt version, the Anthropic model id, the
+  "AI reads sources" switch and, when it is on, every source citation on the model's steps (source id and quote); then
+  the run's facts, digested by key and rating (`lib/ai/facts-digest.ts`, browser-safe; the page's own perception gaps,
+  broken scenarios and forecast facts are left out, so the page and the server digest the same list). Pressing Analyse
+  while both parts are unchanged returns the stored analysis without reserving or calling the model; **Analyse again**
+  passes `force` and runs anyway, still through `reserve_ai_run`. The pages load the latest analysis of the process (any
+  version) and mark it **out of date** once the base differs (the server) or the facts do (the browser, once its run is
+  in). Rows from before have no hash and are compared by version.
 - **Cost bound** as ADR 0013: every model call first reserves a run (`reserve_ai_run`: 40 a workspace in 24 hours, one a
   minute per process; the company counts as the company map's process). The panel shows the model and an estimated cost
   from the stored token usage at list prices (`lib/ai/cost.ts`), "about $0.06".
-- **Review.** An analysis's insights are stored as proposed findings citing it (`storeProposedFindings`): a key already
-  there in any status is left alone (a dismissed finding stays dismissed), an AI insight acknowledged before B17
-  (`ai:insight:<hash>` on an issue) isn't proposed again, and earlier proposals of the same scope that the new analysis
-  didn't make again are superseded. Owners and editors accept, edit ("Save and accept") or dismiss them from the
-  analysis panel; viewers see only that some are waiting.
-- **Forgery.** The trigger stamps who and when, starts an AI finding proposed and requires it to cite an analysis the
-  writer stored in the last 15 minutes; a finding by hand starts accepted. As ADR 0013 says, an editor could still write
+- **Review.** An analysis's insights are stored as proposed findings citing it and the run that wrote it
+  (`storeProposedFindings`; `findings.run_id`, since an analysis is kept one per version and a second run on the same
+  version keeps its id). A key a person decided (accepted or dismissed) is left alone; a key still proposed, or
+  superseded, is proposed again with what this run wrote; an AI insight acknowledged before B17 (`ai:insight:<hash>` on
+  an issue) isn't proposed again; and the proposals of the same scope that an earlier run made and this one didn't are
+  superseded. A superseded proposal can't be accepted or dismissed. Owners and editors accept, edit ("Save and accept")
+  or dismiss them from the analysis panel, where each one's cited facts open under it before Accept; viewers see only
+  that some are waiting.
+- **Forgery and honesty.** The trigger stamps who and when, starts an AI finding proposed and requires it to cite an
+  analysis the writer stored in the last 15 minutes and that analysis's run; a finding by hand starts accepted. The facts
+  an AI finding cites never change after it is written (only a later run proposing it again replaces them), and when a
+  person changes what an AI finding says, the trigger sets `edited`, so the page labels it "AI, edited" and says its
+  edited words weren't checked. Every source a finding cites must be one of its workspace's. As ADR 0013 says, an editor could still write
   AI text through PostgREST after running an analysis; the database can't check the words.
 - **Rules editor removed.** Settings → Analysis rules, its demo page and nav item, the editing helpers and the demo
   store are deleted. Every page passes the defaults; `analysis_rules` rows stay, unread. The MCP `list_issues`
   detections use the defaults too.
 - **The connector** gains `get_facts`, `list_findings`, `get_analysis`, `list_sources` and `list_solutions`, so Claude
   outside the app can read everything an analysis reads (with `get_process`, `run_scenario`, `list_issues` and
-  `get_first_principles`).
+  `get_first_principles`). Each is bounded: facts worst first up to a limit (40 by default) with sentences trimmed;
+  findings and sources a page at a time (50 by default) with the total and the next offset; solutions without their
+  copied maps.
 
 ## Consequences
 

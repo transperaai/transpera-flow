@@ -11,7 +11,7 @@ import { TYPE_LABELS, type RegisterEntry } from "@/lib/issues/register";
  * What produced an insight: one of the analysis rules (only insights acknowledged before B17: rules now give facts, not
  * findings), AI (A46), or a person who added it by hand (B17).
  */
-export type InsightSource = { kind: "rule"; name: string; ruleId: string | null } | { kind: "ai"; name: "AI" } | { kind: "manual"; name: "By hand" };
+export type InsightSource = { kind: "rule"; name: string; ruleId: string | null } | { kind: "ai"; name: "AI" | "AI, edited"; edited?: boolean } | { kind: "manual"; name: "By hand" };
 
 /**
  * A detection that may carry its origin. A rule's has none; the AI's (A46) is `origin: "ai"`, with its own "why it
@@ -24,6 +24,8 @@ export type Detection = DetectedIssue & {
   findingId?: string;
   findingProcessId?: string | null;
   facts?: FindingCitation[];
+  /** An AI finding someone has changed since AI wrote it. */
+  edited?: boolean;
 };
 
 export interface Insight {
@@ -75,7 +77,7 @@ export function headline(evidence: string): string {
 }
 
 export function sourceOf(d: Detection): InsightSource {
-  if (d.origin === "ai") return { kind: "ai", name: "AI" };
+  if (d.origin === "ai") return d.edited ? { kind: "ai", name: "AI, edited", edited: true } : { kind: "ai", name: "AI" };
   if (d.origin === "manual") return { kind: "manual", name: "By hand" };
   const id = ruleOfFinding(d);
   return { kind: "rule", ruleId: id, name: id ? RULES_UI[id].name : TYPE_LABELS[d.type] };

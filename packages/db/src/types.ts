@@ -517,6 +517,10 @@ export interface FindingRow {
   source_ids: string[];
   ai_key: string | null;
   analysis_id: string | null;
+  /** The run that last proposed it (analyses are kept one per version; each run has its own id). */
+  run_id: string | null;
+  /** An AI finding a person has changed (set by the database only): its words are no longer only AI's. */
+  edited: boolean;
   created_by: string | null;
   created_at: string;
   updated_by: string | null;

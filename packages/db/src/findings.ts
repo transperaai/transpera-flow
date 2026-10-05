@@ -7,7 +7,7 @@ import { FINDING_TYPES, type FindingCitation, type FindingRating, type FindingRo
 // AI finding proposed and one by hand accepted, and refuses an "AI" finding that no analysis of the caller's wrote.
 
 export const FINDING_COLUMNS =
-  "id, workspace_id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, source_ids, ai_key, analysis_id, created_by, created_at, updated_by, updated_at, decided_by, decided_at";
+  "id, workspace_id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, source_ids, ai_key, analysis_id, run_id, edited, created_by, created_at, updated_by, updated_at, decided_by, decided_at";
 
 export const FINDING_LIMITS = { title: 200, evidence: 2000, why: 2000, facts: 30, sources: 20 } as const;
 
@@ -134,48 +134,66 @@ export interface ProposedFinding {
 }
 
 /**
- * Store what an analysis proposed (issue #175): each new finding as proposed, citing the analysis. A finding already
- * there with the same key (proposed, accepted or dismissed: a person's decision stands, D38) is left as it is. The earlier
- * proposals of the same scope that this analysis didn't make again are superseded, so the review list holds only what the
- * latest analysis says. `scope` is the process the analysis is stored against (the company map's process for the whole company). Returns how many were added and superseded.
+ * Store what one run of an analysis proposed (issue #175). A finding new to this place is added as proposed, citing the
+ * analysis and the run. One already there with the same key that is still proposed, or was superseded, is proposed again
+ * with what this run wrote; one a person decided (accepted or dismissed: their decision stands, D38) is left as it is.
+ * Then the proposals of the same scope that an earlier run made and this one didn't make again are superseded, so the
+ * review list holds only what the latest run says. Runs, not analyses, tell them apart: an analysis is kept one per
+ * version, so a second run on the same version keeps its id. `scope` is the process the analysis is stored against (the
+ * company map's process for the whole company). Reads only the rows with the keys proposed now and the proposals still
+ * open in this scope, never the whole table.
  */
 export async function storeProposedFindings(
   db: Db,
-  input: { workspaceId: string; analysisId: string; scope: string; findings: readonly ProposedFinding[]; skipKeys?: ReadonlySet<string> },
-): Promise<{ added: number; superseded: number } | { error: string }> {
-  const keys = input.findings.map((f) => f.aiKey);
-  const existing = await db.from("findings").select("id, ai_key, process_id, status, analysis_id").eq("workspace_id", input.workspaceId).eq("origin", "ai");
-  if (existing.error) return { error: existing.error.message };
-  const known = new Set(existing.data.map((r) => `${r.process_id ?? ""}|${r.ai_key}`));
-  const fresh = input.findings.filter((f) => !known.has(`${f.processId ?? ""}|${f.aiKey}`) && !input.skipKeys?.has(f.aiKey));
+  input: { workspaceId: string; analysisId: string; runId: string; scope: string; findings: readonly ProposedFinding[]; skipKeys?: ReadonlySet<string> },
+): Promise<{ added: number; renewed: number; superseded: number } | { error: string }> {
+  const wanted = input.findings.filter((f) => !input.skipKeys?.has(f.aiKey));
+  const keys = [...new Set(wanted.map((f) => f.aiKey))];
+  const where = (processId: string | null, key: string) => `${processId ?? ""}|${key}`;
+  const known = new Map<string, { id: string; status: FindingStatus }>();
+  if (keys.length) {
+    const same = await db.from("findings").select("id, ai_key, process_id, status").eq("workspace_id", input.workspaceId).eq("origin", "ai").in("ai_key", keys);
+    if (same.error) return { error: same.error.message };
+    for (const r of same.data) known.set(where(r.process_id, r.ai_key ?? ""), { id: r.id, status: r.status as FindingStatus });
+  }
+  const content = (f: ProposedFinding) => ({
+    step_id: f.stepId,
+    rating: f.rating,
+    type: f.type,
+    title: f.title.slice(0, FINDING_LIMITS.title),
+    evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
+    why: f.why.slice(0, FINDING_LIMITS.why),
+    facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
+    analysis_id: input.analysisId,
+    run_id: input.runId,
+    status: "proposed",
+  });
+  const fresh = wanted.filter((f) => !known.has(where(f.processId, f.aiKey)));
+  const again = wanted.flatMap((f) => {
+    const r = known.get(where(f.processId, f.aiKey));
+    return r && (r.status === "proposed" || r.status === "superseded") ? [{ id: r.id, f }] : [];
+  });
   if (fresh.length) {
-    const { error } = await db.from("findings").insert(
-      fresh.map((f) => ({
-        workspace_id: input.workspaceId,
-        process_id: f.processId,
-        step_id: f.stepId,
-        origin: "ai",
-        status: "proposed",
-        rating: f.rating,
-        type: f.type,
-        title: f.title.slice(0, FINDING_LIMITS.title),
-        evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
-        why: f.why.slice(0, FINDING_LIMITS.why),
-        facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
-        ai_key: f.aiKey,
-        analysis_id: input.analysisId,
-      })),
-    );
+    const { error } = await db.from("findings").insert(fresh.map((f) => ({ workspace_id: input.workspaceId, process_id: f.processId, origin: "ai", ai_key: f.aiKey, ...content(f) })));
     if (error) return { error: error.message };
   }
-  // Earlier proposals of this scope (made by an analysis of the same process, or of the company) not proposed again.
-  const scopeAnalyses = await db.from("ai_analyses").select("id").eq("workspace_id", input.workspaceId).eq("process_id", input.scope);
-  const stale = existing.data.filter(
-    (r) => r.status === "proposed" && r.analysis_id && r.analysis_id !== input.analysisId && !keys.includes(r.ai_key ?? "") && (scopeAnalyses.data ?? []).some((a) => a.id === r.analysis_id),
-  );
+  for (const { id, f } of again) {
+    const { error } = await db.from("findings").update(content(f)).eq("id", id);
+    if (error) return { error: error.message };
+  }
+  // The proposals still open in this scope (made by an analysis stored against it) that an earlier run made.
+  const open = await db
+    .from("findings")
+    .select("id, run_id, ai_analyses!inner(process_id)")
+    .eq("workspace_id", input.workspaceId)
+    .eq("origin", "ai")
+    .eq("status", "proposed")
+    .eq("ai_analyses.process_id", input.scope);
+  if (open.error) return { error: open.error.message };
+  const stale = open.data.filter((r) => r.run_id !== input.runId).map((r) => r.id);
   if (stale.length) {
-    const { error } = await db.from("findings").update({ status: "superseded" }).in("id", stale.map((r) => r.id));
+    const { error } = await db.from("findings").update({ status: "superseded" }).in("id", stale);
     if (error) return { error: error.message };
   }
-  return { added: fresh.length, superseded: stale.length };
+  return { added: fresh.length, renewed: again.length, superseded: stale.length };
 }

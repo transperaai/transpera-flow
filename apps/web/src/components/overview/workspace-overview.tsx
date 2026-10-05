@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { isBlank } from "@transpera-flow/engine";
 import { Overview } from "@/components/overview/overview";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
-import { aiConfigured, loadLatestAiViews, loadWorkspaceFindings } from "@/lib/ai/data";
-import { analysisModelHash, isStale } from "@/lib/ai/model-hash";
+import { aiConfigured, loadLatestAiViews, loadWorkspaceAiSettings, loadWorkspaceFindings } from "@/lib/ai/data";
+import { analysisBaseHash, isStale } from "@/lib/ai/model-hash";
+import { NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
@@ -23,7 +24,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     return <EmptyOverview slug={slug} name={head.name} unpublished={overview?.processes ?? []} />;
   }
   const ws = live.workspace.id;
-  const [parts, company, issues, sources, canEdit, firstPrinciples, solutions, findings] = await Promise.all([
+  const [parts, company, issues, sources, canEdit, firstPrinciples, solutions, findings, aiSettings] = await Promise.all([
     loadLiveParts(ws),
     loadLiveCompany(ws),
     loadWorkspaceIssues(ws),
@@ -32,10 +33,13 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     loadLiveFirstPrinciples(live.process.id, live.revision.id),
     loadWorkspaceSolutions(ws),
     loadWorkspaceFindings(ws),
+    loadWorkspaceAiSettings(ws),
   ]);
   // The latest analysis of the whole company (B17), stored against the company map; out of date once the company model changed.
   const aiView = company ? ((await loadLatestAiViews([company.process.id]))[company.process.id] ?? null) : null;
-  const stale = isStale(aiView, { hash: aiView ? analysisModelHash(live, firstPrinciples, "company") : null, revisionId: company?.revision.id ?? null });
+  // Out of date once what it read changed (model, first principles, Anthropic model, sources); the page adds the facts.
+  const baseHash = aiView ? analysisBaseHash(live, firstPrinciples, "company", { readSources: aiSettings.read_sources, model: NARRATION_MODEL }) : null;
+  const stale = isStale(aiView, { base: baseHash, revisionId: company?.revision.id ?? null });
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
   const found = company && mapVersion ? await loadCompanyVersion(ws, mapVersion) : null;

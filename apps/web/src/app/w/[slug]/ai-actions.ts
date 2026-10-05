@@ -20,22 +20,25 @@ async function signedIn() {
   return data?.claims?.sub ? supabase : null;
 }
 
-/** Analyse a process's live version (cached: nothing runs while the model is unchanged). */
-export async function analyseProcess(processId: string): Promise<AiRunReply> {
-  if (typeof processId !== "string" || !UUID.test(processId)) return { status: "error", message: "That isn't valid." };
+/**
+ * Analyse a process's live version. Cached: the model isn't called while what the analysis read is unchanged, unless
+ * `force` ("Analyse again"), which still reserves a run, so the daily cap and the cooldown hold.
+ */
+export async function analyseProcess(processId: string, force: boolean = false): Promise<AiRunReply> {
+  if (typeof processId !== "string" || !UUID.test(processId) || typeof force !== "boolean") return { status: "error", message: "That isn't valid." };
   const supabase = await signedIn();
   if (!supabase) return { status: "error", message: "Your session has ended. Sign in again." };
-  const out = await runAiAnalysis(supabase, processId);
+  const out = await runAiAnalysis(supabase, processId, { force });
   if (out.status === "stored") refresh();
   return replyOf(out, "process");
 }
 
-/** Analyse the whole company (cached the same way). */
-export async function analyseCompany(workspaceId: string): Promise<AiRunReply> {
-  if (typeof workspaceId !== "string" || !UUID.test(workspaceId)) return { status: "error", message: "That isn't valid." };
+/** Analyse the whole company (cached, and forced, the same way). */
+export async function analyseCompany(workspaceId: string, force: boolean = false): Promise<AiRunReply> {
+  if (typeof workspaceId !== "string" || !UUID.test(workspaceId) || typeof force !== "boolean") return { status: "error", message: "That isn't valid." };
   const supabase = await signedIn();
   if (!supabase) return { status: "error", message: "Your session has ended. Sign in again." };
-  const out = await runCompanyAiAnalysis(supabase, workspaceId);
+  const out = await runCompanyAiAnalysis(supabase, workspaceId, { force });
   if (out.status === "stored") refresh();
   return replyOf(out, "company");
 }

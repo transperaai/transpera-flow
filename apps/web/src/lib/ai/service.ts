@@ -5,8 +5,9 @@ import "server-only";
 // Nothing runs on a publish or a market change any more. Everything runs as the signed-in user under RLS, with the client
 // of the person who pressed it, so a viewer's click or a stranger's request writes nothing.
 //
-// Results are cached: an analysis is stored with a hash of the model it read, and pressing Analyse again while the model
-// hashes the same returns the stored one without simulating or calling the model. Every model call first reserves a run
+// Results are cached: an analysis is stored with a hash of what it read (the model, first principles, Anthropic model,
+// the sources switch and quotes, and the run's facts: `model-hash.ts`), and pressing Analyse while that hashes the same
+// returns the stored one without calling the model. "Analyse again" forces a run all the same. Every model call first reserves a run
 // in the database (`reserve_ai_run`: 40 runs a day per workspace, one a minute per process), so the cost stays bounded
 // whatever calls this. What AI found is stored as PROPOSED findings, each citing the facts it rests on, for a person to
 // accept, edit or dismiss.
@@ -33,10 +34,10 @@ import {
 } from "@transpera-flow/db";
 import { absenceTest, resolveMoney, shadowPricesFor, simulate, type AbsenceTest, type DetectedIssue } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
-import { anthropicAnalyst } from "@/lib/narration/anthropic";
+import { anthropicAnalyst, NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { analyseWithAi, type AiModel, type AiOutcome } from "./analyse";
 import { aiInputForRun, costedRoleIds, quotesFromBundle, ruleFindings, type AiRunInput } from "./input";
-import { analysisModelHash } from "./model-hash";
+import { analysisBaseHash, factsDigest, joinAnalysisHash } from "./model-hash";
 import type { AiInsight } from "./types";
 
 /** The replications and seed every page uses, so AI reads the same run the person sees. */
@@ -50,7 +51,7 @@ export type AiSkip =
   | "no_first_principles"
   /** This process ran less than a minute ago (the database refuses a second run). */
   | "cooldown"
-  /** The model is the one the stored analysis read: it is still current, and nothing was run. */
+  /** Everything the stored analysis read hashes the same: it is still current, and the model wasn't called. */
   | "unchanged"
   /** The workspace has used its model runs for the day (the database counts them). */
   | "limit"
@@ -78,8 +79,8 @@ export interface AiRunDeps {
   canWrite: boolean;
   /** The latest stored analysis of this scope, if any. */
   existing: { input_hash: string; status: string; model_hash: string | null } | null;
-  /** The hash of the model as it is now (`analysisModelHash`); null when it can't be built. */
-  modelHash: string | null;
+  /** The base hash of what the analysis reads now (`analysisBaseHash`); null when the model can't be built. The run's facts are added once it is built. */
+  baseHash: string | null;
   /** Load the version and run it. Called only once the cheap checks pass. */
   build: () => Promise<AiRunInput | { error: string }>;
   /** Claude, or null when the server has no key. */
@@ -88,8 +89,8 @@ export interface AiRunDeps {
   reserve: () => Promise<AiReservation>;
   /** Store the analysis; its id, or null when it couldn't be written. */
   save: (row: SaveAiAnalysisInput) => Promise<string | null>;
-  /** Store what it found as proposed findings; how many were new, or an error in words. */
-  propose: (analysisId: string, findings: ProposedFinding[]) => Promise<{ added: number } | { error: string }>;
+  /** Store what one run found as proposed findings; how many were new, or an error in words. */
+  propose: (analysisId: string, runId: string, findings: ProposedFinding[]) => Promise<{ added: number } | { error: string }>;
 }
 
 /** The process each step belongs to in a bundle (its own, and those of every other process in it). */
@@ -124,14 +125,16 @@ export async function runAnalysis(deps: AiRunDeps): Promise<AiRunResult> {
   if (!deps.canWrite) return { status: "skipped", why: "forbidden" };
   if (!deps.model) return { status: "skipped", why: "not_set_up" };
   const current = deps.existing?.status === "ok";
-  // The cache: the model hashes as it did when the stored analysis was written, so nothing is simulated or sent.
-  if (!deps.force && current && deps.modelHash && deps.existing?.model_hash === deps.modelHash) return { status: "skipped", why: "unchanged" };
 
   const built = await deps.build();
   if ("error" in built) return { status: "skipped", why: "model_error", message: built.error };
   const made = aiInputForRun({ ...built, scope: deps.scope, quotes: deps.settings.read_sources ? quotesFromBundle(built.bundle) : null });
   if (!made) return { status: "skipped", why: "no_first_principles" };
-  if (!deps.force && current && deps.existing?.input_hash === made.input.hash) return { status: "skipped", why: "unchanged" };
+  // The cache: what the stored analysis read hashes as it does now (its facts included), so the model isn't called.
+  // An analysis stored without a hash (before B17) is matched by what it was sent.
+  const modelHash = deps.baseHash ? joinAnalysisHash(deps.baseHash, factsDigest(made.findings)) : null;
+  const same = deps.existing?.model_hash ? deps.existing.model_hash === modelHash : deps.existing?.input_hash === made.input.hash;
+  if (!deps.force && current && same) return { status: "skipped", why: "unchanged" };
 
   // The one place the model is called: reserve first, so the database has counted the run whatever happens next.
   const reservation = await deps.reserve();
@@ -156,12 +159,12 @@ export async function runAnalysis(deps: AiRunDeps): Promise<AiRunResult> {
     dropped: outcome.dropped,
     input_hash: made.input.hash,
     model: outcome.model,
-    model_hash: deps.modelHash,
+    model_hash: modelHash,
     usage: outcome.usage as unknown as SaveAiAnalysisInput["usage"],
   });
   if (!id) return { status: "error", message: "The analysis ran but couldn't be saved." };
   if (outcome.status !== "ok") return { status: "stored", outcome, added: 0 };
-  const stored = await deps.propose(id, proposedFindings(outcome.insights, deps.scope, deps.scope === "company" ? "" : built.bundle.process.id, stepProcesses(built.bundle)));
+  const stored = await deps.propose(id, reservation.runId, proposedFindings(outcome.insights, deps.scope, deps.scope === "company" ? "" : built.bundle.process.id, stepProcesses(built.bundle)));
   if ("error" in stored) return { status: "error", message: "The analysis ran, but its findings couldn't be saved for review. Try again." };
   return { status: "stored", outcome, added: stored.added };
 }
@@ -226,8 +229,8 @@ async function common(db: Db, workspaceId: string, storedOn: string) {
     existing: row ? { input_hash: row.input_hash, status: row.status, model_hash: row.model_hash } : null,
     reserve: () => reserveAiRun(db, workspaceId, storedOn, "manual"),
     save: (r: SaveAiAnalysisInput) => saveAiAnalysis(db, r),
-    propose: async (analysisId: string, findings: ProposedFinding[]) => {
-      const out = await storeProposedFindings(db, { workspaceId, analysisId, scope: storedOn, findings, skipKeys: skip });
+    propose: async (analysisId: string, runId: string, findings: ProposedFinding[]) => {
+      const out = await storeProposedFindings(db, { workspaceId, analysisId, runId, scope: storedOn, findings, skipKeys: skip });
       return "error" in out ? out : { added: out.added };
     },
   };
@@ -247,14 +250,15 @@ export async function runAiAnalysis(db: Db, processId: string, { force = false, 
     if (!workspace || !listed) return { status: "error", message: "The process couldn't be found." };
     const bundle = await loadProcessBundle(db, workspace, listed, revisionId);
     const fp = (await loadFirstPrinciplesFor(db, processId, [revisionId]))[revisionId]?.doc ?? null;
+    const shared = await common(db, workspaceId, processId);
     return await runAnalysis({
       force,
       scope: "process",
       workspaceId,
       processId,
       revisionId,
-      ...(await common(db, workspaceId, processId)),
-      modelHash: analysisModelHash(bundle, fp, "process"),
+      ...shared,
+      baseHash: analysisBaseHash(bundle, fp, "process", { readSources: shared.settings.read_sources, model: NARRATION_MODEL }),
       build: () => loadRun(db, bundle, processId),
       model,
     });
@@ -281,14 +285,15 @@ export async function runCompanyAiAnalysis(db: Db, workspaceId: string, { force 
     if (!pipeline?.live_revision_id) return { status: "skipped", why: "no_live" };
     const bundle = await loadProcessBundle(db, workspace, pipeline, pipeline.live_revision_id);
     const fp = (await loadFirstPrinciplesFor(db, pipeline.id, [pipeline.live_revision_id]))[pipeline.live_revision_id]?.doc ?? null;
+    const shared = await common(db, workspaceId, company.id);
     return await runAnalysis({
       force,
       scope: "company",
       workspaceId,
       processId: company.id,
       revisionId: company.live_revision_id,
-      ...(await common(db, workspaceId, company.id)),
-      modelHash: analysisModelHash(bundle, fp, "company"),
+      ...shared,
+      baseHash: analysisBaseHash(bundle, fp, "company", { readSources: shared.settings.read_sources, model: NARRATION_MODEL }),
       build: () => loadRun(db, bundle, pipeline.id),
       model,
     });

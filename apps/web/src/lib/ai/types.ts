@@ -83,7 +83,10 @@ export interface AiPanelData {
   hasFirstPrinciples: boolean;
   /** The version the analysis is of (null when unknown). */
   versionNumber: number | null;
-  /** True when the model has changed since `view` was written (B17): it is kept, marked out of date, until someone analyses again. */
+  /**
+   * True when what `view` read has changed since it was written (B17): the model, first principles, Anthropic model or
+   * sources, as the server works out. The page also marks it out of date once its run's facts differ (`factsChanged`).
+   */
   stale?: boolean;
 }
 

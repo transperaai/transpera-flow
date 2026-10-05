@@ -9,6 +9,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { demoAiView } from "@/lib/ai/demo";
 import { AI_SWITCHES } from "@/lib/ai/switches";
 import type { AiAnalysisView, AiPanelData } from "@/lib/ai/types";
+import { factsDigest, joinAnalysisHash } from "@/lib/ai/facts-digest";
 import type { FindingsState } from "@/lib/findings/use-findings";
 import { NORTHBEAM_PROCESS_ID } from "@transpera-flow/db";
 
@@ -55,6 +56,8 @@ const proposal = (over: Partial<FindingRow> = {}): FindingRow => ({
   source_ids: [],
   ai_key: "ai:insight:aaaaaaaaaaaa",
   analysis_id: "a",
+  run_id: "run-1",
+  edited: false,
   created_by: null,
   created_at: "2026-10-01T09:00:00.000Z",
   updated_by: null,
@@ -105,13 +108,23 @@ describe("the analysis panel", () => {
     expect(html).not.toContain("Out of date");
   });
 
-  it("marks a stored analysis out of date when the model has changed since, and keeps showing it", () => {
+  it("marks a stored analysis out of date when what it read has changed since, and keeps showing it", () => {
     const html = read(data({ stale: true }));
     expect(html).toContain('data-analysis="stale"');
     expect(html).toContain("Out of date");
-    expect(html).toContain("The process has changed since this was written. Analyse again to bring it up to date.");
+    expect(html).toContain("What this read has changed since it was written (the process, the facts from its run, its first principles or sources). Analyse again to bring it up to date.");
     expect(html).toContain("The Strategist is the constraint.");
-    expect(read(data({ stale: true }), { scope: "company" })).toContain("The company model has changed since");
+    expect(read(data({ stale: true }), { scope: "company" })).toContain("(the company model, the facts");
+  });
+
+  it("marks it out of date when the page's facts differ from those it read, once the run is in", () => {
+    const facts = [{ key: "wait:step:a", rating: "bad", type: "delay" }];
+    const hash = joinAnalysisHash("base", factsDigest(facts));
+    const at = (pageFacts: typeof facts | null) => read(data({ view: view({ modelHash: hash }) }), { facts: pageFacts });
+    expect(at(facts)).not.toContain("Out of date");
+    expect(at(null)).not.toContain("Out of date");
+    expect(at([{ ...facts[0]!, rating: "risk" }])).toContain("Out of date");
+    expect(at([...facts, { key: "queue:step:b", rating: "bad", type: "delay" }])).toContain("Out of date");
   });
 
   it("says AI analysis isn't set up when the server has no key, and still offers a finding by hand", () => {
@@ -141,7 +154,11 @@ describe("the analysis panel", () => {
     expect(html).toContain("Proposals wait for one person");
     expect(html).not.toContain("Already accepted");
     expect(html).toContain("Rests on 1 fact");
+    // The facts open under it before anyone accepts (closed at first), and each button names the finding it acts on.
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-controls="cited-f1"');
     for (const b of [">Accept<", ">Edit<", ">Dismiss<"]) expect(html).toContain(b);
+    for (const b of ["Accept", "Edit", "Dismiss"]) expect(html).toContain(`aria-label="${b}: Proposals wait for one person"`);
   });
 
   it("shows a viewer no review list and no buttons, only that findings are waiting", () => {

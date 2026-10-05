@@ -20,8 +20,8 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function open(mode: "demo" | "readonly" = "demo"): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+async function open(mode: "demo" | "readonly" = "demo", width = 1280): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -36,6 +36,30 @@ async function open(mode: "demo" | "readonly" = "demo"): Promise<{ page: Page; e
 const proposed = (page: Page) => page.locator("[data-proposed] b").allInnerTexts();
 const listed = (page: Page) => page.locator("[data-insight] button b").allInnerTexts();
 const row = (page: Page, title: string) => page.locator("[data-proposed]", { hasText: title });
+
+describe("on a phone (400px)", { timeout: 60_000 }, () => {
+  it("wraps a finding's title, tags and buttons instead of cutting them off", async () => {
+    const { page, errors } = await open("demo", 400);
+    // Every review row fits the screen, its buttons included.
+    for (const r of await page.locator("[data-proposed]").all()) {
+      const box = (await r.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(400);
+    }
+    const title = "Only one person can price and scope work";
+    await row(page, title).getByRole("button", { name: "Accept" }).click();
+    await expect.poll(() => listed(page)).toEqual([title]);
+    const card = page.locator("[data-insight]").first();
+    // The title takes the card's width (the tag and the issue sit under it), and no tag is cut short.
+    const [cardBox, titleBox] = [(await card.boundingBox())!, (await card.locator("button b").boundingBox())!];
+    expect(titleBox.width).toBeGreaterThan(cardBox.width * 0.6);
+    for (const tag of await card.locator("[data-source]").all()) {
+      expect(await tag.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), await tag.innerText()).toBe(true);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(400);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+});
 
 describe("AI findings: accept, edit, dismiss", { timeout: 60_000 }, () => {
   it("starts with the analysis's findings proposed, none listed until accepted", async () => {
@@ -61,6 +85,19 @@ describe("AI findings: accept, edit, dismiss", { timeout: 60_000 }, () => {
     await page.close();
   });
 
+  it("shows the facts a proposal cites before anyone accepts it, and names the finding on each button", async () => {
+    const { page, errors } = await open();
+    const title = "Proposals wait about a week for the Strategist";
+    const r = row(page, title);
+    expect(await r.locator("[data-cited]").count()).toBe(0);
+    await r.locator("[data-cited-toggle]").click();
+    expect(await r.locator("[data-cited-toggle]").getAttribute("aria-expanded")).toBe("true");
+    expect(await r.locator("[data-cited]").innerText()).toContain("Work waits 6.2 working days for Audit & proposal.");
+    for (const b of ["Accept", "Edit", "Dismiss"]) expect(await r.getByRole("button", { name: `${b}: ${title}`, exact: true }).count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
   it("edits one before accepting it", async () => {
     const { page, errors } = await open();
     await row(page, "Only one person can price and scope work").getByRole("button", { name: "Edit" }).click();
@@ -70,6 +107,11 @@ describe("AI findings: accept, edit, dismiss", { timeout: 60_000 }, () => {
     await dialog.getByRole("button", { name: "Save and accept" }).click();
     await expect.poll(() => listed(page)).toEqual(["Only the Strategist can price work"]);
     expect(await page.locator("[data-insight]").first().innerText()).toContain("Operational risk");
+    // Its words are now a person's: it says so, here and in its detail.
+    expect(await page.locator("[data-insight] [data-source]").first().innerText()).toBe("AI, edited");
+    await page.locator("[data-insight] button", { hasText: "Only the Strategist can price work" }).click();
+    expect(await page.locator("[data-insight-dialog]").innerText()).toContain("AI, edited by your team");
+    await page.keyboard.press("Escape");
     expect(await proposed(page)).toHaveLength(2);
     expect(errors).toEqual([]);
     await page.close();

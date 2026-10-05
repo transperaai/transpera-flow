@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { reserveAiRun, saveAiAnalysis, setFindingStatus, storeProposedFindings, type ProposedFinding } from "@transpera-flow/db";
 import { generateApiToken, type McpHandlerOptions } from "../src";
 import { call, connect, signJwt } from "./helpers";
 
@@ -199,6 +200,113 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       const r = await call(mcpViewer, tool, args);
       expect(r.ok, `${tool} ${JSON.stringify(r)}`).toBe(true);
     }
+  }, 120_000);
+
+  it("supersedes, run by run, the proposals a later run on the same version didn't make again, and proposes one again", async () => {
+    const revision = (await one("select live_revision_id from processes where id = $1", [ids.process])).live_revision_id as string;
+    const proposal = (aiKey: string, title: string): ProposedFinding => ({ aiKey, processId: ids.process, stepId: null, rating: "bad", type: "delay", title, evidence: "Work waits.", why: "Clients wait.", facts: [] });
+    const A = proposal("ai:insight:aaaaaaaaaaa1", "Proposals wait for one person");
+    const B = proposal("ai:insight:bbbbbbbbbbb2", "Only one strategist can price work");
+    const run = async (findings: ProposedFinding[]) => {
+      // One run a minute per process: age the earlier runs, as a minute passing would.
+      await admin.query("update ai_runs set started_at = started_at - interval '2 minutes' where process_id = $1", [ids.process]);
+      const reserved = await reserveAiRun(editor as never, ids.ws, ids.process, "manual");
+      if (reserved.status !== "ok") throw new Error(`reserve: ${reserved.status}`);
+      const analysisId = await saveAiAnalysis(editor as never, {
+        run_id: reserved.runId,
+        workspace_id: ids.ws,
+        process_id: ids.process,
+        revision_id: revision,
+        status: "ok",
+        reason: null,
+        trigger: "manual",
+        summary: ["Fine."],
+        insights: [],
+        review: [],
+        checked: 0,
+        dropped: 0,
+        input_hash: "h",
+        model: "fake",
+        model_hash: null,
+        usage: [],
+      });
+      if (!analysisId) throw new Error("the analysis wasn't saved");
+      const out = await storeProposedFindings(editor as never, { workspaceId: ids.ws, analysisId, runId: reserved.runId, scope: ids.process, findings });
+      return { analysisId, runId: reserved.runId, out };
+    };
+    const status = async () =>
+      Object.fromEntries((await admin.query("select ai_key, status, run_id from findings where workspace_id = $1 and ai_key = any($2)", [ids.ws, [A.aiKey, B.aiKey]])).rows.map((r) => [r.ai_key, r]));
+
+    const first = await run([A, B]);
+    expect(first.out).toEqual({ added: 2, renewed: 0, superseded: 0 });
+    // The same version again: the analysis keeps its id, the run is new, and B (not proposed again) is superseded.
+    const second = await run([A]);
+    expect(second.analysisId).toBe(first.analysisId);
+    expect(second.out).toEqual({ added: 0, renewed: 1, superseded: 1 });
+    let now = await status();
+    expect(now[A.aiKey]).toMatchObject({ status: "proposed", run_id: second.runId });
+    expect(now[B.aiKey]).toMatchObject({ status: "superseded", run_id: first.runId });
+    // A superseded proposal can't be accepted or dismissed.
+    const bId = (await one("select id from findings where workspace_id = $1 and ai_key = $2", [ids.ws, B.aiKey])).id as string;
+    for (const s of ["accepted", "dismissed"] as const) expect(await setFindingStatus(editor as never, bId, s)).toMatchObject({ status: "invalid", message: expect.stringContaining("later analysis replaced") });
+    const aId = (await one("select id from findings where workspace_id = $1 and ai_key = $2", [ids.ws, A.aiKey])).id as string;
+    expect(await setFindingStatus(editor as never, aId, "accepted")).toMatchObject({ status: "saved" });
+    // A third run proposes B again (it is back for review) and leaves A, which a person accepted, as it is.
+    const third = await run([A, B]);
+    expect(third.out).toEqual({ added: 0, renewed: 1, superseded: 0 });
+    now = await status();
+    expect(now[A.aiKey]).toMatchObject({ status: "accepted", run_id: second.runId });
+    expect(now[B.aiKey]).toMatchObject({ status: "proposed", run_id: third.runId });
+  }, 60_000);
+
+  it("keeps every connector list bounded: facts to a limit, findings and sources a page at a time, solutions without their maps", async () => {
+    const mcp = await connect(tokens.viewer, options);
+    const facts = await call<{ count: number; shown: number; facts: { evidence: string; cost: Record<string, unknown> }[] }>(mcp, "get_facts", { process: "Sales", limit: 1 });
+    expect(facts.ok, JSON.stringify(facts)).toBe(true);
+    expect(facts.data.facts).toHaveLength(1);
+    expect(facts.data.shown).toBe(1);
+    expect(facts.data.count).toBeGreaterThanOrEqual(1);
+    expect(facts.data.facts[0]!.evidence.length).toBeLessThanOrEqual(600);
+    expect(Object.keys(facts.data.facts[0]!.cost).sort()).toEqual(["currency", "estimate", "hours_per_month", "how", "per_month"]);
+
+    const stored = Number((await one("select count(*) from findings where workspace_id = $1 and status in ('proposed', 'accepted')", [ids.ws])).count);
+    expect(stored).toBeGreaterThanOrEqual(2);
+    const page1 = await call<{ total: number; next_offset: number | null; findings: { id: string }[] }>(mcp, "list_findings", { limit: 1 });
+    expect(page1.ok, JSON.stringify(page1)).toBe(true);
+    expect(page1.data).toMatchObject({ total: stored, next_offset: 1 });
+    expect(page1.data.findings).toHaveLength(1);
+    const page2 = await call<{ findings: { id: string }[] }>(mcp, "list_findings", { limit: 1, offset: 1 });
+    expect(page2.data.findings).toHaveLength(1);
+    expect(page2.data.findings[0]!.id).not.toBe(page1.data.findings[0]!.id);
+    const whole = await call<{ total: number; next_offset: number | null }>(mcp, "list_findings", { limit: 200 });
+    expect(whole.data).toMatchObject({ total: stored, next_offset: null });
+
+    for (const title of ["Kickoff call", "Ops notes", "SOP"]) await admin.query("insert into sources (workspace_id, title, body) values ($1, $2, $3)", [ids.ws, title, "x".repeat(5000)]);
+    const s1 = await call<{ total: number; next_offset: number | null; sources: { title: string; text: string; text_truncated: boolean }[] }>(mcp, "list_sources", { limit: 2 });
+    expect(s1.ok, JSON.stringify(s1)).toBe(true);
+    expect(s1.data).toMatchObject({ total: 3, next_offset: 2 });
+    expect(s1.data.sources.map((s) => s.title)).toEqual(["Kickoff call", "Ops notes"]);
+    expect(s1.data.sources[0]).toMatchObject({ text_truncated: true });
+    expect(s1.data.sources[0]!.text).toHaveLength(4000);
+    const s2 = await call<{ next_offset: number | null; sources: { title: string }[] }>(mcp, "list_sources", { limit: 2, offset: 2 });
+    expect(s2.data).toMatchObject({ next_offset: null, sources: [{ title: "SOP" }] });
+
+    const revision = (await one("select live_revision_id from processes where id = $1", [ids.process])).live_revision_id as string;
+    await admin.query("begin");
+    await admin.query("set local session_replication_role = replica");
+    await admin.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'Hire a second strategist', $4)", [
+      ids.ws,
+      ids.process,
+      revision,
+      JSON.stringify({ steps: [{ id: "s", name: "A big copied map" }], edges: [] }),
+    ]);
+    await admin.query("commit");
+    const sol = await call<{ solutions: Record<string, unknown>[] }>(mcp, "list_solutions", {});
+    expect(sol.ok, JSON.stringify(sol)).toBe(true);
+    expect(sol.data.solutions).toHaveLength(1);
+    expect(sol.data.solutions[0]).toMatchObject({ name: "Hire a second strategist", changed_step_ids: [], issues: [] });
+    expect(sol.data.solutions[0]).not.toHaveProperty("steps");
+    expect(sol.data.solutions[0]).not.toHaveProperty("workspace_id");
   }, 120_000);
 
   it("shows another workspace's owner none of it over the connector", async () => {

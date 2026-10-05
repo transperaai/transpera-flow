@@ -20,6 +20,9 @@ export const liveFindingsStore = (workspaceId: string): FindingsStore => ({
   decide: (id, status) => decideFinding(id, status),
 });
 
+/** What the database says when a superseded proposal is decided. */
+const SUPERSEDED = "A later analysis replaced this proposal, so it can't be decided. Analyse again.";
+
 let demoCount = 0;
 const demoId = () => `00000000-0000-4000-8000-${String(++demoCount).padStart(12, "0")}`;
 
@@ -57,6 +60,8 @@ export class MemoryFindingsStore implements FindingsStore {
       source_ids: d.sourceIds ?? [],
       ai_key: null,
       analysis_id: null,
+      run_id: null,
+      edited: false,
       created_by: this.who,
       created_at: now,
       updated_by: this.who,
@@ -70,9 +75,13 @@ export class MemoryFindingsStore implements FindingsStore {
     if (!row) return { status: "forbidden" };
     const problem = findingDraftProblem(d);
     if (problem) return { status: "invalid", message: problem };
+    if (row.status === "superseded") return { status: "invalid", message: SUPERSEDED };
     const now = new Date().toISOString();
+    const changed =
+      row.title !== d.title.trim() || row.evidence !== d.evidence.trim() || row.why !== d.why.trim() || row.rating !== d.rating || row.type !== d.type || row.step_id !== d.stepId || row.process_id !== d.processId;
     return this.put({
       ...row,
+      edited: row.edited || (row.origin === "ai" && changed),
       process_id: d.processId,
       step_id: d.stepId,
       rating: d.rating,
@@ -92,6 +101,7 @@ export class MemoryFindingsStore implements FindingsStore {
   async decide(id: string, status: "accepted" | "dismissed"): Promise<FindingWrite> {
     const row = this.find(id);
     if (!row) return { status: "forbidden" };
+    if (row.status === "superseded") return { status: "invalid", message: SUPERSEDED };
     return this.put({ ...row, status, decided_at: new Date().toISOString(), decided_by: this.who });
   }
 }

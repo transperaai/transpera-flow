@@ -40,6 +40,8 @@ const finding = (over: Partial<FindingRow> = {}): FindingRow => ({
   source_ids: [],
   ai_key: "ai:insight:aaaaaaaaaaaa",
   analysis_id: null,
+  run_id: null,
+  edited: false,
   created_by: null,
   created_at: "2026-10-01T09:00:00.000Z",
   updated_by: null,
@@ -176,6 +178,10 @@ describe("what an analysis cost", () => {
     expect(formatCost(usd)).toBe("about $0.11");
     expect(formatCost(0.004)).toBe("under $0.01");
     expect(costOfUsage("some-other-model", usage)).toBeNull();
+    // The id the API served it under: a snapshot date or a context-window suffix is the same model's price.
+    expect(costOfUsage("claude-opus-5-5-20261001", usage)).toBe(usd);
+    expect(costOfUsage("claude-opus-5-5[1m]", usage)).toBe(usd);
+    expect(costOfUsage("claude-opus-5-5-preview", usage)).toBeNull();
     expect(costOfUsage("claude-opus-5-5", [])).toBeNull();
     expect(formatCost(null)).toBeNull();
   });

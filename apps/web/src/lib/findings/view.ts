@@ -32,6 +32,7 @@ export function findingDetection(f: FindingRow): Detection {
     findingId: f.id,
     findingProcessId: f.process_id,
     facts: readCitations(f.facts),
+    ...(f.edited ? { edited: true } : {}),
   };
 }
 
