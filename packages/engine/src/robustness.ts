@@ -192,19 +192,38 @@ export interface ProvenanceRows {
   services?: readonly { id: string; provenance?: unknown }[];
   /** The workspace row's `provenance`: settings keyed `settings.<key>` (`settings.health_recover`, ...). */
   workspace?: unknown;
+  /**
+   * Lead source rows, per-column provenance (`volume_week`, `conversion_to_qualified`). Qualified leads a week
+   * (`demand.leads_per_week`) are known only when every source's are (see `leadsProvenance`).
+   */
+  leadSources?: readonly { provenance?: unknown }[];
+}
+
+/**
+ * Where qualified leads a week come from, given the lead sources. Calibration measures the qualified leads themselves
+ * and stores the leads a week that give them (issue #41), so a source whose `volume_week` is measured has measured
+ * qualified leads. Only then are they left out of the robustness check: the total is measured when every source's
+ * leads a week are, and an estimate otherwise (entered volumes stay varied, as before calibration). With no sources it
+ * is the workspace's interim figure, an estimate.
+ */
+export function leadsProvenance(sources: readonly { provenance?: unknown }[]): ProvenanceSource {
+  return sources.length > 0 && sources.every((s) => provenanceSource(s.provenance, "volume_week") === "measured") ? "measured" : "estimated";
 }
 
 /**
  * A `ProvenanceLookup` over the stored rows: a step's or a service's own row,
  * and for a health rule (`health.<field>`) the workspace's
- * `settings.health_<field>` entry, handed over in the per-column shape.
- * Targets with no row here (demand, roles, people) are estimated.
+ * `settings.health_<field>` entry, handed over in the per-column shape;
+ * for qualified leads a week, the lead sources' (`leadsProvenance`).
+ * Targets with no row here (other demand, roles, people) are estimated.
  */
-export function provenanceFromRows({ steps = [], services = [], workspace }: ProvenanceRows): ProvenanceLookup {
+export function provenanceFromRows({ steps = [], services = [], workspace, leadSources }: ProvenanceRows): ProvenanceLookup {
   const byStep = new Map(steps.map((s) => [s.id, s.provenance]));
   const byService = new Map(services.map((s) => [s.id, s.provenance]));
+  const leads = leadSources ? leadsProvenance(leadSources) : "estimated";
   return (t) => {
     if (t.kind === "steps") return byStep.get(t.id);
+    if (t.kind === "demand" && t.field === "leads_per_week") return { leads_per_week: { source: leads } };
     if (t.kind === "services") return byService.get(t.id);
     if (t.kind === "health" && isObject(workspace)) return { [t.field]: workspace[`settings.health_${t.field}`] };
     return undefined;
