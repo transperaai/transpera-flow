@@ -45,26 +45,45 @@ export async function saveAiSetting(db: Db, workspaceId: string, key: string, va
   return { status: "saved", settings: await loadAiSettings(db, workspaceId) };
 }
 
-const ANALYSIS_COLUMNS = "id, workspace_id, process_id, revision_id, status, reason, trigger, summary, insights, review, checked, dropped, input_hash, model, usage, run_id, created_by, created_at, updated_at";
+const ANALYSIS_COLUMNS = "id, workspace_id, process_id, revision_id, status, reason, trigger, summary, insights, review, checked, dropped, input_hash, model, model_hash, usage, run_id, created_by, created_at, updated_at";
 
 export type AiAnalysisWithRun = AiAnalysisRow & {
   /** Who ran it (the name recorded when the run was reserved); null if unknown. */
   run_by: string | null;
 };
 
-/** The stored analyses of these revisions (RLS: every member reads), by revision id, each with the name of whoever ran it. */
-export async function loadAiAnalyses(db: Db, revisionIds: readonly string[]): Promise<Record<string, AiAnalysisWithRun>> {
-  if (!revisionIds.length) return {};
-  const { data, error } = await db.from("ai_analyses").select(ANALYSIS_COLUMNS).in("revision_id", [...revisionIds]);
-  if (error) throw error;
-  const rows = data as unknown as AiAnalysisRow[];
+/** The names of whoever ran these analyses (recorded when each run was reserved). */
+async function withRunBy(db: Db, rows: AiAnalysisRow[]): Promise<AiAnalysisWithRun[]> {
   const names = new Map<string, string | null>();
   if (rows.length) {
     const runs = await db.from("ai_runs").select("id, user_name").in("id", rows.map((r) => r.run_id));
     if (runs.error) throw runs.error;
     for (const r of runs.data) names.set(r.id, r.user_name);
   }
-  return Object.fromEntries(rows.map((r) => [r.revision_id, { ...r, run_by: names.get(r.run_id) ?? null }]));
+  return rows.map((r) => ({ ...r, run_by: names.get(r.run_id) ?? null }));
+}
+
+/** The stored analyses of these revisions (RLS: every member reads), by revision id, each with the name of whoever ran it. */
+export async function loadAiAnalyses(db: Db, revisionIds: readonly string[]): Promise<Record<string, AiAnalysisWithRun>> {
+  if (!revisionIds.length) return {};
+  const { data, error } = await db.from("ai_analyses").select(ANALYSIS_COLUMNS).in("revision_id", [...revisionIds]);
+  if (error) throw error;
+  const rows = await withRunBy(db, data as unknown as AiAnalysisRow[]);
+  return Object.fromEntries(rows.map((r) => [r.revision_id, r]));
+}
+
+/**
+ * The latest analysis of each of these processes, whichever version it read (B17): an analysis is kept until someone runs
+ * a new one, and the page says when it is out of date. By process id.
+ */
+export async function loadLatestAiAnalyses(db: Db, processIds: readonly string[]): Promise<Record<string, AiAnalysisWithRun>> {
+  if (!processIds.length) return {};
+  const { data, error } = await db.from("ai_analyses").select(ANALYSIS_COLUMNS).in("process_id", [...processIds]).order("updated_at", { ascending: false });
+  if (error) throw error;
+  const latest = new Map<string, AiAnalysisRow>();
+  for (const r of data as unknown as AiAnalysisRow[]) if (!latest.has(r.process_id)) latest.set(r.process_id, r);
+  const rows = await withRunBy(db, [...latest.values()]);
+  return Object.fromEntries(rows.map((r) => [r.process_id, r]));
 }
 
 export type AiReservation =
@@ -83,7 +102,7 @@ export const AI_RUN_COOLDOWN_SECONDS = 60;
 
 /**
  * Reserve a model run before calling the model (A46). The database counts it, so the cap holds however the app is
- * called: manual runs, failed runs and market triggers all reserve first.
+ * called: every run, failed or not, reserves first.
  */
 export async function reserveAiRun(db: Db, workspaceId: string, processId: string, trigger: AiAnalysisTrigger): Promise<AiReservation> {
   const { data, error } = await db.rpc("reserve_ai_run", { p_workspace: workspaceId, p_process: processId, p_trigger: trigger });
@@ -94,22 +113,6 @@ export async function reserveAiRun(db: Db, workspaceId: string, processId: strin
   if (r?.status === "cooldown") return { status: "cooldown", retryAfterSeconds: r.retry_after_seconds ?? AI_RUN_COOLDOWN_SECONDS };
   if (r?.status === "forbidden") return { status: "forbidden" };
   return { status: "error" };
-}
-
-/**
- * Note that the market changed now, and return the mark: a later change moves it, so only the last change's run finds it
- * still in place (`claimMarketPending`). Null if it couldn't be written (the caller isn't an editor).
- */
-export async function markMarketPending(db: Db, workspaceId: string, now: Date = new Date()): Promise<string | null> {
-  const at = now.toISOString();
-  const { error } = await db.from("ai_settings").upsert({ workspace_id: workspaceId, market_pending_at: at }, { onConflict: "workspace_id" });
-  return error ? null : at;
-}
-
-/** Claim the pending market review if `mark` is still the latest: true for exactly one caller, once. */
-export async function claimMarketPending(db: Db, workspaceId: string, mark: string): Promise<boolean> {
-  const { data, error } = await db.from("ai_settings").update({ market_pending_at: null }).eq("workspace_id", workspaceId).eq("market_pending_at", mark).select("workspace_id");
-  return !error && data.length > 0;
 }
 
 export interface SaveAiAnalysisInput {
@@ -126,17 +129,19 @@ export interface SaveAiAnalysisInput {
   dropped: number;
   input_hash: string;
   model: string | null;
+  /** The hash of the model it read (see `ai_analyses.model_hash`). */
+  model_hash: string | null;
   usage: Json;
   /** The run reserved for this analysis (`reserveAiRun`). */
   run_id: string;
 }
 
-/** Store (or replace) the analysis of a revision. Owners and editors only; returns false when it couldn't be written. */
-export async function saveAiAnalysis(db: Db, input: SaveAiAnalysisInput): Promise<boolean> {
-  const { error } = await db.from("ai_analyses").upsert(input, { onConflict: "revision_id" });
+/** Store (or replace) the analysis of a revision. Owners and editors only; returns its id, or null when it couldn't be written. */
+export async function saveAiAnalysis(db: Db, input: SaveAiAnalysisInput): Promise<string | null> {
+  const { data, error } = await db.from("ai_analyses").upsert(input, { onConflict: "revision_id" }).select("id").single();
   if (error) {
     console.error("Couldn't store the AI analysis.", error.message);
-    return false;
+    return null;
   }
-  return true;
+  return data.id;
 }

@@ -23,12 +23,11 @@ export {
   AI_RUN_COOLDOWN_SECONDS,
   AI_SETTING_KEYS,
   DEFAULT_AI_SETTINGS,
-  claimMarketPending,
-  markMarketPending,
   reserveAiRun,
   type AiAnalysisWithRun,
   type AiReservation,
   loadAiAnalyses,
+  loadLatestAiAnalyses,
   loadAiSettings,
   saveAiAnalysis,
   saveAiSetting,
@@ -37,6 +36,22 @@ export {
   type SaveAiAnalysisInput,
   type SaveAiSettingOutcome,
 } from "./ai";
+export {
+  FINDING_COLUMNS,
+  FINDING_LIMITS,
+  createManualFinding,
+  findingDraftProblem,
+  findingIdOfKey,
+  findingKey,
+  loadFindings,
+  readCitations,
+  setFindingStatus,
+  storeProposedFindings,
+  updateFinding,
+  type FindingDraft,
+  type FindingWrite,
+  type ProposedFinding,
+} from "./findings";
 export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
 export {
   FIRST_PRINCIPLES_COLUMNS,
