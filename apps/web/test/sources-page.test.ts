@@ -138,7 +138,7 @@ describe("help on the Sources screen", () => {
 
   it("has a description and an example for every control and rule", () => {
     expect(Object.keys(LIBRARY_HELP).sort()).toEqual(["kind", "process", "search", "sort", "unlinked"]);
-    expect(Object.keys(SOURCE_DIALOG_HELP).sort()).toEqual(["choice", "date", "existing", "kind", "quote", "target", "title", "type"]);
+    expect(Object.keys(SOURCE_DIALOG_HELP).sort()).toEqual(["choice", "date", "existing", "file", "kind", "quote", "target", "title", "type"]);
     for (const [key, help] of [...Object.entries(SOURCE_DIALOG_HELP), ...Object.entries(LINK_HELP), ...Object.entries(LIBRARY_HELP)]) {
       expect(help.label.length, key).toBeGreaterThan(2);
       expect(help.description.length, `${key} description`).toBeGreaterThan(30);

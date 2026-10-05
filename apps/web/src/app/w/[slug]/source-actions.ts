@@ -1,11 +1,25 @@
 "use server";
 
-import { SOURCE_COLUMNS, SOURCE_LINK_COLUMNS, linkColumns, loadSourceBody, searchSources, type SourceLinkRow, type SourceListRow, type SourceRow } from "@transpera-flow/db";
+import {
+  MAX_SOURCE_FILE_BYTES,
+  SOURCE_COLUMNS,
+  SOURCE_LINK_COLUMNS,
+  linkColumns,
+  loadSourceBody,
+  loadSourceFile,
+  searchSources,
+  type SourceFile,
+  type SourceLinkRow,
+  type SourceListRow,
+  type SourceRow,
+} from "@transpera-flow/db";
 import { mapOutcome, type SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField } from "@/lib/fields/server";
+import { extractSourceText } from "@/lib/sources/extract";
+import { displayName, parseStoragePath, TOO_BIG } from "@/lib/sources/file-check";
 import { PAGE_SIZE, parseLibraryQuery } from "@/lib/sources/library";
 import { linkJson, parseNewSource, parseTarget } from "@/lib/sources/links";
-import type { LinkSourceResult, RemoveSourceResult, SaveSourceResult } from "@/lib/sources/store";
+import type { AttachFileResult, FileLinkResult, LinkSourceResult, RemoveSourceResult, SaveSourceResult } from "@/lib/sources/store";
 import { cleanSourceField, formatSpeakers, isId, isSourceField, parseSpeakers, type Scalar } from "@/lib/sources/validate";
 import { createClient } from "@/lib/supabase/server";
 
@@ -133,9 +147,12 @@ export async function deleteSource(id: unknown): Promise<RemoveSourceResult> {
   if (!isId(id)) return invalid;
   const supabase = await signedInClient();
   if (!supabase) return signedOut;
-  const { data, error } = await supabase.from("sources").delete().eq("id", id).select("id");
+  const { data, error } = await supabase.from("sources").delete().eq("id", id).select("id, file_path");
   if (error) return failure(error);
-  return data?.length ? { status: "ok" } : forbidden;
+  if (!data?.length) return forbidden;
+  // Its original file goes with it (best effort: an editor may delete it; a file left behind is unreachable from the app).
+  if (data[0]!.file_path) await supabase.storage.from(BUCKET).remove([data[0]!.file_path]);
+  return { status: "ok" };
 }
 
 export type LibraryPageResult = { status: "ok"; rows: SourceListRow[]; total: number } | { status: "error"; message: string };
@@ -174,4 +191,77 @@ export async function readSourceBody(sourceId: unknown): Promise<{ status: "ok";
   } catch {
     return { status: "error", message: "Couldn't load the text. Try again." };
   }
+}
+
+/** A source's original file (its name, kind and size), read when it is opened. */
+export async function readSourceFile(sourceId: unknown): Promise<{ status: "ok"; file: SourceFile | null } | { status: "error"; message: string }> {
+  if (!isId(sourceId)) return invalid;
+  const supabase = await signedInClient();
+  if (!supabase) return signedOut;
+  try {
+    return { status: "ok", file: await loadSourceFile(supabase, sourceId) };
+  } catch {
+    return { status: "error", message: "Couldn't load the file's details. Try again." };
+  }
+}
+
+const BUCKET = "sources";
+
+/**
+ * Keep a file the browser has just uploaded to Storage (issue #182, B19 2/2) as a source's original, and its text as the
+ * source's full text. The upload itself went straight to the private `sources` bucket as the signed-in user (its storage
+ * policies: editors of the workspace only, into the workspace's own folder; at most 10 MB and the five types). Here, as that
+ * user: the path must be one made for this source's workspace; the file is read back from Storage and checked by its name AND
+ * its content, whatever type the browser declared; its text is read on the server; then the source is updated (RLS: editors
+ * only). A file refused at any point is deleted again, and a file it replaces is deleted once the new one is kept.
+ */
+export async function attachSourceFile(sourceId: unknown, path: unknown, name: unknown): Promise<AttachFileResult> {
+  if (!isId(sourceId) || typeof name !== "string") return invalid;
+  const supabase = await signedInClient();
+  if (!supabase) return signedOut;
+  const { data: source, error: readError } = await supabase.from("sources").select("id, workspace_id, file_path").eq("id", sourceId).maybeSingle();
+  if (readError) return failure(readError);
+  if (!source) return { status: "error", message: "That source isn't there any more." };
+  const where = parseStoragePath(path, source.workspace_id);
+  if (!where) return invalid;
+  const storage = supabase.storage.from(BUCKET);
+  const refuse = async (message: string): Promise<AttachFileResult> => {
+    await storage.remove([where.path]);
+    return { status: "error", message };
+  };
+
+  const { data: blob, error: downloadError } = await storage.download(where.path);
+  if (downloadError || !blob) return { status: "error", message: "Couldn't find the uploaded file. Upload it again." };
+  if (blob.size > MAX_SOURCE_FILE_BYTES) return refuse(TOO_BIG);
+  const read = await extractSourceText(where.name, new Uint8Array(await blob.arrayBuffer()));
+  if (!read.ok) return refuse(read.error);
+
+  const file: SourceFile = { path: where.path, name: displayName(name), type: read.type, size: blob.size };
+  const { data, error } = await supabase
+    .from("sources")
+    .update({ file_path: file.path, file_name: file.name, file_type: file.type, file_size: file.size, body: read.text || null })
+    .eq("id", sourceId)
+    .select("id");
+  if (error) {
+    await storage.remove([where.path]);
+    return failure(error);
+  }
+  if (!data?.length) return refuse(forbidden.message);
+  if (source.file_path && source.file_path !== where.path) await storage.remove([source.file_path]);
+  return { status: "ok", file, body: read.text || null };
+}
+
+/**
+ * A short-lived link that downloads a source's original file (members of its workspace only). It is always a download
+ * (`Content-Disposition: attachment`), never opened in the page, so an uploaded file is never rendered as HTML.
+ */
+export async function sourceFileLink(sourceId: unknown): Promise<FileLinkResult> {
+  if (!isId(sourceId)) return invalid;
+  const supabase = await signedInClient();
+  if (!supabase) return signedOut;
+  const file = await loadSourceFile(supabase, sourceId).catch(() => null);
+  if (!file) return { status: "error", message: "This source has no file." };
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(file.path, 60, { download: file.name });
+  if (error || !data?.signedUrl) return { status: "error", message: "Couldn't get the file. Try again." };
+  return { status: "ok", url: data.signedUrl };
 }
