@@ -10,7 +10,7 @@
 // chart (B15) included.
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import type { MonthBusy, Stat } from "@transpera-flow/engine";
+import { RATING_RULES, bandOf, isTooBusy, type MonthBusy, type Stat } from "@transpera-flow/engine";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { labelIndexes } from "@/lib/overview/axis";
 import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/timeline";
@@ -35,8 +35,13 @@ const TOP = 22;
 const AXIS = 22;
 const CLIENT_HEADER = 26;
 
-/** Busy shares at or past the line are Bad, at 95% or past it Operational risk: the rating colours of rule 1. */
-const toneOf = (v: number, line: number) => (v >= 0.95 ? "var(--rate-risk)" : v >= line ? "var(--rate-bad)" : null);
+type Cutoffs = readonly [number, number, number];
+
+/** Rule 1's bands, as the alerts read them: Bad is "too busy", the top band Operational risk, in the rating colours. */
+const toneOf = (v: number, cutoffs: Cutoffs) => {
+  const band = bandOf(cutoffs, v, RATING_RULES.busy.upperInclusive);
+  return band >= 3 ? "var(--rate-risk)" : band >= 2 ? "var(--rate-bad)" : null;
+};
 
 /** A legend entry: a swatch and a word, in text colour. */
 export function TimelineLegendItem({ children, swatch }: { children: ReactNode; swatch: ReactNode }) {
@@ -49,7 +54,7 @@ export function TimelineLegendItem({ children, swatch }: { children: ReactNode; 
 }
 
 /** The legend: what every mark on the timeline means. */
-export function TimelineLegend({ busyLine, hasMarkers, hasMarket }: { busyLine: number; hasMarkers: boolean; hasMarket: boolean }) {
+export function TimelineLegend({ busyLine, hasMarkers, hasMarket, hasUncovered = false }: { busyLine: number; hasMarkers: boolean; hasMarket: boolean; hasUncovered?: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" data-timeline-legend>
       <TimelineLegendItem swatch={<i aria-hidden className="h-0.5 w-4 rounded bg-accent" />}>Average</TimelineLegendItem>
@@ -62,6 +67,9 @@ export function TimelineLegend({ busyLine, hasMarkers, hasMarket }: { busyLine: 
           <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-fg">▼</span>}>Leaves</TimelineLegendItem>
           <TimelineLegendItem swatch={<i aria-hidden className="h-1 w-4 rounded-full bg-fg-3" />}>On leave</TimelineLegendItem>
         </>
+      )}
+      {hasUncovered && (
+        <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-rate-risk bg-rate-risk-soft" />}>No one to do the work</TimelineLegendItem>
       )}
       {hasMarket && <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-line-2 bg-[repeating-linear-gradient(135deg,var(--line-2)_0_2px,transparent_2px_5px)]" />}>Market condition</TimelineLegendItem>}
     </div>
@@ -80,17 +88,18 @@ function peakOf(row: TimelineRow, months: TimelineData["months"]): string {
 export function ForecastTimeline({
   data,
   rows,
-  busyLine,
+  cutoffs,
   label,
 }: {
   data: TimelineData;
   /** Which busy rows to draw: by role, or by person. */
   rows: "roles" | "people";
-  /** Where "Too busy" starts (rule 1's Bad cut-off). */
-  busyLine: number;
+  /** Rule 1's cut-offs (Good, Bad, Operational risk): the dashed line is where "Too busy" (Bad) starts. */
+  cutoffs: Cutoffs;
   /** What the chart shows, for a screen reader. */
   label: string;
 }) {
+  const busyLine = cutoffs[1];
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const hatch = `forecast-market-hatch-${useId().replace(/:/g, "")}`;
@@ -249,10 +258,18 @@ export function ForecastTimeline({
               {rowLabel(r, rowTop(r), row.name, peakOf(row, data.months))}
               <line x1={m.l} x2={m.l + plotW} y1={rowBase(r)} y2={rowBase(r)} stroke="var(--line-2)" strokeWidth={1} />
               <line x1={m.l} x2={m.l + plotW} y1={y(busyLine)} y2={y(busyLine)} stroke="var(--fg-3)" strokeDasharray="4 3" strokeWidth={1} />
+              {row.uncovered?.map((h, i) =>
+                h !== null ? (
+                  <g key={`uncovered-${i}`} data-uncovered={i}>
+                    <title>{`${data.months[i]!.long}: no one in ${row.name} to do about ${formatNumber(h, 0)} hours of work a week`}</title>
+                    <rect x={m.l + i * col + 1} y={rowBase(r) - ROW} width={Math.max(2, col - 2)} height={ROW} rx={3} fill="var(--rate-risk-soft)" stroke="var(--rate-risk)" strokeWidth={1} />
+                  </g>
+                ) : null,
+              )}
               <path d={bandPath(row.series.map((s) => (s ? { lo: s.p10, hi: s.p90 } : null)), y)} fill="var(--accent)" fillOpacity={0.22} />
               <path d={linePath(means, y)} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
               {row.series.map((s, i) => {
-                const tone = s ? toneOf(s.mean, busyLine) : null;
+                const tone = s ? toneOf(s.mean, cutoffs) : null;
                 return tone ? <circle key={i} cx={x(i)} cy={y(s!.mean)} r={3.5} fill={tone} stroke="var(--panel)" strokeWidth={2} /> : null;
               })}
               {last && (
@@ -261,6 +278,11 @@ export function ForecastTimeline({
                 </text>
               )}
               {row.markers.map((mk, k) => markerGlyph(mk, r, k))}
+              {!last && row.uncovered && (
+                <text x={m.l + plotW + 6} y={rowBase(r) - ROW / 2 + 4} className="fill-fg text-[11px] font-semibold">
+                  No one
+                </text>
+              )}
             </g>
           );
         })}
@@ -306,6 +328,7 @@ export function ForecastTimeline({
           <ul className="mt-1 flex flex-col gap-0.5">
             {busy.map((row) => {
               const s = row.series[hover];
+              const undone = row.uncovered?.[hover] ?? null;
               return (
                 <li key={row.id} className="flex justify-between gap-3 tabular-nums">
                   <span className="truncate">{row.name}</span>
@@ -314,8 +337,10 @@ export function ForecastTimeline({
                       <>
                         <b className="font-semibold">{formatPercent(s.mean)}</b>
                         <span className="text-muted-foreground"> ({formatPercent(s.p10)}–{formatPercent(s.p90)})</span>
-                        {s.mean >= busyLine ? " too busy" : ""}
+                        {isTooBusy(s.mean, cutoffs) ? " too busy" : ""}
                       </>
+                    ) : undone !== null ? (
+                      <b className="font-semibold">no one, {formatNumber(undone, 0)} h/wk undone</b>
                     ) : (
                       <span className="text-muted-foreground">not there</span>
                     )}
@@ -331,20 +356,25 @@ export function ForecastTimeline({
             ))}
           </ul>
           {data.markers.filter((mk) => hover >= mk.from && hover <= mk.to).map((mk) => (
-            <p key={`${mk.personId}-${mk.kind}`} className="mt-1 text-muted-foreground">
+            <p key={`${mk.personId}-${mk.kind}-${mk.at}`} className="mt-1 text-muted-foreground">
               {mk.label}, {mk.when}
             </p>
           ))}
         </div>
       )}
-      <TimelineTable data={data} busy={busy} busyLine={busyLine} />
+      <TimelineTable data={data} busy={busy} cutoffs={cutoffs} />
     </div>
   );
 }
 
 /** The same numbers as a table, for a screen reader. */
-function TimelineTable({ data, busy, busyLine }: { data: TimelineData; busy: TimelineRow[]; busyLine: number }) {
-  const cell = (s: MonthBusy | null) => (s ? `${formatPercent(s.mean)} (${formatPercent(s.p10)} to ${formatPercent(s.p90)})${s.mean >= busyLine ? ", too busy" : ""}` : "not there");
+function TimelineTable({ data, busy, cutoffs }: { data: TimelineData; busy: TimelineRow[]; cutoffs: Cutoffs }) {
+  const cell = (s: MonthBusy | null, undone: number | null) =>
+    s
+      ? `${formatPercent(s.mean)} (${formatPercent(s.p10)} to ${formatPercent(s.p90)})${isTooBusy(s.mean, cutoffs) ? ", too busy" : ""}${undone !== null ? `, ${formatNumber(undone, 0)} hours a week with no one to do them` : ""}`
+      : undone !== null
+        ? `no one there, ${formatNumber(undone, 0)} hours a week undone`
+        : "not there";
   const count = (s: Stat) => formatNumber(s.mean, 0);
   return (
     <table className="sr-only">
@@ -371,7 +401,7 @@ function TimelineTable({ data, busy, busyLine }: { data: TimelineData; busy: Tim
           <tr key={mo.index}>
             <th scope="row">{mo.long}</th>
             {busy.map((r) => (
-              <td key={r.id}>{cell(r.series[i] ?? null)}</td>
+              <td key={r.id}>{cell(r.series[i] ?? null, r.uncovered?.[i] ?? null)}</td>
             ))}
             {data.clients.map((c) => (
               <td key={c.id || "all"}>{count(c.series[i]!)}</td>

@@ -6,7 +6,10 @@
 // rules), on the average and in a bad month (the 90th percentile), and writes it as an insight: rated by rule 1 as any
 // other finding is, in plain English from a fixed template, with every number taken from the run.
 //
-// Someone already too busy on average in the first month isn't a forecast: the run's own "Too busy" insight says so.
+// Someone the run's own "Too busy" insight already covers (rated by rule 1 over the whole run) gets no alert from a
+// measure (average or bad month) that is too busy in the first month already: that insight says so. When it gets
+// too busy later is still news (a growing business crossing the line in June). A role
+// left with nobody to do its work gets an "Uncovered" alert instead (Operational risk, as no one can do the work).
 // Pure: no I/O, no clock, no randomness.
 
 import { eligible } from "./eligibility";
@@ -17,6 +20,7 @@ import type { EngineModel, MonthBusy, MonthlyResult, SimulationResult } from "./
 import {
   RATING_RULES,
   bandOf,
+  fixedRating,
   rateRule,
   ratingFields,
   resolveRatingConfig,
@@ -44,26 +48,30 @@ export interface BusyCrossing {
   badMonth: Crossing | null;
 }
 
+/** Whether a busy share is too busy (rule 1's Bad band or above), by the rule's own bands. The timeline uses the same test. */
+export const isTooBusy = (share: number, cutoffs: readonly [number, number, number]): boolean => bandOf(cutoffs, share, RATING_RULES.busy.upperInclusive) >= TOO_BUSY_BAND;
+
 /**
  * The first month a series is too busy (rule 1's Bad band or above), on its average and on its 90th percentile.
- * Months with nobody there (null) never cross.
+ * Months with nobody there (null) never cross. With `skipFirst`, a measure already too busy in the first month has no
+ * crossing at all: what it says is already known (the run's own "Too busy" insight).
  */
-export function firstCrossing(series: readonly (MonthBusy | null)[], cutoffs: readonly [number, number, number]): BusyCrossing {
-  const upper = RATING_RULES.busy.upperInclusive;
-  let average: Crossing | null = null;
-  let badMonth: Crossing | null = null;
-  series.forEach((m, i) => {
-    if (!m) return;
-    if (!average && bandOf(cutoffs, m.mean, upper) >= TOO_BUSY_BAND) average = { month: i, value: m.mean };
-    if (!badMonth && bandOf(cutoffs, m.p90, upper) >= TOO_BUSY_BAND) badMonth = { month: i, value: m.p90 };
-  });
-  return { average, badMonth };
+export function firstCrossing(series: readonly (MonthBusy | null)[], cutoffs: readonly [number, number, number], { skipFirst = false } = {}): BusyCrossing {
+  const first = (value: (m: MonthBusy) => number): Crossing | null => {
+    const i = series.findIndex((m) => m !== null && isTooBusy(value(m), cutoffs));
+    if (i < 0 || (skipFirst && i === 0)) return null;
+    return { month: i, value: value(series[i]!) };
+  };
+  return { average: first((m) => m.mean), badMonth: first((m) => m.p90) };
 }
 
 export interface ForecastAlertOptions {
   /** The month's name for month `i` of the run (0 is the first), as people read it: "February". Default: "month 1", "month 2"… */
   monthName?: (i: number) => string;
 }
+
+/** The prefix of an "Uncovered" alert's key: `forecast:uncovered:<role id>`. */
+export const UNCOVERED_KEY = `${FORECAST_KEY_PREFIX}:uncovered`;
 
 const LOCALE = "en-GB";
 const num = (v: number, digits = 1) => v.toLocaleString(LOCALE, { maximumFractionDigits: digits, minimumFractionDigits: 0 });
@@ -114,10 +122,14 @@ export function forecastAlerts(
   ): DetectedIssue | null => {
     const resolved = resolveRule(config, "busy", subject);
     if (!resolved.enabled) return null;
-    const { average, badMonth } = firstCrossing(series, resolved.cutoffs);
+    // Rated too busy over the whole run, as the run's own insight rates it: a spell from the first month is that insight's.
+    const whole = kind === "role" ? result.kpi.roles[id]?.util : result.kpi.people[id]?.util;
+    const covered =
+      whole !== undefined &&
+      rateRule(config, "busy", resolved, { average: whole.mean, p90: whole.p90, onBottleneck: kind === "role" ? id === result.bnRole : id === result.bnPerson }).rating !== "great";
+    const { average, badMonth } = firstCrossing(series, resolved.cutoffs, { skipFirst: covered });
     const bad = useBadMonth ? badMonth : null;
-    // Too busy on average from the first month: not a forecast (the run's own insight covers it). Never: nothing to say.
-    if (average?.month === 0 || (!average && !bad)) return null;
+    if (!average && !bad) return null;
     const at = Math.min(average?.month ?? Infinity, bad?.month ?? Infinity);
     const m = series[at]!;
     const outcome = rateRule(config, "busy", resolved, { average: m.mean, p90: m.p90, onBottleneck: false });
@@ -175,7 +187,37 @@ export function forecastAlerts(
   };
 
   const alerted = new Set<string>();
+  // A role left with nobody to do its work: Operational risk, whatever its busy share (there is none to compute).
   for (const rid of Object.keys(model.roles).sort()) {
+    const resolved = resolveRule(config, "busy", { roleId: rid });
+    const series = monthly.uncovered?.[rid];
+    const at = series ? series.findIndex((h) => h !== null) : -1;
+    if (!resolved.enabled || at < 0) continue;
+    const name = model.roles[rid]!.name;
+    const hours = series![at]!;
+    const steps = model.steps.filter((s) => s.role === rid).map((s) => s.id);
+    const last = series!.reduce<number>((l, h, i) => (h !== null ? i : l), at);
+    out.push({
+      key: `${UNCOVERED_KEY}:${rid}`,
+      type: "capacity",
+      ...fixedRating("risk"),
+      cost: noCost("A forecast: the work nobody is there to do waits, or is lost, from then on."),
+      title: `Uncovered from ${monthName(at)}: no one in ${name} to do ${num(hours, 0)} hours of work a week`,
+      evidence: [
+        `Forecast over ${monthly.months.length} month${monthly.months.length === 1 ? "" : "s"}, ${reps} simulated runs.`,
+        `From ${monthName(at)} nobody in ${name} is on the team${last > at ? `, until ${monthName(last)} at least` : ""}, so about ${num(hours)} hours a week of their work has nobody to do it.`,
+        at > 0 ? `Hire, or hand the work to someone else, by ${monthName(at - 1)}.` : "Hire, or hand the work to someone else, now.",
+      ].join(" "),
+      metrics: { month: at + 1, uncovered_hours_week: hours, ...(last > at ? { last_month: last + 1 } : {}) },
+      stepId: steps[0] ?? null,
+      roleId: rid,
+      personId: null,
+      fix: null,
+    });
+    alerted.add(rid);
+  }
+  for (const rid of Object.keys(model.roles).sort()) {
+    if (alerted.has(rid)) continue;
     const series = monthly.roles[rid];
     if (!series) continue;
     const members = Object.keys(people).filter((pid) => people[pid]!.roles.includes(rid));

@@ -640,6 +640,8 @@ interface ClientShape {
   /** Each carrier once, in the order first met, and their parts of the load as flat (role index, hours a week) pairs. */
   touched: PersonState[];
   parts: number[][];
+  /** Load nobody carries (no one of the role on the team), as flat (role index, hours a week) pairs. */
+  uncovered: number[];
 }
 
 /** True when any step has current WIP entered (0 counts: "nothing here right now"). */
@@ -679,8 +681,12 @@ export function runOnce(
   keepTrace: boolean,
   start: InitialState = initialState(model),
   sampleWeekly = false,
-  /** Keep month-by-month sums (`MonthlyReplication`, the forecast). They are read off the run and change nothing in it. */
-  sampleMonthly = false,
+  /**
+   * Keep month-by-month sums (`MonthlyReplication`, the forecast). They are read off the run and change nothing in it.
+   * `true`: months of 52/12 weeks from t = 0. A list: the hours (inside the run) where each month after the first
+   * starts, e.g. the 1st of each calendar month (see `monthBounds`).
+   */
+  sampleMonthly: boolean | readonly number[] = false,
 ): ReplicationResult {
   // Groups and child processes are only a view: runs see leaf steps (a no-op for flat models).
   model = withClientGroups(flattenModel(model));
@@ -953,14 +959,19 @@ export function runOnce(
 
   // Month-by-month sums (the forecast), only when asked for: flat arrays of [row × month], rows being roles, people or
   // steps by index. Nothing in the run reads them.
-  const nM = sampleMonthly ? Math.max(1, Math.ceil(H / monthHours - 1e-9)) : 0;
+  const bounds = sampleMonthly ? monthBounds(H, monthHours, sampleMonthly === true ? undefined : sampleMonthly) : null;
+  const nM = bounds ? bounds.length - 1 : 0;
   const nR = roleIds.length;
   const nP = people.length;
   const mon = sampleMonthly
     ? {
         roleWork: new Float64Array(nR * nM),
-        /** Client hours that fell in someone's leave, by role: shared out to the colleagues there that month at the end. */
-        roleAway: new Float64Array(nR * nM),
+        /** Client hours that fell in someone's leave, by person and role: shared out to the others in the role there that month at the end. */
+        personAway: new Float64Array(nP * nR * nM),
+        /** Client hours of a role nobody on the team carried (nobody left in its pool), by role. */
+        roleUncovered: new Float64Array(nR * nM),
+        /** Items reaching each step, for the work a role with nobody there leaves undone. */
+        arrivals: new Float64Array(stepList.length * nM),
         personWork: new Float64Array(nP * nM),
         overWeeks: new Float64Array(nP * nM),
         overOngoing: new Float64Array(nP * nM),
@@ -973,7 +984,19 @@ export function runOnce(
       }
     : null;
   /** The month `t` falls in (0 to nM - 1). */
-  const monthOf = (t: number) => Math.min(nM - 1, Math.max(0, Math.floor(t / monthHours)));
+  const monthOf = (t: number) => {
+    const b = bounds!;
+    let lo = 0;
+    let hi = nM - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (b[mid]! <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  /** Where month m ends, cut at `hi`. */
+  const monthEnd = (m: number, hi: number) => (m === nM - 1 ? hi : Math.min(hi, bounds![m + 1]!));
   /** Add `amount`, spread evenly over [a, b], to row `row`'s months, keeping only the part inside [0, H]. */
   const spread = (arr: Float64Array, row: number, a: number, b: number, amount: number) => {
     if (!(amount > 0)) return;
@@ -986,7 +1009,7 @@ export function runOnce(
     if (!(hi > lo)) return;
     const rate = amount / (b - a);
     for (let m = monthOf(lo), t = lo; t < hi && m < nM; m++) {
-      const end = m === nM - 1 ? hi : Math.min(hi, (m + 1) * monthHours);
+      const end = monthEnd(m, hi);
       arr[row * nM + m]! += rate * (end - t);
       t = end;
     }
@@ -1001,7 +1024,7 @@ export function runOnce(
   const monthlyOngoing = (p: PersonState, a: number, b: number) => {
     const sums = mon!;
     for (let m = monthOf(a), t = a; t < b && m < nM; m++) {
-      const end = m === nM - 1 ? b : Math.min(b, (m + 1) * monthHours);
+      const end = monthEnd(m, b);
       const weeks = (end - t) / hpw;
       const away = p.leave ? awayHours(p, t, end) / hpw : 0;
       sums.personWork[p.idx * nM + m]! += p.load * (weeks - away);
@@ -1009,7 +1032,7 @@ export function runOnce(
       for (let r = 0; r < has.length; r++) {
         if (!has[r]) continue;
         sums.roleWork[r * nM + m]! += p.roleLoad[r]! * weeks;
-        if (away > 0) sums.roleAway[r * nM + m]! += p.roleLoad[r]! * away;
+        if (away > 0) sums.personAway[(p.idx * nR + r) * nM + m]! += p.roleLoad[r]! * away;
       }
       if (overloaded(p)) {
         sums.overWeeks[p.idx * nM + m]! += weeks;
@@ -1017,6 +1040,17 @@ export function runOnce(
       }
       t = end;
     }
+  };
+  /** Client hours a week, per role, that nobody carries now (nobody of the role on the team), and since when. Month by month only. */
+  const uncoveredRate = new Float64Array(nR);
+  let uncoveredT = -W;
+  const advanceUncovered = (t: number) => {
+    if (!mon) return;
+    const a = Math.max(uncoveredT, 0);
+    const b = Math.min(t, H);
+    uncoveredT = t;
+    if (!(b > a)) return;
+    for (let r = 0; r < nR; r++) if (uncoveredRate[r]! > 1e-9) spread(mon.roleUncovered, r, a, b, (uncoveredRate[r]! * (b - a)) / hpw);
   };
   /** Add a person's load since `lastT` to the measured-window integrals. */
   const advance = (p: PersonState, t: number) => {
@@ -1042,6 +1076,12 @@ export function runOnce(
   };
   /** Pooled model: every person's share of `active` clients' ongoing hours, by role and capacity. */
   const setPooledLoads = (t: number) => {
+    if (mon) {
+      advanceUncovered(t);
+      roleIds.forEach((rid, r) => {
+        uncoveredRate[r] = poolCapacity[rid] ? 0 : active * (model.roles[rid]!.ongoing || 0);
+      });
+    }
     for (const p of people) {
       advance(p, t);
       p.roleLoad.fill(0);
@@ -1248,11 +1288,15 @@ export function runOnce(
     let shape = shapes.get(key);
     if (shape) return shape;
     const carriers: [PersonState, string, number][] = [];
+    const uncovered: number[] = [];
     const loads = clientRoleLoads(model, client);
     for (const rid in loads) {
-      for (const c of carriersFor(pools, poolPeople, rid, client.assignments[rid])) {
+      const found = carriersFor(pools, poolPeople, rid, client.assignments[rid]);
+      for (const c of found) {
         carriers.push([personById.get(c.person)!, rid, loads[rid]! * c.share]);
       }
+      // Nobody of the role on the team: the work is still there, undone.
+      if (!found.length && loads[rid]! > 0) uncovered.push(roleIndex.get(rid)!, loads[rid]!);
     }
     const assigned: PersonState[] = [];
     for (const pid of new Set(Object.values(client.assignments))) {
@@ -1287,6 +1331,7 @@ export function runOnce(
       team: NO_TEAM,
       touched,
       parts,
+      uncovered,
     };
     shape.team = teamFor(client, shape);
     shapes.set(key, shape);
@@ -1363,6 +1408,10 @@ export function runOnce(
       p.clients++;
     }
     for (let i = 0; i < touched.length; i++) addRosterLoad(touched[i]!, parts[i]!, t);
+    if (mon && shape.uncovered.length) {
+      advanceUncovered(t);
+      for (let i = 0; i < shape.uncovered.length; i += 2) uncoveredRate[shape.uncovered[i]!]! += shape.uncovered[i + 1]!;
+    }
     rosterClients.push(rc);
     active = rosterClients.length;
   };
@@ -1383,6 +1432,11 @@ export function runOnce(
     for (const p of rc.shape.touched) {
       p.contrib.delete(rc);
       setRosterLoad(p, t);
+    }
+    if (mon && rc.shape.uncovered.length) {
+      advanceUncovered(t);
+      const u = rc.shape.uncovered;
+      for (let i = 0; i < u.length; i += 2) uncoveredRate[u[i]!] = Math.max(0, uncoveredRate[u[i]!]! - u[i + 1]!);
     }
   };
   /**
@@ -1410,6 +1464,14 @@ export function runOnce(
       for (let i = 0; i < shape.touched.length; i++) shape.touched[i]!.contrib.set(rc, shape.parts[i]!);
     }
     for (const p of people) setRosterLoad(p, t);
+    if (mon) {
+      advanceUncovered(t);
+      uncoveredRate.fill(0);
+      for (const rc of rosterClients) {
+        const u = rc.shape.uncovered;
+        for (let i = 0; i < u.length; i += 2) uncoveredRate[u[i]!]! += u[i + 1]!;
+      }
+    }
   };
   /** A retainer won during the run: a synthetic client, assigned per role by round-robin among the role's members. */
   const addWonClient = (svc: ServiceState, t: number) => {
@@ -1651,6 +1713,7 @@ export function runOnce(
     const st = target.st;
     if (st) {
       st.stat.arrivals++;
+      if (mon && t >= 0 && t < H) mon.arrivals[st.mi * nM + monthOf(t)]!++;
       queueAt(e, st, t, t);
       return;
     }
@@ -2040,6 +2103,7 @@ export function runOnce(
     if (redo) {
       st.stat.reworks++;
       st.stat.arrivals++;
+      if (mon && t >= 0 && t < H) mon.arrivals[st.mi * nM + monthOf(t)]!++;
       if (lp) {
         for (let i = 0; i < lps.length; i++) {
           const L = lps[i]!;
@@ -2287,7 +2351,8 @@ export function runOnce(
       churnTick(ev.t);
       if (mon) {
         // Active clients by service at the end of each week, averaged over the month at the end.
-        const m = Math.min(nM - 1, Math.max(0, Math.ceil(ev.t / monthHours - 1e-9) - 1));
+        // The tick closes the week before it: a tick on a month's first hour belongs to the month before.
+        const m = monthOf(Math.max(0, ev.t - 1e-6));
         mon.ticks[m]!++;
         const add = (key: string, n: number) => {
           let row = mon.clients.get(key);
@@ -2307,6 +2372,7 @@ export function runOnce(
     pool.push(ev);
   }
   for (const p of people) advance(p, H);
+  advanceUncovered(H);
   // Clients still active bill to the horizon.
   for (const rc of rosterClients) bill(rc, H);
   // Deadlines up to the horizon, after its weekly tick.
@@ -2318,7 +2384,7 @@ export function runOnce(
    * someone on leave shared out to the colleagues of their role who are there that month, by the hours each has.
    */
   function monthlyOut(sums: NonNullable<typeof mon>): MonthlyReplication {
-    const bounds = Array.from({ length: nM }, (_, m): [number, number] => [m * monthHours, m === nM - 1 ? H : (m + 1) * monthHours]);
+    const spans = Array.from({ length: nM }, (_, m): [number, number] => [bounds![m]!, bounds![m + 1]!]);
     const row = (arr: Float64Array, i: number) => Array.from(arr.subarray(i * nM, (i + 1) * nM));
     const personCapacity: Record<string, number[]> = {};
     const personOvertime: Record<string, number[]> = {};
@@ -2333,8 +2399,8 @@ export function runOnce(
     });
     for (const p of people) {
       const c = p.person.capacity;
-      const cap = bounds.map(([a, b]) => Math.max(0, (c * (b - a - awayHours(p, a, b))) / hpw));
-      const ot = bounds.map((_, m) => {
+      const cap = spans.map(([a, b]) => Math.max(0, (c * (b - a - awayHours(p, a, b))) / hpw));
+      const ot = spans.map((_, m) => {
         const i = p.idx * nM + m;
         const over = sums.overWeeks[i]!;
         return overtimeCap > 0 ? Math.min(Math.max(0, sums.overOngoing[i]! + sums.overPipeline[i]! - c * over), overtimeCap * c * over) : 0;
@@ -2350,15 +2416,30 @@ export function runOnce(
         }
       }
     }
+    // Someone's client hours while they are away go to the others in the role who are there, by the hours each has.
     roleIds.forEach((rid, r) => {
       const members = people.filter((p) => p.person.roles.includes(rid));
-      for (let m = 0; m < nM; m++) {
-        const away = sums.roleAway[r * nM + m]!;
-        if (!(away > 0)) continue;
-        const total = members.reduce((sum, p) => sum + personCapacity[p.id]![m]! / p.person.roles.length, 0);
-        if (!(total > 0)) continue;
-        for (const p of members) personWork[p.id]![m]! += (away * (personCapacity[p.id]![m]! / p.person.roles.length)) / total;
+      for (const away of members) {
+        for (let m = 0; m < nM; m++) {
+          const hours = sums.personAway[(away.idx * nR + r) * nM + m]!;
+          if (!(hours > 0)) continue;
+          const others = members.filter((p) => p !== away);
+          const total = others.reduce((sum, p) => sum + personCapacity[p.id]![m]! / p.person.roles.length, 0);
+          if (!(total > 0)) continue;
+          for (const p of others) personWork[p.id]![m]! += (hours * (personCapacity[p.id]![m]! / p.person.roles.length)) / total;
+        }
       }
+    });
+    // Work nobody in a role was there to do: client hours no one carried, and, in months the role has no hours at all,
+    // the hands-on time of the items that reached its steps (each at the step's mean).
+    const roleUncovered: Record<string, number[]> = {};
+    roleIds.forEach((rid, r) => {
+      const out = row(sums.roleUncovered, r);
+      for (const st of stepList) {
+        if (st.s.role !== rid || st.s.person) continue;
+        for (let m = 0; m < nM; m++) if (!(roleCapacity[rid]![m]! > 0)) out[m]! += sums.arrivals[st.mi * nM + m]! * st.s.work;
+      }
+      roleUncovered[rid] = out;
     });
     const waitSum: Record<string, number[]> = {};
     const waitN: Record<string, number[]> = {};
@@ -2370,7 +2451,20 @@ export function runOnce(
     for (const [key, counts] of [...sums.clients.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       clients[key] = Array.from(counts, (n, m) => (sums.ticks[m]! > 0 ? n / sums.ticks[m]! : 0));
     }
-    return { roleWork, roleCapacity, roleOvertime, personWork, personCapacity, personOvertime, waitSum, waitN, lateTasks: Array.from(sums.late), clients };
+    return {
+      bounds: [...bounds!],
+      roleWork,
+      roleCapacity,
+      roleOvertime,
+      roleUncovered,
+      personWork,
+      personCapacity,
+      personOvertime,
+      waitSum,
+      waitN,
+      lateTasks: Array.from(sums.late),
+      clients,
+    };
   }
 
   const stepOut: Record<string, StepResult> = {};
@@ -2831,6 +2925,24 @@ const visitShare = (n: number, visits: number) => (visits > 0 ? Math.min(1, n / 
 export interface SimulateOptions {
   /** Month-by-month busy shares, waits, late client tasks and clients (`SimulationResult.monthly`; the forecast, issue #35). */
   monthly?: boolean;
+  /**
+   * With `monthly`: where each month after the first starts, in working hours from t = 0 (the 1st of each calendar
+   * month, say), so the months are the calendar's. Omitted: months of 52/12 weeks from the start.
+   */
+  monthStarts?: readonly number[];
+}
+
+/**
+ * The edges of a run's months: 0, each month's start, and the horizon. With `starts`, those inside the run (sorted,
+ * repeats dropped); otherwise every 52/12 weeks.
+ */
+export function monthBounds(H: number, monthHours: number, starts?: readonly number[]): number[] {
+  if (starts) {
+    const inside = [...new Set(starts.filter((t) => Number.isFinite(t) && t > 0 && t < H))].sort((a, b) => a - b);
+    return [0, ...inside, H];
+  }
+  const n = Math.max(1, Math.ceil(H / monthHours - 1e-9));
+  return [...Array.from({ length: n }, (_, m) => m * monthHours), H];
 }
 
 export function simulate(model: EngineModel, reps = 30, seed = 1, options: SimulateOptions = {}): SimulationResult {
@@ -2839,7 +2951,7 @@ export function simulate(model: EngineModel, reps = 30, seed = 1, options: Simul
   let trace: TraceEntity[] | null = null;
   const start = initialState(model);
   for (let i = 0; i < reps; i++) {
-    const r = runOnce(model, seed + i * SEED_STRIDE, i === 0, start, false, options.monthly === true);
+    const r = runOnce(model, seed + i * SEED_STRIDE, i === 0, start, false, options.monthly ? (options.monthStarts ?? true) : false);
     if (i === 0) trace = r.entities;
     runs.push(r);
   }
@@ -2978,10 +3090,9 @@ function monthBusy(work: number[], capacity: number[], overtime: number[], weeks
 
 /** The replications' month-by-month sums as means and 10-90% ranges (see `MonthlyResult`). */
 function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyResult {
-  const H = model.horizonWeeks * model.hoursPerWeek;
-  const monthHours = (52 / 12) * model.hoursPerWeek;
-  const nM = reps[0]!.lateTasks.length;
-  const months = Array.from({ length: nM }, (_, m) => ({ start: m * monthHours, end: m === nM - 1 ? H : (m + 1) * monthHours }));
+  const bounds = reps[0]!.bounds;
+  const nM = bounds.length - 1;
+  const months = Array.from({ length: nM }, (_, m) => ({ start: bounds[m]!, end: bounds[m + 1]! }));
   const weeksOf = (m: number) => (months[m]!.end - months[m]!.start) / model.hoursPerWeek;
   const busyRows = (work: (r: MonthlyReplication) => Record<string, number[]>, cap: (r: MonthlyReplication) => Record<string, number[]>, ot: (r: MonthlyReplication) => Record<string, number[]>) => {
     const out: Record<string, (MonthBusy | null)[]> = {};
@@ -3007,8 +3118,16 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
   const keys = [...new Set(reps.flatMap((r) => Object.keys(r.clients)))].sort();
   const clients: Record<string, Stat[]> = {};
   for (const key of keys) clients[key] = months.map((_, m) => stat(reps.map((r) => r.clients[key]?.[m] ?? 0)));
+  const uncovered: Record<string, (number | null)[]> = {};
+  for (const id of Object.keys(reps[0]!.roleUncovered)) {
+    uncovered[id] = months.map((_, m) => {
+      const perWeek = reps.reduce((a, r) => a + r.roleUncovered[id]![m]!, 0) / reps.length / weeksOf(m);
+      return perWeek > 0.05 ? perWeek : null;
+    });
+  }
   return {
     months,
+    uncovered,
     roles: busyRows((r) => r.roleWork, (r) => r.roleCapacity, (r) => r.roleOvertime),
     people: busyRows((r) => r.personWork, (r) => r.personCapacity, (r) => r.personOvertime),
     waits,

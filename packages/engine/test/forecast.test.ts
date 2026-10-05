@@ -20,6 +20,8 @@ const HPW = 40;
 const MONTH = (52 / 12) * HPW;
 const months = (n: number) => Math.round((n * 52) / 12);
 
+const busy = (mean: number, p90 = mean): MonthBusy => ({ mean, p10: mean, p90, capacity: 40, work: mean * 40 });
+
 /** A run's numbers without the month-by-month part, to compare with a run that wasn't asked for it. */
 const withoutMonthly = ({ monthly: _monthly, ...rest }: SimulationResult) => rest;
 
@@ -171,7 +173,6 @@ describe("planned hires and leave change capacity in the right months", () => {
 });
 
 describe("who gets too busy, and when", () => {
-  const busy = (mean: number, p90 = mean): MonthBusy => ({ mean, p10: mean, p90, capacity: 40, work: mean * 40 });
 
   it("finds the first month on the average and in a bad month", () => {
     const series = [busy(0.6, 0.7), busy(0.7, 0.86), null, busy(0.86, 0.9), busy(0.8, 0.9)];
@@ -240,6 +241,87 @@ describe("who gets too busy, and when", () => {
     const after = forecastAlerts(hired, simulate(hired, 20, 1, { monthly: true })).find((a) => a.key === "forecast:role:ppc");
     expect(before).toBeDefined();
     expect(after?.metrics.month ?? Infinity).toBeGreaterThan(before!.metrics.month!);
+  });
+});
+
+describe("review fixes: calendar months, uncovered roles, the run's own insight, leave hand-back", () => {
+  /** One role of client work only (no enquiries), two or three people: every hour is the pooled client load. */
+  const clientWorkOnly = (people: Record<string, Partial<EnginePerson>>, weeks = months(3)): EngineModel => ({
+    horizonWeeks: weeks,
+    hoursPerWeek: HPW,
+    leadsPerWeek: 0,
+    activeClients: 30,
+    churnMonthly: 0,
+    retainer: 1000,
+    warmupWeeks: 0,
+    roles: { am: { name: "Account manager", count: 1, cost: 50, ongoing: 1 } },
+    people: Object.fromEntries(Object.entries(people).map(([id, p]) => [id, { name: id, roles: ["am"], capacity: HPW, ...p }])),
+    entry: "s",
+    sinks: { won: "won", lost: "lost" },
+    steps: [{ id: "s", name: "S", role: "am", work: 1, wait: 0, rework: 0, next: [{ to: "won", p: 1 }] }],
+  });
+
+  it("takes the months' edges it is given (calendar months), first and last ones part of a month", () => {
+    const m = { ...northbeamModel(), horizonWeeks: months(3) };
+    const starts = [20, 200, 380];
+    const mo = simulate(m, 3, 1, { monthly: true, monthStarts: starts }).monthly!;
+    expect(mo.months.map((x) => [x.start, x.end])).toEqual([
+      [0, 20],
+      [20, 200],
+      [200, 380],
+      [380, months(3) * HPW],
+    ]);
+    // Asking for other months changes nothing else in the run.
+    expect(withoutMonthly(simulate(m, 3, 1, { monthly: true, monthStarts: starts }))).toEqual(simulate(m, 3, 1));
+  });
+
+  it("gives a person's client hours on leave to the others in the role, not back to them", () => {
+    // Two people, 15 client hours a week each. A's leave is the second half of the second month.
+    const mid = 1.5 * MONTH;
+    const two = simulate(clientWorkOnly({ a: { leave: [[mid, 2 * MONTH]] }, b: {} }), 1, 1, { monthly: true }).monthly!;
+    const weeks = MONTH / HPW;
+    expect(two.people.a![1]!.work * weeks).toBeCloseTo(15 * (weeks / 2), 6);
+    expect(two.people.b![1]!.work * weeks).toBeCloseTo(15 * weeks + 15 * (weeks / 2), 6);
+    // Three people (10 hours each): A's half month goes to B and C, by their hours (C is part-time).
+    const three = simulate(clientWorkOnly({ a: { leave: [[mid, 2 * MONTH]] }, b: {}, c: { capacity: 20 } }), 1, 1, { monthly: true }).monthly!;
+    const load = (cap: number) => (30 * cap) / 100;
+    const away = load(40) * (weeks / 2);
+    expect(three.people.a![1]!.work * weeks).toBeCloseTo(load(40) * (weeks / 2), 6);
+    expect(three.people.b![1]!.work * weeks).toBeCloseTo(load(40) * weeks + (away * 40) / 60, 6);
+    expect(three.people.c![1]!.work * weeks).toBeCloseTo(load(20) * weeks + (away * 20) / 60, 6);
+  });
+
+  it("says a role is uncovered when its only person leaves: no one there to do its work, at Operational risk", () => {
+    const m = named({ "strat-1": { until: 3 * MONTH } });
+    const r = simulate(m, 20, 1, { monthly: true });
+    const uncovered = r.monthly!.uncovered.strat!;
+    expect(uncovered.slice(0, 3)).toEqual([null, null, null]);
+    for (const h of uncovered.slice(3)) expect(h).toBeGreaterThan(5);
+    expect(r.monthly!.roles.strat![5]).toBeNull();
+    const alerts = forecastAlerts(m, r);
+    const alert = alerts.find((a) => a.key === "forecast:uncovered:strat")!;
+    expect(alert.rating).toBe("risk");
+    expect(alert.title).toBe(`Uncovered from month 4: no one in Strategist to do ${Math.round(uncovered[3]!)} hours of work a week`);
+    expect(alert.metrics.uncovered_hours_week).toBe(uncovered[3]);
+    // It speaks for the role: no "too busy" alert beside it.
+    expect(alerts.some((a) => a.key === "forecast:role:strat")).toBe(false);
+    expect(ruleOfFinding(alert)).toBe("busy");
+  });
+
+  it("says nothing new for a role the run's own insight covers when it is too busy from the first month, on the average or a bad month", () => {
+    const flat = { ...northbeamModel(), horizonWeeks: months(12) };
+    const r = simulate(flat, 20, 1, { monthly: true });
+    // The strategist is too busy over the whole run, and in a bad month from the first month.
+    expect(r.kpi.roles.strat!.util.p90).toBeGreaterThanOrEqual(0.85);
+    expect(r.monthly!.roles.strat![0]!.p90).toBeGreaterThanOrEqual(0.85);
+    const strat = forecastAlerts(flat, r).find((a) => a.key === "forecast:role:strat");
+    // No "Act now" from the first month; at most when the average crosses later.
+    expect(strat?.metrics.month ?? Infinity).toBeGreaterThan(1);
+    expect(strat?.evidence ?? "").not.toContain("Act now");
+    expect(strat?.metrics.bad_month).toBeUndefined();
+    // Each measure on its own: a bad month from the start is known, the average crossing later is news.
+    const series = [busy(0.7, 0.9), busy(0.8, 0.9), busy(0.9, 0.95)];
+    expect(firstCrossing(series, [0.7, 0.85, 0.95], { skipFirst: true })).toEqual({ average: { month: 2, value: 0.9 }, badMonth: null });
   });
 });
 

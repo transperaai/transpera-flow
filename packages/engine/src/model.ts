@@ -587,6 +587,8 @@ export interface WeeklySamples {
  * month. Hours are totals over the month, not a week. Reading these never changes the run.
  */
 export interface MonthlyReplication {
+  /** The months' edges in working hours: 0, each month's start, the horizon. */
+  bounds: number[];
   /**
    * Work per role id: pipeline and servicing hands-on time (spread over the time it is worked) and ongoing client
    * hours, all of it, including the client hours of someone on leave.
@@ -597,8 +599,13 @@ export interface MonthlyReplication {
   /** Overtime hours, split across the roles of the people who worked it. */
   roleOvertime: Record<string, number[]>;
   /**
-   * Work per person id. Client hours that fall in their leave go to the colleagues of the same role who are there
-   * that month, by the hours each has, so a person's month is the work they actually face.
+   * Work nobody in the role was there to do: client hours no one of the role carried (nobody on the team), and in
+   * months the role has no hours at all, the hands-on time of the items that reached its steps (at each step's mean).
+   */
+  roleUncovered: Record<string, number[]>;
+  /**
+   * Work per person id. Client hours that fall in someone's leave go to the others of the same role who are there
+   * that month (not to them), by the hours each has, so a person's month is the work they actually face.
    */
   personWork: Record<string, number[]>;
   personCapacity: Record<string, number[]>;
@@ -630,6 +637,8 @@ export interface MonthlyResult {
   months: { start: number; end: number }[];
   /** Per role id and month; null when nobody in the role is there that month. */
   roles: Record<string, (MonthBusy | null)[]>;
+  /** Per role id and month: hours a week of work nobody in the role was there to do (see `MonthlyReplication.roleUncovered`); null when none. */
+  uncovered: Record<string, (number | null)[]>;
   /** Per person id and month; null when they aren't there at all that month. */
   people: Record<string, (MonthBusy | null)[]>;
   /** Mean hours waited for a person per step id and month (all replications together); null with no waits that month. */

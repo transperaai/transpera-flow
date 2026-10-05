@@ -67,10 +67,11 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
   const start = useMemo(() => startDate ?? today(), [startDate]);
 
   const built = useMemo(() => forecastModel(live, months, start), [live, months, start]);
-  const sim = useSimulation(built.model, 30, 1, { monthly: true });
+  const sim = useSimulation(built.model, 30, 1, { monthly: true, monthStarts: built.monthStarts });
   const result = sim.status === "done" && built.model && sim.run.result.H === built.model.horizonWeeks * built.model.hoursPerWeek ? sim.run.result : null;
   const rules = useRatingSettings(mode === "demo", analysisRules);
-  const busyLine = useMemo(() => toRatingConfig(rules, live.workspace.settings.hours_per_week).rules.busy.cutoffs[1], [rules, live.workspace.settings.hours_per_week]);
+  const cutoffs = useMemo(() => toRatingConfig(rules, live.workspace.settings.hours_per_week).rules.busy.cutoffs, [rules, live.workspace.settings.hours_per_week]);
+  const busyLine = cutoffs[1];
   const alerts = useMemo(() => (built.model && result ? forecastInsights(built.model, result, rules, start) : null), [built.model, result, rules, start]);
   const data = useMemo(() => (built.model && result ? timelineData(built.model, result, live, start) : null), [built.model, result, live, start]);
 
@@ -176,7 +177,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
         </div>
         <Card className="gap-3 px-4 py-4" data-chart="forecast">
           <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
-            <TimelineLegend busyLine={busyLine} hasMarkers={planned > 0} hasMarket={(data?.market.length ?? 0) > 0} />
+            <TimelineLegend busyLine={busyLine} hasUncovered={data?.roles.some((r) => r.uncovered) ?? false} hasMarkers={planned > 0} hasMarket={(data?.market.length ?? 0) > 0} />
             <Help
               label="The “Too busy” line"
               description="Where your analysis rules say a role or person is too busy (rule 1, Bad). Above it there is little room for a bad month or a new client. You can change it in Settings, Analysis rules."
@@ -187,7 +188,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
             <ForecastTimeline
               data={data}
               rows={rows}
-              busyLine={busyLine}
+              cutoffs={cutoffs}
               label={`How busy each ${rows === "roles" ? "role" : "person"} is per month over the next ${span}, against the ${Math.round(busyLine * 100)}% too busy line.`}
             />
           ) : sim.status === "error" ? (

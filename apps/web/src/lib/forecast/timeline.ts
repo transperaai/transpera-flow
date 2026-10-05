@@ -3,12 +3,12 @@
 // leave. Pure (no React), so it is tested without a browser, and shared: any screen that runs the model month by month
 // (`simulate(…, { monthly: true })`) can draw the same timeline from it (the Overview's team load chart, B15).
 
-import { monthOfHour, type EngineModel, type MonthBusy, type SimulationResult, type Stat } from "@transpera-flow/engine";
-import type { ProcessBundle } from "@transpera-flow/db";
+import { monthOfHour, type EngineModel, type MonthBusy, type MonthlyResult, type SimulationResult, type Stat } from "@transpera-flow/engine";
+import { workingDaysBetween, type ProcessBundle } from "@transpera-flow/db";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/** A month of the forecast, named by the calendar month it starts in. */
+/** A month of the forecast, named by the calendar month its middle falls in. */
 export interface TimelineMonth {
   index: number;
   /** "Oct", with the year on January and on the first month: "Oct 26". */
@@ -19,15 +19,42 @@ export interface TimelineMonth {
   name: string;
 }
 
+/** Working days a month has to have to stand alone: a first or last part of a month shorter than this joins its neighbour. */
+const MIN_PART_DAYS = 5;
+
 /**
- * The calendar months of a forecast that starts on `startDate` (ISO): month i is the calendar month i months on.
- * The engine's months are 52/12 weeks of working time, so this is the month each one mostly falls in.
+ * Where each calendar month after the first starts, in working hours from the start of `startDate` (weekdays only,
+ * as the model counts time), for `simulate(…, { monthly: true, monthStarts })`. A first or last part of a month
+ * shorter than a working week joins the month next to it, so no month is a few days long.
  */
-export function timelineMonths(startDate: string, count: number): TimelineMonth[] {
+export function calendarMonthStarts(startDate: string, horizonWeeks: number, hoursPerWeek: number): number[] {
+  const perDay = hoursPerWeek / 5;
+  const H = horizonWeeks * hoursPerWeek;
   const [y, m] = startDate.split("-").map(Number) as [number, number];
-  return Array.from({ length: count }, (_, index) => {
-    const month = (m - 1 + index) % 12;
-    const year = y + Math.floor((m - 1 + index) / 12);
+  const starts: number[] = [];
+  for (let k = 1; ; k++) {
+    const year = y + Math.floor((m - 1 + k) / 12);
+    const month = (m - 1 + k) % 12;
+    const first = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const hours = workingDaysBetween(startDate, first) * perDay;
+    if (hours >= H) break;
+    starts.push(hours);
+  }
+  if (starts.length && starts[0]! < MIN_PART_DAYS * perDay) starts.shift();
+  if (starts.length && H - starts[starts.length - 1]! < MIN_PART_DAYS * perDay) starts.pop();
+  return starts;
+}
+
+/**
+ * The calendar months of a forecast that starts on `startDate` (ISO), one per month of the run, each named by the
+ * calendar month its middle falls in (with calendar month edges, the month it is; a first or last part of a month
+ * joined to its neighbour takes the neighbour's name).
+ */
+export function timelineMonths(startDate: string, months: MonthlyResult["months"], hoursPerWeek: number): TimelineMonth[] {
+  return months.map((mo, index) => {
+    const mid = dateAtHour(startDate, (mo.start + mo.end) / 2, hoursPerWeek);
+    const month = mid.getUTCMonth();
+    const year = mid.getUTCFullYear();
     const name = MONTH_NAMES[month]!;
     const yy = String(year % 100).padStart(2, "0");
     return { index, name, long: `${name} ${year}`, short: index === 0 || month === 0 ? `${name.slice(0, 3)} ${yy}` : name.slice(0, 3) };
@@ -43,7 +70,7 @@ export interface TimelineMarker {
   /** The month it starts in, and (leave) the month it ends in. */
   from: number;
   to: number;
-  /** Where in the months it starts and ends, as months from the start (2.5 is halfway through the third), for drawing. */
+  /** Where in the months it starts and ends, as months from the start (2.5 is halfway through the third month), for drawing. */
   at: number;
   until: number;
   /** "Ben Ortiz starts", "Leah Grant on leave". */
@@ -80,6 +107,8 @@ export interface TimelineRow {
   name: string;
   /** Null for a month with nobody there. */
   series: (MonthBusy | null)[];
+  /** Roles: hours a week of work nobody in the role is there to do, per month (null when none). */
+  uncovered?: (number | null)[];
   markers: TimelineMarker[];
 }
 
@@ -103,9 +132,15 @@ export interface TimelineData {
 export function plannedMarkers(model: EngineModel, monthly: NonNullable<SimulationResult["monthly"]>, startDate: string): TimelineMarker[] {
   const out: TimelineMarker[] = [];
   const last = monthly.months.length - 1;
-  const monthHours = (52 / 12) * model.hoursPerWeek;
   const end = monthly.months[last]!.end;
-  const at = (hour: number) => Math.min(end, Math.max(0, hour)) / monthHours;
+  /** Months from the start, with the fraction of the month: months differ in length, the timeline's columns don't. */
+  const at = (hour: number) => {
+    const h = Math.min(end, Math.max(0, hour));
+    if (h >= end) return last + 1;
+    const i = monthOfHour(monthly, h)!;
+    const mo = monthly.months[i]!;
+    return i + (h - mo.start) / (mo.end - mo.start);
+  };
   const day = (hour: number) => dayLabel(dateAtHour(startDate, hour, model.hoursPerWeek));
   for (const [id, p] of Object.entries(model.people ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
     const base = { personId: id, personName: p.name, roleIds: p.roles };
@@ -129,18 +164,25 @@ export function plannedMarkers(model: EngineModel, monthly: NonNullable<Simulati
   return out;
 }
 
-/** The market schedule's conditions other than Stable, as runs of months inside the first `count` months. */
-export function marketBands(bundle: Pick<ProcessBundle, "marketSchedule" | "marketConditions">, count: number): MarketBand[] {
+/**
+ * The market schedule's conditions other than Stable, as runs of the forecast's months. The schedule's months are the
+ * engine's (52/12 weeks from the start, see market.ts); each forecast month takes the condition at its middle.
+ */
+export function marketBands(bundle: Pick<ProcessBundle, "marketSchedule" | "marketConditions">, months: MonthlyResult["months"], hoursPerWeek: number): MarketBand[] {
   const byId = new Map((bundle.marketConditions ?? []).map((c) => [c.id, c]));
-  const months: (string | null)[] = new Array<string | null>(count).fill(null);
+  const scheduleHours = (52 / 12) * hoursPerWeek;
+  const bySchedule: (string | null)[] = new Array<string | null>(24).fill(null);
   // Later entries win where they overlap, as the engine reads the schedule (marketFromSchedule).
   for (const e of bundle.marketSchedule ?? []) {
     const c = byId.get(e.condition_id);
-    if (!c || c.preset === "stable") continue;
-    for (let m = Math.max(1, e.from_month); m <= Math.min(count, e.to_month); m++) months[m - 1] = c.name;
+    if (!c) continue;
+    for (let m = Math.max(1, e.from_month); m <= Math.min(24, e.to_month); m++) bySchedule[m - 1] = c.preset === "stable" ? null : c.name;
   }
+  // The last month of the schedule holds after it ends, as in the engine.
+  const conditionAt = (hour: number) => bySchedule[Math.min(23, Math.floor(hour / scheduleHours))] ?? null;
+  const names = months.map((mo) => conditionAt((mo.start + mo.end) / 2));
   const bands: MarketBand[] = [];
-  months.forEach((name, i) => {
+  names.forEach((name, i) => {
     const prev = bands[bands.length - 1];
     if (name === null) return;
     if (prev && prev.name === name && prev.to === i - 1) prev.to = i;
@@ -149,9 +191,16 @@ export function marketBands(bundle: Pick<ProcessBundle, "marketSchedule" | "mark
   return bands;
 }
 
-/** Rows with any work in the forecast, in the model's order for roles and by name for people. */
-const busyRows = (series: Record<string, (MonthBusy | null)[]>, names: [string, string][], markersOf: (id: string) => TimelineMarker[]): TimelineRow[] =>
-  names.filter(([id]) => series[id]?.some((m) => m && m.p90 > 0.005)).map(([id, name]) => ({ id, name, series: series[id]!, markers: markersOf(id) }));
+/** Rows with any work in the forecast (or work nobody is there to do), in the model's order for roles and by name for people. */
+const busyRows = (
+  series: Record<string, (MonthBusy | null)[]>,
+  names: [string, string][],
+  markersOf: (id: string) => TimelineMarker[],
+  uncovered?: Record<string, (number | null)[]>,
+): TimelineRow[] =>
+  names
+    .filter(([id]) => series[id]?.some((m) => m && m.p90 > 0.005) || uncovered?.[id]?.some((h) => h !== null))
+    .map(([id, name]) => ({ id, name, series: series[id]!, ...(uncovered?.[id]?.some((h) => h !== null) ? { uncovered: uncovered[id]! } : {}), markers: markersOf(id) }));
 
 /** Everything the timeline draws, from a month-by-month run of `model` that starts on `startDate`. */
 export function timelineData(
@@ -162,7 +211,7 @@ export function timelineData(
 ): TimelineData | null {
   const monthly = result.monthly;
   if (!monthly) return null;
-  const months = timelineMonths(startDate, monthly.months.length);
+  const months = timelineMonths(startDate, monthly.months, model.hoursPerWeek);
   const markers = plannedMarkers(model, monthly, startDate);
   const roleNames = Object.entries(model.roles).map(([id, r]): [string, string] => [id, r.name]);
   const people = Object.entries(result.resolvedPeople)
@@ -171,10 +220,10 @@ export function timelineData(
   const serviceName = new Map(bundle.services.map((s) => [s.id, s.name]));
   return {
     months,
-    roles: busyRows(monthly.roles, roleNames, (rid) => markers.filter((m) => m.roleIds.includes(rid))),
+    roles: busyRows(monthly.roles, roleNames, (rid) => markers.filter((m) => m.roleIds.includes(rid)), monthly.uncovered),
     people: busyRows(monthly.people, people, (pid) => markers.filter((m) => m.personId === pid)),
     clients: Object.entries(monthly.clients).map(([id, series]) => ({ id, name: id ? (serviceName.get(id) ?? model.services?.[id]?.name ?? "Other") : "Clients", series })),
-    market: marketBands(bundle, months.length),
+    market: marketBands(bundle, monthly.months, model.hoursPerWeek),
     markers,
   };
 }
