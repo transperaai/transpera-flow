@@ -30,7 +30,8 @@
 //
 // Pure: no I/O, no clock (except an optional time budget, as in shadow-price.ts).
 
-import type { EngineModel, EnginePerson, EngineStep, ReplicationResult } from "./model";
+import { eligible } from "./eligibility";
+import type { EngineModel, ReplicationResult } from "./model";
 import { initialState, resolvePeople, runOnce, SEED_STRIDE } from "./simulate";
 
 /** One more missed servicing task per replication, on average, counts as a client deadline missed. */
@@ -44,12 +45,7 @@ export const ABSENCE_START_WEEK = 2;
 /** Weeks after the person returns that the run should still cover, to see whether the queues recover. */
 const OBSERVE_WEEKS = 5;
 
-/** Who can work a step, as the engine dispatches it (simulate.ts `canDo`). */
-export function eligible(personId: string, p: EnginePerson, s: EngineStep): boolean {
-  if (s.person) return s.person === personId;
-  if (p.skills) return p.skills.includes(s.id);
-  return s.role !== null && p.roles.includes(s.role);
-}
+export { eligible };
 
 export interface AbsenceCandidate {
   personId: string;

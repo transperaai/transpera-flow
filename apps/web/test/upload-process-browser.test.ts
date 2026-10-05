@@ -203,6 +203,8 @@ describe("the Upload process dialog", () => {
     await page.locator("[data-upload-create]").click();
     await page.waitForSelector("[data-upload-error]");
     expect(await page.locator("[data-upload-error]").innerText()).toBe("You don't have permission to add processes here.");
+    // The error renders as soon as it is set; the button comes back when the transition that was creating settles, a render later.
+    await page.waitForFunction(() => document.querySelector<HTMLButtonElement>("[data-upload-create]")?.disabled === false);
     expect(await page.locator("[data-upload-create]").isEnabled()).toBe(true);
     await page.close();
   }, 60_000);

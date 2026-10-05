@@ -40,7 +40,9 @@ import {
 import { arrivalTimes as drawArrivals } from "./demand";
 import { activeMarket, type MarketFactors } from "./market";
 import { EventQueue } from "./event-queue";
+import { eligible } from "./eligibility";
 import { flattenModel } from "./flatten";
+import { detectLoops, type Loop } from "./loops";
 import type {
   ClientReplication,
   ClientResult,
@@ -54,6 +56,9 @@ import type {
   EngineStep,
   InitialState,
   Kpis,
+  LoopReplication,
+  LoopResult,
+  ReworkTotal,
   Outcome,
   PersonResult,
   ReplicationResult,
@@ -62,6 +67,7 @@ import type {
   ServiceCounts,
   Stat,
   SimulationResult,
+  StepFacts,
   StepResult,
   Touchpoints,
   TraceEntity,
@@ -87,6 +93,13 @@ const DEFAULT_WARMUP_WEEKS = 4;
 const MAX_WARMUP_WEEKS = 52;
 /** Seed of the pilot run that sizes the automatic warm-up; fixed, so the warm-up is a property of the model. */
 const PILOT_SEED = 1;
+/** Each model's rework loops, found once and shared by its replications. */
+const loopCache = new WeakMap<EngineModel, Loop[]>();
+function loopsOf(model: EngineModel): Loop[] {
+  let loops = loopCache.get(model);
+  if (!loops) loopCache.set(model, (loops = detectLoops(model)));
+  return loops;
+}
 /** Each model's stream labels, shared by its replications. */
 const streamLabels = new WeakMap<EngineModel, StreamLabels>();
 
@@ -96,6 +109,40 @@ interface SimEntity extends TraceEntity {
   svc: number;
   /** Set for a servicing task. */
   task?: Task;
+  /**
+   * Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits; then, from `nLoops` on, for each
+   * loop's steps how many times (up to 2) the item has visited it in its stay in the loop. Null until it first reaches a step in a loop.
+   */
+  lp: Uint8Array | null;
+}
+
+/** Bits of `SimEntity.lp`: in the loop's region now; went round at least once on this stay (so it is on a repeat pass). */
+const LP_INSIDE = 1;
+const LP_WENT = 2;
+
+/** A rework loop as a run tracks it (see loops.ts). */
+interface LoopRun {
+  def: Loop;
+  idx: number;
+  body: Set<string>;
+  /** Where its steps' visit counts start in `SimEntity.lp`, and each step's place among them. */
+  off: number;
+  pos: Map<string, number>;
+  redo: boolean;
+  /**
+   * Counted as events in the measured window, so long loops aren't under-counted: items sent back for the first
+   * time on a stay (went), every send-back (rounds), and stays that ended without one (clean). Repeat-pass elapsed
+   * hours as each pass ends.
+   */
+  went: number;
+  clean: number;
+  rounds: number;
+  /** Decisions made while on a repeat pass: sent back again, or left. Rounds per looper is 1 + again / left, whatever the horizon cuts off. */
+  again: number;
+  left: number;
+  extraElapsed: number;
+  /** Hands-on hours on repeat passes in the measured window, by role (each pass counted in the innermost loop it is on). */
+  roleHours: Map<string, number>;
 }
 
 /** A servicing task in flight: whose it is and when it is due. */
@@ -156,6 +203,12 @@ interface StepStat {
   slaBreaches: number;
   /** Visits that went straight to a lost end (a lead lost at this step). */
   lostHere: number;
+  /** Hands-on hours of visits a person worked, and how many; external wait hours and the visits that had it. `stretchSum`: extra elapsed time from part-time availability (elapsed minus hands-on). */
+  stretchSum: number;
+  handsOnSum: number;
+  handsOnN: number;
+  fixedWaitSum: number;
+  fixedWaitN: number;
 }
 
 /** A first-in, first-out queue of items waiting at a step. */
@@ -236,6 +289,9 @@ interface StepState {
   routes: Route[] | null;
   /** Where each of the step's edges (`s.next`) leads. */
   targets: Target[];
+  /** The rework loops whose body holds this step (empty for most), and where this step's visit count is in an item's `lp` for each. */
+  loops: LoopRun[];
+  loopSlots: number[];
   /** With a market: which of `s.next` lead to the sale (see `signingEdges`); null when conv doesn't apply here. */
   winEdges: EdgeKind[] | null;
   /** With a market: the sale is still ahead (a lost end can be reached from here), so "time to decide" applies to its external wait. */
@@ -677,6 +733,11 @@ export function runOnce(
         departures: 0,
         slaBreaches: 0,
         lostHere: 0,
+        stretchSum: 0,
+        handsOnSum: 0,
+        handsOnN: 0,
+        fixedWaitSum: 0,
+        fixedWaitN: 0,
       },
       queue: new Fifo(),
       people: [],
@@ -693,6 +754,8 @@ export function runOnce(
           ? services.map((sv) => routeFor(s.next, sv.s.pathTags))
           : null,
       targets: [],
+      loops: [],
+      loopSlots: [],
       winEdges: null,
       beforeSale: false,
       acc: s.role !== null && Object.hasOwn(roleAcc, s.role) ? roleAcc[s.role]! : null,
@@ -715,6 +778,35 @@ export function runOnce(
     st.targets = st.s.next.map((n) => targetFor(n.to));
     if (st.routes) for (const r of st.routes) r.targets = r.next.map((n) => targetFor(n.to));
   }
+  // Rework loops (loops.ts): found once per model, tracked per item below without touching any random stream.
+  const loopRuns: LoopRun[] = loopsOf(model).map((def, idx) => ({
+    def,
+    idx,
+    body: new Set(def.body),
+    off: 0,
+    pos: new Map(def.body.map((id, i) => [id, i])),
+    redo: def.kind === "redo",
+    went: 0,
+    clean: 0,
+    rounds: 0,
+    again: 0,
+    left: 0,
+    extraElapsed: 0,
+    roleHours: new Map(),
+  }));
+  for (const L of loopRuns) for (const id of L.def.body) stepStates.get(id)?.loops.push(L);
+  // Innermost first (smallest body, then loop order): a repeat pass is counted once, in the first active loop.
+  for (const st of stepList) st.loops.sort((a, b) => a.body.size - b.body.size || a.idx - b.idx);
+  const nLoops = loopRuns.length;
+  let lpSize = nLoops;
+  for (const L of loopRuns) {
+    L.off = lpSize;
+    lpSize += L.body.size;
+  }
+  for (const st of stepList) st.loopSlots = st.loops.map((L) => L.off + L.pos.get(st.s.id)!);
+  /** All repeat passes together, so loops that overlap are not double counted. */
+  const reworkRoles = new Map<string, number>();
+  let reworkElapsed = 0;
   if (market) {
     const reach = outcomeReach(stepStates, ends);
     for (const st of stepList) {
@@ -1440,7 +1532,7 @@ export function runOnce(
     scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
     const sla = l.link.sla;
     const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.interval === null };
-    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task };
+    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, lp: null };
     if (keepTrace) {
       e.trace = [];
       e.servicing = { process: l.link.process, client: c.key };
@@ -1601,6 +1693,19 @@ export function runOnce(
       seg.tE = null;
       seg.tL = null;
     }
+    const lps = st.loops;
+    if (lps.length) {
+      // An item reaching any step of a loop's region is inside it, wherever it joined (and whenever: warm-up entrants count when they leave).
+      let f = e.lp;
+      if (!f) {
+        f = e.lp = new Uint8Array(lpSize);
+      }
+      const slots = st.loopSlots;
+      for (let i = 0; i < lps.length; i++) {
+        f[lps[i]!.idx]! |= LP_INSIDE;
+        if (f[slots[i]!]! < 2) f[slots[i]!]!++;
+      }
+    }
     if (!st.staffed) {
       startService(e, st, null, t);
       return;
@@ -1689,6 +1794,17 @@ export function runOnce(
       const frac = availFrac(p);
       const handsOn = st.work();
       dur = handsOn / frac;
+      st.stat.handsOnSum += handsOn;
+      st.stat.handsOnN++;
+      st.stat.stretchSum += dur - handsOn;
+      if (st.loops.length && e.lp && t >= 0) {
+        const L = repeatLoop(st.loops, st.loopSlots, e.lp);
+        if (L) {
+          const role = st.s.role ?? p.person.roles[0] ?? "unassigned";
+          L.roleHours.set(role, (L.roleHours.get(role) ?? 0) + handsOn);
+          reworkRoles.set(role, (reworkRoles.get(role) ?? 0) + handsOn);
+        }
+      }
       const svc = e.task !== undefined;
       if (svc) p.svcHours += handsOn;
       else p.busyHours += handsOn;
@@ -1724,6 +1840,8 @@ export function runOnce(
     let w = st.wait ? st.wait() : 0;
     // "Time to decide": the market stretches or shortens external waits before the sale, not onboarding, delivery or servicing.
     if (market && w > 0 && st.beforeSale && !st.assigned) w *= mkt(t).cycle;
+    st.stat.fixedWaitSum += w;
+    st.stat.fixedWaitN++;
     // With no wait and nothing else pending at `t`, its leave event would be
     // the very next one handled (whatever `takeNext` schedules comes after
     // it), so it's handled here instead, in exactly that order.
@@ -1742,6 +1860,18 @@ export function runOnce(
     st.stat.departures++;
     if (s.sla !== undefined && t - e.seg!.tQ > s.sla) st.stat.slaBreaches++;
     const redo = Boolean(s.rework && st.rework() < s.rework);
+    const lps = st.loops;
+    const lp = lps.length ? e.lp : null;
+    if (lp) {
+      // Time at a step on a repeat pass is what the loop adds to the item's cycle time (in the innermost loop it is on).
+      const L = repeatLoop(lps, st.loopSlots, lp);
+      if (L && t >= 0) {
+        // Counted whole when the pass ends (as a rate), not clipped to the window, so passes that began before it aren't shortened.
+        const x = t - e.seg!.tQ;
+        L.extraElapsed += x;
+        reworkElapsed += x;
+      }
+    }
     if (e.task && t >= 0) {
       e.task.client.visits++;
       visitsAll++;
@@ -1753,6 +1883,12 @@ export function runOnce(
     if (redo) {
       st.stat.reworks++;
       st.stat.arrivals++;
+      if (lp) {
+        for (let i = 0; i < lps.length; i++) {
+          const L = lps[i]!;
+          if (L.redo && L.def.from === s.id) goRound(e, L, t);
+        }
+      }
       queueAt(e, st, t, t);
       return;
     }
@@ -1781,9 +1917,52 @@ export function runOnce(
       }
     }
     const target = targets[k]!;
+    if (lp) {
+      for (let i = 0; i < lps.length; i++) {
+        const L = lps[i]!;
+        if (!L.redo && L.def.from === s.id && L.def.to === target.id) goRound(e, L, t);
+        else if (L.redo || !L.body.has(target.id)) leaveLoop(e, L, t);
+      }
+    }
     // A visit sent straight to a lost end is work lost at this step (rule 12).
     if (target.end && target.end.outcome === "lost" && !e.task && e.outcome !== "won" && t >= 0) st.stat.lostHere++;
     enterTarget(e, target, t);
+  }
+
+  /** The innermost loop the item is on a repeat pass of, among a step's loops (sorted innermost first). */
+  function repeatLoop(lps: LoopRun[], slots: number[], lp: Uint8Array): LoopRun | null {
+    // A repeat pass: the item went round, and has been to this step before in its stay (a step it joined past is first seen after the send-back).
+    for (let i = 0; i < lps.length; i++) if (lp[lps[i]!.idx]! & LP_WENT && lp[slots[i]!]! >= 2) return lps[i]!;
+    return null;
+  }
+
+  /** An item goes round a loop once more: it is on a repeat pass until it leaves the loop. */
+  function goRound(e: SimEntity, L: LoopRun, t: number) {
+    const f = e.lp!;
+    if (t >= 0) {
+      L.rounds++;
+      if (f[L.idx]! & LP_WENT) L.again++;
+      else L.went++;
+    }
+    f[L.idx]! |= LP_WENT;
+  }
+
+  /**
+   * An item leaves a loop's region, and the loop forgets it, so a later stay
+   * counts afresh. A stay that ends with no send-back, in the measured window,
+   * is a clean one. Together with first send-backs these are the settled first
+   * passes, so the share is not weighted to the quick ones (a looper is counted
+   * when it is sent back, not when it finally leaves).
+   */
+  function leaveLoop(e: SimEntity, L: LoopRun, t: number) {
+    const f = e.lp!;
+    if (!(f[L.idx]! & LP_INSIDE)) return;
+    if (t >= 0) {
+      if (f[L.idx]! & LP_WENT) L.left++;
+      else L.clean++;
+    }
+    f[L.idx] = 0;
+    f.fill(0, L.off, L.off + L.body.size);
   }
 
   /**
@@ -1815,8 +1994,24 @@ export function runOnce(
         departures: 0,
         slaBreaches: 0,
         lostHere: 0,
+        stretchSum: 0,
+        handsOnSum: 0,
+        handsOnN: 0,
+        fixedWaitSum: 0,
+        fixedWaitN: 0,
       });
     }
+    for (const L of loopRuns) {
+      L.clean = 0;
+      L.again = 0;
+      L.left = 0;
+      L.went = 0;
+      L.rounds = 0;
+      L.extraElapsed = 0;
+      L.roleHours.clear();
+    }
+    reworkRoles.clear();
+    reworkElapsed = 0;
     for (const rid in roleAcc) {
       roleAcc[rid]!.busy = 0;
       roleAcc[rid]!.svc = 0;
@@ -1857,7 +2052,7 @@ export function runOnce(
     }
     items.sort((a, b) => a.tQ - b.tQ);
     for (const { st, tQ } of items) {
-      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix) };
+      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), lp: null };
       entities.push(e);
       queueAt(e, st, tQ, 0);
     }
@@ -1895,7 +2090,7 @@ export function runOnce(
     if (ev.type === "arrive") {
       scheduleArrival();
       const sv = drawService(ev.t < 0 ? mixWarmup : mix);
-      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv };
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, lp: null };
       if (keepTrace) entities.push(e);
       if (ev.t >= 0) services[sv]!.counts.arrivals++;
       enterTarget(e, entryTargets[sv]!, ev.t);
@@ -1951,6 +2146,11 @@ export function runOnce(
       departures: st.departures,
       slaBreaches: st.slaBreaches,
       lostHere: st.lostHere,
+      avgHandsOn: st.handsOnN ? st.handsOnSum / st.handsOnN : 0,
+      avgStretch: st.handsOnN ? st.stretchSum / st.handsOnN : 0,
+      handsOnVisits: st.handsOnN,
+      avgFixedWait: st.fixedWaitN ? st.fixedWaitSum / st.fixedWaitN : 0,
+      fixedWaitVisits: st.fixedWaitN,
     };
   }
   // Ongoing load is reported from the live client count, integrated over the
@@ -2065,6 +2265,18 @@ export function runOnce(
       valuePerson,
     };
   }
+  const loopsOut: Record<string, LoopReplication> = {};
+  for (const L of loopRuns) {
+    loopsOut[L.def.id] = {
+      entered: L.went + L.clean,
+      went: L.went,
+      rounds: L.rounds,
+      again: L.again,
+      left: L.left,
+      roleHours: Object.fromEntries(L.roleHours),
+      extraElapsed: L.extraElapsed,
+    };
+  }
   // Revenue from the per-service counts (docs/PRD.md §13).
   let newMrr = 0;
   let ltvAdded = 0;
@@ -2078,7 +2290,7 @@ export function runOnce(
     lostRevenue += l * sv.value;
     if (sv.id !== null) serviceOut[sv.id] = sv.counts;
   }
-  const toTrace = ({ seg: _seg, svc, task: _task, ...entity }: SimEntity): TraceEntity => {
+  const toTrace = ({ seg: _seg, svc, task: _task, lp: _lp, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
     return id !== null ? { ...entity, service: id } : entity;
   };
@@ -2098,6 +2310,8 @@ export function runOnce(
     steps: stepOut,
     roles: roleOut,
     people: peopleOut,
+    loops: loopsOut,
+    rework: { roleHours: Object.fromEntries(reworkRoles), extraElapsed: reworkElapsed, items: won + lost + done },
     entities: keepTrace ? entities.map(toTrace) : null,
     ...(weekly ? { weekly } : {}),
     H,
@@ -2236,6 +2450,123 @@ function clientResults(model: EngineModel, runs: ReplicationResult[]): Record<st
   return out;
 }
 
+const MONTH_WEEKS = 52 / 12;
+
+/** The mean of per-run means weighted by the counts behind them (0 when there are none). */
+function weighted(
+  runs: ReplicationResult[],
+  value: (r: ReplicationResult) => number | undefined,
+  count: (r: ReplicationResult) => number | undefined,
+): number {
+  let sum = 0;
+  let n = 0;
+  for (const r of runs) {
+    const c = count(r) ?? 0;
+    sum += (value(r) ?? 0) * c;
+    n += c;
+  }
+  return n > 0 ? sum / n : 0;
+}
+
+/**
+ * A ratio across replications: the mean is the sum of numerators over the sum of
+ * denominators (so runs with nothing to divide by add nothing, not a zero), the
+ * band is of the runs that have a denominator.
+ */
+function ratioStat(nums: number[], dens: number[]): Stat {
+  const sumN = nums.reduce((a, b) => a + b, 0);
+  const sumD = dens.reduce((a, b) => a + b, 0);
+  const mean = sumD > 0 ? sumN / sumD : 0;
+  const ratios = nums.flatMap((n, i) => (dens[i]! > 0 ? [n / dens[i]!] : []));
+  const band = stat(ratios);
+  return { mean, p10: band.p10, p90: band.p90 };
+}
+
+/**
+ * Times round per item that goes round: 1 + (send-backs of items already on a repeat pass) / (their leaving), each a decision made at
+ * a moment in the window, so passes still running at the horizon (the long ones) aren't missed. 0 when no item went round.
+ */
+function meanRounds(reps: LoopReplication[]): Stat {
+  if (!reps.some((r) => r.went > 0)) return { mean: 0, p10: 0, p90: 0 };
+  const s = ratioStat(reps.map((r) => r.again), reps.map((r) => r.left));
+  return { mean: 1 + s.mean, p10: 1 + s.p10, p90: 1 + s.p90 };
+}
+
+/** Each rework loop across replications (loops.ts): the share that go round, how often, and what the repeat passes cost. */
+function loopResults(model: EngineModel, runs: ReplicationResult[]): LoopResult[] {
+  const weeks = model.horizonWeeks;
+  const out: LoopResult[] = [];
+  for (const def of loopsOf(model)) {
+    const reps = runs.map((r) => r.loops![def.id]!);
+    const roles = new Set<string>();
+    for (const r of reps) for (const rid of Object.keys(r.roleHours)) roles.add(rid);
+    const perMonth = (hours: number) => (weeks > 0 ? (hours / weeks) * MONTH_WEEKS : 0);
+    const extraHandsOnHoursPerMonth: Record<string, Stat> = {};
+    for (const rid of [...roles].sort()) extraHandsOnHoursPerMonth[rid] = stat(reps.map((r) => perMonth(r.roleHours[rid] ?? 0)));
+    out.push({
+      id: def.id,
+      kind: def.kind,
+      steps: def.steps,
+      from: def.from,
+      to: def.to,
+      share: ratioStat(reps.map((r) => r.went), reps.map((r) => r.entered)),
+      meanRounds: meanRounds(reps),
+      extraHandsOnHoursPerMonth,
+      extraHandsOnHoursPerMonthTotal: stat(reps.map((r) => perMonth(Object.values(r.roleHours).reduce((a, b) => a + b, 0)))),
+      extraCycleHours: ratioStat(reps.map((r) => r.extraElapsed), reps.map((r) => r.entered)),
+      extraCycleHoursPerLooper: ratioStat(reps.map((r) => r.extraElapsed), reps.map((r) => r.went)),
+    });
+  }
+  return out;
+}
+
+/** All repeat passes together (each counted once, in the innermost loop it is on), so the loops' figures add up to these. */
+function reworkTotals(model: EngineModel, runs: ReplicationResult[]): ReworkTotal {
+  const weeks = model.horizonWeeks;
+  const perMonth = (hours: number) => (weeks > 0 ? (hours / weeks) * MONTH_WEEKS : 0);
+  const roles = new Set<string>();
+  for (const r of runs) for (const rid of Object.keys(r.rework!.roleHours)) roles.add(rid);
+  const byRole: Record<string, Stat> = {};
+  for (const rid of [...roles].sort()) byRole[rid] = stat(runs.map((r) => perMonth(r.rework!.roleHours[rid] ?? 0)));
+  return {
+    extraHandsOnHoursPerMonth: byRole,
+    extraHandsOnHoursPerMonthTotal: stat(runs.map((r) => perMonth(Object.values(r.rework!.roleHours).reduce((a, b) => a + b, 0)))),
+    extraCycleHoursPerItem: ratioStat(runs.map((r) => r.rework!.extraElapsed), runs.map((r) => r.rework!.items)),
+  };
+}
+
+/** Per step: hands-on versus waiting, and whether only one person can do it. */
+function stepFactsOf(model: EngineModel, steps: Record<string, StepResult>): Record<string, StepFacts> {
+  const people = resolvePeople(model);
+  const H = model.horizonWeeks * model.hoursPerWeek;
+  const named = Boolean(model.people && Object.keys(model.people).length);
+  // Someone away for the whole run can't do anything in it.
+  const awayAllRun = (p: EnginePerson) => (p.leave ?? []).some(([a, b]) => a <= 0 && b >= H);
+  const ids = Object.keys(people).filter((id) => people[id]!.capacity > 0 && !awayAllRun(people[id]!));
+  const out: Record<string, StepFacts> = {};
+  for (const s of model.steps) {
+    const r = steps[s.id]!;
+    const handsOn = r.avgHandsOn ?? 0;
+    const stretch = r.avgStretch ?? 0;
+    const fixed = r.avgFixedWait ?? 0;
+    const total = handsOn + stretch + r.avgWait + fixed;
+    const staffed = Boolean(s.role || s.person);
+    // A role with a head-count of 0 and no named people is staffed by nobody (the engine itself would invent one person).
+    const emptyRole = !named && s.role !== null && !s.person && (model.roles[s.role]?.count ?? 0) < 1;
+    const who = staffed && !emptyRole ? ids.filter((id) => eligible(id, people[id]!, s)) : [];
+    out[s.id] = {
+      handsOnHours: handsOn,
+      stretchHours: stretch,
+      queueWaitHours: r.avgWait,
+      fixedWaitHours: fixed,
+      handsOnShare: total > 0 ? handsOn / total : 0,
+      keyPerson: who.length === 1 ? { personId: who[0]!, personName: people[who[0]!]!.name } : null,
+      nobodyCanDo: staffed && who.length === 0,
+    };
+  }
+  return out;
+}
+
 /** A share of a step's visits (0 when there were none). */
 const visitShare = (n: number, visits: number) => (visits > 0 ? Math.min(1, n / visits) : 0);
 
@@ -2266,6 +2597,12 @@ export function simulate(model: EngineModel, reps = 30, seed = 1): SimulationRes
       departures: avg((r) => r.steps[s.id]!.departures),
       slaBreaches: avg((r) => r.steps[s.id]!.slaBreaches),
       lostHere: avg((r) => r.steps[s.id]!.lostHere ?? 0),
+      // Per-visit means, weighted by the visits behind each run's mean (a run with none says nothing).
+      avgHandsOn: weighted(runs, (r) => r.steps[s.id]!.avgHandsOn, (r) => r.steps[s.id]!.handsOnVisits),
+      avgStretch: weighted(runs, (r) => r.steps[s.id]!.avgStretch, (r) => r.steps[s.id]!.handsOnVisits),
+      handsOnVisits: avg((r) => r.steps[s.id]!.handsOnVisits ?? 0),
+      avgFixedWait: weighted(runs, (r) => r.steps[s.id]!.avgFixedWait, (r) => r.steps[s.id]!.fixedWaitVisits),
+      fixedWaitVisits: avg((r) => r.steps[s.id]!.fixedWaitVisits ?? 0),
       p90: {
         avgWait: pct(runs.map((r) => r.steps[s.id]!.avgWait), 0.9),
         reworkShare: pct(runs.map((r) => visitShare(r.steps[s.id]!.reworks, r.steps[s.id]!.departures)), 0.9),
@@ -2355,6 +2692,9 @@ export function simulate(model: EngineModel, reps = 30, seed = 1): SimulationRes
     bnStep,
     bnPerson,
     trace,
+    loops: loopResults(model, runs),
+    rework: reworkTotals(model, runs),
+    stepFacts: stepFactsOf(model, steps),
     H,
     reps,
     wipEnd: model.steps.reduce((a, s) => a + (svcSteps.has(s.id) ? 0 : steps[s.id]!.wip), 0),
