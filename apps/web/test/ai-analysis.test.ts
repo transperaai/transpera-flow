@@ -35,10 +35,10 @@ const firstSentence = (s: string) => s.slice(0, s.search(/[.!?](\s|$)/) + 1);
 const AUDIT = northbeamStepIds.audit;
 
 /** What a good analysis looks like: every figure copied from the facts. */
-const good = (): { read: string[]; insights: { title: string; type: string; rating: string; stepId: string | null; evidence: string; why: string }[]; review: { step: string; level: string; text: string }[] } => ({
+const good = (): { read: string[]; insights: { title: string; type: string; rating: string; stepId: string | null; evidence: string; why: string; facts?: string[] }[]; review: { step: string; level: string; text: string }[] } => ({
   read: [`Over the run Northbeam wins ${results.wins}. ${firstSentence(first.evidence)}`],
   insights: [
-    { title: "The audit step holds up the whole line", type: "bottleneck", rating: "bad", stepId: AUDIT, evidence: firstSentence(first.evidence), why: "Everything after it waits, and the first principles say proposals should go out quickly." },
+    { title: "The audit step holds up the whole line", type: "bottleneck", rating: "bad", stepId: AUDIT, evidence: firstSentence(first.evidence), why: "Everything after it waits, and the first principles say proposals should go out quickly.", facts: [input.facts[0]!.id] },
   ],
   review: [{ step: "saa", level: "bad", text: "Automating the lead qualifier comes before you have decided to delete that step." }],
 });
@@ -172,6 +172,34 @@ describe("analyseWithAi", () => {
     const out = await analyseWithAi(input, fake(() => made));
     expect(out.insights).toHaveLength(0);
     expect(out.rejected.some((r) => r.problems.some((p) => p.reason.includes("quotation")))).toBe(true);
+  });
+
+  it("keeps the facts each finding cites, as the engine wrote them, and quotes it cites from the sources", async () => {
+    const draft = good();
+    draft.insights[0]!.facts = [input.facts[0]!.id, "fact-zzz", input.quoteRefs[0]!.id];
+    const out = await analyseWithAi(input, fake(() => draft));
+    expect(out.insights[0]!.facts).toEqual([
+      { kind: "fact", key: first.key, text: expect.stringContaining(first.title) },
+      { kind: "quote", key: "Audit & proposal", text: "Most weeks that's my Sunday, honestly" },
+    ]);
+  });
+
+  it("drops a finding that cites none of the facts it was given (the engine measured nothing it rests on)", async () => {
+    const draft = good();
+    draft.insights[0]!.facts = [];
+    const quoteOnly = good();
+    quoteOnly.insights[0]!.facts = [input.quoteRefs[0]!.id];
+    for (const d of [draft, quoteOnly]) {
+      const out = await analyseWithAi(input, fake(() => d));
+      expect(out.insights).toEqual([]);
+      expect(out.rejected.some((r) => r.problems.some((p) => p.reason.includes("cites none of the facts")))).toBe(true);
+    }
+  });
+
+  it("gives the facts ids with no digits, so an id can never pass the number check as a figure", () => {
+    expect(input.facts.length).toBe(findings.length);
+    for (const f of input.facts) expect(f.id).toMatch(/^fact-[a-z]+$/);
+    expect(JSON.stringify((input.payload as { findings: { id: string }[] }).findings.map((f) => f.id))).toBe(JSON.stringify(input.facts.map((f) => f.id)));
   });
 
   it("turns unknown steps into no step, never keeps an unknown type, and caps the lists", async () => {
@@ -377,8 +405,8 @@ describe("AI insights in the insight list", () => {
       "nonsense",
     ];
     expect(readInsights(stored).map((i) => i.title)).toEqual(["Fine"]);
-    const view = aiViewFromRow({ id: "1", workspace_id: "w", process_id: "p", revision_id: "r", status: "ok", reason: null, trigger: "publish", summary: ["One.", 3, ""], insights: stored, review: [{ step: "job", level: "warn", text: "t" }, { step: "x", level: "warn", text: "t" }], checked: 3, dropped: 1, input_hash: "h", model: "m", usage: [], run_id: "run", created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", run_by: "Ed Itor" });
-    expect(view).toMatchObject({ summary: ["One."], review: [{ step: "job" }], checked: 3, dropped: 1, runBy: "Ed Itor" });
+    const view = aiViewFromRow({ id: "1", workspace_id: "w", process_id: "p", revision_id: "r", status: "ok", reason: null, trigger: "publish", summary: ["One.", 3, ""], insights: stored, review: [{ step: "job", level: "warn", text: "t" }, { step: "x", level: "warn", text: "t" }], checked: 3, dropped: 1, input_hash: "h", model: "m", model_hash: "mh", usage: [], run_id: "run", created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", run_by: "Ed Itor" });
+    expect(view).toMatchObject({ summary: ["One."], review: [{ step: "job" }], checked: 3, dropped: 1, runBy: "Ed Itor", modelHash: "mh", costUsd: null });
     expect(view.review).toHaveLength(1);
   });
 });

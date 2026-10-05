@@ -9,7 +9,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import type { ProcessBundle } from "@transpera-flow/db";
-import { RATING_LABELS, toRatingConfig, type AnalysisSettings } from "@transpera-flow/engine";
+import { RATING_LABELS, toRatingConfig } from "@transpera-flow/engine";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,13 +24,11 @@ const RATING_CHIP = { risk: "border-crit bg-crit-soft", bad: "border-serious bg-
 
 export function ForecastPanel({
   bundle,
-  analysisRules,
   forecastHref,
   startDate,
   months = DEFAULT_FORECAST_MONTHS,
 }: {
   bundle: ProcessBundle;
-  analysisRules: AnalysisSettings;
   /** The Forecast page, where alerts are acknowledged and the horizon picked. */
   forecastHref: string;
   startDate?: string;
@@ -49,9 +48,9 @@ export function ForecastPanel({
   }, [near]);
   const sim = useSimulation(near ? built.model : null, 30, 1, { monthly: true, monthStarts: built.monthStarts });
   const result = near && sim.status === "done" ? sim.run.result : null;
-  const cutoffs = toRatingConfig(analysisRules, bundle.workspace.settings.hours_per_week).rules.busy.cutoffs;
+  const cutoffs = toRatingConfig(ANALYSIS_DEFAULTS, bundle.workspace.settings.hours_per_week).rules.busy.cutoffs;
   const busyLine = cutoffs[1];
-  const alerts = useMemo(() => (built.model && result ? forecastInsights(built.model, result, analysisRules, start) : null), [built.model, result, analysisRules, start]);
+  const alerts = useMemo(() => (built.model && result ? forecastInsights(built.model, result, ANALYSIS_DEFAULTS, start) : null), [built.model, result, start]);
   const data = useMemo(() => (built.model && result ? timelineData(built.model, result, bundle, start) : null), [built.model, result, bundle, start]);
   if (!built.model) return null;
   const span = horizonLabel(months);

@@ -196,17 +196,17 @@ describe("answers saved only to first principles can be published", () => {
 describe("goals met reads the same success measures on every page", () => {
   const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8");
   it("every page that rates a run passes them to the detectors", () => {
-    for (const f of ["components/process-page.tsx", "components/process-view.tsx", "components/issues-page.tsx", "components/overview/overview.tsx", "components/rules/analysis-rules-settings.tsx"]) {
+    // The rules editor (and its live preview) went with B17; every page left that rates a run still passes them.
+    for (const f of ["components/process-page.tsx", "components/process-view.tsx", "components/issues-page.tsx", "components/overview/overview.tsx"]) {
       expect(read(f), f).toContain("useSuccessMeasures(");
     }
     expect(read("components/process-page.tsx")).toContain("successMeasures,");
     expect(read("components/process-view.tsx")).toContain("successMeasures,");
     expect(read("components/issues-page.tsx")).toContain("absence, successMeasures)");
     expect(read("components/overview/overview.tsx")).toContain("{ successMeasures }");
-    expect(read("components/rules/analysis-rules-settings.tsx")).toContain("{ successMeasures }");
   });
   it("and the workspace pages load the live version's answers for them", () => {
-    for (const f of ["app/w/[slug]/issues/page.tsx", "app/w/[slug]/settings/rules/page.tsx", "components/overview/workspace-overview.tsx"]) {
+    for (const f of ["app/w/[slug]/issues/page.tsx", "components/overview/workspace-overview.tsx"]) {
       expect(read(f), f).toContain("loadLiveFirstPrinciples(");
     }
     expect(readFileSync(join(__dirname, "..", "..", "..", "packages", "mcp", "src", "analysis-tools.ts"), "utf8")).toContain("successMeasureSource(");

@@ -3,7 +3,14 @@
 Agreed with Austin, 1 Oct 2026, in the analysis rules session. This replaces the detector thresholds in
 `packages/engine/src/issues.ts` (`DEFAULT_ISSUE_THRESHOLDS`) and the four engine severities. It is the spec for the tickets that follow.
 
-**Editing (A44, issue #109):** Settings → Analysis rules (`/w/<slug>/settings/rules`, `/demo/settings/rules`) edits all 15 rules, the escalators and the money settings, stored per workspace in `analysis_rules.settings` (sparse jsonb; `packages/engine/src/analysis-settings.ts`). Only the rules on the rating model below take effect in the engine yet; the others are saved and apply when their detectors land. The absence test's length and frequency are read by the engine (A42); the 12-month cap is read once the cost ticket (A43) lands.
+**Since B17 (issue #175, decision D40):** the rules give **facts**, not findings. Each page shows what they find under "Facts
+from the run", as evidence; AI reads those facts and proposes findings, and people add their own. The rules editor below
+is gone: every workspace is rated with the **documented defaults on this page** (the cut-offs in the table, both
+escalators on, a lost client or deal worth at most 12 months of fees, a two-week absence twice a year, and the normal waits
+of 1 working day for sales steps and 2 for client work). What a workspace saved in `analysis_rules` is kept, unread; a
+later ticket can bring a setting back if Austin wants one.
+
+**Editing (A44, issue #109; removed in B17):** Settings → Analysis rules (`/w/<slug>/settings/rules`, `/demo/settings/rules`) edits all 15 rules, the escalators and the money settings, stored per workspace in `analysis_rules.settings` (sparse jsonb; `packages/engine/src/analysis-settings.ts`). Only the rules on the rating model below take effect in the engine yet; the others are saved and apply when their detectors land. The absence test's length and frequency are read by the engine (A42); the 12-month cap is read once the cost ticket (A43) lands.
 
 **Built so far (A41, issue #106):** the rating model and rules 1, 3, 4, 5, 6 and 7 are in
 `packages/engine/src/ratings.ts` and the detectors (`issues.ts`, `overtime-issues.ts`). The rules not listed there still
@@ -201,17 +208,19 @@ Notes:
 
 ## What AI does
 
-AI analysis runs alongside the rules. It reads:
+AI analysis runs when someone presses **Analyse** on a process page, or on the Overview for the whole company (B17). It reads:
 
-- the rule results;
+- the facts (what the rules find, each with an id it cites);
 - each process's first principles;
-- the linked sources.
+- the linked sources, if the workspace allows it.
 
-It writes insights marked **AI**. It may suggest a rating, but every number it uses comes from the simulation, and its
-insights go through the same Acknowledge step as rule insights. AI also runs the first-principles checks (see the
-research note), such as automation proposed for a step that is still a delete candidate.
+It writes **findings**, each citing the facts (and quotes) it rests on. They arrive *proposed*: a person accepts them (after
+editing, if they like) or dismisses them, and only accepted findings show on the pages. A finding that cites no fact, or
+any number the run doesn't have, is dropped. People can add findings by hand too. AI also runs the first-principles checks
+(see the research note), such as automation proposed for a step that is still a delete candidate.
 
-How it is built, what it is given, how every number it writes is checked against the run, and when it runs: [ADR 0013](adr/0013-ai-analysis.md). The switches are on Settings → AI analysis.
+How it is built, what it is given and how every number it writes is checked against the run: [ADR 0013](adr/0013-ai-analysis.md);
+how findings, the cache and the review work: [ADR 0015](adr/0015-analysis-findings.md).
 
 ## Acknowledge and dismiss
 

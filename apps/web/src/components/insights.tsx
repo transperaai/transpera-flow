@@ -1,16 +1,20 @@
 "use client";
 
-// Insights v2 (issue #110, A45): the raw analysis from the latest run as rated rows, worst first, on the process page and
-// the Overview alike. Hovering or focusing a row lights up the steps it touches on the page's map; clicking opens the
-// detail. An insight only becomes an issue (and only then reaches the map) when someone acknowledges it (D24).
+// Findings as rated rows, worst first, on the process page and the Overview alike (issue #110, A45; since B17, #175, the
+// accepted findings: AI's once someone accepted them, and those added by hand, plus insights acknowledged before). Hovering
+// or focusing a row lights up the steps it touches on the page's map; clicking opens the detail, with the facts it rests
+// on. A finding only becomes an issue (and only then reaches the map) when someone acknowledges it (D24).
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, Sparkles } from "lucide-react";
+import { ChevronRight, PenLine, Sparkles } from "lucide-react";
 import type { DetectedIssue } from "@transpera-flow/engine";
 import type { IssueRow, ScenarioRow } from "@transpera-flow/db";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
+import { FindingDialog, type FindingDialogOptions } from "@/components/findings/finding-dialog";
+import type { FindingsState } from "@/lib/findings/use-findings";
+import { citationsOf } from "@/lib/findings/view";
 import { Help } from "@/components/help";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { RatingPill } from "@/components/overview/rating-pill";
@@ -32,8 +36,8 @@ export const INSIGHT_HELP = {
   },
   dismiss: {
     label: "Dismiss",
-    description: "Say this isn't a problem. It leaves the list and stays away until the process's next published version: if the analysis still finds it then, it is listed again and you can dismiss it again. It never reaches the map.",
-    example: "Dismiss “Spare time” on a person who is meant to have slack. Publish a new version of the process and, if they still have slack, it comes back for another look.",
+    description: "Say this isn't a problem. It leaves the list and never reaches the map. If AI proposes the same finding again later, it stays dismissed.",
+    example: "Dismiss “The strategist has spare time” when they are meant to have slack.",
   },
 } as const;
 
@@ -49,8 +53,6 @@ export interface InsightsProps {
   processName?: (stepId: string) => string | null;
   /** The pointer or focus is on a row: its steps light up on the map; null when it leaves. */
   onLight: (stepIds: string[] | null) => void;
-  /** "Settings → Analysis rules", where each rule's limits are changed. */
-  rulesHref?: string;
   /** The issues register; an acknowledged insight links to its issue there. */
   registerHref?: string;
   /** Whether the viewer may acknowledge or dismiss. */
@@ -69,6 +71,8 @@ export interface InsightsProps {
   busy?: boolean;
   error?: string | null;
   running?: boolean;
+  /** Edit a finding (one backed by a stored finding, not yet an issue). */
+  onEdit?: (insight: Insight) => void;
 }
 
 /** An acknowledged insight links to its issue's page, `<issues>/<number>`. */
@@ -92,7 +96,7 @@ export function Insights(props: InsightsProps) {
     );
   }
   if (!insights.length) {
-    return <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Nothing to report from the latest run. Every rule is within its limits.</p>;
+    return <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No findings yet. Analyse to have AI propose some, or add your own.</p>;
   }
 
   const filtered = filterByRating(insights, rating);
@@ -112,7 +116,7 @@ export function Insights(props: InsightsProps) {
           </Chip>
         ))}
         <span className="ml-auto flex items-center text-xs text-muted-foreground" aria-live="polite">
-          {running ? "Checking the latest run…" : `${filtered.length} insight${filtered.length === 1 ? "" : "s"}`}
+          {running ? "Checking the latest run…" : `${filtered.length} finding${filtered.length === 1 ? "" : "s"}`}
         </span>
       </div>
 
@@ -123,7 +127,7 @@ export function Insights(props: InsightsProps) {
       )}
 
       {shown.length === 0 ? (
-        <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No insights have this rating.</p>
+        <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No findings have this rating.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {shown.map((i) => {
@@ -140,11 +144,11 @@ export function Insights(props: InsightsProps) {
                 onMouseLeave={() => onLight(null)}
                 onFocus={() => onLight(light)}
                 onBlur={() => onLight(null)}
-                className="group flex items-stretch gap-2 rounded-xl border bg-card shadow-token transition-colors focus-within:bg-muted/50 hover:bg-muted/50"
+                className="group flex flex-col rounded-xl border bg-card shadow-token transition-colors focus-within:bg-muted/50 hover:bg-muted/50 sm:flex-row sm:items-stretch sm:gap-2"
                 style={{ borderLeft: `3px solid ${RATING_STRIPE[i.rating]}` }}
               >
                 <button type="button" onClick={() => setOpen(i.key)} className="flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <b className="font-semibold">{i.title}</b>
+                  <b className="font-semibold break-words">{i.title}</b>
                   <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
                     <RatingPill rating={i.rating} />
                     <span className="tabular-nums" data-cost title={i.cost.method}>
@@ -152,9 +156,10 @@ export function Insights(props: InsightsProps) {
                     </span>
                     <span className="min-w-0">{i.number}</span>
                   </span>
-                  {where && <span className="truncate text-xs text-muted-foreground">{where}</span>}
+                  {where && <span className="text-xs break-words text-muted-foreground">{where}</span>}
                 </button>
-                <span className="flex shrink-0 items-center gap-2 pr-3 text-xs text-muted-foreground">
+                {/* On a phone the tag and the issue sit under the text, so the title keeps the width. */}
+                <span className="-mt-1 flex flex-wrap items-center gap-2 px-4 pb-3 text-xs text-muted-foreground sm:mt-0 sm:shrink-0 sm:flex-nowrap sm:pr-3 sm:pb-0 sm:pl-0">
                   <SourceTag insight={i} />
                   {i.issue &&
                     (link ? (
@@ -164,7 +169,7 @@ export function Insights(props: InsightsProps) {
                     ) : (
                       <span className="font-medium text-foreground">{issueLabel(i.issue)}</span>
                     ))}
-                  <ChevronRight aria-hidden className="size-4 transition-transform group-hover:translate-x-0.5" />
+                  <ChevronRight aria-hidden className="ml-auto size-4 transition-transform group-hover:translate-x-0.5 sm:ml-0" />
                 </span>
               </li>
             );
@@ -220,10 +225,11 @@ function Chip({ on, disabled, onClick, count, dot, children }: { on: boolean; di
 }
 
 function SourceTag({ insight }: { insight: Insight }) {
-  const ai = insight.source.kind === "ai";
+  const kind = insight.source.kind;
   return (
-    <span className="inline-flex max-w-28 items-center gap-1 truncate rounded-md bg-muted px-1.5 py-0.5 sm:max-w-none" data-source={ai ? "ai" : "rule"}>
-      {ai && <Sparkles aria-hidden className="size-3 text-accent" />}
+    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 whitespace-nowrap" data-source={kind}>
+      {kind === "ai" && <Sparkles aria-hidden className="size-3 text-accent" />}
+      {kind === "manual" && <PenLine aria-hidden className="size-3" />}
       {insight.source.name}
     </span>
   );
@@ -237,10 +243,10 @@ function InsightDialog({
   onStartAcknowledge,
   stepName,
   currency,
-  rulesHref,
   registerHref,
   canAct,
   onDismiss,
+  onEdit,
   linkedSources,
   busy,
   error,
@@ -259,6 +265,9 @@ function InsightDialog({
   const linking = useSourceLinking();
   const link = insight?.issue ? issueHref(registerHref, insight.issue) : null;
   const ai = insight?.source.kind === "ai";
+  const manual = insight?.source.kind === "manual";
+  const edited = insight?.source.kind === "ai" && insight.source.edited === true;
+  const cited = insight ? citationsOf(insight.detection) : [];
   return (
     <Dialog open={!!insight} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
@@ -277,15 +286,23 @@ function InsightDialog({
                 <RatingPill rating={insight.rating} />
                 <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs">
                   {ai && <Sparkles aria-hidden className="size-3 text-accent" />}
-                  {ai ? "AI analysis" : `Rule: ${insight.source.name}`}
+                  {ai ? (edited ? "AI, edited by your team" : "AI analysis") : manual ? "Added by hand" : `Found by the “${insight.source.name}” check`}
                 </span>
               </div>
               <DialogTitle>{insight.title}</DialogTitle>
-              <DialogDescription>What the analysis found in the latest run.</DialogDescription>
+              <DialogDescription>
+                {manual
+                  ? "A finding someone added by hand."
+                  : ai
+                    ? edited
+                      ? "A finding AI proposed, then someone edited and accepted."
+                      : "A finding AI proposed and someone accepted."
+                    : "What a check of the run found, acknowledged before findings came in."}
+              </DialogDescription>
             </DialogHeader>
             <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
-              <dt className="text-xs font-medium text-muted-foreground uppercase">The number</dt>
-              <dd className="font-mono">{insight.number}</dd>
+              <dt className="text-xs font-medium text-muted-foreground uppercase">{manual ? "What we found" : "The number"}</dt>
+              <dd className={manual ? undefined : "font-mono"}>{insight.number}</dd>
               {insight.found && (
                 <>
                   <dt className="text-xs font-medium text-muted-foreground uppercase">What we found</dt>
@@ -313,19 +330,29 @@ function InsightDialog({
               <dd data-cost>{formatIssueCost(insight.cost, currency)}</dd>
               <dt className="text-xs font-medium text-muted-foreground uppercase">How it&apos;s worked out</dt>
               <dd className="text-muted-foreground">
-                {ai ? (
-                  "AI read this run's results, the process's first principles and linked sources, and wrote this. Every number comes from the simulation."
-                ) : (
-                  <>
-                    The {insight.source.name} rule checked the results of 30 simulated runs against its limits.{" "}
-                    {rulesHref && (
-                      <Link href={rulesHref} className="text-foreground underline">
-                        Settings → Analysis rules
-                      </Link>
-                    )}
-                  </>
-                )}
+                {ai
+                  ? edited
+                    ? "AI read the facts from 30 simulated runs, the first principles and linked sources, and wrote it; someone then changed it. The facts it rests on are as AI cited them, but the edited words weren't checked against the run."
+                    : "AI read the facts from 30 simulated runs, the first principles and linked sources, and wrote this. Every number in it was checked against the run."
+                  : manual
+                    ? "Someone who knows the business wrote it. Its words are theirs; nothing checks its numbers."
+                    : `The “${insight.source.name}” check found it in 30 simulated runs.`}
               </dd>
+              {cited.length > 0 && (
+                <>
+                  <dt className="text-xs font-medium text-muted-foreground uppercase">Rests on</dt>
+                  <dd>
+                    <ul className="flex flex-col gap-1" data-cited>
+                      {cited.map((c, n) => (
+                        <li key={n} className="text-xs">
+                          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-[0.65rem] font-medium uppercase">{c.kind === "quote" ? "Quote" : "Fact"}</span>
+                          {c.kind === "quote" ? `“${c.text}” (${c.key})` : c.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </>
+              )}
             </dl>
 
             {linking ? (
@@ -367,6 +394,18 @@ function InsightDialog({
                 )
               ) : canAct ? (
                 <>
+                  {onEdit && insight.detection.findingId && (
+                    <Button
+                      variant="ghost"
+                      disabled={working || busy}
+                      onClick={() => {
+                        onClose();
+                        onEdit(insight);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
                   <span className="flex items-center">
                     <Button variant="outline" disabled={working || busy} onClick={() => act(onDismiss)}>
                       Dismiss
@@ -378,7 +417,7 @@ function InsightDialog({
                   </Button>
                 </>
               ) : (
-                <p className="text-xs text-muted-foreground">You can read insights here; someone who can edit this workspace acknowledges them.</p>
+                <p className="text-xs text-muted-foreground">You can read findings here; someone who can edit this workspace acknowledges them.</p>
               )}
             </DialogFooter>
           </>
@@ -398,8 +437,14 @@ export function InsightsSection({
   currency,
   processOfStep,
   canEdit,
+  findings,
+  findingOptions,
   ...rest
-}: Omit<InsightsProps, "insights" | "onAcknowledge" | "onDismiss" | "busy" | "error" | "canAct" | "ackDraft"> & {
+}: Omit<InsightsProps, "insights" | "onAcknowledge" | "onDismiss" | "busy" | "error" | "canAct" | "ackDraft" | "onEdit"> & {
+  /** The page's findings (B17): a finding is dismissed and edited there, not as an issue row. */
+  findings?: FindingsState;
+  /** What the edit dialog offers (processes and steps). */
+  findingOptions?: FindingDialogOptions;
   state: IssuesState;
   /** This run's detections; null until the first run finishes. */
   detected: DetectedIssue[] | null;
@@ -418,14 +463,15 @@ export function InsightsSection({
   }, [detected, state.issues, state.revisionOf, stepIds, processId]);
   const ctx: InsightContext = { processId, processOfStep, scenarios, options: rest.formOptions };
   const linking = useSourceLinking();
+  const [editing, setEditing] = useState<string | null>(null);
+  const edited = editing ? findings?.findings.find((f) => f.id === editing) : undefined;
   return (
+    <>
     <Insights
       {...rest}
       insights={insights}
       currency={currency}
       canAct={canEdit}
-      busy={state.busy}
-      error={state.error}
       ackDraft={(i) => {
         const draft = acknowledgeDraft(i, ctx);
         // The sources linked to the insight itself come along to the issue it becomes, beside the ones its steps cite.
@@ -433,8 +479,31 @@ export function InsightsSection({
         return linked.length ? { ...draft, sourceIds: [...new Set([...draft.sourceIds, ...linked])] } : draft;
       }}
       onAcknowledge={(i, draft) => acknowledgeInsight(state, i, ctx, draft)}
-      onDismiss={(i) => dismissInsight(state, i, ctx)}
+      onDismiss={(i) => (i.detection.findingId && findings ? findings.dismiss(i.detection.findingId) : dismissInsight(state, i, ctx))}
+      onEdit={findings && findingOptions ? (i) => setEditing(i.detection.findingId ?? null) : undefined}
+      busy={state.busy || !!findings?.busy}
+      error={state.error ?? findings?.error ?? null}
     />
+    {findings && findingOptions && (
+      <FindingDialog
+        open={!!edited}
+        mode="edit"
+        initial={
+          edited
+            ? { processId: edited.process_id, stepId: edited.step_id, rating: edited.rating, type: edited.type, title: edited.title, evidence: edited.evidence, why: edited.why, sourceIds: edited.source_ids }
+            : { processId: null, stepId: null, rating: "bad", type: "delay", title: "", evidence: "", why: "" }
+        }
+        options={findingOptions}
+        busy={findings.busy}
+        error={findings.error}
+        onSave={(draft) => (edited ? findings.edit(edited.id, draft) : Promise.resolve(null))}
+        onClose={() => {
+          setEditing(null);
+          findings.dismissError();
+        }}
+      />
+    )}
+    </>
   );
 }
 

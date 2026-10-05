@@ -24,6 +24,7 @@ export type Database = {
           input_hash: string
           insights: Json
           model: string | null
+          model_hash: string | null
           process_id: string
           reason: string | null
           review: Json
@@ -45,6 +46,7 @@ export type Database = {
           input_hash: string
           insights?: Json
           model?: string | null
+          model_hash?: string | null
           process_id: string
           reason?: string | null
           review?: Json
@@ -66,6 +68,7 @@ export type Database = {
           input_hash?: string
           insights?: Json
           model?: string | null
+          model_hash?: string | null
           process_id?: string
           reason?: string | null
           review?: Json
@@ -839,6 +842,113 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "process_revisions"
             referencedColumns: ["id", "workspace_id"]
+          },
+        ]
+      }
+      findings: {
+        Row: {
+          ai_key: string | null
+          analysis_id: string | null
+          created_at: string
+          created_by: string | null
+          decided_at: string | null
+          decided_by: string | null
+          edited: boolean
+          evidence: string
+          facts: Json
+          id: string
+          origin: string
+          process_id: string | null
+          rating: string
+          run_id: string | null
+          source_ids: string[]
+          status: string
+          step_id: string | null
+          title: string
+          type: string
+          updated_at: string
+          updated_by: string | null
+          why: string
+          workspace_id: string
+        }
+        Insert: {
+          ai_key?: string | null
+          analysis_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          edited?: boolean
+          evidence?: string
+          facts?: Json
+          id?: string
+          origin: string
+          process_id?: string | null
+          rating: string
+          run_id?: string | null
+          source_ids?: string[]
+          status: string
+          step_id?: string | null
+          title: string
+          type: string
+          updated_at?: string
+          updated_by?: string | null
+          why?: string
+          workspace_id: string
+        }
+        Update: {
+          ai_key?: string | null
+          analysis_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          decided_at?: string | null
+          decided_by?: string | null
+          edited?: boolean
+          evidence?: string
+          facts?: Json
+          id?: string
+          origin?: string
+          process_id?: string | null
+          rating?: string
+          run_id?: string | null
+          source_ids?: string[]
+          status?: string
+          step_id?: string | null
+          title?: string
+          type?: string
+          updated_at?: string
+          updated_by?: string | null
+          why?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "findings_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ai_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "findings_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "ai_analyses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "findings_process_id_fkey"
+            columns: ["process_id"]
+            isOneToOne: false
+            referencedRelation: "processes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "findings_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
           },
         ]
       }

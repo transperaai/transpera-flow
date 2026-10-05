@@ -49,7 +49,7 @@ const matches = (rest: string, path: string) => rest === path || rest.startsWith
  * The shared shape: `base` is where the workspace's pages live (`/w/<slug>` or `/demo`), `rest` the path under it.
  * The workspace root is the Overview, the landing page (issue #100); a process's map (`/p/<id>`) belongs to Processes.
  */
-function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; rules?: boolean; levers?: boolean; ai?: boolean }): NavGroup[] {
+function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; ai?: boolean }): NavGroup[] {
   const onMap = rest.startsWith("/p/");
   const item = (i: Omit<NavItem, "href" | "active"> & { path: string; active?: boolean }): NavItem => {
     const { path, active, ...fields } = i;
@@ -61,9 +61,8 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     // Who gets too busy, and when (issue #35).
     item({ key: "forecast", label: "Forecast", path: "/forecast", icon: "forecast" }),
   ];
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/rules" || rest === "/settings/levers" || rest === "/settings/ai" || rest === "/settings/calibration" }));
-  // The demo has no Settings page, so its Analysis rules and Levers are reached from the sidebar directly.
-  if (extra.rules) company.push(item({ key: "rules", label: "Analysis rules", path: "/settings/rules", icon: "settings" }));
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/levers" || rest === "/settings/ai" || rest === "/settings/calibration" }));
+  // The demo has no Settings page, so its Levers are reached from the sidebar directly.
   if (extra.levers) company.push(item({ key: "levers", label: "Levers", path: "/settings/levers", icon: "settings" }));
   if (extra.ai) company.push(item({ key: "ai", label: "AI analysis", path: "/settings/ai", icon: "settings" }));
   if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
@@ -96,10 +95,10 @@ export function workspaceNav({ slug, pathname, canManage, counts }: { slug: stri
   return groups(base, rest, counts, { settings: true, access: canManage });
 }
 
-/** Northbeam on the demo: no database, so no Settings or Access (but its Analysis rules and Levers, edited in memory). */
+/** Northbeam on the demo: no database, so no Settings or Access (but its Levers, edited in memory). */
 function demoGroups(pathname: string, counts: NavCounts): NavGroup[] {
   const rest = pathname === "/demo" ? "" : pathname.startsWith("/demo/") ? pathname.slice("/demo".length) : "\u0000";
-  return groups("/demo", rest, counts, { settings: false, access: false, rules: true, levers: true, ai: true });
+  return groups("/demo", rest, counts, { settings: false, access: false, levers: true, ai: true });
 }
 
 /** Larkspur is a read-only map: just the map, and its issues in the map's side panel. */

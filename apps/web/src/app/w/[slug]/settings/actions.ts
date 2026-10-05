@@ -15,7 +15,6 @@ import {
   type ClientGroupField,
 } from "@/lib/client-groups";
 import { isTagList, parseNewService, parseServiceField, type ServiceField } from "@/lib/services";
-import { afterMarketChange } from "@/lib/ai/trigger";
 import { createClient } from "@/lib/supabase/server";
 
 // Writes from the workspace settings page. Every write runs as the signed-in
@@ -485,8 +484,6 @@ export async function saveMarketField(conditionId: string, field: string, value:
   }
   // A preset, or a row you can't edit, matches no row for an update.
   if (!data.length) return { status: "not_found" };
-  // A factor changes what the market does to every run (a rename doesn't): AI looks again, after the response.
-  if (parsed.field !== "name") afterMarketChange(supabase, data[0]!.workspace_id);
   refresh();
   return { status: "saved", value: parsed.value };
 }
@@ -516,7 +513,6 @@ export async function addMarketChange(workspaceId: string, _prev: ActionResult, 
     .insert({ workspace_id: parsed.workspaceId, condition_id: parsed.conditionId, from_month: parsed.from, to_month: parsed.to });
   // 23P01: the months overlap another change (the table's trigger).
   if (error) return error.code === "23P01" ? { error: "Those months overlap another change. Remove it first, or pick other months." } : failure(error);
-  afterMarketChange(supabase, parsed.workspaceId);
   refresh();
   return {};
 }
@@ -528,7 +524,6 @@ export async function removeMarketChange(changeId: string): Promise<ActionResult
   const { data, error } = await supabase.from("market_schedule").delete().eq("id", changeId).select("id, workspace_id");
   if (error) return failure(error);
   if (!data.length) return { error: "That change was already removed, or you can't edit it." };
-  afterMarketChange(supabase, data[0]!.workspace_id);
   refresh();
   return {};
 }

@@ -1,60 +1,57 @@
 import "server-only";
 
-// Running AI analysis on the server and storing it per process version (issue #111, A46; docs/adr/0013-ai-analysis.md).
-// Everything runs as the signed-in user under RLS: after a publish or a market change, with the client of the editor who
-// made it; for "Run again", with the editor who clicked. There is no service key, so a viewer's click or a stranger's
-// request can write nothing. Every model call first reserves a run in the database (`reserve_ai_run`, which counts the
-// daily cap and the per-process cooldown where an editor can't reset them), including "Run again" and runs that fail.
+// Running AI analysis on the server (issue #111, A46; issue #175, B17; docs/adr/0013-ai-analysis.md and 0015). Analysis
+// runs ON DEMAND only: someone presses "Analyse" on a process page (one process) or on the Overview (the whole company).
+// Nothing runs on a publish or a market change any more. Everything runs as the signed-in user under RLS, with the client
+// of the person who pressed it, so a viewer's click or a stranger's request writes nothing.
 //
-// It is a long call (a simulation, then one or two model requests), so a trigger never waits for it: callers hand it to
-// `after()` and it fails quietly (`runInBackground`). Nothing here throws for a model or database problem.
+// Results are cached: an analysis is stored with a hash of what it read (the model, first principles, Anthropic model,
+// the sources switch and quotes, and the run's facts: `model-hash.ts`), and pressing Analyse while that hashes the same
+// returns the stored one without calling the model. "Analyse again" forces a run all the same. Every model call first reserves a run
+// in the database (`reserve_ai_run`: 40 runs a day per workspace, one a minute per process), so the cost stays bounded
+// whatever calls this. What AI found is stored as PROPOSED findings, each citing the facts it rests on, for a person to
+// accept, edit or dismiss.
 
 import {
   AI_DAILY_RUN_LIMIT,
   ModelError,
-  claimMarketPending,
-  markMarketPending,
   reserveAiRun,
   type AiReservation,
-  loadAiAnalyses,
   loadAiSettings,
-  loadAnalysisRules,
   loadFirstPrinciplesFor,
+  loadIssues,
+  loadLatestAiAnalyses,
   loadProcessBundle,
   listProcesses,
   saveAiAnalysis,
+  storeProposedFindings,
   toEngineModel,
-  type AiAnalysisTrigger,
   type AiSettings,
   type Db,
   type ProcessBundle,
+  type ProposedFinding,
   type SaveAiAnalysisInput,
 } from "@transpera-flow/db";
 import { absenceTest, resolveMoney, shadowPricesFor, simulate, type AbsenceTest, type DetectedIssue } from "@transpera-flow/engine";
-import { anthropicAnalyst } from "@/lib/narration/anthropic";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
+import { anthropicAnalyst, NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { analyseWithAi, type AiModel, type AiOutcome } from "./analyse";
 import { aiInputForRun, costedRoleIds, quotesFromBundle, ruleFindings, type AiRunInput } from "./input";
+import { analysisBaseHash, factsDigest, joinAnalysisHash } from "./model-hash";
+import type { AiInsight } from "./types";
 
 /** The replications and seed every page uses, so AI reads the same run the person sees. */
 const REPS = 30;
 const SEED = 1;
-/** Most processes one market change reviews. */
-export const AI_MARKET_PROCESS_LIMIT = 5;
-/** A market change waits this long for further changes before its review starts (a market field saves on every edit). */
-export const AI_MARKET_DEBOUNCE_MS = 20_000;
-/** After the debounce, no new process review starts once this much time has passed: a request has `maxDuration` 300 s, and one review can take 110 s. */
-export const AI_MARKET_BUDGET_MS = 150_000;
 
 export type AiSkip =
-  /** The trigger's switch is off. */
-  | "switched_off"
   /** The server has no Anthropic API key. */
   | "not_set_up"
   /** The version has no first principles to review. */
   | "no_first_principles"
   /** This process ran less than a minute ago (the database refuses a second run). */
   | "cooldown"
-  /** The facts are the ones the stored analysis was made from. */
+  /** Everything the stored analysis read hashes the same: it is still current, and the model wasn't called. */
   | "unchanged"
   /** The workspace has used its model runs for the day (the database counts them). */
   | "limit"
@@ -65,58 +62,96 @@ export type AiSkip =
   /** The model of the process can't be built (a step is broken, say). */
   | "model_error";
 
-export type AiRunResult = { status: "stored"; outcome: AiOutcome } | { status: "skipped"; why: AiSkip; message?: string } | { status: "error"; message: string };
+export type AiRunResult =
+  | { status: "stored"; outcome: AiOutcome; added: number }
+  | { status: "skipped"; why: AiSkip; message?: string }
+  | { status: "error"; message: string };
 
 export interface AiRunDeps {
-  trigger: AiAnalysisTrigger;
-  /** A manual run ignores the "unchanged" shortcut (it still reserves a run, so it still counts against the cap and the cooldown). */
+  /** Run even when the model is unchanged (it still reserves a run, so it still counts against the cap and the cooldown). */
   force: boolean;
+  scope: "process" | "company";
   workspaceId: string;
+  /** The process the analysis is stored against: the one analysed, or the company map's for the whole company. */
   processId: string;
   revisionId: string | null;
-  settings: AiSettings;
+  settings: Pick<AiSettings, "read_sources">;
   canWrite: boolean;
-  /** The stored analysis of this version, if any. */
-  existing: { input_hash: string; status: string } | null;
+  /** The latest stored analysis of this scope, if any. */
+  existing: { input_hash: string; status: string; model_hash: string | null } | null;
+  /** The base hash of what the analysis reads now (`analysisBaseHash`); null when the model can't be built. The run's facts are added once it is built. */
+  baseHash: string | null;
   /** Load the version and run it. Called only once the cheap checks pass. */
   build: () => Promise<AiRunInput | { error: string }>;
   /** Claude, or null when the server has no key. */
   model: AiModel | null;
-  /** Reserve a model run in the database before calling the model: it counts the daily cap and the cooldown. Every model call, failed or not, reserves first. */
+  /** Reserve a model run in the database before calling the model: it counts the daily cap and the cooldown. */
   reserve: () => Promise<AiReservation>;
-  save: (row: SaveAiAnalysisInput) => Promise<boolean>;
+  /** Store the analysis; its id, or null when it couldn't be written. */
+  save: (row: SaveAiAnalysisInput) => Promise<string | null>;
+  /** Store what one run found as proposed findings; how many were new, or an error in words. */
+  propose: (analysisId: string, runId: string, findings: ProposedFinding[]) => Promise<{ added: number } | { error: string }>;
+}
+
+/** The process each step belongs to in a bundle (its own, and those of every other process in it). */
+export function stepProcesses(bundle: ProcessBundle): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const o of bundle.otherProcesses ?? []) for (const s of o.steps) out.set(s.id, o.process.id);
+  for (const s of bundle.steps) out.set(s.id, bundle.process.id);
+  return out;
+}
+
+/**
+ * AI insights as proposed findings. A finding on a step sits in that step's process; one on no step sits in the process
+ * analysed, or across the company for the whole company.
+ */
+export function proposedFindings(insights: readonly AiInsight[], scope: "process" | "company", processId: string, steps: ReadonlyMap<string, string>): ProposedFinding[] {
+  return insights.map((i) => ({
+    aiKey: i.key,
+    processId: (i.stepId && steps.get(i.stepId)) || (scope === "company" ? null : processId),
+    stepId: i.stepId,
+    rating: i.rating,
+    type: i.type,
+    title: i.title,
+    evidence: i.evidence,
+    why: i.why,
+    facts: i.facts ?? [],
+  }));
 }
 
 /** Decide, run and store one analysis. Pure orchestration over the injected pieces, so it is tested with fakes. */
 export async function runAnalysis(deps: AiRunDeps): Promise<AiRunResult> {
   if (!deps.revisionId) return { status: "skipped", why: "no_live" };
   if (!deps.canWrite) return { status: "skipped", why: "forbidden" };
-  if (deps.trigger === "publish" && !deps.settings.review_on_publish) return { status: "skipped", why: "switched_off" };
-  if (deps.trigger === "market" && !deps.settings.review_on_market) return { status: "skipped", why: "switched_off" };
   if (!deps.model) return { status: "skipped", why: "not_set_up" };
+  const current = deps.existing?.status === "ok";
 
   const built = await deps.build();
   if ("error" in built) return { status: "skipped", why: "model_error", message: built.error };
-  const made = aiInputForRun({ ...built, quotes: deps.settings.read_sources ? quotesFromBundle(built.bundle) : null });
+  const made = aiInputForRun({ ...built, scope: deps.scope, quotes: deps.settings.read_sources ? quotesFromBundle(built.bundle) : null });
   if (!made) return { status: "skipped", why: "no_first_principles" };
-  if (!deps.force && deps.existing?.status === "ok" && deps.existing.input_hash === made.input.hash) return { status: "skipped", why: "unchanged" };
+  // The cache: what the stored analysis read hashes as it does now (its facts included), so the model isn't called.
+  // An analysis stored without a hash (before B17) is matched by what it was sent.
+  const modelHash = deps.baseHash ? joinAnalysisHash(deps.baseHash, factsDigest(made.findings)) : null;
+  const same = deps.existing?.model_hash ? deps.existing.model_hash === modelHash : deps.existing?.input_hash === made.input.hash;
+  if (!deps.force && current && same) return { status: "skipped", why: "unchanged" };
 
   // The one place the model is called: reserve first, so the database has counted the run whatever happens next.
   const reservation = await deps.reserve();
   if (reservation.status === "limit") return { status: "skipped", why: "limit", message: `This workspace has used its ${AI_DAILY_RUN_LIMIT} AI runs for the day.` };
-  if (reservation.status === "cooldown") return { status: "skipped", why: "cooldown", message: `AI reviewed this process a moment ago. Try again in ${reservation.retryAfterSeconds} seconds.` };
+  if (reservation.status === "cooldown") return { status: "skipped", why: "cooldown", message: `AI analysed this a moment ago. Try again in ${reservation.retryAfterSeconds} seconds.` };
   if (reservation.status === "forbidden") return { status: "skipped", why: "forbidden" };
   if (reservation.status === "error") return { status: "error", message: "AI analysis couldn't start. Try again." };
 
   const outcome = await analyseWithAi(made.input, deps.model);
-  const stored = await deps.save({
+  const id = await deps.save({
     run_id: reservation.runId,
     workspace_id: deps.workspaceId,
     process_id: deps.processId,
     revision_id: deps.revisionId,
     status: outcome.status,
     reason: outcome.reason?.slice(0, 2000) ?? null,
-    trigger: deps.trigger,
+    trigger: "manual",
     summary: outcome.summary,
     insights: outcome.insights as unknown as SaveAiAnalysisInput["insights"],
     review: outcome.review as unknown as SaveAiAnalysisInput["review"],
@@ -124,22 +159,22 @@ export async function runAnalysis(deps: AiRunDeps): Promise<AiRunResult> {
     dropped: outcome.dropped,
     input_hash: made.input.hash,
     model: outcome.model,
+    model_hash: modelHash,
     usage: outcome.usage as unknown as SaveAiAnalysisInput["usage"],
   });
-  return stored ? { status: "stored", outcome } : { status: "error", message: "The analysis ran but couldn't be saved." };
+  if (!id) return { status: "error", message: "The analysis ran but couldn't be saved." };
+  if (outcome.status !== "ok") return { status: "stored", outcome, added: 0 };
+  const stored = await deps.propose(id, reservation.runId, proposedFindings(outcome.insights, deps.scope, deps.scope === "company" ? "" : built.bundle.process.id, stepProcesses(built.bundle)));
+  if ("error" in stored) return { status: "error", message: "The analysis ran, but its findings couldn't be saved for review. Try again." };
+  return { status: "stored", outcome, added: stored.added };
 }
 
 // ---------------------------------------------------------------------------
 // The database side
 // ---------------------------------------------------------------------------
 
-/** The version of a process as AI reads it: its bundle, its model, one run, the rules and its first principles. Rule 8 and the busy cost take their own extra runs, as on the pages. */
-async function loadRun(db: Db, workspaceId: string, processId: string, revisionId: string): Promise<AiRunInput | { error: string }> {
-  const { data: workspace, error: wsError } = await db.from("workspaces").select("id, name, slug, settings").eq("id", workspaceId).maybeSingle();
-  if (wsError || !workspace) return { error: "The workspace couldn't be read." };
-  const process = (await listProcesses(db, workspaceId)).find((p) => p.id === processId);
-  if (!process) return { error: "The process couldn't be found." };
-  const bundle: ProcessBundle = await loadProcessBundle(db, workspace, process, revisionId);
+/** A process's version as AI reads it: its bundle, its model, one run and its first principles. Rule 8 and the busy cost take their own extra runs, as on the pages. */
+async function loadRun(db: Db, bundle: ProcessBundle, firstPrinciplesOf: string): Promise<AiRunInput | { error: string }> {
   let model;
   try {
     model = toEngineModel(bundle);
@@ -147,17 +182,17 @@ async function loadRun(db: Db, workspaceId: string, processId: string, revisionI
     if (err instanceof ModelError) return { error: err.message };
     throw err;
   }
-  const [rules, fp] = await Promise.all([loadAnalysisRules(db, workspaceId), loadFirstPrinciplesFor(db, processId, [revisionId])]);
+  const fp = await loadFirstPrinciplesFor(db, firstPrinciplesOf, [bundle.revision.id]);
   const result = simulate(model, REPS, SEED);
   let absence: AbsenceTest | null = null;
   try {
-    absence = absenceTest(model, { seed: SEED, weeks: resolveMoney(rules.settings).absenceWeeks });
+    absence = absenceTest(model, { seed: SEED, weeks: resolveMoney(ANALYSIS_DEFAULTS).absenceWeeks });
   } catch {
     // Without it "only one person can do it" raises nothing, as on a page while the test is still running.
   }
-  const firstPrinciples = fp[revisionId]?.doc ?? null;
+  const firstPrinciples = fp[bundle.revision.id]?.doc ?? null;
   // The too-busy cost needs the shadow price of each busy role (an extra run), as the pages compute it.
-  const first: DetectedIssue[] = ruleFindings({ bundle, model, result, rules: rules.settings, firstPrinciples, absence });
+  const first: DetectedIssue[] = ruleFindings({ bundle, model, result, firstPrinciples, absence });
   const roleIds = costedRoleIds(first);
   let shadowPrices: Record<string, number> | undefined;
   if (roleIds.length) {
@@ -167,40 +202,65 @@ async function loadRun(db: Db, workspaceId: string, processId: string, revisionI
       // Those costs read "n/a", as on a page whose extra run failed.
     }
   }
-  return { bundle, model, result, rules: rules.settings, firstPrinciples, absence, ...(shadowPrices ? { shadowPrices } : {}) };
+  return { bundle, model, result, firstPrinciples, absence, ...(shadowPrices ? { shadowPrices } : {}) };
 }
 
-/** The signed-in user's client runs one analysis of a process's live version (or of `revisionId`). */
-export async function runAiAnalysis(
-  db: Db,
-  processId: string,
-  { trigger, force = false, model = anthropicAnalyst() }: { trigger: AiAnalysisTrigger; force?: boolean; model?: AiModel | null },
-): Promise<AiRunResult> {
+/** The keys of AI insights already acknowledged as issues before B17 (`ai:insight:<hash>`): those aren't proposed again. */
+async function acknowledgedAiKeys(db: Db, workspaceId: string): Promise<Set<string>> {
+  try {
+    return new Set((await loadIssues(db, workspaceId)).flatMap((i) => (i.detected_key?.startsWith("ai:insight:") ? [i.detected_key] : [])));
+  } catch {
+    return new Set();
+  }
+}
+
+/** The pieces both scopes share: settings, write access, the latest stored analysis, the reservation, the stores. */
+async function common(db: Db, workspaceId: string, storedOn: string) {
+  const [settings, canWrite, latest, skip] = await Promise.all([
+    loadAiSettings(db, workspaceId),
+    db.rpc("can_edit_workspace", { ws: workspaceId }),
+    loadLatestAiAnalyses(db, [storedOn]),
+    acknowledgedAiKeys(db, workspaceId),
+  ]);
+  const row = latest[storedOn];
+  return {
+    settings,
+    canWrite: canWrite.data === true,
+    existing: row ? { input_hash: row.input_hash, status: row.status, model_hash: row.model_hash } : null,
+    reserve: () => reserveAiRun(db, workspaceId, storedOn, "manual"),
+    save: (r: SaveAiAnalysisInput) => saveAiAnalysis(db, r),
+    propose: async (analysisId: string, runId: string, findings: ProposedFinding[]) => {
+      const out = await storeProposedFindings(db, { workspaceId, analysisId, runId, scope: storedOn, findings, skipKeys: skip });
+      return "error" in out ? out : { added: out.added };
+    },
+  };
+}
+
+/** "Analyse" on a process page: the signed-in user's client analyses the process's live version. */
+export async function runAiAnalysis(db: Db, processId: string, { force = false, model = anthropicAnalyst() }: { force?: boolean; model?: AiModel | null } = {}): Promise<AiRunResult> {
   try {
     const { data: process, error } = await db.from("processes").select("id, workspace_id, live_revision_id, is_company").eq("id", processId).maybeSingle();
     if (error || !process) return { status: "error", message: "That process isn't available." };
-    if (process.is_company) return { status: "error", message: "The company map can't be analysed: it is a picture of the business, not a process." };
+    if (process.is_company) return { status: "error", message: "Analyse the whole company from the Overview." };
     const workspaceId = process.workspace_id;
     const revisionId = process.live_revision_id;
-    const [settings, canWrite, existing] = await Promise.all([
-      loadAiSettings(db, workspaceId),
-      db.rpc("can_edit_workspace", { ws: workspaceId }),
-      revisionId ? loadAiAnalyses(db, [revisionId]) : Promise.resolve({}),
-    ]);
-    const row = revisionId ? (existing as Awaited<ReturnType<typeof loadAiAnalyses>>)[revisionId] : undefined;
+    if (!revisionId) return { status: "skipped", why: "no_live" };
+    const { data: workspace } = await db.from("workspaces").select("id, name, slug, settings").eq("id", workspaceId).maybeSingle();
+    const listed = (await listProcesses(db, workspaceId)).find((p) => p.id === processId);
+    if (!workspace || !listed) return { status: "error", message: "The process couldn't be found." };
+    const bundle = await loadProcessBundle(db, workspace, listed, revisionId);
+    const fp = (await loadFirstPrinciplesFor(db, processId, [revisionId]))[revisionId]?.doc ?? null;
+    const shared = await common(db, workspaceId, processId);
     return await runAnalysis({
-      trigger,
       force,
+      scope: "process",
       workspaceId,
       processId,
       revisionId,
-      settings,
-      canWrite: canWrite.data === true,
-      existing: row ? { input_hash: row.input_hash, status: row.status } : null,
-      build: () => loadRun(db, workspaceId, processId, revisionId!),
+      ...shared,
+      baseHash: analysisBaseHash(bundle, fp, "process", { readSources: shared.settings.read_sources, model: NARRATION_MODEL }),
+      build: () => loadRun(db, bundle, processId),
       model,
-      reserve: () => reserveAiRun(db, workspaceId, processId, trigger),
-      save: (r) => saveAiAnalysis(db, r),
     });
   } catch (err) {
     console.error("AI analysis failed.", err instanceof Error ? err.message : err);
@@ -208,66 +268,37 @@ export async function runAiAnalysis(
   }
 }
 
-/** For `after()`: run and swallow everything, so a trigger never breaks the request that started it. */
-export async function runInBackground(work: () => Promise<unknown>): Promise<void> {
-  try {
-    await work();
-  } catch (err) {
-    console.error("AI analysis (background) failed.", err instanceof Error ? err.message : err);
-  }
-}
-
-export interface MarketRunDeps {
-  /** Note that the market changed now; returns the mark (null: couldn't be written, so nothing runs). */
-  mark: () => Promise<string | null>;
-  sleep: (ms: number) => Promise<void>;
-  /** Claim the pending review if `mark` is still the latest change's. */
-  claim: (mark: string) => Promise<boolean>;
-  /** The processes to review, in order. */
-  processes: () => Promise<string[]>;
-  /** Review one process. */
-  run: (processId: string) => Promise<unknown>;
-  now?: () => number;
-  log?: (message: string) => void;
-}
-
 /**
- * A market change, debounced and bounded. Every change moves a mark and waits; only the last change's run still finds its
- * mark in place, claims it and reviews, so a burst of edits makes one review, not one per edit. The review goes through
- * the processes one at a time and starts no new one once the time budget is spent, logging the ones it left (each run
- * reserves its own run in the database, so the daily cap holds either way).
+ * "Analyse the whole company" on the Overview: the company model (the first sales pipeline with every process it runs
+ * beside, as the Overview simulates it), judged against the pipeline's first principles, stored against the company map.
  */
-export async function debouncedMarketRun(deps: MarketRunDeps): Promise<{ ran: string[]; skipped: string[] }> {
-  const none = { ran: [], skipped: [] };
-  const mark = await deps.mark();
-  if (!mark) return none;
-  await deps.sleep(AI_MARKET_DEBOUNCE_MS);
-  if (!(await deps.claim(mark))) return none;
-  const now = deps.now ?? (() => Date.now());
-  const started = now();
-  const ran: string[] = [];
-  const skipped: string[] = [];
-  for (const id of (await deps.processes()).slice(0, AI_MARKET_PROCESS_LIMIT)) {
-    if (now() - started > AI_MARKET_BUDGET_MS) {
-      skipped.push(id);
-      continue;
-    }
-    await deps.run(id);
-    ran.push(id);
+export async function runCompanyAiAnalysis(db: Db, workspaceId: string, { force = false, model = anthropicAnalyst() }: { force?: boolean; model?: AiModel | null } = {}): Promise<AiRunResult> {
+  try {
+    const { data: workspace } = await db.from("workspaces").select("id, name, slug, settings").eq("id", workspaceId).maybeSingle();
+    if (!workspace) return { status: "error", message: "That workspace isn't available." };
+    const everything = await listProcesses(db, workspaceId, { includeCompany: true });
+    const company = everything.find((p) => p.is_company);
+    // The company model, picked as the Overview picks it (`loadProcessBySlug`): the first top-level process with a live version.
+    const all = everything.filter((p) => !p.is_company);
+    const pipeline = all.find((p) => p.live_revision_id && !p.parent_process_id) ?? all.find((p) => p.live_revision_id);
+    if (!company?.live_revision_id) return { status: "error", message: "This workspace has no company map yet." };
+    if (!pipeline?.live_revision_id) return { status: "skipped", why: "no_live" };
+    const bundle = await loadProcessBundle(db, workspace, pipeline, pipeline.live_revision_id);
+    const fp = (await loadFirstPrinciplesFor(db, pipeline.id, [pipeline.live_revision_id]))[pipeline.live_revision_id]?.doc ?? null;
+    const shared = await common(db, workspaceId, company.id);
+    return await runAnalysis({
+      force,
+      scope: "company",
+      workspaceId,
+      processId: company.id,
+      revisionId: company.live_revision_id,
+      ...shared,
+      baseHash: analysisBaseHash(bundle, fp, "company", { readSources: shared.settings.read_sources, model: NARRATION_MODEL }),
+      build: () => loadRun(db, bundle, pipeline.id),
+      model,
+    });
+  } catch (err) {
+    console.error("AI analysis (company) failed.", err instanceof Error ? err.message : err);
+    return { status: "error", message: "AI analysis couldn't run. Try again." };
   }
-  if (skipped.length) (deps.log ?? console.warn)(`AI market review: left ${skipped.length} process(es) for the next change, out of time: ${skipped.join(", ")}`);
-  return { ran, skipped };
-}
-
-/** After a market change: review the workspace's live processes if the switch is on and there is a key (debounced, see `debouncedMarketRun`). */
-export async function runAiAnalysisAfterMarketChange(db: Db, workspaceId: string, model: AiModel | null = anthropicAnalyst()): Promise<void> {
-  if (!model) return;
-  if (!(await loadAiSettings(db, workspaceId)).review_on_market) return;
-  await debouncedMarketRun({
-    mark: () => markMarketPending(db, workspaceId),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    claim: (mark) => claimMarketPending(db, workspaceId, mark),
-    processes: async () => (await listProcesses(db, workspaceId)).filter((p) => p.live_revision_id && p.kind !== "servicing").map((p) => p.id),
-    run: (id) => runAiAnalysis(db, id, { trigger: "market", model }),
-  });
 }

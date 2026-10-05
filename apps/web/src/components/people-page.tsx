@@ -15,8 +15,6 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { BUSY_LIMIT, personRows, teamSummary, type PersonBusy } from "@/lib/people";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { ForecastPanel } from "@/components/forecast/forecast-panel";
-import { useRatingSettings } from "@/lib/rules/use-rating-settings";
-import type { AnalysisSettings } from "@transpera-flow/engine";
 
 const RATING_CHIP: Record<Rating, string> = {
   risk: "border-crit bg-crit-soft",
@@ -57,9 +55,8 @@ export function PeoplePage({
    * Who gets too busy, and when (issue #35): the Forecast page it links to, the analysis rules (omitted: the demo's,
    * edited in this tab), and on the demo its sample plan and fixed start date.
    */
-  forecast?: { href: string; analysisRules?: AnalysisSettings; demo?: boolean; bundle?: ProcessBundle; startDate?: string };
+  forecast?: { href: string; demo?: boolean; bundle?: ProcessBundle; startDate?: string };
 }) {
-  const forecastRules = useRatingSettings(forecast?.demo === true, forecast?.analysisRules);
   const model = useMemo(() => {
     try {
       return toEngineModel(bundle);
@@ -98,7 +95,7 @@ export function PeoplePage({
       </div>
       {health.groups.length > 0 && <ClientGroupsTable health={health} />}
       <HowBusy rows={rows} />
-      {forecast && <ForecastPanel bundle={forecast.bundle ?? bundle} analysisRules={forecastRules} forecastHref={forecast.href} startDate={forecast.startDate} />}
+      {forecast && <ForecastPanel bundle={forecast.bundle ?? bundle} forecastHref={forecast.href} startDate={forecast.startDate} />}
     </>
   );
 }

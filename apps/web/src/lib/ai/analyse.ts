@@ -38,7 +38,7 @@ export interface AiDraft {
   /** The parsed JSON the model wrote (not yet trusted). */
   output: unknown;
   model: string;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number } | null;
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens?: number } | null;
 }
 
 /** A model that writes the analysis: Claude in production (narration/anthropic.ts), fakes in tests, canned text on /demo. */
@@ -144,10 +144,22 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
       dropped++;
       continue;
     }
+    // The facts it rests on (B17): ids the model was given, mapped back to the engine's facts and the quotes. A finding
+    // that cites no fact of the run, when the run has some, rests on nothing the engine measured: it is dropped.
+    const cited = [...new Set(Array.isArray(r.facts) ? r.facts.filter((x): x is string => typeof x === "string") : [])];
+    const facts = [
+      ...input.facts.filter((f) => cited.includes(f.id)).map((f) => ({ kind: "fact" as const, key: f.key, text: back(f.text) })),
+      ...input.quoteRefs.filter((q) => cited.includes(q.id)).map((q) => ({ kind: "quote" as const, key: back(q.key), text: back(q.text) })),
+    ];
+    if (input.facts.length && !facts.some((f) => f.kind === "fact")) {
+      rejected.push({ where: `the insight “${title}”`, text: title, problems: [{ text: title, reason: "a finding that cites none of the facts it was given" } as NumberProblem] });
+      dropped++;
+      continue;
+    }
     const key = keyOf(back(title), stepId);
     if (seen.has(key)) continue;
     seen.add(key);
-    insights.push({ item: { key, type, rating, title: back(title), evidence: back(evidence), why: back(why), stepId }, checked: res.checked });
+    insights.push({ item: { key, type, rating, title: back(title), evidence: back(evidence), why: back(why), stepId, facts }, checked: res.checked });
   }
 
   // The first-principles review.

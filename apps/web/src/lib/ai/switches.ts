@@ -1,4 +1,6 @@
-// The five switches of Settings -> AI analysis (issue #111, A46), with their plain-English help. Wording follows the
+// The switches of Settings -> AI analysis (issue #111, A46). The two that reviewed a version on its own (after a publish,
+// after a market change) are gone: analysis runs only when someone presses "Analyse" (B17, D40); their columns stay, unread.
+// The rest, with their plain-English help. Wording follows the
 // prototype (apps/web/prototype/app-flow.html, Settings -> AI analysis). The two "suggest" switches are enforced by the MCP
 // propose tools (A52): when one is off, Claude can't propose that kind of suggestion.
 
@@ -14,18 +16,6 @@ export interface AiSwitch {
 }
 
 export const AI_SWITCHES: readonly AiSwitch[] = [
-  {
-    key: "review_on_publish",
-    label: "Review after each published version",
-    description: "When you publish a new version of a process, AI looks at the results and writes what it notices: a short read, and insights for the list. It uses only numbers the simulation produced.",
-    example: "“Proposals now go out faster, but fewer are being won.”",
-  },
-  {
-    key: "review_on_market",
-    label: "Review when market conditions change",
-    description: "When you change the market conditions or their schedule, AI checks which processes are hit hardest and updates its read.",
-    example: "“In a downturn, the strategist has more time, but more clients leave.”",
-  },
   {
     key: "suggest_issues",
     label: "Suggest issues (they land in Suggestions)",

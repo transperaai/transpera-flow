@@ -38,6 +38,17 @@ describe("the demo's AI text", () => {
     expect(view.checked).toBe(checked);
   });
 
+  it("cites facts the sample's run has, by the keys and words the engine gives them", () => {
+    const out = screenOutput(JSON.parse(JSON.stringify(DEMO_AI_OUTPUT)), input);
+    const view = demoAiView(bundle.process.id)!;
+    view.insights.forEach((i, n) => {
+      const real = out.insights[n]!.item.facts!;
+      expect(i.facts!.map((f) => f.key)).toEqual(real.map((f) => f.key));
+      // The demo keeps each fact's first sentence.
+      i.facts!.forEach((f, k) => expect(real[k]!.text.startsWith(f.text)).toBe(true));
+    });
+  });
+
   it("points at steps the sample has", () => {
     const ids = new Set(bundle.steps.map((s) => s.id));
     for (const i of demoAiView(bundle.process.id)!.insights) if (i.stepId) expect(ids.has(i.stepId)).toBe(true);

@@ -1,6 +1,5 @@
 "use server";
 
-import { afterPublish } from "@/lib/ai/trigger";
 import { saveFields } from "@/lib/fields/server";
 import type { OpenResult, PublishResult } from "@/lib/drafts/session";
 import type { UpdateResult, WriteResult } from "@/lib/editor/store";
@@ -102,8 +101,6 @@ export async function publishDraft(processId: string, acceptEstimates: unknown):
   if (error) return failure(error) as PublishResult;
   const r = data as Reply;
   if (r.status === "published") {
-    // AI reviews the new version once this response has gone (if the workspace has that switched on); never waited for.
-    afterPublish(session.supabase, processId);
     return { status: "published", revision: { id: r.revision_id!, number: r.number! } };
   }
   if (r.status === "unresolved") return { status: "unresolved", steps: (r.steps ?? []).map((s) => ({ id: s.id, name: s.name })) };

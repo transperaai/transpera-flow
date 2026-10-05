@@ -476,12 +476,62 @@ export interface AiAnalysisRow {
   dropped: number;
   input_hash: string;
   model: string | null;
+  /** A hash of the model it read (engine model, first principles, prompt version): a different hash now means it is out of date (B17). Null on rows from before. */
+  model_hash: string | null;
   usage: Json;
   /** The reserved run that wrote it, and so who ran it. */
   run_id: string;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export type FindingOrigin = "ai" | "manual";
+export type FindingStatus = "proposed" | "accepted" | "dismissed" | "superseded";
+export type FindingRating = "risk" | "bad" | "good" | "great";
+export const FINDING_TYPES = ["bottleneck", "spof", "manual", "delay", "failure", "idea", "capacity", "sla", "churn_risk"] as const;
+export type FindingType = (typeof FINDING_TYPES)[number];
+
+/** A fact or quote a finding rests on, as it read when cited. */
+export interface FindingCitation {
+  kind: "fact" | "quote";
+  /** The fact's key (`<detector>:<subject>:<id>`), or the step a quote is cited on. */
+  key: string;
+  text: string;
+}
+
+/**
+ * A finding (issue #175, B17; decision D40): what AI or a person concludes from the engine's facts. AI findings arrive
+ * proposed and a person accepts, edits or dismisses them; findings by hand start accepted. Only accepted ones show on the
+ * pages, and one can be acknowledged as an issue (`detected_key = 'finding:<origin>:<id>'`).
+ */
+export interface FindingRow {
+  id: string;
+  workspace_id: string;
+  /** Null: across the company. */
+  process_id: string | null;
+  step_id: string | null;
+  origin: FindingOrigin;
+  status: FindingStatus;
+  rating: FindingRating;
+  type: FindingType;
+  title: string;
+  evidence: string;
+  why: string;
+  facts: Json;
+  source_ids: string[];
+  ai_key: string | null;
+  analysis_id: string | null;
+  /** The run that last proposed it (analyses are kept one per version; each run has its own id). */
+  run_id: string | null;
+  /** An AI finding a person has changed (set by the database only): its words are no longer only AI's. */
+  edited: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
 }
 
 export type SourceKind = "transcript" | "notes" | "sop" | "spreadsheet" | "data" | "screenshot" | "other";
@@ -1092,6 +1142,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<FirstPrinciplesRow, "first_principles">>,
   Assert<Matches<AiSettingsRow, "ai_settings">>,
   Assert<Matches<AiAnalysisRow, "ai_analyses">>,
+  // origin, status, rating and type are check-constrained.
+  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type">, "findings">>,
   // trigger is check-constrained to the three triggers.
   Assert<Matches<Omit<AiRunRow, "trigger">, "ai_runs">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.

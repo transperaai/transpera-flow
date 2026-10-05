@@ -16,14 +16,15 @@ import { RatingPill } from "./rating-pill";
 
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** Whether an open row has anything to list: insights, or issues logged by hand that are still open. */
-export const hasOpenFindings = (g: Pick<FindingGroup, "insights" | "issues">): boolean => g.insights.length > 0 || g.issues.some((i) => !i.detected_key && isActiveStatus(i.status));
+/** Whether an open row has anything to list: findings, facts, or issues logged by hand that are still open. */
+export const hasOpenFindings = (g: Pick<FindingGroup, "insights" | "issues"> & { facts?: readonly unknown[] }): boolean =>
+  g.insights.length > 0 || (g.facts?.length ?? 0) > 0 || g.issues.some((i) => !i.detected_key && isActiveStatus(i.status));
 
-/** "2 open issues · 3 new insights · 1 solution in progress", leaving out the zeros (all zero: "Nothing open"). */
+/** "2 open issues · 3 new findings · 1 solution in progress", leaving out the zeros (all zero: "Nothing open"). */
 export function countsLine(g: Pick<FindingGroup, "openIssues" | "newInsights" | "solutionsInProgress">): string {
   const parts = [
     g.openIssues ? count(g.openIssues, "open issue") : "",
-    g.newInsights ? count(g.newInsights, "new insight") : "",
+    g.newInsights ? count(g.newInsights, "new finding") : "",
     g.solutionsInProgress ? `${count(g.solutionsInProgress, "solution")} in progress` : "",
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : "Nothing open";
@@ -85,9 +86,9 @@ export function FindingsByProcess({
                     <span className="text-foreground">{g.top.title}</span>
                   </>
                 ) : company ? (
-                  "Nothing found across the company in this run"
+                  "No findings across the company yet"
                 ) : (
-                  "Nothing found in this run"
+                  "No findings yet"
                 )}
               </span>
               <span className="col-start-2 mt-0.5 text-xs text-muted-foreground tabular-nums sm:col-start-auto sm:mt-0 sm:text-right" data-counts>
@@ -96,7 +97,7 @@ export function FindingsByProcess({
             </button>
             {expanded && (
               <div id={panel} role="region" aria-label={`${g.name}: findings`} className="border-t bg-background/40 px-4 py-3" data-findings-panel>
-                {company && <p className="mb-2 text-xs text-muted-foreground">How busy each role and person is, clients and churn, and the forecast: findings tied to no single process.</p>}
+                {company && <p className="mb-2 text-xs text-muted-foreground">How busy each role and person is, clients and churn, and the forecast: what is tied to no single process.</p>}
                 {hasOpenFindings(g) ? renderFindings(g) : <p className="text-sm text-muted-foreground">Nothing open.</p>}
               </div>
             )}

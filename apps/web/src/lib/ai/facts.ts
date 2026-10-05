@@ -20,7 +20,7 @@ import { context, headlineResults } from "@/lib/narration/facts";
 import type { CheckContext, Fact } from "@/lib/narration/numbers";
 
 /** Bump when the payload or the prompt changes, so a stored analysis is seen as out of date. */
-export const AI_PROMPT_VERSION = 1;
+export const AI_PROMPT_VERSION = 2;
 
 export interface AiInputArgs {
   processName: string;
@@ -41,6 +41,15 @@ export interface AiInputArgs {
   /** Whether a market schedule is in the run (no figures: it only tells the model the months aren't all alike). */
   marketOn: boolean;
   currency: string;
+  /** What is analysed: one process, or the whole company (its company model). Only the wording the model reads differs. */
+  scope?: "process" | "company";
+}
+
+/** A fact the model may cite, by the id it was given: the engine finding's key and how it reads. */
+export interface AiFactRef {
+  id: string;
+  key: string;
+  text: string;
 }
 
 export interface AiInput {
@@ -56,6 +65,22 @@ export interface AiInput {
   quotes: string[];
   /** SHA-256 of the payload and prompt version: the same hash means the stored analysis is current. */
   hash: string;
+  /** The engine's facts by the id the model cites them with (B17). */
+  facts: AiFactRef[];
+  /** The quotes by the id the model cites them with: the step each is cited on, and its words. */
+  quoteRefs: AiFactRef[];
+}
+
+/** "a", "b", ... "z", "aa", "ab": ids with no digits, so no id can pass the number check as a figure. */
+export function letters(i: number): string {
+  let n = i + 1;
+  let out = "";
+  while (n > 0) {
+    n--;
+    out = String.fromCharCode(97 + (n % 26)) + out;
+    n = Math.floor(n / 26);
+  }
+  return out;
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -185,11 +210,19 @@ export function buildAiInput(args: AiInputArgs): AiInput {
   };
   const raw: Fact[] = [...head.raw];
 
-  const quotes = (args.quotes ?? []).slice(0, MAX_QUOTES).map((q) => ({ step: q.step, quote: q.quote.trim().slice(0, MAX_QUOTE_CHARS) })).filter((q) => q.quote);
+  const quotes = (args.quotes ?? [])
+    .slice(0, MAX_QUOTES)
+    .map((q) => ({ step: q.step, quote: q.quote.trim().slice(0, MAX_QUOTE_CHARS) }))
+    .filter((q) => q.quote)
+    .map((q, i) => ({ id: `quote-${letters(i)}`, ...q }));
+  // The facts the model cites by id (B17): each finding of the engine's, by an id with no digits in it.
+  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: `${f.title}. ${f.evidence}`.slice(0, 600) }));
   const aliases = aliasesFor(args.people);
   const payload = mapStrings(
     {
       ...factPayload,
+      scope: args.scope === "company" ? "The whole company: every process, role, person and client group in the company model." : `One process: ${args.processName}.`,
+      findings: findingsPayload.map((f, i) => ({ id: factRefs[i]!.id, ...f })),
       market: args.marketOn ? "A market schedule is switched on, so some months are busier or quieter than others." : "No market changes are scheduled.",
       steps: steps.map((s) => ({ id: s.id, name: s.name })),
       firstPrinciples: args.firstPrinciples ? firstPrinciplesPayload(args.firstPrinciples, steps, args.people) : null,
@@ -217,6 +250,8 @@ export function buildAiInput(args: AiInputArgs): AiInput {
     aliases,
     steps: steps.map((s) => ({ id: s.id, name: s.name })),
     quotes: wordsGiven(payload),
+    facts: factRefs,
+    quoteRefs: quotes.map((q) => ({ id: q.id, key: q.step, text: q.quote })),
     hash: createHash("sha256").update(JSON.stringify({ v: AI_PROMPT_VERSION, payload })).digest("hex"),
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { larkspurBundle, northbeamBundle, toEngineModel } from "@transpera-flow/db";
 import { ANALYSIS_RULE_IDS } from "@transpera-flow/engine";
-import { RULES_UI, SETTING_HELP } from "@/lib/rules/catalogue";
+import { RULES_UI } from "@/lib/rules/catalogue";
 import { cleanHidden, isLeverShown, kindsOf, LEVER_GROUP_ORDER, LEVER_KINDS, leverKind, leverKindId, visibleLevers } from "@/lib/scenarios/lever-catalogue";
 import { buildLevers, GROUP_LABELS } from "@/lib/scenarios/levers";
 import { horizonLabel, horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/lib/horizon";
@@ -83,15 +83,11 @@ describe("the sliders on a process page map onto it", () => {
 });
 
 describe("no lever, rule or market setting is without an (i)", () => {
-  it("has a description and example for every analysis rule and its settings", () => {
+  // The rules' own settings (cut-offs, escalators, money) went with the rules editor in B17; each rule keeps its help.
+  it("has a description and example for every analysis rule", () => {
     for (const id of ANALYSIS_RULE_IDS) {
       expect(RULES_UI[id].help.description.trim().length, id).toBeGreaterThan(10);
       expect(RULES_UI[id].help.example.trim().length, id).toBeGreaterThan(5);
-    }
-    for (const [key, h] of Object.entries(SETTING_HELP)) {
-      expect(h.label.trim(), key).not.toBe("");
-      expect(h.description.trim().length, key).toBeGreaterThan(10);
-      expect(h.example.trim().length, key).toBeGreaterThan(5);
     }
   });
 });

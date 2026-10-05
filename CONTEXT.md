@@ -49,15 +49,19 @@ _Avoid_: Edit mode, edit toggle
 ### Analysis
 
 **Rating**:
-One of four levels a rule gives a finding: Great, Good could improve, Bad not urgent, Operational risk. Example: a strategist busy 82% of the time rates Good could improve, and is raised to Operational risk if a bad month hits 97% and she is the bottleneck.
+One of four levels a rule gives a fact, or a person or AI gives a finding: Great, Good could improve, Bad not urgent, Operational risk. Example: a strategist busy 82% of the time rates Good could improve, and is raised to Operational risk if a bad month hits 97% and she is the bottleneck.
 _Avoid_: Severity, priority, critical, warning
 
-**Insight**:
-A finding from a rule or from the AI, with a rating and a cost per month. It stays off the map until someone acknowledges it. Example: "Proposals wait 3 days for the strategist."
-_Avoid_: Alert, detection, finding
+**Fact**:
+What the simulation measures, rated by a rule, shown as evidence ("Facts from the run"). Nobody acknowledges or dismisses a fact. Example: "Work waits 6.2 working days for Audit & proposal." (D40)
+_Avoid_: Insight, alert, detection
+
+**Finding**:
+What AI or a person concludes from the facts: a rating, where it sits, what was found, why it matters, and the facts it rests on. AI's arrive proposed and someone accepts or dismisses them; one added by hand is accepted at once. It stays off the map until someone acknowledges it as an issue. Example: "Proposals wait a week because only the strategist can price work." (D40; an **insight** acknowledged before then is kept as an accepted finding.)
+_Avoid_: Alert, detection, insight (the old name)
 
 **Issue**:
-A problem the team has decided to own. It comes from an acknowledged insight or is logged by hand, and has owners, a target and a status. Example: "Leads go cold while waiting for a proposal", owned by the sales lead, target 60% won.
+A problem the team has decided to own. It comes from an acknowledged finding (or, before D40, insight) or is logged by hand, and has owners, a target and a status. Example: "Leads go cold while waiting for a proposal", owned by the sales lead, target 60% won.
 _Avoid_: Bug, ticket, risk
 
 **Solution**:
@@ -89,7 +93,7 @@ _Avoid_: Economy, scenario, seasonality (seasonality is a separate monthly deman
 
 ## Relationships
 
-- A **rule** turns a simulation number into a **rating**. Rules and the AI write **insights**.
-- An acknowledged **insight** can become an **issue**. An **issue** can have many **solutions**, and one **solution** can solve many **issues**.
+- A **rule** turns a simulation number into a rated **fact**. The AI (on demand) and people write **findings** from the facts.
+- An accepted **finding**, once acknowledged, becomes an **issue**. An **issue** can have many **solutions**, and one **solution** can solve many **issues**.
 - A **solution** is a copy of a **process**. A **process** keeps one live version and at most one draft.
 - **Client groups** and **churn drivers** set how clients leave. **Market conditions** set how many arrive.

@@ -1,6 +1,6 @@
-// From a process version and its run to what AI analysis is given (issue #111, A46). Pure and shared by the server
-// (after a publish, a market change or "Run again"), the tests and the demo's stand-in, so every one of them reads a
-// run the same way the pages do: the same rule findings, the same first-principles checks.
+// From a process version and its run to what AI analysis is given (issue #111, A46; issue #175, B17). Pure and shared by
+// the server ("Analyse"), the tests and the demo's stand-in, so every one of them reads a run the same way the pages do:
+// the same engine facts (the rules at their documented defaults, D40), the same first-principles checks.
 
 import { runResults, type ProcessBundle } from "@transpera-flow/db";
 import {
@@ -23,8 +23,10 @@ export interface AiRunInput {
   bundle: ProcessBundle;
   model: EngineModel;
   result: SimulationResult;
-  /** The workspace's analysis rules (omitted: the defaults). */
+  /** The analysis settings (omitted: the documented defaults every page uses, D40). */
   rules?: AnalysisSettings;
+  /** One process, or the whole company (the company model: every step of every process in it). */
+  scope?: "process" | "company";
   /** The version's first principles; null when it has none. */
   firstPrinciples: FirstPrinciples | null;
   absence?: AbsenceTest | null;
@@ -81,7 +83,9 @@ export function aiInputForRun(run: AiRunInput): { input: AiInput; findings: Dete
   if (!fp || isBlank(fp)) return null;
   const { bundle } = run;
   const findings = ruleFindings(run);
-  const steps = processSteps(bundle)
+  // The whole company reads every step in its model; a process, its own and those of the processes inside it.
+  const stepRows = run.scope === "company" ? [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((o) => o.steps)] : processSteps(bundle);
+  const steps = stepRows
     .filter((s) => s.kind !== "start" && s.kind !== "end")
     .map((s) => ({ id: s.id, name: s.name }));
   // Every person, inactive ones too: a name in a first-principles answer or a source quote may be someone who has left.
@@ -97,7 +101,8 @@ export function aiInputForRun(run: AiRunInput): { input: AiInput; findings: Dete
   });
   const currency = bundle.workspace.settings.currency;
   const input = buildAiInput({
-    processName: bundle.process.name,
+    processName: run.scope === "company" ? "The whole company" : bundle.process.name,
+    scope: run.scope ?? "process",
     results: runResults(run.model, run.result, currency),
     findings,
     steps,

@@ -14,7 +14,6 @@ import {
   loadIssue,
   saveIssue,
   listProcesses,
-  loadAnalysisRules,
   loadFirstPrinciples,
   loadIssues,
   loadProcessBundle,
@@ -90,7 +89,7 @@ interface Loaded {
 }
 
 /** The live revision as an engine model, run from `start_date` (default today). */
-async function loadLiveModel(
+export async function loadLiveModel(
   ctx: ToolContext,
   args: { workspace?: string; process?: string; start_date?: string },
   assumptions: string[],
@@ -519,10 +518,10 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
           assumptions.push(`Detections come from a run of the live model at ${DEFAULT_REPS} replications, seed ${DEFAULT_SEED}.`);
           const run = simulate(loaded.model, DEFAULT_REPS, DEFAULT_SEED);
           const keys = new Set(issues.map((i) => i.detected_key).filter(Boolean));
-          // The workspace's analysis rules, as the app rates with them.
-          const rules = await loadAnalysisRules(ctx.db, ws.id).catch(() => ({ settings: {}, version: null }));
+          // The documented defaults, as every page of the app rates with them since B17 (D40): the rules give facts.
+          const rules = { settings: {} };
           const currency = loaded.bundle.workspace.settings.currency;
-          // The money settings (the cap on what a loss is worth, absences a year) are the workspace's too (issue #108).
+          // The money settings (the cap on what a loss is worth, absences a year) are the defaults too (issue #108, D40).
           const money = { ...resolveMoney(rules.settings), currency };
           const config = toRatingConfig(rules.settings, loaded.model.hoursPerWeek);
           // The success measures of the live version's first principles, which rule 11 (goals met) rates, as the app does.
