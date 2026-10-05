@@ -298,6 +298,7 @@ export function calibrationEdges(edges: readonly EdgeRow[]): CalibrationEdge[] {
     from: e.from_step_id,
     to: e.to_step_id,
     probability: e.probability === null || e.probability === undefined ? null : num(e.probability),
+    tagged: Boolean(e.condition_tag),
   }));
 }
 

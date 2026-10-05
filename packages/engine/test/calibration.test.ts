@@ -259,6 +259,11 @@ describe("calibrate", () => {
     expect(fit.branches!.map((x) => x.proposed)).toEqual([0.7, 0.3]);
   });
 
+  it("measures no odds where an item's service decides the way (condition tags)", () => {
+    const edges = EDGES.map((e) => (e.from === "fit" ? { ...e, tagged: true } : e));
+    expect(calibrate(input({ edges })).proposals.some((p) => p.key === "routing:fit")).toBe(false);
+  });
+
   it("is deterministic and does not depend on the log's row order", () => {
     const shuffled = [...fixtureRows()].reverse();
     expect(calibrate(input({ rows: shuffled })).proposals).toEqual(r.proposals);

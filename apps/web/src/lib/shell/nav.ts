@@ -59,7 +59,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     item({ key: "sources", label: "Sources", path: "/sources", icon: "sources", count: counts.unlinkedSources, tone: "warn", countNoun: "not linked to anything" }),
     item({ key: "people", label: "People", path: "/people", icon: "people" }),
   ];
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/rules" || rest === "/settings/levers" || rest === "/settings/ai" }));
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/rules" || rest === "/settings/levers" || rest === "/settings/ai" || rest === "/settings/calibration" }));
   // The demo has no Settings page, so its Analysis rules and Levers are reached from the sidebar directly.
   if (extra.rules) company.push(item({ key: "rules", label: "Analysis rules", path: "/settings/rules", icon: "settings" }));
   if (extra.levers) company.push(item({ key: "levers", label: "Levers", path: "/settings/levers", icon: "settings" }));

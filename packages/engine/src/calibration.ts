@@ -69,6 +69,8 @@ export interface CalibrationEdge {
   from: string;
   to: string;
   probability: number | null;
+  /** A condition tag (a service's path): which way an item goes is decided by its service, not by odds. */
+  tagged?: boolean;
 }
 
 export interface CalibrationLeadSource {
@@ -457,7 +459,8 @@ function routingProposals(
   const proposals: CalibrationProposal[] = [];
   for (const step of input.steps) {
     const edges = out.get(step.id);
-    if (!edges || edges.length < 2) continue;
+    // Ways out chosen by service (condition tags) have no odds to measure.
+    if (!edges || edges.length < 2 || edges.some((e) => e.tagged)) continue;
     const X = step.id;
     const reach = edges.map((e) => firstLogged(arrive(e.to), null));
     const xLogged = logged.has(X);
