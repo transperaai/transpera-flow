@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 // can_edit_workspace check. The checks here only reject malformed input early.
 
 export type RestoreResult =
-  | { status: "restored"; number: number; unlinkedChildren: number }
+  | { status: "restored"; number: number; unlinkedChildren: number; skippedHolders: number; addedHolders: number }
   /** The draft has changes of its own; restoring would replace them. Ask, then call again with `replaceDraft`. */
   | { status: "draft_exists" }
   | { status: "error"; message: string };
@@ -43,8 +43,8 @@ export async function restoreVersion(processId: string, revisionId: string, repl
   }
   const { data, error } = await session.supabase.rpc("restore_version", { target_process: processId, source_revision: revisionId, replace_draft: replaceDraft });
   if (error) return error.code === "42501" ? forbidden : failed;
-  const r = data as { status: string; number?: number; unlinked_children?: number };
-  if (r.status === "restored") return { status: "restored", number: r.number ?? 0, unlinkedChildren: r.unlinked_children ?? 0 };
+  const r = data as { status: string; number?: number; unlinked_children?: number; skipped_holders?: number; added_holders?: number };
+  if (r.status === "restored") return { status: "restored", number: r.number ?? 0, unlinkedChildren: r.unlinked_children ?? 0, skippedHolders: r.skipped_holders ?? 0, addedHolders: r.added_holders ?? 0 };
   if (r.status === "draft_exists") return { status: "draft_exists" };
   if (r.status === "already_live") return { status: "error", message: "That is the live version already." };
   return forbidden;

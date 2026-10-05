@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { northbeamStepIds } from "@transpera-flow/db";
+import { defaultCompanyPart, northbeamBundle, northbeamStepIds, partOf, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep } from "@/lib/editor/commands";
@@ -17,6 +17,8 @@ export interface HarnessOptions {
   /** The open groups live here and are handed to the map (`expanded`), as two maps sharing them would. */
   controlled: boolean;
   highlight: string[] | null;
+  /** The company map (B11) of Northbeam, as the Editor draws it: process cards joined by handoff lines. */
+  company?: boolean;
 }
 
 declare global {
@@ -27,6 +29,9 @@ declare global {
       setOpen: (ids: string[]) => void;
       getOpen: () => string[];
       addStep: () => void;
+      /** The editor's connections, by the names of the cards they join, with their labels and shares. */
+      getEdges: () => { from: string; to: string; label: string | null; probability: number }[];
+      getSteps: () => string[];
     };
     mapIds: typeof northbeamStepIds;
     groupIds: typeof DEMO_GROUP_IDS;
@@ -35,8 +40,16 @@ declare global {
 
 const never = () => () => undefined;
 
+/** Northbeam's company map as the Editor holds it: the stored map's cards and lines, with the processes they link to. */
+function companyBundle(): ProcessBundle {
+  const base = northbeamBundle();
+  const parts: ProcessPart[] = [partOf(base), ...(base.otherProcesses ?? [])];
+  const company = defaultCompanyPart(base.workspace.id, parts);
+  return { ...base, process: company.process, revision: company.revision, steps: company.steps, edges: company.edges, retired: [], otherProcesses: parts };
+}
+
 function Harness({ options }: { options: HarnessOptions }) {
-  const base = useMemo(() => (options.nested ? withDemoGroups(demoBundle()) : demoBundle()), [options.nested]);
+  const base = useMemo(() => (options.company ? companyBundle() : options.nested ? withDemoGroups(demoBundle()) : demoBundle()), [options.nested, options.company]);
   const editor = useMemo(() => (options.editable ? new ProcessEditor(base, new MemoryStore(base)) : null), [base, options.editable]);
   const state = useSyncExternalStore(editor ? editor.subscribe : never, editor ? editor.getState : () => null, () => null);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
@@ -48,8 +61,14 @@ function Harness({ options }: { options: HarnessOptions }) {
       setOpen: (ids) => setOpen(new Set(ids)),
       getOpen: () => [...open],
       addStep: () => editor?.run((b) => addStep(b, { kind: "task", x: 3200, y: 900 }).edit),
+      getEdges: () => {
+        const b = editor?.getState().bundle ?? base;
+        const name = (id: string) => b.steps.find((s) => s.id === id)?.name ?? id;
+        return b.edges.map((e) => ({ from: name(e.from_step_id), to: name(e.to_step_id), label: e.label, probability: Number(e.probability) }));
+      },
+      getSteps: () => (editor?.getState().bundle ?? base).steps.map((s) => s.name),
     };
-  }, [open, editor]);
+  }, [open, editor, base]);
   return (
     // Where the app puts the map: an editor's map fills a flex panel; a read-only one sits in a block, as wide as the page.
     // (In a bare flex row a read-only map shrinks to its toolbar, and the "drag the map" hint it adds after framing widens
@@ -65,6 +84,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         expanded={options.controlled ? open : undefined}
         onExpandedChange={options.controlled ? setOpen : undefined}
         showPlayback={false}
+        handoffs={options.company}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
       />
     </div>

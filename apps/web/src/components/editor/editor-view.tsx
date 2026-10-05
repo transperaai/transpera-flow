@@ -100,6 +100,8 @@ export function EditorView({
   idea?: IdeaSeed | null;
 }) {
   const router = useRouter();
+  // The company map (B11): a picture of the business. Cards are moved and joined by handoff lines; nothing is simulated.
+  const company = initialLive.process.is_company === true;
   const stamp = useCallback(() => ({ at: new Date().toISOString(), by: userId }), [userId]);
   const blockMode = editorMode === "block";
   const solutionMode = editorMode === "solution";
@@ -288,7 +290,7 @@ export function EditorView({
     ? "Wait for your edits to save."
     : state.conflicts.length
       ? "Settle the conflicting edits first (keep mine / keep theirs)."
-      : workingModel.error
+      : workingModel.error && !company
         ? `The draft can't be simulated: ${workingModel.error}.`
         : null;
 
@@ -335,6 +337,7 @@ export function EditorView({
         blocked={blocked}
         unresolved={unresolved}
         breaks={breaks}
+        company={company}
         simulating={simulating}
         onSimulate={simulate}
         onReview={select}
@@ -348,7 +351,7 @@ export function EditorView({
       />
       <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[264px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)]">
         <aside aria-label="Palette" className="flex flex-col gap-4 border-b border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-r lg:border-b-0">
-          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} />
+          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} />
           {solutionMode && placement && (
             <p role="note" data-idea-note className="rounded-token border border-edit/50 bg-edit-soft p-2 text-xs">
               {placement.note}
@@ -380,7 +383,7 @@ export function EditorView({
         </aside>
         <main className="flex min-h-[28rem] min-w-0 flex-col gap-2 bg-bg p-3 lg:min-h-0">
           {(state.conflicts.length > 0 || state.error) && <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} sync={sync} />}
-          {workingModel.error && !blockMode && (
+          {workingModel.error && !blockMode && !company && (
             <p role="status" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">
               This {solutionMode ? "solution" : "draft"} can&apos;t be simulated yet: {workingModel.error}.
             </p>
@@ -393,14 +396,16 @@ export function EditorView({
               editorState={state}
               selection={selected}
               onSelectionChange={setSelection}
-              commands={commands}
+              // The company map's cards can't be copied, split or removed, so the card menu has nothing to offer.
+              commands={company ? null : commands}
+              handoffs={company}
               diff={marksChanges ? diff : null}
               highlight={outlined}
               onRestore={restore}
               savedLabel={scratch ? "Edited" : hasDraft ? "Saved to draft" : "Saved"}
               hideAdd
               // Nothing to play until Simulate has run.
-              showPlayback={!stale && !!pair?.draft.result}
+              showPlayback={!company && !stale && !!pair?.draft.result}
             />
           </div>
         </main>
@@ -417,6 +422,7 @@ export function EditorView({
             sourcesHref={sourcesHref}
             mode={editorMode}
             blocks={blockTools}
+            company={company}
             draft={
               marksChanges
                 ? (step) => ({
@@ -430,7 +436,7 @@ export function EditorView({
           />
         </aside>
       </div>
-      {!blockMode && (
+      {!blockMode && !company && (
       <SimulateFooter
         asked={!!asked}
         pair={pair}

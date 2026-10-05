@@ -229,3 +229,19 @@ select proacl from pg_proc where pronamespace = 'public'::regnamespace and prona
 ```
 
 Expect one row, `authenticated` EXECUTE, and an ACL with an `authenticated=X/...` entry, no `anon=` and no `=X/...`.
+
+## Editing the company map (B11 slice 2, migration 20261127500000)
+
+Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/company-map-editing.test.ts` and `company-map.test.ts`, including both headers' rollbacks and both migrations re-applied over existing workspaces). No table or column is added. Two things rest on how Postgres behaves for the table owner, which should hold on Supabase but has not been seen there:
+
+- `private.company_holder_guard` (a `before delete` trigger on `public.steps`, `when (old.child_process_id is not null)`) refuses a signed-in role (`authenticated`, `anon`) and lets everything else through. It relies on foreign-key cascades (discarding a draft, deleting a process or a workspace) running as the owner of the table, and on `restore_version` and the sync functions being `security definer`. The same assumption is behind `edit_drafts_only`.
+- `private.company_map_apply` writes a new published revision of the company map in the middle of the statement that created, renamed or deleted a process (an `after insert or update` or `before delete` trigger, security definer). A workspace that is being deleted is skipped (`not exists (select 1 from public.workspaces ...)`), because the revision's foreign key to it would fail.
+
+After applying, check on the real project (the migration's header has the same queries):
+
+```sql
+select routine_name, grantee from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC') and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map');
+select has_function_privilege('anon', 'public.revision_history(uuid)', 'execute') or has_function_privilege('anon', 'public.restore_version(uuid, uuid, boolean)', 'execute');
+```
+
+Both must be empty or false. `revision_history` was dropped and re-created (one more column, `note`), so its grants were re-made in the migration: `authenticated` may execute it, `anon` may not.

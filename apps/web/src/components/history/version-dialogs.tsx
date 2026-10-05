@@ -26,7 +26,7 @@ type Phase =
   | { step: "ask" }
   | { step: "working" }
   | { step: "replace" }
-  | { step: "done"; unlinkedChildren: number }
+  | { step: "done"; unlinkedChildren: number; skippedHolders: number; addedHolders: number }
   | { step: "error"; message: string };
 
 /**
@@ -53,7 +53,7 @@ export function RestoreDialog({
     setPhase({ step: "working" });
     try {
       const r = await restore(revisionId, replace);
-      if (r.status === "restored") setPhase({ step: "done", unlinkedChildren: r.unlinkedChildren });
+      if (r.status === "restored") setPhase({ step: "done", unlinkedChildren: r.unlinkedChildren, skippedHolders: r.skippedHolders, addedHolders: r.addedHolders });
       else if (r.status === "draft_exists") setPhase({ step: "replace" });
       else setPhase({ step: "error", message: r.message });
     } catch {
@@ -82,6 +82,10 @@ export function RestoreDialog({
             Open it in the Editor to check it, then publish it as a new version.
             {phase.unlinkedChildren > 0 &&
               ` ${phase.unlinkedChildren === 1 ? "One step" : `${phase.unlinkedChildren} steps`} held a process that has since moved elsewhere, so ${phase.unlinkedChildren === 1 ? "it comes back as an ordinary step" : "they come back as ordinary steps"}.`}
+            {phase.skippedHolders > 0 &&
+              ` ${phase.skippedHolders === 1 ? "One process on that version" : `${phase.skippedHolders} processes on that version`} ${phase.skippedHolders === 1 ? "isn't" : "aren't"} on the map any more (deleted, or now inside another process), so ${phase.skippedHolders === 1 ? "it was" : "they were"} left out.`}
+            {phase.addedHolders > 0 &&
+              ` ${phase.addedHolders === 1 ? "One process" : `${phase.addedHolders} processes`} made since ${phase.addedHolders === 1 ? "was" : "were"} added back at the bottom of ${phase.addedHolders === 1 ? "its" : "their"} column.`}
           </p>
         )}
         {phase.step === "error" && (
@@ -137,7 +141,7 @@ export function DuplicateDialog({
     setPhase({ step: "working" });
     try {
       const r = await duplicate(revisionId, name);
-      if (r.status === "duplicated") setPhase({ step: "done", unlinkedChildren: 0, processId: r.processId });
+      if (r.status === "duplicated") setPhase({ step: "done", unlinkedChildren: 0, skippedHolders: 0, addedHolders: 0, processId: r.processId });
       else setPhase({ step: "error", message: r.message });
     } catch {
       setPhase({ step: "error", message: "Couldn't do that. Try again." });

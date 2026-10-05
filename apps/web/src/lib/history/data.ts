@@ -28,6 +28,8 @@ export interface HistoryData {
   models: Record<string, ModelEntry>;
   /** The process has a draft open (restoring replaces it, so the screen warns first). */
   hasDraft: boolean;
+  /** The company map (B11): its versions are not simulated, so the screen lists what changed and nothing else. */
+  company: boolean;
 }
 
 /** One revision as the engine's model, with the process's current roles, people and settings around it. */
@@ -44,7 +46,7 @@ function modelOf(base: ProcessBundle, revision: { id: string; number: number }, 
 /** Everything the History screen shows for a process, or null if it isn't visible (RLS decides). */
 export async function loadHistory(slug: string, processId: string): Promise<HistoryData | null> {
   const db = await createClient();
-  const found = await loadProcessBySlug(db, slug, { draft: false, processId });
+  const found = await loadProcessBySlug(db, slug, { draft: false, processId, includeCompany: true });
   if (!found) return null;
   const { live, draft, processes } = found;
   const { data: rows, error } = await db.rpc("revision_history", { target_process: processId });
@@ -57,9 +59,11 @@ export async function loadHistory(slug: string, processId: string): Promise<Hist
     authorKind: (r.author_kind as AuthorKind | null) ?? null,
     authorName: r.author_name,
     changes: parseChanges(r.changes),
+    note: r.note ?? null,
   }));
   const models: Record<string, ModelEntry> = {};
-  const wanted = autoRunIds(versions, AUTO_RUN_VERSIONS);
+  // The company map is a picture of the business, not a process: nothing to simulate.
+  const wanted = live.process.is_company ? [] : autoRunIds(versions, AUTO_RUN_VERSIONS);
   // One query pair per version: a single query for all of them would hit PostgREST's 1000-row cap on a big process.
   await Promise.all(
     wanted.map(async (id) => {
@@ -77,6 +81,7 @@ export async function loadHistory(slug: string, processId: string): Promise<Hist
     versions,
     models,
     hasDraft: draft !== null,
+    company: Boolean(live.process.is_company),
   };
 }
 

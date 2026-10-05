@@ -54,7 +54,7 @@ async function mount(options: Partial<HarnessOptions> = {}): Promise<Page> {
   });
   await page.setContent(`<style>${css}${LAYOUT_CSS}</style><div id="root"></div>`);
   await page.addScriptTag({ content: script });
-  await page.evaluate((o) => window.mountMap(o), { editable: false, nested: false, controlled: false, highlight: null, ...options });
+  await page.evaluate((o) => window.mountMap(o), { editable: false, nested: false, controlled: false, highlight: null, company: false, ...options });
   await page.waitForSelector(".react-flow__node");
   // Wait for the first framing: the view leaves its starting place.
   await page.waitForFunction(() => !/translate\(0px, 0px\) scale\(1\)/.test(document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? ""), undefined, { timeout: 10_000 });
@@ -154,6 +154,65 @@ describe("a step's detail", () => {
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.querySelector("[data-step-detail]"));
     await page.waitForFunction((id) => document.activeElement?.getAttribute("data-id") === id, await page.evaluate(() => window.mapIds.audit));
+    await page.close();
+  }, 60_000);
+});
+
+describe("the company map in the Editor (B11)", () => {
+  /** Drag from a card's right-hand handle to another card's left-hand handle. */
+  async function connect(page: Page, from: string, to: string) {
+    const handle = async (name: string, side: "source" | "target") => {
+      const box = await page.locator(".react-flow__node", { hasText: name }).first().locator(`.react-flow__handle.${side}`).boundingBox();
+      return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+    };
+    const a = await handle(from, "source");
+    const b = await handle(to, "target");
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 6 });
+    await page.mouse.move(b.x, b.y, { steps: 6 });
+    await page.mouse.up();
+  }
+
+  it("draws a handoff line with a full share, labels it, shows the label, and removes it", async () => {
+    const page = await mount({ editable: true, company: true });
+    const lines = () => page.evaluate(() => window.mapApi.getEdges());
+    const before = await lines();
+    // Northbeam has a pipeline and two servicing processes: the stored map joins the pipeline to each; join the two servicing ones.
+    expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
+    const servicing = before.map((e) => e.to);
+    expect(servicing).toHaveLength(2);
+    await connect(page, servicing[0]!, servicing[1]!);
+    await page.waitForFunction((n) => window.mapApi.getEdges().length === n + 1, before.length);
+    const drawn = (await lines()).find((e) => e.from === servicing[0] && e.to === servicing[1])!;
+    // A handoff is a picture, not a branch: its share is whole, whatever else leaves the card.
+    expect(drawn).toMatchObject({ label: null, probability: 1 });
+    // Selected as it is drawn: the handoff editor has a label field, and no share or tag.
+    const label = page.getByLabel("Handoff label");
+    await label.fill("Signed contract");
+    await label.press("Enter");
+    await page.waitForFunction(() => window.mapApi.getEdges().some((e) => e.label === "Signed contract"));
+    expect(await page.getByLabel("Branch probability, percent").count()).toBe(0);
+    // Click away: the label is drawn on the line.
+    await page.mouse.click(40, 520);
+    await page.waitForFunction(() => [...document.querySelectorAll(".react-flow__edgelabel-renderer span")].some((e) => e.textContent === "Signed contract"));
+    // Remove it again.
+    await page.locator(".react-flow__edge-interaction").last().click({ force: true });
+    await page.getByRole("button", { name: "Remove handoff" }).click();
+    await page.waitForFunction((n) => window.mapApi.getEdges().length === n, before.length);
+    await page.close();
+  }, 60_000);
+
+  it("keeps every card: Delete does nothing to a process card", async () => {
+    const page = await mount({ editable: true, company: true });
+    await page.locator(".react-flow__node").first().click();
+    await page.keyboard.press("Delete");
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Delete");
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
     await page.close();
   }, 60_000);
 });

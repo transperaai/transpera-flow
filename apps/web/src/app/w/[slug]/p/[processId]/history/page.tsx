@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { HistoryPage } from "@/components/history/history-page";
 import { ProcessNav } from "@/components/process-nav";
@@ -22,7 +23,17 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
   const here = `${base}/p/${process.id}`;
   return (
     <HistoryPage
+      company={history.company}
       nav={
+        history.company ? (
+          <nav aria-label="Breadcrumb" className="flex items-center gap-x-1 text-xs text-muted-foreground">
+            <Link href={base} className="hover:text-accent hover:underline">
+              Overview
+            </Link>
+            <span aria-hidden>/</span>
+            <span className="font-medium text-fg">Company map</span>
+          </nav>
+        ) : (
         <ProcessNav
           processes={processes}
           current={process.id}
@@ -31,6 +42,7 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
           processesHref={`${base}/processes`}
           companyMapHref={base}
         />
+        )
       }
       processName={process.name}
       kind={process.kind}

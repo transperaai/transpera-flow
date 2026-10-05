@@ -511,8 +511,9 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
 
   it("audit-logs every MCP write with actor_kind mcp", async () => {
     const rows = (
-      await admin.query("select actor_id, actor_kind, action, target_table from audit_log where workspace_id = $1 order by created_at", [workspaceId])
-    ).rows as { actor_id: string; actor_kind: string; action: string; target_table: string }[];
+      await admin.query("select actor_id, actor_kind, action, target_table, target_id from audit_log where workspace_id = $1 order by created_at", [workspaceId])
+    ).rows as { actor_id: string; actor_kind: string; action: string; target_table: string; target_id: string }[];
+    const companyId = (await admin.query("select id from processes where workspace_id = $1 and is_company", [workspaceId])).rows[0]!.id as string;
     const mcp = rows.filter((r) => r.actor_kind === "mcp");
     expect(mcp.length).toBeGreaterThan(0);
     expect(mcp.every((r) => r.actor_id === editorId)).toBe(true);
@@ -532,8 +533,11 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
     ]) {
       expect(seen, kind).toContain(kind);
     }
-    // Only the test's own setup (as the database owner) is logged as anything else.
-    expect(rows.filter((r) => r.actor_kind !== "mcp").every((r) => r.target_table === "memberships")).toBe(true);
+    // Only the test's own setup (as the database owner) is logged as anything else, and the company map's versions the system
+    // makes when a process is created (B11: "Added <process>", a published version of its own, by the system).
+    const systemMapVersion = (r: { actor_kind: string; action: string; target_id: string }) => r.actor_kind === "system" && r.action === "publish" && r.target_id === companyId;
+    expect(rows.filter((r) => r.actor_kind !== "mcp" && !systemMapVersion(r)).every((r) => r.target_table === "memberships")).toBe(true);
+    expect(rows.filter(systemMapVersion).length).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------

@@ -46,6 +46,8 @@ export async function WorkspaceOverview({ slug }: { slug: string }) {
       firstPrinciples={firstPrinciples}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
       processesHref={`${base}/processes`}
+      companyEditHref={canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
+      companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       issuesHref={`${base}/issues`}
       rulesHref={`${base}/settings/rules`}
       ai={{ view: aiViews[live.revision.id] ?? null, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: live.revision.number }}

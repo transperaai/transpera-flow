@@ -108,6 +108,8 @@ export function StepInspector({
   // A group (or a step holding a child process) has no numbers of its own: the steps inside it do the work.
   const holder = step.kind === "group" || step.child_process_id !== null;
   const working = step.kind !== "start" && step.kind !== "end" && !holder;
+  // A process placed on the company map (B11): a link to the process, named after it, and not taken off the map from here.
+  const placed = bundle.process.is_company === true && step.child_process_id !== null;
 
   const kindOptions: SelectOption[] = [...STEP_KINDS, ...(step.kind === "subprocess" || step.kind === "group" ? [step.kind] : [])]
     .filter((k) => k === step.kind || !kindProblem(bundle, id, k))
@@ -163,6 +165,8 @@ export function StepInspector({
       <TextField
         label="Name"
         value={step.name}
+        disabled={placed}
+        hint={placed ? "Named after its process. Rename the process on its own page." : undefined}
         save={field<string | null>("name")}
         help={{ description: "What this step is called on the map and in the analysis.", example: "“Discovery call” or “Send proposal”." }}
       />
@@ -175,6 +179,7 @@ export function StepInspector({
           }}
           value={step.kind}
           options={kindOptions}
+          disabled={placed}
           save={via<string | null>((b, v) => (v ? setStepKind(b, id, v as StepKind) : null))}
         />
         {step.kind === "end" && (
@@ -192,7 +197,9 @@ export function StepInspector({
         <p className="rounded-token border border-line bg-panel-2 px-2 py-1.5 text-xs text-fg-2">
           {step.kind === "group"
             ? "A group is a box of steps. It has no hours, role or rework of its own: the steps inside it do the work, and the numbers are the same whether it is open or closed on the map."
-            : "This step holds a child process, a process with its own page and versions. The numbers are those of the child's steps."}
+            : placed
+              ? "This card is a process placed on the company map. Moving it, or joining it to another with a handoff line, changes only this map: the process itself is never edited here. Open its page to change it."
+              : "This step holds a child process, a process with its own page and versions. The numbers are those of the child's steps."}
         </p>
       )}
 
@@ -367,13 +374,20 @@ export function StepInspector({
           multiline
           save={field("notes")}
         />
-        <button
-          type="button"
-          onClick={onDelete}
-          className="self-start rounded-token border border-crit px-2.5 py-1 text-crit hover:bg-crit-soft"
-        >
-          Delete step
-        </button>
+        {placed ? (
+          <>
+            <button type="button" disabled aria-describedby="placed-delete-note" className="self-start rounded-token border border-line px-2.5 py-1 text-fg-3">
+              Delete step
+            </button>
+            <p id="placed-delete-note" className="text-xs text-muted-foreground">
+              Removing processes from the map comes with the process library.
+            </p>
+          </>
+        ) : (
+          <button type="button" onClick={onDelete} className="self-start rounded-token border border-crit px-2.5 py-1 text-crit hover:bg-crit-soft">
+            Delete step
+          </button>
+        )}
       </div>
     </aside>
   );
