@@ -14,6 +14,8 @@ import { LinkedSources, useSourceLinking } from "@/components/sources/linking-co
 import { AiRead } from "@/components/ai/ai-read";
 import type { AiPanelData } from "@/lib/ai/types";
 import { FirstPrinciplesCard } from "@/components/first-principles/first-principles-card";
+import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import { IncompleteDataNote, MissingForSimulation } from "@/components/simulation-gaps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -191,6 +193,13 @@ export function ProcessPage({
   });
 
   const old = viewingVersion !== null;
+  // What the process still lacks for meaningful numbers (issue #167): the same check as the upload preview, on this version.
+  const gaps = useMemo(() => (bundle.process.is_company ? [] : findGaps(gapInputFromBundle(bundle))), [bundle]);
+  const [gapStep, setGapStep] = useState<string | null>(null);
+  const showGapStep = (id: string) => {
+    setGapStep(id);
+    document.getElementById("map")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   // The steps of this process and of the processes inside it, which the wait chart is about (the model may hold more).
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
   const unpublished = liveVersion === 0;
@@ -263,9 +272,10 @@ export function ProcessPage({
           </div>
         </header>
 
-        {(notice || bundle.process.kind === "servicing" || error) && (
+        {(notice || bundle.process.kind === "servicing" || error || gaps.length > 0) && (
           <div className="flex flex-col gap-2">
             <Fragment key="notice">{notice}</Fragment>
+            <MissingForSimulation gaps={gaps} onSelectStep={showGapStep} settingsHref={settingsHref} />
             {bundle.process.kind === "servicing" && <ServicingBanner bundle={bundle} settingsHref={settingsHref} />}
             {error && (
               <Alert className="border-crit bg-crit-soft">
@@ -301,6 +311,7 @@ export function ProcessPage({
             <div className="flex flex-col gap-3">
               <HorizonPicker weeks={model.horizonWeeks} onChange={pickHorizon} />
               <HeadlineCards cards={cards} />
+              <IncompleteDataNote count={gaps.length} />
               {levers.length > 0 && (
                 <LeverPanel
                   levers={levers}
@@ -343,7 +354,7 @@ export function ProcessPage({
             openIssues={issuesUi.openIssues}
             rating={issuesUi.rating}
             stepExtras={issuesUi.stepExtras}
-            highlight={issuesUi.highlight}
+            highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : null)}
             sourceTitles={sourceTitles}
           />
         </Section>

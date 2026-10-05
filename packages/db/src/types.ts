@@ -299,6 +299,8 @@ export type Provenance = {
    * Goes away when anyone writes one of the branches' probabilities (a trigger), so "Missing for simulation" can list the step.
    */
   defaulted?: boolean;
+  /** On `branch_odds`: each branch's probability (by the id of the step it leads to) as it was when defaulted. Changing any of them clears the gap at once. */
+  was?: { [toStepId: string]: number };
 };
 
 /**

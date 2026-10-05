@@ -44,6 +44,8 @@ import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
 import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
+import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import { MissingForSimulation } from "@/components/simulation-gaps";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
@@ -67,6 +69,7 @@ export function EditorView({
   userId = null,
   viewer = null,
   sourcesHref,
+  settingsHref,
   exitHref,
   horizonMonths = null,
   extraChanges = 0,
@@ -88,6 +91,8 @@ export function EditorView({
   userId?: string | null;
   viewer?: Viewer | null;
   sourcesHref?: string;
+  /** The workspace's Settings page, which "Missing for simulation" links to for incoming volume. */
+  settingsHref?: string;
   /** Where Exit editor goes. */
   exitHref: string;
   /** The horizon picked on the map, in months; null runs the model at its own length. */
@@ -130,6 +135,8 @@ export function EditorView({
   const workingModel = useEngineModel(working, weeks);
   const liveModel = useEngineModel(live, weeks);
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
+  // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
+  const gaps = useMemo(() => (company || scratch ? [] : findGaps(gapInputFromBundle(working))), [company, scratch, working]);
 
   // Selection can outlive what it points at (after a delete or an undo).
   const selected = useMemo(() => {
@@ -383,6 +390,7 @@ export function EditorView({
         </aside>
         <main className="flex min-h-[28rem] min-w-0 flex-col gap-2 bg-bg p-3 lg:min-h-0">
           {(state.conflicts.length > 0 || state.error) && <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} sync={sync} />}
+          <MissingForSimulation gaps={gaps} onSelectStep={select} settingsHref={settingsHref} />
           {workingModel.error && !blockMode && !company && (
             <p role="status" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">
               This {solutionMode ? "solution" : "draft"} can&apos;t be simulated yet: {workingModel.error}.
@@ -446,6 +454,7 @@ export function EditorView({
         liveNumber={live.revision.number}
         solution={solutionMode}
         verdict={verdict}
+        incomplete={gaps.length}
       />
       )}
     </div>

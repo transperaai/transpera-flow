@@ -178,6 +178,17 @@ describe("on a process's model", () => {
     expect(texts(model([], { process: { id: "p1", kind: "servicing" }, servicingLinks: [{ process_id: "other" }] }))).toHaveLength(1);
   });
 
+  it("odds clear in the editor at once: a branch that no longer has its defaulted probability is filled in", () => {
+    const marked = [row("d", "Client decides", "decision", { provenance: { branch_odds: { source: "estimated", defaulted: true, was: { y: 0.5, n: 0.5 } } } })];
+    const edges = (y: number, n: number) => [
+      { from_step_id: "d", to_step_id: "y", probability: y },
+      { from_step_id: "d", to_step_id: "n", probability: n },
+    ];
+    const run = (e: ReturnType<typeof edges>) => texts(gapInputFromBundle({ steps: marked, edges: e, process: { id: "p", kind: "pipeline" }, leadSources: [{ volume_week: 1 }] } as never));
+    expect(run(edges(0.5, 0.5))).toEqual(["Client decides: branch odds missing"]);
+    expect(run(edges(0.7, 0.3))).toEqual([]);
+  });
+
   it("a decision with one way out needs no odds", () => {
     const input = gapInputFromBundle({ steps: [row("d", "Decides", "decision", { provenance: { branch_odds: { defaulted: true } } })], edges: [{ from_step_id: "d", to_step_id: "y" }], process: { id: "p", kind: "pipeline" }, leadSources: [{ volume_week: 1 }] } as never);
     expect(texts(input)).toEqual([]);

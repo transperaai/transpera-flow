@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { checkProcessFileText, processTextFrom } from "@transpera-flow/db/process-file";
+import { findGaps, gapInputFromFile } from "@transpera-flow/db/simulation-gaps";
 import { UploadProcessDialog, type UploadProcess } from "@/components/processes/upload-process-dialog";
 import { sourceLabel, uploadSizeProblem, type CreateUploadInput, type UploadPreview } from "@/lib/processes/upload";
 
@@ -18,6 +19,8 @@ export interface HarnessCompany {
   createThrows?: "failure" | "redirect";
   /** The pages the fake server can fetch by link: address to the page's text (an HTML page or JSON). Any other link can't be opened. */
   links?: Record<string, string>;
+  /** Whether the company has lead volume (default: no, so a pipeline shows the volume gap). */
+  hasVolume?: boolean;
 }
 
 declare global {
@@ -78,6 +81,29 @@ function makeUpload(company: HarnessCompany): UploadProcess {
           unknownRoles: unknown,
           unknownPeople: [],
           nameTaken: company.processes.find((p) => norm(p) === norm(check.file!.name)) ?? null,
+          gap: (() => {
+            const f = check.file!;
+            const input = gapInputFromFile(f, { hasRole: (r) => company.roles.some((x) => norm(x.name) === norm(r)), volume: company.hasVolume ? "known" : "missing", volumeSuggested: !!f.company?.demand?.lead_sources.length });
+            return { input, roleOf: Object.fromEntries(f.steps.flatMap((x) => (x.role ? [[x.id, x.role]] : []))), gaps: findGaps(input) };
+          })(),
+          // What the server action would count from a /2 file (the real preview needs the database for the suggestions' wording).
+          ...(check.file.format === "transpera-process/2"
+            ? {
+                extras: {
+                  sources: (check.file.sources ?? []).map((x) => ({ title: x.title, kind: x.kind, date: x.date ?? null })),
+                  suggestions: [
+                    ...(check.file.company?.people ?? []).map((x) => ({ subject: `New person ${x.name}`, headline: `The file suggests adding person ${x.name}`, isNew: true })),
+                    ...(check.file.company?.roles ?? []).map((x) => ({ subject: `New role ${x.name}`, headline: `The file suggests adding role ${x.name}`, isNew: true })),
+                    ...(check.file.company?.services ?? []).map((x) => ({ subject: `New service ${x.name}`, headline: `The file suggests adding service ${x.name}`, isNew: true })),
+                    ...(check.file.company?.demand?.lead_sources ?? []).map((x) => ({ subject: `New lead source ${x.name}`, headline: `The file suggests adding lead source ${x.name}`, isNew: true })),
+                  ],
+                  proposals: (check.file.proposals ?? []).map((x) => ({ kind: x.type, title: x.title, forIssue: x.for_issue ?? null })),
+                  firstPrinciplesParts: check.file.first_principles ? 3 : 0,
+                  notes: [],
+                  conflicts: check.conflicts ?? [],
+                },
+              }
+            : {}),
         },
       };
     },

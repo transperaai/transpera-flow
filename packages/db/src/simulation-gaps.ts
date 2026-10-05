@@ -139,9 +139,13 @@ function isDefaulted(step: Pick<StepRow, "provenance">, column: "work_hours" | "
 }
 
 /** The step's branches took the share the others leave, and nobody has written one since. */
-function oddsDefaulted(step: Pick<StepRow, "provenance">): boolean {
+function oddsDefaulted(step: Pick<StepRow, "provenance">, out: readonly { to_step_id: string; probability: number }[]): boolean {
   const p = (step.provenance as Record<string, unknown> | undefined)?.branch_odds;
-  return isObject(p) && p.defaulted === true;
+  if (!isObject(p) || p.defaulted !== true) return false;
+  // The marker is taken off by the database when a probability is written; the model a person is editing hasn't heard yet, so a
+  // branch that no longer has the probability it was given by default counts as filled in already.
+  const was = isObject(p.was) ? p.was : null;
+  return !was || out.every((e) => Number(was[e.to_step_id]) === Number(e.probability));
 }
 
 /**
@@ -150,8 +154,8 @@ function oddsDefaulted(step: Pick<StepRow, "provenance">): boolean {
  * `servicingLinks`); a bundle without it says "unknown" and no volume gap is raised.
  */
 export function gapInputFromBundle(bundle: Pick<ProcessBundle, "steps" | "edges" | "process" | "leadSources" | "servicingLinks">): GapInput {
-  const leaving = new Map<string, number>();
-  for (const e of bundle.edges) leaving.set(e.from_step_id, (leaving.get(e.from_step_id) ?? 0) + 1);
+  const leaving = new Map<string, { to_step_id: string; probability: number }[]>();
+  for (const e of bundle.edges) leaving.set(e.from_step_id, [...(leaving.get(e.from_step_id) ?? []), e]);
   const kind = bundle.process.kind;
   let volume: GapInput["volume"] = "unknown";
   if (kind === "pipeline" && bundle.leadSources) volume = bundle.leadSources.some((l) => Number(l.volume_week) > 0) ? "known" : "missing";
@@ -168,7 +172,7 @@ export function gapInputFromBundle(bundle: Pick<ProcessBundle, "steps" | "edges"
         role: s.role_id !== null,
         handsOn: !isDefaulted(s, "work_hours"),
         wait: !isDefaulted(s, "wait_hours"),
-        odds: k !== "decision" || (leaving.get(s.id) ?? 0) < 2 || !oddsDefaulted(s),
+        odds: k !== "decision" || (leaving.get(s.id) ?? []).length < 2 || !oddsDefaulted(s, leaving.get(s.id) ?? []),
       };
     }),
   };

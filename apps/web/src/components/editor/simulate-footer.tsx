@@ -22,6 +22,7 @@ export function SimulateFooter({
   liveNumber,
   solution = false,
   verdict = null,
+  incomplete = 0,
 }: {
   /** Simulate has been pressed. */
   asked: boolean;
@@ -35,6 +36,8 @@ export function SimulateFooter({
   /** Solution mode (A49): the second number is the solution's, and the footer says how it did against the issue's target. */
   solution?: boolean;
   verdict?: { issue: SolutionIssue; result: TargetVerdict } | null;
+  /** How many things are still missing for simulation (issue #167): the numbers above say so while any remain. */
+  incomplete?: number;
 }) {
   const what = solution ? "solution" : "draft";
   const rows = pair?.live?.result && pair.draft.result ? compareRuns({ model: pair.live.model, result: pair.live.result }, { model: pair.draft.model, result: pair.draft.result }, currency) : null;
@@ -88,6 +91,11 @@ export function SimulateFooter({
                 {verdict.result.holdsPct !== null ? `, holds in ${verdict.result.holdsPct}%` : ""}
               </b>
               <span className="text-muted-foreground">{verdict.result.note}</span>
+            </span>
+          )}
+          {incomplete > 0 && (
+            <span role="note" data-incomplete-data className="basis-full text-xs text-fg-2">
+              Based on incomplete data: {incomplete} {incomplete === 1 ? "thing is" : "things are"} still missing for simulation (see the warning above the map).
             </span>
           )}
           {stale && <span className="text-xs text-warn">You&apos;ve changed the {what} since. Simulate again.</span>}

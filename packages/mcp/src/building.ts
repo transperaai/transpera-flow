@@ -1086,7 +1086,8 @@ export function planImport(
   for (const id of oddsMissing) {
     const inserted = insertSteps.find((r) => r.id === id);
     if (inserted) {
-      inserted.provenance = { ...inserted.provenance, branch_odds: estimatedEntry(stamp, { defaulted: true, note: "No odds were given for its branches; they share what is left equally. Enter the odds to confirm them." }) };
+      const was = Object.fromEntries(insertEdges.filter((e) => e.from_step_id === id).map((e) => [e.to_step_id, Number(e.probability)]));
+      inserted.provenance = { ...inserted.provenance, branch_odds: estimatedEntry(stamp, { defaulted: true, was, note: "No odds were given for its branches; they share what is left equally. Enter the odds to confirm them." }) };
     }
   }
 
