@@ -88,6 +88,14 @@ export async function setMemberRole(slug: string, form: FormData) {
   done(slug, outcome(result), "Role updated.");
 }
 
+/** Links a member (however they joined) to their person record, or clears the link. Members on the list take it from the list row. */
+export async function setMemberPerson(slug: string, form: FormData) {
+  const supabase = await signedInClient();
+  const personId = text(form, "person_id") || null;
+  const result = await supabase.from("memberships").update({ person_id: personId }).eq("id", text(form, "id")).select("id");
+  done(slug, outcome(result), personId ? "Linked to the person." : "Unlinked from the person.");
+}
+
 /** Deactivated members keep their row (so a domain can't re-add them) but get no access. */
 export async function setMemberActive(slug: string, form: FormData) {
   const supabase = await signedInClient();
