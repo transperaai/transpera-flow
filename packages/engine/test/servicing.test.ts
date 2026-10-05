@@ -413,7 +413,11 @@ describe("compatibility and determinism", () => {
 });
 
 describe("performance (docs/PRD.md §6.7)", () => {
-  it("40 steps, 25 people, 26 clients with servicing, 26 weeks, 30 reps: within 1.5 s", () => {
+  // The limit is the best of three 30-replication runs (< 1.5 s); the test's wall time is a warm-up plus all three, so an
+  // engine just inside the limit needs about 4.7 s, too close to Vitest's 5 s default. Issue #181 measured the engine
+  // before and after #178 (the same speed: best of 5, about 0.8 s here, identical KPIs); the timeouts on CI were other
+  // suites sharing the CPU, now fixed by running perf tests on their own. The timeout bounds the harness, not the target.
+  it("40 steps, 25 people, 26 clients with servicing, 26 weeks, 30 reps: within 1.5 s", { tags: ["perf"], timeout: 10_000 }, () => {
     const m = largeModel();
     m.services = {
       svc: service(

@@ -43,7 +43,7 @@ describe("the horizon picker's options", () => {
   });
 });
 
-describe("a 24-month run stays within the PRD §6.7 targets, scaled by horizon (8 × the 13-week targets)", () => {
+describe("a 24-month run stays within the PRD §6.7 targets, scaled by horizon (8 × the 13-week targets)", { tags: ["perf"] }, () => {
   it("pipeline-only Northbeam: < 8 × 150 ms", () => {
     const ms = rerunBest(northbeamPipeline, 24);
     console.info(`24 months, pipeline-only Northbeam: ${ms.toFixed(0)} ms (limit ${150 * SCALE})`);
