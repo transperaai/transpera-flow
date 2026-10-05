@@ -22,10 +22,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { issueHref } from "@/lib/issues/pages";
-import { saveSolutionNotes, saveSolutionVerdict } from "@/app/w/[slug]/solution-page-actions";
+import { deleteSolution, saveSolutionNotes, saveSolutionVerdict } from "@/app/w/[slug]/solution-page-actions";
+import { DeleteSolution } from "@/components/solutions/delete-solution";
 import { linkSolutionToIssue } from "@/app/w/[slug]/solution-actions";
 import { builtBy, builtDate, changesLine, linkableIssues, linksOf, MAX_NOTES, solutionType, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
-import { addDemoLink, setDemoNotes, setDemoVerdict, useDemoSolutions, type VerdictPatch } from "@/lib/solutions/demo";
+import { addDemoLink, removeDemoSolution, setDemoNotes, setDemoVerdict, useDemoSolutions, type VerdictPatch } from "@/lib/solutions/demo";
 import { demoLinkVerdict } from "@/lib/solutions/demo-link";
 import { SOLUTION_PAGE_HELP, newOnProcessHelp } from "@/lib/solutions/help";
 import { solutionEditorHref } from "@/lib/solutions/links";
@@ -142,15 +143,29 @@ export function SolutionPage(props: SolutionPageProps) {
           <span className="text-xs text-muted-foreground">Changes: {changesLine(solution, 6)}</span>
         </div>
         {canEdit && (
-          <span className="flex items-center">
-            <Link
-              href={solutionEditorHref(base, solution.process_id, { from: `${base}/solutions/${solution.id}` })}
-              className="inline-flex h-9 items-center rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
-              data-new-on-process
-            >
-              ✎ New solution on {processName}
-            </Link>
-            <Help {...newOnProcessHelp(processName)} />
+          <span className="flex flex-wrap items-center gap-2">
+            <DeleteSolution
+              name={solution.name}
+              linked={links.length}
+              remove={async () => {
+                if (mode === "demo") {
+                  removeDemoSolution(solution.id);
+                  return { status: "ok" };
+                }
+                return deleteSolution(workspaceId, solution.id);
+              }}
+              onDeleted={() => router.push(solutionsListHref(base))}
+            />
+            <span className="flex items-center">
+              <Link
+                href={solutionEditorHref(base, solution.process_id, { from: `${base}/solutions/${solution.id}` })}
+                className="inline-flex h-9 items-center rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
+                data-new-on-process
+              >
+                ✎ New solution on {processName}
+              </Link>
+              <Help {...newOnProcessHelp(processName)} />
+            </span>
           </span>
         )}
       </header>

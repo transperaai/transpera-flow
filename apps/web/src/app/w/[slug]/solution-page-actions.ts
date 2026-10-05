@@ -46,6 +46,24 @@ export async function saveSolutionVerdict(workspaceId: unknown, solutionId: unkn
   return { status: "ok", link: data[0] as unknown as SolutionIssueRow };
 }
 
+export type DeleteSolutionResult = { status: "ok" } | { status: "error"; message: string };
+
+/**
+ * Delete a solution (issue #182). Its links to issues go with it; the database first writes them to the audit log and adds a
+ * line to each issue's history (`log_solution_delete`). An issue it fixed keeps its resolution, without the pick. Anyone who
+ * can't edit the workspace deletes nothing, and is told so.
+ */
+export async function deleteSolution(workspaceId: unknown, solutionId: unknown): Promise<DeleteSolutionResult> {
+  if (!isId(workspaceId) || !isId(solutionId)) return invalid;
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) return signedOut;
+  const { data, error } = await supabase.from("solutions").delete().eq("id", solutionId).eq("workspace_id", workspaceId).select("id");
+  if (error) return error.code === "42501" ? forbidden : { status: "error", message: "Couldn't delete. Try again." };
+  if (!data.length) return forbidden;
+  return { status: "ok" };
+}
+
 export type NotesResult = { status: "ok"; notes: string } | { status: "error"; message: string };
 
 /** The notes on a solution as a whole (not on one issue). */

@@ -112,6 +112,17 @@ export function addDemoLink(solutionId: string, issueId: string, verdict: { auto
   return link;
 }
 
+/** Delete a solution and its links in this tab (issue #182). */
+export function removeDemoSolution(solutionId: string): void {
+  state = {
+    ...state,
+    solutions: state.solutions.filter((s) => s.id !== solutionId),
+    links: state.links.filter((l) => l.solution_id !== solutionId),
+    aiIds: state.aiIds.filter((id) => id !== solutionId),
+  };
+  emit();
+}
+
 /** The demo's solutions as they are now (outside a component; the tests read this). */
 export const demoSolutionsNow = (): DemoState => state;
 

@@ -71,7 +71,7 @@ _Avoid_: Proposal (a visitor's proposal arrives as a suggestion)
 ### Company model
 
 **Client group**:
-The clients of one service, counted but not named: how many, the fee, normal churn, typical stay and starting health. Example: "34 SEO clients paying $2,000 a month". Named client records are hidden but kept.
+The clients of one service, counted but not named: how many, the fee, normal churn, typical stay and starting health. Example: "34 SEO clients paying $2,000 a month". Once any group counts clients, the groups are simulated and named clients (Settings, Clients) are a record only; a client who leaves is made inactive, never deleted (PRD D42).
 _Avoid_: Client roster, client list, account
 Not to be confused with a **group**, which is a box of steps inside a process (above): a group holds steps, a client group counts clients.
 

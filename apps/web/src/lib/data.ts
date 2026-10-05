@@ -11,6 +11,7 @@ import {
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
+  loadClients,
   loadMarket,
   type MarketConditionRow,
   type MarketScheduleRow,
@@ -216,6 +217,11 @@ async function loadAiSolutionIds(db: Awaited<ReturnType<typeof createClient>>, w
   } catch {
     return [];
   }
+}
+
+/** The workspace's named clients, their services and who looks after them (issue #182): everyone in the workspace reads them. */
+export async function loadWorkspaceClients(workspaceId: string) {
+  return loadClients(await createClient(), workspaceId);
 }
 
 /** The workspace's saved scenarios, oldest first (RLS: everyone in the workspace can read them). */

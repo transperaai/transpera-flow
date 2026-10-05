@@ -156,6 +156,8 @@ describe("resolving with a solution", () => {
     expect(text({ solution_verdict: { solution: "Lead scoring", verdict: "fail", was: "pass", notes_changed: true } })).toBe("Your verdict on “Lead scoring”: Fail. Updated your note on “Lead scoring”.");
     expect(text({ solution_verdict: { solution: "Lead scoring", verdict: null, was: "fail", notes_changed: false } })).toBe("Cleared your verdict on “Lead scoring”.");
     expect(text({ solution_verdict: { solution: "Lead scoring", verdict: "pass", was: "pass", notes_changed: true } })).toBe("Updated your note on “Lead scoring”.");
+    // A deleted solution (issue #182) leaves a line on each issue it was linked to.
+    expect(text({ solution_deleted: { solution_id: "x", solution: "Lead scoring" } })).toBe("Deleted solution “Lead scoring”.");
   });
 });
 

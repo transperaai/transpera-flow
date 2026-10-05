@@ -274,3 +274,12 @@ Verified only against plain Postgres, with Supabase's default table privileges e
 - `import_process_bundle` is SECURITY INVOKER, so every table's own policy and trigger (including #177's version guards) runs as the signed-in user; a viewer or stranger is refused whole. `anon` and PUBLIC have no EXECUTE (checked through `proacl`).
 - Sources are inserted with ids the caller chose, before the process, so the `link_cited_sources` trigger links the steps that cite them as they are written. This relies on Supabase's `sources` insert grant covering `id` (the table-level `insert` grant does).
 - `clear_branch_odds` updates `steps` from an AFTER UPDATE trigger on `edges`. It only ever fires in a draft (the drafts-only guard on `edges` refuses anything else), so the guard on `steps` passes.
+
+## Clients by hand, solution deletes, workspace name and currency (issue #182, migration 20261201000000)
+
+Verified only against plain Postgres (`packages/db/test/manual-entry.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-manual-entry.test.ts`), not against a Supabase project.
+
+- `private.never_delete_clients` refuses a delete of a client only when `current_user` is `authenticated` or `anon` and the client's workspace still exists. Deleting a workspace takes its clients by the foreign key's cascade, which Postgres runs as the table owner (so `current_user` is the owner there, as for `private.company_holder_guard`); the tests delete a workspace as a signed-in agency admin and as the superuser. On Supabase the service role (the dashboard, `prod-sql.sh`) is neither role, so an operator can still remove a client by hand.
+- `private.log_solution_delete` is SECURITY DEFINER (owned by `postgres` on Supabase): it writes `audit_log` and `issue_events`, which nobody signed in may write. It runs before the delete, so the solution's links (deleted by the cascade afterwards) are still there to copy.
+- The two `workspaces` checks are added NOT VALID; run the migration's preflight 4 first, and `alter table public.workspaces validate constraint ...` later if wanted.
+
