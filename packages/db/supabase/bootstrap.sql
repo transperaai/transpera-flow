@@ -20029,6 +20029,184 @@ create trigger company_map_new_workspace after insert on public.workspaces
 select private.relayout_company_map(w.id) from public.workspaces w order by w.created_at, w.id;
 ']);
 
+-- 20261127000000_log_process_import.sql
+-- Audit entry for an uploaded process (issue #166, ticket B13, slice 1 of 2).
+--
+-- "Upload process" on the Processes page creates a new process with a draft from a file (or, in slice 2, a link). The change
+-- log must say where it came from: "Imported from <file name | link>". `audit_log` is written only by SECURITY DEFINER
+-- functions and triggers (clients have no INSERT), so this adds the one function that writes that entry:
+--
+--   * `public.log_process_import(target_process, import_source)`: SECURITY DEFINER with an empty search_path. It writes one
+--     `audit_log` row (action `import`, target `processes`, diff `{source, text}`) for a process the caller may edit
+--     (`can_edit_workspace`). It is not a general-purpose logger. The process must be one made by an import
+--     (`processes.source = 'import'`), made by the caller (`created_by = auth.uid()`) in the last ten minutes, and not logged
+--     yet; the row is locked (`for update`) while that is checked, so two calls at once cannot both write. So it cannot put text
+--     on someone else's process, on an old one, or repeat an entry. The source text is cut to 300 characters. The actor kind is
+--     `mcp` for an API-token request and `user` otherwise. (A process made a moment ago by the caller's own MCP `import_process`
+--     also passes: the caller can write one entry saying where it came from, about their own new process.)
+--
+-- STRICTLY ADDITIVE: one function. No table, column, constraint, trigger or existing function is changed.
+--
+-- Preflight (run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each should be as described):
+--
+--   1. The function does not exist yet. Expect 0:
+--        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'log_process_import';
+--   2. Nothing of ours is applied past this one. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= '20261127000000';
+--   3. `processes.source` allows 'import'. Expect one row whose definition lists 'import':
+--        select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.processes'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%source%';
+--
+-- Post-apply grant check (authenticated may execute it; anon and PUBLIC may not):
+--        select grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name = 'log_process_import' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1;
+--        select proacl from pg_proc where pronamespace = 'public'::regnamespace and proname = 'log_process_import';
+--   Expect: one row, authenticated EXECUTE; and an ACL with an `authenticated=X/...` entry and no `anon=` and no `=X/...` (an entry
+--   with an empty grantee is PUBLIC).
+--
+-- Rollback (run as one transaction; nothing existing was changed):
+--
+--   begin;
+--   drop function if exists public.log_process_import(uuid, text);
+--   delete from supabase_migrations.schema_migrations where version = '20261127000000';
+--   commit;
+--
+-- Entries already written stay in `audit_log` (it keeps entries beyond the things they describe).
+--
+-- Production data: none needed.
+
+create function public.log_process_import(target_process uuid, import_source text) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  proc public.processes;
+  label text := left(trim(coalesce(import_source, '')), 300);
+begin
+  select p.* into proc from public.processes p where p.id = target_process for update;
+  -- Not found, not allowed, someone else's and too old all look the same.
+  if not found
+    or not coalesce(public.can_edit_workspace(proc.workspace_id), false)
+    or proc.created_by is distinct from auth.uid()
+    or proc.created_at < now() - interval '10 minutes' then
+    raise exception 'log_process_import: no such process' using errcode = '42501';
+  end if;
+  if proc.source <> 'import' then
+    raise exception 'log_process_import: that process was not made by an import' using errcode = '22023';
+  end if;
+  if label = '' then
+    raise exception 'log_process_import: say where it was imported from' using errcode = '22023';
+  end if;
+  if exists (
+    select 1 from public.audit_log l
+    where l.workspace_id = proc.workspace_id and l.target_table = 'processes' and l.target_id = proc.id and l.action = 'import'
+  ) then
+    raise exception 'log_process_import: this import is already logged' using errcode = '22023';
+  end if;
+  insert into public.audit_log (workspace_id, actor_id, actor_kind, action, target_table, target_id, diff)
+  values (
+    proc.workspace_id,
+    auth.uid(),
+    case when coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id' then 'mcp' else 'user' end,
+    'import',
+    'processes',
+    proc.id,
+    jsonb_build_object('source', label, 'text', 'Imported from ' || label)
+  );
+end;
+$$;
+
+revoke all on function public.log_process_import(uuid, text) from public, anon;
+grant execute on function public.log_process_import(uuid, text) to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261127000000', 'log_process_import', array['-- Audit entry for an uploaded process (issue #166, ticket B13, slice 1 of 2).
+--
+-- "Upload process" on the Processes page creates a new process with a draft from a file (or, in slice 2, a link). The change
+-- log must say where it came from: "Imported from <file name | link>". `audit_log` is written only by SECURITY DEFINER
+-- functions and triggers (clients have no INSERT), so this adds the one function that writes that entry:
+--
+--   * `public.log_process_import(target_process, import_source)`: SECURITY DEFINER with an empty search_path. It writes one
+--     `audit_log` row (action `import`, target `processes`, diff `{source, text}`) for a process the caller may edit
+--     (`can_edit_workspace`). It is not a general-purpose logger. The process must be one made by an import
+--     (`processes.source = ''import''`), made by the caller (`created_by = auth.uid()`) in the last ten minutes, and not logged
+--     yet; the row is locked (`for update`) while that is checked, so two calls at once cannot both write. So it cannot put text
+--     on someone else''s process, on an old one, or repeat an entry. The source text is cut to 300 characters. The actor kind is
+--     `mcp` for an API-token request and `user` otherwise. (A process made a moment ago by the caller''s own MCP `import_process`
+--     also passes: the caller can write one entry saying where it came from, about their own new process.)
+--
+-- STRICTLY ADDITIVE: one function. No table, column, constraint, trigger or existing function is changed.
+--
+-- Preflight (run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each should be as described):
+--
+--   1. The function does not exist yet. Expect 0:
+--        select count(*) from pg_proc where pronamespace = ''public''::regnamespace and proname = ''log_process_import'';
+--   2. Nothing of ours is applied past this one. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261127000000'';
+--   3. `processes.source` allows ''import''. Expect one row whose definition lists ''import'':
+--        select pg_get_constraintdef(oid) from pg_constraint where conrelid = ''public.processes''::regclass and contype = ''c'' and pg_get_constraintdef(oid) like ''%source%'';
+--
+-- Post-apply grant check (authenticated may execute it; anon and PUBLIC may not):
+--        select grantee, privilege_type from information_schema.routine_privileges where routine_schema = ''public'' and routine_name = ''log_process_import'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'') order by 1;
+--        select proacl from pg_proc where pronamespace = ''public''::regnamespace and proname = ''log_process_import'';
+--   Expect: one row, authenticated EXECUTE; and an ACL with an `authenticated=X/...` entry and no `anon=` and no `=X/...` (an entry
+--   with an empty grantee is PUBLIC).
+--
+-- Rollback (run as one transaction; nothing existing was changed):
+--
+--   begin;
+--   drop function if exists public.log_process_import(uuid, text);
+--   delete from supabase_migrations.schema_migrations where version = ''20261127000000'';
+--   commit;
+--
+-- Entries already written stay in `audit_log` (it keeps entries beyond the things they describe).
+--
+-- Production data: none needed.
+
+create function public.log_process_import(target_process uuid, import_source text) returns void
+language plpgsql
+security definer
+set search_path = ''''
+as $$
+declare
+  proc public.processes;
+  label text := left(trim(coalesce(import_source, '''')), 300);
+begin
+  select p.* into proc from public.processes p where p.id = target_process for update;
+  -- Not found, not allowed, someone else''s and too old all look the same.
+  if not found
+    or not coalesce(public.can_edit_workspace(proc.workspace_id), false)
+    or proc.created_by is distinct from auth.uid()
+    or proc.created_at < now() - interval ''10 minutes'' then
+    raise exception ''log_process_import: no such process'' using errcode = ''42501'';
+  end if;
+  if proc.source <> ''import'' then
+    raise exception ''log_process_import: that process was not made by an import'' using errcode = ''22023'';
+  end if;
+  if label = '''' then
+    raise exception ''log_process_import: say where it was imported from'' using errcode = ''22023'';
+  end if;
+  if exists (
+    select 1 from public.audit_log l
+    where l.workspace_id = proc.workspace_id and l.target_table = ''processes'' and l.target_id = proc.id and l.action = ''import''
+  ) then
+    raise exception ''log_process_import: this import is already logged'' using errcode = ''22023'';
+  end if;
+  insert into public.audit_log (workspace_id, actor_id, actor_kind, action, target_table, target_id, diff)
+  values (
+    proc.workspace_id,
+    auth.uid(),
+    case when coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'' then ''mcp'' else ''user'' end,
+    ''import'',
+    ''processes'',
+    proc.id,
+    jsonb_build_object(''source'', label, ''text'', ''Imported from '' || label)
+  );
+end;
+$$;
+
+revoke all on function public.log_process_import(uuid, text) from public, anon;
+grant execute on function public.log_process_import(uuid, text) to authenticated;
+']);
+
 -- 20261127500000_company_map_editing.sql
 -- Editing the company map (issue #163, B11 slice 2 of 2; PRD D26 and D39; ADR 0014).
 --
@@ -20087,6 +20265,10 @@ select private.relayout_company_map(w.id) from public.workspaces w order by w.cr
 --   * `private.company_map_membership`, `private.company_map_before_delete` (replaced) call it; `private.sync_company_map`
 --     (the old in-place reconciler) is dropped; `private.relayout_company_map` (seed and backfill only, the app never calls
 --     it) is replaced: it now starts the map over as a single version 1;
+--   * `private.refuse_row_moves` and its `refuse_row_moves` triggers on `steps`, `edges` and `process_revisions` (new, ALL processes): nobody
+--     signed in changes `revision_id`, `process_id` or `workspace_id` of a step, edge or version (moving a card to another process's draft,
+--     or the map's draft to another process, skipped every check); `nesting_is_a_tree` is re-created watching `revision_id` and
+--     `process_id` too;
 --   * `private.company_new_version`, `private.company_add_holder`, `private.company_map_edit`, `private.company_map_apply`
 --     (new, private, executable by nobody signed in). Deleting a process marks the cards that held it in every version
 --     (an audit entry `map_cards_removed` naming the cards), so restore skips those and keeps a placeholder a person drew.
@@ -20112,10 +20294,11 @@ select private.relayout_company_map(w.id) from public.workspaces w order by w.cr
 -- Post-apply checks:
 --   1. The new private functions are executable by nobody signed in or anonymous. Expect 0 rows:
 --        select routine_name from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC')
---          and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map');
---   2. The old reconciler is gone and the holder guards are on steps. Expect 0, then 3:
+--          and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map', 'refuse_row_moves');
+--   2. The old reconciler is gone and the guards are on steps. Expect 0, 3, then 3 (refuse_row_moves on steps, edges, process_revisions):
 --        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname = 'sync_company_map';
 --        select count(*) from pg_trigger where tgrelid = 'public.steps'::regclass and tgname in ('company_holder_guard', 'company_group_guard', 'company_holder_update_guard') and not tgisinternal;
+--        select count(*) from pg_trigger where tgname = 'refuse_row_moves' and not tgisinternal;
 --   3. revision_history returns the note, authenticated may call it and restore_version, anon may not. Expect true, true, false:
 --        select pg_get_function_result('public.revision_history(uuid)'::regprocedure) like '%note text%';
 --        select has_function_privilege('authenticated', 'public.revision_history(uuid)', 'execute') and has_function_privilege('authenticated', 'public.restore_version(uuid, uuid, boolean)', 'execute');
@@ -20129,6 +20312,12 @@ select private.relayout_company_map(w.id) from public.workspaces w order by w.cr
 -- come back and refuse any further change to them:
 --
 --   begin;
+--   drop trigger refuse_row_moves on public.process_revisions;
+--   drop trigger refuse_row_moves on public.edges;
+--   drop trigger refuse_row_moves on public.steps;
+--   drop function private.refuse_row_moves();
+--   drop trigger nesting_is_a_tree on public.steps;
+--   create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id on public.steps deferrable initially deferred for each row execute function private.check_step_nesting();
 --   drop trigger company_holder_update_guard on public.steps;
 --   drop trigger company_group_guard on public.steps;
 --   drop trigger company_holder_guard on public.steps;
@@ -20347,6 +20536,43 @@ begin
   return null;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Rows stay in their version and process
+-- ---------------------------------------------------------------------------
+
+-- Moving a step or edge to another revision (or process), or a revision to another process, would carry a card off the map or put
+-- a process inside itself without passing any check made on insert, delete or the nesting columns. Nothing signed in does it: no
+-- path of the app, MCP or the database functions needs to (they insert copies; save_fields refuses these columns). The system,
+-- the owner and security-definer functions are not signed-in roles and are not refused. Applies to every process.
+create function private.refuse_row_moves() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user in ('authenticated', 'anon')
+     and (to_jsonb(new) -> 'revision_id', to_jsonb(new) -> 'process_id', to_jsonb(new) -> 'workspace_id')
+         is distinct from (to_jsonb(old) -> 'revision_id', to_jsonb(old) -> 'process_id', to_jsonb(old) -> 'workspace_id') then
+    raise exception 'A step, connection or version stays in the process and version it was made in' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_row_moves() from public, anon, authenticated;
+
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.steps
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.edges
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of process_id, workspace_id on public.process_revisions
+  for each row execute function private.refuse_row_moves();
+
+-- The nesting check also runs when a step changes revision or process (defence in depth: the trigger above refuses it for
+-- signed-in roles, this covers any other writer).
+drop trigger nesting_is_a_tree on public.steps;
+create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id, revision_id, process_id on public.steps
+  deferrable initially deferred for each row execute function private.check_step_nesting();
 
 -- ---------------------------------------------------------------------------
 -- The sync rule: events, not reconciliation
@@ -20904,6 +21130,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * `private.company_map_membership`, `private.company_map_before_delete` (replaced) call it; `private.sync_company_map`
 --     (the old in-place reconciler) is dropped; `private.relayout_company_map` (seed and backfill only, the app never calls
 --     it) is replaced: it now starts the map over as a single version 1;
+--   * `private.refuse_row_moves` and its `refuse_row_moves` triggers on `steps`, `edges` and `process_revisions` (new, ALL processes): nobody
+--     signed in changes `revision_id`, `process_id` or `workspace_id` of a step, edge or version (moving a card to another process''s draft,
+--     or the map''s draft to another process, skipped every check); `nesting_is_a_tree` is re-created watching `revision_id` and
+--     `process_id` too;
 --   * `private.company_new_version`, `private.company_add_holder`, `private.company_map_edit`, `private.company_map_apply`
 --     (new, private, executable by nobody signed in). Deleting a process marks the cards that held it in every version
 --     (an audit entry `map_cards_removed` naming the cards), so restore skips those and keeps a placeholder a person drew.
@@ -20929,10 +21159,11 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- Post-apply checks:
 --   1. The new private functions are executable by nobody signed in or anonymous. Expect 0 rows:
 --        select routine_name from information_schema.routine_privileges where routine_schema = ''private'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'')
---          and routine_name in (''company_new_version'', ''company_add_holder'', ''company_map_edit'', ''company_map_apply'', ''company_holder_guard'', ''company_process_guard'', ''company_revision_guard'', ''company_map_membership'', ''company_map_before_delete'', ''relayout_company_map'');
---   2. The old reconciler is gone and the holder guards are on steps. Expect 0, then 3:
+--          and routine_name in (''company_new_version'', ''company_add_holder'', ''company_map_edit'', ''company_map_apply'', ''company_holder_guard'', ''company_process_guard'', ''company_revision_guard'', ''company_map_membership'', ''company_map_before_delete'', ''relayout_company_map'', ''refuse_row_moves'');
+--   2. The old reconciler is gone and the guards are on steps. Expect 0, 3, then 3 (refuse_row_moves on steps, edges, process_revisions):
 --        select count(*) from pg_proc where pronamespace = ''private''::regnamespace and proname = ''sync_company_map'';
 --        select count(*) from pg_trigger where tgrelid = ''public.steps''::regclass and tgname in (''company_holder_guard'', ''company_group_guard'', ''company_holder_update_guard'') and not tgisinternal;
+--        select count(*) from pg_trigger where tgname = ''refuse_row_moves'' and not tgisinternal;
 --   3. revision_history returns the note, authenticated may call it and restore_version, anon may not. Expect true, true, false:
 --        select pg_get_function_result(''public.revision_history(uuid)''::regprocedure) like ''%note text%'';
 --        select has_function_privilege(''authenticated'', ''public.revision_history(uuid)'', ''execute'') and has_function_privilege(''authenticated'', ''public.restore_version(uuid, uuid, boolean)'', ''execute'');
@@ -20946,6 +21177,12 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- come back and refuse any further change to them:
 --
 --   begin;
+--   drop trigger refuse_row_moves on public.process_revisions;
+--   drop trigger refuse_row_moves on public.edges;
+--   drop trigger refuse_row_moves on public.steps;
+--   drop function private.refuse_row_moves();
+--   drop trigger nesting_is_a_tree on public.steps;
+--   create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id on public.steps deferrable initially deferred for each row execute function private.check_step_nesting();
 --   drop trigger company_holder_update_guard on public.steps;
 --   drop trigger company_group_guard on public.steps;
 --   drop trigger company_holder_guard on public.steps;
@@ -21164,6 +21401,43 @@ begin
   return null;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Rows stay in their version and process
+-- ---------------------------------------------------------------------------
+
+-- Moving a step or edge to another revision (or process), or a revision to another process, would carry a card off the map or put
+-- a process inside itself without passing any check made on insert, delete or the nesting columns. Nothing signed in does it: no
+-- path of the app, MCP or the database functions needs to (they insert copies; save_fields refuses these columns). The system,
+-- the owner and security-definer functions are not signed-in roles and are not refused. Applies to every process.
+create function private.refuse_row_moves() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+begin
+  if current_user in (''authenticated'', ''anon'')
+     and (to_jsonb(new) -> ''revision_id'', to_jsonb(new) -> ''process_id'', to_jsonb(new) -> ''workspace_id'')
+         is distinct from (to_jsonb(old) -> ''revision_id'', to_jsonb(old) -> ''process_id'', to_jsonb(old) -> ''workspace_id'') then
+    raise exception ''A step, connection or version stays in the process and version it was made in'' using errcode = ''55000'';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_row_moves() from public, anon, authenticated;
+
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.steps
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.edges
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of process_id, workspace_id on public.process_revisions
+  for each row execute function private.refuse_row_moves();
+
+-- The nesting check also runs when a step changes revision or process (defence in depth: the trigger above refuses it for
+-- signed-in roles, this covers any other writer).
+drop trigger nesting_is_a_tree on public.steps;
+create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id, revision_id, process_id on public.steps
+  deferrable initially deferred for each row execute function private.check_step_nesting();
 
 -- ---------------------------------------------------------------------------
 -- The sync rule: events, not reconciliation

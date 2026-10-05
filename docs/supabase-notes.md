@@ -219,6 +219,17 @@ select routine_name, grantee from information_schema.routine_privileges where ro
 
 Both must return no rows. The guard trigger tells a signed-in caller from the system by `current_user` (`authenticated`, `anon`), as `edit_drafts_only` does.
 
+## Audit entry for an uploaded process (B13 slice 1, migration 20261127000000)
+
+Verified only against plain Postgres (`packages/db/test/log-process-import.test.ts`, and `packages/mcp/test/postgrest-import-file.test.ts` through PostgREST with the auth shim). `public.log_process_import` is `security definer` with an empty `search_path`, because `audit_log` has no client INSERT. It checks `can_edit_workspace` itself, and that the caller created the process in the last ten minutes (wrapped in `coalesce(..., false)`: for someone outside the workspace the function returns NULL, not false, and `not NULL` would let them through). After applying, check the grants on Supabase:
+
+```sql
+select grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name = 'log_process_import' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1;
+select proacl from pg_proc where pronamespace = 'public'::regnamespace and proname = 'log_process_import';
+```
+
+Expect one row, `authenticated` EXECUTE, and an ACL with an `authenticated=X/...` entry, no `anon=` and no `=X/...`.
+
 ## Editing the company map (B11 slice 2, migration 20261127500000)
 
 Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/company-map-editing.test.ts` and `company-map.test.ts`, including both headers' rollbacks and both migrations re-applied over existing workspaces). No table or column is added. Two things rest on how Postgres behaves for the table owner, which should hold on Supabase but has not been seen there:

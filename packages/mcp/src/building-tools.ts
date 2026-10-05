@@ -146,7 +146,7 @@ const stepFieldsShape = {
 type StepFieldsJson = z.infer<z.ZodObject<typeof stepFieldsShape>>;
 
 /** A step of process_json: the step tools' fields, plus the steps it holds and the child process it holds (issue #102). */
-interface ImportStepJson extends Omit<StepFieldsJson, "kind"> {
+export interface ImportStepJson extends Omit<StepFieldsJson, "kind"> {
   id?: string;
   name: string;
   kind?: BuildStepKind;
@@ -157,7 +157,7 @@ interface ImportStepJson extends Omit<StepFieldsJson, "kind"> {
   process?: ProcessJson;
 }
 
-interface ImportEdgeJson {
+export interface ImportEdgeJson {
   from: string;
   to: string;
   probability?: number;
@@ -165,7 +165,7 @@ interface ImportEdgeJson {
   label?: string | null;
 }
 
-interface ProcessJson {
+export interface ProcessJson {
   name?: string;
   kind?: "pipeline" | "servicing";
   entity_name?: string;
@@ -263,6 +263,7 @@ const userIds = new WeakMap<ToolContext, Promise<string | null>>();
 
 /** The token owner's user id, for provenance `by` (read once per request). */
 function userIdOf(ctx: ToolContext): Promise<string | null> {
+  if (ctx.userId !== undefined) return Promise.resolve(ctx.userId);
   let p = userIds.get(ctx);
   if (!p) {
     p = Promise.resolve(ctx.db.from("api_tokens").select("user_id").eq("token_hash", ctx.tokenHash).maybeSingle()).then(
@@ -610,7 +611,7 @@ function withTopLevelReasoning<T extends { id?: string; name: string; assumption
 type DraftBundle = Graph & { roles: readonly Named[]; people: readonly Named[]; retired?: StepRow[] };
 
 /** What import_process returns for one process: the draft it wrote and what to check, with the child processes written beside it. */
-interface ImportOutcome {
+export interface ImportOutcome {
   workspace: { id: string; name: string };
   process: { id: string; name: string };
   draft: { revision_id: string; number: number; opened_now: boolean };
@@ -828,6 +829,38 @@ async function prepareImport(
     },
   };
   return prepared;
+}
+
+/** Refuse unless the caller can edit the workspace's processes (editors and owners). */
+async function requireCanEdit(ctx: ToolContext, ws: WorkspaceRef): Promise<void> {
+  const { data: canEdit, error: accessError } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
+  if (accessError) throw writeError(accessError, "edit processes");
+  if (canEdit !== true) throw new ToolError("forbidden", `You don't have permission to edit processes in '${ws.name}' (editors and owners can).`);
+}
+
+/** Prepare a new process (kind and entity defaulted as the tool says) from process_json. */
+function prepareNewProcess(scope: ImportScope, json: ProcessJson): Promise<PreparedImport> {
+  if (!json.name) throw new ToolError("invalid_input", "process_json needs a name for a new process (or pass `target` to write into an existing one).");
+  const kind = json.kind ?? "pipeline";
+  if (!json.kind) scope.assumptions.push("kind defaulted to pipeline.");
+  const entity = json.entity_name ?? (kind === "pipeline" ? "lead" : "item");
+  if (!json.entity_name) scope.assumptions.push(`entity_name defaulted to '${entity}'.`);
+  return prepareImport(scope, json, { create: { name: json.name, kind, entity_name: entity, source: "import" }, ancestors: [] });
+}
+
+/**
+ * Create a new process, as a draft, from process_json: what `import_process` does without a `target`, for callers that
+ * aren't an MCP session (the web app's upload, issue #166). Acts as `ctx.db`'s user through RLS, so it needs an editor;
+ * checks the whole import before writing any of it; never publishes.
+ */
+export async function importNewProcess(ctx: ToolContext, workspaceId: string, json: ProcessJson, assumptions: string[] = []): Promise<ImportOutcome> {
+  const ws = await resolveWorkspace(ctx, workspaceId, assumptions);
+  await requireCanEdit(ctx, ws);
+  const processes = await listProcesses(ctx.db, ws.id);
+  const scope: ImportScope = { ctx, ws, assumptions, reserved: new Set(), processes, claimed: new Map(), stamp: await stampOf(ctx) };
+  const prepared = await prepareNewProcess(scope, json);
+  await prepared.ensure(null);
+  return prepared.write();
 }
 
 /** The ids of the processes that hold `proc`, nearest first. */
@@ -1412,9 +1445,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
           json = r.data;
         } else json = args.process_json;
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
-        const { data: canEdit, error: accessError } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
-        if (accessError) throw writeError(accessError, "edit processes");
-        if (canEdit !== true) throw new ToolError("forbidden", `You don't have permission to edit processes in '${ws.name}' (editors and owners can).`);
+        await requireCanEdit(ctx, ws);
 
         const processes = await listProcesses(ctx.db, ws.id);
         const scope: ImportScope = { ctx, ws, assumptions, reserved: new Set(), processes, claimed: new Map(), stamp: await stampOf(ctx) };
@@ -1425,12 +1456,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
           if (ignored.length) assumptions.push(`process_json's ${ignored.join(", ")} ${ignored.length === 1 ? "was" : "were"} ignored: they belong to the process, not its draft.`);
           prepared = await prepareImport(scope, json, { target, ancestors: ancestorsOf(processes, target) });
         } else {
-          if (!json.name) throw new ToolError("invalid_input", "process_json needs a name for a new process (or pass `target` to write into an existing one).");
-          const kind = json.kind ?? "pipeline";
-          if (!json.kind) assumptions.push("kind defaulted to pipeline.");
-          const entity = json.entity_name ?? (kind === "pipeline" ? "lead" : "item");
-          if (!json.entity_name) assumptions.push(`entity_name defaulted to '${entity}'.`);
-          prepared = await prepareImport(scope, json, { create: { name: json.name, kind, entity_name: entity, source: "import" }, ancestors: [] });
+          prepared = await prepareNewProcess(scope, json);
         }
         await prepared.ensure(null);
         return prepared.write();

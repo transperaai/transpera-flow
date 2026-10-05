@@ -536,3 +536,42 @@ describe("review fixes: nothing takes a card off the map, history is kept, draft
     }
   });
 });
+
+describe("rows stay in the version and process they were made in", () => {
+  /** A published first version for an ordinary process, and the editor's draft of it. */
+  async function draftOf(w: World, pid: string): Promise<string> {
+    const [{ id: rev }] = await q("insert into process_revisions (workspace_id, process_id, number, status, published_at) values ($1, $2, 1, 'published', now()) returning id", [w.ws, pid]);
+    await q("update processes set live_revision_id = $2 where id = $1", [pid, rev]);
+    await q("insert into steps (revision_id, workspace_id, process_id, name, kind) values ($1, $2, $3, 'First', 'task')", [rev, w.ws, pid]);
+    return (await commitAs(editor.claims, (c) => rpc(c, "open_draft", pid))).revision_id as string;
+  }
+
+  it("refuses moving a card of the map into another process's draft, and moving the map's draft to another process", async () => {
+    const w = await world();
+    const mapDraft = await openDraft(w.cid);
+    const salesDraft = await draftOf(w, w.sales);
+    const card = (await holderOf(mapDraft, w.support))!;
+    // Its lines first, as the editor would: then nothing else stands in the way.
+    await commitAs(editor.claims, (c) => c.query("delete from edges where revision_id = $1 and (from_step_id = $2 or to_step_id = $2)", [mapDraft, card.id]));
+    await expect(
+      commitAs(editor.claims, (c) => c.query("update steps set revision_id = $3, process_id = $4 where revision_id = $1 and id = $2", [mapDraft, card.id, salesDraft, w.sales])),
+    ).rejects.toThrow(/stays in the process/);
+    await expect(commitAs(editor.claims, (c) => c.query("update steps set process_id = $3 where revision_id = $1 and id = $2", [mapDraft, card.id, w.sales]))).rejects.toThrow(/stays in the process/);
+    await expect(commitAs(editor.claims, (c) => c.query("update process_revisions set process_id = $2 where id = $1", [mapDraft, w.sales]))).rejects.toThrow(/stays in the process/);
+    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = $2", [mapDraft, w.support]))[0].n).toBe(1);
+  });
+
+  it("refuses the same for ordinary processes: a step or connection into another process's draft", async () => {
+    const w = await world();
+    const salesDraft = await draftOf(w, w.sales);
+    const deliveryDraft = await draftOf(w, w.delivery);
+    const [step] = await q("select id from steps where revision_id = $1", [salesDraft]);
+    await expect(
+      commitAs(editor.claims, (c) => c.query("update steps set revision_id = $3, process_id = $4 where revision_id = $1 and id = $2", [salesDraft, step.id, deliveryDraft, w.delivery])),
+    ).rejects.toThrow(/stays in the process/);
+    await expect(commitAs(editor.claims, (c) => c.query("update process_revisions set process_id = $2 where id = $1", [salesDraft, w.delivery]))).rejects.toThrow(/stays in the process/);
+    // The owner (a migration, a seed) is not refused, and ordinary saves still work.
+    const [row] = await q("select work_hours from steps where revision_id = $1 and id = $2", [salesDraft, step.id]);
+    await expect(commitAs(editor.claims, (c) => save(c, "steps", salesDraft, step.id, { work_hours: Number(row.work_hours) }, { work_hours: 2 }))).resolves.toMatchObject({ status: "saved" });
+  });
+});

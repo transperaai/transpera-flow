@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Transpera process file (transpera-process/1)",
+  "description": "A process for Transpera Flow: its steps and how they connect. Only the fields marked required have to be there; anything left out is filled in and marked to confirm on the canvas.",
+  "type": "object",
+  "required": [
+    "format",
+    "name",
+    "steps"
+  ],
+  "properties": {
+    "format": {
+      "const": "transpera-process/1",
+      "description": "Always the text transpera-process/1."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "What the process is called, e.g. Enquiry to signed client."
+    },
+    "kind": {
+      "enum": [
+        "pipeline",
+        "servicing"
+      ],
+      "default": "pipeline",
+      "description": "pipeline: how new leads become clients (default). servicing: a recurring process for existing clients."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "A sentence on what the process covers."
+    },
+    "entity_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "What flows through it, e.g. lead, task. Default: lead for a pipeline, item for a servicing process."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "description": "Every step. Give each a short unique id that links refer to.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A short unique id, e.g. review. Links use it."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "What the step is called on the map."
+          },
+          "type": {
+            "enum": [
+              "step",
+              "decision",
+              "wait",
+              "start",
+              "end"
+            ],
+            "default": "step",
+            "description": "step: someone does work. decision: items branch. wait: items sit and wait. start and end: where items come in and finish."
+          },
+          "role": {
+            "type": "string",
+            "description": "The role that does it, e.g. Managing director. Roles the company doesn't have yet are matched in the preview; none are created."
+          },
+          "person": {
+            "type": "string",
+            "description": "A person to pin it to (only if they are already in the company; otherwise ignored)."
+          },
+          "hands_on_hours": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Hours of hands-on work per item (average)."
+          },
+          "wait_hours": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "Hours an item waits at this step per item (average)."
+          },
+          "rework_rate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Share of items sent back to do again, from 0 to 1 (0.1 is one in ten)."
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "x": {
+            "type": "number",
+            "description": "Position on the map. Give x and y together, or leave both out to be laid out left to right."
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 500,
+      "description": "How the steps connect, each from one step id to another.",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "probability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The share of items that take this branch, from 0 to 1. Branches out of a step add up to 1."
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "e.g. Qualified"
+          }
+        }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Optional boxes that gather steps on the map.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "steps"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the steps in the group (not start or end steps)."
+          }
+        }
+      }
+    }
+  }
+}

@@ -2936,6 +2936,10 @@ export type Database = {
       }
       is_agency_admin: { Args: never; Returns: boolean }
       is_free_mail_domain: { Args: { domain: string }; Returns: boolean }
+      log_process_import: {
+        Args: { import_source: string; target_process: string }
+        Returns: undefined
+      }
       open_draft: { Args: { target_process: string }; Returns: Json }
       publish_process: {
         Args: { accept_estimates?: boolean; target_process: string }

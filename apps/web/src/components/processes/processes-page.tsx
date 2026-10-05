@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Network } from "lucide-react";
 import { NewProcessButton, type CreateProcess } from "@/components/new-process-dialog";
 import { ProcessesTable } from "@/components/processes/processes-table";
+import { UploadProcessButton, type UploadProcess } from "@/components/processes/upload-process-dialog";
 import { Page } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
 import type { ProcessCardData } from "@/lib/processes/data";
@@ -17,6 +18,7 @@ export function ProcessesPage({
   companyMapHref,
   loadCard,
   create,
+  upload,
   note,
 }: {
   rows: ProcessRowData[];
@@ -26,6 +28,8 @@ export function ProcessesPage({
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
   /** Start a process (signed-in editors only). */
   create?: CreateProcess;
+  /** Bring in a process from a file (signed-in editors only; issue #166). */
+  upload?: UploadProcess;
   /** A line under the table, such as the demo's reminder that nothing is kept. */
   note?: string;
 }) {
@@ -42,6 +46,7 @@ export function ProcessesPage({
               <Network /> Company map
             </Link>
           </Button>
+          {upload && <UploadProcessButton upload={upload} />}
           {create && <NewProcessButton create={create} />}
         </>
       }

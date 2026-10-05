@@ -5,6 +5,7 @@ import { canEditWorkspace } from "@/lib/access-data";
 import { loadWorkspaceHead } from "@/lib/data";
 import { loadProcessesPage } from "@/lib/processes/data";
 import { openProcessCard } from "./actions";
+import { createUpload, previewUpload } from "./upload-actions";
 
 /** Every process of the workspace, sub-processes indented, each row opening its map card (issue #101). */
 export default async function WorkspaceProcessesPage(props: PageProps<"/w/[slug]/processes">) {
@@ -20,6 +21,7 @@ export default async function WorkspaceProcessesPage(props: PageProps<"/w/[slug]
       companyMapHref={base}
       loadCard={openProcessCard.bind(null, slug)}
       create={canEdit ? createServicingProcess.bind(null, workspace.id, slug) : undefined}
+      upload={canEdit ? { preview: previewUpload.bind(null, workspace.id, slug), create: createUpload.bind(null, workspace.id, slug) } : undefined}
     />
   );
 }

@@ -15,3 +15,5 @@ export { buildNewStep, buildStepChange, planImport, resolveName, revisionDiff, t
 export { FIRST_PRINCIPLES_TOOL_NAMES } from "./first-principles-tools";
 export { mergeFirstPrinciples, type FpInput, type FpMergeResult, type FpMode } from "./first-principles";
 export { PROCESS_TEMPLATES, type ProcessTemplate } from "./templates";
+export { fileToProcessJson, importProcessFile, previewProcessFile, type ImportFileOptions, type ImportFileResult, type ImportPreview } from "./import-file";
+export { checkLink, fetchPublicPage, isPublicAddress, LinkError, NOT_PUBLIC_ADVICE, PUBLIC_POLICY, type FetchPolicy, type Resolver } from "./fetch-link";

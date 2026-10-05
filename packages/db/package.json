@@ -6,13 +6,15 @@
   "exports": {
     ".": "./src/index.ts",
     "./issue-status": "./src/issue-status.ts",
-    "./source-links": "./src/source-links.ts"
+    "./source-links": "./src/source-links.ts",
+    "./process-file": "./src/process-file.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "gen:seed": "node --experimental-strip-types scripts/gen-seed.ts",
+    "gen:import-schema": "node --experimental-strip-types scripts/gen-import-schema.ts",
     "gen:bootstrap": "node --experimental-strip-types scripts/gen-bootstrap.ts",
     "gen:types": "npx supabase gen types typescript --linked --workdir . --schema public > src/database.types.ts"
   },
@@ -23,6 +25,7 @@
     "@supabase/supabase-js": "^2.117.2",
     "@types/node": "^22.20.4",
     "@types/pg": "^8.23.1",
+    "ajv": "^8.20.0",
     "eslint": "^9.39.5",
     "pg": "^8.23.0",
     "typescript": "~5.9.3",

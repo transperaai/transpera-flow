@@ -62,6 +62,10 @@ set local lock_timeout = '5s';
 --   * `private.company_map_membership`, `private.company_map_before_delete` (replaced) call it; `private.sync_company_map`
 --     (the old in-place reconciler) is dropped; `private.relayout_company_map` (seed and backfill only, the app never calls
 --     it) is replaced: it now starts the map over as a single version 1;
+--   * `private.refuse_row_moves` and its `refuse_row_moves` triggers on `steps`, `edges` and `process_revisions` (new, ALL processes): nobody
+--     signed in changes `revision_id`, `process_id` or `workspace_id` of a step, edge or version (moving a card to another process's draft,
+--     or the map's draft to another process, skipped every check); `nesting_is_a_tree` is re-created watching `revision_id` and
+--     `process_id` too;
 --   * `private.company_new_version`, `private.company_add_holder`, `private.company_map_edit`, `private.company_map_apply`
 --     (new, private, executable by nobody signed in). Deleting a process marks the cards that held it in every version
 --     (an audit entry `map_cards_removed` naming the cards), so restore skips those and keeps a placeholder a person drew.
@@ -87,10 +91,11 @@ set local lock_timeout = '5s';
 -- Post-apply checks:
 --   1. The new private functions are executable by nobody signed in or anonymous. Expect 0 rows:
 --        select routine_name from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC')
---          and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map');
---   2. The old reconciler is gone and the holder guards are on steps. Expect 0, then 3:
+--          and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map', 'refuse_row_moves');
+--   2. The old reconciler is gone and the guards are on steps. Expect 0, 3, then 3 (refuse_row_moves on steps, edges, process_revisions):
 --        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname = 'sync_company_map';
 --        select count(*) from pg_trigger where tgrelid = 'public.steps'::regclass and tgname in ('company_holder_guard', 'company_group_guard', 'company_holder_update_guard') and not tgisinternal;
+--        select count(*) from pg_trigger where tgname = 'refuse_row_moves' and not tgisinternal;
 --   3. revision_history returns the note, authenticated may call it and restore_version, anon may not. Expect true, true, false:
 --        select pg_get_function_result('public.revision_history(uuid)'::regprocedure) like '%note text%';
 --        select has_function_privilege('authenticated', 'public.revision_history(uuid)', 'execute') and has_function_privilege('authenticated', 'public.restore_version(uuid, uuid, boolean)', 'execute');
@@ -104,6 +109,12 @@ set local lock_timeout = '5s';
 -- come back and refuse any further change to them:
 --
 --   begin;
+--   drop trigger refuse_row_moves on public.process_revisions;
+--   drop trigger refuse_row_moves on public.edges;
+--   drop trigger refuse_row_moves on public.steps;
+--   drop function private.refuse_row_moves();
+--   drop trigger nesting_is_a_tree on public.steps;
+--   create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id on public.steps deferrable initially deferred for each row execute function private.check_step_nesting();
 --   drop trigger company_holder_update_guard on public.steps;
 --   drop trigger company_group_guard on public.steps;
 --   drop trigger company_holder_guard on public.steps;
@@ -322,6 +333,43 @@ begin
   return null;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Rows stay in their version and process
+-- ---------------------------------------------------------------------------
+
+-- Moving a step or edge to another revision (or process), or a revision to another process, would carry a card off the map or put
+-- a process inside itself without passing any check made on insert, delete or the nesting columns. Nothing signed in does it: no
+-- path of the app, MCP or the database functions needs to (they insert copies; save_fields refuses these columns). The system,
+-- the owner and security-definer functions are not signed-in roles and are not refused. Applies to every process.
+create function private.refuse_row_moves() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user in ('authenticated', 'anon')
+     and (to_jsonb(new) -> 'revision_id', to_jsonb(new) -> 'process_id', to_jsonb(new) -> 'workspace_id')
+         is distinct from (to_jsonb(old) -> 'revision_id', to_jsonb(old) -> 'process_id', to_jsonb(old) -> 'workspace_id') then
+    raise exception 'A step, connection or version stays in the process and version it was made in' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_row_moves() from public, anon, authenticated;
+
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.steps
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.edges
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of process_id, workspace_id on public.process_revisions
+  for each row execute function private.refuse_row_moves();
+
+-- The nesting check also runs when a step changes revision or process (defence in depth: the trigger above refuses it for
+-- signed-in roles, this covers any other writer).
+drop trigger nesting_is_a_tree on public.steps;
+create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id, revision_id, process_id on public.steps
+  deferrable initially deferred for each row execute function private.check_step_nesting();
 
 -- ---------------------------------------------------------------------------
 -- The sync rule: events, not reconciliation
@@ -879,6 +927,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * `private.company_map_membership`, `private.company_map_before_delete` (replaced) call it; `private.sync_company_map`
 --     (the old in-place reconciler) is dropped; `private.relayout_company_map` (seed and backfill only, the app never calls
 --     it) is replaced: it now starts the map over as a single version 1;
+--   * `private.refuse_row_moves` and its `refuse_row_moves` triggers on `steps`, `edges` and `process_revisions` (new, ALL processes): nobody
+--     signed in changes `revision_id`, `process_id` or `workspace_id` of a step, edge or version (moving a card to another process's draft,
+--     or the map's draft to another process, skipped every check); `nesting_is_a_tree` is re-created watching `revision_id` and
+--     `process_id` too;
 --   * `private.company_new_version`, `private.company_add_holder`, `private.company_map_edit`, `private.company_map_apply`
 --     (new, private, executable by nobody signed in). Deleting a process marks the cards that held it in every version
 --     (an audit entry `map_cards_removed` naming the cards), so restore skips those and keeps a placeholder a person drew.
@@ -904,10 +956,11 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- Post-apply checks:
 --   1. The new private functions are executable by nobody signed in or anonymous. Expect 0 rows:
 --        select routine_name from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC')
---          and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map');
---   2. The old reconciler is gone and the holder guards are on steps. Expect 0, then 3:
+--          and routine_name in ('company_new_version', 'company_add_holder', 'company_map_edit', 'company_map_apply', 'company_holder_guard', 'company_process_guard', 'company_revision_guard', 'company_map_membership', 'company_map_before_delete', 'relayout_company_map', 'refuse_row_moves');
+--   2. The old reconciler is gone and the guards are on steps. Expect 0, 3, then 3 (refuse_row_moves on steps, edges, process_revisions):
 --        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname = 'sync_company_map';
 --        select count(*) from pg_trigger where tgrelid = 'public.steps'::regclass and tgname in ('company_holder_guard', 'company_group_guard', 'company_holder_update_guard') and not tgisinternal;
+--        select count(*) from pg_trigger where tgname = 'refuse_row_moves' and not tgisinternal;
 --   3. revision_history returns the note, authenticated may call it and restore_version, anon may not. Expect true, true, false:
 --        select pg_get_function_result('public.revision_history(uuid)'::regprocedure) like '%note text%';
 --        select has_function_privilege('authenticated', 'public.revision_history(uuid)', 'execute') and has_function_privilege('authenticated', 'public.restore_version(uuid, uuid, boolean)', 'execute');
@@ -921,6 +974,12 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- come back and refuse any further change to them:
 --
 --   begin;
+--   drop trigger refuse_row_moves on public.process_revisions;
+--   drop trigger refuse_row_moves on public.edges;
+--   drop trigger refuse_row_moves on public.steps;
+--   drop function private.refuse_row_moves();
+--   drop trigger nesting_is_a_tree on public.steps;
+--   create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id on public.steps deferrable initially deferred for each row execute function private.check_step_nesting();
 --   drop trigger company_holder_update_guard on public.steps;
 --   drop trigger company_group_guard on public.steps;
 --   drop trigger company_holder_guard on public.steps;
@@ -1139,6 +1198,43 @@ begin
   return null;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Rows stay in their version and process
+-- ---------------------------------------------------------------------------
+
+-- Moving a step or edge to another revision (or process), or a revision to another process, would carry a card off the map or put
+-- a process inside itself without passing any check made on insert, delete or the nesting columns. Nothing signed in does it: no
+-- path of the app, MCP or the database functions needs to (they insert copies; save_fields refuses these columns). The system,
+-- the owner and security-definer functions are not signed-in roles and are not refused. Applies to every process.
+create function private.refuse_row_moves() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user in ('authenticated', 'anon')
+     and (to_jsonb(new) -> 'revision_id', to_jsonb(new) -> 'process_id', to_jsonb(new) -> 'workspace_id')
+         is distinct from (to_jsonb(old) -> 'revision_id', to_jsonb(old) -> 'process_id', to_jsonb(old) -> 'workspace_id') then
+    raise exception 'A step, connection or version stays in the process and version it was made in' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_row_moves() from public, anon, authenticated;
+
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.steps
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of revision_id, process_id, workspace_id on public.edges
+  for each row execute function private.refuse_row_moves();
+create trigger refuse_row_moves before update of process_id, workspace_id on public.process_revisions
+  for each row execute function private.refuse_row_moves();
+
+-- The nesting check also runs when a step changes revision or process (defence in depth: the trigger above refuses it for
+-- signed-in roles, this covers any other writer).
+drop trigger nesting_is_a_tree on public.steps;
+create constraint trigger nesting_is_a_tree after insert or update of kind, parent_step_id, entry_step_id, child_process_id, revision_id, process_id on public.steps
+  deferrable initially deferred for each row execute function private.check_step_nesting();
 
 -- ---------------------------------------------------------------------------
 -- The sync rule: events, not reconciliation

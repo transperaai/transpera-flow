@@ -5,6 +5,8 @@ import { ToolError } from "./result";
 export interface ToolContext {
   db: Db;
   tokenHash: string;
+  /** Who acts, when it is known without looking the token up (the web app's upload acts as the signed-in user, with no token). */
+  userId?: string | null;
   /** The token's active workspace (set_active_workspace), if any. */
   activeWorkspaceId: string | null;
   /** ISO date used when a tool needs "today". */

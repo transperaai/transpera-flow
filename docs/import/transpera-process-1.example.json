@@ -1,0 +1,97 @@
+{
+  "format": "transpera-process/1",
+  "name": "Enquiry to signed client",
+  "kind": "pipeline",
+  "description": "From a new enquiry to a signed engagement letter.",
+  "steps": [
+    {
+      "id": "enquiry",
+      "name": "Enquiry arrives",
+      "type": "start"
+    },
+    {
+      "id": "review",
+      "name": "Review enquiry",
+      "type": "step",
+      "role": "Managing director",
+      "hands_on_hours": 0.25,
+      "wait_hours": 4,
+      "notes": "Checked the same day if it comes in before noon."
+    },
+    {
+      "id": "call",
+      "name": "Discovery call",
+      "type": "step",
+      "role": "Managing director",
+      "hands_on_hours": 1,
+      "wait_hours": 24,
+      "rework_rate": 0.1
+    },
+    {
+      "id": "proposal",
+      "name": "Write proposal",
+      "type": "step",
+      "role": "Account manager",
+      "hands_on_hours": 3,
+      "wait_hours": 8
+    },
+    {
+      "id": "decides",
+      "name": "Client decides",
+      "type": "decision"
+    },
+    {
+      "id": "signed",
+      "name": "Client signs",
+      "type": "end"
+    },
+    {
+      "id": "declined",
+      "name": "Client declines",
+      "type": "end"
+    },
+    {
+      "id": "unqualified",
+      "name": "Not a fit",
+      "type": "end"
+    }
+  ],
+  "links": [
+    {
+      "from": "enquiry",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "to": "call",
+      "probability": 0.67,
+      "label": "Qualified"
+    },
+    {
+      "from": "review",
+      "to": "unqualified",
+      "probability": 0.33,
+      "label": "Not a fit"
+    },
+    {
+      "from": "call",
+      "to": "proposal"
+    },
+    {
+      "from": "proposal",
+      "to": "decides"
+    },
+    {
+      "from": "decides",
+      "to": "signed",
+      "probability": 0.6,
+      "label": "Signs"
+    },
+    {
+      "from": "decides",
+      "to": "declined",
+      "probability": 0.4,
+      "label": "Declines"
+    }
+  ]
+}
