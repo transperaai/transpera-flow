@@ -99,7 +99,8 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     // Only this suite's own workspaces (the database is shared): their rows go with them.
     for (const ws of [ids.ws, ids.other]) {
       if (!ws) continue;
-      await admin.query("delete from processes where workspace_id = $1", [ws]);
+      // Its processes first (their steps hold its roles), never the company map, which goes with the workspace.
+      await admin.query("delete from processes where workspace_id = $1 and not is_company", [ws]);
       await admin.query("delete from workspaces where id = $1", [ws]);
       await admin.query("delete from audit_log where workspace_id = $1", [ws]);
     }

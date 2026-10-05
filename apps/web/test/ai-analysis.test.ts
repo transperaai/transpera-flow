@@ -405,8 +405,8 @@ describe("AI insights in the insight list", () => {
       "nonsense",
     ];
     expect(readInsights(stored).map((i) => i.title)).toEqual(["Fine"]);
-    const view = aiViewFromRow({ id: "1", workspace_id: "w", process_id: "p", revision_id: "r", status: "ok", reason: null, trigger: "publish", summary: ["One.", 3, ""], insights: stored, review: [{ step: "job", level: "warn", text: "t" }, { step: "x", level: "warn", text: "t" }], checked: 3, dropped: 1, input_hash: "h", model: "m", usage: [], run_id: "run", created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", run_by: "Ed Itor" });
-    expect(view).toMatchObject({ summary: ["One."], review: [{ step: "job" }], checked: 3, dropped: 1, runBy: "Ed Itor" });
+    const view = aiViewFromRow({ id: "1", workspace_id: "w", process_id: "p", revision_id: "r", status: "ok", reason: null, trigger: "publish", summary: ["One.", 3, ""], insights: stored, review: [{ step: "job", level: "warn", text: "t" }, { step: "x", level: "warn", text: "t" }], checked: 3, dropped: 1, input_hash: "h", model: "m", model_hash: "mh", usage: [], run_id: "run", created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", run_by: "Ed Itor" });
+    expect(view).toMatchObject({ summary: ["One."], review: [{ step: "job" }], checked: 3, dropped: 1, runBy: "Ed Itor", modelHash: "mh", costUsd: null });
     expect(view.review).toHaveLength(1);
   });
 });
