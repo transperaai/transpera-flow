@@ -46,7 +46,6 @@ import {
   type Dispatch,
   type KeyboardEvent,
   type MouseEvent,
-  type MutableRefObject,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -85,6 +84,7 @@ import {
   updateEdge,
   type NewStepKind,
 } from "@/lib/editor/commands";
+import type { ViewRef } from "@/lib/editor/groups";
 import { discardProblem } from "@/lib/drafts/discard";
 import type { ChangeKind, DraftDiff, StepChange } from "@/lib/drafts/diff";
 import type { EditorState, ProcessEditor } from "@/lib/editor/editor";
@@ -829,10 +829,10 @@ interface CanvasProps {
   /** The Editor has its own palette (issue #104): leave "Add step" out of the toolbar. */
   hideAdd?: boolean;
   /**
-   * Filled in with a function that returns the centre of what the map is showing, in map coordinates (null before it is
-   * drawn), so the Editor's palette can put a new step where the person is looking.
+   * Filled in with a function that says what the map is showing (its centre and edges in map coordinates, and the measured
+   * size of each card; null before it is drawn), so the Editor's palette can put a new step where the person is looking.
    */
-  viewCentreRef?: MutableRefObject<(() => { x: number; y: number } | null) | null>;
+  viewRef?: ViewRef;
   /**
    * The company map (B11): the lines between process cards are handoffs, drawn and labelled but visual only. They show their label
    * (not a branch share), are edited with a label field, and the loose-end warnings of a process's steps don't apply.
@@ -901,7 +901,7 @@ function Canvas({
   openIssues,
   rating,
   hideAdd = false,
-  viewCentreRef,
+  viewRef,
   handoffs = false,
   expanded: expandedProp,
   onExpandedChange,
@@ -980,21 +980,24 @@ function Canvas({
     requestFit();
   };
   const wrapper = useRef<HTMLDivElement>(null);
-  // The centre of the map panel as it shows now, in map coordinates (not the bars above it).
-  useEffect(() => {
-    if (!viewCentreRef) return;
-    viewCentreRef.current = () => {
-      const rect = wrapper.current?.querySelector(".react-flow")?.getBoundingClientRect();
-      if (!rect || !rect.width || !rect.height) return null;
-      return flow.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-    };
-    return () => {
-      viewCentreRef.current = null;
-    };
-  }, [viewCentreRef, flow]);
   // Positions of nodes mid-drag, and sizes React Flow measured; the rest comes from the bundle.
   const [dragging, setDragging] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [measured, setMeasured] = useState<Map<string, { width: number; height: number }>>(new Map());
+  // What the map panel shows now, in map coordinates (not the bars above it), and how big each card was measured: where the
+  // Editor's palette puts a new step.
+  useEffect(() => {
+    if (!viewRef) return;
+    viewRef.current = () => {
+      const rect = wrapper.current?.querySelector(".react-flow")?.getBoundingClientRect();
+      if (!rect || !rect.width || !rect.height) return null;
+      const from = flow.screenToFlowPosition({ x: rect.left, y: rect.top });
+      const to = flow.screenToFlowPosition({ x: rect.right, y: rect.bottom });
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured };
+    };
+    return () => {
+      viewRef.current = null;
+    };
+  }, [viewRef, flow, measured]);
   const [lanes, setLanes] = useState(false);
   const [editing, setEditing] = useState<{ id: string; field: InlineField } | null>(null);
   const [menu, setMenu] = useState<(MenuState & { bounds: { width: number; height: number } }) | null>(null);

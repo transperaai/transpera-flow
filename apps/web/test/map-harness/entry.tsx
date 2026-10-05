@@ -9,6 +9,7 @@ import { Palette } from "@/components/editor/palette";
 import type { BlockTools } from "@/components/editor/use-blocks";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep } from "@/lib/editor/commands";
+import type { ViewHint } from "@/lib/editor/groups";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { MemoryStore } from "@/lib/editor/store";
 import { demoBundle } from "@/lib/sources/demo";
@@ -70,7 +71,7 @@ function Harness({ options }: { options: HarnessOptions }) {
   const editor = useMemo(() => (options.editable ? new ProcessEditor(base, new MemoryStore(base)) : null), [base, options.editable]);
   const state = useSyncExternalStore(editor ? editor.subscribe : never, editor ? editor.getState : () => null, () => null);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
-  const viewCentreRef = useRef<(() => { x: number; y: number } | null) | null>(null);
+  const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const [highlight, setHighlight] = useState(options.highlight);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
@@ -94,7 +95,7 @@ function Harness({ options }: { options: HarnessOptions }) {
     <div style={options.editable || options.palette ? { width: 1300, height: 560, display: "flex" } : options.card ? { width: 1300, display: "flex", flexDirection: "column" } : { width: 1300 }}>
       {options.palette && editor && (
         <aside style={{ width: 220, padding: 8 }}>
-          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} viewCentreRef={viewCentreRef} />
+          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} viewRef={viewRef} />
         </aside>
       )}
       <ProcessCanvas
@@ -109,7 +110,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         showPlayback={false}
         handoffs={options.company}
         hideAdd={options.palette}
-        viewCentreRef={viewCentreRef}
+        viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
       />
     </div>

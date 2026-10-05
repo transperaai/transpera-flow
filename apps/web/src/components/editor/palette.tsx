@@ -4,7 +4,7 @@
 // one), grouping, and the block library (issue #116): each saved block with its step count, to insert after the selection
 // or to put in place of the selected step or group.
 
-import { useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { isGroup, type ProcessBundle } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
 import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
-import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind } from "@/lib/editor/groups";
+import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind, type ViewRef } from "@/lib/editor/groups";
 import { Badge } from "@/components/ui/badge";
 import type { BlockTools } from "./use-blocks";
 
@@ -30,7 +30,7 @@ export function Palette({
   setSelection,
   blocks,
   company = false,
-  viewCentreRef,
+  viewRef,
 }: {
   bundle: ProcessBundle;
   editor: ProcessEditor;
@@ -41,7 +41,7 @@ export function Palette({
   /** The company map (B11): cards are processes placed by link, so there are no steps or blocks to add, and none to remove. */
   company?: boolean;
   /** Where the map is looking (see ProcessCanvas): new steps appear there, so they are not off screen. */
-  viewCentreRef?: MutableRefObject<(() => { x: number; y: number } | null) | null>;
+  viewRef?: ViewRef;
 }) {
   const only = selected.steps.length === 1 ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
   // What the last add left for the person to do ("connect the new step yourself").
@@ -50,7 +50,7 @@ export function Palette({
     let id: string | null = null;
     let said: string | null = null;
     editor.run((b) => {
-      const made = addAfter(b, only?.id ?? null, kind, viewCentreRef?.current?.() ?? null);
+      const made = addAfter(b, only?.id ?? null, kind, viewRef?.current?.() ?? null);
       id = made.id;
       said = made.note ?? null;
       return made.edit;
