@@ -251,15 +251,109 @@ describe("archiving and restoring", () => {
   });
 });
 
+describe("while it is archived, nothing changes it", () => {
+  it("can't publish a draft opened before it was archived, so what that draft links stays where it is", async () => {
+    // The review's case: X's draft links Y; X is archived; publishing X would have moved Y off the company map.
+    const w = await world([["X", "pipeline"], ["Y", "pipeline"]]);
+    const draft = await openDraft(w.p.X);
+    await commitAs(editor.claims, (c) => link(c, w.ws, w.p.X, draft, w.p.Y));
+    await archive(editor.claims, w.p.X);
+    await refused(publish(w.p.X), "55000", /^X is archived\. Restore it from Processes \(Archived\) before (changing|publishing) it\.$/);
+    expect((await cards(w.cid))[w.p.Y]).toBeDefined();
+    expect(await q("select live_revision_id from processes where id = $1", [w.p.X])).toEqual([{ live_revision_id: expect.any(String) }]);
+    // Not even the database's own roads: a pointer moved by hand.
+    await refused(q("update processes set live_revision_id = $2 where id = $1", [w.p.X, draft]), "55000", /^X is archived\. Restore it from Processes \(Archived\) before publishing it\.$/);
+  });
+
+  it("refuses opening a draft (new or already open) and restoring a version into it", async () => {
+    const w = await world([["Sales", "pipeline"], ["Audit", "pipeline"]]);
+    const first = await liveOf(w.p.Audit);
+    await publishWith(w.ws, w.p.Audit, []);
+    await openDraft(w.p.Sales);
+    await archive(editor.claims, w.p.Sales);
+    await archive(editor.claims, w.p.Audit);
+    const message = /^(Sales|Audit) is archived\. Restore it from Processes \(Archived\) before changing it\.$/;
+    // Sales had a draft open; Audit had none.
+    await refused(commitAs(editor.claims, (c) => rpc(c, "open_draft", w.p.Sales)), "55000", message);
+    await refused(commitAs(editor.claims, (c) => rpc(c, "open_draft", w.p.Audit)), "55000", message);
+    await refused(commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Audit, first, false)), "55000", message);
+    await refused(commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Audit, first, true)), "55000", message);
+    // Restored, it can be edited and published again.
+    await unarchive(editor.claims, w.p.Audit);
+    expect(await openDraft(w.p.Audit)).toEqual(expect.any(String));
+    expect((await publish(w.p.Audit)).status).toBe("published");
+  });
+});
+
+describe("who archived it, and what still needs it", () => {
+  it("never takes archived_by from the caller, and a new process never starts archived", async () => {
+    const w = await world([["Sales", "pipeline"]]);
+    await refused(
+      commitAs(editor.claims, (c) => c.query("insert into processes (workspace_id, name, kind, archived_at) values ($1, 'Born archived', 'pipeline', now())", [w.ws])),
+      "55000",
+      /^A new process can't start archived$/,
+    );
+    await refused(
+      commitAs(editor.claims, (c) => c.query("insert into processes (workspace_id, name, kind, archived_by) values ($1, 'Forged', 'pipeline', $2)", [w.ws, viewer.id])),
+      "55000",
+      /^A new process can't start archived$/,
+    );
+    await refused(commitAs(editor.claims, (c) => c.query("update processes set archived_by = $2 where id = $1", [w.p.Sales, viewer.id])), "55000", /^Who archived a process is recorded by the database/);
+    // Archiving with someone else's name in archived_by records the caller; changing it afterwards is refused.
+    const [row] = await commitAs(editor.claims, async (c) => (await c.query("update processes set archived_at = now(), archived_by = $2 where id = $1 returning archived_by", [w.p.Sales, viewer.id])).rows);
+    expect(row.archived_by).toBe(editor.id);
+    await refused(commitAs(editor.claims, (c) => c.query("update processes set archived_by = $2 where id = $1", [w.p.Sales, viewer.id])), "55000", /^Who archived a process is recorded by the database/);
+    const [back] = await commitAs(editor.claims, async (c) => (await c.query("update processes set archived_at = null, archived_by = $2 where id = $1 returning archived_by", [w.p.Sales, viewer.id])).rows);
+    expect(back.archived_by).toBeNull();
+  });
+
+  it("refuses a pipeline that is a service's way in, and client work a service generates, naming the services", async () => {
+    const w = await world([["Sales", "pipeline"], ["Reporting", "servicing"]]);
+    await q("insert into services (workspace_id, name, entry_process_id) values ($1, 'SEO', $2), ($1, 'PPC', $2)", [w.ws, w.p.Sales]);
+    const [{ id: service }] = await q("insert into services (workspace_id, name) values ($1, 'Retainer') returning id", [w.ws]);
+    await q("insert into service_servicing (workspace_id, service_id, process_id, recurrence) values ($1, $2, $3, '{\"every\": \"month\", \"times\": 1}')", [w.ws, service, w.p.Reporting]);
+    await refused(archive(editor.claims, w.p.Sales), "55000", /^Sales is where new work for PPC, SEO comes in\. Choose another process for it in Settings, Services, then archive it\.$/);
+    await refused(archive(editor.claims, w.p.Reporting), "55000", /^Reporting is client work for Retainer\. Unlink it from that in Settings, Services, then archive it\.$/);
+  });
+
+  it("frees an archived process's name, and refuses a restore that would make two of a name", async () => {
+    const w = await world([["Sales", "pipeline"]]);
+    await archive(editor.claims, w.p.Sales);
+    // The library's and the import's own name checks no longer count it.
+    const made = await commitAs(editor.claims, (c) => rpc(c, "create_library_process", w.ws, "sales", "pipeline"));
+    expect(made.status).toBe("created");
+    await refused(unarchive(editor.claims, w.p.Sales), "55000", /^Another process is called Sales\. Rename one of them, then restore it\.$/);
+    await commitAs(editor.claims, (c) => c.query("update processes set name = 'Old sales' where id = $1", [w.p.Sales]));
+    expect(await unarchive(editor.claims, w.p.Sales)).toEqual([{ archived_at: null, archived_by: null }]);
+    await archive(editor.claims, w.p.Sales);
+    const imported = await commitAs(editor.claims, (c) =>
+      c.query("select public.import_new_process($1, $2) as r", [w.ws, JSON.stringify([{ id: randomUUID(), name: "Old sales", kind: "pipeline", entity_name: "lead", steps: [], edges: [] }])]).then((r) => r.rows[0].r),
+    );
+    expect(imported).toBeTruthy();
+    expect(await q("select name, archived_at is not null archived from processes where workspace_id = $1 and lower(name) = 'old sales' order by archived", [w.ws])).toEqual([
+      { name: "Old sales", archived: false },
+      { name: "Old sales", archived: true },
+    ]);
+  });
+});
+
 describe("the rollback in the header", () => {
-  it("undoes the migration (with 20261130000000's three bodies re-created, as it says), and the migration applies again", async () => {
+  it("undoes the migration (with the six replaced bodies re-created, as it says), passes preflight 3 again, and the migration applies again", async () => {
     const read = (f: string) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8");
     const migration = read("20261204000000_process_admin_source_files.sql");
     const everywhere = read("20261130000000_process_library_everywhere.sql");
-    const defn = (sql: string, name: string) => sql.match(new RegExp(`^create (?:or replace )?function ${name}\\([\\s\\S]*?\\n\\$\\$;`, "m"))![0];
-    const bodies = ["holder_allows", "check_step_nesting", "company_add_holder"].map((n) => defn(everywhere, `private\\.${n}`)).join("\n");
-    const rollback = migration
-      .slice(migration.indexOf("-- ROLLBACK"), migration.indexOf("-- ---------------------------------------------------------------------------\n-- Archiving a process"))
+    const drafts = read("20261006000000_drafts.sql");
+    const atomic = read("20261128000000_import_atomic_link_limit.sql");
+    const defn = (sql: string, name: string) =>
+      sql.match(new RegExp(`^create (?:or replace )?function ${name}\\([\\s\\S]*?\\n\\$\\$;`, "m"))![0].replace(/^create function/, "create or replace function");
+    const bodies = [
+      ...["holder_allows", "check_step_nesting", "company_add_holder"].map((n) => defn(everywhere, `private\\.${n}`)),
+      defn(everywhere, "public\\.create_library_process"),
+      defn(drafts, "public\\.open_draft"),
+      defn(atomic, "public\\.import_new_process"),
+    ].join("\n");
+    const block = (from: string, to: string) => migration.slice(migration.indexOf(from), migration.indexOf(to));
+    const rollback = block("-- ROLLBACK", "-- ---------------------------------------------------------------------------\n-- Archiving a process")
       .split("\n")
       .filter((l) => l.startsWith("--   ") && !l.startsWith("--   --"))
       .map((l) => l.slice(5))
@@ -268,14 +362,26 @@ describe("the rollback in the header", () => {
       .replace("alter table public.processes drop column", () => `${bodies}\nalter table public.processes drop column`);
     await db.client.query(rollback);
     expect(await q("select column_name from information_schema.columns where table_schema = 'public' and table_name in ('processes', 'sources') and column_name in ('archived_at', 'archived_by', 'file_path', 'file_name', 'file_type', 'file_size')")).toEqual([]);
-    expect(await q("select proname from pg_proc where proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'storage_workspace')")).toEqual([]);
+    expect(await q("select proname from pg_proc where proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace')")).toEqual([]);
     expect(await q("select policyname from pg_policies where schemaname = 'storage' and policyname like 'sources:%'")).toEqual([]);
-    expect((await q("select prosrc from pg_proc where proname = 'holder_allows'"))[0].prosrc).not.toContain("archived");
+    // Preflight 3, as written in the header, passes again: the six bodies are back as they were.
+    const preflight3 = block("--   3. The replaced functions", "--   4. Storage is there")
+      .split("\n")
+      .filter((l) => l.startsWith("--        "))
+      .map((l) => l.slice(10))
+      .join("\n");
+    const checks = await q(preflight3);
+    expect(checks).toHaveLength(6);
+    for (const c of checks) expect(Object.values(c)[1], String(c.proname)).toBe(true);
     // The bucket row stays (it may hold files); applying again keeps it and puts everything back.
     await db.client.query(migration);
-    expect(await q("select count(*)::int n from pg_policies where schemaname = 'storage' and policyname like 'sources:%'")).toEqual([{ n: 4 }]);
+    expect(await q("select policyname, cmd from pg_policies where schemaname = 'storage' and policyname like 'sources:%' order by 1")).toEqual([
+      { policyname: "sources: editors delete", cmd: "DELETE" },
+      { policyname: "sources: editors upload", cmd: "INSERT" },
+      { policyname: "sources: members read", cmd: "SELECT" },
+    ]);
     const w = await world([["Sales", "pipeline"]]);
-    await archive(editor.claims, w.p.Sales!);
-    expect((await cards(w.cid))[w.p.Sales!]).toBeUndefined();
+    await archive(editor.claims, w.p.Sales);
+    expect((await cards(w.cid))[w.p.Sales]).toBeUndefined();
   });
 });
