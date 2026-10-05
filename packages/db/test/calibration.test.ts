@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { calibrate, type CalibrationResult } from "@transpera-flow/engine";
 import {
   calibrationInput,
+  LARKSPUR_WORKSPACE_ID,
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_REVISION_ID,
   NORTHBEAM_WORKSPACE_ID,
@@ -260,16 +261,146 @@ describe("apply_calibration", () => {
     expect(made).toEqual({ applied: false, applied_keys: [] });
   });
 
-  it("lets only an apply change what was applied: keys only grow, and who and when are the database's", async () => {
+  it("lets only apply_calibration change what was applied: keys only grow, and who and when are the database's", async () => {
     const fresh = await store(await computeCalibration());
-    // A hand-made update that adds a key: applied, by the person making it, now, whatever it says.
-    await commitAs(editor.claims, (c) =>
-      c.query("update calibrations set applied_keys = '{x}', applied_by = $2, applied_at = '2000-01-01' where id = $1", [fresh.calibration, viewer.id]),
+    // An editor can't append keys without applying anything, nor touch who applied or when.
+    await expect(
+      db.as(editor.claims, (c) => c.query("update calibrations set applied_keys = applied_keys || '{x}' where id = $1", [fresh.calibration])),
+    ).rejects.toThrow(/applied with apply_calibration/);
+    await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied_by = null where id = $1", [fresh.calibration]))).rejects.toThrow(
+      /permission denied/,
     );
+    await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied_at = now() where id = $1", [fresh.calibration]))).rejects.toThrow(
+      /permission denied/,
+    );
+    await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied = true where id = $1", [fresh.calibration]))).rejects.toThrow(
+      /permission denied/,
+    );
+    // Neither can anyone else outside apply_calibration, the table owner included.
+    await expect(q("update calibrations set applied_keys = '{x}' where id = $1", [fresh.calibration])).rejects.toThrow(/applied with apply_calibration/);
+    await expect(q("update calibrations set applied = true, applied_at = now() where id = $1", [fresh.calibration])).rejects.toThrow(/Only applying/);
+
+    // Through apply_calibration: applied, by the caller, now.
+    const out = await commitAs(editor.claims, (c) => apply(c, fresh.calibration, [`arrivals:${northbeamLeadSourceIds.referrals}`]));
+    expect(out.status).toBe("ok");
     const [row] = await q("select applied, applied_by, applied_at > now() - interval '1 minute' as recent from calibrations where id = $1", [fresh.calibration]);
     expect(row).toEqual({ applied: true, applied_by: editor.id, recent: true });
+    // The flag doesn't outlive the call: a later update in the same transaction is refused.
+    await expect(
+      db.as(editor.claims, async (c) => {
+        await apply(c, fresh.calibration, [`arrivals:${northbeamLeadSourceIds.referrals}`]);
+        await c.query("update calibrations set applied_keys = applied_keys || '{y}' where id = $1", [fresh.calibration]);
+      }),
+    ).rejects.toThrow(/applied with apply_calibration/);
     await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied_keys = '{}' where id = $1", [fresh.calibration]))).rejects.toThrow(/stay applied/);
-    await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied = false where id = $1", [fresh.calibration]))).rejects.toThrow(/Only applying/);
+    await expect(q("update calibrations set applied_by = $2 where id = $1", [fresh.calibration, viewer.id])).rejects.toThrow(/Only applying/);
+    await expect(q("update calibrations set applied = false, applied_at = null where id = $1", [fresh.calibration])).rejects.toThrow(/Only applying/);
+  });
+
+  it("forgets who applied and created a calibration when their user is deleted", async () => {
+    const leaver = await createUser(db, "cal-leaver@example.com");
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, leaver.id]);
+    // Referrals' leads a week were applied above: propose against what they are now.
+    const res = structuredClone(await computeCalibration());
+    const key = `arrivals:${northbeamLeadSourceIds.referrals}`;
+    const [now] = await q("select volume_week::float8 v from lead_sources where id = $1", [northbeamLeadSourceIds.referrals]);
+    (proposal(res, key) as unknown as { before: Record<string, unknown> }).before.volume_week = now.v;
+    const out = await commitAs(leaver.claims, async (c) =>
+      (await c.query("select public.record_calibration($1, $2, 'log.csv', '{}', $3, $4, $5) as r", [ws, proc, res.rows, res, [key]])).rows[0].r,
+    );
+    expect(out.results).toEqual([{ key, status: "applied" }]);
+    const [before] = await q("select applied, applied_by, created_by from calibrations where id = $1", [out.calibration_id]);
+    expect(before).toEqual({ applied: true, applied_by: leaver.id, created_by: leaver.id });
+    await q("delete from auth.users where id = $1", [leaver.id]);
+    const [after] = await q("select applied, applied_by, created_by from calibrations where id = $1", [out.calibration_id]);
+    expect(after).toEqual({ applied: true, applied_by: null, created_by: null });
+  });
+
+  it("skips values that aren't what their kind needs, with why, instead of aborting the call", async () => {
+    const res = structuredClone(await computeCalibration());
+    const web = northbeamLeadSourceIds.website;
+    const bad: Record<string, (p: { set: Record<string, unknown>; before: Record<string, unknown> }) => void> = {
+      [`work:${audit}`]: (p) => (p.set.work_params = [0.4]),
+      [`wait:${northbeamStepIds.decision}`]: (p) => (p.set.wait_params = "wide"),
+      [`rework:${audit}`]: (p) => (p.set.rework_rate = "abc"),
+      [`arrivals:${web}`]: (p) => (p.set.volume_week = "lots"),
+      [`routing:${northbeamStepIds.qualify}`]: (p) => {
+        const probs = p.set.probabilities as Record<string, unknown>;
+        probs[Object.keys(probs)[0]!] = "half";
+      },
+    };
+    for (const [key, spoil] of Object.entries(bad)) spoil(proposal(res, key) as never);
+    // A non-numeric `before` is skipped too.
+    const discovery = proposal(res, `work:${northbeamStepIds.discovery}`) as unknown as { before: Record<string, unknown> };
+    discovery.before.work_hours = "1.5h";
+    const keys = [...Object.keys(bad), `work:${northbeamStepIds.discovery}`];
+
+    const [{ draft_revision_id: draft }] = await q("select draft_revision_id from processes where id = $1", [proc]);
+    const snapshot = async () => ({
+      steps: await q("select * from steps where revision_id = $1 order by id", [draft]),
+      edges: await q("select * from edges where revision_id = $1 order by id", [draft]),
+      sources: await q("select * from lead_sources where workspace_id = $1 order by id", [ws]),
+    });
+    const before = await snapshot();
+    const out = await commitAs(editor.claims, async (c) =>
+      (await c.query("select public.record_calibration($1, $2, 'log.csv', '{}', $3, $4, $5) as r", [ws, proc, res.rows, res, keys])).rows[0].r,
+    );
+    expect(out.status).toBe("ok");
+    const byKey = Object.fromEntries(out.results.map((r: { key: string; status: string; reason?: string }) => [r.key, r]));
+    for (const key of keys) expect(byKey[key]).toMatchObject({ status: "invalid", reason: expect.any(String) });
+    expect(byKey[`work:${audit}`].reason).toMatch(/work_params is not an object/);
+    expect(byKey[`wait:${northbeamStepIds.decision}`].reason).toMatch(/wait_params is not an object/);
+    expect(byKey[`rework:${audit}`].reason).toMatch(/rework_rate/);
+    expect(byKey[`arrivals:${web}`].reason).toMatch(/volume_week/);
+    expect(byKey[`routing:${northbeamStepIds.qualify}`].reason).toMatch(/odds/);
+    expect(await snapshot()).toEqual(before);
+    const [cal] = await q("select applied, applied_keys from calibrations where id = $1", [out.calibration_id]);
+    expect(cal).toEqual({ applied: false, applied_keys: [] });
+  });
+
+  it("records nothing against another workspace's process, lead source or step", async () => {
+    const res = structuredClone(await computeCalibration());
+    const [other] = await q(
+      `select p.id process, s.id step, (select l.id from lead_sources l where l.workspace_id = $1 limit 1) source
+       from processes p join steps s on s.revision_id = p.live_revision_id where p.workspace_id = $1 limit 1`,
+      [LARKSPUR_WORKSPACE_ID],
+    );
+    expect(other.process && other.step && other.source).toBeTruthy();
+    const counts = async () => (await q("select (select count(*) from datasets)::int d, (select count(*) from calibrations)::int c"))[0];
+    const call = (c: pg.Client, workspace: string, process: string, results: unknown, keys: string[]) =>
+      c.query("select public.record_calibration($1, $2, 'log.csv', '{}', 1, $3, $4) as r", [workspace, process, results, keys]).then((r) => r.rows[0].r);
+    const start = await counts();
+
+    // Another workspace's process, filed under this workspace or under its own: refused, nothing recorded.
+    await expect(commitAs(editor.claims, (c) => call(c, ws, other.process, res, [`rework:${audit}`]))).rejects.toThrow(/foreign key/);
+    await expect(commitAs(editor.claims, (c) => call(c, LARKSPUR_WORKSPACE_ID, other.process, res, [`rework:${audit}`]))).rejects.toThrow(/row-level security/);
+    expect(await counts()).toEqual(start);
+
+    // Proposals aimed at another workspace's lead source and step: not found, and nothing of theirs written.
+    const arrivals = proposal(res, `arrivals:${northbeamLeadSourceIds.website}`);
+    const rework = proposal(res, `rework:${audit}`);
+    const [theirSource] = await q("select volume_week from lead_sources where id = $1", [other.source]);
+    const aimed = {
+      ...res,
+      proposals: [
+        { ...arrivals, key: "arrivals:theirs", target: { table: "lead_sources", id: other.source }, before: { volume_week: theirSource.volume_week === null ? null : Number(theirSource.volume_week) } },
+        { ...rework, key: "rework:theirs", target: { table: "steps", id: other.step } },
+      ],
+    };
+    const theirs = async () => ({
+      steps: await q("select s.* from steps s join processes p on p.id = s.process_id where p.workspace_id = $1 order by s.revision_id, s.id", [LARKSPUR_WORKSPACE_ID]),
+      sources: await q("select * from lead_sources where workspace_id = $1 order by id", [LARKSPUR_WORKSPACE_ID]),
+      processes: await q("select * from processes where workspace_id = $1 order by id", [LARKSPUR_WORKSPACE_ID]),
+    });
+    const before = await theirs();
+    const out = await commitAs(editor.claims, (c) => call(c, ws, proc, aimed, ["arrivals:theirs", "rework:theirs"]));
+    expect(Object.fromEntries(out.results.map((r: { key: string; status: string }) => [r.key, r.status]))).toEqual({
+      "arrivals:theirs": "not_found",
+      "rework:theirs": "not_found",
+    });
+    expect(await theirs()).toEqual(before);
+    const [cal] = await q("select applied, applied_keys from calibrations where id = $1", [out.calibration_id]);
+    expect(cal).toEqual({ applied: false, applied_keys: [] });
   });
 
   it("records and applies in one call, and leaves no record behind when refused", async () => {

@@ -24,7 +24,8 @@ set local lock_timeout = '5s';
 --     is the record a measured value points at (`provenance.dataset_id`).
 --   * `public.calibrations`: workspace, dataset, process, `results` (the proposals as computed: {proposals: [{key, kind,
 --     target: {table, id}, n, enough, set, before, ...}], ...}), and what was applied (`applied`, `applied_keys`,
---     `applied_at`, `applied_by`). What was proposed never changes; only the four applied columns are updatable.
+--     `applied_at`, `applied_by`). What was proposed never changes; only `applied_keys` is updatable, and only from
+--     inside `apply_calibration` (the trigger sets the other three).
 --   * `public.apply_calibration(p_calibration uuid, p_keys text[])` (SECURITY INVOKER: row-level security decides):
 --     applies the chosen proposals in one transaction, each on its own terms:
 --       - a step's value (hands-on time and spread, wait and spread, redo rate) and a step's branch odds go into the
@@ -42,12 +43,18 @@ set local lock_timeout = '5s';
 --     and applies the ticked keys in ONE transaction, so a failed or refused apply leaves no record behind and a retry
 --     doesn't pile them up. Returns apply_calibration's answer plus `calibration_id` and `dataset_id`.
 --   * `private.calibrations_before_write`: a new calibration starts unapplied; what it proposed never changes;
---     `applied_keys` only grows, and when it does `applied` becomes true and `applied_at`/`applied_by` are set to now and
---     the signed-in user (whatever the update says); deleting a user may null `created_by`/`applied_by`.
+--     `applied_keys` only grows, only inside `apply_calibration` (it sets the transaction-local flag
+--     `transpera.applying_calibration` around its one update; any other update of the keys is refused), and when it does
+--     `applied` becomes true and `applied_at`/`applied_by` are set to now and the signed-in user; deleting a user may null
+--     `created_by`/`applied_by` (that runs as the table owner; a signed-in request may not).
+--   * A proposal whose values aren't what the proposal kind needs (a number that isn't one, `work_params` that isn't an
+--     object, odds outside 0-1, ...) is skipped as `invalid` with a `reason`, never aborting the call
+--     (`private.calibration_payload_problem`).
 --
 -- Row-level security as `suggestion_proposals`: everyone in the workspace reads; owners and editors insert and apply.
 -- Privileges: Supabase gives every new table full rights to anon and authenticated, so this revokes them and grants back
--- select and insert, and on `calibrations` an UPDATE limited to the four applied columns. No delete for anyone.
+-- select and insert, and on `calibrations` an UPDATE of `applied_keys` only (which `apply_calibration`, running as the
+-- caller, needs; the trigger refuses it outside that function). No delete for anyone.
 --
 -- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
 --   1. The tables don't exist yet. Expect 0:
@@ -63,13 +70,13 @@ set local lock_timeout = '5s';
 --   5. The tables it references exist. Expect 5 rows:
 --        select table_name from information_schema.tables where table_schema = 'public' and table_name in ('workspaces', 'processes', 'steps', 'edges', 'lead_sources');
 --
--- POST-APPLY CHECK (authenticated: INSERT and SELECT on both tables, UPDATE on calibrations' applied, applied_at,
--- applied_by and applied_keys only; anon: nothing; the function: not SECURITY DEFINER, empty search_path, no anon EXECUTE):
+-- POST-APPLY CHECK (authenticated: INSERT and SELECT on both tables, UPDATE on calibrations' applied_keys only; anon:
+-- nothing; the functions: not SECURITY DEFINER, empty search_path, no anon EXECUTE):
 --        select table_name, grantee, privilege_type from information_schema.role_table_grants where table_schema = 'public' and table_name in ('datasets', 'calibrations') and grantee in ('anon', 'authenticated') order by 1, 2, 3;
 --        select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'calibrations' and grantee = 'authenticated' and privilege_type = 'UPDATE' order by 1;
 --        select prosecdef, proconfig, has_function_privilege('anon', p.oid, 'execute') from pg_proc p where proname in ('apply_calibration', 'record_calibration');
---   Expect: authenticated INSERT and SELECT on each (no UPDATE row at table level); UPDATE columns applied, applied_at,
---   applied_by, applied_keys; f, {search_path=""}, f.
+--   Expect: authenticated INSERT and SELECT on each (no UPDATE row at table level); UPDATE column applied_keys only;
+--   f, {search_path=""}, f for each function.
 --
 -- ROLLBACK (one transaction; nothing existing was changed, so nothing to put back):
 --
@@ -79,6 +86,7 @@ set local lock_timeout = '5s';
 --   drop table if exists public.calibrations;   -- its indexes, triggers and policies go with it
 --   drop table if exists public.datasets;
 --   drop function if exists private.calibrations_before_write();
+--   drop function if exists private.calibration_payload_problem(text, jsonb, jsonb);
 --   delete from supabase_migrations.schema_migrations where version = '20261202000000';
 --   commit;
 --
@@ -152,8 +160,8 @@ begin
   end if;
   if new.results is distinct from old.results or new.dataset_id is distinct from old.dataset_id
      or new.workspace_id is distinct from old.workspace_id or new.created_at is distinct from old.created_at
-     -- The process and the creator may only go (their row deleted: the foreign key nulls them).
-     or (new.created_by is distinct from old.created_by and new.created_by is not null)
+     -- The process and the creator may only go (their row deleted: the foreign key nulls them, as the table owner).
+     or (new.created_by is distinct from old.created_by and (new.created_by is not null or current_user in ('authenticated', 'anon')))
      or (new.process_id is distinct from old.process_id and new.process_id is not null) then
     raise exception 'A calibration''s proposals never change' using errcode = '55000';
   end if;
@@ -161,12 +169,15 @@ begin
     raise exception 'Applied proposals stay applied' using errcode = '55000';
   end if;
   if new.applied_keys is distinct from old.applied_keys then
+    if coalesce(current_setting('transpera.applying_calibration', true), '') <> 'on' then
+      raise exception 'Proposals are applied with apply_calibration' using errcode = '55000';
+    end if;
     -- Something more was applied: by whom and when is the database's to say.
     new.applied := true;
     new.applied_at := now();
     new.applied_by := auth.uid();
   elsif new.applied is distinct from old.applied or new.applied_at is distinct from old.applied_at
-     or (new.applied_by is distinct from old.applied_by and new.applied_by is not null) then
+     or (new.applied_by is distinct from old.applied_by and (new.applied_by is not null or current_user in ('authenticated', 'anon'))) then
     raise exception 'Only applying proposals changes what was applied' using errcode = '55000';
   end if;
   return new;
@@ -197,7 +208,88 @@ revoke all on public.datasets from anon, authenticated;
 revoke all on public.calibrations from anon, authenticated;
 grant select, insert on public.datasets to authenticated;
 grant select, insert on public.calibrations to authenticated;
-grant update (applied, applied_keys, applied_at, applied_by) on public.calibrations to authenticated;
+-- apply_calibration runs as the caller, so it needs this one column; the trigger refuses the update anywhere else.
+grant update (applied_keys) on public.calibrations to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- What is wrong with a proposal's values, if anything (null: nothing)
+-- ---------------------------------------------------------------------------
+
+create function private.calibration_payload_problem(kind text, setv jsonb, beforev jsonb) returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  p text;
+  v jsonb;
+begin
+  -- `before` holds what the value was: a number, or null when it had none.
+  if kind = 'arrivals' then
+    if (case when jsonb_typeof(setv -> 'volume_week') = 'number' then (setv ->> 'volume_week')::numeric < 0 else true end) then
+      return 'volume_week is not a number of leads';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'volume_week'), 'null') not in ('number', 'null') then
+      return 'the earlier volume_week is not a number';
+    end if;
+    return null;
+  end if;
+  if kind = 'rework' then
+    if (case when jsonb_typeof(setv -> 'rework_rate') = 'number' then (setv ->> 'rework_rate')::numeric not between 0 and 1 else true end) then
+      return 'rework_rate is not a share from 0 to 1';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'rework_rate'), 'null') not in ('number', 'null') then
+      return 'the earlier rework_rate is not a number';
+    end if;
+    return null;
+  end if;
+  if kind in ('work', 'wait') then
+    p := kind;
+    if (case when jsonb_typeof(setv -> (p || '_hours')) = 'number' then (setv ->> (p || '_hours'))::numeric < 0 else true end) then
+      return p || '_hours is not a number of hours';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || '_dist')), '') <> 'string' or setv ->> (p || '_dist') not in ('constant', 'triangular', 'lognormal') then
+      return p || '_dist is not a distribution';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || '_params')), '') <> 'object' then
+      return p || '_params is not an object';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> (p || '_hours')), 'null') not in ('number', 'null')
+       or coalesce(jsonb_typeof(beforev -> (p || '_params_cv')), 'null') not in ('number', 'null')
+       or coalesce(jsonb_typeof(beforev -> (p || '_dist')), 'null') not in ('string', 'null') then
+      return 'the earlier values are not numbers';
+    end if;
+    return null;
+  end if;
+  if kind = 'routing' then
+    if coalesce(jsonb_typeof(setv -> 'probabilities'), '') <> 'object' then
+      return 'probabilities is not an object';
+    end if;
+    for p, v in select e.key, e.value from jsonb_each(setv -> 'probabilities') e loop
+      if p !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        return 'a way out is not an edge id';
+      end if;
+      if (case when jsonb_typeof(v) = 'number' then (v #>> '{}')::numeric not between 0 and 1 else true end) then
+        return 'odds are not shares from 0 to 1';
+      end if;
+    end loop;
+    if coalesce(jsonb_typeof(beforev -> 'probabilities'), '') <> 'object' then
+      return 'the earlier odds are not an object';
+    end if;
+    for v in select e.value from jsonb_each(beforev -> 'probabilities') e loop
+      if jsonb_typeof(v) not in ('number', 'null') then
+        return 'the earlier odds are not numbers';
+      end if;
+    end loop;
+    return null;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.calibration_payload_problem(text, jsonb, jsonb) from public, anon;
+-- apply_calibration runs as the caller.
+grant execute on function private.calibration_payload_problem(text, jsonb, jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- apply_calibration: write the chosen proposals, as the signed-in person
@@ -233,6 +325,7 @@ declare
   edge_ids uuid[];
   matches boolean;
   keys text[];
+  problem text;
   done text[] := '{}';
   results jsonb := '[]';
 begin
@@ -272,6 +365,12 @@ begin
       results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_proposed'));
       continue;
     end;
+    -- Values that aren't what this kind needs are skipped with why, never cast (and so never abort the call).
+    problem := private.calibration_payload_problem(pkind, setv, beforev);
+    if problem is not null then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'invalid', 'reason', problem));
+      continue;
+    end if;
 
     -- A lead source's leads a week: live, as a person's edit to demand.
     if pkind = 'arrivals' and prop -> 'target' ->> 'table' = 'lead_sources' then
@@ -408,8 +507,10 @@ begin
   end loop;
 
   if cardinality(done) > 0 then
-    -- The trigger sets applied, applied_at and applied_by.
+    -- The trigger sets applied, applied_at and applied_by, and accepts the keys only while this flag is on.
+    perform set_config('transpera.applying_calibration', 'on', true);
     update public.calibrations c set applied_keys = c.applied_keys || done where c.id = cal.id;
+    perform set_config('transpera.applying_calibration', 'off', true);
   end if;
 
   return jsonb_build_object(
@@ -478,7 +579,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     is the record a measured value points at (`provenance.dataset_id`).
 --   * `public.calibrations`: workspace, dataset, process, `results` (the proposals as computed: {proposals: [{key, kind,
 --     target: {table, id}, n, enough, set, before, ...}], ...}), and what was applied (`applied`, `applied_keys`,
---     `applied_at`, `applied_by`). What was proposed never changes; only the four applied columns are updatable.
+--     `applied_at`, `applied_by`). What was proposed never changes; only `applied_keys` is updatable, and only from
+--     inside `apply_calibration` (the trigger sets the other three).
 --   * `public.apply_calibration(p_calibration uuid, p_keys text[])` (SECURITY INVOKER: row-level security decides):
 --     applies the chosen proposals in one transaction, each on its own terms:
 --       - a step's value (hands-on time and spread, wait and spread, redo rate) and a step's branch odds go into the
@@ -496,12 +598,18 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     and applies the ticked keys in ONE transaction, so a failed or refused apply leaves no record behind and a retry
 --     doesn't pile them up. Returns apply_calibration's answer plus `calibration_id` and `dataset_id`.
 --   * `private.calibrations_before_write`: a new calibration starts unapplied; what it proposed never changes;
---     `applied_keys` only grows, and when it does `applied` becomes true and `applied_at`/`applied_by` are set to now and
---     the signed-in user (whatever the update says); deleting a user may null `created_by`/`applied_by`.
+--     `applied_keys` only grows, only inside `apply_calibration` (it sets the transaction-local flag
+--     `transpera.applying_calibration` around its one update; any other update of the keys is refused), and when it does
+--     `applied` becomes true and `applied_at`/`applied_by` are set to now and the signed-in user; deleting a user may null
+--     `created_by`/`applied_by` (that runs as the table owner; a signed-in request may not).
+--   * A proposal whose values aren't what the proposal kind needs (a number that isn't one, `work_params` that isn't an
+--     object, odds outside 0-1, ...) is skipped as `invalid` with a `reason`, never aborting the call
+--     (`private.calibration_payload_problem`).
 --
 -- Row-level security as `suggestion_proposals`: everyone in the workspace reads; owners and editors insert and apply.
 -- Privileges: Supabase gives every new table full rights to anon and authenticated, so this revokes them and grants back
--- select and insert, and on `calibrations` an UPDATE limited to the four applied columns. No delete for anyone.
+-- select and insert, and on `calibrations` an UPDATE of `applied_keys` only (which `apply_calibration`, running as the
+-- caller, needs; the trigger refuses it outside that function). No delete for anyone.
 --
 -- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
 --   1. The tables don't exist yet. Expect 0:
@@ -517,13 +625,13 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   5. The tables it references exist. Expect 5 rows:
 --        select table_name from information_schema.tables where table_schema = 'public' and table_name in ('workspaces', 'processes', 'steps', 'edges', 'lead_sources');
 --
--- POST-APPLY CHECK (authenticated: INSERT and SELECT on both tables, UPDATE on calibrations' applied, applied_at,
--- applied_by and applied_keys only; anon: nothing; the function: not SECURITY DEFINER, empty search_path, no anon EXECUTE):
+-- POST-APPLY CHECK (authenticated: INSERT and SELECT on both tables, UPDATE on calibrations' applied_keys only; anon:
+-- nothing; the functions: not SECURITY DEFINER, empty search_path, no anon EXECUTE):
 --        select table_name, grantee, privilege_type from information_schema.role_table_grants where table_schema = 'public' and table_name in ('datasets', 'calibrations') and grantee in ('anon', 'authenticated') order by 1, 2, 3;
 --        select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'calibrations' and grantee = 'authenticated' and privilege_type = 'UPDATE' order by 1;
 --        select prosecdef, proconfig, has_function_privilege('anon', p.oid, 'execute') from pg_proc p where proname in ('apply_calibration', 'record_calibration');
---   Expect: authenticated INSERT and SELECT on each (no UPDATE row at table level); UPDATE columns applied, applied_at,
---   applied_by, applied_keys; f, {search_path=""}, f.
+--   Expect: authenticated INSERT and SELECT on each (no UPDATE row at table level); UPDATE column applied_keys only;
+--   f, {search_path=""}, f for each function.
 --
 -- ROLLBACK (one transaction; nothing existing was changed, so nothing to put back):
 --
@@ -533,6 +641,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop table if exists public.calibrations;   -- its indexes, triggers and policies go with it
 --   drop table if exists public.datasets;
 --   drop function if exists private.calibrations_before_write();
+--   drop function if exists private.calibration_payload_problem(text, jsonb, jsonb);
 --   delete from supabase_migrations.schema_migrations where version = '20261202000000';
 --   commit;
 --
@@ -606,8 +715,8 @@ begin
   end if;
   if new.results is distinct from old.results or new.dataset_id is distinct from old.dataset_id
      or new.workspace_id is distinct from old.workspace_id or new.created_at is distinct from old.created_at
-     -- The process and the creator may only go (their row deleted: the foreign key nulls them).
-     or (new.created_by is distinct from old.created_by and new.created_by is not null)
+     -- The process and the creator may only go (their row deleted: the foreign key nulls them, as the table owner).
+     or (new.created_by is distinct from old.created_by and (new.created_by is not null or current_user in ('authenticated', 'anon')))
      or (new.process_id is distinct from old.process_id and new.process_id is not null) then
     raise exception 'A calibration''s proposals never change' using errcode = '55000';
   end if;
@@ -615,12 +724,15 @@ begin
     raise exception 'Applied proposals stay applied' using errcode = '55000';
   end if;
   if new.applied_keys is distinct from old.applied_keys then
+    if coalesce(current_setting('transpera.applying_calibration', true), '') <> 'on' then
+      raise exception 'Proposals are applied with apply_calibration' using errcode = '55000';
+    end if;
     -- Something more was applied: by whom and when is the database's to say.
     new.applied := true;
     new.applied_at := now();
     new.applied_by := auth.uid();
   elsif new.applied is distinct from old.applied or new.applied_at is distinct from old.applied_at
-     or (new.applied_by is distinct from old.applied_by and new.applied_by is not null) then
+     or (new.applied_by is distinct from old.applied_by and (new.applied_by is not null or current_user in ('authenticated', 'anon'))) then
     raise exception 'Only applying proposals changes what was applied' using errcode = '55000';
   end if;
   return new;
@@ -651,7 +763,88 @@ revoke all on public.datasets from anon, authenticated;
 revoke all on public.calibrations from anon, authenticated;
 grant select, insert on public.datasets to authenticated;
 grant select, insert on public.calibrations to authenticated;
-grant update (applied, applied_keys, applied_at, applied_by) on public.calibrations to authenticated;
+-- apply_calibration runs as the caller, so it needs this one column; the trigger refuses the update anywhere else.
+grant update (applied_keys) on public.calibrations to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- What is wrong with a proposal's values, if anything (null: nothing)
+-- ---------------------------------------------------------------------------
+
+create function private.calibration_payload_problem(kind text, setv jsonb, beforev jsonb) returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  p text;
+  v jsonb;
+begin
+  -- `before` holds what the value was: a number, or null when it had none.
+  if kind = 'arrivals' then
+    if (case when jsonb_typeof(setv -> 'volume_week') = 'number' then (setv ->> 'volume_week')::numeric < 0 else true end) then
+      return 'volume_week is not a number of leads';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'volume_week'), 'null') not in ('number', 'null') then
+      return 'the earlier volume_week is not a number';
+    end if;
+    return null;
+  end if;
+  if kind = 'rework' then
+    if (case when jsonb_typeof(setv -> 'rework_rate') = 'number' then (setv ->> 'rework_rate')::numeric not between 0 and 1 else true end) then
+      return 'rework_rate is not a share from 0 to 1';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'rework_rate'), 'null') not in ('number', 'null') then
+      return 'the earlier rework_rate is not a number';
+    end if;
+    return null;
+  end if;
+  if kind in ('work', 'wait') then
+    p := kind;
+    if (case when jsonb_typeof(setv -> (p || '_hours')) = 'number' then (setv ->> (p || '_hours'))::numeric < 0 else true end) then
+      return p || '_hours is not a number of hours';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || '_dist')), '') <> 'string' or setv ->> (p || '_dist') not in ('constant', 'triangular', 'lognormal') then
+      return p || '_dist is not a distribution';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || '_params')), '') <> 'object' then
+      return p || '_params is not an object';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> (p || '_hours')), 'null') not in ('number', 'null')
+       or coalesce(jsonb_typeof(beforev -> (p || '_params_cv')), 'null') not in ('number', 'null')
+       or coalesce(jsonb_typeof(beforev -> (p || '_dist')), 'null') not in ('string', 'null') then
+      return 'the earlier values are not numbers';
+    end if;
+    return null;
+  end if;
+  if kind = 'routing' then
+    if coalesce(jsonb_typeof(setv -> 'probabilities'), '') <> 'object' then
+      return 'probabilities is not an object';
+    end if;
+    for p, v in select e.key, e.value from jsonb_each(setv -> 'probabilities') e loop
+      if p !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        return 'a way out is not an edge id';
+      end if;
+      if (case when jsonb_typeof(v) = 'number' then (v #>> '{}')::numeric not between 0 and 1 else true end) then
+        return 'odds are not shares from 0 to 1';
+      end if;
+    end loop;
+    if coalesce(jsonb_typeof(beforev -> 'probabilities'), '') <> 'object' then
+      return 'the earlier odds are not an object';
+    end if;
+    for v in select e.value from jsonb_each(beforev -> 'probabilities') e loop
+      if jsonb_typeof(v) not in ('number', 'null') then
+        return 'the earlier odds are not numbers';
+      end if;
+    end loop;
+    return null;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.calibration_payload_problem(text, jsonb, jsonb) from public, anon;
+-- apply_calibration runs as the caller.
+grant execute on function private.calibration_payload_problem(text, jsonb, jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- apply_calibration: write the chosen proposals, as the signed-in person
@@ -687,6 +880,7 @@ declare
   edge_ids uuid[];
   matches boolean;
   keys text[];
+  problem text;
   done text[] := '{}';
   results jsonb := '[]';
 begin
@@ -726,6 +920,12 @@ begin
       results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_proposed'));
       continue;
     end;
+    -- Values that aren't what this kind needs are skipped with why, never cast (and so never abort the call).
+    problem := private.calibration_payload_problem(pkind, setv, beforev);
+    if problem is not null then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'invalid', 'reason', problem));
+      continue;
+    end if;
 
     -- A lead source's leads a week: live, as a person's edit to demand.
     if pkind = 'arrivals' and prop -> 'target' ->> 'table' = 'lead_sources' then
@@ -862,8 +1062,10 @@ begin
   end loop;
 
   if cardinality(done) > 0 then
-    -- The trigger sets applied, applied_at and applied_by.
+    -- The trigger sets applied, applied_at and applied_by, and accepts the keys only while this flag is on.
+    perform set_config('transpera.applying_calibration', 'on', true);
     update public.calibrations c set applied_keys = c.applied_keys || done where c.id = cal.id;
+    perform set_config('transpera.applying_calibration', 'off', true);
   end if;
 
   return jsonb_build_object(
