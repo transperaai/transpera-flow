@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --tags-filter='!perf'",
+    "test:perf": "vitest run --tags-filter=perf --no-file-parallelism"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

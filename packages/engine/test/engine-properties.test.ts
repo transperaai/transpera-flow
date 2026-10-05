@@ -85,7 +85,7 @@ describe("behaviour", () => {
 });
 
 describe("performance", () => {
-  it("runs 40 steps, 25 people, 26 weeks, 30 reps within the PRD target (1.5 s)", () => {
+  it("runs 40 steps, 25 people, 26 weeks, 30 reps within the PRD target (1.5 s)", { tags: ["perf"] }, () => {
     const model = largeModel();
     expect(Object.values(model.roles).reduce((a, r) => a + r.count, 0)).toBe(25);
     simulate(model, 3, 1); // warm up the JIT

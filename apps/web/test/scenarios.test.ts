@@ -82,7 +82,7 @@ describe("levers are generated from the model", () => {
     return best;
   };
 
-  it("re-running a pipeline-only Northbeam after a lever move stays within the PRD §6.7 target (< 150 ms for 30 replications)", () => {
+  it("re-running a pipeline-only Northbeam after a lever move stays within the PRD §6.7 target (< 150 ms for 30 replications)", { tags: ["perf"] }, () => {
     // The seeded bundle without its servicing processes and links: the pipeline model §6.7's first target describes.
     const pipelineOnly = () => {
       const b = northbeamBundle();
@@ -92,14 +92,14 @@ describe("levers are generated from the model", () => {
     expect(rerunBest(pipelineOnly)).toBeLessThan(150);
   });
 
-  it("re-running the full seeded Northbeam (client groups and servicing, as the app runs it) after a lever move stays within its PRD §6.7 target (< 250 ms for 30 replications)", () => {
+  it("re-running the full seeded Northbeam (client groups and servicing, as the app runs it) after a lever move stays within its PRD §6.7 target (< 250 ms for 30 replications)", { tags: ["perf"] }, () => {
     expect(model().servicingProcesses).toBeDefined();
     expect(model().clientGroups).toBeDefined();
     expect(model().clients).toBeUndefined();
     expect(rerunBest(model)).toBeLessThan(250);
   });
 
-  it("re-running Northbeam with its named client roster and servicing stays within the same target", () => {
+  it("re-running Northbeam with its named client roster and servicing stays within the same target", { tags: ["perf"] }, () => {
     const named = () => toEngineModel({ ...northbeamBundle(), clientGroups: [] }, START);
     expect(named().clients).toBeDefined();
     expect(rerunBest(named)).toBeLessThan(250);

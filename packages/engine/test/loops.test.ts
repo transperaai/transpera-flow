@@ -378,7 +378,7 @@ describe("step facts", () => {
 });
 
 describe("performance with loops", () => {
-  it("runs the 40-step model, which has redo loops, within the PRD target (1.5 s)", () => {
+  it("runs the 40-step model, which has redo loops, within the PRD target (1.5 s)", { tags: ["perf"] }, () => {
     const m = largeModel();
     expect(detectLoops(m).length).toBeGreaterThan(0);
     simulate(m, 3, 1);
