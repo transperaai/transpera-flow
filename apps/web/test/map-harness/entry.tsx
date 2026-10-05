@@ -12,6 +12,8 @@ import type { BlockTools } from "@/components/editor/use-blocks";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
+import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryCreate, LibraryCreateInput } from "@/lib/editor/library-create";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { MemoryStore } from "@/lib/editor/store";
 import { demoBundle } from "@/lib/sources/demo";
@@ -28,6 +30,8 @@ export interface HarnessOptions {
   palette?: boolean;
   /** A read-only map in a flex column as wide as the page, as the Overview's card holds it (the default is a plain 1300px block). */
   card?: boolean;
+  /** An ordinary process's editor with the process library (B12 part 2): Northbeam's other processes, one on the company map, templates, and a stand-in "New process". */
+  library?: boolean;
 }
 
 declare global {
@@ -43,6 +47,8 @@ declare global {
       /** The editor's connections, by the names of the cards they join, with their labels and shares. */
       getEdges: () => { from: string; to: string; label: string | null; probability: number }[];
       getSteps: () => string[];
+      /** What the stand-in "New process" was asked to make. */
+      created: () => unknown[];
     };
     mapIds: typeof northbeamStepIds;
     groupIds: typeof DEMO_GROUP_IDS;
@@ -70,6 +76,27 @@ function companyBundle(): ProcessBundle {
   return { ...base, process: company.process, revision: company.revision, steps: company.steps, edges: company.edges, retired: [], otherProcesses: parts };
 }
 
+/** What the stand-in "New process" was asked to make. */
+const created: unknown[] = [];
+
+/** The library an ordinary editor is handed (B12 part 2): the other processes sit nowhere, one more sits on the company map. */
+function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templates: LibraryTemplate[]; onCreate: LibraryCreate } {
+  const others = (bundle.otherProcesses ?? []).map<LibraryProcess>((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, live: true, holder: null }));
+  return {
+    processes: [
+      { id: bundle.process.id, name: bundle.process.name, kind: bundle.process.kind, live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
+      ...others,
+      { id: "f0000000-0000-4000-8000-000000000001", name: "Renewals", kind: "servicing", live: true, holder: null },
+      { id: "f0000000-0000-4000-8000-000000000002", name: "Referrals", kind: "pipeline", live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
+    ],
+    templates: [{ id: "agency-delivery", name: "Agency delivery", kind: "servicing", description: "A template." }],
+    onCreate: async (input: LibraryCreateInput) => {
+      created.push(input);
+      const name = input.kind === "new" ? input.name : "Agency delivery";
+      return { process: { id: `e0000000-0000-4000-8000-00000000000${created.length}`, name, kind: input.kind === "new" ? input.processKind : "servicing", live: false } };
+    },
+  };
+}
 /** The Editor's keyboard shortcuts (Delete, undo, ...), as the Editor mounts them, so the real removal path is the one under test. */
 function EditorKeys({ editor, bundle, selection, setSelection }: { editor: ProcessEditor; bundle: ProcessBundle; selection: Selection; setSelection: Dispatch<SetStateAction<Selection>> }) {
   useEditCommands({ editor, bundle, selected: selection, setSelection });
@@ -82,6 +109,7 @@ function Harness({ options }: { options: HarnessOptions }) {
   const state = useSyncExternalStore(editor ? editor.subscribe : never, editor ? editor.getState : () => null, () => null);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
+  const library = useMemo(() => (options.library ? libraryOf(base) : undefined), [base, options.library]);
   const [highlight, setHighlight] = useState(options.highlight);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
@@ -97,6 +125,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         return b.edges.map((e) => ({ from: name(e.from_step_id), to: name(e.to_step_id), label: e.label, probability: Number(e.probability) }));
       },
       getSteps: () => (editor?.getState().bundle ?? base).steps.map((s) => s.name),
+      created: () => [...created],
     };
   }, [open, editor, base]);
   return (
@@ -106,7 +135,7 @@ function Harness({ options }: { options: HarnessOptions }) {
     <div style={options.editable || options.palette ? { width: 1300, height: 560, display: "flex" } : options.card ? { width: "100%", display: "flex", flexDirection: "column" } : { width: 1300 }}>
       {options.palette && editor && (
         <aside style={{ width: 220, padding: 8 }}>
-          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} company={options.company} viewRef={viewRef} />
+          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} company={options.company} viewRef={viewRef} library={library} />
         </aside>
       )}
       {options.palette && editor && <EditorKeys editor={editor} bundle={state?.bundle ?? base} selection={selection} setSelection={setSelection} />}

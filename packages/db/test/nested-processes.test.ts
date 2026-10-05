@@ -280,15 +280,15 @@ describe("child processes", () => {
     expect(row).toEqual({ parent_process_id: null, workspace_id: ws });
   });
 
-  it("needs the holder's process to be the child's parent", async () => {
+  it("lets a draft link any other process (B12), but never itself", async () => {
     const top = await newProcess(ws, null, "Holder");
     const unrelated = await newProcess(ws, null, "Unrelated");
-    await expect(commit((c) => addStep(c, top, { kind: "subprocess", name: "Wrong", child: unrelated.proc }))).rejects.toMatchObject({
+    // Its parent column is not this process: a link is still allowed in a draft (publishing checks where it already sits).
+    await expect(commit((c) => addStep(c, top, { kind: "subprocess", name: "Linked", child: unrelated.proc }))).resolves.toBeDefined();
+    await expect(commit((c) => addStep(c, top, { kind: "subprocess", name: "Self", child: top.proc }))).rejects.toMatchObject({
       code: "23514",
-      message: expect.stringContaining("must be a child of this step's process"),
+      message: expect.stringContaining("can't hold itself or the company map"),
     });
-    // A process can't hold itself either.
-    await expect(commit((c) => addStep(c, top, { kind: "subprocess", name: "Self", child: top.proc }))).rejects.toMatchObject({ code: "23514" });
   });
 
   it("is held by one step per revision, and only by a subprocess step", async () => {
@@ -467,8 +467,7 @@ describe("rules checked at commit see the final rows", () => {
     const child = await newProcess(ws, top.proc, "Real child");
     // The step says it belongs to another process, but its revision is the real owner's: fine.
     await commit((c) => addStep(c, { proc: other.proc, rev: top.rev }, { kind: "subprocess", name: "Right revision", child: child.proc }));
-    // The step says it belongs to the real owner, but its revision is another process's: refused.
-    const stranger = await newProcess(ws, null, "Wrong revision");
-    await expect(commit((c) => addStep(c, { proc: top.proc, rev: stranger.rev }, { kind: "subprocess", name: "Wrong revision", child: child.proc }))).rejects.toMatchObject({ code: "23514" });
+    // The step says it belongs to the real owner, but its revision is the child's own: the child would hold itself, refused.
+    await expect(commit((c) => addStep(c, { proc: top.proc, rev: child.rev }, { kind: "subprocess", name: "Wrong revision", child: child.proc }))).rejects.toMatchObject({ code: "23514" });
   });
 });

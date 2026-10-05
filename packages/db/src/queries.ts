@@ -73,10 +73,13 @@ export async function loadServicingContext(
   db: Db,
   workspaceId: string,
   process: Pick<ProcessRow, "id" | "kind">,
+  revisionId?: string,
 ): Promise<{ servicingLinks: ServiceServicingRow[]; otherProcesses: ProcessPart[] }> {
-  const [processes, links] = await Promise.all([
+  const [processes, links, heldHere] = await Promise.all([
     listProcesses(db, workspaceId),
     db.from("service_servicing").select(SERVICE_SERVICING_COLUMNS).eq("workspace_id", workspaceId).order("id"),
+    // The processes this revision links to (a draft may hold one its live version does not yet: B12).
+    revisionId ? db.from("steps").select("child_process_id").eq("revision_id", revisionId).not("child_process_id", "is", null) : { data: [], error: null },
   ]);
   const live = processes.filter((p) => p.id !== process.id && p.live_revision_id);
   // A child process runs inside its parent, so it is never the pipeline a servicing process runs beside.
@@ -85,6 +88,13 @@ export async function loadServicingContext(
   // The child processes (any depth) of this process and of those, which the steps holding them are simulated through.
   const reached = new Set([process.id, ...base.map((p) => p.id)]);
   const children: typeof live = [];
+  for (const h of (rows(heldHere) ?? []) as { child_process_id: string | null }[]) {
+    const p = live.find((x) => x.id === h.child_process_id);
+    if (p && !reached.has(p.id)) {
+      reached.add(p.id);
+      children.push(p);
+    }
+  }
   for (let grew = true; grew; ) {
     grew = false;
     for (const p of live) {
@@ -217,7 +227,7 @@ export async function loadProcessBundle(
       loadClientGroups(db, ws),
       loadChurnDrivers(db, ws),
       // The company map runs nothing: it needs no other processes (the Editor draws its cards from the live processes it is given).
-      process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process),
+      process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process, revisionId),
       loadMarket(db, ws),
       db.from("workspaces").select("provenance").eq("id", ws).maybeSingle(),
     ]);
@@ -261,10 +271,35 @@ export async function loadProcessBundle(
 
 const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, live_revision_id, parent_process_id, is_company" as const;
 
+/** Where a process sits: the process whose LIVE version holds it by a link (B12, ADR 0014). */
+export interface Placement {
+  /** The placed process. */
+  processId: string;
+  holderId: string;
+  holderName: string;
+  /** The holder is the company map: the process is "on the map", top level. */
+  holderIsCompany: boolean;
+}
+
+/**
+ * Every link in a live version of the workspace's processes, from `public.process_placements`: which process holds which. A
+ * process is held in at most one live version (the database refuses a second on publish), so this is where each one sits.
+ */
+export async function listPlacements(db: Db, workspaceId: string): Promise<Placement[]> {
+  const r = await db.from("process_placements").select("process_id, holder_process_id, holder_name, holder_is_company").eq("workspace_id", workspaceId).order("process_id").order("holder_process_id");
+  return (rows(r) ?? []).flatMap((p) =>
+    p.process_id && p.holder_process_id ? [{ processId: p.process_id, holderId: p.holder_process_id, holderName: p.holder_name ?? "", holderIsCompany: p.holder_is_company === true }] : [],
+  );
+}
+
 /**
  * A workspace's processes, oldest first. The company map (a stored process whose steps hold the top-level processes,
  * B11) is not one of them unless `includeCompany` is set: it is never simulated, listed as an ordinary process or
  * counted.
+ *
+ * `parent_process_id` is DERIVED here, not read from the column (B12, ADR 0014): it is the process whose live version holds
+ * this one by a link, or null when none does or the holder is the company map (top level). So "inside" means the same in the
+ * app, the simulation and MCP: what the published versions say. The stored column is legacy and no longer read.
  */
 export async function listProcesses(
   db: Db,
@@ -273,8 +308,9 @@ export async function listProcesses(
 ): Promise<(ProcessRow & { draft_revision_id: string | null })[]> {
   let q = db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id`).eq("workspace_id", workspaceId);
   if (!includeCompany) q = q.eq("is_company", false);
-  const r = await q.order("created_at").order("id");
-  return rows(r) as (ProcessRow & { draft_revision_id: string | null })[];
+  const [r, placements] = await Promise.all([q.order("created_at").order("id"), listPlacements(db, workspaceId)]);
+  const parentOf = new Map(placements.filter((p) => !p.holderIsCompany).map((p) => [p.processId, p.holderId]));
+  return (rows(r) as (ProcessRow & { draft_revision_id: string | null })[]).map((p) => ({ ...p, parent_process_id: parentOf.get(p.id) ?? null }));
 }
 
 /**

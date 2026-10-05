@@ -12,6 +12,8 @@ import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
 import { ProcessLibrary } from "./process-library";
+import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryCreate } from "@/lib/editor/library-create";
 import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind, type ViewRef } from "@/lib/editor/groups";
 import { Badge } from "@/components/ui/badge";
 import type { BlockTools } from "./use-blocks";
@@ -31,6 +33,7 @@ export function Palette({
   blocks,
   company = false,
   viewRef,
+  library,
 }: {
   bundle: ProcessBundle;
   editor: ProcessEditor;
@@ -42,10 +45,14 @@ export function Palette({
   company?: boolean;
   /** Where the map is looking (see ProcessCanvas): new steps appear there, so they are not off screen. */
   viewRef?: ViewRef;
+  /** The process library (B12): the workspace's processes and where each sits, templates, and how to make a new process. */
+  library?: { processes?: readonly LibraryProcess[]; templates?: readonly LibraryTemplate[]; onCreate?: LibraryCreate };
 }) {
   const only = selected.steps.length === 1 ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
   // What the last add left for the person to do ("connect the new step yourself").
   const [note, setNote] = useState<string | null>(null);
+  // "+ Process" opens the process library (always open on the company map, where processes are all there is to add).
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const add = (kind: PaletteKind) => {
     let id: string | null = null;
     let said: string | null = null;
@@ -91,14 +98,14 @@ export function Palette({
           <p className="text-xs text-muted-foreground">Drag cards to move them. Draw a handoff line from a card&apos;s right edge to another card, then click the line to label it.</p>
         </section>
       )}
-      {company && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} />}
+      {company && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
       {!company && (
       <section aria-label="Add to the process" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
           Add
           <Help
             label="Add"
-            description="Adds a new step, decision, wait or group in the middle of what you are looking at, joined in after the step you have selected. Nothing selected adds it unconnected."
+            description="Adds a new step, decision, wait or group in the middle of what you are looking at, joined in after the step you have selected. Nothing selected adds it unconnected. + Process opens the process library, to add whole processes as links."
             example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
           />
         </h2>
@@ -108,6 +115,17 @@ export function Palette({
               {label}
             </Button>
           ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setLibraryOpen((o) => !o)}
+            aria-expanded={libraryOpen}
+            data-palette-process
+            className="col-span-2 border-dashed hover:border-edit"
+          >
+            + Process
+          </Button>
         </div>
         <p className="text-xs text-muted-foreground">
           {only
@@ -123,6 +141,7 @@ export function Palette({
         )}
       </section>
       )}
+      {!company && libraryOpen && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
 
       <section aria-label="Groups" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">

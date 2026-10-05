@@ -420,3 +420,90 @@ describe("the process library on the company map (B12)", () => {
     await page.close();
   }, 60_000);
 });
+
+describe("the process library in an ordinary process's editor (B12 part 2)", () => {
+  const free = (page: Page) => page.locator("[data-process-library] [data-library-item][data-state='free']");
+  const holders = (page: Page) => page.evaluate(() => window.mapApi.getSteps());
+  const openLibrary = async (page: Page) => {
+    await page.locator("[data-palette-process]").click();
+    await page.locator("[data-process-library]").waitFor();
+  };
+
+  it("+ Process opens the library: what sits nowhere, and what sits on the company map (it gives way), can be ticked", async () => {
+    const page = await mount({ editable: true, palette: true, library: true });
+    expect(await page.locator("[data-process-library]").count()).toBe(0);
+    await openLibrary(page);
+    const freeNames = await free(page).locator("> span > span:first-child").allTextContents();
+    expect(freeNames).toContain("Renewals");
+    expect(freeNames).toEqual([...freeNames].sort((a, b) => a.localeCompare(b)));
+    // One on the company map is offered too (the map gives way when this is published), and says so.
+    const onMap = page.locator("[data-library-item][data-state='map']");
+    expect(await onMap.count()).toBe(1);
+    expect(await onMap.locator("input").isEnabled()).toBe(true);
+    expect(await onMap.innerText()).toContain("Referrals");
+    expect(await onMap.innerText()).toContain("On the company map — moves here when you publish.");
+    expect(await page.locator("[data-process-library] [role=group]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).toContain("On the company map");
+    await onMap.locator("input").check();
+    await page.waitForFunction(() => document.querySelector("[data-library-add]")?.textContent === "Add 1 to the map");
+    // The process being edited is never offered.
+    expect(await page.locator("[data-library-item]").allTextContents()).not.toContain(expect.stringContaining("Lead to live"));
+    await page.close();
+  }, 60_000);
+
+  it("adds several processes in one go as links in view, none on another; undo takes them out and redo puts them back", async () => {
+    const page = await mount({ editable: true, palette: true, library: true });
+    const before = await holders(page);
+    const nodesBefore = await page.locator(".react-flow__node").count();
+    await openLibrary(page);
+    const n = await free(page).count();
+    expect(n).toBeGreaterThanOrEqual(2);
+    for (const item of await free(page).all()) await item.locator("input").check();
+    await page.waitForFunction((k) => document.querySelector("[data-library-add]")?.textContent === `Add ${k} to the map`, n);
+    await page.locator("[data-library-add]").click();
+    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + n);
+    await settled(page);
+    expect((await holders(page)).length).toBe(before.length + n);
+    // Every added link is in view, and none covers another.
+    const added = await page.evaluate((names) => {
+      return [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
+        .filter((e) => !names.includes(e.innerText.split("\n")[0] ?? ""))
+        .map((e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; });
+    }, before);
+    const p = await panel(page);
+    expect(added.length).toBeGreaterThanOrEqual(n);
+    const placed = (await cards(page)).slice(-n);
+    for (const c of placed) expect(within(c, p)).toBe(true);
+    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) expect(covers(placed[i]!, placed[j]!) || covers(placed[j]!, placed[i]!)).toBe(false);
+    // Now listed as here, and not addable again.
+    await page.waitForFunction((k) => document.querySelectorAll("[data-library-item][data-state='placed'] input:disabled").length === k, n);
+    expect(await free(page).count()).toBe(0);
+    // Undo, then redo (the Editor's shortcuts).
+    await page.locator(".react-flow__pane").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("Control+z");
+    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore);
+    await page.waitForFunction((k) => document.querySelectorAll("[data-process-library] [data-library-item][data-state='free']").length === k, n);
+    await page.keyboard.press("Control+Shift+z");
+    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + n);
+    await page.close();
+  }, 60_000);
+
+  it("New process makes one and adds it here as a link; a template does the same", async () => {
+    const page = await mount({ editable: true, palette: true, library: true });
+    const nodesBefore = await page.locator(".react-flow__node").count();
+    await openLibrary(page);
+    await page.locator("[data-library-new-name]").fill("Client offboarding");
+    await page.locator("[data-library-new-kind='servicing']").click();
+    await page.locator("[data-library-new-make]").click();
+    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + 1);
+    await page.locator("[data-library-note]").waitFor();
+    expect(await page.locator("[data-library-note]").innerText()).toContain("Made Client offboarding and added it here.");
+    expect(await holders(page)).toContain("Client offboarding");
+    await page.locator("[data-library-template='agency-delivery'] button").click();
+    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + 2);
+    expect(await page.evaluate(() => window.mapApi.created())).toEqual([
+      { kind: "new", name: "Client offboarding", processKind: "servicing" },
+      { kind: "template", templateId: "agency-delivery" },
+    ]);
+    await page.close();
+  }, 60_000);
+});

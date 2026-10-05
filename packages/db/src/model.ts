@@ -123,12 +123,15 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
       groups[step.id] = { name: step.name, ...parentOf(step), entry: entryStep.id, next };
       continue;
     }
-    const child = ctx.parts.get(step.child_process_id!);
-    if (!child) throw new ModelError(`'${step.name}' holds a child process that has no published version yet, or that no longer sits inside this process (it was moved); publish it, or remove or replace this step`);
-    if (child.process.parent_process_id !== ctx.stack[ctx.stack.length - 1]) {
-      throw new ModelError(`'${step.name}' holds '${child.process.name}', which no longer sits inside this process (it was moved); remove or replace that step`);
+    // The step's link is what puts the child here (B12): the revision being simulated says what it holds, whatever holds the
+    // child elsewhere. (A process is in at most one live version; the database refuses a second on publish.)
+    // A link back to a process this one sits inside (at any depth) is a loop, whether or not that process is among the parts.
+    if (ctx.stack.includes(step.child_process_id!)) {
+      const name = ctx.parts.get(step.child_process_id!)?.process.name ?? step.name;
+      throw new ModelError(`this would put '${name}' inside itself: '${step.name}' links back to it. Take one of the links out`);
     }
-    if (ctx.stack.includes(child.process.id)) throw new ModelError(`Child process '${child.process.name}' is inside itself`);
+    const child = ctx.parts.get(step.child_process_id!);
+    if (!child) throw new ModelError(`Publish '${step.name}' first: this step links to it, and it has no published version yet`);
     let sub: Graph;
     try {
       sub = resolveGraph(child.steps, child.edges, tags, { parts: ctx.parts, stack: [...ctx.stack, child.process.id] });
@@ -305,19 +308,28 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     return flattenModel(model);
   } catch (err) {
     // A group with nowhere to go, or a loop of groups, is a problem with the process, as any other bad graph is.
-    if (err instanceof NestingError) throw new ModelError(err.message);
+    if (err instanceof NestingError) {
+      // The engine calls every holder a group; a step linking a process is called by its name, as the person sees it.
+      const stuck = /^Group '(.*)' has nothing leaving it/.exec(err.message)?.[1];
+      const all = [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)];
+      if (stuck !== undefined && all.some((x) => x.name === stuck && x.child_process_id) && !all.some((x) => x.name === stuck && x.kind === "group")) {
+        throw new ModelError(`'${stuck}' has nothing leaving it: join it to a next step`);
+      }
+      throw new ModelError(err.message);
+    }
     throw err;
   }
 }
 
 /**
- * The child processes steps of this run's processes may hold, by id, at their
- * live revisions: every one the bundle carries (`loadServicingContext` loads
- * the descendants of the processes a run needs).
+ * The processes steps of this run's processes may hold, by id, at their live
+ * revisions: every one the bundle carries (`loadServicingContext` loads the
+ * ones the run's revisions link to, any depth). Only a holder step's link
+ * brings one into the run.
  */
 function heldProcesses(bundle: ProcessBundle): Map<string, ProcessPart> {
   const parts = new Map<string, ProcessPart>();
-  for (const p of bundle.otherProcesses ?? []) if (p.process.parent_process_id) parts.set(p.process.id, p);
+  for (const p of bundle.otherProcesses ?? []) parts.set(p.process.id, p);
   return parts;
 }
 

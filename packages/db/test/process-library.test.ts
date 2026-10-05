@@ -164,11 +164,17 @@ describe("the process library places a process on the company map as a link", ()
     const support = (await holderOf(draft, w.support))!;
     await commitAs(editor.claims, (c) => unplace(c, draft, support.id));
     await refused(commitAs(editor.claims, (c) => place(c, w, draft, other.sales, "Their Sales", 0, 0)), "23503", /steps_child_process_fk/);
-    await refused(commitAs(editor.claims, (c) => place(c, w, draft, w.cid, "Company map", 0, 0)), "23514", /Company map must be a child of this step.s process/);
-    // Support nested under Sales is held by Sales; it can't also sit on the map.
+    await refused(commitAs(editor.claims, (c) => place(c, w, draft, w.cid, "Company map", 0, 0)), "23514", /Company map can.t sit in step Company map: a process can.t hold itself or the company map/);
+    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = any($2)", [draft, [other.sales, w.cid]]))[0].n).toBe(0);
+    // A process that sits inside another (B12 part 2): the draft may link it, publishing is refused and says where it sits
+    // (process-library-everywhere.test.ts covers every case).
+    // (Off the live map first, as MCP's import moving it inside Sales does, then into Sales's live version.)
     await q("update processes set parent_process_id = $2 where id = $1", [w.support, w.sales]);
-    await refused(commitAs(editor.claims, (c) => place(c, w, draft, w.support, "Support", 0, 0)), "23514", /Support must be a child of this step.s process/);
-    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = any($2)", [draft, [other.sales, w.cid, w.support]]))[0].n).toBe(0);
+    const [rev] = await q("insert into process_revisions (workspace_id, process_id, number, status, published_at) values ($1, $2, 1, 'published', now()) returning id", [w.ws, w.sales]);
+    await q("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ($1, $2, $3, 'Support', 'subprocess', $4)", [rev.id, w.ws, w.sales, w.support]);
+    await q("update processes set live_revision_id = $2 where id = $1", [w.sales, rev.id]);
+    await commitAs(editor.claims, (c) => place(c, w, draft, w.support, "Support", 0, 0));
+    await refused(commitAs(editor.claims, (c) => rpc(c, "publish_process", w.cid)), "23514", /^Support is already inside Sales\. A process can sit in one place only/);
   });
 
   it("is for editors: a viewer can neither place nor remove a card", async () => {
