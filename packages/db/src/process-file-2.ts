@@ -155,8 +155,6 @@ export interface FileProposal extends Backing {
   /** Solution ideas: the issue it is for, by number (12 or "#12") or title. The issue must exist already. */
   for_issue?: string;
   proposed_steps?: FileProposedStep[];
-  /** Step ids the proposed steps would replace. */
-  replaces?: string[];
   expect?: string;
 }
 
@@ -641,7 +639,7 @@ export function checkCompany(raw: unknown, env: Env): FileCompany | undefined {
 // Proposals
 // ---------------------------------------------------------------------------
 
-const PROPOSAL_FIELDS = ["type", "title", "detail", "rating", "issue_type", "steps", "target_measure", "target_now", "target_goal", "for_issue", "proposed_steps", "replaces", ...ITEM_FIELDS];
+const PROPOSAL_FIELDS = ["type", "title", "detail", "rating", "issue_type", "steps", "target_measure", "target_now", "target_goal", "for_issue", "proposed_steps", ...ITEM_FIELDS];
 const PROPOSED_STEP_FIELDS = ["name", "kind", "role"];
 
 /** The file's `proposals`: issues and solution ideas found in the materials. */
@@ -696,7 +694,7 @@ export function checkProposals(raw: unknown, steps: StepsView, env: Env): FilePr
         const v = text(r[k], 200, where, k, env);
         if (v) p[k] = v;
       }
-      for (const k of ["for_issue", "proposed_steps", "replaces", "expect"]) if (r[k] !== undefined) env.warnings.push(`${where} is an issue, so its ${q(k)} was ignored.`);
+      for (const k of ["for_issue", "proposed_steps", "expect"]) if (r[k] !== undefined) env.warnings.push(`${where} is an issue, so its ${q(k)} was ignored.`);
     } else {
       const forIssue = typeof r.for_issue === "number" ? String(r.for_issue) : typeof r.for_issue === "string" ? r.for_issue.trim() : "";
       if (!forIssue) env.errors.push(`${where} is a solution idea, so it needs "for_issue": the number (like 12) or title of an issue you already track.`);
@@ -716,8 +714,6 @@ export function checkProposals(raw: unknown, steps: StepsView, env: Env): FilePr
           p.proposed_steps!.push(step);
         });
       }
-      const replaces = stepRefs(r.replaces, where, "replaces");
-      if (replaces?.length) p.replaces = replaces;
       const expect = text(r.expect, 1000, where, "expect", env);
       if (expect) p.expect = expect;
       for (const k of ["rating", "issue_type", "steps", "target_measure", "target_now", "target_goal"]) if (r[k] !== undefined) env.warnings.push(`${where} is a solution idea, so its ${q(k)} was ignored.`);

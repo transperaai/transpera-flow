@@ -203,7 +203,6 @@ export const PROCESS_FILE_SCHEMA_2 = {
             description: "Solution ideas: the steps it would put in place, in order.",
             items: { type: "object", required: ["name"], properties: { name: { type: "string" }, kind: { type: "string" }, role: { type: "string" } } },
           },
-          replaces: { type: "array", items: { type: "string" }, description: "Solution ideas: ids of the steps it would replace." },
           expect: { type: "string", maxLength: 1000, description: "Solution ideas: what you expect it to do." },
           ...backing,
         },

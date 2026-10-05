@@ -415,10 +415,10 @@ describe("proposals", () => {
 
   it("keeps a solution idea with the issue it is for and its steps", () => {
     const f = base();
-    f.proposals = [{ type: "solution_idea", title: "Automate it", for_issue: 12, proposed_steps: [{ name: "Bot", kind: "task", role: "Doer" }, { name: "Check" }], replaces: ["b"], expect: "Faster.", assumed: "A guess." }];
+    f.proposals = [{ type: "solution_idea", title: "Automate it", for_issue: 12, proposed_steps: [{ name: "Bot", kind: "task", role: "Doer" }, { name: "Check" }], expect: "Faster.", assumed: "A guess." }];
     const out = checkProcessFile(f);
     expect(out.errors).toEqual([]);
-    expect(out.file!.proposals![0]).toMatchObject({ type: "solution_idea", for_issue: "12", proposed_steps: [{ name: "Bot", kind: "task", role: "Doer" }, { name: "Check" }], replaces: ["b"], expect: "Faster." });
+    expect(out.file!.proposals![0]).toMatchObject({ type: "solution_idea", for_issue: "12", proposed_steps: [{ name: "Bot", kind: "task", role: "Doer" }, { name: "Check" }], expect: "Faster." });
   });
 
   it("names each way a proposal can be wrong", () => {
@@ -433,7 +433,6 @@ describe("proposals", () => {
       [{ ...idea, for_issue: undefined }, /it needs "for_issue": the number \(like 12\) or title of an issue you already track/],
       [{ ...idea, proposed_steps: [] }, /it needs "proposed_steps": the steps it would put in place, in order/],
       [{ ...idea, proposed_steps: [{ kind: "task" }] }, /proposed step 1 needs a name/],
-      [{ ...idea, replaces: ["zzz"] }, /lists 'zzz' in replaces, which isn't a step\./],
     ];
     for (const [p, message] of cases) {
       const f = base();

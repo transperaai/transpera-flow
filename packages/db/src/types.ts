@@ -294,6 +294,11 @@ export type Provenance = {
   conflict?: ProvenanceConflict;
   /** The accepted suggestion the value came from (issue #25). */
   suggestion_id?: string;
+  /**
+   * On a step's `branch_odds` entry (issue #167): its branches took the share the others leave because the file gave no odds.
+   * Goes away when anyone writes one of the branches' probabilities (a trigger), so "Missing for simulation" can list the step.
+   */
+  defaulted?: boolean;
 };
 
 /**
