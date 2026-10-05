@@ -120,7 +120,7 @@ export function IssuesDonut({ byRating, byProcess }: { byRating: { rating: Ratin
   });
   const top = Math.max(1, ...byProcess.map((p) => p.count));
   return (
-    <div ref={tipBox} className="relative grid gap-5 sm:grid-cols-[auto_minmax(0,1fr)]">
+    <div ref={tipBox} className="relative flex flex-col gap-4">
       <div className="flex items-center gap-4">
         <svg width={DONUT} height={DONUT} role="img" aria-label={`${total} open issues: ${shown.map((s) => `${s.count} ${RATING_LABELS[s.rating]}`).join(", ")}.`} className="shrink-0" data-donut>
           {arcs.map((a) =>

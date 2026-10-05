@@ -146,7 +146,7 @@ export function FlowEfficiencyCard({ share, span, error = false }: { share: numb
         label={words.text}
       />
       <p className="text-xs text-muted-foreground">
-        {words.text}: of the time work spends at the steps over the next {span}, the share someone is working on it.
+        {words.text} over the next {span}: the share of the time at the steps that someone is working on it.
       </p>
     </HealthCard>
   );
