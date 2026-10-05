@@ -103,8 +103,9 @@ export const gapLines = (gaps: readonly SimulationGap[]): string[] => gaps.map((
 export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: string) => boolean; volume: GapInput["volume"]; volumeSuggested?: boolean }): GapInput {
   const outgoing = new Map<string, ProcessFile["links"]>();
   for (const l of file.links) outgoing.set(l.from, [...(outgoing.get(l.from) ?? []), l]);
-  const stated = (value: number | undefined, assumed: string | undefined, evidence: { value?: number }[] | undefined, range: unknown) =>
-    value !== undefined || assumed !== undefined || !!evidence?.some((c) => c.value !== undefined) || range !== undefined;
+  // A reason for assuming a value is not a value: without a number the importer still fills in its default.
+  const stated = (value: number | undefined, evidence: { value?: number }[] | undefined, range: unknown) =>
+    value !== undefined || !!evidence?.some((c) => c.value !== undefined) || range !== undefined;
   return {
     kind: file.kind,
     volume: opts.volume,
@@ -117,9 +118,9 @@ export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: stri
         name: s.name,
         kind,
         role: !!s.role && opts.hasRole(s.role),
-        handsOn: stated(s.hands_on_hours, s.assumed?.hands_on_hours, s.evidence?.hands_on_hours, s.hands_on_range),
-        wait: stated(s.wait_hours, s.assumed?.wait_hours, s.evidence?.wait_hours, s.wait_range),
-        odds: kind !== "decision" || leaving.length < 2 || leaving.every((l) => stated(l.probability, l.assumed, l.evidence, undefined)),
+        handsOn: stated(s.hands_on_hours, s.evidence?.hands_on_hours, s.hands_on_range),
+        wait: stated(s.wait_hours, s.evidence?.wait_hours, s.wait_range),
+        odds: kind !== "decision" || leaving.length < 2 || leaving.every((l) => stated(l.probability, l.evidence, undefined)),
       };
     }),
   };

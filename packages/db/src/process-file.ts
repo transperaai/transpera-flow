@@ -470,7 +470,10 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
           const stated = new Set(evidence.filter((c) => c.value !== undefined).map((c) => c.value));
           if (stated.size > 1) conflicts.push(`${where}: the sources give different odds (${evidence.filter((c) => c.value !== undefined).map((c) => `${env.sources.find((s) => s.id === c.source)?.title ?? c.source}${c.speaker ? ` (${c.speaker})` : ""}: ${round((c.value as number) * 100)}%`).join("; ")}). The odds in the file are used; check them.`);
         }
-        if (assumed) link.assumed = assumed;
+        if (assumed) {
+          link.assumed = assumed;
+          if (probability === undefined && !evidence.some((c) => c.value !== undefined)) warnings.push(`${where} has a reason for assuming its probability but no number. Give the probability you are assuming, or leave both out.`);
+        }
       }
       links.push(link);
     });

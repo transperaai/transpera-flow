@@ -794,13 +794,6 @@
               }
             }
           },
-          "replaces": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Solution ideas: ids of the steps it would replace."
-          },
           "expect": {
             "type": "string",
             "maxLength": 1000,

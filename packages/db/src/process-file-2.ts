@@ -463,7 +463,13 @@ export function readStepExtras(raw: Record<string, unknown>, label: string, env:
           continue;
         }
         const reason = readAssumed(v, `${label}, ${EVIDENCE_FIELD_WORDS[key as EvidenceField]}`, env);
-        if (reason) assumed[key as EvidenceField] = reason;
+        if (!reason) continue;
+        assumed[key as EvidenceField] = reason;
+        const f = key as EvidenceField;
+        const range = f === "hands_on_hours" ? out.hands_on_range : f === "wait_hours" ? out.wait_range : undefined;
+        if (stated[f] === undefined && !range && !out.evidence?.[f]?.some((c) => c.value !== undefined)) {
+          env.warnings.push(`${label}: there is a reason for assuming ${EVIDENCE_FIELD_WORDS[f]} but no number. Give the number you are assuming, or leave both out.`);
+        }
       }
       if (Object.keys(assumed).length) out.assumed = assumed;
     }
