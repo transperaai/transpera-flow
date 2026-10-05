@@ -1003,7 +1003,7 @@ function prepareNewProcess(scope: ImportScope, json: ProcessJson): Promise<Prepa
 export async function importNewProcess(ctx: ToolContext, workspaceId: string, json: ProcessJson, assumptions: string[] = [], bundle?: ImportBundle): Promise<ImportOutcome> {
   const ws = await resolveWorkspace(ctx, workspaceId, assumptions);
   await requireCanEdit(ctx, ws);
-  const processes = await listProcesses(ctx.db, ws.id);
+  const processes = await importProcesses(ctx, ws.id);
   const scope: ImportScope = { ctx, ws, assumptions, reserved: new Set(), processes, claimed: new Map(), stamp: await stampOf(ctx), ...(bundle ? { bundle } : {}) };
   const prepared = await prepareNewProcess(scope, json);
   await prepared.ensure(null);
@@ -1040,6 +1040,22 @@ export async function createProcessFromTemplate(
   await requireCanEdit(ctx, ws);
   const { proc } = await fromTemplate(ctx, ws, template, name, assumptions, { offMap: true });
   return { id: proc.id, name: proc.name, kind: proc.kind as "pipeline" | "servicing" };
+}
+
+/**
+ * The workspace's processes as an import sees them. Where a process sits is its live holder (`listProcesses` derives
+ * `parent_process_id` from the live links, B12, ADR 0014); an import also writes the stored column when it creates a process
+ * inside another or moves one inside (which the database still checks, and which keeps it off the company map), and that holds
+ * before the holder is published. So a process sits where its live holder is, or else where the stored column says.
+ */
+async function importProcesses(ctx: ToolContext, workspaceId: string): Promise<ProcessWithDraft[]> {
+  const [processes, stored] = await Promise.all([
+    listProcesses(ctx.db, workspaceId),
+    ctx.db.from("processes").select("id, parent_process_id").eq("workspace_id", workspaceId).not("parent_process_id", "is", null),
+  ]);
+  if (stored.error) throw writeError(stored.error, "read processes");
+  const column = new Map((stored.data ?? []).map((r) => [r.id, r.parent_process_id as string]));
+  return processes.map((p) => ({ ...p, parent_process_id: p.parent_process_id ?? column.get(p.id) ?? null }));
 }
 
 /** The ids of the processes that hold `proc`, nearest first. */
@@ -1626,7 +1642,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         await requireCanEdit(ctx, ws);
 
-        const processes = await listProcesses(ctx.db, ws.id);
+        const processes = await importProcesses(ctx, ws.id);
         const scope: ImportScope = { ctx, ws, assumptions, reserved: new Set(), processes, claimed: new Map(), stamp: await stampOf(ctx) };
         let prepared: PreparedImport;
         if (args.target) {

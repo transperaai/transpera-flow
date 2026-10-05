@@ -765,13 +765,16 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
     expect(Number(holder.work_hours)).toBe(0);
     expect((await stepsOf(child.draft_revision_id!)).map((s) => s.name).sort()).toEqual(["Build", "Delivered", "Go live", "Kickoff", "Start delivery"]);
 
+    // Where a process sits is read from the LIVE links (B12, ADR 0014): until the parent is published, the child sits nowhere yet.
     const read = await call<{ process: { parent_process_id: string | null } }>(editor, "get_process", { process: "Delivery process", revision: "draft" });
-    expect(read.data.process.parent_process_id).toBe(parent.id);
+    expect(read.data.process.parent_process_id).toBeNull();
 
     // Publish the child, then the parent, and simulate: the child's steps are simulated inside the parent.
     expect(await call(editor, "publish_process", { process: "Flat delivery", accept_estimates: true })).toMatchObject({ ok: true });
     expect(await call(editor, "publish_process", { process: "Delivery process", accept_estimates: true })).toMatchObject({ ok: true });
     expect(await call(editor, "publish_process", { process: "Company delivery", accept_estimates: true })).toMatchObject({ ok: true });
+    const placed = await call<{ process: { parent_process_id: string | null } }>(editor, "get_process", { process: "Delivery process" });
+    expect(placed.data.process.parent_process_id).toBe(parent.id);
     const a = await call<Run>(editor, "run_scenario", { process: "Flat delivery", ...SIM });
     const b = await call<Run>(editor, "run_scenario", { process: "Company delivery", ...SIM });
     expect(b.ok, JSON.stringify(b)).toBe(true);

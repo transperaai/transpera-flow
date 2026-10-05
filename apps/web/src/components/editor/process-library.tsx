@@ -104,7 +104,7 @@ export function ProcessLibrary({
       setCreated((now) => [...now, made]);
       place([made.id], [...known, made]);
       if (input.kind === "new") setNewName("");
-      setNote({ tone: "ok", text: `Made ${made.name} and added it here. Open it from the Processes list to build it; it is published on its own.` });
+      setNote({ tone: "ok", text: `Made ${made.name} and added it here. Build and publish it on its own page (Processes list) before you publish this one.` });
     });
 
   return (
@@ -190,7 +190,7 @@ export function ProcessLibrary({
             Name of the new process
           </label>
           <Input id={nameId} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name" autoComplete="off" maxLength={120} data-library-new-name />
-          <div className="flex items-center gap-1.5" role="group" aria-label="Kind of process">
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Kind of process">
             {(["pipeline", "servicing"] as const).map((k) => (
               <Button key={k} type="button" size="xs" variant={newKind === k ? "secondary" : "ghost"} aria-pressed={newKind === k} onClick={() => setNewKind(k)} data-library-new-kind={k}>
                 {k === "pipeline" ? "Pipeline" : "Servicing"}
@@ -279,7 +279,7 @@ function LibraryGroup({
               )}
               {e.state === "inside" && (
                 <span id={`${e.id}-why`} className="text-xs text-muted-foreground">
-                  Sits in {e.insideName ?? "another process"}, so it can&apos;t also be here.
+                  {e.insideName === "the company map" ? "Already on the company map" : `Already inside ${e.insideName ?? "another process"}`}. A process sits in one place only: take it off there first.
                 </span>
               )}
               {e.state === "holds" && (
