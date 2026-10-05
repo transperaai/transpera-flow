@@ -12,7 +12,6 @@ import {
   checkFirstPrinciples,
   checkProposals,
   checkSources,
-  citationConflict,
   PROCESS_FILE_FORMAT_2,
   readAssumed,
   readCitations,

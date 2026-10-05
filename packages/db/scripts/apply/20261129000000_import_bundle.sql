@@ -42,7 +42,7 @@ set local lock_timeout = '5s';
 --        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_process_bundle';
 --        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname = 'clear_branch_odds';
 --        select count(*) from pg_trigger where tgname = 'clear_branch_odds' and not tgisinternal;
---   2. Nothing of ours is applied past this one (row 44, #177, is independent and may be applied before or after). Expect 0 rows:
+--   2. Nothing of ours is applied past this one (row 44, #177, 20261128500000, is applied and is independent). Expect 0 rows:
 --        select version from supabase_migrations.schema_migrations where version >= '20261129000000' and version < '20261140000000';
 --   3. The import it calls and the tables it writes exist. Expect 1, then 6:
 --        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_new_process';
@@ -213,7 +213,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_process_bundle';
 --        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname = 'clear_branch_odds';
 --        select count(*) from pg_trigger where tgname = 'clear_branch_odds' and not tgisinternal;
---   2. Nothing of ours is applied past this one (row 44, #177, is independent and may be applied before or after). Expect 0 rows:
+--   2. Nothing of ours is applied past this one (row 44, #177, 20261128500000, is applied and is independent). Expect 0 rows:
 --        select version from supabase_migrations.schema_migrations where version >= '20261129000000' and version < '20261140000000';
 --   3. The import it calls and the tables it writes exist. Expect 1, then 6:
 --        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_new_process';

@@ -1186,6 +1186,8 @@ function rowFields(a: Record<string, unknown> | null, b: Record<string, unknown>
         const xs = isObject(x) ? x[sub] : undefined;
         const ys = isObject(y) ? y[sub] : undefined;
         if (same(xs, ys)) continue;
+        // The "no odds were given" marker (issue #167) is bookkeeping: its going away is not a change to the step.
+        if (key === "provenance" && sub === "branch_odds") continue;
         out[`${key}.${sub}`] = key === "provenance" ? { live: provenanceSummary(xs), draft: provenanceSummary(ys) } : { live: xs ?? null, draft: ys ?? null };
       }
     } else if (!same(x, y)) out[key] = { live: x ?? null, draft: y ?? null };

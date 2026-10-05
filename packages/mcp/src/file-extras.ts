@@ -28,7 +28,6 @@ import { buildIssueProposal, buildSolutionIdeaProposal, matchIssue, type Proposa
 import { ToolError } from "./result";
 import {
   buildClientSuggestion,
-  buildCompanySuggestion,
   buildDemandSuggestions,
   buildPersonSuggestion,
   buildRoleSuggestion,
