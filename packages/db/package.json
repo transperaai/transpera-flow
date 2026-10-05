@@ -7,7 +7,11 @@
     ".": "./src/index.ts",
     "./issue-status": "./src/issue-status.ts",
     "./source-links": "./src/source-links.ts",
-    "./process-file": "./src/process-file.ts"
+    "./process-file": "./src/process-file.ts",
+    "./process-file-util": "./src/process-file-util.ts",
+    "./process-file-2": "./src/process-file-2.ts",
+    "./process-file-2-schema": "./src/process-file-2-schema.ts",
+    "./simulation-gaps": "./src/simulation-gaps.ts"
   },
   "scripts": {
     "lint": "eslint .",

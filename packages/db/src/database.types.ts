@@ -2938,6 +2938,10 @@ export type Database = {
         Args: { p_adopt?: Json; p_nodes: Json; p_workspace: string }
         Returns: Json
       }
+      import_process_bundle: {
+        Args: { p_adopt?: Json; p_extras?: Json; p_nodes: Json; p_workspace: string }
+        Returns: Json
+      }
       is_agency_admin: { Args: never; Returns: boolean }
       is_free_mail_domain: { Args: { domain: string }; Returns: boolean }
       log_process_import: {

@@ -91,12 +91,12 @@ describe("the format", () => {
   it("says a missing format plainly", () => {
     const f = base();
     delete f.format;
-    expect(checkProcessFile(f).errors).toEqual([`The file doesn't say which format it is in. Add "format": "transpera-process/1" at the top.`]);
+    expect(checkProcessFile(f).errors).toEqual([`The file doesn't say which format it is in. Add "format": "transpera-process/2" at the top.`]);
   });
 
   it("says a different format plainly, and a newer version differently", () => {
-    expect(checkProcessFile({ ...base(), format: "bpmn" }).errors[0]).toMatch(/says its format is 'bpmn', but Transpera reads 'transpera-process\/1'/);
-    expect(checkProcessFile({ ...base(), format: "transpera-process/2" }).errors[0]).toMatch(/in format 'transpera-process\/2', but this version of Transpera reads 'transpera-process\/1'/);
+    expect(checkProcessFile({ ...base(), format: "bpmn" }).errors[0]).toMatch(/says its format is 'bpmn', but Transpera reads 'transpera-process\/1' and 'transpera-process\/2'/);
+    expect(checkProcessFile({ ...base(), format: "transpera-process/3" }).errors[0]).toMatch(/in format 'transpera-process\/3', but this version of Transpera reads 'transpera-process\/1' and 'transpera-process\/2'/);
   });
 
   it("refuses something that isn't an object", () => {

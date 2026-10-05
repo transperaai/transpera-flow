@@ -1,0 +1,293 @@
+{
+  "format": "transpera-process/2",
+  "name": "Enquiry to signed client",
+  "kind": "pipeline",
+  "description": "From a new enquiry to a signed engagement letter.",
+  "sources": [
+    {
+      "id": "interview-maya",
+      "title": "Interview with Maya Chen, managing director",
+      "kind": "transcript",
+      "date": "2026-09-30",
+      "speakers": [
+        "Maya Chen",
+        "Interviewer"
+      ],
+      "body": "Interviewer: How long does the first review take?\nMaya Chen: About fifteen minutes an enquiry, and I do it the same day.\nInterviewer: And proposals?\nMaya Chen: Three hours to write, but they sit for a day before I review them. Most of the website enquiries go nowhere, maybe two in three are a fit."
+    },
+    {
+      "id": "sales-sop",
+      "title": "Sales process SOP, version 3",
+      "kind": "notes",
+      "date": "2026-06-01",
+      "speakers": []
+    },
+    {
+      "id": "lead-export",
+      "title": "Lead export, Q3 2026",
+      "kind": "data",
+      "date": "2026-09-30",
+      "speakers": []
+    }
+  ],
+  "steps": [
+    {
+      "id": "enquiry",
+      "name": "Enquiry arrives",
+      "type": "start"
+    },
+    {
+      "id": "review",
+      "name": "Review enquiry",
+      "type": "step",
+      "role": "Managing director",
+      "hands_on_hours": 0.25,
+      "wait_hours": 4,
+      "tool": "HubSpot",
+      "notes": "Checked the same day if it comes in before noon.",
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-maya",
+            "speaker": "Maya Chen",
+            "time": "00:02:10",
+            "quote": "About fifteen minutes an enquiry, and I do it the same day.",
+            "value": 0.25
+          }
+        ]
+      },
+      "assumed": {
+        "wait_hours": "Nobody gave a wait; four hours is the half-day the SOP allows."
+      }
+    },
+    {
+      "id": "call",
+      "name": "Discovery call",
+      "type": "step",
+      "role": "Managing director",
+      "hands_on_hours": 1,
+      "hands_on_range": {
+        "min": 0.5,
+        "max": 1.5
+      },
+      "wait_hours": 24,
+      "rework_rate": 0.1,
+      "assumed": {
+        "hands_on_hours": "The SOP says calls last up to an hour.",
+        "wait_hours": "A day to book, from the SOP's 'next working day'.",
+        "rework_rate": "A rough one in ten; nobody measured it."
+      }
+    },
+    {
+      "id": "proposal",
+      "name": "Write proposal",
+      "type": "step",
+      "role": "Account manager",
+      "hands_on_hours": 3,
+      "wait_hours": 24,
+      "waiting_now": 2,
+      "evidence": {
+        "hands_on_hours": [
+          {
+            "source": "interview-maya",
+            "speaker": "Maya Chen",
+            "time": "00:06:40",
+            "quote": "Three hours to write, but they sit for a day before I review them.",
+            "value": 3
+          }
+        ],
+        "wait_hours": [
+          {
+            "source": "interview-maya",
+            "speaker": "Maya Chen",
+            "time": "00:06:40",
+            "quote": "they sit for a day before I review them",
+            "value": 24
+          }
+        ]
+      }
+    },
+    {
+      "id": "decides",
+      "name": "Client decides",
+      "type": "decision"
+    },
+    {
+      "id": "signed",
+      "name": "Client signs",
+      "type": "end"
+    },
+    {
+      "id": "declined",
+      "name": "Client declines",
+      "type": "end"
+    },
+    {
+      "id": "unqualified",
+      "name": "Not a fit",
+      "type": "end"
+    }
+  ],
+  "links": [
+    {
+      "from": "enquiry",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "to": "call",
+      "probability": 0.67,
+      "label": "Qualified",
+      "evidence": [
+        {
+          "source": "interview-maya",
+          "speaker": "Maya Chen",
+          "time": "00:08:15",
+          "quote": "maybe two in three are a fit",
+          "value": 0.67
+        }
+      ]
+    },
+    {
+      "from": "review",
+      "to": "unqualified",
+      "probability": 0.33,
+      "label": "Not a fit"
+    },
+    {
+      "from": "call",
+      "to": "proposal"
+    },
+    {
+      "from": "proposal",
+      "to": "decides"
+    },
+    {
+      "from": "decides",
+      "to": "signed",
+      "probability": 0.6,
+      "label": "Signs",
+      "assumed": "No data on win rate yet; 60% is the figure the SOP plans around."
+    },
+    {
+      "from": "decides",
+      "to": "declined",
+      "probability": 0.4,
+      "label": "Declines"
+    }
+  ],
+  "company": {
+    "people": [
+      {
+        "name": "Maya Chen",
+        "roles": [
+          "Managing director"
+        ],
+        "fte": 1,
+        "evidence": [
+          {
+            "source": "interview-maya",
+            "speaker": "Maya Chen",
+            "time": "00:00:30",
+            "quote": "About fifteen minutes an enquiry, and I do it the same day."
+          }
+        ]
+      }
+    ],
+    "roles": [
+      {
+        "name": "Account manager",
+        "assumed": "The SOP names the role but nobody holds it yet."
+      }
+    ],
+    "services": [
+      {
+        "name": "Monthly retainer",
+        "pricing_model": "retainer",
+        "price": 1500,
+        "evidence": [
+          {
+            "source": "sales-sop",
+            "time": "page 2",
+            "quote": "The standard retainer is £1,500 a month."
+          }
+        ]
+      }
+    ],
+    "demand": {
+      "lead_sources": [
+        {
+          "name": "Website form",
+          "volume_per_week": 8,
+          "evidence": [
+            {
+              "source": "lead-export",
+              "time": "Sheet 1",
+              "quote": "Website form: 104 enquiries in 13 weeks",
+              "value": 8
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "proposals": [
+    {
+      "type": "issue",
+      "title": "Proposals sit for a day before review",
+      "detail": "Written proposals wait a full day for the managing director to review them.",
+      "rating": "good",
+      "issue_type": "delay",
+      "steps": [
+        "proposal"
+      ],
+      "evidence": [
+        {
+          "source": "interview-maya",
+          "speaker": "Maya Chen",
+          "time": "00:06:40",
+          "quote": "they sit for a day before I review them"
+        }
+      ]
+    }
+  ],
+  "first_principles": {
+    "job": {
+      "who": "A founder who needs marketing help",
+      "done": "A signed engagement letter they trust",
+      "evidence": [
+        {
+          "source": "sales-sop",
+          "time": "page 1",
+          "quote": "Every enquiry gets a reply the same day."
+        }
+      ]
+    },
+    "requirements": [
+      {
+        "text": "Every enquiry gets a reply the same day",
+        "owner": "Maya Chen",
+        "why": "It is how the firm wins on trust.",
+        "verdict": "keep",
+        "step": "review",
+        "evidence": [
+          {
+            "source": "sales-sop",
+            "time": "page 1",
+            "quote": "Every enquiry gets a reply the same day."
+          }
+        ]
+      }
+    ],
+    "measures": [
+      {
+        "text": "Win rate of at least 30%",
+        "kpi": "winRate",
+        "comparator": "atLeast",
+        "target": 30,
+        "horizon": "6 months",
+        "assumed": "Austin's goal for the year; no history to check it against."
+      }
+    ]
+  }
+}

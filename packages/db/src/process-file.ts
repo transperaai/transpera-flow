@@ -7,7 +7,30 @@
 // Errors stop the upload (the file can't become a process as it is); warnings are shown in the preview and the upload
 // goes ahead (something is odd, or was filled in for you). Every message names the step or link it is about.
 
+import {
+  checkCompany,
+  checkFirstPrinciples,
+  checkProposals,
+  checkSources,
+  citationConflict,
+  PROCESS_FILE_FORMAT_2,
+  readAssumed,
+  readCitations,
+  readStepExtras,
+  STEP_FIELDS_2,
+  type EvidenceField,
+  type FileCitation,
+  type FileCompany,
+  type FileFirstPrinciples,
+  type FileProposal,
+  type FileRange,
+  type FileSource,
+  type Env,
+} from "@transpera-flow/db/process-file-2";
+import { isObject, MAX_ID, MAX_SUGGESTIONS, norm, plural, q, round, suggest } from "@transpera-flow/db/process-file-util";
+
 export const PROCESS_FILE_FORMAT = "transpera-process/1";
+export { PROCESS_FILE_FORMAT_2 };
 /** The type of the embedded block an HTML file or page carries the object in (slice 2). */
 export const PROCESS_FILE_BLOCK_TYPE = "application/vnd.transpera-process+json";
 
@@ -17,11 +40,7 @@ export type FileStepType = (typeof FILE_STEP_TYPES)[number];
 export const MAX_FILE_STEPS = 200;
 export const MAX_FILE_LINKS = 500;
 const MAX_NAME = 120;
-/** Step ids are short labels ("review"); anything longer is a mistake, and checking it for typos would cost time. */
-const MAX_ID = 64;
 const MAX_GROUPS = 100;
-/** Typo suggestions are a courtesy: only the first few unknown references get one, so a hostile file can't make the checker slow. */
-const MAX_SUGGESTIONS = 20;
 /** The most problems listed; the rest are counted. */
 const MAX_LISTED = 50;
 const MAX_HOURS = 10_000;
@@ -41,6 +60,20 @@ export interface ProcessFileStep {
   notes?: string;
   x?: number;
   y?: number;
+  // What /2 adds (a /1 file never has these).
+  /** The lowest and highest hands-on time, in hours. */
+  hands_on_range?: FileRange;
+  wait_range?: FileRange;
+  /** The id of the step rework goes back to (default: this one). */
+  rework_to?: string;
+  tool?: string;
+  sla_hours?: number;
+  /** Items sitting at the step now. */
+  waiting_now?: number;
+  /** Quotes that back a value, by field. */
+  evidence?: Partial<Record<EvidenceField, FileCitation[]>>;
+  /** Why a value is an assumption, by field. */
+  assumed?: Partial<Record<EvidenceField, string>>;
 }
 
 export interface ProcessFileLink {
@@ -48,6 +81,10 @@ export interface ProcessFileLink {
   to: string;
   probability?: number;
   label?: string;
+  /** /2: quotes that back the probability. */
+  evidence?: FileCitation[];
+  /** /2: why the probability is an assumption. */
+  assumed?: string;
 }
 
 export interface ProcessFileGroup {
@@ -58,7 +95,7 @@ export interface ProcessFileGroup {
 
 /** A file that passed the checks, with its defaults filled in. */
 export interface ProcessFile {
-  format: typeof PROCESS_FILE_FORMAT;
+  format: typeof PROCESS_FILE_FORMAT | typeof PROCESS_FILE_FORMAT_2;
   name: string;
   kind: "pipeline" | "servicing";
   description?: string;
@@ -66,6 +103,11 @@ export interface ProcessFile {
   steps: ProcessFileStep[];
   links: ProcessFileLink[];
   groups: ProcessFileGroup[];
+  // What /2 adds (a /1 file never has these).
+  sources?: FileSource[];
+  company?: FileCompany;
+  proposals?: FileProposal[];
+  first_principles?: FileFirstPrinciples;
 }
 
 export interface ProcessFileCheck {
@@ -73,6 +115,8 @@ export interface ProcessFileCheck {
   file: ProcessFile | null;
   errors: string[];
   warnings: string[];
+  /** /2 only: places where the file's own sources disagree, for the preview. */
+  conflicts?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -177,52 +221,13 @@ export const PROCESS_FILE_EXAMPLE = {
 // The checker
 // ---------------------------------------------------------------------------
 
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-/** A name or id in quotes, cut when it is absurdly long so a message stays readable. */
-const q = (s: string) => `'${s.length > 60 ? `${s.slice(0, 57)}...` : s}'`;
-const norm = (s: string) => s.trim().toLowerCase().replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-
 const TOP_FIELDS = ["$schema", "format", "name", "kind", "description", "entity_name", "steps", "links", "groups"];
+const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "company", "proposals", "first_principles"];
 const STEP_FIELDS = ["id", "name", "type", "role", "person", "hands_on_hours", "wait_hours", "rework_rate", "notes", "x", "y"];
+const STEP_FIELDS_V2 = [...STEP_FIELDS, ...STEP_FIELDS_2];
 const LINK_FIELDS = ["from", "to", "probability", "label"];
+const LINK_FIELDS_2 = [...LINK_FIELDS, "evidence", "assumed"];
 const GROUP_FIELDS = ["name", "steps"];
-
-function distance(a: string, b: string): number {
-  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    let prev = row[0]!;
-    row[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const keep = row[j]!;
-      row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev = keep;
-    }
-  }
-  return row[b.length]!;
-}
-
-/**
- * The step id closest to `ref`, when it is near enough to be a typo. Bounded: ids and references longer than MAX_ID get none, ids
- * whose length can't be close enough are skipped without comparing, and `budget` limits how many suggestions a file can ask for.
- */
-function suggest(ref: string, ids: readonly string[], budget: { left: number }): string | null {
-  if (ref.length > MAX_ID || budget.left <= 0) return null;
-  budget.left--;
-  const limit = Math.max(1, Math.floor(ref.length / 3));
-  let best: { id: string; d: number } | null = null;
-  for (const id of ids) {
-    if (id.length > MAX_ID || Math.abs(id.length - ref.length) > limit) continue;
-    const d = distance(ref.toLowerCase(), id.toLowerCase());
-    if (!best || d < best.d) best = { id, d };
-  }
-  return best && best.d <= limit ? best.id : null;
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-const round = (n: number) => Math.round(n * 1000) / 1000;
 
 /**
  * Check a parsed file and say, in plain words, what is wrong with it. Errors: the wrong or missing `format`, no name or
@@ -237,7 +242,9 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   const budget = { left: MAX_SUGGESTIONS };
   /** A long list of problems is cut, so a hostile file can't make a huge answer. */
   const listed = (list: string[]): string[] => (list.length > MAX_LISTED ? [...list.slice(0, MAX_LISTED), `…and ${list.length - MAX_LISTED} more problems like these.`] : list);
-  const fail = (): ProcessFileCheck => ({ file: null, errors: listed(errors), warnings: listed(warnings) });
+  const conflicts: string[] = [];
+  const env: Env = { errors, warnings, conflicts, sources: [], budget };
+  const fail = (): ProcessFileCheck => ({ file: null, errors: listed(errors), warnings: listed(warnings), ...(conflicts.length ? { conflicts: listed(conflicts) } : {}) });
 
   if (!isObject(input)) {
     errors.push("The file isn't a process: it should be one JSON object with a format, a name and steps. Use 'Copy prompt for Claude' to ask for one, or 'Download example' to see what it looks like.");
@@ -247,22 +254,26 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   // The format comes first: if it is wrong, nothing else in the file can be trusted to mean what we think.
   const format = input.format;
   if (format === undefined) {
-    errors.push(`The file doesn't say which format it is in. Add "format": "${PROCESS_FILE_FORMAT}" at the top.`);
+    errors.push(`The file doesn't say which format it is in. Add "format": "${PROCESS_FILE_FORMAT_2}" at the top.`);
     return fail();
   }
-  if (format !== PROCESS_FILE_FORMAT) {
+  if (format !== PROCESS_FILE_FORMAT && format !== PROCESS_FILE_FORMAT_2) {
     const said = typeof format === "string" ? q(format) : "something that isn't text";
+    const reads = `${q(PROCESS_FILE_FORMAT)} and ${q(PROCESS_FILE_FORMAT_2)}`;
     errors.push(
       typeof format === "string" && format.startsWith("transpera-process/")
-        ? `The file is in format ${said}, but this version of Transpera reads ${q(PROCESS_FILE_FORMAT)}. Ask Claude to redo it in that format.`
-        : `The file says its format is ${said}, but Transpera reads ${q(PROCESS_FILE_FORMAT)}. If this file came from Claude, ask it to follow the format from 'Copy prompt for Claude'.`,
+        ? `The file is in format ${said}, but this version of Transpera reads ${reads}. Ask Claude to redo it in ${q(PROCESS_FILE_FORMAT_2)}.`
+        : `The file says its format is ${said}, but Transpera reads ${reads}. If this file came from Claude, ask it to follow the format from 'Copy prompt for Claude'.`,
     );
     return fail();
   }
+  const v2 = format === PROCESS_FILE_FORMAT_2;
 
   for (const key of Object.keys(input)) {
-    if (!TOP_FIELDS.includes(key)) warnings.push(`The file has a field ${q(key)} that Transpera doesn't use. It was ignored.`);
+    if (!(v2 ? TOP_FIELDS_2 : TOP_FIELDS).includes(key)) warnings.push(`The file has a field ${q(key)} that Transpera doesn't use. It was ignored.`);
   }
+  // Sources come first: evidence anywhere in the file points at them.
+  if (v2) env.sources = checkSources(input.sources, env);
 
   // Name, kind and the rest of the process.
   const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -312,7 +323,7 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       else if (!norm(nm)) errors.push(`${label} has no letters or numbers in its name. Give it a name people can read.`);
       if (id.length > MAX_ID) errors.push(`${label}'s id is ${id.length} characters long; ids are short labels (the most is ${MAX_ID}).`);
       for (const key of Object.keys(raw)) {
-        if (!STEP_FIELDS.includes(key)) warnings.push(`${label} has a field ${q(key)} that Transpera doesn't use. It was ignored.`);
+        if (!(v2 ? STEP_FIELDS_V2 : STEP_FIELDS).includes(key)) warnings.push(`${label} has a field ${q(key)} that Transpera doesn't use. It was ignored.`);
       }
       if (id) {
         declared.add(id);
@@ -363,8 +374,9 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
           y = raw.y;
         } else warnings.push(`${label} has a position that isn't two numbers (x and y), so it will be placed automatically.`);
       }
+      const extras = v2 ? readStepExtras(raw, label, env, { hands_on_hours: hands, wait_hours: wait, rework_rate: rework }) : {};
       if (id && nm) {
-        const step: ProcessFileStep = { id, name: nm, type };
+        const step: ProcessFileStep = { id, name: nm, type, ...extras };
         const role = str("role", 200);
         const person = str("person", 200);
         const notes = str("notes", MAX_NOTES);
@@ -410,7 +422,7 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
         return;
       }
       for (const key of Object.keys(raw)) {
-        if (!LINK_FIELDS.includes(key)) warnings.push(`The link from ${q(from)} to ${q(to)} has a field ${q(key)} that Transpera doesn't use. It was ignored.`);
+        if (!(v2 ? LINK_FIELDS_2 : LINK_FIELDS).includes(key)) warnings.push(`The link from ${q(from)} to ${q(to)} has a field ${q(key)} that Transpera doesn't use. It was ignored.`);
       }
       let ok = true;
       for (const [end, ref] of [["from", from], ["to", to]] as const) {
@@ -445,6 +457,21 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       const link: ProcessFileLink = { from, to };
       if (probability !== undefined) link.probability = probability;
       if (typeof raw.label === "string" && raw.label.trim()) link.label = raw.label.trim().slice(0, 200);
+      if (v2) {
+        const where = `The link from ${q(a.name)} to ${q(b.name)}`;
+        const evidence = readCitations(raw.evidence, `${where} (probability)`, env, { valueMax: 1 });
+        const assumed = readAssumed(raw.assumed, `${where} (probability)`, env);
+        if (evidence.length) {
+          link.evidence = evidence;
+          if (probability === undefined && !evidence.some((c) => c.value !== undefined)) {
+            warnings.push(`${where} has quotes for its probability but no number, here or in the quotes. Give the probability so it can be used.`);
+          }
+          // Quotes that give different odds for one branch are a conflict between the sources.
+          const stated = new Set(evidence.filter((c) => c.value !== undefined).map((c) => c.value));
+          if (stated.size > 1) conflicts.push(`${where}: the sources give different odds (${evidence.filter((c) => c.value !== undefined).map((c) => `${env.sources.find((s) => s.id === c.source)?.title ?? c.source}${c.speaker ? ` (${c.speaker})` : ""}: ${round((c.value as number) * 100)}%`).join("; ")}). The odds in the file are used; check them.`);
+        }
+        if (assumed) link.assumed = assumed;
+      }
       links.push(link);
     });
   }
@@ -487,6 +514,27 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       if (!members.length) warnings.push(`Group ${q(nm)} has no steps, so it was left out.`);
       else groups.push({ name: nm, steps: members });
     });
+  }
+
+  // What /2 adds: where rework goes, then the sections that refer to the steps.
+  let company: FileCompany | undefined;
+  let proposals: FileProposal[] = [];
+  let firstPrinciples: FileFirstPrinciples | undefined;
+  if (v2) {
+    for (const s of steps) {
+      if (s.rework_to === undefined) continue;
+      if (!byId.has(s.rework_to)) {
+        const near = suggest(s.rework_to, ids, budget);
+        errors.push(`Step ${q(s.name)} sends rework back to ${q(s.rework_to)}, which isn't a step.${near ? ` Did you mean ${q(near)}?` : ""}`);
+      } else if (s.rework_to === s.id) delete s.rework_to;
+      else if (s.rework_rate === undefined && !s.evidence?.rework_rate && !s.assumed?.rework_rate) {
+        warnings.push(`Step ${q(s.name)} sends rework back to ${q(byId.get(s.rework_to)!.name)} but has no rework_rate, so nothing is sent back yet.`);
+      }
+    }
+    const view = { ids, has: (id: string) => byId.has(id), name: stepName };
+    company = checkCompany(input.company, env);
+    proposals = checkProposals(input.proposals, view, env);
+    firstPrinciples = checkFirstPrinciples(input.first_principles, view, env);
   }
 
   if (errors.length) return fail();
@@ -535,6 +583,13 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       entry.rework_rate === undefined &&
       entry.role === undefined &&
       entry.person === undefined &&
+      entry.tool === undefined &&
+      entry.sla_hours === undefined &&
+      entry.waiting_now === undefined &&
+      entry.hands_on_range === undefined &&
+      entry.wait_range === undefined &&
+      entry.evidence === undefined &&
+      entry.assumed === undefined &&
       !into.has(entry.id) &&
       (out.get(entry.id) ?? []).length === 1 &&
       !grouped.has(entry.id);
@@ -593,9 +648,20 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   }
 
   return {
-    file: { format: PROCESS_FILE_FORMAT, name, kind, ...(description ? { description } : {}), ...(entity_name ? { entity_name } : {}), steps: normalised, links, groups },
+    file: {
+      format: v2 ? PROCESS_FILE_FORMAT_2 : PROCESS_FILE_FORMAT,
+      name,
+      kind,
+      ...(description ? { description } : {}),
+      ...(entity_name ? { entity_name } : {}),
+      steps: normalised,
+      links,
+      groups,
+      ...(v2 ? { sources: env.sources, ...(company ? { company } : {}), proposals, ...(firstPrinciples ? { first_principles: firstPrinciples } : {}) } : {}),
+    },
     errors,
     warnings,
+    ...(v2 ? { conflicts } : {}),
   };
 }
 
