@@ -4,6 +4,7 @@
 
 import type { ChurnCauses, ChurnReplication, EngineChurnDriver } from "./churn-drivers";
 import type { EngineMarket } from "./market";
+import type { Loop } from "./loops";
 
 /** Times are in working hours. */
 export interface EngineRole {
@@ -477,6 +478,14 @@ export interface StepResult {
    * (ratings.ts). Absent from runs saved before the rating model.
    */
   p90?: { avgWait: number; reworkShare: number; slaBreachShare: number; lostShare?: number };
+  /**
+   * Mean hands-on hours of a visit that was worked by a person, and mean
+   * external (fixed) wait after service. With `avgWait` (queue wait) they split
+   * a step's elapsed time into working and waiting. Absent from runs saved
+   * before the process page redesign (#174).
+   */
+  avgHandsOn?: number;
+  avgFixedWait?: number;
 }
 
 /**
@@ -593,6 +602,8 @@ export interface ReplicationResult {
   steps: Record<string, StepResult>;
   roles: Record<string, RoleResult>;
   people: Record<string, PersonResult>;
+  /** What each rework loop did in the measured window, by loop id (empty when the model has none). */
+  loops?: Record<string, LoopReplication>;
   /**
    * Entities in the measured window (replication 0 only). Those that entered
    * during the warm-up or as starting WIP have negative times.
@@ -605,6 +616,56 @@ export interface ReplicationResult {
   warmupHours: number;
   /** Active clients at the horizon (with a roster: whole clients). */
   activeEnd: number;
+}
+
+/**
+ * One rework loop in one replication (loops.ts). "Entered" items reached the
+ * loop's first step in the measured window; "went round" is those sent back at
+ * least once. Hours are working hours over the whole window.
+ */
+export interface LoopReplication {
+  entered: number;
+  /** Items that went round at least once. */
+  went: number;
+  /** Times round, summed over items. */
+  rounds: number;
+  /** Hands-on hours on repeat passes by role id (a person-pinned step with no role counts to the person's first role). */
+  roleHours: Record<string, number>;
+  /** Elapsed hours (queue, hands-on and waiting) spent at the loop's steps on repeat passes, summed over items. */
+  extraElapsed: number;
+}
+
+/** A rework loop across replications (docs/PRD.md §6; issue #174). Means with a 10-90% band. */
+export interface LoopResult extends Omit<Loop, "body"> {
+  /** Items that went round at least once, as a share of items that entered the loop. */
+  share: Stat;
+  /** Times round per item that goes round at least once (0 when none does). */
+  meanRounds: Stat;
+  /** Extra hands-on hours a month on repeat passes, by role id and in total. */
+  extraHandsOnHoursPerMonth: Record<string, Stat>;
+  extraHandsOnHoursPerMonthTotal: Stat;
+  /** Working hours a repeat pass adds to the cycle time of an item that enters the loop, on average (all items; 0 with none). */
+  extraCycleHours: Stat;
+  /** The same, per item that goes round. */
+  extraCycleHoursPerLooper: Stat;
+}
+
+/** What one step looks like for the process page and the analysis (issue #174). Hours per visit. */
+export interface StepFacts {
+  /** Mean hands-on time of a visit worked by a person. */
+  handsOnHours: number;
+  /** Mean time queueing for a person. */
+  queueWaitHours: number;
+  /** Mean fixed (external) wait after the work. */
+  fixedWaitHours: number;
+  /** `handsOnHours` as a share of hands-on plus queue plus fixed wait (0 when all are 0). */
+  handsOnShare: number;
+  /**
+   * Only one person can do it: the step is staffed and exactly one person with
+   * capacity can work it (a role of head-count 1, or a pinned person with no
+   * alternative). Null when more than one can, or the step is a pure wait.
+   */
+  keyPerson: { personId: string; personName: string } | null;
 }
 
 /** A metric across replications: the mean and the 10th–90th percentile band. */
@@ -719,6 +780,10 @@ export interface SimulationResult {
   bnPerson: string | null;
   /** Replication 0's entities, for animation. */
   trace: TraceEntity[] | null;
+  /** Rework loops, in `detectLoops` order, with what each costs (empty when none). Absent from runs saved before #174. */
+  loops?: LoopResult[];
+  /** Hands-on versus waiting, and key-person risk, per step. Absent from runs saved before #174. */
+  stepFacts?: Record<string, StepFacts>;
   H: number;
   reps: number;
   wipEnd: number;
