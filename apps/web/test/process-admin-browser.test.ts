@@ -151,10 +151,10 @@ describe("an archived process's page", () => {
   }
 
   it("says when it was archived and that it is read only; an editor restores it, and a refusal is shown", async () => {
-    const page = await banner({ canEdit: true, refuse: "Another process is called Monthly reporting. Rename one of them, then restore it." });
+    const page = await banner({ canEdit: true, refuse: "Another process is called Monthly reporting. Rename that one, then restore this." });
     expect(await page.locator("[data-archived-banner]").innerText()).toContain("Archived on 3 Oct. Monthly reporting is off the company map, the lists and the simulation, and read only.");
     await page.getByRole("button", { name: "Restore Monthly reporting" }).click();
-    expect(await page.getByRole("alert").innerText()).toBe("Another process is called Monthly reporting. Rename one of them, then restore it.");
+    expect(await page.getByRole("alert").innerText()).toBe("Another process is called Monthly reporting. Rename that one, then restore this.");
     expect(await calls(page)).toEqual([["restore", "50000000-0000-4000-8000-000000000003"]]);
     await page.close();
   }, 60_000);
