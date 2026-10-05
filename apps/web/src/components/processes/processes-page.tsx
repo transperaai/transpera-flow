@@ -38,7 +38,7 @@ export function ProcessesPage({
       title="Processes"
       eyebrow="Company"
       width="max-w-6xl"
-      description="The company map and everything inside it. Open a row to see that process's map card."
+      description="This workspace's own processes: the company map and everything inside it. Other workspaces have their own. Open a row to see that process's map card."
       actions={
         <>
           <Button variant="outline" asChild>

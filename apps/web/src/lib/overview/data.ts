@@ -1,5 +1,5 @@
 import "server-only";
-import { listProcesses, loadLiveCompanyPart, partitionSteps, type EdgeRow, type ProcessPart, type ProcessRevisionRow, type StepRow } from "@transpera-flow/db";
+import { listProcesses, loadCompanyPartVersion, loadLiveCompanyPart, partitionSteps, type EdgeRow, type ProcessPart, type ProcessRevisionRow, type StepRow } from "@transpera-flow/db";
 import { createClient } from "../supabase/server";
 
 /**
@@ -9,6 +9,14 @@ import { createClient } from "../supabase/server";
  */
 export async function loadLiveCompany(workspaceId: string): Promise<ProcessPart | null> {
   return loadLiveCompanyPart(await createClient(), workspaceId);
+}
+
+/**
+ * The company map at published version `number`, for the Overview's `?version=N` (read only). Null when `number` is not a
+ * published version of this workspace's map; the live number gives the live map. As the signed-in user (RLS decides).
+ */
+export async function loadCompanyVersion(workspaceId: string, number: number): Promise<ProcessPart | null> {
+  return loadCompanyPartVersion(await createClient(), workspaceId, number);
 }
 
 /**

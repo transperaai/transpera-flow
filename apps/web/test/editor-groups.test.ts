@@ -16,6 +16,68 @@ const modelOf = (b: ProcessBundle) => toEngineModel(b, { startDate: START });
 const stepsOf = (b: ProcessBundle, id: string) => b.steps.find((s) => s.id === id)!;
 const from = (b: ProcessBundle, id: string) => b.edges.filter((e) => e.from_step_id === id);
 
+describe("adding where the person is looking", () => {
+  const cardBox = (b: ProcessBundle, id: string) => {
+    const s = stepsOf(b, id);
+    return { l: Number(s.x), t: Number(s.y), r: Number(s.x) + 192, b: Number(s.y) + 92 };
+  };
+  const clear = (b: ProcessBundle, id: string) =>
+    b.steps
+      .filter((o) => o.id !== id && (o.parent_step_id ?? null) === null && o.kind !== "group")
+      .every((o) => {
+        const a = cardBox(b, id);
+        const c = cardBox(b, o.id);
+        return a.r <= c.l || a.l >= c.r || a.b <= c.t || a.t >= c.b;
+      });
+
+  it("puts the new step at the centre of the view when that is free", () => {
+    const b = flat();
+    const view = { x: 5000, y: 3000 };
+    const { edit, id } = addAfter(b, null, "task", view);
+    const s = stepsOf(applyEdit(b, edit), id);
+    expect([Number(s.x) + 96, Number(s.y) + 46]).toEqual([5000, 3000]);
+  });
+
+  it("moves to the nearest free place when the centre is taken, without touching another step", () => {
+    const b = flat();
+    const taken = stepsOf(b, ids.seo);
+    const view = { x: Number(taken.x) + 96, y: Number(taken.y) + 46 };
+    for (const kind of ["task", "decision", "wait"] as const) {
+      const { edit, id } = addAfter(b, null, kind, view);
+      const after = applyEdit(b, edit);
+      expect(clear(after, id)).toBe(true);
+      const s = stepsOf(after, id);
+      // Near: within a step or two of where it was meant to go.
+      expect(Math.hypot(Number(s.x) + 96 - view.x, Number(s.y) + 46 - view.y)).toBeLessThan(260);
+    }
+  });
+
+  it("stays inside what is visible when there is room there", () => {
+    const b = flat();
+    const taken = stepsOf(b, ids.seo);
+    const view = {
+      x: Number(taken.x) + 96,
+      y: Number(taken.y) + 46,
+      visible: { left: Number(taken.x) - 400, top: Number(taken.y) - 300, right: Number(taken.x) + 600, bottom: Number(taken.y) + 300 },
+    };
+    const { edit, id } = addAfter(b, null, "task", view);
+    const s = stepsOf(applyEdit(b, edit), id);
+    expect(Number(s.x)).toBeGreaterThanOrEqual(view.visible.left);
+    expect(Number(s.y)).toBeGreaterThanOrEqual(view.visible.top);
+    expect(Number(s.x) + 192).toBeLessThanOrEqual(view.visible.right);
+    expect(Number(s.y) + 92).toBeLessThanOrEqual(view.visible.bottom);
+  });
+
+  it("keeps a step added inside a group beside the selected step, not at the view's centre", () => {
+    const b = nested();
+    const sel = stepsOf(b, ids.qualify);
+    const { edit, id } = addAfter(b, sel.id, "task", { x: 9000, y: 9000 });
+    const s = stepsOf(applyEdit(b, edit), id);
+    expect(s.parent_step_id).toBe(sel.parent_step_id);
+    expect(Number(s.x)).toBeLessThan(2000);
+  });
+});
+
 describe("adding after the selected step", () => {
   it("splices a new step between the selected step and the one after it", () => {
     const b = flat();

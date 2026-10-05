@@ -142,7 +142,7 @@ describe("every control of solution mode (issue #114)", () => {
     expect(labels("components/editor/issue-area.tsx")).toEqual(["Issue area"]);
     expect(labels("components/editor/simulate-footer.tsx")).toContain("Automatic verdict");
     expect(labels("components/solutions/process-solutions.tsx")).toEqual(["New solution", "Build solution"]);
-    expect(read("components/process-page.tsx")).toMatch(/label: "Solutions",\s+description: "[^"]{15,}",\s+example: "[^"]{8,}"/);
+    // The (i) on the process page's Solutions heading was removed on purpose (QA wave 1); its two buttons above keep theirs.
   });
 
   it("has a button for each thing those (i)s describe", () => {

@@ -3,7 +3,6 @@
 import { isId } from "@/lib/editor/validate";
 import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
 import { mustAskBeforeRestore } from "@/lib/history/restore-check";
-import { loadVersionModel, type ModelEntry } from "@/lib/history/data";
 import { createClient } from "@/lib/supabase/server";
 
 // Writes and reads of the History screen (issue #105). Every call runs as the signed-in user. The database functions
@@ -69,16 +68,4 @@ export async function duplicateVersion(processId: string, revisionId: string, na
   if (r.status === "name_taken") return { status: "error", message: `There is already a process called '${clean}'.` };
   if (r.status === "invalid_name") return { status: "error", message: `Give it a name (up to ${MAX_NAME} characters).` };
   return forbidden;
-}
-
-/** The model of an older version, to simulate it when someone presses Run. */
-export async function versionModel(processId: string, revisionId: string): Promise<ModelEntry | { error: string }> {
-  if (!isId(processId) || !isId(revisionId)) return { error: invalid.message };
-  const session = await signedIn();
-  if (!session.ok) return { error: signedOut.message };
-  try {
-    return (await loadVersionModel(processId, revisionId)) ?? { error: "That version isn't available." };
-  } catch {
-    return { error: failed.message };
-  }
 }

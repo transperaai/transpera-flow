@@ -8,11 +8,12 @@ import { ShellHeader } from "@/components/shell/shell-header";
 import { loadLiveProcess, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSources } from "@/lib/data";
 import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
-import { loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
+import { companyMapView } from "@/lib/overview/company-version";
+import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { loadWorkspaceAnalysisRules } from "@/lib/rules/data";
 
 /** The Overview of a workspace (issue #100): the landing page, at `/w/[slug]` and `/w/[slug]/overview`. */
-export async function WorkspaceOverview({ slug }: { slug: string }) {
+export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
   const live = await loadLiveProcess(slug);
   if (!live) {
     const head = await loadWorkspaceHead(slug);
@@ -32,13 +33,17 @@ export async function WorkspaceOverview({ slug }: { slug: string }) {
     loadAiViews([live.revision.id]),
   ]);
   const base = `/w/${slug}`;
+  // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
+  const found = company && mapVersion ? await loadCompanyVersion(ws, mapVersion) : null;
+  const view = companyMapView(company, found, canEdit);
   return (
     <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
     <Overview
       workspaceName={live.workspace.name}
       live={live}
       parts={parts}
-      company={company}
+      company={view.map}
+      viewingMapVersion={view.viewingVersion}
       issues={issues}
       sources={sources}
       mode={canEdit ? "live" : "readonly"}
@@ -46,7 +51,7 @@ export async function WorkspaceOverview({ slug }: { slug: string }) {
       firstPrinciples={firstPrinciples}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
       processesHref={`${base}/processes`}
-      companyEditHref={canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
+      companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       issuesHref={`${base}/issues`}
       rulesHref={`${base}/settings/rules`}

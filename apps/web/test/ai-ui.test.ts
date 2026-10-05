@@ -46,8 +46,8 @@ describe("the AI read", () => {
     expect(html).toContain("The Strategist is the constraint.");
     expect(html).toContain("Version 3, written 1 Oct 2026 by claude-opus-5-5. Reviewed by AI · run by Ed Itor. 4 numbers checked against the run; 1 item left out");
     expect(html).toContain("Run again");
-    expect(html).toContain("About AI read");
-    expect(html).toContain("About Run again");
+    // The (i)s beside the title and Run again were removed on purpose (QA wave 1): the read's own line says what it uses.
+    expect(html).not.toContain("About AI read");
   });
 
   it("says AI analysis isn't set up when the server has no key", () => {

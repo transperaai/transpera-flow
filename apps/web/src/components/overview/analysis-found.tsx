@@ -3,7 +3,6 @@
 // "What the analysis found" (issue #100, A35): a count per rating. The AI read is components/ai/ai-read.tsx (A46).
 
 import { RATING_LABELS, type DetectedIssue, type Rating } from "@transpera-flow/engine";
-import { Help } from "@/components/help";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ratingCounts } from "@/lib/overview/findings";
 
@@ -22,11 +21,6 @@ export function RatingCounts({ findings }: { findings: readonly Pick<DetectedIss
           <b className="font-semibold text-foreground tabular-nums">{c.count}</b> {RATING_LABELS[c.rating].toLowerCase()}
         </span>
       ))}
-      <Help
-        label="Ratings"
-        description="Every finding gets one of four ratings, worst first: Operational risk (could break delivery or lose clients, fix now), Bad, not urgent (costing time or money, plan a fix), Good, could improve (fine today, with something to gain) and Great (working well). Findings are only listed when there is something to do, so Great never appears here."
-        example="“Too busy” on the strategist at 82% is Bad, not urgent; at 97% it is Operational risk."
-      />
     </p>
   );
 }

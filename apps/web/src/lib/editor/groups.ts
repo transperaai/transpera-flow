@@ -6,7 +6,7 @@
 // step must already be one of the group's own steps). Ungrouping runs the other way round.
 
 import { ancestorsOf, groupHasExit, isGroup, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
-import { GROUP_PADDING } from "@/lib/map/groups";
+import { CARD_SIZE, EMPTY_GROUP, GROUP_PADDING, TERMINAL_SIZE, openGroupSize, type Size } from "@/lib/map/groups";
 import { newId, newStepRow, type NewStepKind } from "./commands";
 import type { Edit, Op, Patch, RowChange } from "./ops";
 
@@ -53,13 +53,71 @@ export function freeSpot(bundle: ProcessBundle, parent: string | null, x: number
   return { x, y };
 }
 
+/** Space kept clear around a card, so a new one is not touching its neighbour. */
+const GAP = 24;
+/** How far, in map units, the search for a free place moves at a time, and how far it goes. */
+const NUDGE = { step: 24, reach: 1600 };
+const NUDGES: { dx: number; dy: number }[] = (() => {
+  const all: { dx: number; dy: number; d: number }[] = [];
+  const n = Math.floor(NUDGE.reach / NUDGE.step);
+  for (let i = -n; i <= n; i++)
+    for (let j = -n; j <= n; j++) all.push({ dx: i * NUDGE.step, dy: j * NUDGE.step, d: Math.hypot(i, j) * NUDGE.step });
+  // Nearest first; on a tie, below and to the right before above and to the left, which is where the eye goes next.
+  return all.sort((a, b) => a.d - b.d || b.dy - a.dy || b.dx - a.dx);
+})();
+
+/** What the map is showing, as the canvas reports it (map coordinates), so a new step can go where the person is looking. */
+export interface ViewHint {
+  /** The centre of the visible map. */
+  x: number;
+  y: number;
+  /** Its edges: a new step is kept inside them when there is room. */
+  visible?: { left: number; top: number; right: number; bottom: number };
+  /** Each card's measured size, by step id (else a typical card). */
+  sizes?: ReadonlyMap<string, Size>;
+}
+export type ViewRef = { current: (() => ViewHint | null) | null };
+
+/** What a step takes up on the map (an open group at the size of its box, as the Editor draws groups open). */
+function footprint(bundle: ProcessBundle, s: StepRow, sizes?: ReadonlyMap<string, Size>): Size {
+  const measured = sizes?.get(s.id);
+  if (measured) return measured;
+  if (isGroup(s)) return openGroupSize(bundle.steps, s.id, "all");
+  return s.kind === "start" || s.kind === "end" ? TERMINAL_SIZE : CARD_SIZE;
+}
+
+/**
+ * Where a new card of this size goes so that its centre is as near the view's centre as it can be without touching a card of
+ * the same group, and inside what is visible if there is room there (else just the nearest free place). Returns the card's
+ * top-left corner, in map coordinates (top level only).
+ */
+export function nearestFreeSpot(bundle: ProcessBundle, view: ViewHint, size: Size = CARD_SIZE): { x: number; y: number } {
+  const boxes = bundle.steps
+    .filter((s) => (s.parent_step_id ?? null) === null)
+    .map((s) => {
+      const z = footprint(bundle, s, view.sizes);
+      return { x: Number(s.x), y: Number(s.y), w: z.width, h: z.height };
+    });
+  const x0 = view.x - size.width / 2;
+  const y0 = view.y - size.height / 2;
+  const free = (x: number, y: number) =>
+    !boxes.some((b) => x < b.x + b.w + GAP && x + size.width + GAP > b.x && y < b.y + b.h + GAP && y + size.height + GAP > b.y);
+  const v = view.visible;
+  const seen = (x: number, y: number) => !v || (x >= v.left && y >= v.top && x + size.width <= v.right && y + size.height <= v.bottom);
+  const hit = NUDGES.find((n) => free(x0 + n.dx, y0 + n.dy) && seen(x0 + n.dx, y0 + n.dy)) ?? NUDGES.find((n) => free(x0 + n.dx, y0 + n.dy));
+  return { x: Math.round(x0 + (hit?.dx ?? 0)), y: Math.round(y0 + (hit?.dy ?? 0)) };
+}
+
 /**
  * Add a step, decision, wait or group after the selected step, in the same group as it (so inside a nested group, the new
  * one lands inside it). The new one is joined in: a selected step with nothing after it leads to it, and one with a
  * single next step now leads to the new one, which leads on to that step. A step with branches, or an end step, gets
- * the new one placed beside it, unconnected. With nothing selected, it goes at the end of the top level.
+ * the new one placed beside it, unconnected. With nothing selected, it is not connected to anything.
+ *
+ * `view` is what the person is looking at: a new card at the top level goes at its centre (or the nearest place that is free
+ * and on screen), so it appears where they are looking. Inside a group it still goes beside the selected step.
  */
-export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind: PaletteKind): { edit: Edit; id: string; note?: string } {
+export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind: PaletteKind, view?: ViewHint | null): { edit: Edit; id: string; note?: string } {
   const sel = selectedId ? stepOf(bundle, selectedId) : undefined;
   const parent = sel ? (sel.parent_step_id ?? null) : null;
   const siblings = bundle.steps.filter((s) => (s.parent_step_id ?? null) === parent);
@@ -68,7 +126,14 @@ export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind:
   // After a step with branches the right is crowded: put the new one just below it, where it is easy to find.
   const x0 = sel ? Number(sel.x) + (branches ? 0 : SLOT.x) : siblings.reduce((m, s) => Math.max(m, Number(s.x) + SLOT.x), 0);
   const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
-  const { x, y } = freeSpot(bundle, parent, x0, y0);
+  // A new group is drawn open around its first step.
+  const size =
+    kind === "group"
+      ? { width: Math.max(EMPTY_GROUP.width, GROUP_PADDING.left + CARD_SIZE.width + GROUP_PADDING.right), height: GROUP_PADDING.top + CARD_SIZE.height + GROUP_PADDING.bottom }
+      : kind === "start" || kind === "end"
+        ? TERMINAL_SIZE
+        : CARD_SIZE;
+  const { x, y } = view && parent === null ? nearestFreeSpot(bundle, view, size) : freeSpot(bundle, parent, x0, y0);
 
   let added: StepRow;
   const extra: StepRow[] = [];

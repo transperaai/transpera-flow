@@ -67,7 +67,7 @@ export function ProcessesTable({
               Type
               <Help
                 label="Type"
-                description="Sales pipeline is how new work comes in and is won. Client work is a recurring process for clients you already have, like a monthly report."
+                description="Sales pipeline is how new work comes in and is won. Client work is a recurring process this company runs for its own existing clients, like a monthly report."
                 example="Northbeam's sales pipeline is a pipeline; its monthly reporting is client work."
               />
             </th>

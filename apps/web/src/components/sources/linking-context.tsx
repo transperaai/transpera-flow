@@ -64,6 +64,7 @@ export function LinkedSources({
   linkText = "+ Link",
   heading = "Sources",
   hideTitle = false,
+  help = true,
   className,
 }: {
   target: SourceLinkTarget;
@@ -75,6 +76,8 @@ export function LinkedSources({
   heading?: string;
   /** The page already has a title for it (a section called Sources): show only the "+ Link". */
   hideTitle?: boolean;
+  /** Show the (i)s by the heading and the link button. Default true. */
+  help?: boolean;
   className?: string;
 }) {
   const linking = useSourceLinking();
@@ -86,7 +89,7 @@ export function LinkedSources({
         {!hideTitle && (
           <h4 className="flex items-center text-[11px] font-semibold tracking-wide text-fg-3 uppercase">
             {heading}
-            <Help {...LINKED_SOURCES_HELP.sources} />
+            {help && <Help {...LINKED_SOURCES_HELP.sources} />}
           </h4>
         )}
         {linking.canEdit && (
@@ -94,7 +97,7 @@ export function LinkedSources({
             <Button type="button" variant="ghost" size="sm" onClick={() => linking.open(target, label)} aria-label={`Link a source to ${label}`}>
               {linkText}
             </Button>
-            <Help {...LINKED_SOURCES_HELP.link} />
+            {help && <Help {...LINKED_SOURCES_HELP.link} />}
           </span>
         )}
       </div>
