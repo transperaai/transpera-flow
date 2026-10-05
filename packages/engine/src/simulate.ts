@@ -109,7 +109,10 @@ interface SimEntity extends TraceEntity {
   svc: number;
   /** Set for a servicing task. */
   task?: Task;
-  /** Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits. Null until it first reaches a step in a loop. */
+  /**
+   * Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits; then, from `nLoops` on, for each
+   * loop's steps how many times (up to 2) the item has visited it in its stay in the loop. Null until it first reaches a step in a loop.
+   */
   lp: Uint8Array | null;
 }
 
@@ -122,6 +125,9 @@ interface LoopRun {
   def: Loop;
   idx: number;
   body: Set<string>;
+  /** Where its steps' visit counts start in `SimEntity.lp`, and each step's place among them. */
+  off: number;
+  pos: Map<string, number>;
   redo: boolean;
   /**
    * Counted as events in the measured window, so long loops aren't under-counted: items sent back for the first
@@ -283,8 +289,9 @@ interface StepState {
   routes: Route[] | null;
   /** Where each of the step's edges (`s.next`) leads. */
   targets: Target[];
-  /** The rework loops whose body holds this step (empty for most). */
+  /** The rework loops whose body holds this step (empty for most), and where this step's visit count is in an item's `lp` for each. */
   loops: LoopRun[];
+  loopSlots: number[];
   /** With a market: which of `s.next` lead to the sale (see `signingEdges`); null when conv doesn't apply here. */
   winEdges: EdgeKind[] | null;
   /** With a market: the sale is still ahead (a lost end can be reached from here), so "time to decide" applies to its external wait. */
@@ -748,6 +755,7 @@ export function runOnce(
           : null,
       targets: [],
       loops: [],
+      loopSlots: [],
       winEdges: null,
       beforeSale: false,
       acc: s.role !== null && Object.hasOwn(roleAcc, s.role) ? roleAcc[s.role]! : null,
@@ -775,6 +783,8 @@ export function runOnce(
     def,
     idx,
     body: new Set(def.body),
+    off: 0,
+    pos: new Map(def.body.map((id, i) => [id, i])),
     redo: def.kind === "redo",
     went: 0,
     clean: 0,
@@ -788,6 +798,12 @@ export function runOnce(
   // Innermost first (smallest body, then loop order): a repeat pass is counted once, in the first active loop.
   for (const st of stepList) st.loops.sort((a, b) => a.body.size - b.body.size || a.idx - b.idx);
   const nLoops = loopRuns.length;
+  let lpSize = nLoops;
+  for (const L of loopRuns) {
+    L.off = lpSize;
+    lpSize += L.body.size;
+  }
+  for (const st of stepList) st.loopSlots = st.loops.map((L) => L.off + L.pos.get(st.s.id)!);
   /** All repeat passes together, so loops that overlap are not double counted. */
   const reworkRoles = new Map<string, number>();
   let reworkElapsed = 0;
@@ -1682,9 +1698,13 @@ export function runOnce(
       // An item reaching any step of a loop's region is inside it, wherever it joined (and whenever: warm-up entrants count when they leave).
       let f = e.lp;
       if (!f) {
-        f = e.lp = new Uint8Array(nLoops);
+        f = e.lp = new Uint8Array(lpSize);
       }
-      for (let i = 0; i < lps.length; i++) f[lps[i]!.idx]! |= LP_INSIDE;
+      const slots = st.loopSlots;
+      for (let i = 0; i < lps.length; i++) {
+        f[lps[i]!.idx]! |= LP_INSIDE;
+        if (f[slots[i]!]! < 2) f[slots[i]!]!++;
+      }
     }
     if (!st.staffed) {
       startService(e, st, null, t);
@@ -1778,7 +1798,7 @@ export function runOnce(
       st.stat.handsOnN++;
       st.stat.stretchSum += dur - handsOn;
       if (st.loops.length && e.lp && t >= 0) {
-        const L = repeatLoop(st.loops, e.lp);
+        const L = repeatLoop(st.loops, st.loopSlots, e.lp);
         if (L) {
           const role = st.s.role ?? p.person.roles[0] ?? "unassigned";
           L.roleHours.set(role, (L.roleHours.get(role) ?? 0) + handsOn);
@@ -1844,7 +1864,7 @@ export function runOnce(
     const lp = lps.length ? e.lp : null;
     if (lp) {
       // Time at a step on a repeat pass is what the loop adds to the item's cycle time (in the innermost loop it is on).
-      const L = repeatLoop(lps, lp);
+      const L = repeatLoop(lps, st.loopSlots, lp);
       if (L && t >= 0) {
         // Counted whole when the pass ends (as a rate), not clipped to the window, so passes that began before it aren't shortened.
         const x = t - e.seg!.tQ;
@@ -1910,8 +1930,9 @@ export function runOnce(
   }
 
   /** The innermost loop the item is on a repeat pass of, among a step's loops (sorted innermost first). */
-  function repeatLoop(lps: LoopRun[], lp: Uint8Array): LoopRun | null {
-    for (let i = 0; i < lps.length; i++) if (lp[lps[i]!.idx]! & LP_WENT) return lps[i]!;
+  function repeatLoop(lps: LoopRun[], slots: number[], lp: Uint8Array): LoopRun | null {
+    // A repeat pass: the item went round, and has been to this step before in its stay (a step it joined past is first seen after the send-back).
+    for (let i = 0; i < lps.length; i++) if (lp[lps[i]!.idx]! & LP_WENT && lp[slots[i]!]! >= 2) return lps[i]!;
     return null;
   }
 
@@ -1941,6 +1962,7 @@ export function runOnce(
       else L.clean++;
     }
     f[L.idx] = 0;
+    f.fill(0, L.off, L.off + L.body.size);
   }
 
   /**

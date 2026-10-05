@@ -228,12 +228,14 @@ describe("loop outputs are unbiased and add up", () => {
     expect(detectLoops(flipped)).toEqual(detectLoops(m));
     for (const x of [m, flipped]) {
       const l = simulate(x, 20, 1).loops![0]!;
-      // Every item goes round with chance 0.3, wherever it joined; a round is 2 h (b and c), 0.3 / 0.7 rounds an item.
+      // Every item goes round with chance 0.3, wherever it joined.
       expect(l.share.mean).toBeGreaterThan(0.26);
       expect(l.share.mean).toBeLessThan(0.34);
-      const expected = 4 * (52 / 12) * (0.3 / 0.7) * 2;
-      expect(l.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(expected * 0.88);
-      expect(l.extraHandsOnHoursPerMonthTotal.mean).toBeLessThan(expected * 1.12);
+      // Rework is a visit beyond the first to a step in the stay. Joining at b: b and c each 1 / 0.7 visits, 0.857 h of repeats.
+      // Joining at c: c repeats 0.429; b is first visited after the first send-back (0.429 visits, 0.3 of them first): 0.129. 0.557 h.
+      const expected = 4 * (52 / 12) * ((0.857143 + 0.557143) / 2);
+      expect(l.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(expected * 0.93);
+      expect(l.extraHandsOnHoursPerMonthTotal.mean).toBeLessThan(expected * 1.07);
     }
   });
 
