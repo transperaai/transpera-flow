@@ -63,7 +63,7 @@ const step = (id: string, name: string, kind: string, extra: Record<string, unkn
 function node(name: string, source: string) {
   const [a, b, d, w, l] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   return {
-    ids: { review: b, decide: d },
+    ids: { review: b, decide: d, won: w, lost: l },
     node: {
       id: randomUUID(),
       parent_id: null,
@@ -77,7 +77,7 @@ function node(name: string, source: string) {
           work_hours: 0.25,
           provenance: { work_hours: { source: "estimated", evidence: [{ source_id: source, speaker: "Sam", quote: "Fifteen minutes.", timestamp: "00:01", value: 0.25 }] } },
         }),
-        step(d, "Decide", "decision", { provenance: { branch_odds: { source: "estimated", defaulted: true, note: "No odds given." } } }),
+        step(d, "Decide", "decision", { provenance: { branch_odds: { source: "estimated", defaulted: true, was: { [w]: 0.5, [l]: 0.5 }, note: "No odds given." } } }),
         step(w, "Won", "end"),
         step(l, "Lost", "end", { outcome: "lost" }),
       ],
@@ -95,7 +95,8 @@ const count = async (sql: string, params: unknown[] = []) => Number((await db.cl
 
 function extras(source: string, proc: string, stepId: string) {
   return {
-    sources: [{ id: source, kind: "transcript", title: "Talk with Sam", speakers: ["Sam"], recorded_at: "2026-09-30", body: "Sam: Fifteen minutes." }],
+    import_source: "talk.json",
+    sources: [{ ref: source, kind: "transcript", title: `Talk with Sam ${source.slice(0, 8)}`, speakers: ["Sam"], recorded_at: "2026-09-30", body: "Sam: Fifteen minutes." }],
     first_principles: { job_who: "A founder", job_done: "Signed", statements: [{ text: "Leads go cold", kind: "truth", source: "Sam", test: "", linked_parameter: null }], requirements: [], deletes: [], improvements: [], why_problem: "", why_chain: [""], root_cause: "", measures: [] },
     suggestions: [
       { target_table: "people", target_id: null, patch: { set: { name: "Bundle Person", fte: 1 } }, evidence: [{ source_id: source, speaker: "Sam", quote: "Fifteen minutes.", timestamp: "00:01" }], note: "Assumed: named in the SOP" },
@@ -119,20 +120,32 @@ describe("import_process_bundle", () => {
       expect(r.processes).toHaveLength(1);
       const rev = r.processes[0].revision_id;
 
-      expect((await c.query("select kind, title, speakers, recorded_at::text d, body, created_by from sources where id = $1", [source])).rows[0]).toMatchObject({ kind: "transcript", title: "Talk with Sam", speakers: ["Sam"], d: "2026-09-30", created_by: editor.id });
+      // The database made the source's id; the placeholder the file cited is gone from everything written.
+      const made = (await c.query("select id, kind, title, speakers, recorded_at::text d, body, created_by from sources where title = $1", [`Talk with Sam ${source.slice(0, 8)}`])).rows;
+      expect(made).toHaveLength(1);
+      expect(made[0]).toMatchObject({ kind: "transcript", speakers: ["Sam"], d: "2026-09-30", created_by: editor.id });
+      const sid = made[0].id as string;
+      expect(sid).not.toBe(source);
       // The source is linked to the process, and (by the step trigger) to the step that cites it: never "Not linked".
-      const links = (await c.query("select kind, process_id, step_id from source_links where source_id = $1 order by kind", [source])).rows;
+      const links = (await c.query("select kind, process_id, step_id from source_links where source_id = $1 order by kind", [sid])).rows;
       expect(links).toEqual([
         { kind: "process", process_id: n.node.id, step_id: null },
         { kind: "step", process_id: n.node.id, step_id: n.ids.review },
       ]);
       expect((await c.query("select job_who, job_done, statements, revision_id from first_principles where process_id = $1", [n.node.id])).rows[0]).toMatchObject({ job_who: "A founder", job_done: "Signed", revision_id: rev });
       const sugg = (await c.query("select target_table, status, created_via, note, evidence from suggestions where workspace_id = $1 and (patch -> 'set' ->> 'name') in ('Bundle Person', 'Bundle Role') order by target_table", [ws])).rows;
-      expect(sugg.map((s) => [s.target_table, s.status, s.created_via])).toEqual([["people", "pending", "mcp"], ["roles", "pending", "mcp"]]);
-      expect(sugg[0].evidence[0]).toMatchObject({ source_id: source, speaker: "Sam" });
+      expect(sugg.map((s) => [s.target_table, s.status, s.created_via])).toEqual([["people", "pending", "upload"], ["roles", "pending", "upload"]]);
+      expect(sugg[0].evidence[0]).toMatchObject({ source_id: sid, speaker: "Sam" });
+      expect((await c.query("select import_source from suggestions where workspace_id = $1 and created_via = 'upload'", [ws])).rows.every((r) => r.import_source === "talk.json")).toBe(true);
+      // The cited source id was rewritten inside the step's provenance too.
+      expect((await c.query("select provenance -> 'work_hours' -> 'evidence' -> 0 ->> 'source_id' s from steps where revision_id = $1 and name = 'Review'", [rev])).rows[0].s).toBe(sid);
       const props = (await c.query("select kind, status, title, payload from suggestion_proposals where workspace_id = $1 and title = 'Review is slow'", [ws])).rows;
       expect(props).toHaveLength(1);
       expect(props[0]).toMatchObject({ kind: "issue", status: "pending" });
+      expect((await c.query("select created_via, import_source, proposer_name from suggestion_proposals where title = 'Review is slow'", [])).rows[0]).toEqual({ created_via: "upload", import_source: "talk.json", proposer_name: null });
+      // Anything else a signed-in user inserts is still recorded as MCP.
+      await c.query("insert into suggestion_proposals (workspace_id, kind, title, payload, created_via, import_source) values ($1, 'issue', 'By hand', '{}', 'upload', 'x')", [ws]);
+      expect((await c.query("select created_via, import_source from suggestion_proposals where title = 'By hand'")).rows[0]).toEqual({ created_via: "mcp", import_source: null });
       expect(props[0].payload.links[0]).toEqual({ process_id: n.node.id, step_id: n.ids.review });
     });
     // Nothing company-level was applied.
@@ -258,5 +271,79 @@ describe("the branch-odds marker", () => {
     expect(await marker(draft, n.ids.decide)).toBeNull();
     // The published version keeps its marker: history is not edited.
     expect(await marker(rev, n.ids.decide)).toMatchObject({ defaulted: true });
+  });
+});
+
+describe("hardening", () => {
+  const call = (n: ReturnType<typeof node>, ex: Record<string, unknown>) =>
+    as(editor.claims, async (c) => (await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify(ex)])).rows[0].r);
+
+  it("a section that is JSON null is a section that is left out", async () => {
+    const r = await call(node("Bundle nulls", ""), { sources: null, suggestions: null, proposals: null, first_principles: null, import_source: null });
+    expect(r).toMatchObject({ sources: 0, suggestions: 0, proposals: 0, first_principles: false });
+  });
+
+  it("refuses more than 2,000,000 characters of source text in all, in plain words", async () => {
+    const big = "x".repeat(400_000);
+    const src = (t: string) => ({ ref: randomUUID(), kind: "notes", title: t, speakers: [], body: big });
+    await expect(call(node("Bundle big", ""), { sources: ["A", "B", "C", "D", "E", "F"].map(src) })).rejects.toThrow(/The sources' text is too long: 2400000 characters in all, and one upload takes at most 2,000,000/);
+    await expect(call(node("Bundle big one", ""), { sources: ["A", "B", "C", "D", "E"].map(src) })).resolves.toMatchObject({ sources: 5 });
+  });
+
+  it("never takes a source's id from the caller: naming an id that exists makes a new source and says nothing about the other", async () => {
+    const existing = (await db.client.query("select id from sources where workspace_id = $1 limit 1", [ws])).rows[0].id as string;
+    const before = (await db.client.query("select title from sources where id = $1", [existing])).rows[0].title;
+    const r = await call(node("Bundle ref clash", existing), { sources: [{ ref: existing, kind: "notes", title: "Made anyway" }] });
+    expect(r.sources).toBe(1);
+    expect((await db.client.query("select id from sources where title = 'Made anyway'")).rows[0].id).not.toBe(existing);
+    expect((await db.client.query("select title from sources where id = $1", [existing])).rows[0].title).toBe(before);
+  });
+
+  /** A decision with three branches, none given odds (the marker holds what they were defaulted to). */
+  async function three(name: string) {
+    const n = node(name, "");
+    const m = randomUUID();
+    n.node.steps.push(step(m, "Maybe", "end", { outcome: "done" }));
+    n.node.edges.push({ id: randomUUID(), from_step_id: n.ids.decide, to_step_id: m, probability: 0.5, label: "Maybe" } as never);
+    const d = n.node.steps.find((x) => x.name === "Decide")!;
+    d.provenance = { branch_odds: { source: "estimated", defaulted: true, was: { [n.ids.won]: 0.5, [n.ids.lost]: 0.5, [m]: 0.5 } } };
+    const rev = (await call(n, {})).processes[0].revision_id as string;
+    return { n, rev, m };
+  }
+  const markerOf = async (rev: string, id: string) => (await db.client.query("select provenance ? 'branch_odds' h from steps where revision_id = $1 and id = $2", [rev, id])).rows[0].h as boolean;
+
+  it("with three branches, giving odds to one leaves the warning, and the second clears it (the last is inferred)", async () => {
+    const { n, rev } = await three("Odds three");
+    expect(await markerOf(rev, n.ids.decide)).toBe(true);
+    await as(editor.claims, (c) => c.query("update edges set probability = 0.2 where revision_id = $1 and from_step_id = $2 and label = 'Wins'", [rev, n.ids.decide]));
+    expect(await markerOf(rev, n.ids.decide)).toBe(true);
+    await as(editor.claims, (c) => c.query("update edges set probability = 0.3 where revision_id = $1 and from_step_id = $2 and label = 'Loses'", [rev, n.ids.decide]));
+    expect(await markerOf(rev, n.ids.decide)).toBe(false);
+  });
+
+  it("adding or removing a branch clears the marker, but the import's own edge inserts do not", async () => {
+    const a = await three("Odds insert");
+    expect(await markerOf(a.rev, a.n.ids.decide)).toBe(true);
+    const end = randomUUID();
+    await as(editor.claims, async (c) => {
+      await c.query("insert into steps (id, revision_id, workspace_id, process_id, name, kind, outcome, x, y) select $1, $2, workspace_id, process_id, 'Extra', 'end', 'done', 0, 0 from steps where revision_id = $2 limit 1", [end, a.rev]);
+      await c.query("insert into edges (revision_id, workspace_id, process_id, from_step_id, to_step_id, probability) select $1, workspace_id, process_id, $2, $3, 0.1 from steps where revision_id = $1 limit 1", [a.rev, a.n.ids.decide, end]);
+    });
+    expect(await markerOf(a.rev, a.n.ids.decide)).toBe(false);
+    const b = await three("Odds delete");
+    await as(editor.claims, (c) => c.query("delete from edges where revision_id = $1 and from_step_id = $2 and label = 'Maybe'", [b.rev, b.n.ids.decide]));
+    expect(await markerOf(b.rev, b.n.ids.decide)).toBe(false);
+  });
+
+  it("never touches a published version: editing a draft leaves the published copy's marker", async () => {
+    const { n, rev } = await three("Odds published");
+    await as(editor.claims, (c) => c.query("select public.publish_process($1, true)", [n.node.id]));
+    const draft = await as(editor.claims, async (c) => (await c.query("select public.open_draft($1) r", [n.node.id])).rows[0].r.revision_id as string);
+    await as(editor.claims, async (c) => {
+      await c.query("update edges set probability = 0.2 where revision_id = $1 and from_step_id = $2 and label = 'Wins'", [draft, n.ids.decide]);
+      await c.query("update edges set probability = 0.3 where revision_id = $1 and from_step_id = $2 and label = 'Loses'", [draft, n.ids.decide]);
+    });
+    expect(await markerOf(draft, n.ids.decide)).toBe(false);
+    expect(await markerOf(rev, n.ids.decide)).toBe(true);
   });
 });

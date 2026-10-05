@@ -1045,7 +1045,7 @@ export function planImport(
     const share = missing.length ? Math.max(0, round((1 - given) / missing.length)) : 0;
     const fromName = rows.get(from)?.name ?? from;
     if (missing.length && list.length > 1) {
-      oddsMissing.add(from);
+      if (missing.length > 1) oddsMissing.add(from);
       assumptions.push(`'${fromName}': ${missing.length === 1 ? "one branch's" : `${missing.length} branches'`} probability defaulted to ${Math.round(share * 1000) / 10}% (the share the others leave).`);
     }
     const existing = edges.filter((e) => e.from_step_id === from);

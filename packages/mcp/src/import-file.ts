@@ -316,6 +316,7 @@ export async function importProcessFile(ctx: ToolContext, file: ProcessFile, opt
     warnings.push(...plan.notes, ...plan.conflicts);
     bundle = {
       processId: ids.processId,
+      importSource: opts.source,
       sources: plan.sources,
       extras: {
         ...(plan.firstPrinciples ? { first_principles: plan.firstPrinciples as never } : {}),

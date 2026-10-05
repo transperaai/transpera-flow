@@ -467,7 +467,17 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
           }
           // Quotes that give different odds for one branch are a conflict between the sources.
           const stated = new Set(evidence.filter((c) => c.value !== undefined).map((c) => c.value));
-          if (stated.size > 1) conflicts.push(`${where}: the sources give different odds (${evidence.filter((c) => c.value !== undefined).map((c) => `${env.sources.find((s) => s.id === c.source)?.title ?? c.source}${c.speaker ? ` (${c.speaker})` : ""}: ${round((c.value as number) * 100)}%`).join("; ")}). The odds in the file are used; check them.`);
+          if (stated.size > 1) conflicts.push(`${where}: the sources give different odds (${evidence.filter((c) => c.value !== undefined).map((c) => `${env.sources.find((s) => s.id === c.source)?.title ?? c.source}${c.speaker ? ` (${c.speaker})` : ""}: ${round((c.value as number) * 100)}%`).join("; ")}). ${probability === undefined ? "The middle one is used" : "The odds in the file are used"}; check them.`);
+          // Odds given only by what was quoted: the quoted number is the probability (the middle one when the quotes disagree), so the
+          // preview, the check for gaps and the import all see the same odds.
+          if (probability === undefined) {
+            const nums = evidence.flatMap((c) => (c.value !== undefined ? [c.value] : [])).sort((a, b) => a - b);
+            if (nums.length) {
+              const mid = nums.length % 2 ? nums[(nums.length - 1) / 2]! : (nums[nums.length / 2 - 1]! + nums[nums.length / 2]!) / 2;
+              link.probability = round(mid);
+              probability = link.probability;
+            }
+          }
         }
         if (assumed) {
           link.assumed = assumed;

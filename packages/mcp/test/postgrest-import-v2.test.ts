@@ -241,6 +241,74 @@ describe.skipIf(!POSTGREST_URL)("uploading a transpera-process/2 file over Postg
     expect(decides.provenance.branch_odds).toBeUndefined();
   });
 
+  it("odds given only as quoted values round-trip: the preview, the checker and the stored edges agree, and nothing is flagged", async () => {
+    const file = checkProcessFile({
+      format: "transpera-process/2",
+      name: `Quoted odds ${randomUUID().slice(0, 6)}`,
+      sources: [{ id: "t", title: "Talk" }],
+      steps: [
+        { id: "s", name: "Start here", type: "start" },
+        { id: "d", name: "Client decides", type: "decision" },
+        { id: "y", name: "Yes", type: "end" },
+        { id: "n", name: "No", type: "end" },
+        { id: "m", name: "Maybe", type: "end" },
+      ],
+      links: [
+        { from: "s", to: "d" },
+        { from: "d", to: "y", evidence: [{ source: "t", quote: "Six in ten sign.", value: 0.6 }] },
+        { from: "d", to: "n", evidence: [{ source: "t", quote: "About a fifth say no.", value: 0.2 }, { source: "t", quote: "More like a quarter.", value: 0.3 }] },
+        { from: "d", to: "m", probability: 0.2 },
+      ],
+    }).file!;
+    expect(file.links.map((l) => l.probability)).toEqual([undefined, 0.6, 0.25, 0.2]);
+    const preview = await previewProcessFile(editorCtx, workspaceId, file);
+    expect(preview.gap.gaps.map((g) => g.text)).not.toContain("Client decides: branch odds missing");
+    const r = await importProcessFile(editorCtx, file, { workspaceId, source: "quoted.json" });
+    const edges = await q("select e.probability::float8 p, t.name from edges e join steps t on t.id = e.to_step_id and t.revision_id = e.revision_id where e.revision_id = $1 and e.from_step_id = (select id from steps where revision_id = $1 and name = 'Client decides')", [r.revision_id]);
+    expect(Object.fromEntries(edges.map((e) => [e.name, e.p]))).toEqual({ Yes: 0.6, No: 0.25, Maybe: 0.2 });
+    const decides = (await q("select provenance from steps where revision_id = $1 and name = 'Client decides'", [r.revision_id]))[0];
+    expect(decides.provenance.branch_odds).toBeUndefined();
+    const proc = (await q("select id from processes where draft_revision_id = $1", [r.revision_id]))[0].id;
+    const steps = await q("select * from steps where revision_id = $1", [r.revision_id]);
+    const edgeRows = await q("select * from edges where revision_id = $1", [r.revision_id]);
+    const model = findGaps(gapInputFromBundle({ steps, edges: edgeRows, process: (await q("select * from processes where id = $1", [proc]))[0], leadSources: [{ volume_week: 1 }], servicingLinks: [] } as never));
+    expect(model.map((g) => g.text)).toEqual([]);
+  });
+
+  it("a two-branch decision with one branch's odds given takes the rest for the other and is not flagged", async () => {
+    const file = checkProcessFile({
+      format: "transpera-process/2",
+      name: `Two branch ${randomUUID().slice(0, 6)}`,
+      steps: [
+        { id: "s", name: "Start here", type: "start" },
+        { id: "d", name: "Client decides", type: "decision" },
+        { id: "y", name: "Yes", type: "end" },
+        { id: "n", name: "No", type: "end" },
+      ],
+      links: [{ from: "s", to: "d" }, { from: "d", to: "y", probability: 0.7 }, { from: "d", to: "n" }],
+    }).file!;
+    const preview = await previewProcessFile(editorCtx, workspaceId, file);
+    expect(preview.gap.gaps.map((g) => g.text)).not.toContain("Client decides: branch odds missing");
+    const r = await importProcessFile(editorCtx, file, { workspaceId, source: "two.json" });
+    const no = (await q("select e.probability::float8 p from edges e join steps t on t.id = e.to_step_id and t.revision_id = e.revision_id where e.revision_id = $1 and t.name = 'No'", [r.revision_id]))[0];
+    expect(no.p).toBeCloseTo(0.3);
+    expect((await q("select provenance from steps where revision_id = $1 and name = 'Client decides'", [r.revision_id]))[0].provenance.branch_odds).toBeUndefined();
+  });
+
+  it("an upload's suggestions and proposals say where they came from, and the reviewer sees it", async () => {
+    const r = await importProcessFile(editorCtx, v2(), { workspaceId, source: "from-claude.json" });
+    expect(r.bundle!.proposals).toBe(1);
+    const rows = await q("select created_via, import_source from suggestions where workspace_id = $1 and import_source = 'from-claude.json'", [workspaceId]);
+    expect(rows.length).toBeGreaterThan(2);
+    expect(rows.every((x) => x.created_via === "upload")).toBe(true);
+    const prop = await q("select created_via, import_source from suggestion_proposals where workspace_id = $1 and import_source = 'from-claude.json'", [workspaceId]);
+    expect(prop).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
+    // The app reads the proposal's source column as the signed-in user.
+    const read = await editorCtx.db.from("suggestion_proposals").select("created_via, import_source").eq("import_source", "from-claude.json");
+    expect(read.error).toBeNull();
+    expect(read.data).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
+  });
+
   describe("Missing for simulation", () => {
     const gapsOf = async (revisionId: string, processId: string) => {
       const proc = (await q("select * from processes where id = $1", [processId]))[0];

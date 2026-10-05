@@ -232,7 +232,7 @@ function SuggestionCard({
   onAccept: () => void;
   onReject: () => void;
 }) {
-  const view = describeSuggestion(s, model);
+  const view = describeSuggestion(s, model, s.created_via === "upload" ? `Upload (${s.import_source ?? "a file"})` : "Claude");
   const open = s.status === "pending";
   const headingId = `suggestion-${s.id}`;
   return (

@@ -80,7 +80,9 @@ describe("on a file", () => {
   });
 
   it("a decision with a branch missing odds", () => {
-    expect(gaps(file((f) => delete f.links[4].probability))).toEqual(["Client decides: branch odds missing"]);
+    expect(gaps(file((f) => (delete f.links[3].probability, delete f.links[4].probability)))).toEqual(["Client decides: branch odds missing"]);
+    // With one branch given, the other is the share it leaves: not a gap.
+    expect(gaps(file((f) => delete f.links[4].probability))).toEqual([]);
     expect(gaps(file((f) => (f.links.splice(4, 1), f.steps.pop())))).toEqual([]);
   });
 
@@ -93,6 +95,7 @@ describe("on a file", () => {
     expect(gaps(f)).toEqual([]);
     const reason = file((x) => {
       delete x.links[3].probability;
+      delete x.links[4].probability;
       x.links[3].assumed = "A guess.";
     });
     expect(gaps(reason)).toEqual(["Client decides: branch odds missing"]);
@@ -121,8 +124,8 @@ const model = (steps: ReturnType<typeof row>[], extra: Record<string, unknown> =
   gapInputFromBundle({
     steps,
     edges: [
-      { from_step_id: "d", to_step_id: "y" },
-      { from_step_id: "d", to_step_id: "n" },
+      { from_step_id: "d", to_step_id: "y", probability: 0.5 },
+      { from_step_id: "d", to_step_id: "n", probability: 0.5 },
     ],
     process: { id: "p1", kind: "pipeline" },
     leadSources: [{ volume_week: 5 }],
@@ -135,7 +138,7 @@ describe("on a process's model", () => {
   const steps = () => [
     row("w", "Write proposal", "task", { provenance: { work_hours: defaulted("task") } }),
     row("p", "Wait for payment", "wait", { provenance: { wait_hours: defaulted("wait") } }),
-    row("d", "Client decides", "decision", { provenance: { branch_odds: { source: "estimated", defaulted: true } } }),
+    row("d", "Client decides", "decision", { provenance: { branch_odds: { source: "estimated", defaulted: true, was: { y: 0.5, n: 0.5 } } } }),
     row("y", "Yes", "end"),
     row("n", "No", "end"),
   ];
@@ -187,6 +190,29 @@ describe("on a process's model", () => {
     const run = (e: ReturnType<typeof edges>) => texts(gapInputFromBundle({ steps: marked, edges: e, process: { id: "p", kind: "pipeline" }, leadSources: [{ volume_week: 1 }] } as never));
     expect(run(edges(0.5, 0.5))).toEqual(["Client decides: branch odds missing"]);
     expect(run(edges(0.7, 0.3))).toEqual([]);
+  });
+
+  it("a decision inside a held child process is a gap of the parent; the company map has none", () => {
+    const child = { process: { id: "kid" }, steps: [row("c1", "Child work", "task", { provenance: { work_hours: defaulted("task") } })], edges: [] };
+    const parent = [row("h", "Holds a child", "subprocess", { child_process_id: "kid" })];
+    const base = { steps: parent, edges: [], process: { id: "p1", kind: "pipeline" }, leadSources: [{ volume_week: 1 }] };
+    const input = gapInputFromBundle({ ...base, otherProcesses: [child, { process: { id: "grand" }, steps: [], edges: [] }] } as never);
+    expect(texts(input)).toEqual(["Child work has no role", "Child work has no hands-on time"]);
+    // Without the child's steps loaded there is nothing to say; a loop of holders is read once.
+    expect(texts(gapInputFromBundle(base as never))).toEqual([]);
+    const loop = { process: { id: "kid" }, steps: [row("c2", "Back to parent", "subprocess", { child_process_id: "p1" })], edges: [] };
+    expect(texts(gapInputFromBundle({ ...base, otherProcesses: [loop] } as never))).toEqual([]);
+    const company = gapInputFromBundle({ steps: [row("w", "Holder", "task", { provenance: { work_hours: defaulted("task") } })], edges: [], process: { id: "co", kind: "pipeline", is_company: true }, leadSources: [] } as never);
+    expect(findGaps(company)).toEqual([]);
+  });
+
+  it("with three branches, odds clear in the editor once two are written (the last is inferred)", () => {
+    const d = row("d", "Decides", "decision", { provenance: { branch_odds: { defaulted: true, was: { a: 0.3, b: 0.3, c: 0.4 } } } });
+    const run = (pa: number, pb: number) =>
+      texts(gapInputFromBundle({ steps: [d], edges: [{ from_step_id: "d", to_step_id: "a", probability: pa }, { from_step_id: "d", to_step_id: "b", probability: pb }, { from_step_id: "d", to_step_id: "c", probability: 0.4 }], process: { id: "p", kind: "pipeline" }, leadSources: [{ volume_week: 1 }] } as never));
+    expect(run(0.3, 0.3)).toEqual(["Decides: branch odds missing"]);
+    expect(run(0.2, 0.3)).toEqual(["Decides: branch odds missing"]);
+    expect(run(0.2, 0.4)).toEqual([]);
   });
 
   it("a decision with one way out needs no odds", () => {

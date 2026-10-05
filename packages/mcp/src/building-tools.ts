@@ -687,7 +687,9 @@ interface ImportScope {
 export interface ImportBundle {
   /** The new process's id. */
   processId: string;
-  /** Sources to add, with the ids the steps' evidence cites. Each is linked to the process. */
+  /** The file name or link, shown in the review queue as "Upload (name)". */
+  importSource: string;
+  /** Sources to add. Each `id` is a placeholder the evidence cites; the database replaces it with the id it makes. Each is linked to the process. */
   sources: { id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; body: string | null }[];
   /** The rest of the extras, as `import_process_bundle` takes them: `first_principles` (its columns), `suggestions`, `proposals`. */
   extras: { first_principles?: Json; suggestions?: Json; proposals?: Json };
@@ -879,7 +881,7 @@ async function prepareImport(
               p_workspace: ws.id,
               p_nodes: nodes as unknown as Json,
               p_adopt: adopts as unknown as Json,
-              p_extras: { sources: bundle.sources, ...bundle.extras } as unknown as Json,
+              p_extras: { sources: bundle.sources.map(({ id, ...rest }) => ({ ref: id, ...rest })), import_source: bundle.importSource, ...bundle.extras } as unknown as Json,
             })
           : await ctx.db.rpc("import_new_process", { p_workspace: ws.id, p_nodes: nodes as unknown as Json, p_adopt: adopts as unknown as Json });
         if (error) {

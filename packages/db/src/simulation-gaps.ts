@@ -120,7 +120,8 @@ export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: stri
         role: !!s.role && opts.hasRole(s.role),
         handsOn: stated(s.hands_on_hours, s.evidence?.hands_on_hours, s.hands_on_range),
         wait: stated(s.wait_hours, s.evidence?.wait_hours, s.wait_range),
-        odds: kind !== "decision" || leaving.length < 2 || leaving.every((l) => stated(l.probability, l.evidence, undefined)),
+        // One branch without odds is the share the others leave (the importer infers it); two or more are not.
+        odds: kind !== "decision" || leaving.length < 2 || leaving.filter((l) => !stated(l.probability, l.evidence, undefined)).length <= 1,
       };
     }),
   };
@@ -145,7 +146,9 @@ function oddsDefaulted(step: Pick<StepRow, "provenance">, out: readonly { to_ste
   // The marker is taken off by the database when a probability is written; the model a person is editing hasn't heard yet, so a
   // branch that no longer has the probability it was given by default counts as filled in already.
   const was = isObject(p.was) ? p.was : null;
-  return !was || out.every((e) => Number(was[e.to_step_id]) === Number(e.probability));
+  if (!was) return false;
+  // With at most one branch still at its defaulted value, the last is inferred (the database clears the marker at the same point).
+  return out.filter((e) => was[e.to_step_id] !== undefined && Number(was[e.to_step_id]) === Number(e.probability)).length > 1;
 }
 
 /**
@@ -153,17 +156,33 @@ function oddsDefaulted(step: Pick<StepRow, "provenance">, out: readonly { to_ste
  * company map has no simulation and no gaps. Demand is read from the bundle when it was loaded (`leadSources`,
  * `servicingLinks`); a bundle without it says "unknown" and no volume gap is raised.
  */
-export function gapInputFromBundle(bundle: Pick<ProcessBundle, "steps" | "edges" | "process" | "leadSources" | "servicingLinks">): GapInput {
-  const leaving = new Map<string, { to_step_id: string; probability: number }[]>();
-  for (const e of bundle.edges) leaving.set(e.from_step_id, [...(leaving.get(e.from_step_id) ?? []), e]);
+export function gapInputFromBundle(bundle: Pick<ProcessBundle, "steps" | "edges" | "process" | "leadSources" | "servicingLinks"> & { otherProcesses?: ProcessBundle["otherProcesses"] }): GapInput {
   const kind = bundle.process.kind;
+  if (bundle.process.is_company) return { kind, volume: "unknown", steps: [] };
+  // The processes held inside this one (a step that holds a child process), to any depth, count as part of it: the engine
+  // simulates them in its place, so a gap in a child is a gap in the parent.
+  const steps = [...bundle.steps];
+  const edges = [...bundle.edges];
+  const seen = new Set<string>([bundle.process.id]);
+  for (let i = 0; i < steps.length; i++) {
+    const child = steps[i]!.child_process_id;
+    if (!child || seen.has(child)) continue;
+    seen.add(child);
+    const part = bundle.otherProcesses?.find((p) => p.process.id === child);
+    if (part) {
+      steps.push(...part.steps);
+      edges.push(...part.edges);
+    }
+  }
+  const leaving = new Map<string, { to_step_id: string; probability: number }[]>();
+  for (const e of edges) leaving.set(e.from_step_id, [...(leaving.get(e.from_step_id) ?? []), e]);
   let volume: GapInput["volume"] = "unknown";
   if (kind === "pipeline" && bundle.leadSources) volume = bundle.leadSources.some((l) => Number(l.volume_week) > 0) ? "known" : "missing";
   if (kind === "servicing" && bundle.servicingLinks) volume = bundle.servicingLinks.some((l) => l.process_id === bundle.process.id) ? "known" : "missing";
   return {
     kind,
     volume,
-    steps: bundle.steps.map((s): GapStep => {
+    steps: steps.map((s): GapStep => {
       const k = s.kind === "task" ? "work" : s.kind === "wait" ? "wait" : s.kind === "decision" ? "decision" : "other";
       return {
         id: s.id,

@@ -265,6 +265,23 @@ describe("evidence on a step's numbers", () => {
     expect(checkProcessFile(f).conflicts?.[0]).toMatch(/The link from 'Work' to 'Finish': the sources give different odds \(Talk with Sam \(Sam\): 100%; Talk with Sam \(Sam\): 80%\)/);
   });
 
+  it("odds given only as a quoted value are the link's probability, so the preview, the gap check and the import agree", () => {
+    const f = base();
+    f.links[1].evidence = [cite({ value: 0.6 })];
+    expect(checkProcessFile(f).file!.links[1]!.probability).toBe(0.6);
+    // Quotes that disagree: the middle value is used and the disagreement is a conflict to settle.
+    const g = base();
+    g.links[1].evidence = [cite({ value: 0.2 }), cite({ value: 0.9 }), cite({ value: 0.4 })];
+    const out = checkProcessFile(g);
+    expect(out.file!.links[1]!.probability).toBe(0.4);
+    expect(out.conflicts?.[0]).toMatch(/the sources give different odds.*The middle one is used; check them\./);
+    // A stated probability always wins over the quotes.
+    const h = base();
+    h.links[1].probability = 0.5;
+    h.links[1].evidence = [cite({ value: 0.9 })];
+    expect(checkProcessFile(h).file!.links[1]!.probability).toBe(0.5);
+  });
+
   it("wants evidence as an object and assumed reasons as text", () => {
     const f = base();
     f.steps[1].evidence = [cite()];
