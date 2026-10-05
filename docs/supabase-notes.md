@@ -229,3 +229,14 @@ select proacl from pg_proc where pronamespace = 'public'::regnamespace and prona
 ```
 
 Expect one row, `authenticated` EXECUTE, and an ACL with an `authenticated=X/...` entry, no `anon=` and no `=X/...`.
+
+## All-or-nothing import and the link-fetch limit (B13 follow-ups, migration 20261128000000)
+
+Verified only against plain Postgres (`packages/db/test/import-atomic.test.ts`, and `packages/mcp/test/postgrest-import-file.test.ts` through PostgREST with the auth shim). `public.import_new_process` is `security invoker`, so the caller's RLS decides; it opens the draft through `open_draft` and inserts steps and edges with the same "union of keys, missing keys are null" semantics as a bulk PostgREST insert. `public.take_link_fetch` is `security definer` with an empty `search_path` and reads `auth.uid()`; its counter table `private.link_fetch_limits` has RLS on and no grants to `anon` or `authenticated`. The test database emulates Supabase's default privileges for the `public` schema only, so check on a real project, after applying:
+
+```sql
+select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name in ('import_new_process', 'take_link_fetch') and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1, 2;
+select grantee, privilege_type from information_schema.role_table_grants where table_schema = 'private' and table_name = 'link_fetch_limits' and grantee in ('anon', 'authenticated', 'PUBLIC');
+```
+
+Expect two rows (`authenticated` EXECUTE on each function) and no rows from the second query.

@@ -2934,6 +2934,10 @@ export type Database = {
         Args: { new_name: string; source_revision: string }
         Returns: Json
       }
+      import_new_process: {
+        Args: { p_adopt?: Json; p_nodes: Json; p_workspace: string }
+        Returns: Json
+      }
       is_agency_admin: { Args: never; Returns: boolean }
       is_free_mail_domain: { Args: { domain: string }; Returns: boolean }
       log_process_import: {
@@ -3061,6 +3065,7 @@ export type Database = {
         }
         Returns: Json
       }
+      take_link_fetch: { Args: never; Returns: number }
       unlinked_source_count: {
         Args: { p_workspace: string }
         Returns: number
