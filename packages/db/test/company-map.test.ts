@@ -233,7 +233,7 @@ describe("who may touch the company map", () => {
     };
     await flagged("update processes set name = 'Renamed' where id = $1", [company.id], /can't be renamed/);
     await flagged("update processes set live_revision_id = null where id = $1", [company.id], /must keep a live version/);
-    await flagged("delete from steps where revision_id = $1 and child_process_id is not null", [company.live_revision_id], /process library/);
+    await flagged("delete from steps where revision_id = $1 and child_process_id is not null", [company.live_revision_id], /taken off the company map by removing its card in a draft/);
     await flagged("insert into processes (workspace_id, name, is_company) values ($1, 'Second', true)", [ws], /made by the system/);
   });
 
