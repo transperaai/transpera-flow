@@ -285,11 +285,17 @@ describe.skipIf(!POSTGREST_URL)("extraction dry run (Tidewater Digital) over Pos
     expect(await call(client, "upsert_person", { workspace: "copperleaf-qa", name: "Ellie Marsh", fte: 0.8, note: "Reset check" })).toMatchObject({ ok: true });
     await client.close();
 
-    const others = async () => Number((await admin.query("select count(*) as n from workspaces where slug <> 'copperleaf-qa'")).rows[0].n);
+    // Other test files run in parallel on the same database and may add workspaces of their own meanwhile, so compare the
+    // workspaces that existed before by id: the reset must leave every one of them in place (and remove only copperleaf-qa).
+    const others = async () =>
+      new Set(((await admin.query("select id from workspaces where slug <> 'copperleaf-qa'")).rows as { id: string }[]).map((r) => r.id));
     const before = await others();
     await admin.query(sql("reset-workspace.sql"));
     expect(await qa()).toHaveLength(0);
-    expect(await others()).toBe(before);
+    const after = await others();
+    expect([...before].filter((id) => !after.has(id))).toEqual([]);
+    // ...and it creates none: anything new since `before` came from another test file, never from the QA scripts.
+    expect((await admin.query("select count(*)::int as n from workspaces where slug like 'copperleaf%'")).rows[0].n).toBe(0);
     expect((await admin.query("select 1 from people where name = 'Grace Adeyemi'")).rowCount).toBe(0);
 
     // It can be rerun, and reset again; resetting when there is nothing to remove is harmless.
