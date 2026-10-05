@@ -183,21 +183,22 @@ describe("a step's detail", () => {
   }, 60_000);
 });
 
-describe("adding from the Editor's palette", () => {
-  type Box = { id: string; l: number; t: number; r: number; b: number };
-  const cards = (page: Page): Promise<Box[]> =>
-    page.locator(".react-flow__node").evaluateAll((els) =>
-      els.map((e) => {
-        const q = e.getBoundingClientRect();
-        return { id: e.getAttribute("data-id")!, l: q.left, t: q.top, r: q.right, b: q.bottom };
-      }),
-    );
-  const panel = async (page: Page) => (await page.locator(".react-flow").boundingBox())!;
-  // The harness has no card styling, so a card is drawn bigger than the app's: judge by the card's middle, not its edges.
-  const centre = (c: Box) => ({ x: (c.l + c.r) / 2, y: (c.t + c.b) / 2 });
-  const within = (c: Box, p: { x: number; y: number; width: number; height: number }) => centre(c).x >= p.x && centre(c).x <= p.x + p.width && centre(c).y >= p.y && centre(c).y <= p.y + p.height;
-  const covers = (a: Box, b: Box) => centre(a).x > b.l && centre(a).x < b.r && centre(a).y > b.t && centre(a).y < b.b;
+type Box = { id: string; l: number; t: number; r: number; b: number };
+const cards = (page: Page): Promise<Box[]> =>
+  page.locator(".react-flow__node").evaluateAll((els) =>
+    els.map((e) => {
+      const q = e.getBoundingClientRect();
+      return { id: e.getAttribute("data-id")!, l: q.left, t: q.top, r: q.right, b: q.bottom };
+    }),
+  );
+const panel = async (page: Page) => (await page.locator(".react-flow").boundingBox())!;
+// The harness has no card styling, so a card is drawn bigger than the app's: judge by the card's middle, not its edges.
+const centre = (c: Box) => ({ x: (c.l + c.r) / 2, y: (c.t + c.b) / 2 });
+const within = (c: Box, p: { x: number; y: number; width: number; height: number }) => centre(c).x >= p.x && centre(c).x <= p.x + p.width && centre(c).y >= p.y && centre(c).y <= p.y + p.height;
+const covers = (a: Box, b: Box) => centre(a).x > b.l && centre(a).x < b.r && centre(a).y > b.t && centre(a).y < b.b;
 
+
+describe("adding from the Editor's palette", () => {
   for (const label of ["+ Step", "+ Decision", "+ Wait", "+ Group"]) {
     it(`${label} adds a card in view that does not sit on another`, async () => {
       const page = await mount({ editable: true, palette: true });
@@ -295,16 +296,92 @@ describe("the company map in the Editor (B11)", () => {
     await page.close();
   }, 60_000);
 
-  it("keeps every card: Delete does nothing to a process card", async () => {
-    const page = await mount({ editable: true, company: true });
-    await page.locator(".react-flow__node").first().click();
-    await page.keyboard.press("Delete");
+  it("removing a card takes it off the map (the link only), and the process is offered by the library again", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    const library = page.locator("[data-process-library]");
+    // Every process of the workspace is on the map to start with: the library lists them greyed.
+    await library.waitFor();
+    expect(await library.locator("[data-library-item][data-state='placed']").count()).toBe(3);
+    expect(await library.locator("[data-library-item][data-state='free']").count()).toBe(0);
+    const first = (await page.evaluate(() => window.mapApi.getSteps()))[0]!;
+    await page.evaluate((n) => window.mapApi.removeCards([n]), first);
+    await page.waitForFunction(() => window.mapApi.getSteps().length === 2);
+    await page.waitForFunction(() => document.querySelectorAll("[data-process-library] [data-library-item][data-state='free']").length === 1);
+    expect(await library.locator("[data-library-item][data-state='placed']").count()).toBe(2);
+    await page.close();
+  }, 60_000);
+});
+
+describe("the process library on the company map (B12)", () => {
+  const free = (page: Page) => page.locator("[data-process-library] [data-library-item][data-state='free']");
+  const add = (page: Page) => page.locator("[data-library-add]");
+  const takeAllOff = async (page: Page) => {
+    await page.evaluate(() => window.mapApi.removeCards());
+    await page.waitForFunction(() => window.mapApi.getSteps().length === 0);
+    await page.waitForFunction(() => document.querySelectorAll("[data-process-library] [data-library-item][data-state='free']").length === 3);
+  };
+
+  it("adds several processes at once as cards in view that do not sit on each other, and they show as already on the map", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    await takeAllOff(page);
+    expect(await add(page).isDisabled()).toBe(true);
+    for (const item of await free(page).all()) await item.locator("input").check();
+    await page.waitForFunction(() => /^Add 3 to the map$/.test(document.querySelector("[data-library-add]")?.textContent ?? ""));
+    await add(page).click();
+    await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 3);
     await settled(page);
+    const placed = await cards(page);
+    const p = await panel(page);
+    for (const c of placed) expect(within(c, p)).toBe(true);
+    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) expect(covers(placed[i]!, placed[j]!) || covers(placed[j]!, placed[i]!)).toBe(false);
+    // They are links: three cards, and the library now says all three are on the map.
     expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
-    await page.keyboard.press("Control+a");
-    await page.keyboard.press("Delete");
+    await page.waitForFunction(() => document.querySelectorAll("[data-process-library] [data-library-item][data-state='placed']").length === 3);
+    expect(await free(page).count()).toBe(0);
+    expect(await page.locator("[data-library-item][data-state='placed'] input:disabled").count()).toBe(3);
+    await page.close();
+  }, 60_000);
+
+  it("places each process once, and the cards land where the map was moved to", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    await takeAllOff(page);
+    // Move the view, then add two of the three: they land in what is now being looked at.
+    const p = await panel(page);
+    const framed = await view(page);
+    await page.mouse.move(p.x + p.width - 60, p.y + p.height - 40);
+    await page.mouse.down();
+    await page.mouse.move(p.x + p.width - 460, p.y + p.height - 240, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForFunction((v) => document.querySelector<HTMLElement>(".react-flow__viewport")!.style.transform !== v, framed);
+    const items = await free(page).all();
+    await items[0]!.locator("input").check();
+    await items[1]!.locator("input").check();
+    await add(page).click();
+    await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 2);
     await settled(page);
-    expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
+    // (Ticking a box may have scrolled the page: measure the panel again, in the same frame as the cards.)
+    const [placed, now] = [await cards(page), await panel(page)];
+    for (const c of placed) expect(within(c, now)).toBe(true);
+    expect(covers(placed[0]!, placed[1]!) || covers(placed[1]!, placed[0]!)).toBe(false);
+    // The third is still free; the two placed are disabled and cannot be added again.
+    expect(await free(page).count()).toBe(1);
+    expect(await page.locator("[data-library-item][data-state='placed'] input:enabled").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("searches by name", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    const names = await page.locator("[data-library-item] > span > span:first-child").allTextContents();
+    expect(names).toHaveLength(3);
+    const word = names[0]!.slice(0, 4);
+    await page.getByLabel("Search processes by name").fill(word.toUpperCase());
+    await page.waitForFunction((n) => document.querySelectorAll("[data-library-item]").length <= n, 3);
+    const shown = await page.locator("[data-library-item]").allTextContents();
+    expect(shown.length).toBeGreaterThanOrEqual(1);
+    expect(shown.every((t) => t.toLowerCase().includes(word.toLowerCase()))).toBe(true);
+    await page.getByLabel("Search processes by name").fill("zzz no such process");
+    await page.waitForFunction(() => document.querySelectorAll("[data-library-item]").length === 0);
+    expect(await page.getByText(/No process matches/).count()).toBe(1);
     await page.close();
   }, 60_000);
 });

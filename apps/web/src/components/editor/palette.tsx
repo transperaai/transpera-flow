@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
-import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
+import { ProcessLibrary } from "./process-library";
 import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind, type ViewRef } from "@/lib/editor/groups";
 import { Badge } from "@/components/ui/badge";
 import type { BlockTools } from "./use-blocks";
@@ -38,7 +38,7 @@ export function Palette({
   setSelection: Dispatch<SetStateAction<Selection>>;
   /** The block library as the Editor uses it. */
   blocks: BlockTools;
-  /** The company map (B11): cards are processes placed by link, so there are no steps or blocks to add, and none to remove. */
+  /** The company map (B11): cards are processes placed by link from the process library (B12), so there are no steps or blocks to add. */
   company?: boolean;
   /** Where the map is looking (see ProcessCanvas): new steps appear there, so they are not off screen. */
   viewRef?: ViewRef;
@@ -89,11 +89,9 @@ export function Palette({
             />
           </h2>
           <p className="text-xs text-muted-foreground">Drag cards to move them. Draw a handoff line from a card&apos;s right edge to another card, then click the line to label it.</p>
-          <p role="note" data-placed-note className="rounded-token border border-line bg-panel-2 px-2 py-1.5 text-xs text-fg-2">
-            {PLACED_REMOVE_NOTE}
-          </p>
         </section>
       )}
+      {company && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} />}
       {!company && (
       <section aria-label="Add to the process" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">

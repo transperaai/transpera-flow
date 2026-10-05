@@ -407,7 +407,7 @@ export function EditorView({
               editorState={state}
               selection={selected}
               onSelectionChange={setSelection}
-              // The company map's cards can't be copied, split or removed, so the card menu has nothing to offer.
+              // The company map's cards can't be copied or split (removing one is Delete or the inspector's Remove from this map), so the card menu has nothing to offer.
               commands={company ? null : commands}
               handoffs={company}
               diff={marksChanges ? diff : null}

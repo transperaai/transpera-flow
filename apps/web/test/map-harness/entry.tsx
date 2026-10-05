@@ -8,7 +8,7 @@ import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/proces
 import { Palette } from "@/components/editor/palette";
 import type { BlockTools } from "@/components/editor/use-blocks";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
-import { addStep } from "@/lib/editor/commands";
+import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { MemoryStore } from "@/lib/editor/store";
@@ -36,6 +36,8 @@ declare global {
       setOpen: (ids: string[]) => void;
       getOpen: () => string[];
       addStep: () => void;
+      /** Delete cards by name (all of them with no names), as the Editor's Delete key does. */
+      removeCards: (names?: string[]) => void;
       /** The editor's connections, by the names of the cards they join, with their labels and shares. */
       getEdges: () => { from: string; to: string; label: string | null; probability: number }[];
       getSteps: () => string[];
@@ -80,6 +82,7 @@ function Harness({ options }: { options: HarnessOptions }) {
       setOpen: (ids) => setOpen(new Set(ids)),
       getOpen: () => [...open],
       addStep: () => editor?.run((b) => addStep(b, { kind: "task", x: 3200, y: 900 }).edit),
+      removeCards: (names) => editor?.run((b) => deleteSelection(b, b.steps.filter((s) => !names || names.includes(s.name)).map((s) => s.id), [])),
       getEdges: () => {
         const b = editor?.getState().bundle ?? base;
         const name = (id: string) => b.steps.find((s) => s.id === id)?.name ?? id;
@@ -95,7 +98,7 @@ function Harness({ options }: { options: HarnessOptions }) {
     <div style={options.editable || options.palette ? { width: 1300, height: 560, display: "flex" } : options.card ? { width: "100%", display: "flex", flexDirection: "column" } : { width: 1300 }}>
       {options.palette && editor && (
         <aside style={{ width: 220, padding: 8 }}>
-          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} viewRef={viewRef} />
+          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} company={options.company} viewRef={viewRef} />
         </aside>
       )}
       <ProcessCanvas

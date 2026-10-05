@@ -8,7 +8,7 @@ import { describeChanges } from "@/lib/history/versions";
 import { companyMap } from "@/lib/overview/company-map";
 
 // Editing the company map in the Editor (issue #163, B11 slice 2): cards are moved, joined by handoff lines (with a label),
-// put in groups; they are never copied, split or removed here (that comes with the process library, B12).
+// put in groups, and removed (which only unlinks); they are never copied or split. Processes are added by the library (process-library.test.ts).
 
 /** The Editor's bundle of Northbeam's company map: the stored map's holders and lines, on the workspace's roles and people. */
 function companyBundle(): ProcessBundle {
@@ -40,19 +40,26 @@ describe("the company map in the Editor", () => {
     expect(labelled?.ops[0]).toMatchObject({ kind: "update", changes: [{ table: "edges", after: { label: "Signed contract" } }] });
   });
 
-  it("does not take a process off the map: a card, a group of cards or a selection with one in it can't be deleted, copied or split", () => {
+  it("removes a card by deleting it (a link only: nothing else is written), but cards can't be copied or split", () => {
     const b = companyBundle();
     const card = b.steps[0]!;
     expect(isPlacedStep(b, card)).toBe(true);
-    expect(deleteSteps(b, [card.id])).toBeNull();
-    expect(deleteSelection(b, [card.id], [])).toBeNull();
+    const removed = deleteSteps(b, [card.id])!;
+    expect(removed.label).toBe(`Removed ${card.name} from the map`);
+    // Only this map's own rows: the card and its lines. The placed process is not part of the edit.
+    expect(removed.ops.every((op) => op.kind === "remove")).toBe(true);
+    const after = applyEdit(b, removed);
+    expect(after.steps.some((s) => s.id === card.id)).toBe(false);
+    expect(after.edges.some((e) => e.from_step_id === card.id || e.to_step_id === card.id)).toBe(false);
+    expect(after.otherProcesses).toEqual(b.otherProcesses);
+    expect(deleteSelection(b, [card.id], [])).not.toBeNull();
     expect(copySteps(b, [card.id])).toBeNull();
     expect(splitStep(b, card.id)).toBeNull();
-    // Cards can be put in a group; the group then holds them, so it can't be deleted either, and ungrouped, the cards are as before.
+    // Cards can be put in a group; deleting the group then takes its cards off the map too, and ungrouped, the cards are as before.
     const grouped = groupSteps(b, [b.steps[0]!.id, b.steps[1]!.id])!;
     const withGroup = applyEdit(b, grouped.edit);
     expect(withGroup.steps.filter((s) => s.parent_step_id === grouped.id)).toHaveLength(2);
-    expect(deleteSteps(withGroup, [grouped.id])).toBeNull();
+    expect(deleteSteps(withGroup, [grouped.id])!.label).toContain("Deleted");
   });
 
   it("deletes a handoff line, and a group with no card in it", () => {
