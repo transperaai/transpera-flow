@@ -211,3 +211,33 @@ process is a **link** and placing **never edits it**; a process appears **at mos
   links, live or in its draft (so one the library made and placed in a draft stays there).
 - **Simulation is unchanged:** a held process is simulated through its holder step, so nested equals flattened, and seeded goldens are
   unchanged (tested).
+
+## B19: archiving a process (#182)
+
+Austin (5 Oct 2026): everything can be added by hand, including taking a process out of use. Processes are never deleted, so
+"archive" is a soft delete (migration 20261204000000).
+
+- **What it is.** `processes.archived_at` (and `archived_by`), set by an ordinary update as an editor (RLS: owners, editors and agency
+  admins; viewers and anon change nothing). A trigger stamps `now()` and the caller; archiving again keeps the first stamp; restoring
+  clears both. `listProcesses` leaves archived processes out unless asked (`includeArchived`), so every list, the library, the
+  Overview, the simulation and MCP's `list_processes` skip them. Their versions, history, issues and sources are kept, and the
+  process still opens by its id (Processes, Archived, links to it).
+- **The company map follows, as a system version.** Archiving takes the process's card off the company map ("Archived Sales"; an
+  open draft of the map loses the card too); restoring puts it back at the bottom of its column ("Restored Sales"), through the map's
+  existing sync (`private.company_map_apply`). A published version is never edited.
+- **Decision: a process inside another ordinary process, or holding others, is refused, with a plain message naming them.** "Kickoff
+  sits inside Onboarding. Take it out of Onboarding and publish, then archive it." / "Onboarding holds Kickoff. Take Kickoff out of
+  Onboarding and publish, then archive it." The alternatives were to unlink it from its holder automatically (a system version of an
+  ordinary process, which only the company map has today, and a silent change to someone's map) or to let the holder keep a link to
+  an archived process (which the simulation would then have to skip, so the holder's numbers would change with no change to its
+  map). Refusing keeps "an archived process is never part of the live tree" true without writing anyone's process, and the fix is
+  one ordinary edit. The Processes page says so before asking the database. The company map itself can't be archived.
+- **It can't come back in by another road.** `holder_allows` refuses placing an archived process in a draft ("Sales is archived:
+  restore it from Processes (Archived) before placing it"); a draft that linked it before it was archived can't be published
+  (`refuse_archived_placements`, on every road to a new live version); `restore_version` skips its card on a restored company map
+  and unlinks it in a restored ordinary process; `company_add_holder` never gives it a card. Locks: archiving takes the same locks as
+  a publish's placement check (the map's row, then the workspace's placement lock), so a publish placing it and the archive can't
+  both pass.
+- **Changing a process's kind** needs no migration: the map's sync already moves the card between the pipeline and client work
+  columns as a system version. The app warns what changes for the simulation before saving, and refuses client work to pipeline
+  while services still generate it (the database refuses it too), naming the services.

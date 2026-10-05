@@ -26,6 +26,10 @@ _Avoid_: Root process (in the UI), overview map
 A process that sits inside a step of another process, with its own page, versions and first principles. The company map is the root: its steps are the top-level processes. A process has one parent. Example: "Onboarding" inside the step "Onboarding" of "Lead to live".
 _Avoid_: Sub-map, nested process
 
+**Archived process**:
+A process taken out of use without deleting it: off the company map, the lists and the simulation, with its versions, history, issues and sources kept. Restore brings it back, with a card on the company map. A process inside another ordinary process, or holding others, can't be archived until it is taken out. Example: "Old audit", archived when the agency stopped selling audits.
+_Avoid_: Deleted process, hidden process (nothing deletes a process)
+
 **Block**:
 A saved group of steps that can be inserted into a process. Example: a "Send proposal and chase" block used in three processes. A block marked AI was made by the AI.
 _Avoid_: Template, snippet, module
