@@ -3108,6 +3108,18 @@ export type Database = {
           workspace_id: string
         }[]
       }
+      record_calibration: {
+        Args: {
+          p_column_map: Json
+          p_file_name: string
+          p_keys: string[]
+          p_process: string
+          p_results: Json
+          p_row_count: number
+          p_workspace: string
+        }
+        Returns: Json
+      }
       reserve_ai_run: {
         Args: { p_process: string; p_trigger: string; p_workspace: string }
         Returns: Json

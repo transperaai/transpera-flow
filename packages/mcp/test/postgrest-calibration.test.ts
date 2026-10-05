@@ -77,7 +77,7 @@ describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
     ids.role = (await one("insert into roles (workspace_id, name) values ($1, 'Sales') returning id", [ids.ws])).id as string;
     await admin.query("insert into people (workspace_id, name, fte) values ($1, 'Sam Lee', 1)", [ids.ws]);
     await admin.query("insert into person_roles (person_id, role_id, workspace_id) select id, $2, $1 from people where workspace_id = $1", [ids.ws, ids.role]);
-    ids.source = (await one("insert into lead_sources (workspace_id, name, volume_week, conversion_to_qualified) values ($1, 'Website', 4, 0.5) returning id", [ids.ws])).id as string;
+    ids.source = (await one("insert into lead_sources (workspace_id, name, volume_week, conversion_to_qualified) values ($1, 'Website', 3, 0.5) returning id", [ids.ws])).id as string;
     ids.proc = (await one("insert into processes (workspace_id, name, kind, entity_name) values ($1, 'Enquiry to signed', 'pipeline', 'enquiry') returning id", [ids.ws])).id as string;
     ids.rev = (await one("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 1, 'published') returning id", [ids.ws, ids.proc])).id as string;
     await admin.query("update processes set live_revision_id = $2 where id = $1", [ids.proc, ids.rev]);
@@ -163,6 +163,17 @@ describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
     expect((await one("select draft_revision_id from processes where id = $1", [ids.proc])).draft_revision_id).toBeNull();
   });
 
+  it("records and applies in one call as the page does; a viewer's call leaves no record", async () => {
+    const before = Number((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n);
+    const args = { p_workspace: ids.ws, p_process: ids.proc, p_file_name: "again.csv", p_column_map: {}, p_row_count: result.rows, p_results: result as never, p_keys: [`rework:${ids.qualify}`] };
+    expect((await viewer.rpc("record_calibration", args)).error).not.toBeNull();
+    expect((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n).toBe(before);
+    const out = await editor.rpc("record_calibration", args);
+    expect(out.error).toBeNull();
+    expect(out.data).toMatchObject({ status: "ok", results: [{ key: `rework:${ids.qualify}`, status: "applied" }] });
+    expect((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n).toBe(before + 1);
+  });
+
   it("applies the ticked proposals into a draft; publishing makes the measured model live, with the Stable market at the measured level", async () => {
     const keys = result.proposals.filter((p) => p.set && p.changed).map((p) => p.key);
     // Half the clients signed, as the model already said: that one is not a change, so not offered.
@@ -183,7 +194,9 @@ describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
     const arrivals = result.proposals.find((p) => p.key === `arrivals:${ids.source}`)!;
     // Qualified leads a week: the measured leads a week times the share that qualify (the measured qualified rate).
     expect(model.leadsPerWeek).toBeCloseTo(arrivals.proposed! * 0.5, 6);
-    expect(model.leadsPerWeek).toBeCloseTo(24 / result.window!.weeks, 1);
+    // One enquiry every 3.5 days: 2 qualified a week, so 4 leads a week at the 50% that qualify.
+    expect(arrivals.proposed).toBe(4);
+    expect(model.leadsPerWeek).toBeCloseTo(2, 6);
 
     // The market's Stable level is 100% of today: a run with Stable in every month is the run on the measured numbers.
     const stable = { ...model, horizonWeeks: 8, market: { months: Array.from({ length: 24 }, () => ({ ...STABLE_MARKET })) } };

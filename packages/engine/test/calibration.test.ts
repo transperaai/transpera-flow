@@ -185,14 +185,40 @@ describe("calibrate", () => {
   });
 
   it("measures qualified arrivals a week per lead source, as leads at the source's qualify rate", () => {
-    const weeks = r.window!.weeks;
+    // 40 items, one every 3.5 days: 2 a week in all, half from each source.
     const web = find(r, "arrivals:web");
     expect(web.n).toBe(20);
-    expect(web.proposed).toBe(Math.round((20 / weeks / 0.5) * 100) / 100);
+    expect(web.proposed).toBe(2); // 1 qualified a week at the 50% that qualify
     const ref = find(r, "arrivals:ref");
     expect(ref.n).toBe(20); // "referral " matches Referral
-    expect(ref.proposed).toBe(Math.round((20 / weeks) * 100) / 100);
+    expect(ref.proposed).toBe(1);
     expect(ref.currentSource).toBe("entered");
+  });
+
+  it("measures arrivals over the time items arrive, however long they then take", () => {
+    // 20 items at 2 a week for 10 weeks, each then waiting 10 weeks at the client's decision.
+    const rows: StepLogRow[] = [];
+    for (let i = 0; i < 20; i++) {
+      const t = T0 + i * 3.5 * DAY;
+      rows.push({ item: `w${i}`, step: "Qualify", started: t, finished: t + HOUR, hours: 1, source: "Referral" });
+      rows.push({ item: `w${i}`, step: "Client decides", started: t + DAY, finished: t + DAY + 70 * DAY, hours: null, source: null });
+    }
+    const res = calibrate(input({ rows }));
+    expect(find(res, "arrivals:ref").proposed).toBe(2);
+    expect(res.inProgressAtStart).toBe(0);
+  });
+
+  it("does not count items already in progress when the log starts as arrivals", () => {
+    // The same 20 arrivals, plus 15 items first logged at the client's decision in the first week.
+    const rows: StepLogRow[] = [];
+    for (let i = 0; i < 20; i++) {
+      const t = T0 + i * 3.5 * DAY;
+      rows.push({ item: `w${i}`, step: "Qualify", started: t, finished: t + HOUR, hours: 1, source: "Referral" });
+    }
+    for (let i = 0; i < 15; i++) rows.push({ item: `old${i}`, step: "Client decides", started: T0 + i * HOUR, finished: T0 + 2 * DAY, hours: null, source: "Referral" });
+    const res = calibrate(input({ rows }));
+    expect(res.inProgressAtStart).toBe(15);
+    expect(find(res, "arrivals:ref")).toMatchObject({ n: 20, proposed: 2 });
   });
 
   it("takes seasonality out of arrivals", () => {
@@ -288,6 +314,8 @@ describe("robustness after calibration", () => {
       steps: [{ id: s.id, provenance: { work_hours: measured, rework_rate: measured } }],
       leadSources: [{ provenance: { volume_week: measured } }, { provenance: { volume_week: measured, conversion_to_qualified: { source: "entered" } } }],
     });
+    // An entered lead source keeps qualified leads in the check.
+    expect(paths({ leadSources: [{ provenance: { volume_week: measured } }, { provenance: { volume_week: { source: "entered" } } }] })).toContain("demand.leads_per_week");
     expect(after).not.toContain(`steps.${s.id}.work_hours`);
     expect(after).not.toContain(`steps.${s.id}.rework_rate`);
     expect(after).not.toContain("demand.leads_per_week");
@@ -300,7 +328,8 @@ describe("robustness after calibration", () => {
     expect(leadsProvenance([{ provenance: { volume_week: measured } }, { provenance: {} }])).toBe("estimated");
     // A measured volume is the measured qualified leads at the source's share, whatever the share's provenance.
     expect(leadsProvenance([{ provenance: { volume_week: measured } }])).toBe("measured");
-    expect(leadsProvenance([{ provenance: { volume_week: { source: "entered" }, conversion_to_qualified: { source: "entered" } } }])).toBe("entered");
-    expect(leadsProvenance([{ provenance: { volume_week: { source: "entered" } } }])).toBe("estimated");
+    // Only measured volumes count: entered ones are still varied.
+    expect(leadsProvenance([{ provenance: { volume_week: { source: "entered" }, conversion_to_qualified: { source: "entered" } } }])).toBe("estimated");
+    expect(leadsProvenance([{ provenance: { volume_week: measured } }, { provenance: { volume_week: { source: "entered" } } }])).toBe("estimated");
   });
 });

@@ -75,12 +75,35 @@ describe("wording", () => {
 });
 
 describe("parseApplyRequest", () => {
-  const ok = { workspaceId: WS, processId: PROC, fileName: " log.csv ", columnMap: { item: "Deal", step: "Stage", started: "Start" }, rowCount: 3, results: { proposals: [{ key: "work:s" }] }, keys: ["work:s", "work:s"] };
+  const KEY = `work:${PROC}`;
+  const ok = {
+    workspaceId: WS,
+    processId: PROC,
+    fileName: " log.csv ",
+    columnMap: { item: "Deal", step: "Stage", started: "Start" },
+    rowCount: 3,
+    results: { proposals: [{ key: KEY }], unmatchedSteps: [{ name: "Invoice to Acme Ltd", rows: 2 }], unmatchedSources: [] },
+    keys: [KEY, KEY],
+  };
 
-  it("accepts a well-formed request and tidies it", () => {
+  it("accepts a well-formed request, tidies it, and stores no free text from the log", () => {
     const r = parseApplyRequest(ok);
-    expect(r.ok && r.request.fileName).toBe("log.csv");
-    expect(r.ok && r.request.keys).toEqual(["work:s"]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.request.fileName).toBe("log.csv");
+    expect(r.request.keys).toEqual([KEY]);
+    expect(r.request.results.unmatchedSteps).toBe(1);
+    expect(r.request.results.unmatchedSources).toBe(0);
+    expect(JSON.stringify(r.request.results)).not.toContain("Acme");
+  });
+
+  it("skips ticked keys that aren't proposals, with a reason, and applies the rest", () => {
+    const r = parseApplyRequest({ ...ok, keys: [KEY, "work:other", 7] });
+    expect(r.ok && r.request.keys).toEqual([KEY]);
+    expect(r.ok && r.request.skipped).toEqual([
+      { key: "work:other", status: "not_proposed" },
+      { key: "7", status: "not_proposed" },
+    ]);
   });
 
   it("refuses what isn't", () => {
@@ -102,7 +125,7 @@ describe("the demo's sample log on Northbeam", () => {
   it("reads cleanly, and every step name is on the map", () => {
     expect(log.errors).toEqual([]);
     expect(log.missing).toEqual([]);
-    expect(result.items).toBe(40);
+    expect(result.items).toBe(56);
     expect(result.unmatchedSteps).toEqual([]);
   });
 
@@ -116,9 +139,10 @@ describe("the demo's sample log on Northbeam", () => {
     expect(find("routing", "Kickoff & strategy")).toBeUndefined();
   });
 
-  it("flags too few and proposes nothing for them", () => {
-    const thin = result.proposals.filter((p) => !p.enough);
-    expect(thin.length).toBeGreaterThan(0);
-    for (const p of thin) expect(p.set).toBeNull();
+  it("measures leads a week close to Northbeam's own seven qualified a week", () => {
+    const qualified = result.proposals
+      .filter((p) => p.kind === "arrivals")
+      .reduce((sum, p) => sum + p.proposed! * Number(bundle.leadSources!.find((s) => s.id === p.target.id)!.conversion_to_qualified), 0);
+    expect(qualified).toBeCloseTo(7, 0);
   });
 });

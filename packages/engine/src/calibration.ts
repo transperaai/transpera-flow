@@ -159,6 +159,8 @@ export interface CalibrationResult {
   window: { from: number; to: number; weeks: number } | null;
   /** Step names in the log that match no step of the process, with how many rows each. */
   unmatchedSteps: { name: string; rows: number }[];
+  /** Items already part-way through the process when the log starts (first logged after its first step): not counted as arrivals. */
+  inProgressAtStart: number;
   /** Lead source names in the log that match no lead source, with how many items each. */
   unmatchedSources: { name: string; items: number }[];
   minSample: number;
@@ -374,7 +376,8 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
   }
 
   proposals.push(...routingProposals(input, byId, logged, byItem, minSample));
-  if (input.leadSources && window) proposals.push(...arrivalProposals(input, byItem, window, minSample));
+  const arrivals = input.leadSources ? arrivalProposals(input, byId, logged, byItem, minSample) : null;
+  if (arrivals) proposals.push(...arrivals.proposals);
 
   const unmatchedSources = input.leadSources && window ? unmatchedSourceNames(input.leadSources, byItem) : [];
   return {
@@ -383,6 +386,7 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
     window,
     unmatchedSteps: [...unmatched.values()].sort((a, b) => b.rows - a.rows || a.name.localeCompare(b.name)),
     unmatchedSources,
+    inProgressAtStart: arrivals?.inProgress ?? 0,
     minSample,
     proposals,
   };
@@ -394,13 +398,8 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
 
 type Visits = Map<string, { step: string; row: StepLogRow }[]>;
 
-function routingProposals(
-  input: CalibrationInput,
-  byId: Map<string, CalibrationStep>,
-  logged: Set<string>,
-  byItem: Visits,
-  minSample: number,
-): CalibrationProposal[] {
+/** How items move through the process's steps, given which steps the log names. */
+function graphOf(input: CalibrationInput, byId: Map<string, CalibrationStep>, logged: Set<string>) {
   const out = new Map<string, CalibrationEdge[]>();
   for (const e of input.edges) {
     if (!byId.has(e.from) || !byId.has(e.to)) continue;
@@ -455,6 +454,19 @@ function routingProposals(
     }
     return seen;
   };
+
+  return { out, arrive, after, firstLogged, unloggedAfter };
+}
+
+
+function routingProposals(
+  input: CalibrationInput,
+  byId: Map<string, CalibrationStep>,
+  logged: Set<string>,
+  byItem: Visits,
+  minSample: number,
+): CalibrationProposal[] {
+  const { out, arrive, after, firstLogged, unloggedAfter } = graphOf(input, byId, logged);
 
   const proposals: CalibrationProposal[] = [];
   for (const step of input.steps) {
@@ -550,34 +562,63 @@ function unmatchedSourceNames(sources: readonly CalibrationLeadSource[], byItem:
   return [...counts.values()].sort((a, b) => b.items - a.items || a.name.localeCompare(b.name));
 }
 
+/**
+ * Qualified leads a week per lead source. An item arrives when it is first logged at the process's first step (the
+ * steps an item reaches first from the start); an item first logged further on was already in progress when the log
+ * began and is not an arrival. The rate is the number of gaps between arrivals over the time from the first arrival to
+ * the last ((n − 1) / span, with seasonality taken out of the span), so how long items then take to finish never
+ * stretches it. Each source gets its share of the arrivals.
+ */
 function arrivalProposals(
   input: CalibrationInput,
+  byId: Map<string, CalibrationStep>,
+  logged: Set<string>,
   byItem: Visits,
-  window: { from: number; to: number; weeks: number },
   minSample: number,
-): CalibrationProposal[] {
+): { proposals: CalibrationProposal[]; inProgress: number } {
   const sources = input.leadSources ?? [];
-  if (!sources.length) return [];
+  const { out, after, firstLogged } = graphOf(input, byId, logged);
+  // The first steps: what the start leads to, or, with no start step, logged steps nothing leads into.
+  const entry = new Set<string>();
+  for (const st of input.steps) if (st.kind === "start") for (const n of after(st.id)) for (const f of firstLogged(n, null)) entry.add(f);
+  if (!entry.size) {
+    const into = new Set([...out.values()].flatMap((es) => es.map((e) => e.to)));
+    for (const id of logged) if (!into.has(id)) entry.add(id);
+  }
+  const arrivals: { item: string; at: number }[] = [];
+  let inProgress = 0;
+  for (const [item, list] of byItem) {
+    const first = list[0]!;
+    if (entry.size && !entry.has(first.step)) inProgress++;
+    else arrivals.push({ item, at: first.row.started });
+  }
+  if (!sources.length) return { proposals: [], inProgress };
   const named = itemSources(byItem);
   const anyNamed = [...named.values()].some((n) => n !== null);
+  if (!anyNamed && sources.length > 1) return { proposals: [], inProgress };
   const counts = new Map(sources.map((s) => [s.id, 0]));
   const idByName = new Map(sources.map((s) => [norm(s.name), s.id]));
-  for (const name of named.values()) {
+  for (const { item } of arrivals) {
+    const name = named.get(item) ?? null;
     // With no source column and one lead source, every item is that source's.
     const id = name ? idByName.get(norm(name)) : !anyNamed && sources.length === 1 ? sources[0]!.id : undefined;
     if (id) counts.set(id, counts.get(id)! + 1);
   }
-  if (!anyNamed && sources.length > 1) return [];
-  const exposure = seasonalWeeks(window.from, window.to, input.seasonality);
-  const longEnough = window.weeks >= CALIBRATION_MIN_WEEKS;
-  return [...sources]
+  const total = arrivals.length;
+  const from = total ? Math.min(...arrivals.map((x) => x.at)) : 0;
+  const to = total ? Math.max(...arrivals.map((x) => x.at)) : 0;
+  const weeks = (to - from) / WEEK_MS;
+  const exposure = seasonalWeeks(from, to, input.seasonality);
+  const longEnough = weeks >= CALIBRATION_MIN_WEEKS;
+  const rate = total > 1 && exposure > 0 ? (total - 1) / exposure : 0;
+  const seasonal = input.seasonality?.some((m) => m !== 1) ?? false;
+  const proposals = [...sources]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((s): CalibrationProposal => {
       const n = counts.get(s.id) ?? 0;
-      const enough = n >= minSample && longEnough && exposure > 0;
-      const qualified = exposure > 0 ? n / exposure : 0;
+      const enough = n >= minSample && longEnough && rate > 0;
+      const qualified = total ? (rate * n) / total : 0;
       const proposed = enough ? round(s.conversion > 0 ? qualified / s.conversion : qualified, 2) : null;
-      const seasonal = input.seasonality?.some((m) => m !== 1) ?? false;
       return {
         key: `arrivals:${s.id}`,
         kind: "arrivals",
@@ -590,16 +631,18 @@ function arrivalProposals(
         proposed,
         changed: enough && proposed !== round(s.volumeWeek, 2),
         blocked: !longEnough
-          ? `The log covers ${fmt(window.weeks)} weeks; at least ${CALIBRATION_MIN_WEEKS} are needed.`
+          ? `New items arrive over ${fmt(weeks)} weeks of the log; at least ${CALIBRATION_MIN_WEEKS} are needed.`
           : enough
             ? null
             : `Too few to measure: ${n} of the ${minSample} needed.`,
         note:
-          `${n} item${n === 1 ? "" : "s"} arrived over ${fmt(window.weeks)} weeks: ${fmt(qualified, 2)} qualified a week` +
+          `${n} of the ${total} items that arrived over ${fmt(weeks)} weeks came from ${s.name}: ${fmt(qualified, 2)} qualified a week` +
           (seasonal ? " with seasonality taken out" : "") +
-          (s.conversion > 0 && s.conversion < 1 ? `, so ${fmt(qualified / s.conversion, 2)} leads a week at the ${Math.round(s.conversion * 100)}% that qualify.` : "."),
+          (s.conversion > 0 && s.conversion < 1 ? `, so ${fmt(qualified / s.conversion, 2)} leads a week at the ${Math.round(s.conversion * 100)}% that qualify.` : ".") +
+          (inProgress ? ` ${inProgress} item${inProgress === 1 ? " was" : "s were"} already in progress when the log starts and ${inProgress === 1 ? "is" : "are"} not counted.` : ""),
         set: enough ? { volume_week: proposed } : null,
         before: enough ? { volume_week: s.volumeWeek } : null,
       };
     });
+  return { proposals, inProgress };
 }

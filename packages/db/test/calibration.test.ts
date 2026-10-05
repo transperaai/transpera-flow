@@ -260,6 +260,37 @@ describe("apply_calibration", () => {
     expect(made).toEqual({ applied: false, applied_keys: [] });
   });
 
+  it("lets only an apply change what was applied: keys only grow, and who and when are the database's", async () => {
+    const fresh = await store(await computeCalibration());
+    // A hand-made update that adds a key: applied, by the person making it, now, whatever it says.
+    await commitAs(editor.claims, (c) =>
+      c.query("update calibrations set applied_keys = '{x}', applied_by = $2, applied_at = '2000-01-01' where id = $1", [fresh.calibration, viewer.id]),
+    );
+    const [row] = await q("select applied, applied_by, applied_at > now() - interval '1 minute' as recent from calibrations where id = $1", [fresh.calibration]);
+    expect(row).toEqual({ applied: true, applied_by: editor.id, recent: true });
+    await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied_keys = '{}' where id = $1", [fresh.calibration]))).rejects.toThrow(/stay applied/);
+    await expect(db.as(editor.claims, (c) => c.query("update calibrations set applied = false where id = $1", [fresh.calibration]))).rejects.toThrow(/Only applying/);
+  });
+
+  it("records and applies in one call, and leaves no record behind when refused", async () => {
+    const res = await computeCalibration();
+    const count = async () => Number((await q("select count(*) n from datasets"))[0].n);
+    const before = await count();
+    const call = (c: pg.Client, keys: string[]) =>
+      c.query("select public.record_calibration($1, $2, 'log.csv', '{}', $3, $4, $5) as r", [ws, proc, res.rows, res, keys]).then((r) => r.rows[0].r);
+    await expect(commitAs(viewer.claims, (c) => call(c, [`rework:${northbeamStepIds.qualify}`]))).rejects.toThrow(/row-level security/);
+    await expect(commitAs({ ...editor.claims, api_token_id: "t1" }, (c) => call(c, [`rework:${northbeamStepIds.qualify}`]))).rejects.toThrow(/by a person in the app/);
+    expect(await count()).toBe(before);
+    const out = await commitAs(editor.claims, (c) => call(c, [`rework:${northbeamStepIds.qualify}`, "work:not-a-uuid"]));
+    expect(out.status).toBe("ok");
+    expect(out.calibration_id).toBeTruthy();
+    expect(Object.fromEntries(out.results.map((r: { key: string; status: string }) => [r.key, r.status]))).toEqual({
+      [`rework:${northbeamStepIds.qualify}`]: "applied",
+      "work:not-a-uuid": "not_proposed",
+    });
+    expect(await count()).toBe(before + 1);
+  });
+
   it("publishes as any draft does: the measured values go live", async () => {
     const res = await commitAs(editor.claims, async (c) => (await c.query("select public.publish_process($1, true) as r", [proc])).rows[0].r);
     expect(res.status).toBe("published");

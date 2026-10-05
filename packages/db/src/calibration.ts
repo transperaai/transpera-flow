@@ -9,7 +9,8 @@
 //   item      required  what went through: a deal, a job, a report (any id)
 //   step      required  the step's name as on the map ("Proposal", "Lost")
 //   started   required  when the visit started: 2026-03-02, 2026-03-02 09:30,
-//                       2026-03-02T09:30:00Z, or day first 02/03/2026 09:30
+//                       2026-03-02T09:30:00Z, or 02/03/2026 09:30 (day and
+//                       month order found from the whole file, or asked)
 //   finished  optional  when it finished (needed for waits)
 //   hours     optional  hands-on hours spent (needed for hands-on time)
 //   source    optional  the lead source an item came from (for leads a week)
@@ -54,7 +55,17 @@ export interface ParsedStepLog {
   errors: StepLogError[];
   /** Data lines read (not counting the header or blank lines). */
   lines: number;
+  /** How slashed dates (02/03/2026) were read: day first, month first, or null when the file has none. */
+  dateOrder: DateOrder | null;
+  /**
+   * Why nothing was read from the dates, if so: `ambiguous` (every slashed date reads both ways: ask which), or `mixed`
+   * (some dates can only be day first and others only month first). `rows` is empty then.
+   */
+  dateProblem: "ambiguous" | "mixed" | null;
 }
+
+/** Day first (02/03/2026 is 2 March) or month first (02/03/2026 is 3 February). */
+export type DateOrder = "dmy" | "mdy";
 
 const normHeader = (h: string) =>
   h
@@ -103,15 +114,36 @@ export function splitCsv(text: string): string[][] {
 }
 
 const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?)?$/i;
-const DAY_FIRST = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+const SLASHED = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 
-/** A date or date-time as epoch milliseconds, or null. Day-first for slashes (02/03/2026 is 2 March). */
-export function parseLogTime(text: string): number | null {
+/**
+ * Which way round a file's slashed dates are: any first part over 12 means day first, any second part over 12 means
+ * month first; both is `mixed`; neither (every date reads both ways) is `ambiguous`; no slashed dates at all is null.
+ */
+export function detectDateOrder(texts: Iterable<string>): DateOrder | "ambiguous" | "mixed" | null {
+  let any = false;
+  let dayFirst = false;
+  let monthFirst = false;
+  for (const t of texts) {
+    const m = SLASHED.exec(t.trim());
+    if (!m) continue;
+    any = true;
+    if (Number(m[1]) > 12) dayFirst = true;
+    if (Number(m[2]) > 12) monthFirst = true;
+  }
+  if (dayFirst && monthFirst) return "mixed";
+  if (dayFirst) return "dmy";
+  if (monthFirst) return "mdy";
+  return any ? "ambiguous" : null;
+}
+
+/** A date or date-time as epoch milliseconds, or null. Slashed dates are read in `order` (day first unless told). */
+export function parseLogTime(text: string, order: DateOrder = "dmy"): number | null {
   const s = text.trim();
   let y: number, mo: number, d: number, h = 0, mi = 0, se = 0;
   let zone: string | undefined;
   const iso = ISO.exec(s);
-  const df = iso ? null : DAY_FIRST.exec(s);
+  const df = iso ? null : SLASHED.exec(s);
   if (iso) {
     [y, mo, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
     h = Number(iso[4] ?? 0);
@@ -119,7 +151,7 @@ export function parseLogTime(text: string): number | null {
     se = Number(iso[6] ?? 0);
     zone = iso[7];
   } else if (df) {
-    [d, mo, y] = [Number(df[1]), Number(df[2]), Number(df[3])];
+    [d, mo, y] = order === "dmy" ? [Number(df[1]), Number(df[2]), Number(df[3])] : [Number(df[2]), Number(df[1]), Number(df[3])];
     h = Number(df[4] ?? 0);
     mi = Number(df[5] ?? 0);
     se = Number(df[6] ?? 0);
@@ -135,8 +167,11 @@ export function parseLogTime(text: string): number | null {
   return t;
 }
 
-/** Reads a step log. Bad rows are reported and left out; the rest are kept. */
-export function parseStepLog(text: string): ParsedStepLog {
+/**
+ * Reads a step log. Bad rows are reported and left out; the rest are kept. Slashed dates are read the way the whole
+ * file shows (`detectDateOrder`), or as `dateOrder` says when the file can't tell; they are never read both ways.
+ */
+export function parseStepLog(text: string, options: { dateOrder?: DateOrder } = {}): ParsedStepLog {
   const table = splitCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
   const header = table[0] ?? [];
   const columns: Partial<Record<StepLogColumn, string>> = {};
@@ -154,7 +189,16 @@ export function parseStepLog(text: string): ParsedStepLog {
   }
   const missing = REQUIRED_STEP_LOG_COLUMNS.filter((c) => index[c] === undefined);
   const lines = Math.max(0, table.length - 1);
-  if (missing.length) return { rows: [], columns, missing, errors: [], lines };
+  if (missing.length) return { rows: [], columns, missing, errors: [], lines, dateOrder: null, dateProblem: null };
+
+  const dateCells = (function* () {
+    for (const r of table.slice(1)) for (const c of ["started", "finished"] as const) if (index[c] !== undefined) yield r[index[c]!] ?? "";
+  })();
+  const detected = detectDateOrder(dateCells);
+  if (detected === "mixed" || (detected === "ambiguous" && !options.dateOrder)) {
+    return { rows: [], columns, missing, errors: [], lines, dateOrder: null, dateProblem: detected };
+  }
+  const dateOrder: DateOrder | null = detected === "dmy" || detected === "mdy" ? detected : detected === "ambiguous" ? options.dateOrder! : null;
 
   const rows: StepLogRow[] = [];
   const errors: StepLogError[] = [];
@@ -185,13 +229,13 @@ export function parseStepLog(text: string): ParsedStepLog {
       errors.push({ line, message: "An item or step name is over 200 characters." });
       continue;
     }
-    const started = parseLogTime(startedText);
+    const started = parseLogTime(startedText, dateOrder ?? "dmy");
     if (started === null) {
-      errors.push({ line, message: `Can't read the start "${startedText.slice(0, 40)}". Use 2026-03-02 09:30 or 02/03/2026 09:30.` });
+      errors.push({ line, message: `Can't read the start "${startedText.slice(0, 40)}". Use 2026-03-02 09:30, or one order of day and month for every date.` });
       continue;
     }
     const finishedText = cell(r, "finished");
-    const finished = finishedText ? parseLogTime(finishedText) : null;
+    const finished = finishedText ? parseLogTime(finishedText, dateOrder ?? "dmy") : null;
     if (finishedText && finished === null) {
       errors.push({ line, message: `Can't read the finish "${finishedText.slice(0, 40)}".` });
       continue;
@@ -209,7 +253,24 @@ export function parseStepLog(text: string): ParsedStepLog {
     const source = cell(r, "source");
     rows.push({ item, step, started, finished, hours, source: source ? source.slice(0, 200) : null });
   }
-  return { rows, columns, missing, errors, lines };
+  return { rows, columns, missing, errors, lines, dateOrder, dateProblem: null };
+}
+
+/**
+ * A file's bytes as text: UTF-8 (with or without a byte-order mark), UTF-16 with a byte-order mark (Excel's "Unicode
+ * text"), or, when the bytes aren't valid UTF-8, Windows-1252 (Excel's plain "CSV" on Windows), saying so.
+ */
+export function decodeLogFile(bytes: Uint8Array): { text: string; note: string | null } {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return { text: new TextDecoder("utf-16le").decode(bytes.subarray(2)), note: null };
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return { text: new TextDecoder("utf-16be").decode(bytes.subarray(2)), note: null };
+  try {
+    return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, ""), note: null };
+  } catch {
+    return {
+      text: new TextDecoder("windows-1252").decode(bytes),
+      note: "The file isn't UTF-8, so it was read as Windows text. If names look wrong, save it as \"CSV UTF-8\" and choose it again.",
+    };
+  }
 }
 
 /** A template to download: the columns, and two items through three steps. */

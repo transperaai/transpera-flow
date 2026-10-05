@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { calibrate } from "@transpera-flow/engine";
 import {
   calibrationInput,
+  decodeLogFile,
+  detectDateOrder,
   leadsArriveAt,
   northbeamBundle,
   parseLogTime,
@@ -87,6 +89,53 @@ describe("parseStepLog", () => {
     const log = parseStepLog(STEP_LOG_TEMPLATE);
     expect(log.errors).toEqual([]);
     expect(log.rows).toHaveLength(6);
+  });
+});
+
+describe("day and month order", () => {
+  const log = (...dates: string[]) => ["item,step,started", ...dates.map((d, i) => `I${i},Qualify,${d}`)].join("\n");
+
+  it("is found from the whole file", () => {
+    expect(detectDateOrder(["02/03/2026", "13/03/2026"])).toBe("dmy");
+    expect(detectDateOrder(["02/03/2026", "03/13/2026"])).toBe("mdy");
+    expect(detectDateOrder(["02/03/2026", "04/05/2026 10:00"])).toBe("ambiguous");
+    expect(detectDateOrder(["13/03/2026", "03/13/2026"])).toBe("mixed");
+    expect(detectDateOrder(["2026-03-02"])).toBeNull();
+  });
+
+  it("reads every date the same way round", () => {
+    const dmy = parseStepLog(log("02/03/2026", "13/03/2026"));
+    expect(dmy.dateOrder).toBe("dmy");
+    expect(dmy.rows.map((r) => r.started)).toEqual([Date.UTC(2026, 2, 2), Date.UTC(2026, 2, 13)]);
+    const mdy = parseStepLog(log("02/03/2026", "03/13/2026"));
+    expect(mdy.dateOrder).toBe("mdy");
+    expect(mdy.rows.map((r) => r.started)).toEqual([Date.UTC(2026, 1, 3), Date.UTC(2026, 2, 13)]);
+  });
+
+  it("asks when the file can't tell, and reads nothing until told", () => {
+    const asked = parseStepLog(log("02/03/2026", "04/05/2026"));
+    expect(asked.dateProblem).toBe("ambiguous");
+    expect(asked.rows).toEqual([]);
+    const told = parseStepLog(log("02/03/2026", "04/05/2026"), { dateOrder: "mdy" });
+    expect(told.dateProblem).toBeNull();
+    expect(told.rows.map((r) => r.started)).toEqual([Date.UTC(2026, 1, 3), Date.UTC(2026, 3, 5)]);
+  });
+
+  it("refuses a file that has dates both ways round", () => {
+    const mixed = parseStepLog(log("13/03/2026", "03/13/2026"), { dateOrder: "dmy" });
+    expect(mixed.dateProblem).toBe("mixed");
+    expect(mixed.rows).toEqual([]);
+  });
+});
+
+describe("decodeLogFile", () => {
+  it("reads UTF-8, UTF-16 with a byte-order mark, and falls back to Windows text with a note", () => {
+    expect(decodeLogFile(new TextEncoder().encode("\uFEFFitem,step\nA,Café"))).toEqual({ text: "item,step\nA,Café", note: null });
+    const utf16 = new Uint8Array([0xff, 0xfe, ...Array.from("a,é").flatMap((c) => [c.charCodeAt(0), 0])]);
+    expect(decodeLogFile(utf16)).toEqual({ text: "a,é", note: null });
+    const latin1 = decodeLogFile(new Uint8Array([0x61, 0x2c, 0xe9]));
+    expect(latin1.text).toBe("a,é");
+    expect(latin1.note).toMatch(/CSV UTF-8/);
   });
 });
 

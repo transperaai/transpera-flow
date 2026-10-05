@@ -199,24 +199,15 @@ export interface ProvenanceRows {
   leadSources?: readonly { provenance?: unknown }[];
 }
 
-const SOURCE_RANK: Record<ProvenanceSource, number> = { estimated: 0, entered: 1, measured: 2 };
-const weakest = (a: ProvenanceSource, b: ProvenanceSource): ProvenanceSource => (SOURCE_RANK[a] <= SOURCE_RANK[b] ? a : b);
-
 /**
- * Where qualified leads a week come from, given the lead sources. A source's qualified leads are its leads a week times
- * the share that qualify; calibration measures the qualified leads themselves and stores the leads a week that give
- * them (issue #41), so a measured `volume_week` makes the source's qualified leads measured whatever its share says.
- * Otherwise they are as known as the less known of the two. The total is as known as its least known source; with no
- * sources it is the workspace's interim figure, an estimate.
+ * Where qualified leads a week come from, given the lead sources. Calibration measures the qualified leads themselves
+ * and stores the leads a week that give them (issue #41), so a source whose `volume_week` is measured has measured
+ * qualified leads. Only then are they left out of the robustness check: the total is measured when every source's
+ * leads a week are, and an estimate otherwise (entered volumes stay varied, as before calibration). With no sources it
+ * is the workspace's interim figure, an estimate.
  */
 export function leadsProvenance(sources: readonly { provenance?: unknown }[]): ProvenanceSource {
-  if (!sources.length) return "estimated";
-  return sources
-    .map((s): ProvenanceSource => {
-      const volume = provenanceSource(s.provenance, "volume_week");
-      return volume === "measured" ? volume : weakest(volume, provenanceSource(s.provenance, "conversion_to_qualified"));
-    })
-    .reduce(weakest);
+  return sources.length > 0 && sources.every((s) => provenanceSource(s.provenance, "volume_week") === "measured") ? "measured" : "estimated";
 }
 
 /**

@@ -5,10 +5,11 @@ import type { Json } from "@transpera-flow/db";
 import { parseApplyRequest } from "@/lib/calibration/request";
 import { createClient } from "@/lib/supabase/server";
 
-// Calibration (issue #41): store the record of the step log and the proposals as computed, then apply the ones the person
-// ticked. Runs as the signed-in user: row-level security lets owners and editors write, and `apply_calibration` puts step
-// values into the process's draft (never live) and lead volumes live, all marked measured, skipping any value that
-// changed since the log was read.
+// Calibration (issue #41): record the step log and the proposals as computed and apply the ones the person ticked, in
+// one call (`record_calibration`, one transaction: a refused or failed apply leaves no record, so retries don't pile
+// them up). Runs as the signed-in user: row-level security lets owners and editors write; step values go into the
+// process's draft (never live) and lead volumes live, all marked measured, skipping any value changed since the log
+// was read.
 
 export type ApplyOutcome =
   | {
@@ -27,26 +28,20 @@ export async function applyCalibration(input: unknown): Promise<ApplyOutcome> {
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
 
-  const denied = { status: "error", message: "Only owners and editors can apply calibration here." } as const;
-  const { data: dataset, error: datasetError } = await supabase
-    .from("datasets")
-    .insert({ workspace_id: r.workspaceId, kind: "step_log", process_id: r.processId, file_name: r.fileName, column_map: r.columnMap as Json, row_count: r.rowCount })
-    .select("id")
-    .single();
-  if (datasetError || !dataset) return datasetError?.code === "42501" ? denied : { status: "error", message: "Couldn't save the log's record. Try again." };
-
-  const { data: calibration, error: calibrationError } = await supabase
-    .from("calibrations")
-    .insert({ workspace_id: r.workspaceId, dataset_id: dataset.id, process_id: r.processId, results: r.results as unknown as Json })
-    .select("id")
-    .single();
-  if (calibrationError || !calibration) return calibrationError?.code === "42501" ? denied : { status: "error", message: "Couldn't save the proposals. Try again." };
-
-  const { data, error } = await supabase.rpc("apply_calibration", { p_calibration: calibration.id, p_keys: r.keys });
-  if (error) return { status: "error", message: error.code === "42501" ? denied.message : "Couldn't apply. Try again." };
-  const out = data as { status: string; results?: { key: string; status: string }[]; draft?: { revision_id: string; number: number; created: boolean } | null };
-  if (out.status !== "ok") return denied;
+  const denied = "Only owners and editors can apply calibration here.";
+  const { data, error } = await supabase.rpc("record_calibration", {
+    p_workspace: r.workspaceId,
+    p_process: r.processId,
+    p_file_name: r.fileName,
+    p_column_map: r.columnMap as Json,
+    p_row_count: r.rowCount,
+    p_results: r.results as unknown as Json,
+    p_keys: r.keys,
+  });
+  if (error) return { status: "error", message: error.code === "42501" ? denied : "Couldn't apply. Try again." };
+  const out = data as { status: string; calibration_id?: string; results?: { key: string; status: string }[]; draft?: { revision_id: string; number: number; created: boolean } | null };
+  if (out.status !== "ok" || !out.calibration_id) return { status: "error", message: denied };
   // The process page, the Editor and the sidebar read the draft and the lead sources.
   refresh();
-  return { status: "ok", calibrationId: calibration.id, results: out.results ?? [], draft: out.draft ?? null };
+  return { status: "ok", calibrationId: out.calibration_id, results: [...(out.results ?? []), ...r.skipped], draft: out.draft ?? null };
 }

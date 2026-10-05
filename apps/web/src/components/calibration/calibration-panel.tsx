@@ -9,7 +9,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { calibrate, type CalibrationProposal, type CalibrationResult } from "@transpera-flow/engine";
-import { calibrationInput, parseStepLog, STEP_LOG_TEMPLATE, type CalibrationRows, type ParsedStepLog } from "@transpera-flow/db/calibration";
+import { calibrationInput, decodeLogFile, parseStepLog, STEP_LOG_TEMPLATE, type CalibrationRows, type DateOrder, type ParsedStepLog } from "@transpera-flow/db/calibration";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
@@ -36,7 +36,7 @@ export interface CalibrationPanelProps {
   sample?: { name: string; text: string };
 }
 
-type Read = { fileName: string; log: ParsedStepLog; result: CalibrationResult | null };
+type Read = { fileName: string; body: string; log: ParsedStepLog; result: CalibrationResult | null; note: string | null };
 type Done = { tone: "ok" | "error"; message: string; editor: boolean };
 
 const SOURCE_TONE = {
@@ -59,14 +59,14 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
   const [pending, start] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const readLog = (body: string, name: string) => {
+  const readLog = (body: string, name: string, note: string | null = null, dateOrder?: DateOrder) => {
     setReading(true);
     setDone(null);
     // Let the page show "Reading…" before a big log is parsed.
     setTimeout(() => {
-      const log = parseStepLog(body);
+      const log = parseStepLog(body, dateOrder ? { dateOrder } : {});
       const result = log.missing.length || !log.rows.length ? null : calibrate(calibrationInput(stored, log.rows));
-      setRead({ fileName: name || "Pasted log", log, result });
+      setRead({ fileName: name || "Pasted log", body, log, result, note });
       setSelected(new Set(result ? result.proposals.filter(initiallySelected).map((p) => p.key) : []));
       setApplied(new Set());
       setReading(false);
@@ -79,10 +79,11 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
       setDone({ tone: "error", message: "That file is over 20 MB. Split it by date and read each part.", editor: false });
       return;
     }
-    const body = await file.text();
+    // Excel saves "CSV" as Windows text and "Unicode text" as UTF-16: read either, and say so when it isn't UTF-8.
+    const { text: body, note } = decodeLogFile(new Uint8Array(await file.arrayBuffer()));
     setFileName(file.name);
     setText("");
-    readLog(body, file.name);
+    readLog(body, file.name, note);
   };
 
   const toggle = (key: string, on: boolean) =>
@@ -192,7 +193,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
             <dt className="font-mono text-xs leading-5">step</dt>
             <dd className="text-muted-foreground">The step&apos;s name as on the map. Log end steps such as Won and Lost too.</dd>
             <dt className="font-mono text-xs leading-5">started</dt>
-            <dd className="text-muted-foreground">When it started: 2026-03-02 09:30, or day first 02/03/2026 09:30.</dd>
+            <dd className="text-muted-foreground">When it started: 2026-03-02 09:30, or 02/03/2026 09:30 (if the log can’t tell day from month, you’re asked).</dd>
             <dt className="font-mono text-xs leading-5">finished</dt>
             <dd className="text-muted-foreground">Optional. When it finished. Needed for waiting times.</dd>
             <dt className="font-mono text-xs leading-5">hours</dt>
@@ -254,7 +255,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
         </CardContent>
       </Card>
 
-      {read && <LogSummary read={read} />}
+      {read && <LogSummary read={read} onDateOrder={(order) => readLog(read.body, read.fileName, read.note, order)} />}
 
       {read?.result && (
         <Card role="region" aria-labelledby="cal-diff-heading">
@@ -344,13 +345,46 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
   );
 }
 
-function LogSummary({ read }: { read: Read }) {
+function LogSummary({ read, onDateOrder }: { read: Read; onDateOrder: (order: DateOrder) => void }) {
   const { log, result } = read;
   if (log.missing.length) {
     return (
       <div role="alert" className="rounded-lg border border-crit bg-crit-soft p-3 text-sm">
         The log has no {log.missing.join(", ")} column. The first row must name the columns: item, step and started at least.
       </div>
+    );
+  }
+  if (log.dateProblem === "mixed") {
+    return (
+      <div role="alert" className="rounded-lg border border-crit bg-crit-soft p-3 text-sm">
+        Some dates in the log can only be day first (like 13/03/2026) and others only month first (like 03/13/2026). Make them all the same
+        way round, or use 2026-03-13, and read it again.
+      </div>
+    );
+  }
+  if (log.dateProblem === "ambiguous") {
+    return (
+      <fieldset className="flex flex-col gap-2 rounded-lg border border-warn bg-warn-soft p-3 text-sm">
+        <legend className="sr-only">Day and month order</legend>
+        <span className="flex items-center gap-1 font-medium">
+          Is 02/03/2026 the 2nd of March or the 3rd of February?
+          <Help
+            label="Day and month order"
+            description="Every date in this log reads both ways round, so say which it is. All the dates are then read the same way."
+            example="Logs from Australia and the UK are usually day first: 02/03/2026 is 2 March."
+          />
+        </span>
+        <span className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2">
+            <input type="radio" name="cal-date-order" onChange={() => onDateOrder("dmy")} /> Day first (2 March)
+            <Help label="Day first" description="Read every date as day, then month, then year." example="02/03/2026 is 2 March 2026." />
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="cal-date-order" onChange={() => onDateOrder("mdy")} /> Month first (3 February)
+            <Help label="Month first" description="Read every date as month, then day, then year, as in the US." example="02/03/2026 is 3 February 2026." />
+          </label>
+        </span>
+      </fieldset>
     );
   }
   return (
@@ -365,7 +399,11 @@ function LogSummary({ read }: { read: Read }) {
         )}
         .
         {log.errors.length > 0 && ` ${log.errors.length} row${log.errors.length === 1 ? " was" : "s were"} left out.`}
+        {log.dateOrder && ` Dates read ${log.dateOrder === "dmy" ? "day first" : "month first"}.`}
+        {result && result.inProgressAtStart > 0 &&
+          ` ${result.inProgressAtStart} item${result.inProgressAtStart === 1 ? " was" : "s were"} already part-way through when the log starts, so ${result.inProgressAtStart === 1 ? "isn't" : "aren't"} counted as new leads.`}
       </p>
+      {read.note && <p className="text-muted-foreground">{read.note}</p>}
       {log.errors.length > 0 && (
         <details>
           <summary className="cursor-pointer text-muted-foreground">Rows left out</summary>

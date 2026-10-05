@@ -7,7 +7,7 @@
 -- person accepts. The raw rows are never stored; only what the PRD's `datasets` row records about the file (name,
 -- column map, row count) and the calibration's results (every proposal, current and proposed, with its sample size).
 --
--- STRICTLY ADDITIVE: two new tables and one new function. Nothing existing is changed.
+-- STRICTLY ADDITIVE: two new tables and two new functions. Nothing existing is changed.
 --
 --   * `public.datasets`: workspace, `kind` (`step_log` now; the PRD's `leads`, `deals`, `jobs`, `time_logs`, `invoices`
 --     are allowed for C1's wizard, #40), the process it is about (if any), `file_name`, `column_map` (which column of the
@@ -29,6 +29,12 @@
 --         before (`already_applied`).
 --     Returns {status: 'ok', draft: {revision_id, number, created} | null, results: [{key, status}]}. An API-token
 --     request (the MCP server) is refused: a person applies calibration in the app.
+--   * `public.record_calibration(...)` (SECURITY INVOKER): what the page calls. Records the dataset and the calibration
+--     and applies the ticked keys in ONE transaction, so a failed or refused apply leaves no record behind and a retry
+--     doesn't pile them up. Returns apply_calibration's answer plus `calibration_id` and `dataset_id`.
+--   * `private.calibrations_before_write`: a new calibration starts unapplied; what it proposed never changes;
+--     `applied_keys` only grows, and when it does `applied` becomes true and `applied_at`/`applied_by` are set to now and
+--     the signed-in user (whatever the update says); deleting a user may null `created_by`/`applied_by`.
 --
 -- Row-level security as `suggestion_proposals`: everyone in the workspace reads; owners and editors insert and apply.
 -- Privileges: Supabase gives every new table full rights to anon and authenticated, so this revokes them and grants back
@@ -39,22 +45,27 @@
 --        select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('datasets', 'calibrations');
 --   2. Nothing of ours is applied past this one. Expect 0 rows:
 --        select version from supabase_migrations.schema_migrations where version >= '20261202000000';
---   3. The helpers it calls exist. Expect 4 rows:
---        select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in ('open_draft', 'can_read_workspace', 'can_edit_workspace', 'set_updated_at');
---   4. The tables it references exist. Expect 5 rows:
+--   3. The three migrations before it (rows 47-49 of docs/production-migrations.md) are applied. Expect 3:
+--        select count(*) from supabase_migrations.schema_migrations where version in ('20261130000000', '20261130500000', '20261201000000');
+--   4. The helpers it calls exist. Expect 5 rows:
+--        select n.nspname || '.' || p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--        where (n.nspname = 'public' and p.proname in ('open_draft', 'can_read_workspace', 'can_edit_workspace', 'set_updated_at'))
+--           or (n.nspname = 'private' and p.proname = 'has_open_conflict');
+--   5. The tables it references exist. Expect 5 rows:
 --        select table_name from information_schema.tables where table_schema = 'public' and table_name in ('workspaces', 'processes', 'steps', 'edges', 'lead_sources');
 --
 -- POST-APPLY CHECK (authenticated: INSERT and SELECT on both tables, UPDATE on calibrations' applied, applied_at,
 -- applied_by and applied_keys only; anon: nothing; the function: not SECURITY DEFINER, empty search_path, no anon EXECUTE):
 --        select table_name, grantee, privilege_type from information_schema.role_table_grants where table_schema = 'public' and table_name in ('datasets', 'calibrations') and grantee in ('anon', 'authenticated') order by 1, 2, 3;
 --        select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'calibrations' and grantee = 'authenticated' and privilege_type = 'UPDATE' order by 1;
---        select prosecdef, proconfig, has_function_privilege('anon', p.oid, 'execute') from pg_proc p where proname = 'apply_calibration';
+--        select prosecdef, proconfig, has_function_privilege('anon', p.oid, 'execute') from pg_proc p where proname in ('apply_calibration', 'record_calibration');
 --   Expect: authenticated INSERT and SELECT on each (no UPDATE row at table level); UPDATE columns applied, applied_at,
 --   applied_by, applied_keys; f, {search_path=""}, f.
 --
 -- ROLLBACK (one transaction; nothing existing was changed, so nothing to put back):
 --
 --   begin;
+--   drop function if exists public.record_calibration(uuid, uuid, text, jsonb, integer, jsonb, text[]);
 --   drop function if exists public.apply_calibration(uuid, text[]);
 --   drop table if exists public.calibrations;   -- its indexes, triggers and policies go with it
 --   drop table if exists public.datasets;
@@ -132,10 +143,22 @@ begin
   end if;
   if new.results is distinct from old.results or new.dataset_id is distinct from old.dataset_id
      or new.workspace_id is distinct from old.workspace_id or new.created_at is distinct from old.created_at
-     or new.created_by is distinct from old.created_by
-     -- The process may only go (its row deleted: the foreign key nulls it).
+     -- The process and the creator may only go (their row deleted: the foreign key nulls them).
+     or (new.created_by is distinct from old.created_by and new.created_by is not null)
      or (new.process_id is distinct from old.process_id and new.process_id is not null) then
     raise exception 'A calibration''s proposals never change' using errcode = '55000';
+  end if;
+  if not (new.applied_keys @> old.applied_keys) then
+    raise exception 'Applied proposals stay applied' using errcode = '55000';
+  end if;
+  if new.applied_keys is distinct from old.applied_keys then
+    -- Something more was applied: by whom and when is the database's to say.
+    new.applied := true;
+    new.applied_at := now();
+    new.applied_by := auth.uid();
+  elsif new.applied is distinct from old.applied or new.applied_at is distinct from old.applied_at
+     or (new.applied_by is distinct from old.applied_by and new.applied_by is not null) then
+    raise exception 'Only applying proposals changes what was applied' using errcode = '55000';
   end if;
   return new;
 end;
@@ -376,12 +399,8 @@ begin
   end loop;
 
   if cardinality(done) > 0 then
-    update public.calibrations c
-    set applied = true,
-        applied_keys = c.applied_keys || done,
-        applied_at = now(),
-        applied_by = auth.uid()
-    where c.id = cal.id;
+    -- The trigger sets applied, applied_at and applied_by.
+    update public.calibrations c set applied_keys = c.applied_keys || done where c.id = cal.id;
   end if;
 
   return jsonb_build_object(
@@ -394,3 +413,41 @@ $$;
 
 revoke all on function public.apply_calibration(uuid, text[]) from public, anon, authenticated;
 grant execute on function public.apply_calibration(uuid, text[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- record_calibration: the dataset record, the calibration and the apply, in one transaction
+-- ---------------------------------------------------------------------------
+
+create function public.record_calibration(
+  p_workspace uuid,
+  p_process uuid,
+  p_file_name text,
+  p_column_map jsonb,
+  p_row_count integer,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  ds uuid;
+  cal uuid;
+  out jsonb;
+begin
+  -- Row-level security refuses a viewer's or a stranger's insert; apply_calibration refuses an API token. Either way
+  -- the whole call rolls back, records included.
+  insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count)
+  values (p_workspace, 'step_log', p_process, p_file_name, coalesce(p_column_map, '{}'), p_row_count)
+  returning id into ds;
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (p_workspace, ds, p_process, p_results)
+  returning id into cal;
+  out := public.apply_calibration(cal, p_keys);
+  return out || jsonb_build_object('calibration_id', cal, 'dataset_id', ds);
+end;
+$$;
+
+revoke all on function public.record_calibration(uuid, uuid, text, jsonb, integer, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_calibration(uuid, uuid, text, jsonb, integer, jsonb, text[]) to authenticated;

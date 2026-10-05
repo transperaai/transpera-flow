@@ -1,5 +1,5 @@
 // A sample step log for Northbeam's pipeline (the public demo's process), so the demo's Calibration page has something
-// to read: forty leads over fourteen weeks, with hands-on hours, the client's decision time, redone audits and which way
+// to read: fifty-six leads over eight weeks (about Northbeam's seven qualified a week), with hands-on hours, the client's decision time, redone audits and which way
 // each lead went. Deterministic: the same text every time.
 
 const DAY = 86_400_000;
@@ -10,13 +10,13 @@ const hours = (i: number, base: number, spread: number) => Math.round((base + ((
 
 export function northbeamSampleLog(): string {
   const lines = ["item,step,started,finished,hours,source"];
-  const sources = ["Website enquiries", "Website enquiries", "Google Ads", "Client referrals"];
-  for (let i = 0; i < 40; i++) {
+  const sources = ["Website enquiries", "Google Ads", "Client referrals", "Website enquiries", "Client referrals", "Google Ads", "Client referrals"];
+  for (let i = 0; i < 56; i++) {
     const item = `NB-${String(101 + i)}`;
-    let t = START + Math.floor(i * 2.4) * DAY + (i % 3) * 3_600_000;
+    let t = START + i * DAY + (i % 3) * 3_600_000;
     const step = (name: string, h: number | null, waitDays = 0) => {
       const done = t + (h ?? 0) * 3_600_000 + waitDays * DAY;
-      lines.push(`${item},${name},${at(t)},${at(done)},${h ?? ""},${name === "Qualify lead" ? sources[i % 4] : ""}`);
+      lines.push(`${item},${name},${at(t)},${at(done)},${h ?? ""},${name === "Qualify lead" ? sources[i % 7] : ""}`);
       t = done + DAY;
     };
     step("Qualify lead", hours(i, 0.75, 0.25));
