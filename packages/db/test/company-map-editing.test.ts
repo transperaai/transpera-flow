@@ -429,12 +429,12 @@ describe("review fixes: nothing takes a card off the map, history is kept, draft
     const card = (await holderOf(draft, w.support))!;
     const offMap = /taken off the company map by removing its card in a draft/;
     await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = null where revision_id = $1 and id = $2", [draft, card.id]))).rejects.toThrow(offMap);
-    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = $3 where revision_id = $1 and id = $2", [draft, card.id, w.delivery]))).rejects.toThrow();
+    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = $3 where revision_id = $1 and id = $2", [draft, card.id, w.delivery]))).rejects.toThrow(offMap);
     await expect(commitAs(editor.claims, (c) => save(c, "steps", draft, card.id, { child_process_id: w.support }, { child_process_id: null }))).rejects.toThrow(offMap);
     // A published version is never edited (the card stays in it).
     const live = (await processRow(w.cid)).live_revision_id;
     const liveCard = (await holderOf(live, w.support))!;
-    await expect(commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [live, liveCard.id]))).rejects.toThrow();
+    await expect(commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [live, liveCard.id]))).rejects.toThrow(offMap);
     expect(await holderOf(live, w.support)).toBeDefined();
     // A card in a group, and the group in another: deleting a group in the draft takes the card with it.
     const [inner, outer] = [randomUUID(), randomUUID()];

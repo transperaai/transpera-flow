@@ -296,18 +296,39 @@ describe("the company map in the Editor (B11)", () => {
     await page.close();
   }, 60_000);
 
-  it("removing a card takes it off the map (the link only), and the process is offered by the library again", async () => {
-    const page = await mount({ editable: true, company: true, palette: true });
+  /** Every process is on the map to start with; select the first card as a person does (a click on it). */
+  async function selectFirstCard(page: Page) {
     const library = page.locator("[data-process-library]");
-    // Every process of the workspace is on the map to start with: the library lists them greyed.
     await library.waitFor();
     expect(await library.locator("[data-library-item][data-state='placed']").count()).toBe(3);
     expect(await library.locator("[data-library-item][data-state='free']").count()).toBe(0);
-    const first = (await page.evaluate(() => window.mapApi.getSteps()))[0]!;
-    await page.evaluate((n) => window.mapApi.removeCards([n]), first);
-    await page.waitForFunction(() => window.mapApi.getSteps().length === 2);
+    const name = (await page.evaluate(() => window.mapApi.getSteps()))[0]!;
+    const card = page.locator(".react-flow__node", { hasText: name }).first();
+    await card.click({ position: { x: 20, y: 8 } });
+    await page.locator("[data-remove-from-map]").waitFor();
+    return { library, name };
+  }
+  async function expectOffTheMap(page: Page, library: ReturnType<Page["locator"]>, name: string) {
+    await page.waitForFunction((n) => !window.mapApi.getSteps().includes(n) && window.mapApi.getSteps().length === 2, name);
     await page.waitForFunction(() => document.querySelectorAll("[data-process-library] [data-library-item][data-state='free']").length === 1);
     expect(await library.locator("[data-library-item][data-state='placed']").count()).toBe(2);
+    // The process is offered again under its own name, and can be ticked.
+    expect(await library.locator("[data-library-item][data-state='free']").innerText()).toContain(name);
+  }
+
+  it("pressing Delete on a selected card takes it off the map (the link only), and the library offers the process again", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    const { library, name } = await selectFirstCard(page);
+    await page.keyboard.press("Delete");
+    await expectOffTheMap(page, library, name);
+    await page.close();
+  }, 60_000);
+
+  it("the inspector's Remove from this map takes the card off the map, and the library offers the process again", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    const { library, name } = await selectFirstCard(page);
+    await page.locator("[data-remove-from-map]").click();
+    await expectOffTheMap(page, library, name);
     await page.close();
   }, 60_000);
 });
@@ -366,6 +387,20 @@ describe("the process library on the company map (B12)", () => {
     // The third is still free; the two placed are disabled and cannot be added again.
     expect(await free(page).count()).toBe(1);
     expect(await page.locator("[data-library-item][data-state='placed'] input:enabled").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("says when the search is hiding processes that are ticked, and still adds them", async () => {
+    const page = await mount({ editable: true, company: true, palette: true });
+    await takeAllOff(page);
+    const items = await free(page).all();
+    await items[0]!.locator("input").check();
+    await items[1]!.locator("input").check();
+    await page.getByLabel("Search processes by name").fill("zzz no such process");
+    await page.waitForFunction(() => document.querySelectorAll("[data-library-item]").length === 0);
+    await page.waitForFunction(() => /^Add 2 to the map \(2 hidden by search\)$/.test(document.querySelector("[data-library-add]")?.textContent ?? ""));
+    await add(page).click();
+    await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 2);
     await page.close();
   }, 60_000);
 

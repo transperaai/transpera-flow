@@ -36,6 +36,9 @@ export function ProcessLibrary({
   // What was picked may since have been placed (or its card removed again): only what can still be added counts.
   const addable = new Set(all.filter((e) => e.state === "free").map((e) => e.id));
   const chosen = [...picked].filter((id) => addable.has(id));
+  // Ticked processes that the search is hiding are still ticked, and still added: the button says so.
+  const shownIds = new Set(free.map((e) => e.id));
+  const hidden = chosen.filter((id) => !shownIds.has(id)).length;
 
   const toggle = (id: string) =>
     setPicked((now) => {
@@ -83,7 +86,7 @@ export function ProcessLibrary({
       )}
       <div className="flex items-center gap-1.5">
         <Button type="button" size="sm" disabled={!chosen.length} onClick={add} data-library-add className="flex-1">
-          {chosen.length ? `Add ${chosen.length} to the map` : "Add to the map"}
+          {chosen.length ? `Add ${chosen.length} to the map${hidden ? ` (${hidden} hidden by search)` : ""}` : "Add to the map"}
         </Button>
         {free.length > 1 && (
           <Button type="button" variant="outline" size="sm" onClick={pickAll} disabled={free.every((e) => picked.has(e.id))}>

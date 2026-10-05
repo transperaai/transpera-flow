@@ -79,6 +79,17 @@ const place = (c: pg.Client, w: World, draft: string, processId: string, name: s
   );
 const unplace = (c: pg.Client, draft: string, stepId: string) => c.query("delete from steps where revision_id = $1 and id = $2", [draft, stepId]);
 
+
+/** The statement is refused with this SQLSTATE and a message that says why (a refusal for another reason fails the test). */
+async function refused(run: Promise<unknown>, code: string, why: RegExp) {
+  const err = (await run.then(
+    () => null,
+    (e: unknown) => e,
+  )) as { code?: string; message?: string } | null;
+  expect(err, "expected the statement to be refused").not.toBeNull();
+  expect({ code: err!.code, message: err!.message }).toEqual({ code, message: expect.stringMatching(why) });
+}
+
 beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   editor = await createUser(db, "editor@process-library.example.com");
@@ -152,11 +163,11 @@ describe("the process library places a process on the company map as a link", ()
     // Make room: take Support off, so a refusal is about the process, not about it already being there.
     const support = (await holderOf(draft, w.support))!;
     await commitAs(editor.claims, (c) => unplace(c, draft, support.id));
-    await expect(commitAs(editor.claims, (c) => place(c, w, draft, other.sales, "Their Sales", 0, 0))).rejects.toThrow();
-    await expect(commitAs(editor.claims, (c) => place(c, w, draft, w.cid, "Company map", 0, 0))).rejects.toThrow();
+    await refused(commitAs(editor.claims, (c) => place(c, w, draft, other.sales, "Their Sales", 0, 0)), "23503", /steps_child_process_fk/);
+    await refused(commitAs(editor.claims, (c) => place(c, w, draft, w.cid, "Company map", 0, 0)), "23514", /Company map must be a child of this step.s process/);
     // Support nested under Sales is held by Sales; it can't also sit on the map.
     await q("update processes set parent_process_id = $2 where id = $1", [w.support, w.sales]);
-    await expect(commitAs(editor.claims, (c) => place(c, w, draft, w.support, "Support", 0, 0))).rejects.toThrow();
+    await refused(commitAs(editor.claims, (c) => place(c, w, draft, w.support, "Support", 0, 0)), "23514", /Support must be a child of this step.s process/);
     expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = any($2)", [draft, [other.sales, w.cid, w.support]]))[0].n).toBe(0);
   });
 
@@ -165,7 +176,7 @@ describe("the process library places a process on the company map as a link", ()
     const draft = await openDraft(w.cid);
     const card = (await holderOf(draft, w.support))!;
     await commitAs(editor.claims, (c) => unplace(c, draft, card.id));
-    await expect(commitAs(viewer.claims, (c) => place(c, w, draft, w.support, "Support", 0, 0))).rejects.toThrow();
+    await refused(commitAs(viewer.claims, (c) => place(c, w, draft, w.support, "Support", 0, 0)), "42501", /row-level security/);
     const sales = (await holderOf(draft, w.sales))!;
     // (A viewer can read the row but the policy lets the delete match nothing, or refuses it.)
     await commitAs(viewer.claims, (c) => unplace(c, draft, sales.id)).catch(() => undefined);
@@ -176,12 +187,25 @@ describe("the process library places a process on the company map as a link", ()
     const w = await world();
     const live = (await processRow(w.cid)).live_revision_id;
     const liveCard = (await holderOf(live, w.sales))!;
-    await expect(commitAs(editor.claims, (c) => unplace(c, live, liveCard.id))).rejects.toThrow();
+    await refused(commitAs(editor.claims, (c) => unplace(c, live, liveCard.id)), "55000", /taken off the company map by removing its card in a draft/);
     const draft = await openDraft(w.cid);
     const card = (await holderOf(draft, w.sales))!;
-    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = null where revision_id = $1 and id = $2", [draft, card.id]))).rejects.toThrow();
+    await refused(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = null where revision_id = $1 and id = $2", [draft, card.id])), "55000", /taken off the company map by removing its card in a draft/);
     expect(await holderOf(live, w.sales)).toBeDefined();
     expect(await holderOf(draft, w.sales)).toBeDefined();
+  });
+
+  it("says the right thing for a group with no card in it: the published version is never edited", async () => {
+    const w = await world();
+    const live = (await processRow(w.cid)).live_revision_id;
+    const group = randomUUID();
+    await q("insert into steps (id, revision_id, workspace_id, process_id, name, kind, x, y) values ($1, $2, $3, $4, 'Empty box', 'group', 0, 0)", [group, live, w.ws, w.cid]);
+    const err = (await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [live, group])).then(
+      () => null,
+      (e: unknown) => e,
+    )) as { message?: string } | null;
+    expect(err).not.toBeNull();
+    expect(err!.message).not.toMatch(/removing its card/);
   });
 
   it("discarding the draft drops its pending removals: live never lost the card", async () => {
