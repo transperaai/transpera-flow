@@ -4,7 +4,6 @@
 // step starts, from the latest run, longest first. The numbers are the run's own: `StepResult.avgWait`, in hours.
 
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
-import { Help } from "@/components/help";
 import { formatHours } from "@/lib/format";
 
 const SHOWN = 7;
@@ -24,11 +23,6 @@ export function WaitByStep({ model, result, stepIds }: { model: EngineModel; res
     <section aria-labelledby="wait-heading" className="rounded-token border border-line bg-panel p-3 shadow-token">
       <h3 id="wait-heading" className="mb-2 flex items-center text-sm font-bold">
         Wait before each step
-        <Help
-          label="Wait before each step"
-          description="How long work sits in line before someone starts a step, on average over the simulated runs. A long wait means the step, or the people who do it, can't keep up."
-          example="Audit & proposal: 38 h means a lead waits about a week, in working hours, before anyone starts its audit."
-        />
       </h3>
       {!result ? (
         <p className="text-sm text-fg-2">Simulating…</p>

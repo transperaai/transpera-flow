@@ -23,58 +23,17 @@ import type { IssueDraft, IssueFormOptions } from "@/lib/issues/draft";
 import { buildInsights, filterByRating, limitInsights, ratingCountsOf, type Insight } from "@/lib/insights/insights";
 import type { IssuesState } from "@/lib/issues/use-issues";
 
-/** The (i) texts: what each control does, in plain words, with an example. */
+/** The (i) texts in an opened insight: only what the screen does not say by itself. */
 export const INSIGHT_HELP = {
-  filter: {
-    label: "Filter by rating",
-    description: "Show only the insights with one rating. The number on each button is how many there are. Click it again, or All, to see everything.",
-    example: "Click Operational risk 2 to see only the two that could break delivery or lose clients.",
-  },
-  row: {
-    label: "Reading a row",
-    description:
-      "Each row is one thing the analysis noticed in the latest run: its rating, what it costs a month (an estimate), the number behind it, the steps it touches and what found it. Hover a row to see its steps on the map. Click it for the detail.",
-    example: "“Strategist is too busy · Operational risk · about £4,200 a month · 94% busy · Audit & proposal · Too busy rule”.",
-  },
   cost: {
     label: "Cost per month",
     description: "A rough price of this problem each month, worked out from the numbers in the run. It is an estimate, not a bill. It says n/a when the problem has no money price.",
     example: "About £4,200 a month (estimate): the strategist's overtime and the work that waits for them.",
   },
-  number: {
-    label: "The number",
-    description: "The figure from the simulation that made the analysis raise this.",
-    example: "The strategist is busy 94% of the time.",
-  },
-  worked: {
-    label: "How it's worked out",
-    description: "Which rule or AI found this, and where to change its limits. Changing a rule re-rates the run straight away.",
-    example: "The Too busy rule rates 85% or more as Bad and 95% or more as Operational risk.",
-  },
-  sources: {
-    label: "Linked sources",
-    description: "Interviews, notes or documents that back this insight up, so others can trust it.",
-    example: "Interview with Maya Collins: “I review every report before it goes out.”",
-  },
-  linkSource: {
-    label: "Link a source",
-    description: "Attach an interview, note or document to this insight. You do it in the Acknowledge dialog, as you turn the insight into an issue: the sources you pick stay with the issue.",
-    example: "Link Maya's interview to “Strategist is too busy”.",
-  },
   dismiss: {
     label: "Dismiss",
     description: "Say this isn't a problem. It leaves the list and stays away until the process's next published version: if the analysis still finds it then, it is listed again and you can dismiss it again. It never reaches the map.",
     example: "Dismiss “Spare time” on a person who is meant to have slack. Publish a new version of the process and, if they still have slack, it comes back for another look.",
-  },
-  acknowledge: {
-    label: "Acknowledge as issue",
-    description: "Opens the Acknowledge dialog: confirm the title, how bad it is, what it touches, who owns it, a target and its sources. Saving makes it a tracked issue with a number. Only then does it show on the map as a badge.",
-    example: "Acknowledge “Strategist is too busy”: it becomes an issue with a red badge on that step.",
-  },
-  issueLink: {
-    label: "Issue number",
-    description: "This insight has been acknowledged and is now a tracked issue, with a number that stays the same. The link opens it in the register.",
-    example: "“Strategist is too busy” is now Issue #4, owned by Maya.",
   },
 } as const;
 
@@ -152,10 +111,8 @@ export function Insights(props: InsightsProps) {
             {RATING_LABELS[c.rating]}
           </Chip>
         ))}
-        <Help {...INSIGHT_HELP.filter} />
         <span className="ml-auto flex items-center text-xs text-muted-foreground" aria-live="polite">
           {running ? "Checking the latest run…" : `${filtered.length} insight${filtered.length === 1 ? "" : "s"}`}
-          <Help {...INSIGHT_HELP.row} />
         </span>
       </div>
 
@@ -327,10 +284,7 @@ function InsightDialog({
               <DialogDescription>What the analysis found in the latest run.</DialogDescription>
             </DialogHeader>
             <dl className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
-              <dt className="flex items-start text-xs font-medium text-muted-foreground uppercase">
-                The number
-                <Help {...INSIGHT_HELP.number} />
-              </dt>
+              <dt className="text-xs font-medium text-muted-foreground uppercase">The number</dt>
               <dd className="font-mono">{insight.number}</dd>
               {insight.found && (
                 <>
@@ -357,10 +311,7 @@ function InsightDialog({
                 <Help {...INSIGHT_HELP.cost} />
               </dt>
               <dd data-cost>{formatIssueCost(insight.cost, currency)}</dd>
-              <dt className="flex items-start text-xs font-medium text-muted-foreground uppercase">
-                How it&apos;s worked out
-                <Help {...INSIGHT_HELP.worked} />
-              </dt>
+              <dt className="text-xs font-medium text-muted-foreground uppercase">How it&apos;s worked out</dt>
               <dd className="text-muted-foreground">
                 {ai ? (
                   "AI read this run's results, the process's first principles and linked sources, and wrote this. Every number comes from the simulation."
@@ -379,20 +330,14 @@ function InsightDialog({
 
             {linking ? (
               // Where the page loads source links: the links themselves, with the Add / Link source dialog. An insight is linked by its detection key.
-              <LinkedSources target={{ kind: "insight", insightKey: insight.key }} label={`Insight: ${insight.title}`} empty="None linked" linkText="+ Link a source" className="flex flex-col gap-1.5" />
+              <LinkedSources target={{ kind: "insight", insightKey: insight.key }} label={`Insight: ${insight.title}`} empty="None linked" linkText="+ Link a source" help={false} className="flex flex-col gap-1.5" />
             ) : (
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center text-xs font-medium text-muted-foreground uppercase">
-                    Sources
-                    <Help {...INSIGHT_HELP.sources} />
-                  </span>
-                  <span className="flex items-center">
-                    <Button variant="ghost" size="sm" disabled={insight.issue !== null || !canAct} onClick={() => onStartAcknowledge(insight)}>
-                      + Link a source
-                    </Button>
-                    <Help {...INSIGHT_HELP.linkSource} />
-                  </span>
+                  <span className="text-xs font-medium text-muted-foreground uppercase">Sources</span>
+                  <Button variant="ghost" size="sm" disabled={insight.issue !== null || !canAct} onClick={() => onStartAcknowledge(insight)}>
+                    + Link a source
+                  </Button>
                 </div>
                 {sources.length ? (
                   sources.map((s) => (
@@ -413,16 +358,13 @@ function InsightDialog({
             )}
             <DialogFooter className="items-center">
               {insight.issue ? (
-                <span className="flex items-center">
-                  {link ? (
-                    <Button asChild>
-                      <Link href={link}>{issueLabel(insight.issue)} →</Link>
-                    </Button>
-                  ) : (
-                    <span className="text-sm font-medium">{issueLabel(insight.issue)}</span>
-                  )}
-                  <Help {...INSIGHT_HELP.issueLink} />
-                </span>
+                link ? (
+                  <Button asChild>
+                    <Link href={link}>{issueLabel(insight.issue)} →</Link>
+                  </Button>
+                ) : (
+                  <span className="text-sm font-medium">{issueLabel(insight.issue)}</span>
+                )
               ) : canAct ? (
                 <>
                   <span className="flex items-center">
@@ -431,12 +373,9 @@ function InsightDialog({
                     </Button>
                     <Help {...INSIGHT_HELP.dismiss} />
                   </span>
-                  <span className="flex items-center">
-                    <Button disabled={working || busy} onClick={() => onStartAcknowledge(insight)}>
-                      Acknowledge as issue…
-                    </Button>
-                    <Help {...INSIGHT_HELP.acknowledge} />
-                  </span>
+                  <Button disabled={working || busy} onClick={() => onStartAcknowledge(insight)}>
+                    Acknowledge as issue…
+                  </Button>
                 </>
               ) : (
                 <p className="text-xs text-muted-foreground">You can read insights here; someone who can edit this workspace acknowledges them.</p>

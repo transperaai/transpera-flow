@@ -12,12 +12,15 @@ import { cn } from "@/lib/utils";
 export function HorizonPicker({
   weeks,
   onChange,
+  help = true,
   className,
 }: {
   /** The run's current length in weeks. */
   weeks: number;
   /** Told the months picked. */
   onChange: (months: number) => void;
+  /** Show the (i) beside the label. The Overview leaves it out. Default true. */
+  help?: boolean;
   className?: string;
 }) {
   const selected = monthsForWeeks(weeks);
@@ -25,11 +28,13 @@ export function HorizonPicker({
     <div className={cn("flex items-center gap-2 text-xs", className)}>
       <span className="flex items-center font-medium text-fg-2">
         Projection
-        <Help
-          label="Projection"
-          description="How far ahead the simulation looks. Longer shows slower effects such as clients leaving and market changes, but takes a little longer to run."
-          example="6m shows the next 6 months. 24m shows two years, including a market change planned for month 18."
-        />
+        {help && (
+          <Help
+            label="Projection"
+            description="How far ahead the simulation looks. Longer shows slower effects such as clients leaving and market changes, but takes a little longer to run."
+            example="6m shows the next 6 months. 24m shows two years, including a market change planned for month 18."
+          />
+        )}
       </span>
       <div role="group" aria-label="Time horizon" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
         {HORIZON_MONTHS.map((m) => (

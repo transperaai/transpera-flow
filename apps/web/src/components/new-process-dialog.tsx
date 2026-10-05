@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Help } from "@/components/help";
 import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,11 +16,6 @@ export function NewProcessButton({ create }: { create: CreateProcess }) {
       <Button className="bg-edit text-edit-fg hover:bg-edit/90" onClick={() => setOpen(true)}>
         ✎ New process
       </Button>
-      <Help
-        label="New process"
-        description="Starts a recurring process for existing clients and opens it in the editor as a draft. Nothing is live until you publish it."
-        example="Call it Monthly client report, add its steps in the editor, then publish."
-      />
       <NewProcessDialog open={open} onOpenChange={setOpen} create={create} />
     </span>
   );

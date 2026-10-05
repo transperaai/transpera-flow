@@ -7,7 +7,6 @@
 
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
-import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { AI_NOT_SET_UP, type AiMode, type AiPanelData } from "@/lib/ai/types";
 import { useAiRun } from "./use-ai-run";
@@ -83,22 +82,12 @@ export function AiRead({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
         <Sparkles aria-hidden className="size-4 text-accent" />
         <span>AI read of this run</span>
-        <Help
-          label="AI read"
-          description="A short plain-English summary of the run, written by AI after it reads the results, the process's first principles and, if you allow it, your sources. Every number it uses is checked against the simulation, and any item with a number that doesn't match is left out."
-          example="“The strategist is the bottleneck: audits wait about a day before anyone starts them.”"
-        />
         <span className="text-xs font-normal text-muted-foreground">· uses {scope === "company" ? "the company's" : "this process's"} first principles, results and sources</span>
         {canRun && mode !== "readonly" && (
           <span className="ml-auto flex items-center">
             <Button variant="ghost" size="sm" disabled={!runnable || pending} onClick={run} title={!runnable ? (!configured ? AI_NOT_SET_UP : "Write first principles first") : undefined}>
               {pending ? "Running…" : "Run again"}
             </Button>
-            <Help
-              label="Run again"
-              description="Asks AI to read this version's run again now and replace what is shown. It also runs by itself when you publish a version or change the market conditions, if those switches are on in Settings → AI analysis."
-              example="You fixed a first principle and want a fresh read without publishing."
-            />
           </span>
         )}
       </div>

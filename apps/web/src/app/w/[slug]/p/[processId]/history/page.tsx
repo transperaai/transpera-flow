@@ -6,10 +6,10 @@ import { canEditWorkspace } from "@/lib/access-data";
 import { isId } from "@/lib/editor/validate";
 import { loadHistory } from "@/lib/history/data";
 import { loadProcessesPage } from "@/lib/processes/data";
-import { duplicateVersion, restoreVersion, versionModel } from "./actions";
+import { duplicateVersion, restoreVersion } from "./actions";
 
 /**
- * A process's History (issue #105): every published version with its simulated numbers, and for editors Restore
+ * A process's History (issue #105): every published version with who made it and what changed, and for editors Restore
  * and Duplicate. View opens the process page at that version, read only.
  */
 export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[processId]/history">) {
@@ -45,10 +45,7 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
         )
       }
       processName={process.name}
-      kind={process.kind}
       versions={history.versions}
-      models={history.models}
-      loadModel={versionModel.bind(null, process.id)}
       viewBase={here}
       actions={canEdit ? { restore: restoreVersion.bind(null, process.id), duplicate: duplicateVersion.bind(null, process.id) } : undefined}
       links={{ edit: `${here}/edit`, newProcessEdit: `${base}/p/{id}/edit` }}

@@ -101,14 +101,13 @@ const current = (result: SimulationResult | null, model: EngineModel | null): Si
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 
-function Section({ title, description, action, help, children }: { title: string; description?: ReactNode; action?: ReactNode; help?: ReactNode; children: ReactNode }) {
+function Section({ title, description, action, children }: { title: string; description?: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h2 className={SECTION_TITLE}>
             {title}
-            {help}
           </h2>
           {description && <div className="text-sm text-muted-foreground">{description}</div>}
         </div>
@@ -230,7 +229,7 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
               {error ? "Can't be simulated yet" : baseResult ? `Live model · 30 simulated runs · updated ${updated ?? ""}`.trim() : "Live model · simulating 30 runs…"}
             </span>
           }
-          actions={<HorizonPicker weeks={weeks} onChange={pickHorizon} />}
+          actions={<HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} />}
         />
 
         {error ? (
@@ -324,13 +323,6 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
         <Section
           title="Trends"
           description={`Projected over the next ${span}, with the 10–90% range from 30 runs.`}
-          help={
-            <Help
-              label="Trends"
-              description="Each chart shows the average of 30 simulated runs, with a band or whisker for the range: one run in ten ends below it and one in ten above it. The time you pick above sets how far ahead they look."
-              example="If the revenue band is wide at month 12, the future is uncertain there: the business could land anywhere inside it."
-            />
-          }
         >
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="gap-3 px-4 py-4" data-chart="mrr">

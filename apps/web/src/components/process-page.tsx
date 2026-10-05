@@ -1,14 +1,15 @@
 "use client";
 
 // The process page (issue #103, A38): a read-only review of one process on a single scrolling column, no tabs and no
-// drawers. First principles, Projection, Map, Insights, Issues, Solutions, then Supporting data. Editing happens in the
+// drawers. First principles, Map, Insights, Issues, Solutions, then Supporting data and, closed at the bottom, Sources. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ChevronRight } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, type AnalysisSettings, type EngineModel, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
+import { RATING_LABELS, type AnalysisSettings, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { AiRead } from "@/components/ai/ai-read";
@@ -21,18 +22,9 @@ import { Separator } from "@/components/ui/separator";
 import { withHorizon } from "@/lib/editor/modes";
 import { useDemoFirstPrinciples } from "@/lib/first-principles/demo-store";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
-import { horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/lib/horizon";
-import { useHiddenLevers } from "@/lib/levers/use-hidden-levers";
-import { headlineCards } from "@/lib/overview/headline";
-import { mrrAfter, startingMrr, summarise } from "@/lib/overview/projection";
-import { resolveRun } from "@/lib/scenarios/broken";
-import { leverKind, visibleLevers } from "@/lib/scenarios/lever-catalogue";
-import { buildLevers, leverPatches, type LeverValues } from "@/lib/scenarios/levers";
+import { horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import { processStepIds } from "@/lib/process-steps";
 import { useSimulation } from "@/lib/sim/use-simulation";
-import { HorizonPicker } from "./horizon-picker";
-import { LeverPanel } from "./lever-panel";
-import { HeadlineCards } from "./overview/headline-cards";
 import { ProcessCanvas } from "./process-canvas";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
 import { useProcessIssues } from "./process-issues";
@@ -67,7 +59,6 @@ export function ProcessPage({
   sources = [],
   liveRevisions,
   analysisRules,
-  hiddenLevers,
   rating,
   registerHref,
   settingsHref,
@@ -96,8 +87,6 @@ export function ProcessPage({
   /** Each process's live revision id, which a dismissed insight is measured against. Omitted: this bundle's, when it is the live one. */
   liveRevisions?: Record<string, string>;
   analysisRules?: AnalysisSettings;
-  /** The lever kinds the workspace has switched off in Settings -> Levers (the demo keeps its own in the tab). */
-  hiddenLevers?: string[];
   /** The process's rating: the worst of its open issues and of those of the processes inside it, as the switcher shows it. */
   rating?: Rating | null;
   registerHref?: string;
@@ -119,42 +108,14 @@ export function ProcessPage({
   notice?: ReactNode;
 }) {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   const horizonParam = Number(searchParams.get("horizon"));
-  const [pickedMonths, setPickedMonths] = useState<number | null>(isHorizonMonths(horizonParam) ? horizonParam : null);
-  const pickHorizon = (months: number) => {
-    setPickedMonths(months);
-    const next = new URLSearchParams(searchParams.toString());
-    next.set("horizon", String(months));
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  };
+  // A ?horizon= in the address still sets how far ahead the run looks (the Overview and the Editor use it); this page has no picker.
+  const pickedMonths = isHorizonMonths(horizonParam) ? horizonParam : null;
   const { model, error } = useEngineModel(bundle, pickedMonths === null ? null : horizonWeeks(pickedMonths));
   const sim = useSimulation(model);
   const result = sim.run?.result ?? null;
 
-  // The levers (A58): slider values live in memory. They change the projection only; the map, insights and issues
-  // keep reading the process as it is.
-  const hidden = useHiddenLevers(mode === "demo", hiddenLevers);
-  const leversHref = settingsHref ? `${settingsHref}/levers` : mode === "demo" ? "/demo/settings/levers" : undefined;
-  const [values, setValues] = useState<LeverValues>({});
-  const levers = useMemo(() => visibleLevers(model ? buildLevers(model) : [], hidden), [model, hidden]);
-  const hiddenCount = hidden.filter((id) => leverKind(id)?.control === "slider").length;
-  const moved = useMemo(() => leverPatches(levers, values), [levers, values]);
-  const resolved = useMemo(() => (model && moved.length ? resolveRun(model, moved, {}) : null), [model, moved]);
-  const projKey = resolved?.ok ? JSON.stringify(resolved.model) : null;
-  const projModel = useMemo(() => (projKey ? (JSON.parse(projKey) as EngineModel) : null), [projKey]);
-  const projSim = useSimulation(projModel);
-  const projected = projModel ? projModel : model;
-  const projectedResult = projModel ? (projSim.status === "done" ? projSim.run.result : null) : sim.status === "done" ? result : null;
-  const months = projected ? (monthsForWeeks(projected.horizonWeeks) ?? Math.max(1, Math.round(projected.horizonWeeks / (52 / 12)))) : 0;
-  const cards = useMemo(() => {
-    if (!projected || !projectedResult) return null;
-    const start = startingMrr(projected);
-    const mrr = mrrAfter(projected, summarise(projected, projectedResult), start);
-    return headlineCards({ model: projected, result: projectedResult, mrr, start, months, currency: bundle.workspace.settings.currency });
-  }, [projected, projectedResult, months, bundle.workspace.settings.currency]);
-  const levStatus = !projModel ? "Every change re-runs the simulation." : projSim.status === "running" ? "Simulating…" : projSim.status === "error" ? "Simulation failed" : "Projection updated";
   const sourceTitles = Object.fromEntries(sources.map((s) => [s.id, s.title]));
 
   // Back to live: the same address without ?version=.
@@ -224,11 +185,6 @@ export function ProcessPage({
             )}
             <span className="inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs">
               {KIND_LABEL[bundle.process.kind]}
-              <Help
-                label="Process type"
-                description="A pipeline is the main flow work moves through, from a lead to a finished client. A servicing process is a recurring job for clients you already have."
-                example="Lead to live is a pipeline. A monthly report for each retainer client is servicing."
-              />
             </span>
             {rating && (
               <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${RATING_PILL[rating]}`} data-process-rating={rating}>
@@ -278,11 +234,6 @@ export function ProcessPage({
         <Section
           id="first-principles"
           title="First principles"
-          help={{
-            label: "First principles",
-            description: "What the process is for, what is truly fixed, who owns each requirement, what could go, the root cause and how success is measured. The analysis judges the process against it, and each success measure is rated by how many simulated runs meet it.",
-            example: "Win rate at least 30%: met in 61% of runs today, so Good, could improve.",
-          }}
         >
           <FirstPrinciplesCard
             bundle={bundle}
@@ -294,36 +245,6 @@ export function ProcessPage({
             draftChanged={firstPrinciples?.draftChanged}
             inheritedFrom={firstPrinciples?.inheritedFrom}
           />
-        </Section>
-
-        <Section id="projection" title="Projection">
-          {model ? (
-            <div className="flex flex-col gap-3">
-              <HorizonPicker weeks={model.horizonWeeks} onChange={pickHorizon} />
-              <HeadlineCards cards={cards} />
-              {levers.length > 0 && (
-                <LeverPanel
-                  levers={levers}
-                  hiddenCount={hiddenCount}
-                  settingsHref={leversHref}
-                  values={values}
-                  currency={bundle.workspace.settings.currency}
-                  status={levStatus}
-                  onChange={(path, v) =>
-                    setValues((prev) => {
-                      const next = { ...prev };
-                      if (v === undefined) delete next[path];
-                      else next[path] = v;
-                      return next;
-                    })
-                  }
-                  onReset={() => setValues({})}
-                />
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-fg-2">Nothing to project until the process can be simulated.</p>
-          )}
         </Section>
 
         <Section
@@ -352,11 +273,6 @@ export function ProcessPage({
           id="insights"
           title="Insights"
           hint="What the analysis found in the latest run. Nothing reaches the map until someone confirms it."
-          help={{
-            label: "Insights",
-            description: "Things the rules noticed in the simulation. They are suggestions: they stay off the map until someone confirms one as an issue.",
-            example: "Proposals wait 38 h before review. Confirm it and it becomes an issue with a red badge on that step.",
-          }}
         >
           <div className="flex flex-col gap-3">
             {ai && <AiRead mode={mode} scope="process" processId={bundle.process.id} ai={ai} firstPrinciplesHref={firstPrinciples?.href} canRun={!old && !unpublished} />}
@@ -368,11 +284,6 @@ export function ProcessPage({
           id="issues"
           title="Issues"
           hint="Open issues linked to this process or its steps."
-          help={{
-            label: "Issues",
-            description: "Problems the team has agreed to own, written by hand or confirmed from an insight. Each has a rating, an owner and a status.",
-            example: "Only one copywriter can do reviews: rated Operational risk, owned by Maya, status Open.",
-          }}
         >
           {issuesUi.issuesList}
           {registerHref && (
@@ -382,17 +293,10 @@ export function ProcessPage({
           )}
         </Section>
 
-        <ProcessSources processId={bundle.process.id} name={bundle.process.name} />
-
         <Section
           id="solutions"
           title="Solutions"
           hint="Bundles of steps tested against an issue. They never change the live map."
-          help={{
-            label: "Solutions",
-            description: "A solution is a copy of this process with some steps changed. It is tested against an issue's target and never changes the live map. A process can have many.",
-            example: "“AI lead qualifier” replaces Check fit and Enrich lead with an AI step, and passes the target of first contact under 4 hours.",
-          }}
         >
           <ProcessSolutions
             processId={bundle.process.id}
@@ -417,29 +321,33 @@ export function ProcessPage({
             <p className="text-sm text-fg-2">Nothing to show until the process can be simulated.</p>
           )}
         </Section>
+
+        <ProcessSources processId={bundle.process.id} name={bundle.process.name} />
       </div>
       {issuesUi.badges}
     </div>
   );
 }
 
-/** The sources that are evidence for the whole process, with "+ Link". Only where the page loads source links (the others have nothing to show). */
+/** The sources that are evidence for the whole process, with "+ Link", in a section at the very bottom that starts closed. Only where the page loads source links (the others have nothing to show). */
 function ProcessSources({ processId, name }: { processId: string; name: string }) {
   const linking = useSourceLinking();
   if (!linking) return null;
   return (
-    <Section
-      id="sources"
-      title="Sources"
-      hint="The interviews, notes and data that are evidence for this process as a whole."
-      help={{
-        label: "Sources",
-        description: "Sources linked to this process show here. A source linked to a step of it shows on that step's detail instead. A source linked to nothing doesn't count as evidence.",
-        example: "The strategy walkthrough, linked to Lead to live: it describes how the whole pipeline works.",
-      }}
-    >
-      <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />
-    </Section>
+    <section id="sources" aria-labelledby="sources-heading" className="min-w-0 scroll-mt-16">
+      <details className="group rounded-xl border bg-card">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+          <ChevronRight aria-hidden className="size-4 text-fg-2 transition-transform group-open:rotate-90" />
+          <h2 id="sources-heading" className="font-display text-lg font-bold">
+            Sources
+          </h2>
+          <span className="text-sm text-fg-2">The interviews, notes and data that are evidence for this process as a whole.</span>
+        </summary>
+        <div className="px-4 pb-4">
+          <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />
+        </div>
+      </details>
+    </section>
   );
 }
 

@@ -8,9 +8,8 @@ import { describe, expect, it } from "vitest";
 const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8");
 
 const EXPECT: Record<string, string[]> = {
-  "components/process-page.tsx": ["Process type", "Process rating"],
-  "components/wait-by-step.tsx": ["Wait before each step"],
-  "components/utilisation-bars.tsx": ["How busy each role is", "Roles or people"],
+  "components/process-page.tsx": ["Process rating"],
+  "components/utilisation-bars.tsx": ["How busy each role is"],
   "components/horizon-picker.tsx": ["Projection"],
 };
 
@@ -28,23 +27,24 @@ describe("process page help", () => {
     });
   }
 
-  it("the sections carry help through <Section help>", () => {
+  it("only the non-obvious things on the process page keep an (i): the map colours and the process rating", () => {
     const text = read("components/process-page.tsx");
-    for (const label of ["First principles", "Map colours", "Insights", "Issues"]) expect(text).toContain(`label: "${label}"`);
+    expect(text).toContain('label: "Map colours"');
+    expect((text.match(/<Help\b/g) ?? []).length).toBeLessThanOrEqual(2);
+    for (const label of ["First principles", "Insights", "Issues", "Solutions", "Sources"]) expect(text).not.toContain(`label: "${label}"`);
   });
 
-  it("every control in the Insights rows and pop-up has an (i) with a description and an example (issue #110)", () => {
+  it("an opened insight keeps at most two (i)s: the cost estimate and Dismiss; the list and rows have none", () => {
     const text = read("components/insights.tsx");
-    const labels = ["Filter by rating", "Reading a row", "Cost per month", "The number", "How it's worked out", "Linked sources", "Link a source", "Dismiss", "Acknowledge as issue", "Issue number"];
-    for (const label of labels) {
+    for (const label of ["Cost per month", "Dismiss"]) {
       const at = text.indexOf(`label: "${label}"`);
       expect(at, `${label} has no help text`).toBeGreaterThan(-1);
       const entry = text.slice(at, at + 700);
       expect(entry).toMatch(/description:/);
       expect(entry).toMatch(/example:/);
     }
-    // Each is used: the filter, the row, the dialog's fields and its three actions.
-    for (const key of ["filter", "row", "cost", "number", "worked", "sources", "linkSource", "dismiss", "acknowledge", "issueLink"]) expect(text).toContain(`<Help {...INSIGHT_HELP.${key}} />`);
+    for (const key of ["cost", "dismiss"]) expect(text).toContain(`<Help {...INSIGHT_HELP.${key}} />`);
+    expect((text.match(/<Help\b/g) ?? []).length).toBe(2);
   });
 
   it("the headline cards and levers bring their own (i)", () => {

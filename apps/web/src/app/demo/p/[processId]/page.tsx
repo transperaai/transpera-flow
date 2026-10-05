@@ -54,7 +54,7 @@ export default async function DemoProcessPage(props: PageProps<"/demo/p/[process
           <AlertDescription className="text-xs leading-relaxed">
             <p>
               Demo mode: sample data from the seed fixtures, not a database. This page is for reading: press Open in Editor to change the
-              process in a draft you can simulate against live, publish or discard. Move the levers and log issues here to try them out.
+              process in a draft you can simulate against live, publish or discard. Log issues here to try them out.
               Everything stays in this tab and is gone when you reload.
             </p>
           </AlertDescription>
