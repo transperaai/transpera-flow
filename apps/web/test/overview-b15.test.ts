@@ -243,7 +243,7 @@ describe("findings by process", () => {
     expect(out.slice(at, out.indexOf("data-top-finding", at))).toContain(RATING_LABELS[card!]);
   });
   it("says a group's counts in words, leaving out zeros", () => {
-    expect(countsLine({ openIssues: 2, newInsights: 1, solutionsInProgress: 1 })).toBe("2 open issues · 1 new insight · 1 solution in progress");
+    expect(countsLine({ openIssues: 2, newInsights: 1, solutionsInProgress: 1 })).toBe("2 open issues · 1 new finding · 1 solution in progress");
     expect(countsLine({ openIssues: 0, newInsights: 0, solutionsInProgress: 0 })).toBe("Nothing open");
   });
 });

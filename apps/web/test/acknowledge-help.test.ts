@@ -55,9 +55,10 @@ describe("Acknowledge dialog help", () => {
     }
   });
 
-  it("the Dismiss help says a dismissal lasts until the process's next published version", () => {
-    expect(INSIGHT_HELP.dismiss.description).toMatch(/next published version/);
-    expect(INSIGHT_HELP.dismiss.example).toMatch(/Publish a new version/);
+  it("the Dismiss help says a dismissed finding leaves the list, never reaches the map, and stays dismissed (B17)", () => {
+    expect(INSIGHT_HELP.dismiss.description).toMatch(/never reaches the map/);
+    expect(INSIGHT_HELP.dismiss.description).toMatch(/stays dismissed/);
+    expect(INSIGHT_HELP.dismiss.example.length).toBeGreaterThan(10);
   });
 
   it("the register's New issue and Edit paths use the same dialog", () => {

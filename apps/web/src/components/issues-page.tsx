@@ -8,7 +8,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type AnalysisSettings, type FirstPrinciples, type IssueCost, type Rating } from "@transpera-flow/engine";
+import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type FirstPrinciples, type IssueCost, type Rating } from "@transpera-flow/engine";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help } from "@/components/help";
 import { LIST_HELP } from "@/lib/issues/help";

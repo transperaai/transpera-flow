@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PanelRight } from "lucide-react";
 import { isUnpublished, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
-import type { AnalysisSettings, EngineModel, FirstPrinciples } from "@transpera-flow/engine";
+import type { EngineModel, FirstPrinciples } from "@transpera-flow/engine";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { discardChange, revertField } from "@/lib/drafts/discard";
 import { EMPTY_DIFF, diffBundles, unresolvedSteps } from "@/lib/drafts/diff";

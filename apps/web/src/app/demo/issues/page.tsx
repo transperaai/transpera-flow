@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { northbeamIssues, northbeamScenarios, processesOf } from "@transpera-flow/db";
 import { IssuesPage } from "@/components/issues-page";
 import { Page } from "@/components/shell/page";

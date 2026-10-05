@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Page } from "@/components/shell/page";
 import { IssuesPage } from "@/components/issues-page";

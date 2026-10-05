@@ -383,7 +383,14 @@ function InsightDialog({
               ) : canAct ? (
                 <>
                   {onEdit && insight.detection.findingId && (
-                    <Button variant="ghost" disabled={working || busy} onClick={() => onEdit(insight)}>
+                    <Button
+                      variant="ghost"
+                      disabled={working || busy}
+                      onClick={() => {
+                        onClose();
+                        onEdit(insight);
+                      }}
+                    >
                       Edit
                     </Button>
                   )}

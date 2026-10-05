@@ -19,6 +19,7 @@ export const DEMO_AI_OUTPUT = {
       stepId: northbeamStepIds.audit,
       evidence: "Items queue 49.8 h on average before anyone starts them at Audit & proposal.",
       why: "Your job is a signed retainer and a kickoff call in the diary. A week in the proposal queue is a week a founder can go elsewhere.",
+      facts: ["fact-b"],
     },
     {
       title: "Late servicing work is the biggest reason PPC clients leave",
@@ -27,6 +28,7 @@ export const DEMO_AI_OUTPUT = {
       stepId: null,
       evidence: "Late or missed servicing work is behind 58% of the PPC management clients lost over the 13-week run.",
       why: "Fixing report timeliness is worth more than any sales change right now.",
+      facts: ["fact-d"],
     },
     {
       title: "Only one person can price and scope work",
@@ -35,6 +37,7 @@ export const DEMO_AI_OUTPUT = {
       stepId: northbeamStepIds.audit,
       evidence: "The Strategist is busy avg 97% of the time (range 85%–101%), and only one person can do Audit & proposal.",
       why: "Your root cause is that pricing and scoping rules aren't written down, so every proposal routes through one person.",
+      facts: ["fact-e", "fact-f"],
     },
   ],
   review: [
@@ -48,6 +51,14 @@ export const DEMO_AI_OUTPUT = {
 
 const KEYS = ["ai:insight:9d1efee1b163", "ai:insight:6f3406c9135d", "ai:insight:6131898b315a"];
 
+/** The facts each demo finding cites (B17), as the sample's run writes them (test/ai-demo.test.ts checks they match). */
+const FACTS: Record<string, { kind: "fact"; key: string; text: string }> = {
+  "fact-b": { kind: "fact", key: "wait:step:e0000000-0000-4000-8000-000000000003", text: "Work waits 6.2 working days for Audit & proposal." },
+  "fact-d": { kind: "fact", key: "churn_risk:driver:80000000-0000-4000-8000-000000000002:late", text: "Late or missed servicing work causes 58% of PPC management clients leaving." },
+  "fact-e": { kind: "fact", key: "capacity:role:b0000000-0000-4000-8000-000000000002", text: "Strategist (Maya Collins) at 97% utilisation." },
+  "fact-f": { kind: "fact", key: "spof:step:e0000000-0000-4000-8000-000000000003", text: "Only Maya Collins can do Audit & proposal." },
+};
+
 /** The demo's analysis of a process, or null for the processes the demo has no AI text for. */
 export function demoAiView(processId: string): AiAnalysisView | null {
   if (processId !== NORTHBEAM_PROCESS_ID) return null;
@@ -56,7 +67,7 @@ export function demoAiView(processId: string): AiAnalysisView | null {
     reason: null,
     trigger: "publish",
     summary: [...DEMO_AI_OUTPUT.read],
-    insights: DEMO_AI_OUTPUT.insights.map((i, n): AiInsight => ({ ...i, key: KEYS[n]! })),
+    insights: DEMO_AI_OUTPUT.insights.map(({ facts, ...i }, n): AiInsight => ({ ...i, key: KEYS[n]!, facts: facts.map((id) => FACTS[id]!) })),
     review: DEMO_AI_OUTPUT.review.map((r): AiReviewFinding => ({ ...r })),
     checked: 22,
     dropped: 0,

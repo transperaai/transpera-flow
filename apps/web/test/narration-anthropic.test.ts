@@ -47,7 +47,7 @@ describe("anthropicNarrator", () => {
   it("sends the latest Claude, structured output, the facts as a cached block and the refusal fallback; reads the paragraphs", async () => {
     const { f, seen } = fakeFetch(() => message(JSON.stringify({ paragraphs: ["One.", "Two."] })));
     const draft = await anthropicNarrator("sk-test", { fetch: f })!.draft(req);
-    expect(draft).toEqual({ paragraphs: ["One.", "Two."], model: NARRATION_MODEL, usage: { inputTokens: 2500, outputTokens: 400, cacheReadTokens: 2000 } });
+    expect(draft).toEqual({ paragraphs: ["One.", "Two."], model: NARRATION_MODEL, usage: { inputTokens: 2500, outputTokens: 400, cacheReadTokens: 2000, cacheWriteTokens: 0 } });
     expect(seen).toHaveLength(1);
     const { url, body, headers } = seen[0]!;
     expect(url).toMatch(/\/v1\/messages(\?beta=true)?$/);

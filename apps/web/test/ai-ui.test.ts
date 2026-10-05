@@ -1,21 +1,24 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_AI_SETTINGS } from "@transpera-flow/db";
-import { AiRead } from "@/components/ai/ai-read";
+import { DEFAULT_AI_SETTINGS, type FindingRow } from "@transpera-flow/db";
+import { AnalysisPanel } from "@/components/findings/analysis-panel";
 import { AiReviewPanel } from "@/components/ai/ai-review-panel";
 import { AiSettingsPage } from "@/components/ai/ai-settings";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { demoAiView } from "@/lib/ai/demo";
 import { AI_SWITCHES } from "@/lib/ai/switches";
 import type { AiAnalysisView, AiPanelData } from "@/lib/ai/types";
+import type { FindingsState } from "@/lib/findings/use-findings";
 import { NORTHBEAM_PROCESS_ID } from "@transpera-flow/db";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }), usePathname: () => "/w/s", useSearchParams: () => new URLSearchParams() }));
-vi.mock("@/app/w/[slug]/ai-actions", () => ({ runAiAnalysisNow: async () => ({ status: "ok", message: "" }) }));
+vi.mock("@/app/w/[slug]/ai-actions", () => ({ analyseProcess: async () => ({ status: "ok", message: "" }), analyseCompany: async () => ({ status: "ok", message: "" }) }));
+vi.mock("@/app/w/[slug]/findings-actions", () => ({ createFinding: async () => ({ status: "forbidden" }), editFinding: async () => ({ status: "forbidden" }), decideFinding: async () => ({ status: "forbidden" }) }));
 vi.mock("@/app/w/[slug]/settings/ai/actions", () => ({ saveAiSwitch: async () => ({ status: "error", message: "" }) }));
 
-// What the AI panels say in each state (issue #111, A46): the read, the review panel and Settings -> AI analysis.
+// What the AI panels say in each state (issue #111, A46; B17): the analysis panel (Analyse, the read, out of date, cost and
+// model, the findings to review), the first-principles review panel and Settings -> AI analysis.
 
 const view = (over: Partial<AiAnalysisView> = {}): AiAnalysisView => ({
   status: "ok",
@@ -36,53 +39,129 @@ const view = (over: Partial<AiAnalysisView> = {}): AiAnalysisView => ({
   ...over,
 });
 const data = (over: Partial<AiPanelData> = {}): AiPanelData => ({ view: view(), configured: true, hasFirstPrinciples: true, versionNumber: 3, ...over });
-const read = (ai: AiPanelData, over: Record<string, unknown> = {}) => renderToStaticMarkup(createElement(AiRead, { mode: "live", scope: "process", processId: "p", ai, firstPrinciplesHref: "/w/s/p/p/first-principles", ...over }));
+const proposal = (over: Partial<FindingRow> = {}): FindingRow => ({
+  id: "f1",
+  workspace_id: "w",
+  process_id: "p",
+  step_id: null,
+  origin: "ai",
+  status: "proposed",
+  rating: "bad",
+  type: "delay",
+  title: "Proposals wait for one person",
+  evidence: "Work waits 6.2 working days for Audit & proposal.",
+  why: "Founders go elsewhere.",
+  facts: [{ kind: "fact", key: "wait:step:a", text: "Work waits 6.2 working days for Audit & proposal." }],
+  source_ids: [],
+  ai_key: "ai:insight:aaaaaaaaaaaa",
+  analysis_id: "a",
+  created_by: null,
+  created_at: "2026-10-01T09:00:00.000Z",
+  updated_by: null,
+  updated_at: "2026-10-01T09:00:00.000Z",
+  decided_by: null,
+  decided_at: null,
+  ...over,
+});
+const findingsState = (canEdit = true): FindingsState => ({
+  findings: [],
+  busy: false,
+  error: null,
+  canEdit,
+  create: async () => null,
+  edit: async () => null,
+  accept: async () => null,
+  dismiss: async () => null,
+  receive: () => {},
+  dismissError: () => {},
+});
+const read = (ai: AiPanelData, over: Record<string, unknown> = {}) =>
+  renderToStaticMarkup(
+    createElement(AnalysisPanel, {
+      mode: "live",
+      scope: "process",
+      ai,
+      findings: findingsState(over.mode !== "readonly"),
+      proposed: [],
+      options: { processes: [{ id: "p", name: "Lead to live" }], company: false, steps: [] },
+      defaultProcessId: "p",
+      stepName: () => null,
+      analyse: async () => ({ status: "ok", message: "" }),
+      firstPrinciplesHref: "/w/s/p/p/first-principles",
+      ...over,
+    } as Parameters<typeof AnalysisPanel>[0]),
+  );
 const panel = (ai: AiPanelData, step: "saa" | "job" = "saa", over: Record<string, unknown> = {}) => renderToStaticMarkup(createElement(AiReviewPanel, { mode: "live", processId: "p", step, ai, ...over }));
 
-describe("the AI read", () => {
-  it("shows the read, where it is from, and how much was checked", () => {
-    const html = read(data());
-    expect(html).toContain("AI read of this run");
+describe("the analysis panel", () => {
+  it("shows the read, who and what wrote it, how much was checked and what it cost, with Analyse again", () => {
+    const html = read(data({ view: view({ costUsd: 0.0612 }) }));
+    expect(html).toContain("AI analysis");
     expect(html).toContain("The Strategist is the constraint.");
-    expect(html).toContain("Version 3, written 1 Oct 2026 by claude-opus-5-5. Reviewed by AI · run by Ed Itor. 4 numbers checked against the run; 1 item left out");
-    expect(html).toContain("Run again");
-    // The (i)s beside the title and Run again were removed on purpose (QA wave 1): the read's own line says what it uses.
-    expect(html).not.toContain("About AI read");
+    expect(html).toContain("Written 1 Oct 2026 by claude-opus-5-5, run by Ed Itor. 4 numbers checked against the run; 1 item left out");
+    expect(html).toContain("Cost about $0.06.");
+    expect(html).toContain("Analyse again");
+    expect(html).toContain("Add a finding");
+    expect(html).not.toContain("Out of date");
   });
 
-  it("says AI analysis isn't set up when the server has no key", () => {
+  it("marks a stored analysis out of date when the model has changed since, and keeps showing it", () => {
+    const html = read(data({ stale: true }));
+    expect(html).toContain('data-analysis="stale"');
+    expect(html).toContain("Out of date");
+    expect(html).toContain("The process has changed since this was written. Analyse again to bring it up to date.");
+    expect(html).toContain("The Strategist is the constraint.");
+    expect(read(data({ stale: true }), { scope: "company" })).toContain("The company model has changed since");
+  });
+
+  it("says AI analysis isn't set up when the server has no key, and still offers a finding by hand", () => {
     const html = read(data({ view: null, configured: false }));
     expect(html).toContain("AI analysis isn&#x27;t set up");
-    expect(html).not.toContain("Write first principles");
-    expect(html).toContain("disabled");
+    expect(html).toContain("You can still add findings by hand");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Analyse<\/button>/);
   });
 
   it("asks for first principles when there are none", () => {
     const html = read(data({ view: null, hasFirstPrinciples: false }));
-    expect(html).toContain("Write its first principles so the review can judge it against your goal");
+    expect(html).toContain("Write this process&#x27;s first principles first");
     expect(html).toContain('href="/w/s/p/p/first-principles"');
-    expect(read(data({ view: null, hasFirstPrinciples: false }), { scope: "company" })).toContain("AI hasn&#x27;t reviewed the company yet");
   });
 
-  it("says it hasn't run yet when it could", () => {
-    expect(read(data({ view: null }))).toContain("AI hasn&#x27;t reviewed this version yet. It reviews each version when it is published");
+  it("says it hasn't run yet, and that Analyse runs it", () => {
+    expect(read(data({ view: null }))).toContain("Not analysed yet. Press Analyse to have AI read the facts and propose findings for you to review.");
   });
 
-  it("says why it couldn't write a read, and keeps the insights it could", () => {
-    expect(read(data({ view: view({ summary: [], reason: "the read was left out: it cited figures that aren't in the run" }) }))).toContain("AI couldn&#x27;t write a read that matched the run: the read was left out");
-    expect(read(data({ view: view({ summary: [], status: "failed", reason: "the model declined to write it" }) }))).toContain("AI couldn&#x27;t review this version: the model declined to write it");
+  it("says why it couldn't write an analysis", () => {
+    expect(read(data({ view: view({ summary: [], status: "failed", reason: "the model declined to write it" }) }))).toContain("AI couldn&#x27;t write an analysis that matched the run: the model declined to write it");
   });
 
-  it("has no Run again for a viewer or an earlier version", () => {
-    expect(read(data(), { mode: "readonly" })).not.toContain("Run again");
-    expect(read(data(), { canRun: false })).not.toContain("Run again");
+  it("lists the proposed findings for an editor to accept, edit or dismiss, each with the facts it rests on", () => {
+    const html = read(data(), { proposed: [proposal(), proposal({ id: "f2", status: "accepted", title: "Already accepted" })] });
+    expect(html).toContain("To review · 1");
+    expect(html).toContain("Proposals wait for one person");
+    expect(html).not.toContain("Already accepted");
+    expect(html).toContain("Rests on 1 fact");
+    for (const b of [">Accept<", ">Edit<", ">Dismiss<"]) expect(html).toContain(b);
   });
 
-  it("on the demo shows the written-in-advance read and a Run again that is never disabled", () => {
+  it("shows a viewer no review list and no buttons, only that findings are waiting", () => {
+    const html = read(data(), { mode: "readonly", proposed: [proposal()] });
+    expect(html).not.toContain("To review");
+    expect(html).not.toContain("Proposals wait for one person");
+    expect(html).toContain("AI proposed 1 finding, waiting for someone who can edit to review.");
+    expect(html).not.toContain("Analyse");
+    expect(html).not.toContain("Add a finding");
+  });
+
+  it("has no Analyse on an earlier version", () => {
+    expect(read(data(), { canRun: false })).not.toContain("Analyse again");
+  });
+
+  it("on the demo shows the written-in-advance read and an Analyse that is never disabled", () => {
     const html = read(data({ view: demoAiView(NORTHBEAM_PROCESS_ID), versionNumber: 3 }), { mode: "demo" });
     expect(html).toContain("The Strategist is the constraint");
-    expect(html).toContain("Run again");
-    expect(html).not.toMatch(/<button[^>]*\sdisabled=""[^>]*>Run again/);
+    expect(html).toContain("Written in advance for the demo");
+    expect(html).not.toMatch(/<button[^>]*\sdisabled=""[^>]*>Analyse again/);
   });
 });
 
@@ -112,9 +191,9 @@ describe("the AI review panel", () => {
     expect(panel(data({ view: view({ status: "failed", review: [], reason: "it timed out" }) }))).toContain("AI couldn&#x27;t review this version: it timed out");
   });
 
-  it("has a Run again for editors only", () => {
-    expect(panel(data())).toContain("Run again");
-    expect(panel(data(), "saa", { mode: "readonly" })).not.toContain("Run again");
+  it("has Analyse for editors only", () => {
+    expect(panel(data())).toContain("Analyse");
+    expect(panel(data(), "saa", { mode: "readonly" })).not.toContain(">Analyse<");
   });
 });
 
@@ -122,11 +201,9 @@ describe("Settings -> AI analysis", () => {
   const page = (over: Record<string, unknown> = {}) =>
     renderToStaticMarkup(createElement(SidebarProvider, null, createElement(AiSettingsPage, { mode: "live", workspaceId: "w", initial: { ...DEFAULT_AI_SETTINGS }, configured: true, ...over })));
 
-  it("has the five switches of the prototype, each with an (i)", () => {
+  it("has the three switches left once analysis runs only on demand (B17), each with an (i)", () => {
     const html = page();
     expect(AI_SWITCHES.map((s) => s.label)).toEqual([
-      "Review after each published version",
-      "Review when market conditions change",
       "Suggest issues (they land in Suggestions)",
       "Suggest solution ideas using blocks from the library",
       "Read linked sources and quotes",
@@ -136,7 +213,11 @@ describe("Settings -> AI analysis", () => {
       expect(html).toContain(`About ${s.label}`);
       expect(html).toContain(`data-ai-switch="${s.key}"`);
     }
-    expect((html.match(/role="switch"/g) ?? []).length).toBe(5);
+    expect((html.match(/role="switch"/g) ?? []).length).toBe(3);
+    // Nothing reviews a version on its own any more.
+    expect(html).not.toContain("Review after each published version");
+    expect(html).not.toContain("Review when market conditions change");
+    expect(html).toContain("Runs when you press Analyse");
   });
 
   it("gives every switch plain-English help with an example, and the two suggest switches say what turning them off does", () => {

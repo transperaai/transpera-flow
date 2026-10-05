@@ -30,7 +30,7 @@ import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ModelError, toEngineModel, type FindingRow, type IssueRow, type ProcessBundle, type ProcessPart, type SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, ratingOfStored, resolveMoney, toRatingConfig, type AnalysisSettings, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { RATING_LABELS, ratingOfStored, resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { PageHeader } from "@/components/shell/page";
