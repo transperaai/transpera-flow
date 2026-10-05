@@ -1,11 +1,13 @@
-import { exportWorkspaceBundle, supabaseReader, supabaseWorkspaceReader } from "@transpera-flow/db";
+import { BundleTooLargeError, bundleJsonChunks, exportWorkspaceBundle, supabaseReader, supabaseWorkspaceReader } from "@transpera-flow/db";
 import { supabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 // GET /w/<slug>/export/bundle (issue #39, B10 part 1): the whole workspace as one JSON file (`transpera-workspace/1`), the
 // backup and migration format. Read as the signed-in user, so row-level security decides what they may read: a member
-// (a viewer included) gets what they can read, anyone else gets a 404 (the same answer as for a workspace that doesn't
-// exist). Nothing is cached, and the file is a download, never rendered.
+// gets what they can read, anyone else gets a 404 (the same answer as for a workspace that doesn't exist). A viewer gets
+// what is published (no drafts, no pending suggestions); an editor or owner gets everything. The tables are read one
+// after another, so a bundle taken during edits can mix moments (`exported_at` says when reading began). The file is sent
+// in pieces without indentation. Nothing is cached, and it is a download, never rendered.
 
 export const maxDuration = 60;
 
@@ -21,12 +23,32 @@ export async function GET(_request: Request, ctx: RouteContext<"/w/[slug]/export
   const { data: workspace, error } = await supabase.from("workspaces").select("id").eq("slug", slug).maybeSingle();
   if (error) return Response.json({ message: "The workspace could not be read." }, { status: 500 });
   if (!workspace) return Response.json({ message: "No such workspace." }, { status: 404 });
+  const { data: canEdit } = await supabase.rpc("can_edit_workspace", { ws: workspace.id });
 
   const now = new Date();
   try {
-    const bundle = await exportWorkspaceBundle(workspace.id, supabaseWorkspaceReader(supabase), supabaseReader(supabase), now);
+    const bundle = await exportWorkspaceBundle(workspace.id, supabaseWorkspaceReader(supabase), supabaseReader(supabase), { canEdit: canEdit === true, now });
     if (!bundle) return Response.json({ message: "No such workspace." }, { status: 404 });
-    return new Response(JSON.stringify(bundle, null, 2), {
+    const chunks = bundleJsonChunks(bundle);
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        // Pieces are small; send a few together to keep the number of writes down.
+        let text = "";
+        for (let i = 0; i < 64; i++) {
+          const next = chunks.next();
+          if (next.done) {
+            if (text) controller.enqueue(encoder.encode(text));
+            controller.close();
+            return;
+          }
+          text += next.value;
+          if (text.length > 256 * 1024) break;
+        }
+        controller.enqueue(encoder.encode(text));
+      },
+    });
+    return new Response(body, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "Content-Disposition": `attachment; filename="${fileName(slug, now)}"`,
@@ -34,7 +56,8 @@ export async function GET(_request: Request, ctx: RouteContext<"/w/[slug]/export
         "X-Content-Type-Options": "nosniff",
       },
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof BundleTooLargeError) return Response.json({ message: e.message }, { status: 413 });
     return Response.json({ message: "The export failed. Try again." }, { status: 500 });
   }
 }

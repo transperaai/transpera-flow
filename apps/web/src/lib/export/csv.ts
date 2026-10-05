@@ -1,11 +1,12 @@
 // CSV text (issue #39, B10): one place that writes it, safe to open in a spreadsheet. A text cell that starts with `=`, `+`,
-// `-`, `@`, a tab or a carriage return would be run as a formula by Excel and Sheets (CSV injection), so it gets a leading
+// `-`, `@` (after any spaces), a tab or a carriage return would be run as a formula by Excel and Sheets (CSV injection), so it gets a leading
 // apostrophe; a cell with a comma, quote or line break is quoted. Numbers are written as numbers. Lines end in CRLF and the
 // file starts with a byte order mark so Excel reads it as UTF-8.
 
 export type CsvCell = string | number | null | undefined;
 
-const FORMULA_START = /^[=+\-@\t\r]/;
+/** A formula starts at the first character that isn't whitespace (a spreadsheet trims it), and a tab or carriage return can start one too. */
+const FORMULA_START = /^[\s\u00a0\ufeff]*[=+\-@]|^[\t\r]/;
 
 /** One cell, as it is written. */
 export function csvCell(value: CsvCell): string {

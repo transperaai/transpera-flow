@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { northbeamIssues, type IssueRow } from "@transpera-flow/db";
 import { noCost, type IssueCost } from "@transpera-flow/engine";
 import { csvCell, csvText } from "@/lib/export/csv";
-import { ISSUES_CSV_HEADER, issuesCsv } from "@/lib/issues/csv";
+import { issuesCsv, issuesCsvHeader } from "@/lib/issues/csv";
 import { listIssues } from "@/lib/issues/pages";
 
 // The issues CSV (issue #39, B10): the listed columns and headers, the Issues list's filters, and cells a spreadsheet
@@ -13,7 +13,7 @@ const issue = (n: number, extra: Partial<IssueRow> = {}): IssueRow => ({ ...nort
 const parse = (csv: string) => csv.replace(/^﻿/, "").trimEnd().split("\r\n");
 
 describe("CSV cells", () => {
-  it.each(["=SUM(A1)", "+1", "-2", "@cmd", "\tx", "\rx"])("defuses a cell that starts with %j", (v) => {
+  it.each(["=SUM(A1)", "+1", "-2", "@cmd", "\tx", "\rx", " =1+1", "   @SUM(A1)", "\u00a0-2+3", "  \t=1"])("defuses a cell that starts with %j", (v) => {
     const cell = csvCell(v);
     expect(cell.replace(/^"/, "").startsWith("'")).toBe(true);
     expect(cell).toContain(v.replace(/"/g, '""'));
@@ -36,12 +36,11 @@ describe("CSV cells", () => {
 
 describe("issues CSV", () => {
   it("has the listed columns, in order, with correct headers", () => {
-    expect(ISSUES_CSV_HEADER.slice(0, 13)).toEqual([
-      "Number", "Title", "Rating", "Status", "Process", "Steps", "Owners", "Target measure", "Target now", "Target goal", "Estimated cost per month", "Currency", "Created",
+    expect(issuesCsvHeader("GBP")).toEqual([
+      "Number", "Title", "Rating", "Status", "Process", "Steps", "Owners", "Target measure", "Target now", "Target goal", "Estimated cost per month (GBP)", "Estimated hours lost per month", "Created", "Resolved",
     ]);
-    expect(ISSUES_CSV_HEADER[13]).toBe("Resolved");
     const lines = parse(issuesCsv([], names, () => null, "GBP"));
-    expect(lines).toEqual([ISSUES_CSV_HEADER.join(",")]);
+    expect(lines).toEqual([issuesCsvHeader("GBP").join(",")]);
   });
 
   it("writes one row per issue with names, owners, target, cost and dates", () => {
@@ -60,16 +59,16 @@ describe("issues CSV", () => {
     });
     const cost: IssueCost = { perMonth: 1234.56, hoursPerMonth: null, method: "x" };
     const [, row] = parse(issuesCsv([i], names, () => cost, "GBP"));
-    expect(row).toBe(`7,Quotes wait for sign-off,"Bad, not urgent",Resolved,Intake,Check fit; Send quote,Rosa; Kofi,Wait at Check fit,1.4 d,under 4 hours,1235,GBP,2026-09-01,2026-09-20`);
+    expect(row).toBe(`7,Quotes wait for sign-off,"Bad, not urgent",Resolved,Intake,Check fit; Send quote,Rosa; Kofi,Wait at Check fit,1.4 d,under 4 hours,1235,,2026-09-01,2026-09-20`);
   });
 
-  it("writes a time-only cost as hours and no cost as empty", () => {
+  it("writes the cost columns as numbers only: money in the currency column, a time-only cost as hours, none as empty", () => {
     const a = issue(1);
     const b = issue(2);
     const cost = (i: IssueRow): IssueCost => (i.number === 1 ? { perMonth: null, hoursPerMonth: 12.34, method: "" } : noCost(""));
     const rows = parse(issuesCsv([a, b], names, cost, "GBP")).slice(1);
-    expect(rows[0]!.split(",")).toContain("12.3 h");
-    expect(rows[1]!.split(",")[10]).toBe("");
+    expect(rows[0]!.split(",").slice(-4, -2)).toEqual(["", "12.3"]);
+    expect(rows[1]!.split(",").slice(-4, -2)).toEqual(["", ""]);
   });
 
   it("is safe to open in a spreadsheet: hostile titles, targets and names are defused", () => {

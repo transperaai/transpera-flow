@@ -116,6 +116,10 @@ export function wrapText(text: string, chars: number, max: number): string[] {
   return lines;
 }
 
+/** A start or end pill is as wide as its text needs (never narrower than the canvas's), so a long name isn't cut. */
+const terminalText = (s: StepRow): string => (s.name || (s.kind === "start" ? "Start" : "End")).slice(0, 40);
+const pillWidth = (s: StepRow): number => Math.max(TERMINAL_SIZE.width, Math.ceil(terminalText(s).length * 8 + 32));
+
 interface Box {
   step: StepRow;
   x: number;
@@ -151,7 +155,7 @@ function layout(steps: readonly StepRow[], expanded: ReadonlySet<string> | "all"
       for (const k of kids.get(s.id) ?? []) place(k, x, y, depth + 1, open ? null : box, next);
       return;
     }
-    const size = s.kind === "start" || s.kind === "end" ? TERMINAL_SIZE : CARD_SIZE;
+    const size = s.kind === "start" || s.kind === "end" ? { ...TERMINAL_SIZE, width: pillWidth(s) } : CARD_SIZE;
     const box: Box = { step: s, x, y, w: size.width, h: size.height, open: false, depth };
     boxes.push(box);
     at.set(s.id, box);
@@ -215,6 +219,7 @@ export function buildMapImage(input: MapImageInput): MapImage {
 
   // Lines between what is drawn; a line into a closed group goes to the group's card. Duplicates and loops inside one card are dropped.
   const labels: string[] = [];
+  const placed: { x: number; y: number; w: number; h: number }[] = [];
   const seenLine = new Set<string>();
   for (const e of input.edges) {
     const a = at.get(e.from_step_id);
@@ -231,9 +236,31 @@ export function buildMapImage(input: MapImageInput): MapImage {
     out.push(`<path d="M${x1} ${y1}C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2} ${y2}" fill="none" stroke="${p.line2}" stroke-width="1.5" marker-end="url(#arrow)"/>`);
     const text = input.handoffs ? (e.label ?? "") : [Number(e.probability) < 1 ? `${Math.round(Number(e.probability) * 100)}%` : null, e.condition_tag].filter(Boolean).join(" · ");
     if (text) {
-      const t = wrapText(text, 16, 1)[0] ?? "";
-      // At the middle of the curve, where branches of one step have already parted; a halo keeps it readable over a line.
-      labels.push(`<text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2 - 4}" font-size="11" text-anchor="middle" fill="${p.fg2}" stroke="${p.background}" stroke-width="4" paint-order="stroke">${esc(t)}</text>`);
+      // Whole (wrapped, never cut to an ellipsis unless it runs past four lines), on the curve where it touches no card and no
+      // other label: the middle if that is clear, else the nearest clear point along the line.
+      const lines = wrapText(text, 18, 4);
+      const w = Math.max(...lines.map((l) => l.length)) * 6.4 + 8;
+      const h = lines.length * 13 + 2;
+      const curve = (t: number) => {
+        const m = 1 - t;
+        return { x: m * m * m * x1 + 3 * m * m * t * (x1 + bend) + 3 * m * t * t * (x2 - bend) + t * t * t * x2, y: m * m * m * y1 + 3 * m * m * t * y1 + 3 * m * t * t * y2 + t * t * t * y2 };
+      };
+      const rectOf = (t: number) => {
+        const c = curve(t);
+        return { x: c.x - w / 2, y: c.y - h - 2, w, h };
+      };
+      const hits = (r: { x: number; y: number; w: number; h: number }, o: { x: number; y: number; w: number; h: number }) => r.x < o.x + o.w && o.x < r.x + r.w && r.y < o.y + o.h && o.y < r.y + r.h;
+      const free = (t: number) => {
+        const r = rectOf(t);
+        return !boxes.some((bx) => !bx.open && hits(r, { x: bx.x + dx, y: bx.y + dy, w: bx.w, h: bx.h })) && !placed.some((o) => hits(r, o));
+      };
+      const t = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9].find(free) ?? 0.5;
+      const r = rectOf(t);
+      placed.push(r);
+      const cx = r.x + w / 2;
+      labels.push(
+        `<text x="${cx}" y="${r.y + 11}" font-size="11" text-anchor="middle" fill="${p.fg2}" stroke="${p.background}" stroke-width="4" paint-order="stroke">${lines.map((l, i) => `<tspan x="${cx}" dy="${i ? 13 : 0}">${esc(l)}</tspan>`).join("")}</text>`,
+      );
     }
   }
 
@@ -248,7 +275,7 @@ export function buildMapImage(input: MapImageInput): MapImage {
     const count = ids.reduce((n, id) => n + (input.issues?.[id] ?? 0), 0);
     if (s.kind === "start" || s.kind === "end") {
       out.push(`<g data-step="${esc(s.id)}"><rect x="${x}" y="${y}" width="${b.w}" height="${b.h}" rx="${b.h / 2}" fill="${p.panel2}" stroke="${p.line2}"/>`);
-      out.push(`<text x="${x + b.w / 2}" y="${y + b.h / 2 + 4.5}" font-size="13" font-weight="600" text-anchor="middle" fill="${p.fg}">${esc(wrapText(s.name || (s.kind === "start" ? "Start" : "End"), 12, 1)[0] ?? "")}</text></g>`);
+      out.push(`<text x="${x + b.w / 2}" y="${y + b.h / 2 + 4.5}" font-size="13" font-weight="600" text-anchor="middle" fill="${p.fg}">${esc(terminalText(s))}</text></g>`);
       continue;
     }
     const closedGroup = isGroup(s);

@@ -77,34 +77,96 @@ export const BUNDLE_TABLES = {
   },
 } as const satisfies Record<string, TableSpec>;
 
-/** Columns never exported, in any table: who made a row, and anyone's email. */
-export const NEVER_EXPORTED = ["created_by", "published_by", "reviewed_by", "user_id", "email", "proposer_email", "proposer_name"] as const;
+/**
+ * Keys that name an account or a person's contact details, in a column or at any depth of a JSON column: who made, changed,
+ * reviewed or published something (`created_by`, `updated_by`, `reviewed_by`, `published_by`, `edited_by`, any `*_by`; the
+ * `by` in `provenance` and `resolved`), who did it in a history (`actor`), `user_id`, `author`, `uid`, and emails and names
+ * typed by a proposer. The migrations write `auth.uid()` into exactly these. Matched without regard to case.
+ */
+export const ACCOUNT_KEY = /^(by|actor|actor_id|user_id|uid|author|author_id|email|proposer_email|proposer_name|user_name|user_email)$|_by$|^(created|updated|edited|reviewed|published|accepted|resolved)_by_/i;
 
-/** Removes the columns that are never exported. */
-export function scrub(row: Row): Row {
-  const out: Row = {};
-  for (const [k, v] of Object.entries(row)) if (!(NEVER_EXPORTED as readonly string[]).includes(k)) out[k] = v;
-  return out;
+/** Keys that end in `_by` but are not accounts: the steps that took over a retired step's work, and the person who agreed a first-principles item. */
+const NOT_ACCOUNTS = new Set(["replaced_by", "agreed_by"]);
+const isAccountKey = (k: string): boolean => ACCOUNT_KEY.test(k) && !NOT_ACCOUNTS.has(k);
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Every account id found under an account key, anywhere in `value` (a second net: the same id is then removed wherever it turns up). */
+export function collectAccountIds(value: unknown, into: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(value)) for (const v of value) collectAccountIds(v, into);
+  else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      if (isAccountKey(k)) {
+        if (typeof v === "string" && UUID.test(v)) into.add(v.toLowerCase());
+      } else collectAccountIds(v, into);
+    }
+  }
+  return into;
 }
 
-const PAGE = 1000;
+/**
+ * `value` without any account key at any depth, and without any string equal to an account id found by `collectAccountIds`
+ * (a property holding one is dropped; an array element holding one is dropped).
+ */
+export function scrubDeep<T>(value: T, ids: ReadonlySet<string> = new Set()): T {
+  const isId = (v: unknown) => typeof v === "string" && ids.has(v.toLowerCase());
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.filter((x) => !isId(x)).map(walk);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v)) if (!isAccountKey(k) && !isId(x)) out[k] = walk(x);
+      return out;
+    }
+    return v;
+  };
+  return walk(value) as T;
+}
 
-/** A reader over a Supabase client acting as the signed-in user: pages of 1000 (the API's cap), in a stable order. */
-export function supabaseReader(db: Db): TableReader {
+/** Removes account keys and ids from a row (kept for the tests; the export scrubs everything it holds in one pass). */
+export function scrub(row: Row): Row {
+  return scrubDeep(row, collectAccountIds(row));
+}
+
+/** The most rows of one table, and in all, a bundle will hold: past that the export says so instead of exhausting memory. */
+export const MAX_TABLE_ROWS = 250_000;
+export const MAX_BUNDLE_ROWS = 600_000;
+
+export class BundleTooLargeError extends Error {
+  constructor(what: string) {
+    super(`This workspace is too large to export in one file (${what}).`);
+    this.name = "BundleTooLargeError";
+  }
+}
+
+export interface ReaderOptions {
+  /** Rows asked for per request (the API may return fewer, whatever its own limit). */
+  pageSize?: number;
+  maxRows?: number;
+}
+
+/**
+ * A reader over a Supabase client acting as the signed-in user, in a stable order. It asks for the next rows after what it
+ * has, and stops only on an empty page, so an API that returns fewer rows than asked (a lower max-rows) can't truncate it.
+ */
+export function supabaseReader(db: Db, options: ReaderOptions = {}): TableReader {
+  const pageSize = options.pageSize ?? 1000;
+  const maxRows = options.maxRows ?? MAX_TABLE_ROWS;
   return async (table, workspaceId) => {
     const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table);
     if (!spec) throw new Error(`Not a bundle table: ${table}`);
     const all: Row[] = [];
-    for (let from = 0; ; from += PAGE) {
+    for (;;) {
       let q = (db as unknown as { from: (t: string) => { select: (c: string) => { eq: (c: string, v: string) => { order: (c: string) => unknown } } } })
         .from(table)
         .select(spec.columns ?? "*")
         .eq("workspace_id", workspaceId) as unknown as { order: (c: string) => unknown };
       for (const col of spec.order) q = q.order(col) as typeof q;
-      const { data, error } = await (q as unknown as { range: (a: number, b: number) => Promise<{ data: Row[] | null; error: { message: string } | null }> }).range(from, from + PAGE - 1);
+      const from = all.length;
+      const { data, error } = await (q as unknown as { range: (a: number, b: number) => Promise<{ data: Row[] | null; error: { message: string } | null }> }).range(from, from + pageSize - 1);
       if (error) throw new Error(error.message);
-      all.push(...(data ?? []));
-      if (!data || data.length < PAGE) break;
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (all.length > maxRows) throw new BundleTooLargeError(`${table} has more than ${maxRows} rows`);
     }
     return all;
   };
@@ -114,6 +176,8 @@ export interface WorkspaceBundle {
   format: typeof WORKSPACE_BUNDLE_FORMAT;
   exported_at: string;
   engine_version: string;
+  /** "everything" for an editor or owner; "published" for a viewer (no drafts, no pending suggestions or proposals). */
+  scope: "everything" | "published";
   /** What the file is, for a person opening it. */
   about: string;
   workspace: { id: string; name: string; slug: string; plan: string | null; settings: unknown; provenance: unknown };
@@ -142,6 +206,12 @@ const group = (rows: Row[], key: string): Map<string, Row[]> => {
   return m;
 };
 
+export interface ExportOptions {
+  /** Whether the user may edit the workspace. Editors and owners get everything; a viewer gets what is published: no draft versions, no pending suggestions or proposals. */
+  canEdit: boolean;
+  now?: Date;
+}
+
 /**
  * The workspace's bundle, or null when the signed-in user can't read the workspace (not a member, or no such workspace: the
  * same answer, so it can't be used to find workspaces). `readWorkspace` reads the one `workspaces` row under RLS.
@@ -150,21 +220,39 @@ export async function exportWorkspaceBundle(
   workspaceId: string,
   readWorkspace: (id: string) => Promise<Row | null>,
   read: TableReader,
-  now: Date = new Date(),
+  options: ExportOptions,
 ): Promise<WorkspaceBundle | null> {
-  const ws = await readWorkspace(workspaceId);
-  if (!ws || ws.id !== workspaceId) return null;
+  const now = options.now ?? new Date();
+  const wsRow = await readWorkspace(workspaceId);
+  if (!wsRow || wsRow.id !== workspaceId) return null;
 
   const names = Object.keys(BUNDLE_TABLES) as (keyof typeof BUNDLE_TABLES)[];
-  const data = Object.fromEntries(
+  const raw = Object.fromEntries(
     await Promise.all(
       names.map(async (n) => {
         const rows = await read(BUNDLE_TABLES[n].table, workspaceId);
         // Belt and braces: a row of another workspace is dropped even if a policy let it through.
-        return [n, rows.filter((r) => r.workspace_id === workspaceId).map(scrub)] as const;
+        return [n, rows.filter((r) => r.workspace_id === workspaceId)] as const;
       }),
     ),
   ) as Record<keyof typeof BUNDLE_TABLES, Row[]>;
+  const total = Object.values(raw).reduce((n, rows) => n + rows.length, 0);
+  if (total > MAX_BUNDLE_ROWS) throw new BundleTooLargeError(`${total} rows in all`);
+
+  // A viewer gets what is published (the same as the live app shows a reader), not working drafts or pending suggestions.
+  if (!options.canEdit) {
+    raw.process_revisions = raw.process_revisions.filter((r) => r.status !== "draft");
+    const kept = new Set(raw.process_revisions.map((r) => r.id));
+    for (const t of ["steps", "edges", "first_principles"] as const) raw[t] = raw[t].filter((r) => kept.has(r.revision_id));
+    raw.processes = raw.processes.map((p) => ({ ...p, draft_revision_id: null }));
+    raw.suggestions = [];
+    raw.suggestion_proposals = [];
+  }
+
+  // Everyone's account is scrubbed from everything, by key at any depth and then by the ids those keys held.
+  const ids = collectAccountIds([raw, wsRow]);
+  const data = Object.fromEntries(names.map((n) => [n, scrubDeep(raw[n], ids)])) as Record<keyof typeof BUNDLE_TABLES, Row[]>;
+  const ws = scrubDeep(wsRow, ids);
 
   const stepsBy = group(data.steps, "revision_id");
   const edgesBy = group(data.edges, "revision_id");
@@ -214,8 +302,9 @@ export async function exportWorkspaceBundle(
     format: WORKSPACE_BUNDLE_FORMAT,
     exported_at: now.toISOString(),
     engine_version: ENGINE_VERSION,
+    scope: options.canEdit ? "everything" : "published",
     about:
-      "A Transpera Flow workspace backup (export only; importing a bundle is not available yet). Rows keep their ids and column names. Named clients are hidden in the product and kept here, flagged hidden. People's emails, members, tokens and who created a row are never included.",
+      "A Transpera Flow workspace backup (export only; importing a bundle is not available yet). Rows keep their ids and column names. Named clients are hidden in the product and kept here, flagged hidden. People's emails, members, tokens and who made or changed anything are never included. The tables are read one after another while people may be editing, so a bundle taken during edits can mix moments: exported_at is when the reading began. A viewer's bundle leaves out draft versions and pending suggestions.",
     workspace: {
       id: String(ws.id),
       name: String(ws.name),
@@ -246,4 +335,29 @@ export function supabaseWorkspaceReader(db: Db): (id: string) => Promise<Row | n
     if (error) throw new Error(error.message);
     return (data as Row | null) ?? null;
   };
+}
+
+/**
+ * The bundle as JSON text in pieces, one per row of each section and without indentation, so a response can be sent as it
+ * is made instead of as one very large string. The pieces joined are valid JSON, equal to `JSON.stringify(bundle)`.
+ */
+export function* bundleJsonChunks(bundle: WorkspaceBundle): Generator<string> {
+  function* part(value: unknown, depth: number): Generator<string> {
+    if (Array.isArray(value)) {
+      yield "[";
+      for (let i = 0; i < value.length; i++) yield (i ? "," : "") + JSON.stringify(value[i]);
+      yield "]";
+    } else if (value && typeof value === "object" && depth < 2) {
+      yield "{";
+      let first = true;
+      for (const [k, v] of Object.entries(value)) {
+        if (v === undefined) continue;
+        yield `${first ? "" : ","}${JSON.stringify(k)}:`;
+        first = false;
+        yield* part(v, depth + 1);
+      }
+      yield "}";
+    } else yield JSON.stringify(value) ?? "null";
+  }
+  yield* part(bundle, 0);
 }

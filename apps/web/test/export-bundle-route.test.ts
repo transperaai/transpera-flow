@@ -2,18 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // GET /w/<slug>/export/bundle (issue #39, B10): signed-in members only, as a download, nothing cached, and no detail in errors.
 
-const state = { env: true, claims: { claims: { sub: "u1" } } as { claims?: { sub?: string } } | null, workspace: { id: "w1" } as { id: string } | null, bundle: { format: "transpera-workspace/1", workspace: { id: "w1" } } as unknown, boom: false };
+const state = { env: true, claims: { claims: { sub: "u1" } } as { claims?: { sub?: string } } | null, workspace: { id: "w1" } as { id: string } | null, bundle: { format: "transpera-workspace/1", workspace: { id: "w1" } } as unknown, boom: false, big: false, canEdit: true, seen: [] as unknown[] };
 
 vi.mock("@/lib/supabase/env", () => ({ supabaseEnv: () => (state.env ? { url: "x", key: "y" } : null) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getClaims: async () => ({ data: state.claims }) },
+    rpc: async () => ({ data: state.canEdit }),
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: state.workspace, error: null }) }) }) }),
   }),
 }));
 vi.mock("@transpera-flow/db", async (orig) => ({
   ...(await orig<typeof import("@transpera-flow/db")>()),
-  exportWorkspaceBundle: async () => {
+  exportWorkspaceBundle: async (_id: string, _a: unknown, _b: unknown, options: unknown) => {
+    state.seen.push(options);
+    if (state.big) throw new (await orig<typeof import("@transpera-flow/db")>()).BundleTooLargeError("x");
     if (state.boom) throw new Error("select * from secret_table failed");
     return state.bundle;
   },
@@ -32,6 +35,9 @@ beforeEach(() => {
   state.workspace = { id: "w1" };
   state.bundle = { format: "transpera-workspace/1", workspace: { id: "w1" } };
   state.boom = false;
+  state.big = false;
+  state.canEdit = true;
+  state.seen = [];
 });
 
 describe("bundle route", () => {
@@ -67,6 +73,17 @@ describe("bundle route", () => {
     const r = await call();
     expect(r.status).toBe(500);
     expect(JSON.stringify(await r.json())).not.toContain("secret_table");
+  });
+
+  it("tells an editor from a viewer, and says so when a workspace is too large", async () => {
+    await call();
+    state.canEdit = false;
+    await call();
+    expect(state.seen.map((o) => (o as { canEdit: boolean }).canEdit)).toEqual([true, false]);
+    state.big = true;
+    const r = await call();
+    expect(r.status).toBe(413);
+    expect((await r.json()).message).toMatch(/too large/);
   });
 
   it("has nothing to export in the demo", async () => {

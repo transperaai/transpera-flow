@@ -95,6 +95,21 @@ describe("map image", () => {
     expect(buildMapImage({ ...base, steps: [a!, b!], edges: [edge] }).svg).toContain("40%");
   });
 
+  it("sizes start and end pills to their text and keeps whole line labels", () => {
+    const start: StepRow = { ...bundle.steps[0]!, id: "st", kind: "start", name: "A customer enquiry arrives by phone", x: 0, y: 0, parent_step_id: null };
+    const task: StepRow = { ...bundle.steps[1]!, id: "tk", kind: "task", name: "T", x: 400, y: 0, parent_step_id: null };
+    const edge = { ...bundle.edges[0]!, from_step_id: "st", to_step_id: "tk", label: "Signed contract and first payment received", probability: 1, condition_tag: null };
+    const { svg } = buildMapImage({ ...base, steps: [start, task], edges: [edge], handoffs: true });
+    expect(svg).toContain("A customer enquiry arrives by phone");
+    const w = Number(/data-step="st"><rect[^>]* width="(\d+)"/.exec(svg)![1]);
+    expect(w).toBeGreaterThan(96);
+    expect(w).toBeGreaterThanOrEqual("A customer enquiry arrives by phone".length * 8);
+    // The label is wrapped, not cut: every word is there and there is no ellipsis.
+    const label = [...svg.matchAll(/<tspan[^>]*>([^<]*)<\/tspan>/g)].map((m) => m[1]).join(" ");
+    expect(label).toBe("Signed contract and first payment received");
+    expect(label).not.toContain("…");
+  });
+
   it("copes with an empty map", () => {
     const { svg } = buildMapImage({ ...base, steps: [], edges: [] });
     expect(svg).toContain("</svg>");

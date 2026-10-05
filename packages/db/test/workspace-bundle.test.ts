@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BUNDLE_TABLES, NEVER_EXPORTED, NORTHBEAM_WORKSPACE_ID, WORKSPACE_BUNDLE_FORMAT, exportWorkspaceBundle, type Row, type TableReader } from "../src";
+import { BUNDLE_TABLES, NORTHBEAM_WORKSPACE_ID, WORKSPACE_BUNDLE_FORMAT, bundleJsonChunks, collectAccountIds, exportWorkspaceBundle, scrubDeep, type Row, type TableReader } from "../src";
+import type pg from "pg";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // The JSON workspace bundle export (issue #39, B10 part 1): every entity of the workspace with all versions, only for people
@@ -16,14 +17,14 @@ afterAll(async () => {
 });
 
 /** Reads as `claims` under RLS: what the app's Supabase client does. */
-async function exportAs(claims: Record<string, unknown> | null, workspaceId = ws) {
+async function exportAs(claims: Record<string, unknown> | null, workspaceId = ws, canEdit = true) {
   return db.as(claims, async (c) => {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
       return (await c.query(`select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
-    return exportWorkspaceBundle(workspaceId, readWorkspace, read, new Date("2026-10-05T12:00:00Z"));
+    return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit, now: new Date("2026-10-05T12:00:00Z") });
   });
 }
 
@@ -101,7 +102,7 @@ describe("workspace bundle export", () => {
     // A reader that leaked a foreign row (a policy mistake) is still filtered.
     const leaky = await db.as(editor.claims, async (c) => {
       const read: TableReader = async (table) => (await c.query(`select ${Object.values(BUNDLE_TABLES).find((x) => x.table === table)!.columns ?? "*"} from public.${table} where workspace_id in ($1, $2)`, [ws, other])).rows as Row[];
-      return exportWorkspaceBundle(ws, async (id) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null, read);
+      return exportWorkspaceBundle(ws, async (id) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null, read, { canEdit: true });
     });
     expect(JSON.stringify(leaky)).not.toContain("Secret role");
   });
@@ -114,9 +115,91 @@ describe("workspace bundle export", () => {
     expect(text).not.toContain("@northbeam.example");
     expect(text).not.toContain("someone.private");
     const keys = keysDeep(b);
-    for (const k of NEVER_EXPORTED) expect(keys.has(k), k).toBe(false);
+    for (const k of ["created_by", "published_by", "reviewed_by", "user_id", "email", "proposer_email", "actor", "by"]) expect(keys.has(k), k).toBe(false);
     for (const k of ["memberships", "api_tokens", "token_hash", "workspace_access_emails", "workspace_domains", "link_hash"]) expect(keys.has(k), k).toBe(false);
     expect(text).not.toContain(editor.id);
+  });
+
+  it("holds no account id anywhere, after an editor edits an issue, confirms a step value, accepts a suggestion and changes a setting", async () => {
+    const owner = await member("bundle.owner@northbeam.example", "owner");
+    const other = await member("bundle.other@northbeam.example", "editor");
+    const as = async <T>(claims: Record<string, unknown>, fn: (c: pg.Client) => Promise<T>): Promise<T> => {
+      await db.client.query("begin");
+      try {
+        await db.client.query("set local role authenticated");
+        await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(claims)]);
+        const r = await fn(db.client);
+        await db.client.query("commit");
+        return r;
+      } catch (e) {
+        await db.client.query("rollback");
+        throw e;
+      }
+    };
+    const proc = (await db.client.query("select id, live_revision_id from processes where workspace_id = $1 and not is_company and live_revision_id is not null limit 1", [ws])).rows[0];
+    const ads = (await db.client.query("select id from lead_sources where workspace_id = $1 limit 1", [ws])).rows[0].id;
+    await as(owner.claims, async (c) => {
+      // An issue edited (its history records who), a workspace setting changed (provenance records who).
+      const issue = (await c.query("select id from issues where workspace_id = $1 limit 1", [ws])).rows[0].id;
+      await c.query("update issues set evidence = 'Seen on the call' where id = $1", [issue]);
+      await c.query("update workspaces set settings = settings || '{\"currency\": \"EUR\"}'::jsonb where id = $1", [ws]);
+      // A step value confirmed on a draft, as the editor writes it (provenance carries `by`).
+      const draft = (await c.query("select public.open_draft($1) as r", [proc.id])).rows[0].r;
+      const rev = draft.revision_id ?? draft.id ?? (await c.query("select draft_revision_id from processes where id = $1", [proc.id])).rows[0].draft_revision_id;
+      await c.query(
+        "update steps set provenance = jsonb_build_object('work_hours', jsonb_build_object('source', 'entered', 'by', $1::text, 'at', now())) where revision_id = $2 and id = (select id from steps where revision_id = $2 and kind = 'task' limit 1)",
+        [owner.id, rev],
+      );
+      // A suggestion accepted.
+      const s = (await c.query("insert into suggestions (workspace_id, target_table, target_id, patch, evidence) values ($1, 'lead_sources', $2, '{\"set\": {\"volume_week\": 33}}', '[]') returning id", [ws, ads])).rows[0].id;
+      await c.query("select public.review_suggestions($1::uuid[], 'accept', 'ok')", [[s]]);
+    });
+    // The ids really are in the database, in the places that matter: the test can fail.
+    const raw = async (sql: string) => Number((await db.client.query(sql, [owner.id])).rows[0].n);
+    expect(await raw("select count(*) n from issue_events where actor = $1")).toBeGreaterThan(0);
+    expect(await raw("select count(*) n from workspaces where provenance::text like '%' || $1 || '%'")).toBeGreaterThan(0);
+    expect(await raw("select count(*) n from steps where provenance::text like '%' || $1 || '%'")).toBeGreaterThan(0);
+    expect(await raw("select count(*) n from lead_sources where provenance::text like '%' || $1 || '%'")).toBeGreaterThan(0);
+    expect(await raw("select count(*) n from suggestions where reviewed_by = $1")).toBeGreaterThan(0);
+
+    const b = await exportAs(owner.claims);
+    const text = JSON.stringify(b);
+    for (const u of [owner.id, other.id]) expect(text.toLowerCase()).not.toContain(u.toLowerCase());
+    // And no user in the database at all.
+    const users = (await db.client.query("select id from auth.users")).rows.map((r) => String(r.id).toLowerCase());
+    for (const u of users) expect(text.toLowerCase(), u).not.toContain(u);
+    // What is not an account stays: the issue's history is there, without who.
+    const issue = b!.issues.find((i) => (i.events as Row[]).length > 0)!;
+    expect((issue.events as Row[])[0]).toHaveProperty("kind");
+    expect((issue.events as Row[])[0]).not.toHaveProperty("actor");
+  });
+
+  it("gives a viewer what is published, and an editor everything: drafts and pending suggestions", async () => {
+    const editor = await member("bundle.scope.editor@northbeam.example", "editor");
+    const viewer = await member("bundle.scope.viewer@northbeam.example", "viewer");
+    const proc = (await db.client.query("select id from processes where workspace_id = $1 and not is_company and live_revision_id is not null limit 1", [ws])).rows[0].id;
+    // A draft and a pending suggestion exist (made as the database owner; the export is what is under test).
+    await db.client.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify(editor.claims)]);
+    await db.client.query("set role authenticated");
+    await db.client.query("select public.open_draft($1)", [proc]);
+    await db.client.query("insert into suggestions (workspace_id, target_table, target_id, patch, evidence) select $1, 'lead_sources', id, '{\"set\": {\"volume_week\": 77}}', '[]' from lead_sources where workspace_id = $1 limit 1", [ws]);
+    await db.client.query("reset role");
+    const drafts = (b: NonNullable<Awaited<ReturnType<typeof exportAs>>>) => b.processes.flatMap((p) => p.versions as Row[]).filter((v) => v.status === "draft");
+    const all = (await exportAs(editor.claims, ws, true))!;
+    expect(all.scope).toBe("everything");
+    expect(drafts(all).length).toBeGreaterThan(0);
+    expect(all.suggestions.some((s) => s.status === "pending")).toBe(true);
+    const v = (await exportAs(viewer.claims, ws, false))!;
+    expect(v.scope).toBe("published");
+    expect(drafts(v)).toHaveLength(0);
+    expect(v.suggestions).toHaveLength(0);
+    expect(v.suggestion_proposals).toHaveLength(0);
+    // Nothing of a draft's steps or edges either, and no process points at one.
+    const kept = new Set(v.processes.flatMap((p) => (p.versions as Row[]).map((x) => x.id)));
+    expect(v.counts.steps).toBe(v.processes.reduce((n, p) => n + (p.versions as Row[]).reduce((m, x) => m + (x.steps as Row[]).length, 0), 0));
+    expect(v.processes.every((p) => p.draft_revision_id === null)).toBe(true);
+    expect(kept.size).toBeLessThan(all.counts.process_versions! + 1);
+    expect(v.counts.process_versions).toBeLessThan(all.counts.process_versions!);
   });
 
   it("is deterministic plain JSON: the same workspace gives the same text", async () => {
@@ -125,5 +208,30 @@ describe("workspace bundle export", () => {
     const b = JSON.stringify(await exportAs(editor.claims));
     expect(a).toBe(b);
     expect(a.length).toBeGreaterThan(1000);
+  });
+});
+
+describe("scrubbing", () => {
+  it("drops account keys at any depth and the ids they held, and keeps what is not an account", () => {
+    const id = "3b241101-e2bb-4255-8caf-4136c566a962";
+    const row = { id: "r1", created_by: id, replaced_by: ["s2"], provenance: { work_hours: { source: "entered", by: id, at: "x", evidence: [{ quote: "q", actor: id }] } }, detail: { agreed_by: "p1", note: id, list: [id, "keep"] } };
+    const ids = collectAccountIds(row);
+    expect([...ids]).toEqual([id]);
+    const out = scrubDeep(row, ids);
+    expect(JSON.stringify(out)).not.toContain(id);
+    expect(out).toEqual({ id: "r1", replaced_by: ["s2"], provenance: { work_hours: { source: "entered", at: "x", evidence: [{ quote: "q" }] } }, detail: { agreed_by: "p1", list: ["keep"] } });
+  });
+
+  it("matches by_ names and suffixes without case", () => {
+    expect(scrubDeep({ Updated_By: "x", edited_by_name: "y", resolved_by: "z", reviewedBy: "k", keep_this: 1 })).toEqual({ reviewedBy: "k", keep_this: 1 });
+  });
+
+  it("sends the JSON in pieces that join to the same text", async () => {
+    const editor = await member("bundle.chunks@northbeam.example", "editor");
+    const b = (await exportAs(editor.claims))!;
+    const chunks = [...bundleJsonChunks(b)];
+    expect(chunks.length).toBeGreaterThan(50);
+    expect(chunks.join("")).toBe(JSON.stringify(b));
+    expect(chunks.join("")).not.toMatch(/\n\s/);
   });
 });

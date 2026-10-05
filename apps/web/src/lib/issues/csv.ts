@@ -6,7 +6,8 @@ import { RATING_LABELS, ratingOfStored, type IssueCost } from "@transpera-flow/e
 import { csvText, type CsvCell } from "@/lib/export/csv";
 import { statusLabel } from "./pages";
 
-export const ISSUES_CSV_HEADER = [
+/** The header, with the money column's unit in its name (the cell is then only a number). */
+export const issuesCsvHeader = (currency: string): string[] => [
   "Number",
   "Title",
   "Rating",
@@ -17,11 +18,14 @@ export const ISSUES_CSV_HEADER = [
   "Target measure",
   "Target now",
   "Target goal",
-  "Estimated cost per month",
-  "Currency",
+  `Estimated cost per month (${currency})`,
+  "Estimated hours lost per month",
   "Created",
   "Resolved",
-] as const;
+];
+
+/** The header for no particular currency, for tests and callers that don't know one. */
+export const ISSUES_CSV_HEADER = issuesCsvHeader("workspace currency");
 
 export interface IssuesCsvNames {
   processes: ReadonlyMap<string, string>;
@@ -31,11 +35,11 @@ export interface IssuesCsvNames {
 
 const day = (iso: string | null | undefined): string => (iso ? iso.slice(0, 10) : "");
 
-/** What an issue costs a month as one cell: money as a number, a time-only cost as "12 h", none as empty. */
-function costCell(cost: IssueCost | null): CsvCell {
-  if (cost?.perMonth != null) return Math.round(cost.perMonth);
-  if (cost?.hoursPerMonth != null) return `${Math.round(cost.hoursPerMonth * 10) / 10} h`;
-  return "";
+/** The two cost cells: money (in the header's currency) or, when only time can be costed, hours; each a number or empty. */
+function costCells(cost: IssueCost | null): [CsvCell, CsvCell] {
+  if (cost?.perMonth != null) return [Math.round(cost.perMonth), ""];
+  if (cost?.hoursPerMonth != null) return ["", Math.round(cost.hoursPerMonth * 10) / 10];
+  return ["", ""];
 }
 
 /** The CSV of `issues` (already filtered and sorted as the list shows them). */
@@ -56,11 +60,10 @@ export function issuesCsv(issues: readonly IssueRow[], names: IssuesCsvNames, co
       i.target_measure,
       i.target_now,
       i.target_goal,
-      costCell(costOf(i)),
-      currency,
+      ...costCells(costOf(i)),
       day(i.created_at),
       day(i.resolved_at),
     ];
   });
-  return csvText(ISSUES_CSV_HEADER, rows);
+  return csvText(issuesCsvHeader(currency), rows);
 }
