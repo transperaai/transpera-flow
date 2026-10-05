@@ -20,17 +20,17 @@ Leading words: **evidence** (a verbatim quote that backs a number), **assumed** 
    - each **conflict** between sources;
    - each unclear step, branch or order, the process split, the hours in a working day (when a source says "days"), role titles, a surname for a first name;
    - each value the materials only imply ("same day", "never goes back"), a number only the interviewer proposed, and each withdrawn number.
-   - Give every question a **suggested answer** with the quote it rests on (`Hana, 00:03:38: "One in five, I'd say." → 0.2?`), so confirming is one word.
+   - Give every question a **suggested answer** with the quote it rests on (`Hana, 00:03:38: "One in five, I'd say." → 0.2?`). Replying "go" accepts every suggestion shown; an answer he types for an item overrides its suggestion.
    - Done when every gap, conflict and ambiguity from step 2 has a numbered question.
 4. **Build** one JSON file per process only after the answers (see "One file per process"), then **check** it (see "Check"). A question left unanswered stays a gap until he answers it.
 5. **Summarise** (see "Output and summary").
 
 ## Evidence
 
-Every number carries evidence or an assumed reason. Every stated number is kept: nothing a speaker said is dropped for being awkward to place.
+Every number carries evidence or an assumed reason. A stated number is kept, however awkward to place, unless its speaker withdrew or corrected it: then the correction wins, or the number stays out, and the ledger notes the withdrawn one.
 
 - **Evidence** is the shortest verbatim stretch of one line that states the number, with `source`, `speaker` (the label as written), `time` (`00:03:12`, `page 3`, `cell B7`, `arrow from Review to Call`) and `value` in the field's units. Case and punctuation may differ; the words match.
-- **Assumed** is written only when Austin says "skip" or "use your best guess" for an item: `Assumed: <reason> (Austin said to assume)`. A converted number also carries it, naming the conversion and the day length Austin gave.
+- **Assumed** is any reason a value is not a plain quote: a conversion (naming the day length Austin gave), a ceiling, a number the interviewer proposed, an approximation, a future date. A **guess** (a value no material states) is written only when Austin says "skip" or "use your best guess" for it, and its reason ends `(Austin said to assume)`.
 - **Silence.** A value nobody stated and Austin did not supply is left out, never invented. The app marks it missing, and the gap shows in the summary.
 - **Shapes.** A step's `evidence` and `assumed` are objects keyed by field, and only `hands_on_hours`, `wait_hours`, `rework_rate`, `waiting_now` and `sla_hours` take them: `"evidence": {"wait_hours": [{...}]}`, `"assumed": {"wait_hours": "reason"}`. A link's `evidence` is a list of quotes and its `assumed` a string. Every company, proposal and first-principles item takes `evidence` (a list) and `assumed` (a string).
 - **Units.** Everything is hours per item; shares run 0 to 1; minutes divide by 60 (twenty minutes is 0.33). A "day" converts at the company's day (7.5 hours when it works a 37.5-hour week), asked once in step 3 when no material says. Keep the speaker's words in the quote and the converted number in `value`, with the day length in `assumed`.
@@ -39,7 +39,7 @@ Every number carries evidence or an assumed reason. Every stated number is kept:
 - **Corrections.** A speaker who corrects themselves is quoted at the correction. A number the interviewer proposed and the speaker accepted is asked about first (it is the interviewer's number); once Austin confirms, it is quoted at the agreement ("Yeah, roughly.") and `assumed` says who proposed it.
 - **Withdrawn numbers.** A number the speaker or the interviewer withdrew ("I'd be making it up", "don't hold me to that", "not a number to model") is asked about, with "leave it out" as the suggested answer, and stays out of the file unless Austin supplies it.
 - **Queueing.** "Sits in her inbox because she is busy" is queueing, which the simulation produces from capacity. It goes in `notes`, and the stated count of items there goes in `waiting_now`. `wait_hours` is for time nobody works on the item: the client, the calendar, a courier.
-- **Elapsed times.** "Out in a day", "takes two days to go out" is time at the step, not hands-on time: it goes in `wait_hours` (converted at the working day), with `notes` saying it is elapsed. A promise ("within five working days") is `sla_hours`.
+- **Elapsed times.** "Out in a day", "takes two days to go out" is time at the step, not hands-on time: it goes in `wait_hours` (converted at the working day), with `notes` saying it is elapsed. A promise on one step ("reply within a day") is `sla_hours` on that step; a promise that spans several steps ("proposal within five working days of the call") is a first-principles requirement, and also `sla_hours` on the step that delivers it with a `notes` line saying which steps it spans.
 - **Scope.** Two numbers for the "same" step that count different things (writing time against all-in effort, a call against the call plus prep) stay as a conflict, and `notes` says what each includes.
 
 ## Turning materials into steps
@@ -48,7 +48,7 @@ Every number carries evidence or an assumed reason. Every stated number is kept:
 |---|---|
 | Rough map | Box text is a step name; arrows are links; a diamond or a split is a decision; arrow labels (Yes, No, 30%) are `label` and odds; a lane or colour is a role; a note with a time is a number (`time` says where on the map). A box with no number gets none. |
 | Interview | The order the speaker walks through is the link order; "then", "after that", "goes to" are links. Each person who does work is a role; "only X does it" is `person`; software named is `tool`. |
-| SOP | Numbered steps are steps; stated deadlines and promises are `sla_hours` on a step, or a first-principles requirement when they span steps. |
+| SOP | Numbered steps are steps; a deadline or promise on one step is `sla_hours` there; one spanning several steps is a requirement plus `sla_hours` on the delivering step (see "Elapsed times"). |
 | Spreadsheet | Columns of times, volumes and prices are numbers (`time` is the cell or row); a roster is `company.people`, an account list is `company.clients`. |
 
 - **Step types.** `start` (exactly one, leading to exactly one step), `step` (someone works), `wait` (nobody works), `decision` (items branch), `end` (one per way an item finishes: won, lost, not a fit).

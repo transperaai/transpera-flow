@@ -233,7 +233,8 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
     const s = x.steps;
     expect(s["Wait for a diary slot"]).toMatchObject({ wait_dist: "triangular", wait_params: { min: 15, mode: 18.75, max: 22.5 } });
     expect(Number(s["Wait for a diary slot"].wait_hours)).toBe(18.75);
-    expect(s["Client considers proposal"]).toMatchObject({ wait_dist: "triangular", wait_params: { min: 7.5, mode: 75, max: 75 } });    expect(Number(s["Pricing sign-off"].work_hours)).toBe(0.33);
+    // The quote states 75, which differs from the range middle, so the stored wait is the stated ceiling as a plain value.
+    expect(Number(s["Client considers proposal"].wait_hours)).toBe(75);    expect(Number(s["Pricing sign-off"].work_hours)).toBe(0.33);
     expect(Number(s["Send contract"].current_wip)).toBe(3);
     expect(cites(s["Send contract"].provenance.wait_hours.evidence)).toEqual([
       [grace.id, "Grace Adeyemi", 15],

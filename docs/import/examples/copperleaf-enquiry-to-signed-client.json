@@ -133,7 +133,7 @@
         ]
       },
       "assumed": {
-        "hands_on_hours": "The interviewer proposed four hours (\"So four hours for the audit?\", 00:08:05) and Grace agreed with \"Yeah, roughly.\" after saying it varies a lot; Tom has seen one take an afternoon and another two days. Austin confirmed four hours; Assumed (Austin said to assume)."
+        "hands_on_hours": "The interviewer proposed four hours (\"So four hours for the audit?\", 00:08:05) and Grace agreed after saying it varies a lot; Austin confirmed four hours. Tom has seen one take an afternoon and another two days."
       }
     },
     {
@@ -209,9 +209,11 @@
       },
       "assumed": {
         "hands_on_hours": "Grace's 2.5 h (two to three) is the writing alone; Tom's \"day and a half\" is working time, not elapsed (he confirmed at 00:05:30), 1.5 days at a 7.5 hour day (Austin: 37.5 hour week) = 11.25 h, and includes tailoring, scope back-and-forth with the client, chasing Maddie and sorting the numbers with him.",
-        "sla_hours": "Five working days at a 7.5 hour day (Austin: 37.5 hour week) is 37.5 hours. The promise runs from the call, so it covers the audit, the deck and this step; it is kept here because this is the step that sends it."
+        "sla_hours": "Five working days at a 7.5 hour day (Austin: 37.5 hour week) is 37.5 hours. The promise runs from the call, so it covers the audit, the deck and this step; it is kept here because this is the step that sends it.",
+        "wait_hours": "No wait nobody works on: the week on Grace's desk is queueing behind her pitching (\"They sit on my desk a week because I'm pitching.\", 00:11:29; \"If I had two of me it'd be a day.\", 00:11:54), which the simulation produces from her capacity and the five waiting."
       },
-      "sla_hours": 37.5
+      "sla_hours": 37.5,
+      "wait_hours": 0
     },
     {
       "id": "pricing",
@@ -253,9 +255,20 @@
       },
       "notes": "Grace chases around day ten. Proposals that go silent are called lost after a month, and silence is counted as lost (\"We don't track it\", 00:14:19). Tom: \"That's about right. Some are quicker.\" (00:08:29).",
       "assumed": {
-        "wait_hours": "Grace gave only a ceiling, \"The client decision takes, well, within two weeks usually.\" (00:13:15), which is 10 working days at 7.5 h = 75 h, and \"Some come back in a day\" (7.5 h). The ceiling is used as the wait, with the range; confirm the typical wait."
+        "wait_hours": "Grace gave only a ceiling, \"within two weeks\", which is 10 working days at 7.5 h = 75 h, and \"Some come back in a day\" (7.5 h). The ceiling is used as the wait, with the range; the typical wait is not stated."
       },
-      "wait_hours": 75
+      "wait_hours": 75,
+      "evidence": {
+        "wait_hours": [
+          {
+            "source": "interview-grace",
+            "speaker": "Grace Adeyemi",
+            "time": "00:13:15",
+            "quote": "The client decision takes, well, within two weeks usually.",
+            "value": 75
+          }
+        ]
+      }
     },
     {
       "id": "decides",

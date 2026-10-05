@@ -210,6 +210,9 @@ describe("Copperleaf: Enquiry to signed client", () => {
     const wait2 = f.steps.find((s) => s.id === "client-wait")!;
     // A stated ceiling ("within two weeks") is the wait, with the range that has a stated minimum.
     expect(wait2).toMatchObject({ wait_hours: 75, wait_range: { min: 7.5, max: 75 } });
+    expect(wait2.evidence!.wait_hours![0]).toMatchObject({ quote: "The client decision takes, well, within two weeks usually.", value: 75 });
+    expect(proposal.wait_hours).toBe(0);
+    expect(proposal.assumed!.wait_hours).toMatch(/queueing/);
     expect(proposal.sla_hours).toBe(37.5);
     expect(proposal.evidence!.sla_hours![0]!.value).toBe(5 * 7.5);
   });
@@ -239,7 +242,6 @@ describe("Copperleaf: Enquiry to signed client", () => {
     expect(step("deck")).toMatchObject({ hands_on_hours: 2 });
     expect(step("deck").assumed!.hands_on_hours).toMatch(/Assumed: two hours \(Austin said to assume\)/);
     expect(step("first-look").assumed!.hands_on_hours).toMatch(/\(Austin said to assume\)/);
-    expect(step("audit").assumed!.hands_on_hours).toMatch(/\(Austin said to assume\)/);
     // Nothing says how long a contract takes to prepare, only how long a yes takes to become a sent contract.
     expect(step("contract").hands_on_hours).toBeUndefined();
     expect(step("contract")).toMatchObject({ waiting_now: 3 });
