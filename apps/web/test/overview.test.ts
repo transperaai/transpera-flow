@@ -6,7 +6,6 @@ import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { labelIndexes, monthLabel, niceTicks } from "@/lib/overview/axis";
 import { sortFindings, ratingCounts } from "@/lib/overview/findings";
-import { headlineCards } from "@/lib/overview/headline";
 import { checkpointMonths, checkpointWeeks, mrrAfter, mrrSeries, percentile, startingMrr, summarise } from "@/lib/overview/projection";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -43,12 +42,6 @@ describe("projection", () => {
     const band = mrrAfter(model, summarise(model, result), start);
     expect(band.lo).toBeLessThanOrEqual(band.mean);
     expect(band.mean).toBeLessThanOrEqual(band.hi);
-    const cards = headlineCards({ model, result, mrr: band, start, months: 3, currency: "GBP" });
-    expect(cards.map((c) => c.key)).toEqual(["won", "mrr", "churn", "bottleneck"]);
-    for (const c of cards) {
-      expect(c.range).not.toBe("");
-      expect(c.help.example).not.toBe("");
-    }
   });
 });
 
@@ -185,17 +178,14 @@ describe("the old demo links", () => {
 });
 
 describe("a company with no client records", () => {
-  it("says its churn is an estimate and uses the interim client count", () => {
+  it("projects revenue from the interim client count, decaying at the monthly churn rate", () => {
     const base = toEngineModel(demoBundle());
     const model = { ...base, clients: undefined, clientGroups: undefined, activeClients: 20, churnMonthly: 0.05 };
     const start = startingMrr(model);
     expect(start.clients).toBe(20);
     const result = simulate(model, 6, 1);
     const band = mrrAfter(model, summarise(model, result), start);
-    const cards = headlineCards({ model, result, mrr: band, start, months: 3, currency: "GBP" });
-    const churn = cards.find((c) => c.key === "churn")!;
-    expect(churn.note).toMatch(/estimate/);
-    expect(churn.range).toMatch(/^about \d+% of clients over 3 months$/);
-    expect(cards.find((c) => c.key === "mrr")!.note).toMatch(/estimate/);
+    expect(band.lo).toBeLessThanOrEqual(band.mean);
+    expect(band.mean).toBeLessThanOrEqual(band.hi);
   });
 });

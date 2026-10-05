@@ -1,6 +1,7 @@
 import { defaultCompanyPart, northbeamIssues, partOf, processesOf } from "@transpera-flow/db";
 import { Overview } from "@/components/overview/overview";
 import { demoAiView } from "@/lib/ai/demo";
+import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
 import { DEMO_LIVE_VERSION } from "@/lib/history/demo";
 import { demoBundle, demoSources } from "@/lib/sources/demo";
 
@@ -22,6 +23,9 @@ export function DemoOverview() {
       processesHref="/demo/processes"
       issuesHref="/demo/issues"
       rulesHref="/demo/settings/rules"
+      forecastHref="/demo/forecast"
+      // The demo's months don't move, so its screenshots and tests don't either.
+      startDate={DEMO_FORECAST_START}
       // Written in advance: the demo never calls an AI.
       ai={{ view: demoAiView(live.process.id), configured: true, hasFirstPrinciples: true, versionNumber: DEMO_LIVE_VERSION }}
     />

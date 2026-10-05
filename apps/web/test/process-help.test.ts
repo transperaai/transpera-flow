@@ -47,8 +47,8 @@ describe("process page help", () => {
     expect((text.match(/<Help\b/g) ?? []).length).toBe(2);
   });
 
-  it("the headline cards and levers bring their own (i)", () => {
-    expect(read("components/overview/headline-cards.tsx")).toContain("<Help");
+  it("levers bring their own (i); the Overview's health cards (B15) keep to none, as QA wave 1 left the Overview", () => {
+    expect(read("components/overview/health-cards.tsx")).not.toContain("<Help");
     expect(read("components/lever-panel.tsx")).toContain("<Help");
   });
 });

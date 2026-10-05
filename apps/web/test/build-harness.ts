@@ -1,7 +1,7 @@
 // Bundles a browser-test harness (a page that mounts real components) with esbuild. Shared by the sources library and Editor
 // tour browser tests. Server Actions ("use server" modules) can't run on a bare page, so each is replaced by a module with
-// the same exports that answer with an error; `next/navigation` and `next/link` are replaced by small stand-ins. Everything
-// else is the real source.
+// the same exports that answer with an error; `next/navigation`, `next/link` and `next/dynamic` are replaced by small
+// stand-ins. Everything else is the real source.
 
 import { build, type Plugin } from "esbuild";
 import { readFileSync } from "node:fs";
@@ -16,6 +16,7 @@ const stubs: Plugin = {
   setup(b) {
     b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: `${STUBS}/navigation.ts` }));
     b.onResolve({ filter: /^next\/link$/ }, () => ({ path: `${STUBS}/link.tsx` }));
+    b.onResolve({ filter: /^next\/dynamic$/ }, () => ({ path: `${STUBS}/dynamic.tsx` }));
     b.onLoad({ filter: /\.tsx?$/ }, (args) => {
       if (!args.path.startsWith(SRC)) return undefined;
       const text = readFileSync(args.path, "utf8");
@@ -30,8 +31,11 @@ const stubs: Plugin = {
   },
 };
 
-/** The bundled script of a harness entry, ready to add to a page. */
-export async function bundleHarness(entry: URL): Promise<string> {
+/**
+ * The bundled script of a harness entry, ready to add to a page. `define` replaces expressions as esbuild does (for
+ * example `import.meta.url`, which a bundled script has none of).
+ */
+export async function bundleHarness(entry: URL, define: Record<string, string> = {}): Promise<string> {
   const out = await build({
     entryPoints: [fileURLToPath(entry)],
     bundle: true,
@@ -39,7 +43,7 @@ export async function bundleHarness(entry: URL): Promise<string> {
     platform: "browser",
     write: false,
     jsx: "automatic",
-    define: { "process.env.NODE_ENV": '"production"' },
+    define: { "process.env.NODE_ENV": '"production"', ...define },
     alias: { "@": SRC },
     plugins: [stubs],
     logLevel: "silent",

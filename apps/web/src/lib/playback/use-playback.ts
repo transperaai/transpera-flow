@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import type { ProcessBundle } from "@transpera-flow/db";
 import type { SimulationResult } from "@transpera-flow/engine";
 import { PlaybackClock, formatSimTime, maxHopHours } from "./clock";
-import { playbackGraph, playbackRun } from "./graph";
+import { playbackGraph, playbackRun, rolledUpSteps } from "./graph";
 import { PlaybackIndex, type PlaybackGraph } from "./trace-index";
 
 /** A step that playback labels: a working step's queue, or how many reached an end. */
@@ -12,6 +12,21 @@ export interface PlaybackStep {
   id: string;
   name: string;
   kind: "work" | "end";
+  /** The steps it stands for, when steps inside a closed group roll up into its card (the company map); else just itself. */
+  members?: string[];
+}
+
+/** The counts of a step, or of every step it stands for. */
+export function countsOf(index: PlaybackIndex, step: PlaybackStep, t: number) {
+  const ids = step.members ?? [step.id];
+  const out = { queued: 0, service: 0, waiting: 0 };
+  for (const id of ids) {
+    const c = index.counts(id, t);
+    out.queued += c.queued;
+    out.service += c.service;
+    out.waiting += c.waiting;
+  }
+  return out;
 }
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
@@ -36,7 +51,12 @@ export function usePrefersReducedMotion(): boolean {
  * changes. Playback and editing coexist: any edit pauses playback where it is,
  * and the re-run that follows is shown from the same time.
  */
-export function usePlayback(bundle: ProcessBundle, result: SimulationResult | null) {
+export function usePlayback(
+  bundle: ProcessBundle,
+  result: SimulationResult | null,
+  /** The company map (issue #173): play every item, pipeline and servicing, and count steps in closed groups on the card holding them (`open`: the groups drawn open). */
+  rollUp: { open: ReadonlySet<string> } | null = null,
+) {
   const hoursPerWeek = bundle.workspace.settings.hours_per_week;
   const [clock] = useState(() => new PlaybackClock());
   const state = useSyncExternalStore(clock.subscribe, clock.getState, clock.getState);
@@ -44,7 +64,8 @@ export function usePlayback(bundle: ProcessBundle, result: SimulationResult | nu
 
   const processId = bundle.process.id;
   const processKind = bundle.process.kind;
-  const run = useMemo(() => (result ? playbackRun(result, { id: processId, kind: processKind }) : null), [result, processId, processKind]);
+  const all = rollUp !== null;
+  const run = useMemo(() => (result ? playbackRun(result, all ? "all" : { id: processId, kind: processKind }) : null), [result, processId, processKind, all]);
   // Rebuilt only when the edges or end steps change, not when a step moves.
   const graphKey = JSON.stringify(playbackGraph(bundle));
   const graph = useMemo(() => JSON.parse(graphKey) as PlaybackGraph, [graphKey]);
@@ -61,12 +82,13 @@ export function usePlayback(bundle: ProcessBundle, result: SimulationResult | nu
     clock.pause();
   }, [clock, bundle]);
 
+  const open = rollUp?.open ?? null;
   const steps = useMemo(
     () =>
-      bundle.steps
-        .filter((s) => s.kind !== "start")
-        .map((s): PlaybackStep => ({ id: s.id, name: s.name, kind: s.kind === "end" ? "end" : "work" })),
-    [bundle.steps],
+      open
+        ? rolledUpSteps(bundle.steps, open)
+        : bundle.steps.filter((s) => s.kind !== "start").map((s): PlaybackStep => ({ id: s.id, name: s.name, kind: s.kind === "end" ? "end" : "work" })),
+    [bundle.steps, open],
   );
 
   /** What a screen reader hears about the map at a time. */
@@ -75,7 +97,7 @@ export function usePlayback(bundle: ProcessBundle, result: SimulationResult | nu
       if (!index) return "";
       const queues = steps
         .filter((s) => s.kind === "work")
-        .map((s) => [s.name, index.queuedAt(s.id, t)] as const)
+        .map((s) => [s.name, countsOf(index, s, t).queued] as const)
         .filter(([, n]) => n > 0)
         .map(([name, n]) => `${name} ${n}`);
       const ends = steps
