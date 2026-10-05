@@ -8,6 +8,8 @@ export type TourVariant = "process" | "company";
 
 export interface TourStep {
   id: string;
+  /** Open the element first if it is a folded-away list. */
+  reveal?: boolean;
   /** What the step points at: the first element that matches is highlighted. Several selectors are tried in order. */
   target: string[];
   title: string;
@@ -36,9 +38,11 @@ const STEPS: Record<string, TourStep> = {
   },
   checklist: {
     id: "checklist",
-    target: ["[data-missing-for-simulation]", 'aside[aria-label="Inspector"]'],
+    target: ["[data-missing-for-simulation]"],
+    // The list is folded away until it is opened: the tour opens it so the step shows what it talks about.
+    reveal: true,
     title: "The assumptions checklist",
-    body: "A number nobody has confirmed is an assumption. Anything marked Assumption, or listed under Missing for simulation, still needs a real figure. Confirm it, or cite a source for it.",
+    body: "Missing for simulation lists what the map still has no real figure for: a role, a time, a wait, odds on a branch or how many arrive. Click one to go to that step, then fill it in or cite a source.",
   },
   draft: {
     id: "draft",
@@ -66,16 +70,22 @@ const STEPS: Record<string, TourStep> = {
   },
   history: {
     id: "history",
-    target: ["[data-tour=hint]"],
+    target: ["[data-tour=history]"],
     title: "History",
-    body: "Every published version is kept in History on the process page, with what changed. If a change turns out wrong, open an older version and restore it.",
+    body: "History keeps every published version, with what changed. If a change turns out wrong, open History here, pick an older version and restore it.",
+  },
+  historyCompany: {
+    id: "history",
+    target: ["[data-tour=history]"],
+    title: "History",
+    body: "History keeps every published version of the map, with what changed. If a change turns out wrong, open History here, pick an older version and restore it.",
   },
 };
 
 const ORDER: Record<TourVariant, string[]> = {
   process: ["palette", "canvas", "inspector", "checklist", "draft", "simulate", "publish", "history"],
   // The company map is a picture of the business: nothing to simulate and no assumptions to check, so the tour is shorter.
-  company: ["palette", "canvas", "inspector", "draft", "publishCompany"],
+  company: ["palette", "canvas", "inspector", "draft", "publishCompany", "historyCompany"],
 };
 
 export const tourVariant = (company: boolean): TourVariant => (company ? "company" : "process");

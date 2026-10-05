@@ -37,7 +37,15 @@ async function open(options: SourcesHarnessOptions = {}): Promise<{ page: Page; 
 const titles = (page: Page) => page.locator("[data-source-row] button[aria-label^='Open ']").evaluateAll((els) => els.map((e) => e.textContent!.trim()));
 const count = (page: Page) => page.locator("[data-library-count]").innerText();
 const panel = (page: Page) => page.locator("[data-source-panel]");
-const search = (page: Page, text: string) => page.getByLabel("Search sources").fill(text);
+/** Waits for the library to finish asking for rows (it asks after every change to the search or a filter). */
+const settle = async (page: Page) => {
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 60)));
+  await page.waitForSelector("section[aria-label='Source library'][aria-busy=false]");
+};
+const search = async (page: Page, text: string) => {
+  await page.getByLabel("Search sources").fill(text);
+  await settle(page);
+};
 
 describe("the Sources library table", () => {
   it("lists each source with its title, kind, date, speakers and what it is linked to, and flags the one linked to nothing", async () => {
@@ -57,12 +65,12 @@ describe("the Sources library table", () => {
     await page.close();
   }, 60_000);
 
-  it("searches as you type, over the title, speakers, text and links, and says how many it found", async () => {
+  it("searches as you type, over the title, speakers and text, and says how many it found", async () => {
     const { page } = await open({ sources: "many" });
     expect(await count(page)).toBe("12 sources.");
     await search(page, "banana");
     expect(await titles(page)).toEqual(["Interview E"]);
-    expect(await count(page)).toBe("Showing 1 of 12 sources.");
+    expect(await count(page)).toBe("1 source found.");
     await search(page, "leah");
     expect(await titles(page)).toContain("Notes: ops walkthrough with Leah");
     await search(page, "sam okafor interview");
@@ -76,6 +84,7 @@ describe("the Sources library table", () => {
     expect(await page.locator("[data-library-empty]").innerText()).toContain("No sources match");
     expect(await page.locator("[data-source-row]").count()).toBe(0);
     await page.getByRole("button", { name: "Clear filters" }).click();
+    await settle(page);
     expect(await page.locator("[data-source-row]").count()).toBe(12);
     expect(await page.getByLabel("Search sources").inputValue()).toBe("");
     expect(await page.getByRole("button", { name: "Clear filters" }).count()).toBe(0);
@@ -85,24 +94,31 @@ describe("the Sources library table", () => {
   it("filters by kind, by process, and to the sources linked to nothing, alone or together", async () => {
     const { page } = await open({ sources: "many" });
     await page.getByLabel("Filter by kind").selectOption("data");
+    await settle(page);
     const data = await titles(page);
     expect(data.length).toBe(2);
     expect(await page.locator("[data-source-row] td:nth-child(2)").allInnerTexts()).toEqual(["Data", "Data"]);
     await page.getByLabel("Filter by kind").selectOption("all");
+    await settle(page);
 
     const processName = (await page.getByLabel("Filter by process").locator("option").allInnerTexts())[1]!;
     await page.getByLabel("Filter by process").selectOption({ label: processName });
+    await settle(page);
     const inProcess = await titles(page);
     expect(inProcess.length).toBeGreaterThan(0);
     expect(inProcess.length).toBeLessThan(12);
     for (const row of await page.locator("[data-source-row] td:nth-child(5)").allInnerTexts()) expect(row).toContain(processName);
     await page.getByLabel("Filter by process").selectOption("all");
+    await settle(page);
 
     await page.getByRole("checkbox", { name: "Not linked only" }).check();
+
+    await settle(page);
     expect((await titles(page)).sort()).toEqual(["Interview H", "Interview I", "Notes: ops walkthrough with Leah"]);
-    expect(await count(page)).toBe("Showing 3 of 12 sources.");
+    expect(await count(page)).toBe("3 sources found.");
     // With a kind as well: only the notes among them.
     await page.getByLabel("Filter by kind").selectOption("notes");
+    await settle(page);
     expect(await titles(page)).toEqual(expect.arrayContaining(["Notes: ops walkthrough with Leah"]));
     for (const kind of await page.locator("[data-source-row] td:nth-child(2)").allInnerTexts()) expect(kind).toBe("Notes");
     await page.close();
@@ -115,12 +131,15 @@ describe("the Sources library table", () => {
     let list = await dates();
     expect(list).toEqual([...list].sort().reverse());
     await page.getByLabel("Sort sources").selectOption("oldest");
+    await settle(page);
     list = await dates();
     expect(list).toEqual([...list].sort());
     await page.getByLabel("Sort sources").selectOption("title");
+    await settle(page);
     let names = await titles(page);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base", numeric: true })));
     await page.getByLabel("Sort sources").selectOption("title-desc");
+    await settle(page);
     names = await titles(page);
     expect(names[0]).toBe("Strategy walkthrough");
     await page.close();
@@ -131,6 +150,61 @@ describe("the Sources library table", () => {
     expect(await page.getByText("No sources yet. Add the audit's transcripts and notes").count()).toBe(1);
     expect(await page.locator("table").count()).toBe(0);
     expect(errors).toEqual([]);
+    await page.close();
+  }, 60_000);
+});
+
+describe("what the table holds", () => {
+  it("shows a short excerpt in each row and reads the full text only when the source is opened", async () => {
+    const { page } = await open();
+    const row = page.locator("[data-source-row]", { hasText: "Strategy walkthrough" });
+    const excerpt = await row.locator("[data-excerpt]").innerText();
+    expect(excerpt.length).toBeGreaterThan(20);
+    expect(excerpt.length).toBeLessThanOrEqual(160);
+    // The end of the text is nowhere on the page until the source is opened.
+    expect(await page.getByText("Kickoffs are quicker, half a day.").count()).toBe(0);
+    await row.click();
+    await panel(page).waitFor();
+    await panel(page).locator("[data-full-text]").getByText("Kickoffs are quicker, half a day.").waitFor();
+    await page.close();
+  }, 60_000);
+
+  it("shows a snippet around the match when the text matched", async () => {
+    const { page } = await open({ sources: "many" });
+    await search(page, "banana");
+    expect((await page.locator("[data-source-row] [data-excerpt]").first().innerText()).toLowerCase()).toContain("banana");
+    await page.close();
+  }, 60_000);
+
+  it("offers every kind a source can be, and the new ones filter", async () => {
+    const { page } = await open();
+    expect(await page.getByLabel("Filter by kind").locator("option").allInnerTexts()).toEqual(["All kinds", "Transcript", "Notes", "SOP", "Spreadsheet", "Data", "Screenshot", "Other"]);
+    await page.close();
+  }, 60_000);
+
+  it("shows fifty at a time: 'Show more' adds the next page until all are shown, and a new search starts again", async () => {
+    const { page } = await open({ sources: "paged" });
+    expect(await page.locator("[data-source-row]").count()).toBe(50);
+    expect(await count(page)).toBe("Showing 50 of 130 sources.");
+    await page.locator("[data-library-more]").click();
+    await settle(page);
+    await page.waitForFunction(() => document.querySelectorAll("[data-source-row]").length === 100);
+    expect(await count(page)).toBe("Showing 100 of 130 sources.");
+    await page.locator("[data-library-more]").click();
+    await settle(page);
+    await page.waitForFunction(() => document.querySelectorAll("[data-source-row]").length === 130);
+    expect(await count(page)).toBe("130 sources.");
+    expect(await page.locator("[data-library-more]").count()).toBe(0);
+    expect(new Set(await titles(page)).size).toBe(130);
+    await search(page, "procedure 12");
+    expect((await titles(page)).length).toBe(10);
+    expect(await page.locator("[data-library-more]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("gives the search, each filter and the toggle an (i)", async () => {
+    const { page } = await open();
+    for (const label of ["Search", "Kind", "Process", "Sort by", "Not linked only"]) expect(await page.getByRole("button", { name: `About ${label}` }).count(), label).toBe(1);
     await page.close();
   }, 60_000);
 });
@@ -155,6 +229,19 @@ describe("the side panel", () => {
     // The row it came from is marked.
     expect(await page.locator("[data-source-row][data-open=true]").count()).toBe(1);
     expect(errors).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("gives 'Linked to' and the unlinked warning their (i), as rendered", async () => {
+    const { page } = await open();
+    await page.getByRole("button", { name: "Open Strategy walkthrough" }).click();
+    await panel(page).waitFor();
+    expect(await panel(page).getByRole("button", { name: /^About Linked to/ }).count()).toBe(1);
+    await page.keyboard.press("Escape");
+    await panel(page).waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Open Notes: ops walkthrough with Leah" }).click();
+    await panel(page).waitFor();
+    expect(await panel(page).getByRole("button", { name: /^About Not linked/ }).count()).toBe(1);
     await page.close();
   }, 60_000);
 
@@ -206,8 +293,9 @@ describe("the side panel", () => {
     await page.close();
   }, 60_000);
 
-  it("can open on arrival, and is read-only for a viewer: no 'Link to…', no way to remove a link or delete", async () => {
-    const { page } = await open({ mode: "readonly", open: "30000000-0000-4000-8000-000000000001" });
+  it("is read-only for a viewer: no 'Link to…', no way to remove a link or delete", async () => {
+    const { page } = await open({ mode: "readonly" });
+    await page.getByRole("button", { name: "Open Strategy walkthrough" }).click();
     await panel(page).waitFor();
     expect(await panel(page).getByRole("heading", { name: "Strategy walkthrough" }).count()).toBe(1);
     expect(await page.getByRole("button", { name: /Link .* to something/ }).count()).toBe(0);

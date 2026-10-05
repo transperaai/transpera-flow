@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SourceLinkRow, SourceRow } from "@transpera-flow/db";
 import { demoBundle, demoLinkTargets, demoPageSources, demoSourceLinks } from "../src/lib/sources/demo";
-import { DEFAULT_QUERY, filterSources, isFiltered, linkedSummary, sourceDate, type LibraryQuery } from "../src/lib/sources/library";
+import { DEFAULT_QUERY, excerptOf, filterSources, isFiltered, linkedSummary, parseLibraryQuery, searchWords, sourceDate, toListRow, type LibraryQuery } from "../src/lib/sources/library";
 
 // The Sources library's search, filters, sort and "linked to" column (issue #176, B18). The table in a browser is
 // sources-library-browser.test.ts.
@@ -53,37 +53,38 @@ const links = [
 
 describe("filtering", () => {
   it("shows everything by default", () => {
-    expect(ids(filterSources(sources, links, targets, DEFAULT_QUERY)).sort()).toEqual(["a", "b", "c", "d"]);
+    expect(ids(filterSources(sources, links, DEFAULT_QUERY)).sort()).toEqual(["a", "b", "c", "d"]);
     expect(isFiltered(DEFAULT_QUERY)).toBe(false);
   });
 
-  it("searches the title, speakers, text and what a source is linked to, ignoring case, all words needed", () => {
-    expect(ids(filterSources(sources, links, targets, q({ search: "STRATEGY" })))).toEqual(["a"]);
-    expect(ids(filterSources(sources, links, targets, q({ search: "leah" })))).toEqual(["b"]);
-    expect(ids(filterSources(sources, links, targets, q({ search: "back and forth" })))).toEqual(["b"]);
-    expect(ids(filterSources(sources, links, targets, q({ search: `process: ${p1!.name.toLowerCase()}` })))).toEqual(["a"]);
-    expect(ids(filterSources(sources, links, targets, q({ search: "audit maya" })))).toEqual(["a"]);
-    expect(ids(filterSources(sources, links, targets, q({ search: "audit leah" })))).toEqual([]);
-    expect(filterSources(sources, links, targets, q({ search: "  " })).length).toBe(4);
+  it("searches the title, speakers and text, ignoring case, all words needed", () => {
+    expect(ids(filterSources(sources, links, q({ search: "STRATEGY" })))).toEqual(["a"]);
+    expect(ids(filterSources(sources, links, q({ search: "leah" })))).toEqual(["b"]);
+    expect(ids(filterSources(sources, links, q({ search: "back and forth" })))).toEqual(["b"]);
+    // What a source is linked to is not searched: filter by process for that.
+    expect(ids(filterSources(sources, links, q({ search: `process: ${p1!.name.toLowerCase()}` })))).toEqual([]);
+    expect(ids(filterSources(sources, links, q({ search: "audit maya" })))).toEqual(["a"]);
+    expect(ids(filterSources(sources, links, q({ search: "audit leah" })))).toEqual([]);
+    expect(filterSources(sources, links, q({ search: "  " })).length).toBe(4);
   });
 
   it("filters by kind", () => {
-    expect(ids(filterSources(sources, links, targets, q({ kind: "data" })))).toEqual(["c"]);
-    expect(ids(filterSources(sources, links, targets, q({ kind: "transcript" })))).toEqual(["a"]);
+    expect(ids(filterSources(sources, links, q({ kind: "data" })))).toEqual(["c"]);
+    expect(ids(filterSources(sources, links, q({ kind: "transcript" })))).toEqual(["a"]);
   });
 
   it("filters by process, counting a link to one of its steps", () => {
-    expect(ids(filterSources(sources, links, targets, q({ processId: p1!.id })))).toEqual(["a"]);
-    expect(ids(filterSources(sources, links, targets, q({ processId: p2!.id })))).toEqual(["b"]);
+    expect(ids(filterSources(sources, links, q({ processId: p1!.id })))).toEqual(["a"]);
+    expect(ids(filterSources(sources, links, q({ processId: p2!.id })))).toEqual(["b"]);
   });
 
   it("can show only the sources linked to nothing", () => {
-    expect(ids(filterSources(sources, links, targets, q({ unlinkedOnly: true }))).sort()).toEqual(["d"]);
+    expect(ids(filterSources(sources, links, q({ unlinkedOnly: true }))).sort()).toEqual(["d"]);
   });
 
   it("combines filters, and says when any is on", () => {
-    expect(ids(filterSources(sources, links, targets, q({ kind: "notes", processId: p2!.id })))).toEqual(["b"]);
-    expect(ids(filterSources(sources, links, targets, q({ kind: "transcript", processId: p2!.id })))).toEqual([]);
+    expect(ids(filterSources(sources, links, q({ kind: "notes", processId: p2!.id })))).toEqual(["b"]);
+    expect(ids(filterSources(sources, links, q({ kind: "transcript", processId: p2!.id })))).toEqual([]);
     for (const over of [{ search: "x" }, { kind: "data" as const }, { processId: p1!.id }, { unlinkedOnly: true }]) expect(isFiltered(q(over))).toBe(true);
   });
 });
@@ -91,18 +92,18 @@ describe("filtering", () => {
 describe("sorting", () => {
   it("sorts by date, newest or oldest first; a source without a date is filed under the day it was added", () => {
     expect(sourceDate(sources[2]!)).toBe("2026-10-01");
-    expect(ids(filterSources(sources, links, targets, q({ sort: "newest" })))).toEqual(["c", "b", "a", "d"]);
-    expect(ids(filterSources(sources, links, targets, q({ sort: "oldest" })))).toEqual(["d", "a", "b", "c"]);
+    expect(ids(filterSources(sources, links, q({ sort: "newest" })))).toEqual(["c", "b", "a", "d"]);
+    expect(ids(filterSources(sources, links, q({ sort: "oldest" })))).toEqual(["d", "a", "b", "c"]);
   });
 
   it("sorts by title, ignoring case", () => {
-    expect(ids(filterSources(sources, links, targets, q({ sort: "title" })))).toEqual(["c", "b", "d", "a"]);
-    expect(ids(filterSources(sources, links, targets, q({ sort: "title-desc" })))).toEqual(["a", "d", "b", "c"]);
+    expect(ids(filterSources(sources, links, q({ sort: "title" })))).toEqual(["c", "b", "d", "a"]);
+    expect(ids(filterSources(sources, links, q({ sort: "title-desc" })))).toEqual(["a", "d", "b", "c"]);
   });
 
   it("keeps a stable order for equal dates (by title) and does not change the list it is given", () => {
     const same = [src("x", { title: "Zed", recorded_at: "2026-09-01" }), src("y", { title: "Alpha", recorded_at: "2026-09-01" })];
-    expect(ids(filterSources(same, [], targets, q({ sort: "newest" })))).toEqual(["y", "x"]);
+    expect(ids(filterSources(same, [], q({ sort: "newest" })))).toEqual(["y", "x"]);
     expect(ids(same)).toEqual(["x", "y"]);
   });
 });
@@ -130,7 +131,47 @@ describe("the linked-to summary", () => {
   });
 
   it("matches the demo's sample: one source is linked to nothing", () => {
-    const unlinked = filterSources(demoPageSources(), demoSourceLinks(), targets, q({ unlinkedOnly: true }));
+    const unlinked = filterSources(demoPageSources(), demoSourceLinks(), q({ unlinkedOnly: true }));
     expect(unlinked.map((s) => s.title)).toEqual(["Notes: ops walkthrough with Leah"]);
+  });
+});
+
+describe("rows without the full text", () => {
+  const long = `${"Intake goes back and forth. ".repeat(40)}Then the refund policy is checked by Dana. ${"More words. ".repeat(40)}`;
+
+  it("keeps a row to the first 160 characters, or the words around the first match", () => {
+    expect(excerptOf(null)).toBe("");
+    expect(excerptOf("  \n ")).toBe(" ");
+    expect(excerptOf(long).length).toBeLessThanOrEqual(160);
+    expect(excerptOf(long).startsWith("Intake goes back")).toBe(true);
+    const around = excerptOf(long, "DANA");
+    expect(around).toContain("Dana");
+    expect(around.length).toBeLessThanOrEqual(160);
+  });
+
+  it("makes a list row with no body and says whether there is text", () => {
+    const row = toListRow(src("z", { body: long }));
+    expect("body" in row).toBe(false);
+    expect(row.has_body).toBe(true);
+    expect(row.excerpt.length).toBeLessThanOrEqual(160);
+    expect(toListRow(src("y", { body: "   " })).has_body).toBe(false);
+    expect(toListRow(src("x", { body: null })).has_body).toBe(false);
+    expect(JSON.stringify(toListRow(src("z", { body: long }))).length).toBeLessThan(1000);
+  });
+
+  it("reads a search as at most 10 words of at most 100 characters", () => {
+    expect(searchWords("  Refund   DANA ")).toEqual(["refund", "dana"]);
+    expect(searchWords("a ".repeat(30)).length).toBe(10);
+    expect(searchWords("x".repeat(500))[0]!.length).toBe(100);
+  });
+});
+
+describe("a query from the browser", () => {
+  it("is accepted when it is a query, and refused otherwise", () => {
+    expect(parseLibraryQuery(DEFAULT_QUERY)).toEqual(DEFAULT_QUERY);
+    expect(parseLibraryQuery({ ...DEFAULT_QUERY, kind: "sop", sort: "title", unlinkedOnly: true, search: "x" })).not.toBeNull();
+    for (const bad of [null, "x", 4, {}, { ...DEFAULT_QUERY, kind: "video" }, { ...DEFAULT_QUERY, sort: "random" }, { ...DEFAULT_QUERY, processId: "not-an-id" }, { ...DEFAULT_QUERY, search: 5 }, { ...DEFAULT_QUERY, unlinkedOnly: "yes" }, { ...DEFAULT_QUERY, search: "x".repeat(1001) }]) {
+      expect(parseLibraryQuery(bad)).toBeNull();
+    }
   });
 });

@@ -19,7 +19,7 @@ describe("the tour's steps", () => {
 
   it("has a shorter tour for the company map, which has nothing to simulate", () => {
     const company = tourSteps("company").map((s) => s.id);
-    expect(company).toEqual(["palette", "canvas", "inspector", "draft", "publish"]);
+    expect(company).toEqual(["palette", "canvas", "inspector", "draft", "publish", "history"]);
     expect(company.length).toBeLessThan(tourSteps("process").length);
     expect(tourVariant(true)).toBe("company");
     expect(tourVariant(false)).toBe("process");
@@ -42,7 +42,7 @@ describe("the tour's steps", () => {
   });
 
   it("points every step at an element the Editor really draws", () => {
-    const editor = ["components/editor/editor-bar.tsx", "components/editor/editor-view.tsx", "components/simulation-gaps.tsx"].map(read).join("\n");
+    const editor = ["components/editor/editor-bar.tsx", "components/editor/editor-view.tsx", "components/simulation-gaps.tsx", "components/editor/palette.tsx", "components/editor/inspector.tsx"].map(read).join("\n");
     for (const step of [...tourSteps("process"), ...tourSteps("company")]) {
       // Each step needs at least one selector that is in the source; the others are fallbacks.
       const found = step.target.some((selector) => {
@@ -58,12 +58,16 @@ describe("the tour's steps", () => {
   it("tries a step's selectors in order, and drops a step that points at nothing", () => {
     const root = (present: string[]) => ({ querySelector: (s: string) => (present.includes(s) ? ({} as Element) : null) });
     const checklist = tourSteps("process").find((s) => s.id === "checklist")!;
-    expect(resolveTarget(checklist, root(["[data-missing-for-simulation]", 'aside[aria-label="Inspector"]']))).not.toBeNull();
-    expect(resolveTarget(checklist, root(['aside[aria-label="Inspector"]']))).not.toBeNull();
+    expect(resolveTarget(checklist, root(["[data-missing-for-simulation]"]))).not.toBeNull();
+    // The checklist step points at the checklist and nothing else: with no list on the screen it is left out.
+    expect(resolveTarget(checklist, root(['aside[aria-label="Inspector"]']))).toBeNull();
     expect(resolveTarget(checklist, root([]))).toBeNull();
+    expect(checklist.reveal).toBe(true);
+    const history = tourSteps("process").find((s) => s.id === "history")!;
+    expect(history.target).toEqual(["[data-tour=history]"]);
     // A block's Editor has no draft chip, Simulate or Publish.
     const block = root(['aside[aria-label="Palette"]', "[data-tour=canvas]", 'aside[aria-label="Inspector"]']);
-    expect(presentSteps("process", block).map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "checklist"]);
+    expect(presentSteps("process", block).map((s) => s.id)).toEqual(["palette", "canvas", "inspector"]);
   });
 });
 

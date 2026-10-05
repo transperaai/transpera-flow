@@ -12,6 +12,10 @@ export interface TourHarnessOptions {
   company?: boolean;
   /** Who is signed in; null is the demo. */
   userId?: string | null;
+  /** The database says this person has already dismissed the tour. */
+  dismissed?: boolean;
+  /** Leave the process with something missing for simulation, so the checklist is on the screen. */
+  gaps?: boolean;
   /** Edit mode: a draft (default) or a block. */
   editorMode?: "draft" | "block";
 }
@@ -31,6 +35,8 @@ function companyBundle(): ProcessBundle {
 
 window.mountEditor = (options) => {
   const live = options.company ? companyBundle() : demoBundle();
+  // No lead volume anywhere: "Missing for simulation" lists it.
+  if (options.gaps) live.leadSources = [];
   createRoot(document.getElementById("root")!).render(
     <EditorView
       live={live}
@@ -39,6 +45,8 @@ window.mountEditor = (options) => {
       editorMode={options.editorMode ?? "draft"}
       sources={demoSources()}
       userId={options.userId ?? null}
+      tourDismissed={options.dismissed ?? false}
+      historyHref="/history"
       exitHref="/"
     />,
   );

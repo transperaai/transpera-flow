@@ -73,15 +73,18 @@ export const SOURCE_DIALOG_HELP = {
   },
 } as const;
 
+/** The part of a source the dialog needs: which one it is and what to call it. */
+export type DialogSource = Pick<SourceRow, "id" | "title" | "kind">;
+
 /** What the dialog gives back: a new source with its first link, or a link for a source that is already there. */
-export type SourceSubmission = { kind: "add"; input: SourceInput; link: SourceLinkTarget } | { kind: "link"; source: SourceRow; link: SourceLinkTarget };
+export type SourceSubmission = { kind: "add"; input: SourceInput; link: SourceLinkTarget } | { kind: "link"; source: DialogSource; link: SourceLinkTarget };
 
 export interface SourceDialogProps {
   /** Whether it is showing. The dialog starts again from its props each time it opens. */
   open: boolean;
   targets: LinkTargets;
   /** The source to link ("Link source"); without one the dialog adds a new source ("Add source"). */
-  source?: SourceRow | null;
+  source?: DialogSource | null;
   /** A thing to have picked already, when a screen's "+ Link" opens the dialog for it. */
   preset?: SourceLinkTarget | null;
   /** What `preset` is called ("Step: Check fit"), for the line saying what an existing source will be linked to. */

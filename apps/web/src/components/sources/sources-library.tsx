@@ -4,19 +4,13 @@
 // to, and a flag on one that is linked to nothing. Search, a kind filter, a process filter, "Not linked only" and a sort sit above
 // it. A row opens the side panel (sources-page.tsx). Presentational: the page owns the sources and what is open.
 
-import { useMemo, useState } from "react";
-import type { LinkTargets, SourceLinkRow, SourceRow } from "@transpera-flow/db";
-import { LibraryFilters } from "@/components/library-filters";
+import { useMemo } from "react";
+import type { LinkTargets, SourceLinkRow, SourceListRow } from "@transpera-flow/db";
+import { LibraryFilters } from "@/components/sources/library-filters";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SOURCE_KIND_LABELS } from "@/lib/sources/validate";
-import {
-  DEFAULT_QUERY,
-  filterSources,
-  isFiltered,
-  linkedSummary,
-  sourceDate,
-  type LibraryQuery,
-} from "@/lib/sources/library";
+import { DEFAULT_QUERY, isFiltered, linkedSummary, sourceDate, type LibraryQuery } from "@/lib/sources/library";
 
 const SHOWN = 2;
 
@@ -33,14 +27,30 @@ function Names({ names }: { names: string[] }) {
 }
 
 export function SourcesLibrary({
-  sources,
+  rows,
+  total,
+  query,
+  onQuery,
+  loading,
+  loadError,
+  onMore,
   links,
   targets,
   citations,
   openId,
   onOpen,
 }: {
-  sources: SourceRow[];
+  /** The rows loaded so far (a page at a time), without their full text. */
+  rows: SourceListRow[];
+  /** How many sources match the query in all. */
+  total: number;
+  query: LibraryQuery;
+  onQuery: (q: LibraryQuery) => void;
+  /** Asking the database for rows. */
+  loading: boolean;
+  loadError: string | null;
+  /** Load the next page. */
+  onMore: () => void;
   links: SourceLinkRow[];
   targets: LinkTargets;
   /** How many values cite each source, by source id. */
@@ -48,41 +58,28 @@ export function SourcesLibrary({
   openId: string | null;
   onOpen: (id: string) => void;
 }) {
-  const [query, setQuery] = useState<LibraryQuery>(DEFAULT_QUERY);
-  const set = (patch: Partial<LibraryQuery>) =>
-    setQuery((q) => ({ ...q, ...patch }));
-  const rows = useMemo(
-    () => filterSources(sources, links, targets, query),
-    [sources, links, targets, query],
-  );
+  const set = (patch: Partial<LibraryQuery>) => onQuery({ ...query, ...patch });
   const linksOf = useMemo(() => {
     const by = new Map<string, SourceLinkRow[]>();
-    for (const l of links)
-      by.set(l.source_id, [...(by.get(l.source_id) ?? []), l]);
+    for (const l of links) by.set(l.source_id, [...(by.get(l.source_id) ?? []), l]);
     return by;
   }, [links]);
   const filtered = isFiltered(query);
+  const more = rows.length < total;
+  const noun = total === 1 ? "source" : "sources";
 
   return (
-    <section aria-label="Source library" className="flex flex-col gap-3">
-      <LibraryFilters
-        query={query}
-        filtered={filtered}
-        targets={targets}
-        set={set}
-        onClear={() => setQuery(DEFAULT_QUERY)}
-      />
-      <p
-        role="status"
-        aria-live="polite"
-        data-library-count
-        className="text-xs text-fg-2"
-      >
-        {filtered
-          ? `Showing ${rows.length} of ${sources.length} ${sources.length === 1 ? "source" : "sources"}.`
-          : `${sources.length} ${sources.length === 1 ? "source" : "sources"}.`}
+    <section aria-label="Source library" aria-busy={loading} className="flex flex-col gap-3">
+      <LibraryFilters query={query} filtered={filtered} targets={targets} set={set} onClear={() => onQuery(DEFAULT_QUERY)} />
+      <p role="status" aria-live="polite" data-library-count className="text-xs text-fg-2">
+        {loading ? "Searching…" : more ? `Showing ${rows.length} of ${total} ${noun}.` : filtered ? `${total} ${noun} found.` : `${total} ${noun}.`}
       </p>
-      {rows.length === 0 ? (
+      {loadError && (
+        <p role="alert" className="rounded-lg border border-crit bg-crit-soft p-2 text-sm">
+          {loadError}
+        </p>
+      )}
+      {rows.length === 0 && !loading ? (
         <p
           data-library-empty
           className="rounded-lg border border-dashed border-line p-4 text-fg-2"
@@ -168,6 +165,11 @@ export function SourcesLibrary({
                           </span>
                         )}
                       </span>
+                      {s.excerpt && (
+                        <span data-excerpt className="mt-0.5 line-clamp-2 break-words text-xs text-fg-3">
+                          {s.excerpt}
+                        </span>
+                      )}
                       {cites > 0 && (
                         <span className="mt-0.5 hidden text-xs text-fg-3 md:block">
                           {cites === 1
@@ -233,6 +235,13 @@ export function SourcesLibrary({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {more && !loading && (
+        <div>
+          <Button type="button" variant="outline" size="sm" data-library-more onClick={onMore}>
+            Show more
+          </Button>
         </div>
       )}
     </section>

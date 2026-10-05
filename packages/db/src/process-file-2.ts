@@ -23,7 +23,7 @@ export const SUCCESS_KPI_KEYS = ["won", "winsPerWeek", "winRate", "newMrr", "bil
 const FP_MAX_ITEMS = 50;
 const FP_MAX_CHAIN = 10;
 
-export const SOURCE_KINDS = ["transcript", "notes", "data", "screenshot"] as const;
+export const SOURCE_KINDS = ["transcript", "notes", "sop", "spreadsheet", "data", "screenshot", "other"] as const;
 export type FileSourceKind = (typeof SOURCE_KINDS)[number];
 
 export const MAX_FILE_SOURCES = 50;
@@ -252,7 +252,7 @@ export function checkSources(raw: unknown, env: Env): FileSource[] {
     let kind: FileSourceKind = "transcript";
     if (s.kind !== undefined) {
       if (typeof s.kind === "string" && (SOURCE_KINDS as readonly string[]).includes(s.kind)) kind = s.kind as FileSourceKind;
-      else env.errors.push(`${label} has the kind ${typeof s.kind === "string" ? q(s.kind) : "given"}, which Transpera doesn't know. Use transcript, notes, data or screenshot.`);
+      else env.errors.push(`${label} has the kind ${typeof s.kind === "string" ? q(s.kind) : "given"}, which Transpera doesn't know. Use transcript, notes, sop, spreadsheet, data, screenshot or other.`);
     }
     let date: string | undefined;
     if (s.date !== undefined && s.date !== null) {

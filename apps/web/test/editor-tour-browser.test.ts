@@ -56,17 +56,20 @@ async function walk(page: Page) {
         palette: ['aside[aria-label="Palette"]'],
         canvas: ["[data-tour=canvas]"],
         inspector: ['aside[aria-label="Inspector"]'],
-        checklist: ["[data-missing-for-simulation]", 'aside[aria-label="Inspector"]'],
+        checklist: ["[data-missing-for-simulation]"],
         draft: ["[data-tour=draft]"],
         simulate: ["[data-tour=simulate]"],
         publish: ["[data-tour=publish]"],
-        history: ["[data-tour=hint]"],
+        history: ["[data-tour=history]"],
       };
+      // Each step has ONE element it must be on: the one named here, not whichever the tour found.
       const el = selectors[step]!.map((s) => document.querySelector(s)).find(Boolean);
       if (!el) return false;
       const r = el.getBoundingClientRect();
-      // The outline surrounds the element (a little padding either way, clipped to the screen).
-      return r.width > 0 && r.height > 0 && h.left <= Math.max(r.left, 0) + 1 && h.top <= Math.max(r.top, 0) + 1 && h.right >= Math.min(r.right, innerWidth) - 1 && h.bottom >= Math.min(r.bottom, innerHeight) - 1;
+      // The outline surrounds the element (a little padding either way, clipped to the screen) and is no bigger than that.
+      const around = r.width > 0 && r.height > 0 && h.left <= Math.max(r.left, 0) + 1 && h.top <= Math.max(r.top, 0) + 1 && h.right >= Math.min(r.right, innerWidth) - 1 && h.bottom >= Math.min(r.bottom, innerHeight) - 1;
+      const snug = h.right - h.left <= Math.min(r.width, innerWidth) + 16 && h.bottom - h.top <= Math.min(r.height, innerHeight) + 16 + 24;
+      return around && snug;
     }, id);
     seen.push({ id, onTarget, title: await card(page).locator("h2").innerText(), count: await page.locator("[data-tour-count]").innerText() });
     const next = page.locator("[data-tour-next]");
@@ -80,7 +83,7 @@ async function walk(page: Page) {
 
 describe("the Editor tour", () => {
   it("opens by itself the first time, and walks the Editor's areas in order, each pointing at a real element", async () => {
-    const { page, errors } = await open({ userId: "user-a" });
+    const { page, errors } = await open({ userId: "user-a", gaps: true });
     await card(page).waitFor();
     expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 8");
     const seen = await walk(page);
@@ -88,9 +91,21 @@ describe("the Editor tour", () => {
     expect(seen.map((s) => s.title)).toEqual(["The palette", "The canvas", "The inspector", "The assumptions checklist", "Your draft", "Simulate", "Publish", "History"]);
     expect(seen.map((s) => s.count)).toEqual(Array.from({ length: 8 }, (_, i) => `Step ${i + 1} of 8`));
     for (const s of seen) expect(s.onTarget, `${s.id} points at its element`).toBe(true);
+    // The checklist step opened the folded-away list it talks about.
+    expect(await page.locator("[data-missing-for-simulation]").evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
     expect(await card(page).count()).toBe(0);
     expect(await page.locator("[data-tour-highlight]").count()).toBe(0);
     expect(errors).toEqual([]);
+    await page.context().close();
+  }, 60_000);
+
+  it("leaves out the checklist step when nothing is missing, rather than pointing at something else", async () => {
+    const { page } = await open({ userId: "user-a" });
+    await card(page).waitFor();
+    expect(await page.locator("[data-missing-for-simulation]").count()).toBe(0);
+    const seen = await walk(page);
+    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "draft", "simulate", "publish", "history"]);
+    for (const s of seen) expect(s.onTarget, s.id).toBe(true);
     await page.context().close();
   }, 60_000);
 
@@ -120,7 +135,7 @@ describe("the Editor tour", () => {
     // "Take the tour" starts it again, from the first step.
     await again.page.getByRole("button", { name: "Take the tour" }).click();
     await card(again.page).waitFor();
-    expect(await again.page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 8");
+    expect(await again.page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 7");
     await again.page.close();
 
     // Someone else on the same browser has not seen it.
@@ -147,6 +162,52 @@ describe("the Editor tour", () => {
     await first.context.close();
   }, 60_000);
 
+  it("closes with Escape wherever the focus is, and puts the focus back on 'Take the tour'", async () => {
+    const { page } = await open({ userId: "user-a" });
+    await card(page).waitFor();
+    // Focus somewhere else in the Editor (not on the card), then Escape.
+    await page.locator("[data-tour=canvas]").evaluate((el) => (el as HTMLElement).focus());
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await card(page).evaluate((el) => el.contains(document.activeElement))).toBe(false);
+    await page.keyboard.press("Escape");
+    expect(await card(page).count()).toBe(0);
+    await page.waitForFunction(() => document.activeElement?.hasAttribute("data-take-tour"));
+    await page.context().close();
+  }, 60_000);
+
+  it("remembers a signed-in person's dismissal in the database, as well as the browser: nothing opens when it says so", async () => {
+    const first = await open({ userId: "user-a" });
+    await card(first.page).waitFor();
+    await first.page.locator("[data-tour-skip]").click();
+    const calls = await first.page.evaluate(() => (globalThis as unknown as { __serverActions?: { name: string; args: unknown[] }[] }).__serverActions ?? []);
+    expect(calls.filter((c) => c.name === "dismissEditorTour")).toEqual([{ name: "dismissEditorTour", args: ["process"] }]);
+    await first.context.close();
+
+    // A different browser (nothing stored there) of a person whose account says they dismissed it.
+    const elsewhere = await open({ userId: "user-a", dismissed: true });
+    await elsewhere.page.waitForTimeout(500);
+    expect(await card(elsewhere.page).count()).toBe(0);
+    // "Take the tour" still works.
+    await elsewhere.page.getByRole("button", { name: "Take the tour" }).click();
+    await card(elsewhere.page).waitFor();
+    await elsewhere.context.close();
+
+    // The company map's tour is its own: a dismissed process tour doesn't hide it, and dismissing it says `company`.
+    const company = await open({ company: true, userId: "user-a" });
+    await card(company.page).waitFor();
+    await company.page.locator("[data-tour-skip]").click();
+    const companyCalls = await company.page.evaluate(() => (globalThis as unknown as { __serverActions?: { name: string; args: unknown[] }[] }).__serverActions ?? []);
+    expect(companyCalls.filter((c) => c.name === "dismissEditorTour")).toEqual([{ name: "dismissEditorTour", args: ["company"] }]);
+    await company.context.close();
+
+    // The demo has nobody signed in: only the browser remembers.
+    const demo = await open({ userId: null });
+    await card(demo.page).waitFor();
+    await demo.page.locator("[data-tour-skip]").click();
+    expect(await demo.page.evaluate(() => ((globalThis as unknown as { __serverActions?: unknown[] }).__serverActions ?? []).length)).toBe(0);
+    await demo.context.close();
+  }, 90_000);
+
   it("moves focus to the card so the keyboard carries on from there", async () => {
     const { page } = await open({ userId: "user-a" });
     await card(page).waitFor();
@@ -159,7 +220,7 @@ describe("the Editor tour", () => {
   it("is shorter on the company map: no Simulate and no assumptions, every step still real", async () => {
     const { page, errors } = await open({ company: true, userId: "user-a" });
     await card(page).waitFor();
-    expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 5");
+    expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 6");
     const ids = [];
     for (;;) {
       const id = (await card(page).getAttribute("data-tour-step"))!;
@@ -172,16 +233,16 @@ describe("the Editor tour", () => {
       }
       await next.click();
     }
-    expect(ids).toEqual(["palette", "canvas", "inspector", "draft", "publish"]);
+    expect(ids).toEqual(["palette", "canvas", "inspector", "draft", "publish", "history"]);
     expect(errors).toEqual([]);
     await page.context().close();
   }, 60_000);
 
-  it("leaves out a step whose element isn't there (a block has no draft to publish)", async () => {
+  it("leaves out a step whose element isn't there (a block has no draft to publish, and no History)", async () => {
     const { page } = await open({ editorMode: "block", userId: "user-a" });
     await card(page).waitFor();
     const seen = await walk(page);
-    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "checklist"]);
+    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector"]);
     for (const s of seen) expect(s.onTarget, s.id).toBe(true);
     await page.context().close();
   }, 60_000);

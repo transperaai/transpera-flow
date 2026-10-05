@@ -77,6 +77,8 @@ export function EditorView({
   extraChanges = 0,
   issue = null,
   idea = null,
+  tourDismissed = false,
+  historyHref,
 }: {
   live: ProcessBundle;
   draft: ProcessBundle | null;
@@ -91,6 +93,10 @@ export function EditorView({
   /** Kept for the sources a step cites (issue #21). */
   sources?: SourceRow[];
   userId?: string | null;
+  /** The database says this person has already dismissed the Editor's written tour. */
+  tourDismissed?: boolean;
+  /** The History page of what is being edited, for the bar's History button. */
+  historyHref?: string;
   viewer?: Viewer | null;
   sourcesHref?: string;
   /** The workspace's Settings page, which "Missing for simulation" links to for incoming volume. */
@@ -130,7 +136,7 @@ export function EditorView({
   const [selection, setSelection] = useState<Selection>(placement?.id ? { steps: [placement.id], edges: [] } : NO_SELECTION);
   const me = viewer ?? (mode === "demo" ? DEMO_VIEWER : null);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
-  const tour = useEditorTour({ userId, company });
+  const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
   const [sync, realtime] = useRealtime(session, connection.transport, me, "draft");
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
@@ -352,6 +358,7 @@ export function EditorView({
         breaks={breaks}
         company={company}
         onTour={tour.start}
+        historyHref={historyHref}
         simulating={simulating}
         onSimulate={simulate}
         onReview={select}

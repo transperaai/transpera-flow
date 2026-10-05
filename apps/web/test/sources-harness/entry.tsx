@@ -8,11 +8,9 @@ import { SourcesPage } from "@/components/sources-page";
 import { demoBundle, demoCitations, demoLinkTargets, demoPageSources, demoSourceLinks } from "@/lib/sources/demo";
 
 export interface SourcesHarnessOptions {
-  /** The three sample sources (default), twelve (`many`), or none. */
-  sources?: "sample" | "many" | "none";
+  /** The three sample sources (default), twelve (`many`), 130 (`paged`: three pages of the library), or none. */
+  sources?: "sample" | "many" | "paged" | "none";
   mode?: "demo" | "readonly";
-  /** A source to open on arrival. */
-  open?: string | null;
 }
 
 declare global {
@@ -22,6 +20,19 @@ declare global {
 }
 
 const KINDS: SourceKind[] = ["transcript", "notes", "data", "screenshot"];
+
+/** `n` more sources, each linked to a process, with titles that sort in order. */
+function bulk(base: SourceRow[], n: number, processId: string): { sources: SourceRow[]; links: SourceLinkRow[] } {
+  const sources: SourceRow[] = [];
+  const links: SourceLinkRow[] = [];
+  const at = "2026-09-29T09:00:00Z";
+  for (let i = 0; i < n; i++) {
+    const id = `32000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+    sources.push({ id, workspace_id: base[0]!.workspace_id, kind: "sop", title: `Procedure ${String(i + 1).padStart(3, "0")}`, speakers: [], recorded_at: "2026-07-01", body: `Step by step, number ${i + 1}.`, file_url: null, created_at: at, updated_at: at });
+    links.push({ id: `b2000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`, workspace_id: base[0]!.workspace_id, source_id: id, kind: "process", process_id: processId, step_id: null, insight_key: null, issue_id: null, solution_id: null, created_at: at, created_by: null });
+  }
+  return { sources, links };
+}
 
 /** Nine more sources on top of the sample's three: every kind, several dates, two of them linked to nothing. */
 function more(base: SourceRow[], processIds: string[]): { sources: SourceRow[]; links: SourceLinkRow[] } {
@@ -72,6 +83,11 @@ window.mountSources = (options) => {
     sources = [...sources, ...extra.sources];
     links = [...links, ...extra.links];
   }
+  if (options.sources === "paged") {
+    const extra = bulk(sources, 127, targets.processes[0]!.id);
+    sources = [...sources, ...extra.sources];
+    links = [...links, ...extra.links];
+  }
   if (options.sources === "none") {
     sources = [];
     links = [];
@@ -79,13 +95,12 @@ window.mountSources = (options) => {
   createRoot(document.getElementById("root")!).render(
     <SourcesPage
       workspaceId={bundle.workspace.id}
-      sources={sources}
+      memory={sources}
       citations={demoCitations(bundle)}
       links={links}
       targets={targets}
       mode={options.mode ?? "demo"}
       processBase="/demo/p"
-      initialOpenId={options.open ?? null}
     />,
   );
 };

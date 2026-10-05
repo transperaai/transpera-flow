@@ -19,6 +19,9 @@ export default async function WorkspaceSourcesPage(props: PageProps<"/w/[slug]/s
       <SourcesPage
         workspaceId={data.workspace.id}
         sources={data.sources}
+        total={data.total}
+        totalAll={data.totalAll}
+        deletedSourceIds={data.deletedSourceIds}
         citations={data.citations}
         links={data.links}
         targets={data.targets}

@@ -21,7 +21,10 @@ const stubs: Plugin = {
       const text = readFileSync(args.path, "utf8");
       if (!/^\s*["']use server["']/.test(text)) return undefined;
       const names = [...text.matchAll(/export\s+(?:async\s+)?(?:function|const)\s+(\w+)/g)].map((m) => m[1]!);
-      const body = names.map((n) => `export const ${n} = async () => ({ status: "error", message: "Not available in this test." });`).join("\n");
+      // Each call is noted on `window.__serverActions`, so a test can see what the page asked the server to do.
+      const body = names
+        .map((n) => `export const ${n} = async (...args) => { (globalThis.__serverActions ??= []).push({ name: "${n}", args }); return { status: "error", message: "Not available in this test." }; };`)
+        .join("\n");
       return { contents: body, loader: "js" };
     });
   },

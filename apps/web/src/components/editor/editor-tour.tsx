@@ -2,10 +2,12 @@
 
 // The Editor's written tour (issue #176, B18): 5 to 8 short steps that highlight each area of the Editor in turn. It opens by
 // itself the first time someone opens the Editor, can be started again from "Take the tour", and once dismissed (skipped,
-// finished or closed with Escape) it never opens by itself again; that is remembered per user in the browser.
+// finished or closed with Escape) it never opens by itself again; that is remembered per user in the database (so on any device),
+// with the browser's storage as a fast copy for the same device.
 // The steps and the rules are in lib/editor/tour.ts. Hook-up: `useEditorTour` in the Editor, `onTour` on its bar.
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { dismissEditorTour } from "@/app/w/[slug]/tour-actions";
 import { Button } from "@/components/ui/button";
 import { browserStorage, dismiss, isDismissed, presentSteps, resolveTarget, tourVariant, type TourStep } from "@/lib/editor/tour";
 
@@ -46,8 +48,11 @@ export interface EditorTour {
   node: React.ReactNode;
 }
 
-/** The tour for an Editor: `userId` is who is signed in (null on the demo), `company` picks the shorter tour for the company map. */
-export function useEditorTour({ userId, company }: { userId: string | null; company: boolean }): EditorTour {
+/**
+ * The tour for an Editor: `userId` is who is signed in (null on the demo), `company` picks the shorter tour for the company map,
+ * `dismissed` is whether the database says this person has already dismissed it.
+ */
+export function useEditorTour({ userId, company, dismissed = false }: { userId: string | null; company: boolean; dismissed?: boolean }): EditorTour {
   const variant = tourVariant(company);
   const [steps, setSteps] = useState<TourStep[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -61,14 +66,18 @@ export function useEditorTour({ userId, company }: { userId: string | null; comp
 
   // First time in the Editor: open by itself, once the screen has drawn the areas the steps point at.
   useEffect(() => {
-    if (isDismissed(browserStorage(), userId, variant)) return;
+    if (dismissed || isDismissed(browserStorage(), userId, variant)) return;
     const id = requestAnimationFrame(() => start());
     return () => cancelAnimationFrame(id);
-  }, [userId, variant, start]);
+  }, [userId, variant, dismissed, start]);
 
   const close = useCallback(() => {
     dismiss(browserStorage(), userId, variant);
+    // Signed in: remember it on the account too. If that fails the browser's copy still holds on this device.
+    if (userId) void dismissEditorTour(variant).catch(() => undefined);
     setSteps(null);
+    // Focus goes back to where the tour was started from.
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-take-tour]")?.focus());
   }, [userId, variant]);
 
   return { start, node: steps ? <TourCard steps={steps} index={index} setIndex={setIndex} onClose={close} /> : null };
@@ -91,6 +100,7 @@ function TourCard({ steps, index, setIndex, onClose }: { steps: TourStep[]; inde
   useLayoutEffect(() => {
     const el = resolveTarget(step, document);
     // "instant", not smooth: the outline is measured straight away.
+    if (step.reveal && el instanceof HTMLDetailsElement) el.open = true;
     el?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" as ScrollBehavior });
     measure();
     window.addEventListener("resize", measure);
@@ -100,6 +110,13 @@ function TourCard({ steps, index, setIndex, onClose }: { steps: TourStep[]; inde
       window.removeEventListener("scroll", measure, true);
     };
   }, [step, measure]);
+
+  // Escape closes the tour wherever focus is.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   // Focus moves to the card for each step, so the keyboard carries on from there.
   useEffect(() => {
@@ -123,9 +140,6 @@ function TourCard({ steps, index, setIndex, onClose }: { steps: TourStep[]; inde
         aria-describedby="editor-tour-body"
         data-tour-card
         data-tour-step={step.id}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-        }}
         style={placement?.card ? { top: placement.card.top, left: placement.card.left } : undefined}
         className={`fixed z-[61] flex w-[min(22rem,calc(100vw-1.5rem))] flex-col gap-2 rounded-lg border border-line bg-panel p-3.5 text-sm text-fg shadow-lg ${placement?.card ? "" : "right-3 bottom-3 left-3 w-auto sm:left-auto sm:w-88"}`}
       >

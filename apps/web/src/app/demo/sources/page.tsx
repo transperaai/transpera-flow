@@ -13,7 +13,7 @@ export default function DemoSourcesPage() {
     >
       <SourcesPage
         workspaceId={bundle.workspace.id}
-        sources={demoPageSources()}
+        memory={demoPageSources()}
         citations={demoCitations(bundle)}
         links={demoSourceLinks()}
         targets={demoLinkTargets(bundle)}

@@ -69,6 +69,7 @@ export function EditorBar({
   issue = null,
   company = false,
   onTour,
+  historyHref,
 }: {
   mode: EditorMode;
   /** What is being edited: the process's name. */
@@ -104,6 +105,8 @@ export function EditorBar({
   company?: boolean;
   /** Starts the written tour of the Editor (B18); without it there is no "Take the tour" link. */
   onTour?: () => void;
+  /** The History page of what is edited: shows a History button that goes there (after the last edits are saved). */
+  historyHref?: string;
 }) {
   const info = MODE_INFO[mode];
   const router = useRouter();
@@ -227,6 +230,22 @@ export function EditorBar({
               Discard…
             </Button>
           )}
+          {mode === "draft" && historyHref && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={onBar}
+              data-tour="history"
+              onClick={async () => {
+                // Edits save as they are made; let the last ones land before leaving.
+                await session.editor.settled();
+                router.push(historyHref);
+              }}
+            >
+              History
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -242,7 +261,7 @@ export function EditorBar({
           </Button>
         </div>
       </div>
-      <p data-tour={mode === "draft" ? "hint" : undefined} className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
+      <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
         {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : info.hint}
         {onTour && (
           <button type="button" className="ml-2 font-semibold underline" onClick={onTour} data-take-tour>

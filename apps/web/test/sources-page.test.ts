@@ -7,7 +7,7 @@ import { type SourceLinkRow } from "@transpera-flow/db";
 import { SourcesPage } from "@/components/sources-page";
 import { LINK_HELP } from "@/components/sources/link-chips";
 import { SOURCE_DIALOG_HELP } from "@/components/sources/source-dialog";
-import { LIBRARY_HELP } from "@/components/library-filters";
+import { LIBRARY_HELP } from "@/components/sources/library-filters";
 import { demoBundle, demoCitations, demoLinkTargets, demoPageSources, demoSourceLinks, DEMO_UNLINKED_SOURCE_ID } from "@/lib/sources/demo";
 import { demoNav, flatItems, workspaceNav } from "@/lib/shell/nav";
 
@@ -18,6 +18,8 @@ vi.mock("@/app/w/[slug]/source-actions", () => ({
   deleteSource: async () => ({ status: "error", message: "" }),
   linkSource: async () => ({ status: "error", message: "" }),
   unlinkSource: async () => ({ status: "error", message: "" }),
+  searchSourcesPage: async () => ({ status: "error", message: "" }),
+  readSourceBody: async () => ({ status: "error", message: "" }),
 }));
 
 // The Sources page (issue #118, A53): each source with its title, type, date, quote and links as chips, "+ Link", a warning
@@ -28,7 +30,7 @@ const page = (over: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     createElement(SourcesPage, {
       workspaceId: bundle.workspace.id,
-      sources: demoPageSources(),
+      memory: demoPageSources(),
       citations: demoCitations(bundle),
       links: demoSourceLinks(),
       targets: demoLinkTargets(bundle),
@@ -103,14 +105,11 @@ describe("the Sources page", () => {
   });
 
   it("says what to do when there are no sources", () => {
-    expect(text(page({ sources: [], links: [], citations: {} }))).toContain("No sources yet. Add the audit's transcripts and notes and link each one");
+    expect(text(page({ memory: [], links: [], citations: {} }))).toContain("No sources yet. Add the audit's transcripts and notes and link each one");
   });
 
-  it("gives the 'Not linked only' toggle and the panel's warning and links their (i)", () => {
-    expect(html).toContain(`About ${LIBRARY_HELP.unlinked.label}`);
-    const source = readFileSync(join(__dirname, "..", "src/components/sources-page.tsx"), "utf8");
-    expect(source).toContain("<LinkedToLabel />");
-    expect(source).toContain("<UnlinkedWarning />");
+  it("gives the search, each filter, the sort and the 'Not linked only' toggle their (i)", () => {
+    for (const help of Object.values(LIBRARY_HELP)) expect(html).toContain(`About ${help.label}`);
   });
 });
 
@@ -138,7 +137,7 @@ describe("help on the Sources screen", () => {
   const chips = read("components/sources/link-chips.tsx");
 
   it("has a description and an example for every control and rule", () => {
-    expect(Object.keys(LIBRARY_HELP)).toEqual(["unlinked"]);
+    expect(Object.keys(LIBRARY_HELP).sort()).toEqual(["kind", "process", "search", "sort", "unlinked"]);
     expect(Object.keys(SOURCE_DIALOG_HELP).sort()).toEqual(["choice", "date", "existing", "kind", "quote", "target", "title", "type"]);
     for (const [key, help] of [...Object.entries(SOURCE_DIALOG_HELP), ...Object.entries(LINK_HELP), ...Object.entries(LIBRARY_HELP)]) {
       expect(help.label.length, key).toBeGreaterThan(2);

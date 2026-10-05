@@ -9,8 +9,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const URL_SHAPE = /^https?:\/\/\S+$/;
 
-export const SOURCE_KINDS = ["transcript", "notes", "data", "screenshot"] as const satisfies readonly SourceKind[];
-export const SOURCE_KIND_LABELS: Record<SourceKind, string> = { transcript: "Transcript", notes: "Notes", data: "Data", screenshot: "Screenshot" };
+export const SOURCE_KINDS = ["transcript", "notes", "sop", "spreadsheet", "data", "screenshot", "other"] as const satisfies readonly SourceKind[];
+export const SOURCE_KIND_LABELS: Record<SourceKind, string> = { transcript: "Transcript", notes: "Notes", sop: "SOP", spreadsheet: "Spreadsheet", data: "Data", screenshot: "Screenshot", other: "Other" };
 export const MAX_TITLE = 200;
 export const MAX_BODY = 500_000;
 export const MAX_SPEAKERS = 50;
@@ -83,7 +83,7 @@ export function parseSourceInput(input: unknown): Parsed<SourceInput> {
     const clean = cleanSourceField(field, raw ?? null);
     if (!clean) {
       const what: Record<SourceField, string> = {
-        kind: "Pick transcript, notes, data or screenshot.",
+        kind: "Pick transcript, notes, SOP, spreadsheet, data, screenshot or other.",
         title: `Give the source a title (up to ${MAX_TITLE} characters).`,
         speakers: `List up to ${MAX_SPEAKERS} speakers, separated by commas.`,
         recorded_at: "Enter the date as YYYY-MM-DD.",
