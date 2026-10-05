@@ -103,13 +103,14 @@ export function addStep(
 
 /**
  * A process placed on the company map (B11): a card that is a link to the process. Cards are moved, joined by handoff lines and
- * put in groups, but not copied, split or removed here: adding and removing processes comes with the process library (B12).
+ * put in groups, and removed (which only unlinks: the process is never touched), but not copied or split. Processes are added from
+ * the process library (B12, ./library.ts).
  */
 export const isPlacedStep = (bundle: Pick<ProcessBundle, "process">, step: Pick<StepRow, "child_process_id">): boolean =>
   bundle.process.is_company === true && step.child_process_id !== null;
 
-/** What the Editor says where a card can't be removed. */
-export const PLACED_REMOVE_NOTE = "Removing processes from the map comes with the process library.";
+/** What the Editor says about removing a card. */
+export const PLACED_REMOVE_NOTE = "Removing a card only takes the process off this map. The process itself is never changed or deleted.";
 
 /** Delete steps with every edge into or out of them; rework targets pointing at them are cleared. */
 export function deleteSteps(bundle: ProcessBundle, ids: readonly string[]): Edit | null {
@@ -117,10 +118,10 @@ export function deleteSteps(bundle: ProcessBundle, ids: readonly string[]): Edit
   // A group takes the steps inside it with it (as the database does), at any depth.
   const byId = new Map(bundle.steps.map((s) => [s.id, s]));
   for (const s of bundle.steps) if (ancestorsOf(s.id, byId).some((g) => gone.has(g))) gone.add(s.id);
-  // A process card stays on the map, and so does a group with one inside.
-  if (bundle.steps.some((s) => gone.has(s.id) && isPlacedStep(bundle, s))) return null;
   const steps = bundle.steps.filter((s) => gone.has(s.id));
   if (!steps.length) return null;
+  // A process card on the company map is only unlinked: the process is not touched (it goes back to the library).
+  const cards = steps.filter((s) => isPlacedStep(bundle, s));
   const edges = bundle.edges.filter((e) => gone.has(e.from_step_id) || gone.has(e.to_step_id));
   const refs: RowChange[] = bundle.steps
     .filter((s) => !gone.has(s.id) && s.rework_to_step_id && gone.has(s.rework_to_step_id))
@@ -131,7 +132,14 @@ export function deleteSteps(bundle: ProcessBundle, ids: readonly string[]): Edit
       after: { rework_to_step_id: null },
     }));
   return {
-    label: steps.length === 1 ? `Deleted ${steps[0]!.name}` : `Deleted ${steps.length} steps`,
+    label:
+      cards.length === steps.length
+        ? cards.length === 1
+          ? `Removed ${cards[0]!.name} from the map`
+          : `Removed ${cards.length} processes from the map`
+        : steps.length === 1
+          ? `Deleted ${steps[0]!.name}`
+          : `Deleted ${steps.length} steps`,
     ops: [...(refs.length ? [{ kind: "update" as const, changes: refs }] : []), { kind: "remove", steps, edges }],
   };
 }

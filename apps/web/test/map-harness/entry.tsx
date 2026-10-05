@@ -1,14 +1,16 @@
 // The process map on a bare page, for the browser tests in ../map-browser.test.ts. Bundled by esbuild and
 // driven through `window.mountMap` and `window.mapApi`; nothing here ships.
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
 import { createRoot } from "react-dom/client";
 import { defaultCompanyPart, northbeamBundle, northbeamStepIds, partOf, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
 import { Palette } from "@/components/editor/palette";
+import { Inspector } from "@/components/editor/inspector";
+import { useEditCommands } from "@/components/editor/use-edit-commands";
 import type { BlockTools } from "@/components/editor/use-blocks";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
-import { addStep } from "@/lib/editor/commands";
+import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { MemoryStore } from "@/lib/editor/store";
@@ -36,6 +38,8 @@ declare global {
       setOpen: (ids: string[]) => void;
       getOpen: () => string[];
       addStep: () => void;
+      /** Delete cards by name (all of them with no names), as the Editor's Delete key does. */
+      removeCards: (names?: string[]) => void;
       /** The editor's connections, by the names of the cards they join, with their labels and shares. */
       getEdges: () => { from: string; to: string; label: string | null; probability: number }[];
       getSteps: () => string[];
@@ -66,6 +70,12 @@ function companyBundle(): ProcessBundle {
   return { ...base, process: company.process, revision: company.revision, steps: company.steps, edges: company.edges, retired: [], otherProcesses: parts };
 }
 
+/** The Editor's keyboard shortcuts (Delete, undo, ...), as the Editor mounts them, so the real removal path is the one under test. */
+function EditorKeys({ editor, bundle, selection, setSelection }: { editor: ProcessEditor; bundle: ProcessBundle; selection: Selection; setSelection: Dispatch<SetStateAction<Selection>> }) {
+  useEditCommands({ editor, bundle, selected: selection, setSelection });
+  return null;
+}
+
 function Harness({ options }: { options: HarnessOptions }) {
   const base = useMemo(() => (options.company ? companyBundle() : options.nested ? withDemoGroups(demoBundle()) : demoBundle()), [options.nested, options.company]);
   const editor = useMemo(() => (options.editable ? new ProcessEditor(base, new MemoryStore(base)) : null), [base, options.editable]);
@@ -80,6 +90,7 @@ function Harness({ options }: { options: HarnessOptions }) {
       setOpen: (ids) => setOpen(new Set(ids)),
       getOpen: () => [...open],
       addStep: () => editor?.run((b) => addStep(b, { kind: "task", x: 3200, y: 900 }).edit),
+      removeCards: (names) => editor?.run((b) => deleteSelection(b, b.steps.filter((s) => !names || names.includes(s.name)).map((s) => s.id), [])),
       getEdges: () => {
         const b = editor?.getState().bundle ?? base;
         const name = (id: string) => b.steps.find((s) => s.id === id)?.name ?? id;
@@ -95,9 +106,10 @@ function Harness({ options }: { options: HarnessOptions }) {
     <div style={options.editable || options.palette ? { width: 1300, height: 560, display: "flex" } : options.card ? { width: "100%", display: "flex", flexDirection: "column" } : { width: 1300 }}>
       {options.palette && editor && (
         <aside style={{ width: 220, padding: 8 }}>
-          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} viewRef={viewRef} />
+          <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} company={options.company} viewRef={viewRef} />
         </aside>
       )}
+      {options.palette && editor && <EditorKeys editor={editor} bundle={state?.bundle ?? base} selection={selection} setSelection={setSelection} />}
       <ProcessCanvas
         bundle={state?.bundle ?? base}
         editor={editor}
@@ -113,6 +125,24 @@ function Harness({ options }: { options: HarnessOptions }) {
         viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
       />
+      {options.palette && editor && options.company && (
+        <aside aria-label="Inspector" style={{ width: 260, padding: 8 }}>
+          <Inspector
+            bundle={state?.bundle ?? base}
+            editor={editor}
+            selected={selection}
+            setSelection={setSelection}
+            inspectFocus={null}
+            onFocused={() => undefined}
+            sources={[]}
+            stamp={() => ({ at: "2026-10-05T00:00:00Z", by: null }) as never}
+            mode="draft"
+            draft={null}
+            blocks={NO_BLOCKS}
+            company
+          />
+        </aside>
+      )}
     </div>
   );
 }

@@ -34,6 +34,7 @@ import {
 import { POSITION } from "@/lib/drafts/discard";
 import type { StepChange } from "@/lib/drafts/diff";
 import { describeValue, fieldLabel } from "@/lib/editor/describe";
+import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { readField, type Edit, type Scalar } from "@/lib/editor/ops";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
@@ -108,7 +109,7 @@ export function StepInspector({
   // A group (or a step holding a child process) has no numbers of its own: the steps inside it do the work.
   const holder = step.kind === "group" || step.child_process_id !== null;
   const working = step.kind !== "start" && step.kind !== "end" && !holder;
-  // A process placed on the company map (B11): a link to the process, named after it, and not taken off the map from here.
+  // A process placed on the company map (B11): a link to the process, named after it. It is taken off the map with Remove from this map, which leaves the process itself alone.
   const placed = bundle.process.is_company === true && step.child_process_id !== null;
 
   const kindOptions: SelectOption[] = [...STEP_KINDS, ...(step.kind === "subprocess" || step.kind === "group" ? [step.kind] : [])]
@@ -376,11 +377,11 @@ export function StepInspector({
         />
         {placed ? (
           <>
-            <button type="button" disabled aria-describedby="placed-delete-note" className="self-start rounded-token border border-line px-2.5 py-1 text-fg-3">
-              Delete step
+            <button type="button" onClick={onDelete} aria-describedby="placed-delete-note" data-remove-from-map className="self-start rounded-token border border-line px-2.5 py-1 hover:bg-panel-2">
+              Remove from this map
             </button>
             <p id="placed-delete-note" className="text-xs text-muted-foreground">
-              Removing processes from the map comes with the process library.
+              {PLACED_REMOVE_NOTE}
             </p>
           </>
         ) : (

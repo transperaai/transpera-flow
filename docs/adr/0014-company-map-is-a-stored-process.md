@@ -1,6 +1,6 @@
 # 14. The company map is a stored process; a placed process is held by a link, never edited
 
-Date: 2 Oct 2026 · Status: accepted · Issue: #163 (B11, slices 1 and 2 of 2) · Builds on PRD D26 and D39, migration 20261108000000 (nested processes) · Relaxed later by B12 (#164)
+Date: 2 Oct 2026 · Status: accepted · Issue: #163 (B11, slices 1 and 2 of 2) · Builds on PRD D26 and D39, migration 20261108000000 (nested processes) · Extended by B12 (#164, the process library; see the last section)
 
 ## Context
 
@@ -58,9 +58,8 @@ see the whole picture; it needs editing, history and versions.
   on the Overview): cards are moved, joined by **handoff lines** (a line with an optional label; it has a full share and no tag, and the
   simulation never reads it) and put in groups; there is nothing to simulate, no blocks and no first principles. The Overview draws the
   labels. The map's History lists versions with what changed and no numbers; restore is offered, duplicate is not.
-- **Removing a card is not offered.** Adding and removing processes from a map comes with the process library (B12, #164). Until then a
-  card cannot be deleted: the Editor refuses it (and says why), and a trigger on `steps` refuses it for anyone signed in, so the API
-  cannot do what the screen does not. (Not for the system, `restore_version`, or the cascades of deleting a draft, a process or a workspace.)
+- **Removing a card was not offered, until the process library (B12, #164, last section).** Slice 2 refused it in the Editor and, with a
+  trigger on `steps`, for anyone signed in, so the API could not do what the screen did not. B12 lifts that for a draft only.
 
 ## The sync rule (the three slice 1 blockers, decided)
 
@@ -124,3 +123,31 @@ what they draw, put back what they took out, and rewrite published versions.
   until someone did.
 - *Reconcile on every event* (as slice 1 did): rejected above.
 
+## B12: the process library (#164)
+
+Austin (5 Oct 2026): in the company map editor a "Process library" panel lists the workspace's processes; placing one puts a **linked**
+card on the map and **never edits or copies the process**; a process is on the map at most once; several can be picked and added at once;
+removing a card only unlinks it.
+
+- **Placing is the insert of a holder step into the map's draft**, nothing else. `private.holder_allows` (a parent-less, non-company
+  process of the same workspace, held by a company map), the composite foreign key on `child_process_id` (same workspace) and the unique
+  index `steps_one_holder_per_child` (once per version) already say who may be placed, so placing needed no migration and the placed
+  process's row, versions, steps and edges are not written (tested byte for byte, in the database, over PostgREST and in the browser).
+  "At most once" is per map, and a process has one map (the workspace's company map), so it is once in the tree. A process that is held
+  inside another (it has a parent) is shown greyed with where it sits, and the database refuses it too.
+- **Removing is deleting the card from a draft**, which is the migration 20261129500000: `private.company_holder_guard` now lets an
+  editor delete a card of the company map, or a group holding cards, **in a draft version**. Everything else the slice 2 guard refused is
+  still refused: deleting a card of a published version, and unlinking by update (`child_process_id` set to null or another process,
+  also through `save_fields`). Publishing the draft is what takes the process off the live map ("Not on the map" in the library); nothing
+  writes to the process. Undo and redo cover both, and discarding the draft drops pending placements and removals.
+- **Where cards land.** Each goes to the centre of what the person is looking at, or the nearest free place, as new steps do (QA wave 1,
+  `nearestFreeSpot`); the next takes the next free place, so several added at once do not cover each other. A card the draft removed is
+  still drawn where it was live (a struck-through ghost with Restore), and new cards keep clear of it too.
+- **Restore keeps its rule.** `restore_version` still adds back to a restored map any top-level process the version did not hold, "so a
+  restore never drops a process off the map" (slice 2). With the library a process can be off the map on purpose, so a restore puts it
+  back at the bottom of its column (and says how many it added). This is left as it is: a deliberate removal is one more edit the person
+  can repeat, and the alternative (telling "made since" from "taken off") needs a record that the map does not keep. Open question for
+  Austin.
+- **Not built here.** Templates in the library and "New process" (ticket #164 mentions them), the "+ Process" button in ordinary process
+  editors, and the general "a process may hold others" relaxation of `holder_allows`; Austin's decisions for this slice cover the
+  company map only. `holder_allows` is still the one place to change when that comes.

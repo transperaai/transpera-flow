@@ -164,11 +164,11 @@ describe("editing the company map like any process", () => {
     expect((await q("select count(*)::int n from processes where workspace_id = $1 and name = 'Copy'", [w.ws]))[0].n).toBe(0);
   });
 
-  it("does not let an editor take a process off the map, but discarding a draft and moving cards work", async () => {
+  it("lets an editor take a card off a draft (the link only), and discarding a draft and moving cards work", async () => {
     const w = await world();
     const draft = await openDraft(w.cid);
     const holder = (await holderOf(draft, w.support))!;
-    await expect(commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [draft, holder.id]))).rejects.toThrow(/process library/);
+    // (Taking a card off, and what it leaves alone, is tested in process-library.test.ts.)
     // A group an editor made is theirs to delete.
     const group = randomUUID();
     await commitAs(editor.claims, async (c) => {
@@ -338,7 +338,7 @@ describe("the sync rule: a system-made version per event, never an edit of a pub
     const w = await world();
     const draft = await openDraft(w.cid);
     const delivery = (await holderOf(draft, w.delivery))!;
-    // (Only the system can remove a holder from a draft until the process library exists: this stands for that choice.)
+    // A person took the card off the draft (the process library's Remove from the map).
     await q("delete from steps where revision_id = $1 and id = $2", [draft, delivery.id]);
     await q("insert into processes (workspace_id, name, kind) values ($1, 'Epsilon', 'pipeline')", [w.ws]);
     await q("update processes set name = 'Delivery 2' where id = $1", [w.delivery]);
@@ -423,23 +423,30 @@ describe("review fixes: nothing takes a card off the map, history is kept, draft
     return (await q("select private.revision_changes($1, $2) as r", [p.live_revision_id, p.draft_revision_id]))[0].r;
   };
 
-  it("refuses every road that takes a card off the map: delete, unlink, and deleting a group that holds one", async () => {
+  it("takes a card off the map only by deleting it from a draft: not by unlinking it, and not from a published version", async () => {
     const w = await world();
     const draft = await openDraft(w.cid);
     const card = (await holderOf(draft, w.support))!;
-    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = null where revision_id = $1 and id = $2", [draft, card.id]))).rejects.toThrow(/process library/);
-    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = $3 where revision_id = $1 and id = $2", [draft, card.id, w.delivery]))).rejects.toThrow();
-    await expect(commitAs(editor.claims, (c) => save(c, "steps", draft, card.id, { child_process_id: w.support }, { child_process_id: null }))).rejects.toThrow(/process library/);
-    // A card in a group, and the group in another: deleting either group is deleting the card.
+    const offMap = /taken off the company map by removing its card in a draft/;
+    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = null where revision_id = $1 and id = $2", [draft, card.id]))).rejects.toThrow(offMap);
+    await expect(commitAs(editor.claims, (c) => c.query("update steps set child_process_id = $3 where revision_id = $1 and id = $2", [draft, card.id, w.delivery]))).rejects.toThrow(offMap);
+    await expect(commitAs(editor.claims, (c) => save(c, "steps", draft, card.id, { child_process_id: w.support }, { child_process_id: null }))).rejects.toThrow(offMap);
+    // A published version is never edited (the card stays in it).
+    const live = (await processRow(w.cid)).live_revision_id;
+    const liveCard = (await holderOf(live, w.support))!;
+    await expect(commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [live, liveCard.id]))).rejects.toThrow(offMap);
+    expect(await holderOf(live, w.support)).toBeDefined();
+    // A card in a group, and the group in another: deleting a group in the draft takes the card with it.
     const [inner, outer] = [randomUUID(), randomUUID()];
     await commitAs(editor.claims, async (c) => {
       await c.query("insert into steps (id, revision_id, workspace_id, process_id, name, kind, x, y) values ($1, $3, $4, $5, 'Inner', 'group', 0, 0), ($2, $3, $4, $5, 'Outer', 'group', 0, 0)", [inner, outer, draft, w.ws, w.cid]);
       await c.query("update steps set parent_step_id = $2 where revision_id = $1 and id = $3", [draft, outer, inner]);
       await c.query("update steps set parent_step_id = $2 where revision_id = $1 and id = $3", [draft, inner, card.id]);
     });
-    await expect(commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [draft, inner]))).rejects.toThrow(/process library/);
-    await expect(commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [draft, outer]))).rejects.toThrow(/process library/);
-    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = $2", [draft, w.support]))[0].n).toBe(1);
+    await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and id = $2", [draft, outer]));
+    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = $2", [draft, w.support]))[0].n).toBe(0);
+    // The process itself is as it was.
+    expect((await q("select count(*)::int n from processes where id = $1 and parent_process_id is null", [w.support]))[0].n).toBe(1);
   });
 
   it("keeps history: only drafts are made or deleted, status moves only as publishing moves it, pointers name the right versions", async () => {
