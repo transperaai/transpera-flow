@@ -207,7 +207,11 @@ const group = (rows: Row[], key: string): Map<string, Row[]> => {
 };
 
 export interface ExportOptions {
-  /** Whether the user may edit the workspace. Editors and owners get everything; a viewer gets what is published: no draft versions, no pending suggestions or proposals. */
+  /**
+   * Whether the user may edit the workspace. Editors and owners get everything; `false` gives what is published (no draft
+   * versions, no pending suggestions or proposals). The export route no longer calls this for viewers (only agency admins,
+   * owners and editors may export, issue #39), but bundles made that way exist, and the import checker accepts them.
+   */
   canEdit: boolean;
   now?: Date;
 }
@@ -304,7 +308,7 @@ export async function exportWorkspaceBundle(
     engine_version: ENGINE_VERSION,
     scope: options.canEdit ? "everything" : "published",
     about:
-      "A Transpera Flow workspace backup (export only; importing a bundle is not available yet). Rows keep their ids and column names. Named clients are hidden in the product and kept here, flagged hidden. People's emails, members, tokens and who made or changed anything are never included. The tables are read one after another while people may be editing, so a bundle taken during edits can mix moments: exported_at is when the reading began. A viewer's bundle leaves out draft versions and pending suggestions.",
+      "A Transpera Flow workspace backup. Restore it into a new, empty workspace from that workspace's Overview: each process comes back as a draft of its latest published version. Rows keep their ids and column names. Named clients are hidden in the product and kept here, flagged hidden. People's emails, members, tokens and who made or changed anything are never included. The tables are read one after another while people may be editing, so a bundle taken during edits can mix moments: exported_at is when the reading began.",
     workspace: {
       id: String(ws.id),
       name: String(ws.name),
