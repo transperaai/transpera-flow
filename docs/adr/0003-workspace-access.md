@@ -46,3 +46,19 @@ giving the app the service-role key.
 - `workspace_members(ws)` is a second `SECURITY DEFINER` function so the Access page can show emails and last sign-in
   from `auth.users`, returning nothing unless the caller manages the workspace.
 - Existing sessions revoked from the list keep a valid JWT but see nothing through RLS; there is no session kill.
+
+## Addendum: a workspace keeps an owner (issue #30, migration 20261206000000)
+
+- A signed-in person (or an API token) can't demote, deactivate or delete a workspace's **last active owner**, themselves
+  included, nor remove or re-role the pre-assigned email row that made them one. Two `keep_an_owner` triggers (on
+  `memberships` and `workspace_access_emails`) raise `workspace_keeps_an_owner` (23514); the Access page shows "A workspace
+  needs at least one owner. Make someone else an owner first."
+- Agency admins (the JWT flag) are exempt, so a workspace can be left with no owner when offboarding. A workspace with no
+  owner at all is allowed; the rule only stops going from one owner to none.
+- The membership guard applies only when `current_user = 'authenticated'`. Reconciliation (SECURITY DEFINER), foreign-key
+  cascades and SQL run as other roles pass.
+- **Known gap:** an owner who joined by *domain* and was then promoted loses their membership when the domain is removed,
+  because that reconciliation runs as the function owner and isn't guarded. That is rare, and an agency admin can fix it.
+- `public.my_person_id(ws)` returns the person record linked to the caller's active membership. Any member can be linked to
+  a person on the Access page (not only people on the pre-assigned list). One membership per person is a rule of the page,
+  not the database: a unique constraint would make `resolve_my_access` fail at sign-in on existing duplicates.
