@@ -92,6 +92,7 @@ export interface FilePerson extends Backing {
   cost_rate?: number;
   email?: string;
   start_date?: string;
+  leave?: { start_date: string; end_date: string; note?: string }[];
 }
 export interface FileRole extends Backing {
   name: string;
@@ -103,6 +104,8 @@ export interface FileClient extends Backing {
   start_date?: string;
   health?: number;
   notes?: string;
+  active?: boolean;
+  assignments?: Record<string, string>;
 }
 export interface FileService extends Backing {
   name: string;
@@ -519,9 +522,9 @@ const dayOf = (v: unknown, where: string, what: string, env: Env): string | unde
 };
 
 const COMPANY_KEYS = ["people", "roles", "clients", "services", "demand"];
-const PERSON_FIELDS = ["name", "roles", "fte", "hours_per_week", "cost_rate", "email", "start_date", ...ITEM_FIELDS];
+const PERSON_FIELDS = ["name", "roles", "fte", "hours_per_week", "cost_rate", "email", "start_date", "leave", ...ITEM_FIELDS];
 const ROLE_FIELDS = ["name", ...ITEM_FIELDS];
-const CLIENT_FIELDS = ["name", "services", "mrr", "start_date", "health", "notes", ...ITEM_FIELDS];
+const CLIENT_FIELDS = ["name", "services", "mrr", "start_date", "health", "notes", "active", "assignments", ...ITEM_FIELDS];
 const SERVICE_FIELDS = ["name", "pricing_model", "price", "margin", "tenure_months", "monthly_churn", "mix_share", ...ITEM_FIELDS];
 const DEMAND_FIELDS = ["lead_sources", "growth_monthly", "seasonality", ...ITEM_FIELDS];
 const LEAD_FIELDS = ["name", "volume_per_week", "conversion_to_qualified", ...ITEM_FIELDS];
@@ -554,6 +557,24 @@ export function checkCompany(raw: unknown, env: Env): FileCompany | undefined {
     if (email) person.email = email;
     const start = dayOf(item.start_date, where, "start_date", env);
     if (start) person.start_date = start;
+    if (item.leave !== undefined && item.leave !== null) {
+      if (!Array.isArray(item.leave) || item.leave.length > 50) env.errors.push(`${where}: leave should be a list of {"start_date", "end_date"} days, like 2026-12-07.`);
+      else {
+        const leave: NonNullable<FilePerson["leave"]> = [];
+        item.leave.forEach((l, j) => {
+          if (!isObject(l)) return void env.errors.push(`${where}: leave ${j + 1} should be an object with a start_date and an end_date.`);
+          unknownFields(l, ["start_date", "end_date", "note"], `${where}, leave ${j + 1}`, env);
+          const from = dayOf(l.start_date, where, `leave ${j + 1} start_date`, env);
+          const to = dayOf(l.end_date, where, `leave ${j + 1} end_date`, env);
+          if (l.start_date === undefined || l.end_date === undefined) return void env.errors.push(`${where}: leave ${j + 1} needs a start_date and an end_date.`);
+          if (!from || !to) return;
+          if (to < from) return void env.errors.push(`${where}: leave ${j + 1} ends (${to}) before it starts (${from}).`);
+          const note = text(l.note, 500, where, "a leave note", env);
+          leave.push({ start_date: from, end_date: to, ...(note ? { note } : {}) });
+        });
+        if (leave.length) person.leave = leave;
+      }
+    }
     company.people.push(person);
   });
 
@@ -580,6 +601,15 @@ export function checkCompany(raw: unknown, env: Env): FileCompany | undefined {
     if (health !== undefined) client.health = health;
     const notes = text(item.notes, MAX_TEXT, where, "notes", env);
     if (notes) client.notes = notes;
+    if (item.active !== undefined && item.active !== null) {
+      if (typeof item.active === "boolean") client.active = item.active;
+      else env.errors.push(`${where}: active should be true or false.`);
+    }
+    if (item.assignments !== undefined && item.assignments !== null) {
+      if (!isObject(item.assignments) || Object.values(item.assignments).some((v) => typeof v !== "string" || !v.trim())) {
+        env.errors.push(`${where}: assignments should be a role and a person, like {"Account director": "Tom Whitfield"}.`);
+      } else if (Object.keys(item.assignments).length) client.assignments = Object.fromEntries(Object.entries(item.assignments).map(([k, v]) => [k.trim(), (v as string).trim()]));
+    }
     company.clients.push(client);
   });
 

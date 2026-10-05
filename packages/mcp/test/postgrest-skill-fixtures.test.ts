@@ -21,6 +21,9 @@ const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgres
 const SUPABASE_URL = "https://project.supabase.test";
 
 let admin: pg.Client;
+/** The workspaces and users these tests make, removed afterwards: the shared database is read by other suites (the QA workspace test looks for Grace Adeyemi). */
+const madeWorkspaces: string[] = [];
+const madeUsers: string[] = [];
 
 const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 const q = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows;
@@ -57,7 +60,9 @@ async function company(slug: string, roles: string[], people: [string, number][]
   for (const [name, volume] of leadSources) await q("insert into lead_sources (workspace_id, name, volume_week) values ($1, $2, $3)", [workspaceId, name, volume]);
   for (const [name, mrr] of clients) await q("insert into clients (workspace_id, name, mrr) values ($1, $2, $3)", [workspaceId, name, mrr]);
   for (const name of services) await q("insert into services (workspace_id, name, pricing_model, price) values ($1, $2, 'retainer', 1000)", [workspaceId, name]);
+  madeWorkspaces.push(workspaceId);
   const editorId = randomUUID();
+  madeUsers.push(editorId);
   await q("insert into auth.users (id, email) values ($1, $2)", [editorId, `skill-${randomUUID()}@example.com`]);
   await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [workspaceId, editorId]);
   const ctx = contextFor(editorId);
@@ -107,6 +112,9 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
   });
 
   afterAll(async () => {
+    if (madeWorkspaces.length) await admin?.query("delete from steps where workspace_id = any($1)", [madeWorkspaces]);
+    if (madeWorkspaces.length) await admin?.query("delete from workspaces where id = any($1)", [madeWorkspaces]);
+    if (madeUsers.length) await admin?.query("delete from auth.users where id = any($1)", [madeUsers]);
     await admin?.end();
   });
 
@@ -127,13 +135,13 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
     expect(preview.unknownRoles).toEqual([]);
     expect(preview.unknownPeople).toEqual([]);
     expect(preview.extras!.sources.map((s) => s.title)).toEqual(["Tidewater interview: Hana Iqbal, account manager", "Tidewater interview: Owen Hart, SEO specialist"]);
-    expect(preview.extras!.suggestions.map((s) => s.subject)).toEqual(["Person Priti Rao", "New person Jonah Pike", "Client Marlow Physio", "New client Quayside Vets", "Lead source Referrals"]);
+    expect(preview.extras!.suggestions.map((s) => s.subject)).toEqual(["Person Priti Rao", "New person Jonah Pike", "Person Owen Hart", "Client Marlow Physio", "New client Quayside Vets", "Lead source Referrals"]);
     expect(preview.extras!.proposals).toHaveLength(3);
     expect(preview.gap.gaps.map((g) => g.text)).toEqual(["Director review has no hands-on time", "No recurrence: link this process to a service and set how often it repeats in Settings"]);
     expect(await companyCounts(w.workspaceId)).toEqual(before);
 
     const r = await importProcessFile(w.ctx, file, { workspaceId: w.workspaceId, source: "tidewater-monthly-client-report.json" });
-    expect(r).toMatchObject({ steps: 8, links: 8, bundle: { sources: 2, suggestions: 5, proposals: 3, first_principles: true } });
+    expect(r).toMatchObject({ steps: 8, links: 8, bundle: { sources: 2, suggestions: 6, proposals: 3, first_principles: true } });
     const x = await written(w, "Monthly client report", r.revision_id);
     expect(x.proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import", kind: "servicing" });
 
@@ -158,7 +166,7 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
 
     // Company facts are pending suggestions and nothing was applied; the two disagreements of 2x or more are logged as perception gaps.
     expect(x.suggestions.every((s) => s.status === "pending" && s.created_via === "upload")).toBe(true);
-    expect(x.suggestions.map((s) => s.target_table)).toEqual(["clients", "clients", "lead_sources", "people", "people"]);
+    expect(x.suggestions.map((s) => s.target_table)).toEqual(["clients", "clients", "lead_sources", "people", "people", "people"]);
     expect(await companyCounts(w.workspaceId)).toEqual({ ...before, issues: before.issues + 2 });
     expect(x.issues).toEqual([
       { type: "perception_gap", title: "Sources disagree on Director review: rework rate" },
@@ -196,19 +204,13 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
     const preview = await previewProcessFile(w.ctx, w.workspaceId, file);
     expect(preview.unknownRoles).toEqual(["Designer"]);
     expect(preview.unknownPeople).toEqual([]);
-    expect(preview.gap.gaps.map((g) => g.text)).toEqual([
-      "First look at enquiry has no hands-on time",
-      "Already spending on ads?: branch odds missing",
-      "Pitch deck has no role",
-      "Pitch deck has no hands-on time",
-      "Send contract has no hands-on time",
-      "Client signs contract has no wait time",
-    ]);
+    expect(preview.gap.gaps.map((g) => g.text)).toEqual(["Pitch deck has no role", "Send contract has no hands-on time"]);
     expect(preview.extras!.suggestions.map((s) => s.subject)).toEqual([
       "New role Designer",
       "Person Ellie Marsh",
       "Person Kofi Mensah",
       "New person Ruby Chen",
+      "New person Maddie Kerr",
       "Client Ashgrove Garden Centre",
       "New client Harlow and Pike Opticians",
       "Client Brambleway Farm Shop",
@@ -220,7 +222,7 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
     expect(await companyCounts(w.workspaceId)).toEqual(before);
 
     const r = await importProcessFile(w.ctx, file, { workspaceId: w.workspaceId, source: "copperleaf-enquiry-to-signed-client.json" });
-    expect(r).toMatchObject({ steps: 17, links: 17, bundle: { sources: 2, suggestions: 10, proposals: 4, first_principles: true } });
+    expect(r).toMatchObject({ steps: 15, links: 14, bundle: { sources: 2, suggestions: 11, proposals: 4, first_principles: true } });
     expect(r.warnings).toContain("One step has no role: the file's role isn't one of your roles and wasn't mapped to one.");
     const x = await written(w, "Enquiry to signed client", r.revision_id);
     expect(x.proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import", kind: "pipeline" });
@@ -231,16 +233,22 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
     const s = x.steps;
     expect(s["Wait for a diary slot"]).toMatchObject({ wait_dist: "triangular", wait_params: { min: 15, mode: 18.75, max: 22.5 } });
     expect(Number(s["Wait for a diary slot"].wait_hours)).toBe(18.75);
-    expect(s["Client considers proposal"]).toMatchObject({ wait_dist: "triangular", wait_params: { min: 7.5, mode: 41.25, max: 75 } });
-    expect(Number(s["Pricing sign-off"].work_hours)).toBe(0.33);
-    expect(Number(s["Client signs contract"].current_wip)).toBe(3);
+    expect(s["Client considers proposal"]).toMatchObject({ wait_dist: "triangular", wait_params: { min: 7.5, mode: 75, max: 75 } });    expect(Number(s["Pricing sign-off"].work_hours)).toBe(0.33);
+    expect(Number(s["Send contract"].current_wip)).toBe(3);
+    expect(cites(s["Send contract"].provenance.wait_hours.evidence)).toEqual([
+      [grace.id, "Grace Adeyemi", 15],
+      [tom.id, "Tom Whitfield", 7.5],
+    ]);
+    expect(Number(s["Write proposal"].sla_hours)).toBe(37.5);
     expect(Number(s["Write proposal"].current_wip)).toBe(5);
     expect(cites(s["Write proposal"].provenance.work_hours.evidence)).toEqual([
       [grace.id, "Grace Adeyemi", 2.5],
       [tom.id, "Tom Whitfield", 11.25],
     ]);
     expect(s["Audit ad accounts"].provenance.work_hours).toMatchObject({ assumption: true, note: expect.stringContaining("interviewer proposed four hours") });
-    for (const name of ["First look at enquiry", "Send contract"]) expect(s[name].provenance.work_hours?.note ?? "").toMatch(/^Server default for a/);
+    expect(s["Send contract"].provenance.work_hours?.note ?? "").toMatch(/^Server default for a/);
+    expect(Number(s["First look at enquiry"].work_hours)).toBe(0.25);
+    expect(s["First look at enquiry"].provenance.work_hours).toMatchObject({ assumption: true });
     expect(s["Pitch deck"].role_id).toBeNull();
     expect(s["Pricing sign-off"]).toMatchObject({ role_id: w.roles["Account director"] });
     expect(s["Pricing sign-off"].person_id).not.toBeNull();
@@ -257,22 +265,38 @@ describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures ove
       "Client decides > Lost": 0.585,
     });
     expect(s["Client decides"].provenance.branch_odds).toBeUndefined();
-    // Odds for the ads decision were left out, so the import marked them as defaulted: that is what the gap warning reads.
-    expect(s["Already spending on ads?"].provenance.branch_odds).toMatchObject({ defaulted: true });
+    // The withdrawn audit-skip share left no decision in the draft.
+    expect(s["Already spending on ads?"]).toBeUndefined();
 
     // Sources linked to the process; company facts pending and unapplied; conflicts of 2x or more logged as perception gaps.
     expect(x.links.filter((l) => l.kind === "process").map((l) => l.source_id).sort()).toEqual([grace.id, tom.id].sort());
     expect(x.suggestions.every((g) => g.status === "pending" && g.created_via === "upload")).toBe(true);
     const by = (t: string) => x.suggestions.filter((g) => g.target_table === t);
-    expect(by("people").map((g) => g.patch.set)).toEqual([{ fte: 0.8 }, { fte: 0.8 }, { name: "Ruby Chen" }]);
-    expect(by("people")[2]!.target_id).toBeNull();
-    expect(by("people")[2]!.evidence.map((c: { source_id: string }) => c.source_id)).toEqual([grace.id, tom.id]);
-    expect(by("clients").map((g) => g.patch.set.mrr)).toEqual([3600, undefined, 2500]);
-    expect(by("lead_sources").map((g) => g.patch.set)).toEqual([{ volume_week: 9 }, { name: "LinkedIn" }]);
+    const people = by("people");
+    expect(people).toHaveLength(4);
+    const ruby = people.find((g) => g.patch.set.name === "Ruby Chen")!;
+    expect(ruby.patch.set).toEqual({ name: "Ruby Chen", start_date: "2026-11-09" });
+    expect(ruby.target_id).toBeNull();
+    expect(ruby.evidence.map((c: { source_id: string }) => c.source_id)).toEqual([tom.id, grace.id]);
+    expect(people.find((g) => g.patch.set.name === "Maddie Kerr")!.target_id).toBeNull();
+    const existing = people.filter((g) => g.target_id !== null);
+    expect(existing.map((g) => g.patch.set)).toEqual([{ fte: 0.8 }, { fte: 0.8 }]);
+    // Kofi's booked leave comes as leave on his suggestion.
+    expect(existing.flatMap((g) => g.patch.leave ?? [])).toEqual([{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family abroad; booked" }]);
+    const clients = by("clients");
+    expect(clients).toHaveLength(3);
+    expect(clients.find((g) => g.patch.set.mrr === 3600)!.target_id).not.toBeNull();
+    expect(clients.find((g) => g.patch.set.active === false)).toMatchObject({ target_id: expect.any(String), patch: { set: { active: false } } });
+    const harlow = clients.find((g) => g.patch.set.name === "Harlow and Pike Opticians")!;
+    expect(harlow.target_id).toBeNull();
+    expect(Object.keys(harlow.patch.assignments)).toEqual([w.roles["Account director"]]);
+    expect(Object.values(harlow.patch.assignments)[0]).not.toBeNull();
+    expect(by("lead_sources")).toHaveLength(2);
+    expect(by("lead_sources").map((g) => g.patch.set)).toEqual(expect.arrayContaining([{ volume_week: 9 }, { name: "LinkedIn" }]));
     expect(by("roles").map((g) => g.patch.set)).toEqual([{ name: "Designer" }]);
     expect(by("seasonality").map((g) => g.patch.set)).toEqual([{ month: 12, multiplier: 0.5 }]);
-    expect(await companyCounts(w.workspaceId)).toEqual({ ...before, issues: before.issues + 3 });
-    expect(x.issues.map((i) => i.type)).toEqual(["perception_gap", "perception_gap", "perception_gap"]);
+    expect(await companyCounts(w.workspaceId)).toEqual({ ...before, issues: before.issues + 4 });
+    expect(x.issues.map((i) => i.type)).toEqual(["perception_gap", "perception_gap", "perception_gap", "perception_gap"]);
 
     expect(x.proposals.map((p) => p.title)).toEqual([
       "Chasing clients to sign takes a lot of Tom's time",

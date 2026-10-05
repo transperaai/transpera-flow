@@ -10,14 +10,20 @@
       "title": "Tidewater interview: Hana Iqbal, account manager",
       "kind": "transcript",
       "date": "2026-10-05",
-      "speakers": ["Interviewer", "Hana Iqbal"]
+      "speakers": [
+        "Interviewer",
+        "Hana Iqbal"
+      ]
     },
     {
       "id": "interview-owen",
       "title": "Tidewater interview: Owen Hart, SEO specialist",
       "kind": "transcript",
       "date": "2026-10-07",
-      "speakers": ["Interviewer", "Owen Hart"]
+      "speakers": [
+        "Interviewer",
+        "Owen Hart"
+      ]
     }
   ],
   "steps": [
@@ -37,11 +43,29 @@
       "notes": "Owen mostly, Priti when Owen is slammed. Spread over the first three or four days of the month, not all on day one. Owen corrected himself: first \"An hour, yeah\", then \"Well no, with the checking it's three hours a client\"; the export itself is an hour and the rest is checking. A big e-commerce client is nearer four. The export times out about once a fortnight and is rerun for that client.",
       "evidence": {
         "hands_on_hours": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:01:16", "quote": "Give or take, but about an hour a client.", "value": 1 },
-          { "source": "interview-owen", "speaker": "Owen Hart", "time": "00:00:47", "quote": "Well no, with the checking it's three hours a client.", "value": 3 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:01:16",
+            "quote": "Give or take, but about an hour a client.",
+            "value": 1
+          },
+          {
+            "source": "interview-owen",
+            "speaker": "Owen Hart",
+            "time": "00:00:47",
+            "quote": "Well no, with the checking it's three hours a client.",
+            "value": 3
+          }
         ],
         "wait_hours": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:01:32", "quote": "It just gets done.", "value": 0 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:01:32",
+            "quote": "It just gets done.",
+            "value": 0
+          }
         ]
       }
     },
@@ -55,7 +79,13 @@
       "notes": "Hana did not mention this step; Owen runs a crawl on each site and reads the errors, broken links and page speed so the report has more than rankings. The crawl runs on its own but he has to read it. It comes after the rankings and before the commentary; he drops a paragraph into the commentary doc.",
       "evidence": {
         "hands_on_hours": [
-          { "source": "interview-owen", "speaker": "Owen Hart", "time": "00:02:02", "quote": "About an hour and a half per client.", "value": 1.5 }
+          {
+            "source": "interview-owen",
+            "speaker": "Owen Hart",
+            "time": "00:02:02",
+            "quote": "About an hour and a half per client.",
+            "value": 1.5
+          }
         ]
       }
     },
@@ -65,16 +95,31 @@
       "type": "step",
       "role": "Account manager",
       "hands_on_hours": 2.5,
-      "hands_on_range": { "min": 2, "max": 3 },
+      "hands_on_range": {
+        "min": 2,
+        "max": 3
+      },
       "waiting_now": 4,
       "tool": "Google Docs",
       "notes": "Two hours for a quiet month, three if something has dropped. Written one at a time or in a batch (\"it's a mess\"). Hana has a wish for a commentary template, not how it works today.",
       "evidence": {
         "hands_on_hours": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:02:00", "quote": "call it two, three hours.", "value": 2.5 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:02:00",
+            "quote": "call it two, three hours.",
+            "value": 2.5
+          }
         ],
         "waiting_now": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:02:16", "quote": "I've got four half-written right now", "value": 4 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:02:16",
+            "quote": "I've got four half-written right now",
+            "value": 4
+          }
         ]
       }
     },
@@ -89,8 +134,20 @@
       "notes": "Callum reads every report in the doc, changes wording and sometimes queries a number. Hana does not know how long it takes (\"You'd have to ask him. It can't be long, he reads fast.\", 00:02:56). It sits in his inbox a day or two because he is in meetings: queueing behind his other work, not a fixed wait. Sent back for tone or a weak recommendation; the numbers do not change.",
       "evidence": {
         "rework_rate": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:03:38", "quote": "One in five, I'd say.", "value": 0.2 },
-          { "source": "interview-owen", "speaker": "Owen Hart", "time": "00:03:22", "quote": "Callum bounces about half of them back.", "value": 0.5 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:03:38",
+            "quote": "One in five, I'd say.",
+            "value": 0.2
+          },
+          {
+            "source": "interview-owen",
+            "speaker": "Owen Hart",
+            "time": "00:03:22",
+            "quote": "Callum bounces about half of them back.",
+            "value": 0.5
+          }
         ]
       }
     },
@@ -103,7 +160,13 @@
       "notes": "Export to PDF, email it, a quick note.",
       "evidence": {
         "hands_on_hours": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:04:24", "quote": "A quarter of an hour, tops.", "value": 0.25 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:04:24",
+            "quote": "A quarter of an hour, tops.",
+            "value": 0.25
+          }
         ]
       }
     },
@@ -116,24 +179,55 @@
       "notes": "Hana does not say who takes the call; Account manager is taken from her sending the report. Sometimes it runs over.",
       "evidence": {
         "hands_on_hours": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:05:01", "quote": "it's half an hour in the diary.", "value": 0.5 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:05:01",
+            "quote": "it's half an hour in the diary.",
+            "value": 0.5
+          }
         ]
       }
     },
-    { "id": "delivered", "name": "Report delivered", "type": "end" }
+    {
+      "id": "delivered",
+      "name": "Report delivered",
+      "type": "end"
+    }
   ],
   "links": [
-    { "from": "month-end", "to": "rankings" },
-    { "from": "rankings", "to": "technical-check" },
-    { "from": "technical-check", "to": "commentary" },
-    { "from": "commentary", "to": "review" },
-    { "from": "review", "to": "send" },
+    {
+      "from": "month-end",
+      "to": "rankings"
+    },
+    {
+      "from": "rankings",
+      "to": "technical-check"
+    },
+    {
+      "from": "technical-check",
+      "to": "commentary"
+    },
+    {
+      "from": "commentary",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "to": "send"
+    },
     {
       "from": "send",
       "to": "delivered",
       "label": "Client says thanks",
       "evidence": [
-        { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:04:52", "quote": "ninety per cent finished once it's sent.", "value": 0.9 }
+        {
+          "source": "interview-hana",
+          "speaker": "Hana Iqbal",
+          "time": "00:04:52",
+          "quote": "ninety per cent finished once it's sent.",
+          "value": 0.9
+        }
       ]
     },
     {
@@ -141,49 +235,123 @@
       "to": "follow-up",
       "label": "Client has questions",
       "evidence": [
-        { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:04:38", "quote": "But about one in ten has questions, and then it turns into a follow-up call.", "value": 0.1 }
+        {
+          "source": "interview-hana",
+          "speaker": "Hana Iqbal",
+          "time": "00:04:38",
+          "quote": "But about one in ten has questions, and then it turns into a follow-up call.",
+          "value": 0.1
+        }
       ]
     },
-    { "from": "follow-up", "to": "delivered" }
+    {
+      "from": "follow-up",
+      "to": "delivered"
+    }
   ],
   "company": {
     "people": [
       {
         "name": "Priti Rao",
-        "roles": ["SEO specialist"],
+        "roles": [
+          "SEO specialist"
+        ],
         "fte": 0.6,
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:05:36", "quote": "she's three days a week now.", "value": 0.6 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:05:36",
+            "quote": "she's three days a week now.",
+            "value": 0.6
+          }
         ],
         "assumed": "Three days of five is 0.6; Hana says it applies since the start of the month."
       },
       {
         "name": "Jonah Pike",
-        "roles": ["SEO specialist"],
+        "roles": [
+          "SEO specialist"
+        ],
         "start_date": "2026-10-12",
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:05:58", "quote": "we've hired Jonah Pike, he's an SEO specialist, he starts on the twelfth of October." },
-          { "source": "interview-owen", "speaker": "Owen Hart", "time": "00:04:26", "quote": "He starts on the twelfth, yes." }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:05:58",
+            "quote": "we've hired Jonah Pike, he's an SEO specialist, he starts on the twelfth of October."
+          },
+          {
+            "source": "interview-owen",
+            "speaker": "Owen Hart",
+            "time": "00:04:26",
+            "quote": "He starts on the twelfth, yes."
+          }
         ],
         "assumed": "The year, 2026, is taken from the interview date; his FTE was not stated."
+      },
+      {
+        "name": "Owen Hart",
+        "leave": [
+          {
+            "start_date": "2026-12-21",
+            "end_date": "2026-12-31",
+            "note": "Booked and paid for"
+          }
+        ],
+        "evidence": [
+          {
+            "source": "interview-owen",
+            "speaker": "Owen Hart",
+            "time": "00:04:52",
+            "quote": "I'm off from the twenty-first of December to the thirty-first, it's booked and it's paid for, so it's happening."
+          }
+        ],
+        "assumed": "The year, 2026, is taken from the interview date."
       }
     ],
     "clients": [
       {
         "name": "Marlow Physio",
-        "services": ["SEO retainer", "Content add-on"],
+        "services": [
+          "SEO retainer",
+          "Content add-on"
+        ],
         "mrr": 2900,
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:06:17", "quote": "they were twenty-five hundred a month but they're on twenty-nine hundred now", "value": 2900 }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:06:17",
+            "quote": "they were twenty-five hundred a month but they're on twenty-nine hundred now",
+            "value": 2900
+          }
         ]
       },
       {
         "name": "Quayside Vets",
-        "services": ["SEO retainer"],
-        "notes": "Hana is the account manager and Owen does the SEO. Monthly fee not known: it was Callum's deal.",
+        "services": [
+          "SEO retainer"
+        ],
+        "notes": "Monthly fee not known: it was Callum's deal.",
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:06:43", "quote": "Quayside Vets, they signed on the SEO retainer." }
-        ]
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:06:43",
+            "quote": "Quayside Vets, they signed on the SEO retainer."
+          },
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:06:43",
+            "quote": "I'm their account manager and Owen's doing the SEO."
+          }
+        ],
+        "assignments": {
+          "Account manager": "Hana Iqbal",
+          "SEO specialist": "Owen Hart"
+        }
       }
     ],
     "demand": {
@@ -192,7 +360,13 @@
           "name": "Referrals",
           "volume_per_week": 3,
           "evidence": [
-            { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:07:08", "quote": "It's about three a week now, it was two for ages and it's crept up.", "value": 3 }
+            {
+              "source": "interview-hana",
+              "speaker": "Hana Iqbal",
+              "time": "00:07:08",
+              "quote": "It's about three a week now, it was two for ages and it's crept up.",
+              "value": 3
+            }
           ]
         }
       ]
@@ -204,10 +378,22 @@
       "title": "The rank tracker export times out and the client's pull is redone",
       "detail": "About once a fortnight. Hana would not guess the cost; Owen put it at maybe twenty minutes each time, unmeasured.",
       "issue_type": "failure",
-      "steps": ["rankings"],
+      "steps": [
+        "rankings"
+      ],
       "evidence": [
-        { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:07:33", "quote": "It times out about once a fortnight and then Owen has to redo the whole client." },
-        { "source": "interview-owen", "speaker": "Owen Hart", "time": "00:04:08", "quote": "Maybe twenty minutes each time, but I haven't measured it." }
+        {
+          "source": "interview-hana",
+          "speaker": "Hana Iqbal",
+          "time": "00:07:33",
+          "quote": "It times out about once a fortnight and then Owen has to redo the whole client."
+        },
+        {
+          "source": "interview-owen",
+          "speaker": "Owen Hart",
+          "time": "00:04:08",
+          "quote": "Maybe twenty minutes each time, but I haven't measured it."
+        }
       ]
     },
     {
@@ -215,9 +401,16 @@
       "title": "Every report goes through Callum",
       "detail": "Reports queue in his inbox for a day or two behind meetings; Hana says it is not slowness but that he is one person and everything goes through him.",
       "issue_type": "spof",
-      "steps": ["review"],
+      "steps": [
+        "review"
+      ],
       "evidence": [
-        { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:03:12", "quote": "he's one person and everything goes through him." }
+        {
+          "source": "interview-hana",
+          "speaker": "Hana Iqbal",
+          "time": "00:03:12",
+          "quote": "he's one person and everything goes through him."
+        }
       ]
     },
     {
@@ -225,9 +418,16 @@
       "title": "The same commentary sentences are rewritten every month",
       "detail": "Hana calls a template a wish, not how it works today; Owen would use one too.",
       "issue_type": "manual",
-      "steps": ["commentary"],
+      "steps": [
+        "commentary"
+      ],
       "evidence": [
-        { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:07:51", "quote": "I write the same sentence about mobile visibility every month." }
+        {
+          "source": "interview-hana",
+          "speaker": "Hana Iqbal",
+          "time": "00:07:51",
+          "quote": "I write the same sentence about mobile visibility every month."
+        }
       ]
     }
   ],
@@ -237,7 +437,12 @@
         "text": "Reports go out within five working days of month end.",
         "kind": "truth",
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:05:14", "quote": "it's in the retainer terms. Report within five working days of month end." }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:05:14",
+            "quote": "it's in the retainer terms. Report within five working days of month end."
+          }
         ]
       }
     ],
@@ -247,7 +452,12 @@
         "owner": "Callum Reid",
         "step": "review",
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:02:41", "quote": "He reviews every report before it goes out." }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:02:41",
+            "quote": "He reviews every report before it goes out."
+          }
         ],
         "assumed": "Hana does not say who set the rule; Callum is named as the person who does the review."
       }
@@ -259,7 +469,12 @@
         "comparator": "atMost",
         "target": 40,
         "evidence": [
-          { "source": "interview-hana", "speaker": "Hana Iqbal", "time": "00:05:14", "quote": "Report within five working days of month end." }
+          {
+            "source": "interview-hana",
+            "speaker": "Hana Iqbal",
+            "time": "00:05:14",
+            "quote": "Report within five working days of month end."
+          }
         ],
         "assumed": "Five working days at 8 hours a day (Tidewater works a 40 hour week) is 40 working hours."
       }

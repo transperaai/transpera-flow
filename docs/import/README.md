@@ -23,15 +23,15 @@ The `process-file` skill turns a mix of materials (interview transcripts, rough 
 ## Run it
 
 1. Give it the materials: attach or paste them. A drawn map can be an image or a description.
-2. It lists what it found (processes, people, numbers, conflicts between sources) and asks at most five blocking questions in one message. Answer them, or say "go" to take its stated defaults.
-3. It writes one `.json` file per process, then a short summary: what was built, assumptions, conflicts between sources, **Missing for simulation**, what it left out, and open questions.
+2. It lists what it found (processes, people, numbers, conflicts between sources), then asks about every gap and ambiguity in one numbered message, grouped by process, each with a suggested answer and its quote. Answer by number ("1 yes, 2 0.3, 3 skip"). Say "skip" or "use your best guess" for an item and it records an assumption marked as yours; otherwise it builds only after your answers.
+3. It writes one `.json` file per process, then a short summary: what was built, assumptions, conflicts between sources, **Missing for simulation**, what it left out, and what is still open, with the questions and your answers.
 
 ## Upload
 
 1. In the app, open **Processes**, then **Upload process**, and choose a file (or drop it). Do this once per file.
 2. The preview shows the counts per section (steps, sources, suggestions, proposals), the conflicts between your sources, the conflicts with your company's own values, any role to map, and the **Missing for simulation** list. Fix anything it quotes by asking Claude to correct the file, or edit the draft afterwards.
 3. Create. Each file becomes a **draft**: nothing is live until you publish it. Company facts wait on **Suggestions** to accept or reject, as do the issues, and nothing is applied silently.
-4. Fill the gaps (the open questions in the summary say which to ask first), place each draft with the library, then publish.
+4. Fill the gaps (the still-open list in the summary says which to ask first), place each draft with the library, then publish.
 
 ## The examples
 
@@ -40,6 +40,6 @@ The `process-file` skill turns a mix of materials (interview transcripts, rough 
 - `tidewater-monthly-client-report.json`: both Tidewater interviews (`docs/extraction/examples/tidewater`) as one servicing process.
 - `copperleaf-enquiry-to-signed-client.json`: both Copperleaf QA interviews (`docs/extraction/qa/interview-1.txt`, `interview-2.txt`) as one pipeline.
 
-The answers to the skill's blocking questions are assumed to be: a 40-hour week at Tidewater (8-hour day) and a 37.5-hour week at Copperleaf (7.5-hour day); the role titles, services and Kofi's surname from the company's own records.
+The answers Austin is taken to have given to the skill's questions: a 40-hour week at Tidewater (8-hour day) and a 37.5-hour week at Copperleaf (7.5-hour day); the role titles, services and Kofi's surname from the company's own records. For Copperleaf he also said: use 0.25 h for the first look and 2 h for the deck as best guesses, take the audit as 4 h, use the two-week ceiling as the client wait, leave out the audit-skip share, and leave the contract hands-on time, the LinkedIn volume and the proposal conflicts unsettled. Those guesses are recorded as `Assumed: ... (Austin said to assume)`.
 
 They are tested twice. `packages/db/test/process-file-skill-fixtures.test.ts` checks that each validates against the schema and the checker, that every quote is word for word on the line at its time and said by that speaker, that every number has evidence or an assumed reason, and that the conflicts and gaps are the expected ones. `packages/mcp/test/postgrest-skill-fixtures.test.ts` uploads each over PostgREST as an editor (with `POSTGREST_URL` set; see "MCP end-to-end suites" in the root `README.md`) and checks the draft, the sources and their links, the pending suggestions and proposals, and that nothing company-level changed.

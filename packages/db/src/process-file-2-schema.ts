@@ -127,6 +127,19 @@ export const PROCESS_FILE_SCHEMA_2 = {
               cost_rate: { type: "number", minimum: 0, description: "The hourly cost." },
               email: { type: "string" },
               start_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+              leave: {
+                type: "array",
+                description: "Booked leave: the days they are away, from the first to the last.",
+                items: {
+                  type: "object",
+                  required: ["start_date", "end_date"],
+                  properties: {
+                    start_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+                    end_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+                    note: { type: "string", maxLength: 500 },
+                  },
+                },
+              },
             },
             "The person's name.",
           ),
@@ -141,6 +154,12 @@ export const PROCESS_FILE_SCHEMA_2 = {
               start_date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
               health: { type: "number", minimum: 0, maximum: 100 },
               notes: { type: "string", maxLength: 2000 },
+              active: { type: "boolean", description: "false when the client has left; true when they are back." },
+              assignments: {
+                type: "object",
+                description: "Who looks after the client, by role, like {\"Account director\": \"Tom Whitfield\"}. Roles and people the company already has.",
+                additionalProperties: { type: "string" },
+              },
             },
             "The client's name.",
           ),
@@ -337,7 +356,14 @@ export const PROCESS_FILE_EXAMPLE_2 = {
     { from: "decides", to: "declined", probability: 0.4, label: "Declines" },
   ],
   company: {
-    people: [{ name: "Maya Chen", roles: ["Managing director"], fte: 1, evidence: [{ source: "interview-maya", speaker: "Maya Chen", time: "00:00:30", quote: "About fifteen minutes an enquiry, and I do it the same day." }] }],
+    people: [{ name: "Maya Chen", roles: ["Managing director"], fte: 1, evidence: [{ source: "interview-maya", speaker: "Maya Chen", time: "00:00:30", quote: "About fifteen minutes an enquiry, and I do it the same day." }], leave: [{ start_date: "2026-12-21", end_date: "2026-12-31", note: "Christmas" }] }],
+    clients: [
+      {
+        name: "Northgate Foods",
+        assignments: { "Managing director": "Maya Chen" },
+        evidence: [{ source: "sales-sop", time: "page 4", quote: "Maya looks after Northgate Foods herself." }],
+      },
+    ],
     roles: [{ name: "Account manager", assumed: "The SOP names the role but nobody holds it yet." }],
     services: [{ name: "Monthly retainer", pricing_model: "retainer", price: 1500, evidence: [{ source: "sales-sop", time: "page 2", quote: "The standard retainer is £1,500 a month." }] }],
     demand: {
@@ -395,7 +421,7 @@ export function claudePrompt2(): string {
     '- Every number comes from a source or is an assumption. A number from a source carries "evidence": the quote word for word (never reworded), its source id, who said it and where (a time or a page), and "value" when they stated a number. A number nobody stated carries "assumed": one sentence on why. If neither is true, leave the number out. Never invent one.',
     "- Quote a day length exactly as it was said: if someone says a working day, keep that in the quote and convert it in the number (7.5 hours a day unless the sources say otherwise). If two sources give different numbers, give both as separate quotes with their own value: Transpera flags the disagreement for me to settle.",
     "- Useful minimum for a meaningful simulation: a role and hands-on time on every work step, a wait on every wait step, odds on every branch of a decision, and how many leads (or recurring tasks) arrive. Ask me for what's missing rather than guessing; the upload warns about anything still missing.",
-    '- Facts about the company (people, roles, clients, services, lead volumes) go in "company", each with evidence. They only become suggestions for me to accept.',
+    '- Facts about the company (people with their booked leave, roles, clients with whether they are still clients and who looks after them, services, lead volumes) go in "company", each with evidence. They only become suggestions for me to accept. When two sources disagree on a company fact, keep both quotes and leave the value out; when one source corrects another later, the correction wins.',
     '- Problems and ideas you find go in "proposals", each with its quote. They only become proposals for me to accept. A "solution_idea" needs "for_issue": an issue I already track.',
     '- "first_principles" only holds what the materials say, quoted. Leave the rest empty.',
     "- Use role names exactly as I use them. Don't add fields that aren't in the schema.",

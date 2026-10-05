@@ -173,7 +173,10 @@ describe("Tidewater: Monthly client report", () => {
     expect(f.company!.people.map((p) => [p.name, p.fte, p.start_date])).toEqual([
       ["Priti Rao", 0.6, undefined],
       ["Jonah Pike", undefined, "2026-10-12"],
+      ["Owen Hart", undefined, undefined],
     ]);
+    expect(f.company!.people[2]!.leave).toEqual([{ start_date: "2026-12-21", end_date: "2026-12-31", note: "Booked and paid for" }]);
+    expect(f.company!.clients[1]!.assignments).toEqual({ "Account manager": "Hana Iqbal", "SEO specialist": "Owen Hart" });
     expect(f.company!.clients.map((c) => [c.name, c.mrr])).toEqual([
       ["Marlow Physio", 2900],
       ["Quayside Vets", undefined],
@@ -205,14 +208,17 @@ describe("Copperleaf: Enquiry to signed client", () => {
     expect(proposal.evidence!.hands_on_hours!.map((c) => c.value)).toEqual([2.5, 1.5 * 7.5]);
     expect(proposal.assumed!.hands_on_hours).toMatch(/7\.5 hour day/);
     const wait2 = f.steps.find((s) => s.id === "client-wait")!;
-    expect(wait2.wait_range).toEqual({ min: 7.5, max: 75 });
-    expect(wait2.wait_hours).toBeUndefined();
+    // A stated ceiling ("within two weeks") is the wait, with the range that has a stated minimum.
+    expect(wait2).toMatchObject({ wait_hours: 75, wait_range: { min: 7.5, max: 75 } });
+    expect(proposal.sla_hours).toBe(37.5);
+    expect(proposal.evidence!.sla_hours![0]!.value).toBe(5 * 7.5);
   });
 
   it("flags every disagreement between Grace and Tom and settles none of them", () => {
     const c = checked(pack);
     const text = c.conflicts!.join("\n");
-    expect(c.conflicts).toHaveLength(5);
+    expect(c.conflicts).toHaveLength(6);
+    expect(text).toMatch(/Send contract.*wait.*: 15;.*: 7\.5\)/);
     expect(text).toMatch(/Write proposal.*hands-on time.*2\.5.*11\.25/);
     expect(text).toMatch(/Write proposal.*rework rate.*0\.25.*0\.5/);
     expect(text).toMatch(/Onboarding call.*hands-on time/);
@@ -224,15 +230,22 @@ describe("Copperleaf: Enquiry to signed client", () => {
     expect(win + lost).toBeCloseTo(1, 10);
   });
 
-  it("leaves out the numbers the interviewees would not stand behind", () => {
+  it("records what the materials imply as assumed, and leaves out what they do not say", () => {
     const f = checked(pack).file;
     const step = (id: string) => f.steps.find((s) => s.id === id)!;
-    expect(step("first-look").hands_on_hours).toBeUndefined();
-    expect(step("deck").hands_on_hours).toBeUndefined();
+    // Implied ("a coffee-length thing", "briefed the day before"): a placeholder with its reason.
+    expect(step("first-look")).toMatchObject({ hands_on_hours: 0.25 });
+    expect(step("first-look").assumed!.hands_on_hours).toMatch(/coffee-length/);
+    expect(step("deck")).toMatchObject({ hands_on_hours: 2 });
+    expect(step("deck").assumed!.hands_on_hours).toMatch(/Assumed: two hours \(Austin said to assume\)/);
+    expect(step("first-look").assumed!.hands_on_hours).toMatch(/\(Austin said to assume\)/);
+    expect(step("audit").assumed!.hands_on_hours).toMatch(/\(Austin said to assume\)/);
+    // Nothing says how long a contract takes to prepare, only how long a yes takes to become a sent contract.
     expect(step("contract").hands_on_hours).toBeUndefined();
-    expect(step("signs").wait_hours).toBeUndefined();
-    // The audit skip share ("maybe a fifth") was declined, so the decision's branches carry no odds.
-    expect(f.links.filter((l) => l.from === "ads").map((l) => l.probability)).toEqual([undefined, undefined]);
+    expect(step("contract")).toMatchObject({ waiting_now: 3 });
+    expect(step("contract").evidence!.wait_hours!.map((c) => c.value)).toEqual([15, 7.5]);
+    // The audit skip share ("maybe a fifth") was withdrawn: no decision, no odds.
+    expect(f.steps.some((s) => s.type === "decision" && s.id !== "decides")).toBe(false);
     // The audit's four hours came from the interviewer's suggestion, and says so.
     expect(step("audit").assumed!.hands_on_hours).toMatch(/interviewer proposed four hours/);
   });
@@ -240,21 +253,20 @@ describe("Copperleaf: Enquiry to signed client", () => {
   it("reports the useful-minimum gaps by step", () => {
     const f = checked(pack).file;
     const gaps = findGaps(gapInputFromFile(f, { hasRole: (r) => r !== "Designer", volume: "known" }));
-    expect(gaps.map((g) => g.text)).toEqual([
-      "First look at enquiry has no hands-on time",
-      "Already spending on ads?: branch odds missing",
-      "Pitch deck has no role",
-      "Pitch deck has no hands-on time",
-      "Send contract has no hands-on time",
-      "Client signs contract has no wait time",
-    ]);
+    expect(gaps.map((g) => g.text)).toEqual(["Pitch deck has no role", "Send contract has no hands-on time"]);
   });
 
   it("suggests only what was said and settled, and leaves the rest as open questions", () => {
     const f = checked(pack).file;
-    expect(f.company!.people.map((p) => p.name)).toEqual(["Ellie Marsh", "Kofi Mensah", "Ruby Chen"]);
-    expect(f.company!.people.find((p) => p.name === "Ruby Chen")!.start_date).toBeUndefined();
+    expect(f.company!.people.map((p) => p.name)).toEqual(["Ellie Marsh", "Kofi Mensah", "Ruby Chen", "Maddie Kerr"]);
+    // The later correction wins (Tom: "Ruby starts on the ninth, not the second").
+    expect(f.company!.people.find((p) => p.name === "Ruby Chen")!.start_date).toBe("2026-11-09");
+    expect(f.company!.people.find((p) => p.name === "Kofi Mensah")!.leave).toEqual([{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family abroad; booked" }]);
+    const client = (name: string) => f.company!.clients.find((c) => c.name === name)!;
+    expect(client("Brambleway Farm Shop").active).toBe(false);
+    expect(client("Harlow and Pike Opticians").assignments).toEqual({ "Account director": "Tom Whitfield" });
     const lead = (name: string) => f.company!.demand!.lead_sources.find((l) => l.name === name)!;
+    expect(f.company!.demand!.lead_sources.map((l) => l.name)).toEqual(["Website enquiries", "LinkedIn"]);
     expect(lead("Website enquiries").volume_per_week).toBe(9);
     expect(lead("LinkedIn").volume_per_week).toBeUndefined();
     expect(lead("LinkedIn").evidence!.map((c) => c.value)).toEqual([2, 1]);

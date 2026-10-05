@@ -455,6 +455,31 @@
                 "type": "string",
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
               },
+              "leave": {
+                "type": "array",
+                "description": "Booked leave: the days they are away, from the first to the last.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "start_date",
+                    "end_date"
+                  ],
+                  "properties": {
+                    "start_date": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "end_date": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  }
+                }
+              },
               "evidence": {
                 "type": "array",
                 "maxItems": 10,
@@ -540,6 +565,17 @@
               "notes": {
                 "type": "string",
                 "maxLength": 2000
+              },
+              "active": {
+                "type": "boolean",
+                "description": "false when the client has left; true when they are back."
+              },
+              "assignments": {
+                "type": "object",
+                "description": "Who looks after the client, by role, like {\"Account director\": \"Tom Whitfield\"}. Roles and people the company already has.",
+                "additionalProperties": {
+                  "type": "string"
+                }
               },
               "evidence": {
                 "type": "array",
