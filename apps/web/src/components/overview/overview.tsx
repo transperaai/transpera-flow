@@ -14,6 +14,8 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
+import { ExportMenu } from "@/components/export/export-menu";
+import { ratingOfRank } from "@/lib/map/rating";
 import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ProcessPart, type SourceRow } from "@transpera-flow/db";
 import { resolveMoney, toRatingConfig, type AnalysisSettings, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
@@ -72,6 +74,8 @@ export interface OverviewProps {
   /** Editors only: the Editor on the company map (its draft, handoff lines and publishing), and its History (B11). */
   companyEditHref?: string;
   companyHistoryHref?: string;
+  /** Where the workspace's JSON bundle is downloaded (live workspaces only; the demo has none). */
+  bundleHref?: string;
   /** The earlier version of the company map being shown (`?version=N`, read only), or null for live. Only the map changes. */
   viewingMapVersion?: number | null;
   issuesHref: string;
@@ -120,7 +124,7 @@ function Section({ title, description, action, children }: { title: string; desc
   );
 }
 
-export function Overview({ workspaceName, live, parts, company, issues, sources = NO_SOURCES, mode, analysisRules, firstPrinciples, hrefs, processesHref, companyEditHref, companyHistoryHref, viewingMapVersion = null, issuesHref, rulesHref, ai }: OverviewProps) {
+export function Overview({ workspaceName, live, parts, company, issues, sources = NO_SOURCES, mode, analysisRules, firstPrinciples, hrefs, processesHref, companyEditHref, companyHistoryHref, bundleHref, viewingMapVersion = null, issuesHref, rulesHref, ai }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -263,6 +267,24 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
                   ✎ Edit company map
                 </Link>
               )}
+              <ExportMenu
+                name={`${workspaceName} company map`}
+                bundleHref={bundleHref}
+                note="Drawn as it is on screen."
+                input={() => ({
+                  title: `${workspaceName}: company map`,
+                  subtitle: viewingMapVersion !== null ? `Version ${viewingMapVersion}` : "Live",
+                  steps: map.bundle.steps,
+                  edges: map.bundle.edges,
+                  expanded,
+                  rating: (id) => {
+                    const r = rating(id);
+                    return r ? ratingOfRank(r.rank) : null;
+                  },
+                  issues: openIssues,
+                  handoffs: true,
+                })}
+              />
               {companyHistoryHref && (
                 <Link href={companyHistoryHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
                   History

@@ -1,26 +1,30 @@
 "use client";
 
-// The Sources screen (docs/PRD.md §8 screen 7, issue #21; A53, issue #118): transcripts, notes
-// data exports and screenshots from the audit, each with its quote, what it is linked to (chips, "+ Link") and
-// every value that cites it, so any inferred number can be traced to what someone said. A source
-// linked to nothing is flagged: it doesn't count as evidence.
+// The Sources library (docs/PRD.md §8 screen 7, issues #21, #118, #176): transcripts, notes, data exports and screenshots from
+// the audit as a searchable table. A row opens a side panel with the full text, what it is linked to ("Link to…") and the values
+// that quote it, so any inferred number can be traced to what someone said. A source linked to nothing is flagged: it doesn't
+// count as evidence.
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   EVIDENCE_LABELS,
   formatParameter,
   isEvidenceColumn,
-  unlinkedSources,
   type LinkTargets,
   type SourceCitation,
   type SourceLinkRow,
+  type SourceListRow,
   type SourceRow,
 } from "@transpera-flow/db";
 import { DateField, SelectField, TextField } from "@/components/fields";
 import { LinkChips, LinkedToLabel, UnlinkedWarning } from "@/components/sources/link-chips";
 import { SourceDialog, type SourceSubmission } from "@/components/sources/source-dialog";
+import { SourcesLibrary } from "@/components/sources/sources-library";
+import { DEFAULT_QUERY, PAGE_SIZE, excerptOf, filterSources, toListRow, type LibraryQuery } from "@/lib/sources/library";
+import { liveLibraryBackend, memoryLibraryBackend, type LibraryBackend } from "@/lib/sources/library-backend";
 import { buttonVariants } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Saver } from "@/lib/fields/field-controller";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { demoSourceStore } from "@/lib/sources/demo-store";
@@ -30,7 +34,7 @@ import { SOURCE_KIND_LABELS, SOURCE_KINDS, parseSpeakers, type SourceField } fro
 
 /** Plain-English (i) text for a source's fields, with an example (issue #123). */
 const SOURCE_HELP = {
-  kind: { description: "What sort of material this is: a transcript of a conversation, notes someone wrote up, a data export, or a screenshot.", example: "Transcript, for the typed-up discovery interview." },
+  kind: { description: "What sort of material this is: a transcript of a conversation, notes someone wrote up, an SOP, a spreadsheet, a data export, a screenshot or something else.", example: "Transcript, for the typed-up discovery interview." },
   title: { description: "A name that tells people what this is.", example: "Discovery interview with Maya." },
   speakers: { description: "Who is talking or wrote it, separated by commas. Quotes show who said them.", example: "Maya Collins, Rosa Diaz." },
   date: { description: "When it was recorded or written.", example: "3 October." },
@@ -41,14 +45,6 @@ const SOURCE_HELP = {
 
 const button = buttonVariants({ variant: "outline", size: "sm" });
 const primary = buttonVariants({ size: "sm" });
-const EXCERPT = 280;
-/** The start of a source's text, as the card's quote: whole words, and an ellipsis when there is more. */
-const excerpt = (body: string | null) => {
-  const text = (body ?? "").trim().replace(/\s+/g, " ");
-  if (text.length <= EXCERPT) return text;
-  const cut = text.slice(0, EXCERPT);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), EXCERPT - 40))}…`;
-};
 const kindOptions = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k] }));
 
 const FIELD_NAMES: Record<string, string> = {
@@ -66,7 +62,11 @@ const statedValue = (c: SourceCitation) =>
 
 export function SourcesPage({
   workspaceId,
-  sources: initial,
+  sources: firstPage = [],
+  total: firstTotal,
+  totalAll: firstTotalAll,
+  memory,
+  deletedSourceIds = [],
   citations,
   links: initialLinks,
   targets: initialTargets,
@@ -74,7 +74,15 @@ export function SourcesPage({
   processBase,
 }: {
   workspaceId: string;
-  sources: SourceRow[];
+  /** The library's first page, from the database: rows without their full text (a workspace's page). */
+  sources?: SourceListRow[];
+  /** How many sources match in all, and how many the workspace has. */
+  total?: number;
+  totalAll?: number;
+  /** The sources held in the tab, with their text (the demo, and tests): searched here, not by the database. */
+  memory?: SourceRow[];
+  /** Cited sources that have been deleted, so their citations are listed apart. */
+  deletedSourceIds?: string[];
   /** What cites each source, by source id. */
   citations: Record<string, SourceCitation[]>;
   /** What each source is linked to. */
@@ -90,18 +98,31 @@ export function SourcesPage({
   const demoSolutions = useDemoSolutions().solutions;
   // In the demo every page of the tab shares one store, so a link made on a step or an issue is here too.
   const [store] = useState<SourceStore>(() =>
-    mode === "live" ? liveSourceStore(workspaceId) : mode === "demo" ? demoSourceStore(workspaceId, initial, initialLinks) : new MemorySourceStore(workspaceId, initial, undefined, initialLinks),
+    mode === "live" ? liveSourceStore(workspaceId) : mode === "demo" ? demoSourceStore(workspaceId, memory ?? [], initialLinks) : new MemorySourceStore(workspaceId, memory ?? [], undefined, initialLinks),
   );
-  const shared = mode === "demo" && store instanceof MemorySourceStore ? store.snapshot() : null;
-  const [sources, setSources] = useState(shared?.sources ?? initial);
-  const [links, setLinks] = useState(shared?.links ?? initialLinks);
+  const held = store instanceof MemorySourceStore ? store : null;
+  const shared = mode === "demo" && held ? held.snapshot() : null;
+  const seed = held ? { sources: shared?.sources ?? memory ?? [], links: shared?.links ?? initialLinks } : null;
+  const [backend] = useState<LibraryBackend>(() => (held ? memoryLibraryBackend(held) : liveLibraryBackend(workspaceId)));
+  const [links, setLinks] = useState(seed?.links ?? initialLinks);
+  const [query, setQuery] = useState<LibraryQuery>(DEFAULT_QUERY);
+  const [firstRows] = useState(() => (seed ? filterSources(seed.sources, seed.links, DEFAULT_QUERY) : null));
+  const [rows, setRows] = useState<SourceListRow[]>(() => (firstRows ? firstRows.slice(0, PAGE_SIZE).map((x) => toListRow(x)) : firstPage));
+  const [total, setTotal] = useState(firstRows ? firstRows.length : (firstTotal ?? firstPage.length));
+  const [totalAll, setTotalAll] = useState(seed ? seed.sources.length : (firstTotalAll ?? firstPage.length));
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<{ source: SourceRow | null } | null>(null);
+  const [dialog, setDialog] = useState<{ source: SourceListRow | null } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The source open in the side panel: its row, and its full text once that has been read.
+  const [opened, setOpened] = useState<{ row: SourceListRow; body: string | null | undefined } | null>(null);
+  const [gone, setGone] = useState(deletedSourceIds);
   const cited = new Set(Object.keys(citations));
-  const orphans = Object.entries(citations).filter(([id]) => !sources.some((s) => s.id === id));
-  const unlinked = unlinkedSources(sources, links);
+  const orphans = Object.entries(citations).filter(([id]) => gone.includes(id));
+  const linkedIds = new Set(links.map((l) => l.source_id));
+  const unlinkedCount = Math.max(totalAll - linkedIds.size, 0);
   // The demo's solutions live in the tab; a workspace's come with the page.
   const targets = mode === "demo" ? { ...initialTargets, solutions: demoSolutions.map((s) => ({ id: s.id, name: s.name })) } : initialTargets;
   // The sidebar's count comes from the server: ask for it again after a change.
@@ -111,14 +132,64 @@ export function SourcesPage({
     if (mode === "live") router.refresh();
   };
 
+  // Searching: a change to the query asks the backend for the first page (after a short pause while typing, for the database).
+  // An answer that arrives after a newer question is dropped.
+  const asked = useRef(0);
+  const run = useCallback(
+    async (q: LibraryQuery, offset: number, limit?: number) => {
+      const id = ++asked.current;
+      setLoading(true);
+      try {
+        const page = await backend.search(q, offset, limit);
+        if (id !== asked.current) return;
+        setRows((list) => (offset === 0 ? page.rows : [...list, ...page.rows.filter((r) => !list.some((x) => x.id === r.id))]));
+        setTotal(page.total);
+        setLoadError(null);
+      } catch (e) {
+        if (id === asked.current) setLoadError(e instanceof Error ? e.message : "Couldn't load the sources. Try again.");
+      } finally {
+        if (id === asked.current) setLoading(false);
+      }
+    },
+    [backend],
+  );
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
+    const t = setTimeout(() => void run(query, 0), held ? 0 : 250);
+    return () => clearTimeout(t);
+  }, [query, run, held]);
+  const refresh = () => run(query, 0, Math.max(PAGE_SIZE, rows.length));
+
+  const open = async (id: string) => {
+    const row = rows.find((r) => r.id === id);
+    if (!row) return;
+    setOpened({ row, body: undefined });
+    try {
+      const body = await backend.body(id);
+      setOpened((o) => (o && o.row.id === id ? { ...o, body } : o));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load the text. Try again.");
+      setOpened((o) => (o && o.row.id === id ? { ...o, body: null } : o));
+    }
+  };
+
+  // A saved field shows at once in the open panel and in its row.
+  const patch = (id: string, field: SourceField, value: unknown) => {
+    const apply = (r: SourceListRow): SourceListRow =>
+      r.id !== id ? r : field === "body" ? { ...r, excerpt: excerptOf(value as string | null), has_body: ((value as string | null) ?? "").trim() !== "" } : ({ ...r, [field]: value } as SourceListRow);
+    setRows((list) => list.map(apply));
+    setOpened((o) => (o && o.row.id === id ? { row: apply(o.row), body: field === "body" ? (value as string | null) : o.body } : o));
+  };
+
   const saver =
     (id: string, field: SourceField): Saver<string | null> =>
     async (base, next) => {
       const outcome = await store.saveField(id, field, base, next);
-      if (outcome.status === "saved") {
-        const value = field === "speakers" ? parseSpeakers(outcome.value as string | null) : outcome.value;
-        setSources((list) => list.map((s) => (s.id === id ? ({ ...s, [field]: value } as SourceRow) : s)));
-      }
+      if (outcome.status === "saved") patch(id, field, field === "speakers" ? parseSpeakers(outcome.value as string | null) : outcome.value);
       return outcome as Awaited<ReturnType<Saver<string | null>>>;
     };
 
@@ -126,14 +197,16 @@ export function SourcesPage({
     if (s.kind === "add") {
       const r = await store.create(s.input, [s.link]);
       if (r.status === "error") return r.message;
-      setSources((list) => [r.source, ...list]);
       setLinks((list) => [...list, ...r.links]);
+      setTotalAll((n) => n + 1);
+      void refresh();
       changed("Source added and linked.");
       return null;
     }
     const r = await store.link(s.source.id, s.link);
     if (r.status === "error") return r.message;
     setLinks((list) => [...list, r.link]);
+    void refresh();
     changed("Source linked.");
     return null;
   };
@@ -144,6 +217,7 @@ export function SourcesPage({
       const r = await store.unlink(link.id);
       if (r.status === "error") return setError(r.message);
       setLinks((list) => list.filter((l) => l.id !== link.id));
+      void refresh();
       changed("Link removed.");
     } finally {
       setBusy(false);
@@ -155,9 +229,9 @@ export function SourcesPage({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-fg-2">
           {canEdit ? "Owners and editors add sources and link them." : "You can read the sources here; owners and editors can add and change them."}
-          {unlinked.length > 0 && (
-            <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinked.length}>
-              {unlinked.length === 1 ? "1 source isn't linked to anything yet." : `${unlinked.length} sources aren't linked to anything yet.`}
+          {unlinkedCount > 0 && (
+            <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinkedCount}>
+              {unlinkedCount === 1 ? "1 source isn't linked to anything yet." : `${unlinkedCount} sources aren't linked to anything yet.`}
             </span>
           )}
         </p>
@@ -178,41 +252,61 @@ export function SourcesPage({
           </button>
         </p>
       )}
-      {sources.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
+      {totalAll === 0 ? (
+        <p data-no-sources className="rounded-lg border border-dashed border-line p-4 text-fg-2">
           No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an
           insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
         </p>
       ) : (
-        <ul aria-label="Sources" className="flex flex-col gap-3">
-          {sources.map((s) => (
-            <li key={s.id}>
-              <SourceItem
-                source={s}
-                citations={citations[s.id] ?? []}
-                links={links.filter((l) => l.source_id === s.id)}
-                targets={targets}
-                canEdit={canEdit}
-                busy={busy}
-                saver={saver}
-                processBase={processBase}
-                onLink={() => setDialog({ source: s })}
-                onUnlink={(l) => void unlink(l)}
-                onRemove={async () => {
-                  const r = await store.remove(s.id);
-                  if (r.status === "error") setError(r.message);
-                  else {
-                    setSources((list) => list.filter((x) => x.id !== s.id));
-                    setLinks((list) => list.filter((l) => l.source_id !== s.id));
-                    changed("Source deleted.");
-                  }
-                }}
-                cited={cited.has(s.id)}
-              />
-            </li>
-          ))}
-        </ul>
+        <SourcesLibrary
+          rows={rows}
+          total={total}
+          query={query}
+          onQuery={setQuery}
+          loading={loading}
+          loadError={loadError}
+          onMore={() => void run(query, rows.length)}
+          links={links}
+          targets={targets}
+          citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
+          openId={opened?.row.id ?? null}
+          onOpen={(id) => void open(id)}
+        />
       )}
+      <Sheet open={opened !== null} onOpenChange={(o) => !o && setOpened(null)}>
+        <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-source-panel>
+          {opened && (
+            <SourcePanel
+              key={opened.row.id}
+              source={{ ...opened.row, body: opened.body ?? null }}
+              loadingText={opened.body === undefined && opened.row.has_body}
+              citations={citations[opened.row.id] ?? []}
+              links={links.filter((l) => l.source_id === opened.row.id)}
+              targets={targets}
+              canEdit={canEdit}
+              busy={busy}
+              saver={saver}
+              processBase={processBase}
+              onLink={() => setDialog({ source: opened.row })}
+              onUnlink={(l) => void unlink(l)}
+              onRemove={async () => {
+                const id = opened.row.id;
+                const r = await store.remove(id);
+                if (r.status === "error") setError(r.message);
+                else {
+                  setOpened(null);
+                  setLinks((list) => list.filter((l) => l.source_id !== id));
+                  setTotalAll((n) => Math.max(n - 1, 0));
+                  if (cited.has(id)) setGone((g) => [...g, id]);
+                  void refresh();
+                  changed("Source deleted.");
+                }
+              }}
+              cited={cited.has(opened.row.id)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
       {orphans.length > 0 && (
         <section aria-label="Citations of deleted sources" className="rounded-lg border border-warn bg-warn-soft p-3 text-xs">
           <h2 className="mb-1 text-sm font-bold">Citing a deleted source</h2>
@@ -224,8 +318,9 @@ export function SourcesPage({
   );
 }
 
-function SourceItem({
+function SourcePanel({
   source: s,
+  loadingText,
   citations,
   links,
   targets,
@@ -239,6 +334,8 @@ function SourceItem({
   cited,
 }: {
   source: SourceRow;
+  /** The text is still being read. */
+  loadingText: boolean;
   citations: SourceCitation[];
   links: SourceLinkRow[];
   targets: LinkTargets;
@@ -253,24 +350,27 @@ function SourceItem({
 }) {
   const [confirming, setConfirming] = useState(false);
   const value = (f: SourceField) => sourceFieldValue(s, f) as string | null;
-  const quote = excerpt(s.body);
+  const text = (s.body ?? "").trim();
   return (
-    <article aria-label={s.title} data-linked={links.length > 0} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3 shadow-xs">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-base font-bold">{s.title}</h2>
-        <span className="rounded-full border border-line px-1.5 text-[11px] font-semibold text-fg-2">{SOURCE_KIND_LABELS[s.kind]}</span>
-        {s.recorded_at && <span className="text-fg-3 tabular-nums">{s.recorded_at}</span>}
-        {s.speakers.length > 0 && <span className="text-fg-2">{s.speakers.join(", ")}</span>}
-        <span className="ml-auto flex items-baseline gap-3">
-          <span className="text-fg-3">{citations.length ? `Cited by ${citations.length} value${citations.length === 1 ? "" : "s"}` : "Not cited yet"}</span>
-          {canEdit && (
-            <button type="button" className={button} onClick={onLink} aria-label={`Link ${s.title} to something`}>
-              + Link
-            </button>
-          )}
-        </span>
-      </header>
-      {quote && <blockquote className="text-fg-2">“{quote}”</blockquote>}
+    <article aria-label={s.title} data-linked={links.length > 0} className="flex flex-col gap-3 p-4">
+      <SheetHeader className="p-0 pr-10">
+        <SheetTitle className="text-base font-bold">{s.title}</SheetTitle>
+        <SheetDescription asChild>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="rounded-full border border-line px-1.5 text-[11px] font-semibold text-fg-2">{SOURCE_KIND_LABELS[s.kind]}</span>
+            {s.recorded_at && <span className="text-fg-3 tabular-nums">{s.recorded_at}</span>}
+            {s.speakers.length > 0 && <span className="text-fg-2">{s.speakers.join(", ")}</span>}
+            <span className="text-fg-3">{citations.length ? `Cited by ${citations.length} value${citations.length === 1 ? "" : "s"}` : "Not cited yet"}</span>
+          </div>
+        </SheetDescription>
+      </SheetHeader>
+      {canEdit && (
+        <div>
+          <button type="button" className={button} onClick={onLink} aria-label={`Link ${s.title} to something`}>
+            Link to…
+          </button>
+        </div>
+      )}
       {links.length > 0 ? (
         <div className="flex flex-col gap-1">
           <LinkedToLabel />
@@ -279,8 +379,30 @@ function SourceItem({
       ) : (
         <UnlinkedWarning />
       )}
-      <Citations citations={citations} processBase={processBase} />
-      <details className="mt-2">
+      <section aria-label="Full text" className="flex flex-col gap-1">
+        <h3 className="text-xs font-semibold text-fg-2">Full text</h3>
+        {loadingText ? (
+          <p role="status" className="text-fg-3">
+            Loading the text…
+          </p>
+        ) : text ? (
+          <p data-full-text className="max-h-80 overflow-y-auto rounded-lg bg-panel-2 p-2 whitespace-pre-wrap break-words text-fg">
+            {text}
+          </p>
+        ) : (
+          <p className="text-fg-3">No text. {s.file_url ? "The original is at the link below." : "Add some under Details and edit."}</p>
+        )}
+        {s.file_url && (
+          <a href={s.file_url} target="_blank" rel="noreferrer noopener" className="text-xs text-accent underline">
+            Open {s.kind === "screenshot" ? "the screenshot" : "the file"}
+          </a>
+        )}
+      </section>
+      <section aria-label="Cited in" className="flex flex-col gap-1">
+        <h3 className="text-xs font-semibold text-fg-2">Cited in</h3>
+        {citations.length ? <Citations citations={citations} processBase={processBase} /> : <p className="text-fg-3">No value quotes this yet. Cite it from a step&apos;s details.</p>}
+      </section>
+      <details className="mt-1">
         <summary className="cursor-pointer text-fg-2 hover:underline">{canEdit ? "Details and edit" : "Details"}</summary>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <TextField label="Title" value={s.title} save={saver(s.id, "title")} disabled={!canEdit} help={SOURCE_HELP.title} />
@@ -304,11 +426,6 @@ function SourceItem({
           <DateField label="Date" value={s.recorded_at} save={saver(s.id, "recorded_at")} disabled={!canEdit} help={SOURCE_HELP.date} />
           <div className="sm:col-span-2">
             <TextField label="Link (file or recording)" value={s.file_url} optional save={saver(s.id, "file_url")} disabled={!canEdit} help={SOURCE_HELP.link} />
-            {s.file_url && (
-              <a href={s.file_url} target="_blank" rel="noreferrer noopener" className="text-xs text-accent underline">
-                Open {s.kind === "screenshot" ? "the screenshot" : "the file"}
-              </a>
-            )}
           </div>
           <div className="sm:col-span-2">
             <TextField label="Transcript or notes" value={s.body} optional multiline save={saver(s.id, "body")} disabled={!canEdit} help={SOURCE_HELP.body} />

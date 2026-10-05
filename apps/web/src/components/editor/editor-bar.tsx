@@ -68,6 +68,8 @@ export function EditorBar({
   solutionForm,
   issue = null,
   company = false,
+  onTour,
+  historyHref,
 }: {
   mode: EditorMode;
   /** What is being edited: the process's name. */
@@ -101,6 +103,10 @@ export function EditorBar({
   issue?: SolutionIssue | null;
   /** The company map (B11): a picture of the business, so nothing to simulate and the words say "map". */
   company?: boolean;
+  /** Starts the written tour of the Editor (B18); without it there is no "Take the tour" link. */
+  onTour?: () => void;
+  /** The History page of what is edited: shows a History button that goes there (after the last edits are saved). */
+  historyHref?: string;
 }) {
   const info = MODE_INFO[mode];
   const router = useRouter();
@@ -122,7 +128,7 @@ export function EditorBar({
           <span className="rounded border-[1.5px] border-current px-1.5 py-px font-mono text-[11px] font-semibold tracking-widest uppercase">✎ Editor</span>
           <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : company ? COMPANY_TITLE : info.title(subject)}</h1>
           {mode === "draft" && (
-            <span className="rounded-full bg-edit-fg/15 px-2 py-0.5 text-xs font-semibold" aria-live="polite">
+            <span data-tour="draft" className="rounded-full bg-edit-fg/15 px-2 py-0.5 text-xs font-semibold" aria-live="polite">
               {unpublished ? "Not published yet" : hasDraft ? `Draft version ${draftNumber} · live is version ${liveNumber}` : `New draft (version ${draftNumber}) · live is version ${liveNumber}`}
               {changes ? ` · ${plural(changes, "change")}` : ""}
             </span>
@@ -134,7 +140,7 @@ export function EditorBar({
         <div className="flex flex-wrap items-center gap-1.5">
           {mode !== "block" && !company && (
             <>
-            <Button type="button" variant="outline" size="sm" className={onBar} onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>
+            <Button type="button" variant="outline" size="sm" className={onBar} data-tour="simulate" onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>
               {simulating ? "Simulating…" : "▶ Simulate"}
             </Button>
             <Help
@@ -174,6 +180,7 @@ export function EditorBar({
                   variant="outline"
                   size="sm"
                   className={cls}
+                  data-tour="publish"
                   disabled={busy || !drafts.draft || !changes}
                   title={!changes ? "Nothing to publish yet." : undefined}
                   onClick={() => setConfirming("publish")}
@@ -223,6 +230,22 @@ export function EditorBar({
               Discard…
             </Button>
           )}
+          {mode === "draft" && historyHref && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={onBar}
+              data-tour="history"
+              onClick={async () => {
+                // Edits save as they are made; let the last ones land before leaving.
+                await session.editor.settled();
+                router.push(historyHref);
+              }}
+            >
+              History
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -240,6 +263,11 @@ export function EditorBar({
       </div>
       <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
         {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : info.hint}
+        {onTour && (
+          <button type="button" className="ml-2 font-semibold underline" onClick={onTour} data-take-tour>
+            Take the tour
+          </button>
+        )}
         {drafts.notice && (
           <span role="status" className="ml-2 font-semibold">
             {drafts.notice}{" "}

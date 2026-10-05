@@ -11,8 +11,18 @@ export type SimulationState =
 
 const DEBOUNCE_MS = 40;
 
-/** Runs the model in a Web Worker whenever it changes (debounced, stale runs cancelled). */
-export function useSimulation(model: EngineModel | null, reps = 30, seed = 1): SimulationState {
+/**
+ * Runs the model in a Web Worker whenever it changes (debounced, stale runs cancelled). With `monthly`, the run also
+ * carries its month-by-month numbers (the forecast, issue #35).
+ */
+export function useSimulation(
+  model: EngineModel | null,
+  reps = 30,
+  seed = 1,
+  { monthly = false, monthStarts }: { monthly?: boolean; monthStarts?: readonly number[] | null } = {},
+): SimulationState {
+  // The months' edges by value, so a new array with the same edges doesn't run the model again.
+  const starts = monthStarts ? monthStarts.join(",") : "";
   const clientRef = useRef<SimulationClient | null>(null);
   const [state, setState] = useState<SimulationState>({ status: "running", run: null });
 
@@ -30,7 +40,7 @@ export function useSimulation(model: EngineModel | null, reps = 30, seed = 1): S
     const timer = setTimeout(() => {
       setState((s) => ({ status: "running", run: s.run }));
       clientRef.current
-        ?.run(model, { reps, seed })
+        ?.run(model, { reps, seed, monthly, ...(starts ? { monthStarts: starts.split(",").map(Number) } : {}) })
         .then((run) => active && setState({ status: "done", run }))
         .catch((err: Error) => {
           if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ status: "error", error: err.message, run: s.run }));
@@ -40,7 +50,7 @@ export function useSimulation(model: EngineModel | null, reps = 30, seed = 1): S
       active = false;
       clearTimeout(timer);
     };
-  }, [model, reps, seed]);
+  }, [model, reps, seed, monthly, starts]);
 
   return state;
 }

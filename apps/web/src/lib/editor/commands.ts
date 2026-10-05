@@ -102,15 +102,15 @@ export function addStep(
 }
 
 /**
- * A process placed on the company map (B11): a card that is a link to the process. Cards are moved, joined by handoff lines and
- * put in groups, and removed (which only unlinks: the process is never touched), but not copied or split. Processes are added from
- * the process library (B12, ./library.ts).
+ * A process placed here by a link (B11 on the company map; B12 in every editor): a step holding another process. It is moved,
+ * joined and put in groups, and removed (which only unlinks: the process is never touched), but not copied or split, since a
+ * process sits in one place only. Processes are added from the process library (./library.ts).
  */
-export const isPlacedStep = (bundle: Pick<ProcessBundle, "process">, step: Pick<StepRow, "child_process_id">): boolean =>
-  bundle.process.is_company === true && step.child_process_id !== null;
+export const isPlacedStep = (_bundle: Pick<ProcessBundle, "process">, step: Pick<StepRow, "child_process_id">): boolean =>
+  step.child_process_id !== null && step.child_process_id !== undefined;
 
-/** What the Editor says about removing a card. */
-export const PLACED_REMOVE_NOTE = "Removing a card only takes the process off this map. The process itself is never changed or deleted.";
+/** What the Editor says about removing a linked process. */
+export const PLACED_REMOVE_NOTE = "Removing one only takes the process off this map. The process itself is never changed or deleted.";
 
 /** Delete steps with every edge into or out of them; rework targets pointing at them are cleared. */
 export function deleteSteps(bundle: ProcessBundle, ids: readonly string[]): Edit | null {

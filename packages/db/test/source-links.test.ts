@@ -505,7 +505,12 @@ describe("source links", () => {
         const id = (await c.query("select public.add_source($1, $2::jsonb, $3::jsonb) as id", [ws, JSON.stringify({ kind: "data", title: "Deals Jan to Aug" }), JSON.stringify([{ kind: "process", process_id: process }])])).rows[0].id;
         expect((await c.query("select kind from sources where id = $1", [id])).rows[0].kind).toBe("data");
         await fails(c, () => c.query("insert into sources (workspace_id, title, kind) values ($1, 'x', 'video')", [ws]), /sources_kind/);
-        await fails(c, () => c.query("select public.add_source($1, $2::jsonb, $3::jsonb)", [ws, JSON.stringify({ kind: "spreadsheet", title: "x" }), JSON.stringify([{ kind: "process", process_id: process }])]), /sources_kind/);
+        await fails(c, () => c.query("select public.add_source($1, $2::jsonb, $3::jsonb)", [ws, JSON.stringify({ kind: "video", title: "x" }), JSON.stringify([{ kind: "process", process_id: process }])]), /sources_kind/);
+        // The kinds the library adds (migration 20261130500000) go through add_source too.
+        for (const kind of ["sop", "spreadsheet", "other"]) {
+          const made = (await c.query("select public.add_source($1, $2::jsonb, $3::jsonb) as id", [ws, JSON.stringify({ kind, title: `A ${kind}` }), JSON.stringify([{ kind: "process", process_id: process }])])).rows[0].id;
+          expect((await c.query("select kind from sources where id = $1", [made])).rows[0].kind).toBe(kind);
+        }
       });
     });
   });

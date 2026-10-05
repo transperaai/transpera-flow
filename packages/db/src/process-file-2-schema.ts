@@ -74,7 +74,7 @@ export const PROCESS_FILE_SCHEMA_2 = {
         properties: {
           id: { type: "string", minLength: 1, maxLength: 64, description: "A short unique id, e.g. interview-maya. Evidence uses it." },
           title: { type: "string", minLength: 1, maxLength: 200, description: "e.g. Interview with Maya Chen, 30 Sep." },
-          kind: { enum: [...SOURCE_KINDS], default: "transcript", description: "transcript (a conversation), notes (an SOP, a document), data (a spreadsheet or export) or screenshot." },
+          kind: { enum: [...SOURCE_KINDS], default: "transcript", description: "transcript (a conversation), sop (a written procedure), spreadsheet, data (an export), notes (any other document, or a drawn map), screenshot or other." },
           date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "The day it is from, like 2026-09-30." },
           speakers: { type: "array", items: { type: "string" }, description: "Who spoke or wrote it." },
           body: { type: "string", maxLength: 500000, description: "The text itself (optional; leave it out for a long one). When given, quotes are checked against it." },

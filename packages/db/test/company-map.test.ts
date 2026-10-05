@@ -13,6 +13,7 @@ let db: TestDb;
 let editor: { id: string; claims: Record<string, unknown> };
 const migration = readFileSync(new URL("../supabase/migrations/20261126000000_company_map.sql", import.meta.url), "utf8");
 const editing = readFileSync(new URL("../supabase/migrations/20261127500000_company_map_editing.sql", import.meta.url), "utf8");
+const everywhere = readFileSync(new URL("../supabase/migrations/20261130000000_process_library_everywhere.sql", import.meta.url), "utf8");
 
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows;
 
@@ -237,7 +238,7 @@ describe("who may touch the company map", () => {
     await flagged("insert into processes (workspace_id, name, is_company) values ($1, 'Second', true)", [ws], /made by the system/);
   });
 
-  it("holds a process once: a parent-less process on the company map only, a child in its parent only", async () => {
+  it("lets a draft link any process (B12: publishing is where a second place is refused), but never the company map", async () => {
     const [company] = await q("select id, live_revision_id from processes where workspace_id = $1 and is_company", [ws]);
     const top = await q("select id from processes where workspace_id = $1 and not is_company and parent_process_id is null order by id", [ws]);
     const draft = randomUUID();
@@ -245,17 +246,23 @@ describe("who may touch the company map", () => {
     const parent = top[0].id as string;
     await q("insert into processes (id, workspace_id, name, parent_process_id) values ($1, $2, 'Child', $3)", [child, ws, parent]);
     await q("insert into process_revisions (id, workspace_id, process_id, number, status) values ($1, $2, $3, 2, 'draft')", [draft, ws, company.id]);
-    // The child has a parent: the company map may not hold it as well.
+    // The child's (legacy) parent column plays no part: a draft of the company map may link it.
     await db.client.query("begin");
     await db.client.query("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ($1, $2, $3, 'Child', 'subprocess', $4)", [draft, ws, company.id, child]);
-    await expect(db.client.query("set constraints all immediate")).rejects.toThrow(/must be a child of this step's process/);
+    await expect(db.client.query("set constraints all immediate")).resolves.toBeDefined();
     await db.client.query("rollback");
-    // A parent-less process may not sit in an ordinary process's revision.
+    // A parent-less process may sit in an ordinary process's draft too (the library in every editor).
     const [other] = await q("select id from processes where workspace_id = $1 and not is_company and parent_process_id is null and id <> $2 order by id limit 1", [ws, parent]);
     await db.client.query("begin");
     await db.client.query("insert into process_revisions (id, workspace_id, process_id, number, status) values ($1, $2, $3, 9, 'draft')", [randomUUID(), ws, parent]);
     await db.client.query("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ((select id from process_revisions where process_id = $1 and number = 9), $2, $1, 'Other', 'subprocess', $3)", [parent, ws, other.id]);
-    await expect(db.client.query("set constraints all immediate")).rejects.toThrow(/must be a child of this step's process/);
+    await expect(db.client.query("set constraints all immediate")).resolves.toBeDefined();
+    await db.client.query("rollback");
+    // Nor itself.
+    await db.client.query("begin");
+    await db.client.query("insert into process_revisions (id, workspace_id, process_id, number, status) values ($1, $2, $3, 9, 'draft')", [randomUUID(), ws, parent]);
+    await db.client.query("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ((select id from process_revisions where process_id = $1 and number = 9), $2, $1, 'Self', 'subprocess', $1)", [parent, ws]);
+    await expect(db.client.query("set constraints all immediate")).rejects.toThrow(/can't hold itself or the company map/);
     await db.client.query("rollback");
     // And the company map is never held.
     await db.client.query("begin");
@@ -283,9 +290,9 @@ describe("the backfill", () => {
   it("gives workspaces that already exist a company map laid out as the Overview computed it, and rolls back cleanly", async () => {
     // The rollbacks written in the two migrations' headers (slice 2's first), then both migrations again over the workspaces
     // that are there.
-    const rollback = (sql: string, until: string, version: string) =>
+    const rollback = (sql: string, until: string, version: string, from = "-- Rollback") =>
       sql
-        .slice(sql.indexOf("-- Rollback"), sql.indexOf(until))
+        .slice(sql.indexOf(from), sql.indexOf(until))
         .split("\n")
         .filter((l) => l.startsWith("--   ") && !l.startsWith("--   --"))
         .map((l) => l.slice(5))
@@ -303,6 +310,19 @@ describe("the backfill", () => {
       "revoke all on function private.sync_company_map(uuid) from public, anon, authenticated;",
       "grant execute on function public.revision_history(uuid) to authenticated;",
     ].join("\n");
+    // B12 part 2's rollback first (it is the newest of the three that redefine these functions): what its header says to re-create.
+    const rollBackEverywhere = [
+      defn(migration, "private\\.holder_allows"),
+      ...["check_step_nesting", "company_add_holder", "company_map_apply", "company_map_membership"].map((n) => defn(editing, `private\\.${n}`)),
+      defn(editing, "public\\.restore_version"),
+    ].join("\n");
+    await db.client.query(
+      rollback(everywhere, "-- ---------------------------------------------------------------------------\n-- Where a process sits", "20261130000000", "-- ROLLBACK").replace(
+        "drop function private.live_holder",
+        () => `${rollBackEverywhere}\ndrop function private.live_holder`,
+      ),
+    );
+    expect((await q("select count(*)::int n from pg_proc where proname in ('live_holder', 'check_live_placements', 'create_library_process')"))[0].n).toBe(0);
     await db.client.query(duplicate);
     await db.client.query(rollback(editing, "-- ---------------------------------------------------------------------------\n-- Who may change", "20261127500000").replace("commit;", () => `${rollBackEditing}\ncommit;`));
     expect((await q("select count(*)::int n from pg_proc where proname = 'company_map_apply'"))[0].n).toBe(0);
@@ -313,6 +333,7 @@ describe("the backfill", () => {
     expect((await q("select count(*)::int n from steps where child_process_id is not null"))[0].n).toBe(0);
     await db.client.query(migration);
     await db.client.query(editing);
+    await db.client.query(everywhere);
     for (const bundle of [northbeamBundle(), larkspurBundle()]) {
       const got = await stored(bundle.workspace.id);
       const want = computed(bundle);

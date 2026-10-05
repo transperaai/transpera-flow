@@ -15,6 +15,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -49,6 +50,7 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   suggestions: Sparkles,
   sources: FileText,
   people: Users,
+  forecast: TrendingUp,
   settings: Settings2,
   access: ShieldCheck,
 };
