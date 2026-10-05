@@ -21,7 +21,7 @@ let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
-const ids = { ws: "", company: "" };
+const ids = { ws: "", company: "", editor: "" };
 let editor: SupabaseClient;
 let viewer: SupabaseClient;
 let anon: SupabaseClient;
@@ -70,6 +70,7 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
     ids.ws = (await one("insert into workspaces (name, slug) values ('Admin Co', $1) returning id", [`admin-${tag}`])).id as string;
     ids.company = (await one("select id from processes where workspace_id = $1 and is_company", [ids.ws])).id as string;
     const [ed, vw] = [randomUUID(), randomUUID()];
+    ids.editor = ed;
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `adm-editor-${tag}@example.com`, vw, `adm-viewer-${tag}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
     const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
@@ -85,6 +86,7 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
 
   afterAll(async () => {
     if (ids.ws) {
+      await admin.query("delete from storage.objects where bucket_id = 'sources' and name like $1", [`${ids.ws}/%`]);
       await admin.query("delete from workspaces where id = $1", [ids.ws]);
       await admin.query("delete from audit_log where workspace_id = $1", [ids.ws]);
     }
@@ -179,7 +181,16 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
 
   it("an editor keeps a file's details on a source; a viewer and anon can't", async () => {
     const source = (await one("insert into sources (workspace_id, kind, title) values ($1, 'sop', 'Onboarding SOP') returning id", [ids.ws])).id as string;
+    // Uploaded by the editor (as Storage records it: the object's owner); PostgREST doesn't serve the storage schema.
+    const uploaded = async (name: string, owner = ids.editor) => {
+      await admin.query("insert into storage.objects (bucket_id, name, owner, owner_id) values ('sources', $1, $2::uuid, $2)", [name, owner]);
+      return name;
+    };
     const path = `${ids.ws}/${source}/${randomUUID()}/Onboarding SOP.pdf`;
+    // Nothing uploaded there yet: refused.
+    const early = await editor.from("sources").update({ file_path: path, file_name: "Onboarding SOP.pdf", file_type: "pdf", file_size: 2048 }).eq("id", source).select("id");
+    expect({ code: early.error?.code, message: early.error?.message }).toEqual({ code: "42501", message: "Upload the file first: a source keeps only a file you have just uploaded for it" });
+    await uploaded(path);
     const file = { file_path: path, file_name: "Onboarding SOP.pdf", file_type: "pdf", file_size: 2048, body: "1. Send the welcome pack." };
     expect((await viewer.from("sources").update(file).eq("id", source).select("id")).data).toEqual([]);
     expect((await anon.from("sources").update(file).eq("id", source).select("id")).error?.code).toBe("42501");
@@ -187,7 +198,7 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
     expect((await editor.from("sources").update(file).eq("id", source).select("id")).data).toHaveLength(1);
     expect(await loadSourceFile(viewer as never, source)).toEqual({ path, name: "Onboarding SOP.pdf", type: "pdf", size: 2048 });
     // The database's checks hold over the API too: another workspace's folder, another kind, over 10 MB.
-    const other = await editor.from("sources").update({ ...file, file_path: `${randomUUID()}/${source}/${randomUUID()}/x.pdf` }).eq("id", source).select("id");
+    const other = await editor.from("sources").update({ ...file, file_path: await uploaded(`${randomUUID()}/${source}/${randomUUID()}/x.pdf`) }).eq("id", source).select("id");
     expect(other.error?.code).toBe("23514");
     expect((await editor.from("sources").update({ ...file, file_type: "html" }).eq("id", source).select("id")).error?.code).toBe("23514");
     expect((await editor.from("sources").update({ ...file, file_size: 10 * 1024 * 1024 + 1 }).eq("id", source).select("id")).error?.code).toBe("23514");

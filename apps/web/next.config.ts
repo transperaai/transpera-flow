@@ -8,6 +8,8 @@ const monorepoRoot = path.join(projectDir, "../..");
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@transpera-flow/engine", "@transpera-flow/db", "@transpera-flow/mcp"],
+  // Read by a worker thread from node_modules at run time (lib/sources/extract.ts): kept out of the bundle, and traced.
+  serverExternalPackages: ["unpdf"],
   // Trace from the monorepo root: the pnpm store (node_modules/.pnpm) lives there.
   outputFileTracingRoot: monorepoRoot,
   // The Block library's address before it was built (a bookmark of the placeholder still works).

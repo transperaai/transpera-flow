@@ -289,6 +289,54 @@ describe("while it is archived, nothing changes it", () => {
   });
 });
 
+describe("while it is archived, nothing else changes it either", () => {
+  it("refuses renaming it, changing its kind, and writing steps or edges into a draft left open; the draft can still go", async () => {
+    const w = await world([["Sales", "pipeline"]]);
+    const draft = await openDraft(w.p.Sales);
+    const [a, b] = [randomUUID(), randomUUID()];
+    await commitAs(editor.claims, async (c) => {
+      await c.query("insert into steps (id, revision_id, workspace_id, process_id, name, kind, outcome, x, y) values ($1, $3, $4, $5, 'Start', 'start', null, 0, 0), ($2, $3, $4, $5, 'Won', 'end', 'won', 200, 0)", [a, b, draft, w.ws, w.p.Sales]);
+      await c.query("insert into edges (revision_id, workspace_id, process_id, from_step_id, to_step_id, probability) values ($1, $2, $3, $4, $5, 1)", [draft, w.ws, w.p.Sales, a, b]);
+    });
+    await archive(editor.claims, w.p.Sales);
+    const message = /^Sales is archived\. Restore it from Processes \(Archived\) before changing it\.$/;
+    await refused(commitAs(editor.claims, (c) => c.query("update processes set name = 'X' where id = $1", [w.p.Sales])), "55000", message);
+    await refused(commitAs(editor.claims, (c) => c.query("update processes set kind = 'servicing', entity_name = 'task' where id = $1", [w.p.Sales])), "55000", message);
+    await refused(
+      commitAs(editor.claims, (c) => c.query("insert into steps (id, revision_id, workspace_id, process_id, name, kind, x, y) values ($1, $2, $3, $4, 'New', 'task', 0, 0)", [randomUUID(), draft, w.ws, w.p.Sales])),
+      "55000",
+      message,
+    );
+    await refused(commitAs(editor.claims, (c) => c.query("update steps set name = 'Renamed' where revision_id = $1", [draft])), "55000", message);
+    await refused(commitAs(editor.claims, (c) => c.query("update edges set probability = 1 where revision_id = $1", [draft])), "55000", message);
+    const discarded = await commitAs(editor.claims, (c) => rpc(c, "discard_draft", w.p.Sales));
+    expect(discarded.status).toBe("discarded");
+  });
+
+  it("no service may start using it, nor may an import move it inside a new process", async () => {
+    const w = await world([["Sales", "pipeline"], ["Reporting", "servicing"]]);
+    await archive(editor.claims, w.p.Sales);
+    await archive(editor.claims, w.p.Reporting);
+    const message = /^(Sales|Reporting) is archived\. Restore it from Processes \(Archived\) before a service uses it\.$/;
+    await refused(commitAs(editor.claims, (c) => c.query("insert into services (workspace_id, name, entry_process_id) values ($1, 'SEO', $2)", [w.ws, w.p.Sales])), "55000", message);
+    const [{ id: service }] = await q("insert into services (workspace_id, name) values ($1, 'PPC') returning id", [w.ws]);
+    await refused(commitAs(editor.claims, (c) => c.query("update services set entry_process_id = $2 where id = $1", [service, w.p.Sales])), "55000", message);
+    await refused(
+      commitAs(editor.claims, (c) => c.query("insert into service_servicing (workspace_id, service_id, process_id, recurrence) values ($1, $2, $3, '{\"every\": \"month\", \"times\": 1}')", [w.ws, service, w.p.Reporting])),
+      "55000",
+      message,
+    );
+    const parent = randomUUID();
+    await refused(
+      commitAs(editor.claims, (c) =>
+        c.query("select public.import_new_process($1, $2, $3)", [w.ws, JSON.stringify([{ id: parent, name: "Lead to cash", kind: "pipeline", entity_name: "lead", steps: [], edges: [] }]), JSON.stringify([{ id: w.p.Sales, parent_id: parent }])]),
+      ),
+      "55000",
+      /^Sales is archived\. Restore it from Processes \(Archived\) before moving it inside another\.$/,
+    );
+  });
+});
+
 describe("who archived it, and what still needs it", () => {
   it("never takes archived_by from the caller, and a new process never starts archived", async () => {
     const w = await world([["Sales", "pipeline"]]);
@@ -324,11 +372,15 @@ describe("who archived it, and what still needs it", () => {
     const w = await world([["Sales", "pipeline"]]);
     await archive(editor.claims, w.p.Sales);
     // The library's and the import's own name checks no longer count it.
-    const made = await commitAs(editor.claims, (c) => rpc(c, "create_library_process", w.ws, "sales", "pipeline"));
+    const made = await commitAs(editor.claims, (c) => rpc(c, "create_library_process", w.ws, "SALES!", "pipeline"));
     expect(made.status).toBe("created");
-    await refused(unarchive(editor.claims, w.p.Sales), "55000", /^Another process is called Sales\. Rename one of them, then restore it\.$/);
-    await commitAs(editor.claims, (c) => c.query("update processes set name = 'Old sales' where id = $1", [w.p.Sales]));
+    // The import's rule: case and punctuation don't make a different name.
+    await refused(unarchive(editor.claims, w.p.Sales), "55000", /^Another process is called Sales\. Rename that one, then restore this\.$/);
+    // An archived process can't be renamed: rename the other.
+    await refused(commitAs(editor.claims, (c) => c.query("update processes set name = 'Old sales' where id = $1", [w.p.Sales])), "55000", /^Sales is archived\. Restore it from Processes \(Archived\) before changing it\.$/);
+    await commitAs(editor.claims, (c) => c.query("update processes set name = 'New sales' where id = $1", [made.process_id]));
     expect(await unarchive(editor.claims, w.p.Sales)).toEqual([{ archived_at: null, archived_by: null }]);
+    await commitAs(editor.claims, (c) => c.query("update processes set name = 'Old sales' where id = $1", [w.p.Sales]));
     await archive(editor.claims, w.p.Sales);
     const imported = await commitAs(editor.claims, (c) =>
       c.query("select public.import_new_process($1, $2) as r", [w.ws, JSON.stringify([{ id: randomUUID(), name: "Old sales", kind: "pipeline", entity_name: "lead", steps: [], edges: [] }])]).then((r) => r.rows[0].r),

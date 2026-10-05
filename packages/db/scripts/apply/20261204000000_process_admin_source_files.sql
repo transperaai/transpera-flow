@@ -1,9 +1,10 @@
 -- Production apply file for 20261204000000_process_admin_source_files (B19 part 2, issue #182). Archiving a process (two nullable
--- columns; five trigger functions and their triggers; six functions replaced with the same signatures) and a source's original
--- file (four nullable columns with NOT VALID checks, the private `sources` Storage bucket and three policies on
--- `storage.objects`). Needs 20261202000000 (C2 calibration, row 50) applied first: preflight 0 says so. Preflight, post-apply
--- check and rollback are in the migration's own header, repeated below. Apply BEFORE deploying the app (it reads
--- `processes.archived_at` and the source file columns, and uploads into the bucket).
+-- columns; trigger functions and their triggers that keep an archived process out of use and unchanged; six functions replaced
+-- with the same signatures) and a source's original file (four nullable columns with NOT VALID checks, a partial index, a guard
+-- trigger, the private `sources` Storage bucket and three policies on `storage.objects`). Needs 20261202000000 (C2 calibration,
+-- row 50) applied first: preflight 0 says so. Preflight, post-apply check and rollback are in the migration's own header,
+-- repeated below. Apply BEFORE deploying the app (it reads `processes.archived_at` and the source file columns, and uploads
+-- into the bucket).
 
 begin;
 set local lock_timeout = '5s';
@@ -22,14 +23,17 @@ set local lock_timeout = '5s';
 --     `auth.uid()`, archiving again keeps the first stamp, restoring clears both); the company map is never archived; a process
 --     that sits inside another ordinary process (a live link), holds other processes in its live version, is a service's way in
 --     (`services.entry_process_id`) or is client work a service generates (`service_servicing`) is REFUSED, with a plain message
---     naming them; restoring is refused while another process in use has its name (an archived process gives its name up).
+--     naming them; restoring is refused while another process in use has its name (an archived process gives its name up;
+--     the import's rule and lock).
 --   * `private.process_archive_map` and its trigger (after update of `archived_at`): archiving takes the process's card off
 --     the company map as a system version ("Archived Sales"; an open draft of the map loses the card too), restoring puts it
 --     back at the bottom of its column ("Restored Sales"), through the map's existing sync (`private.company_map_apply`).
 --   * While archived, nothing changes the process: `private.refuse_archived_revision` (before insert or update on
 --     `process_revisions`: no draft opened, no version restored into a new or an open draft) and `private.refuse_archived_publish` (before its `live_revision_id` moves: an
---     old draft can't be published), each with its trigger; `public.open_draft` (full copy of 20261006000000's, changed) refuses
---     it too, even when a draft is already open.
+--     old draft can't be published), `private.refuse_archived_edit` (its name, kind, description or place),
+--     `private.refuse_archived_rows` (steps and edges written into a draft left open; deleting the draft stays allowed) and
+--     `private.refuse_archived_service_link` (a service's way in or client work pointed at it), each with its trigger(s);
+--     `public.open_draft` (full copy of 20261006000000's, changed) refuses it too, even when a draft is already open.
 --   * `private.refuse_archived_placements` and its trigger (before update of `live_revision_id`, every caller): publishing (or
 --     any other road to a new live version) that newly holds an archived process is refused ("Sales is archived. ...").
 --   * `private.holder_allows` (full copy of 20261130000000's, changed): an archived process may not be placed. So placing it in
@@ -38,10 +42,13 @@ set local lock_timeout = '5s';
 --     message only) says "Sales is archived" instead of the generic refusal. `private.company_add_holder` (full copy of
 --     20261130000000's, changed): the system never puts an archived process's card on the company map.
 --   * Names are unique among the processes in use: `public.create_library_process` (full copy of 20261130000000's) and
---     `public.import_new_process` (full copy of 20261128000000's) no longer count archived processes (changed lines marked B19).
+--     `public.import_new_process` (full copy of 20261128000000's) no longer count archived processes, and the import never moves
+--     an archived process inside a new one (changed lines marked B19).
 --   * Source files: `sources.file_path`, `file_name`, `file_type` and `file_size` (nullable, all set or none), with checks: the
 --     path is `<workspace_id>/<source id>/<uuid>/<name>` (the source's own workspace and folder), the type is one of txt, md,
---     csv, xlsx, pdf, and the size is 1 byte to 10 MB. The text extracted from the file is the source's `body`.
+--     csv, xlsx, pdf, and the size is 1 byte to 10 MB. The text extracted from the file is the source's `body`. For anyone
+--     signed in, a new `file_path` must name an object of the bucket they uploaded (`private.source_file_guard` and its
+--     trigger). Index `sources_workspace_file_path` (partial) serves the storage policies' look-ups.
 --   * Supabase Storage: a PRIVATE bucket `sources` (10 MB per file, and only the five MIME types the app sends), and three
 --     policies on `storage.objects` for that bucket, keyed by the workspace id in the first folder of the object's name:
 --     members read a file only once a source keeps it (until then only its uploader can, so the app's server can check it);
@@ -51,7 +58,7 @@ set local lock_timeout = '5s';
 --     sweep in docs/supabase-notes.md removes them.
 --
 -- STRICTLY ADDITIVE: new nullable columns (no default, so no rewrite), NOT VALID checks on new columns, new functions and
--- triggers, six functions replaced with the same signatures, one bucket row and three storage policies. No existing column,
+-- triggers, one partial index, six functions replaced with the same signatures, one bucket row and three storage policies. No existing column,
 -- policy or grant changes. Data: none to move (no process is archived, no source has a file).
 --
 -- ORDER: apply after 20261202000000 (C2 calibration, row 50 of docs/production-migrations.md).
@@ -63,7 +70,8 @@ set local lock_timeout = '5s';
 --        select count(*) from supabase_migrations.schema_migrations where version >= '20261204000000';
 --   2. Nothing this migration creates exists yet. Expect 0 rows from each:
 --        select column_name from information_schema.columns where table_schema = 'public' and ((table_name = 'processes' and column_name in ('archived_at', 'archived_by')) or (table_name = 'sources' and column_name in ('file_path', 'file_name', 'file_type', 'file_size')));
---        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace');
+--        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace');
+--        select indexname from pg_indexes where schemaname = 'public' and indexname = 'sources_workspace_file_path';
 --        select id from storage.buckets where id = 'sources';
 --        select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'sources:%';
 --   3. The replaced functions are the bodies this copies, not yet changed. Expect 6 rows, each true:
@@ -76,20 +84,23 @@ set local lock_timeout = '5s';
 --            else prosrc like '%Same rule as the app''s check%' and prosrc not like '%archived%' end
 --        from pg_proc where (pronamespace = 'private'::regnamespace and proname in ('holder_allows', 'check_step_nesting', 'company_add_holder'))
 --          or (pronamespace = 'public'::regnamespace and proname in ('open_draft', 'create_library_process', 'import_new_process'));
---   4. Storage is there, with RLS on its objects. Expect 1 row, true:
+--   4. Storage is there, with RLS on its objects, and objects carry their uploader as text (the policies compare it). Expect 1 row,
+--      true, then 1 row, text:
 --        select relrowsecurity from pg_class where oid = 'storage.objects'::regclass;
+--        select data_type from information_schema.columns where table_schema = 'storage' and table_name = 'objects' and column_name = 'owner_id';
 --
 -- POST-APPLY CHECK:
---   1. Five triggers exist and are enabled. Expect 5 rows, tgenabled 'O':
---        select tgname, tgenabled from pg_trigger where tgname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish') and not tgisinternal;
+--   1. Eleven triggers exist and are enabled (refuse_archived_rows and refuse_archived_service_link are on two tables each).
+--      Expect 11 rows, tgenabled 'O':
+--        select tgrelid::regclass, tgname, tgenabled from pg_trigger where tgname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard') and not tgisinternal;
 --   2. The bucket is private with its limits. Expect 1 row: false, 10485760, 5 types:
 --        select public, file_size_limit, cardinality(allowed_mime_types) from storage.buckets where id = 'sources';
 --   3. Three policies, all for authenticated (read, upload, delete; no update). Expect 3 rows, roles {authenticated}:
 --        select policyname, cmd, roles from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'sources:%';
 --   4. The new private functions have an empty search_path and no EXECUTE for anon or PUBLIC (storage_workspace is executable
---      by authenticated, which the policies need). Expect 6 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
---        select proname, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace');
---        select grantee, routine_name from information_schema.routine_privileges where routine_schema = 'private' and routine_name in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace') and grantee in ('anon', 'authenticated', 'PUBLIC');
+--      by authenticated, which the policies need). Expect 10 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
+--        select proname, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace');
+--        select grantee, routine_name from information_schema.routine_privileges where routine_schema = 'private' and routine_name in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace') and grantee in ('anon', 'authenticated', 'PUBLIC');
 --
 -- ROLLBACK (redeploy the app to a build from before it FIRST; run as one transaction. Archived processes come back as ordinary
 -- processes, with no card on the company map until someone places one; uploaded files stay in the bucket, unreachable from the
@@ -101,9 +112,20 @@ set local lock_timeout = '5s';
 --   drop policy if exists "sources: editors delete" on storage.objects;
 --   -- Keep the bucket row if it has objects (empty it from the dashboard, then): delete from storage.buckets where id = 'sources';
 --   drop function if exists private.storage_workspace(text);
+--   drop trigger if exists source_file_guard on public.sources;
+--   drop function if exists private.source_file_guard();
+--   drop index if exists public.sources_workspace_file_path;
 --   alter table public.sources drop constraint if exists sources_file_all_or_none, drop constraint if exists sources_file_path_shape,
 --     drop constraint if exists sources_file_type, drop constraint if exists sources_file_size, drop constraint if exists sources_file_name_length;
 --   alter table public.sources drop column if exists file_path, drop column if exists file_name, drop column if exists file_type, drop column if exists file_size;
+--   drop trigger if exists refuse_archived_service_link on public.services;
+--   drop trigger if exists refuse_archived_service_link on public.service_servicing;
+--   drop function if exists private.refuse_archived_service_link();
+--   drop trigger if exists refuse_archived_rows on public.steps;
+--   drop trigger if exists refuse_archived_rows on public.edges;
+--   drop function if exists private.refuse_archived_rows();
+--   drop trigger if exists refuse_archived_edit on public.processes;
+--   drop function if exists private.refuse_archived_edit();
 --   drop trigger if exists refuse_archived_placements on public.processes;
 --   drop function if exists private.refuse_archived_placements();
 --   drop trigger if exists refuse_archived_publish on public.processes;
@@ -164,10 +186,13 @@ begin
     raise exception 'The company map can''t be archived' using errcode = '55000';
   end if;
   if new.archived_at is null then
-    -- Restore. Names are unique among the processes in use (an archived one gives its name up).
-    if exists (select 1 from public.processes p where p.workspace_id = new.workspace_id and p.id <> new.id and not p.is_company
-               and p.archived_at is null and lower(btrim(p.name)) = lower(btrim(new.name))) then
-      raise exception 'Another process is called %. Rename one of them, then restore it.', new.name using errcode = '55000';
+    -- Restore. Names are unique among the processes in use (an archived one gives its name up): the import's rule (ignoring
+    -- case and punctuation) under the lock its name check takes, so a restore and an import can't both take a name.
+    perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || new.workspace_id::text, 0));
+    if exists (select 1 from public.processes p where p.workspace_id = new.workspace_id and p.id <> new.id and not p.is_company and p.archived_at is null
+               and trim(regexp_replace(replace(lower(p.name), '&', ' and '), '[^[:alnum:]]+', ' ', 'g'))
+                 = trim(regexp_replace(replace(lower(new.name), '&', ' and '), '[^[:alnum:]]+', ' ', 'g'))) then
+      raise exception 'Another process is called %. Rename that one, then restore this.', new.name using errcode = '55000';
     end if;
     new.archived_by := null;
     return new;
@@ -254,6 +279,69 @@ revoke all on function private.refuse_archived_publish() from public, anon, auth
 create trigger refuse_archived_publish before update of live_revision_id on public.processes
   for each row when (old.archived_at is not null and new.archived_at is not null and new.live_revision_id is distinct from old.live_revision_id)
   execute function private.refuse_archived_publish();
+
+-- Nor its name, kind, description or place, nor the steps and edges of a draft left open (deleting that draft stays allowed),
+-- and no service may start using it.
+create function private.refuse_archived_edit() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  raise exception '% is archived. Restore it from Processes (Archived) before changing it.', old.name using errcode = '55000';
+end;
+$$;
+
+revoke all on function private.refuse_archived_edit() from public, anon, authenticated;
+
+create trigger refuse_archived_edit before update of name, kind, entity_name, description, parent_process_id on public.processes
+  for each row when (old.archived_at is not null and new.archived_at is not null)
+  execute function private.refuse_archived_edit();
+
+create function private.refuse_archived_rows() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  proc public.processes;
+begin
+  select * into proc from public.processes p where p.id = new.process_id;
+  if proc.archived_at is not null then
+    raise exception '% is archived. Restore it from Processes (Archived) before changing it.', proc.name using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_archived_rows() from public, anon, authenticated;
+
+create trigger refuse_archived_rows before insert or update on public.steps
+  for each row execute function private.refuse_archived_rows();
+create trigger refuse_archived_rows before insert or update on public.edges
+  for each row execute function private.refuse_archived_rows();
+
+create function private.refuse_archived_service_link() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  target uuid := (to_jsonb(new) ->> case when tg_table_name = 'services' then 'entry_process_id' else 'process_id' end)::uuid;
+  proc public.processes;
+begin
+  select * into proc from public.processes p where p.id = target;
+  if proc.archived_at is not null then
+    raise exception '% is archived. Restore it from Processes (Archived) before a service uses it.', proc.name using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_archived_service_link() from public, anon, authenticated;
+
+create trigger refuse_archived_service_link before insert or update of entry_process_id on public.services
+  for each row when (new.entry_process_id is not null)
+  execute function private.refuse_archived_service_link();
+create trigger refuse_archived_service_link before insert or update of process_id on public.service_servicing
+  for each row execute function private.refuse_archived_service_link();
 
 -- After an archive or a restore: the company map follows, through its sync (a system version, mirrored into an open draft).
 create function private.process_archive_map() returns trigger
@@ -608,6 +696,11 @@ begin
     if not ((adopt ->> 'parent_id')::uuid = any (made)) then
       raise exception 'import_new_process: a process can only be moved inside a new one of this import' using errcode = '22023';
     end if;
+    -- B19: an archived process stays where it is.
+    select p.name into clash from public.processes p where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace and p.archived_at is not null;
+    if clash is not null then
+      raise exception '% is archived. Restore it from Processes (Archived) before moving it inside another.', clash using errcode = '55000';
+    end if;
     update public.processes p set parent_process_id = (adopt ->> 'parent_id')::uuid
     where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace and p.parent_process_id is null and not p.is_company
       and not ((adopt ->> 'id')::uuid = any (made));
@@ -665,6 +758,37 @@ alter table public.sources
   add constraint sources_file_size check (file_size is null or file_size between 1 and 10485760) not valid,
   add constraint sources_file_name_length check (file_name is null or char_length(btrim(file_name)) between 1 and 200) not valid;
 
+-- What the storage policies look up: the file a source keeps, by workspace. Plain `create index` (production's `sources` is small).
+create index sources_workspace_file_path on public.sources (workspace_id, file_path) where file_path is not null;
+
+-- A source keeps only a file its caller has just uploaded into that source's folder: for anyone signed in, a new `file_path`
+-- must name an object of the `sources` bucket that they own (`owner_id`, set by Storage on upload). So nobody points a source
+-- at someone else's unchecked upload, or at a name with nothing behind it. Clearing it is allowed. Security definer: it reads
+-- `storage.objects`, which the caller may not (an upload is readable only by its owner until it is kept).
+create function private.source_file_guard() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if new.file_path is null or (tg_op = 'UPDATE' and new.file_path is not distinct from old.file_path) then
+    return new;
+  end if;
+  -- Only for someone signed in (or anon): the operator and the migrations pass. (Security definer: current_user is the owner here.)
+  if auth.uid() is null and coalesce(current_setting('role', true), '') not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  if not exists (select 1 from storage.objects o where o.bucket_id = 'sources' and o.name = new.file_path and o.owner_id = (select auth.uid())::text) then
+    raise exception 'Upload the file first: a source keeps only a file you have just uploaded for it' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.source_file_guard() from public, anon, authenticated;
+
+create trigger source_file_guard before insert or update of file_path on public.sources
+  for each row execute function private.source_file_guard();
+
 -- The workspace an object of the `sources` bucket belongs to: the first folder of its name, when that is a uuid. Null
 -- otherwise, so a name that doesn't follow the layout is nobody's (and `can_read_workspace(null)` is false for members).
 create function private.storage_workspace(object_name text) returns uuid
@@ -706,7 +830,7 @@ create policy "sources: editors upload" on storage.objects for insert to authent
     and objects.owner_id = (select auth.uid())::text
     and objects.name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]{1,200}\.(txt|md|csv|xlsx|pdf)$'
     and exists (select 1 from public.sources s where s.workspace_id = private.storage_workspace(objects.name) and s.id::text = split_part(objects.name, '/', 2))
-    and not exists (select 1 from public.sources s where s.file_path = objects.name));
+    and not exists (select 1 from public.sources s where s.workspace_id = private.storage_workspace(objects.name) and s.file_path = objects.name));
 
 create policy "sources: editors delete" on storage.objects for delete to authenticated
   using (bucket_id = 'sources' and private.storage_workspace(objects.name) is not null and public.can_edit_workspace(private.storage_workspace(objects.name)));
@@ -726,14 +850,17 @@ values ('20261204000000', 'process_admin_source_files', array[$mig$-- Everything
 --     `auth.uid()`, archiving again keeps the first stamp, restoring clears both); the company map is never archived; a process
 --     that sits inside another ordinary process (a live link), holds other processes in its live version, is a service's way in
 --     (`services.entry_process_id`) or is client work a service generates (`service_servicing`) is REFUSED, with a plain message
---     naming them; restoring is refused while another process in use has its name (an archived process gives its name up).
+--     naming them; restoring is refused while another process in use has its name (an archived process gives its name up;
+--     the import's rule and lock).
 --   * `private.process_archive_map` and its trigger (after update of `archived_at`): archiving takes the process's card off
 --     the company map as a system version ("Archived Sales"; an open draft of the map loses the card too), restoring puts it
 --     back at the bottom of its column ("Restored Sales"), through the map's existing sync (`private.company_map_apply`).
 --   * While archived, nothing changes the process: `private.refuse_archived_revision` (before insert or update on
 --     `process_revisions`: no draft opened, no version restored into a new or an open draft) and `private.refuse_archived_publish` (before its `live_revision_id` moves: an
---     old draft can't be published), each with its trigger; `public.open_draft` (full copy of 20261006000000's, changed) refuses
---     it too, even when a draft is already open.
+--     old draft can't be published), `private.refuse_archived_edit` (its name, kind, description or place),
+--     `private.refuse_archived_rows` (steps and edges written into a draft left open; deleting the draft stays allowed) and
+--     `private.refuse_archived_service_link` (a service's way in or client work pointed at it), each with its trigger(s);
+--     `public.open_draft` (full copy of 20261006000000's, changed) refuses it too, even when a draft is already open.
 --   * `private.refuse_archived_placements` and its trigger (before update of `live_revision_id`, every caller): publishing (or
 --     any other road to a new live version) that newly holds an archived process is refused ("Sales is archived. ...").
 --   * `private.holder_allows` (full copy of 20261130000000's, changed): an archived process may not be placed. So placing it in
@@ -742,10 +869,13 @@ values ('20261204000000', 'process_admin_source_files', array[$mig$-- Everything
 --     message only) says "Sales is archived" instead of the generic refusal. `private.company_add_holder` (full copy of
 --     20261130000000's, changed): the system never puts an archived process's card on the company map.
 --   * Names are unique among the processes in use: `public.create_library_process` (full copy of 20261130000000's) and
---     `public.import_new_process` (full copy of 20261128000000's) no longer count archived processes (changed lines marked B19).
+--     `public.import_new_process` (full copy of 20261128000000's) no longer count archived processes, and the import never moves
+--     an archived process inside a new one (changed lines marked B19).
 --   * Source files: `sources.file_path`, `file_name`, `file_type` and `file_size` (nullable, all set or none), with checks: the
 --     path is `<workspace_id>/<source id>/<uuid>/<name>` (the source's own workspace and folder), the type is one of txt, md,
---     csv, xlsx, pdf, and the size is 1 byte to 10 MB. The text extracted from the file is the source's `body`.
+--     csv, xlsx, pdf, and the size is 1 byte to 10 MB. The text extracted from the file is the source's `body`. For anyone
+--     signed in, a new `file_path` must name an object of the bucket they uploaded (`private.source_file_guard` and its
+--     trigger). Index `sources_workspace_file_path` (partial) serves the storage policies' look-ups.
 --   * Supabase Storage: a PRIVATE bucket `sources` (10 MB per file, and only the five MIME types the app sends), and three
 --     policies on `storage.objects` for that bucket, keyed by the workspace id in the first folder of the object's name:
 --     members read a file only once a source keeps it (until then only its uploader can, so the app's server can check it);
@@ -755,7 +885,7 @@ values ('20261204000000', 'process_admin_source_files', array[$mig$-- Everything
 --     sweep in docs/supabase-notes.md removes them.
 --
 -- STRICTLY ADDITIVE: new nullable columns (no default, so no rewrite), NOT VALID checks on new columns, new functions and
--- triggers, six functions replaced with the same signatures, one bucket row and three storage policies. No existing column,
+-- triggers, one partial index, six functions replaced with the same signatures, one bucket row and three storage policies. No existing column,
 -- policy or grant changes. Data: none to move (no process is archived, no source has a file).
 --
 -- ORDER: apply after 20261202000000 (C2 calibration, row 50 of docs/production-migrations.md).
@@ -767,7 +897,8 @@ values ('20261204000000', 'process_admin_source_files', array[$mig$-- Everything
 --        select count(*) from supabase_migrations.schema_migrations where version >= '20261204000000';
 --   2. Nothing this migration creates exists yet. Expect 0 rows from each:
 --        select column_name from information_schema.columns where table_schema = 'public' and ((table_name = 'processes' and column_name in ('archived_at', 'archived_by')) or (table_name = 'sources' and column_name in ('file_path', 'file_name', 'file_type', 'file_size')));
---        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace');
+--        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace');
+--        select indexname from pg_indexes where schemaname = 'public' and indexname = 'sources_workspace_file_path';
 --        select id from storage.buckets where id = 'sources';
 --        select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'sources:%';
 --   3. The replaced functions are the bodies this copies, not yet changed. Expect 6 rows, each true:
@@ -780,20 +911,23 @@ values ('20261204000000', 'process_admin_source_files', array[$mig$-- Everything
 --            else prosrc like '%Same rule as the app''s check%' and prosrc not like '%archived%' end
 --        from pg_proc where (pronamespace = 'private'::regnamespace and proname in ('holder_allows', 'check_step_nesting', 'company_add_holder'))
 --          or (pronamespace = 'public'::regnamespace and proname in ('open_draft', 'create_library_process', 'import_new_process'));
---   4. Storage is there, with RLS on its objects. Expect 1 row, true:
+--   4. Storage is there, with RLS on its objects, and objects carry their uploader as text (the policies compare it). Expect 1 row,
+--      true, then 1 row, text:
 --        select relrowsecurity from pg_class where oid = 'storage.objects'::regclass;
+--        select data_type from information_schema.columns where table_schema = 'storage' and table_name = 'objects' and column_name = 'owner_id';
 --
 -- POST-APPLY CHECK:
---   1. Five triggers exist and are enabled. Expect 5 rows, tgenabled 'O':
---        select tgname, tgenabled from pg_trigger where tgname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish') and not tgisinternal;
+--   1. Eleven triggers exist and are enabled (refuse_archived_rows and refuse_archived_service_link are on two tables each).
+--      Expect 11 rows, tgenabled 'O':
+--        select tgrelid::regclass, tgname, tgenabled from pg_trigger where tgname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard') and not tgisinternal;
 --   2. The bucket is private with its limits. Expect 1 row: false, 10485760, 5 types:
 --        select public, file_size_limit, cardinality(allowed_mime_types) from storage.buckets where id = 'sources';
 --   3. Three policies, all for authenticated (read, upload, delete; no update). Expect 3 rows, roles {authenticated}:
 --        select policyname, cmd, roles from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'sources:%';
 --   4. The new private functions have an empty search_path and no EXECUTE for anon or PUBLIC (storage_workspace is executable
---      by authenticated, which the policies need). Expect 6 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
---        select proname, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace');
---        select grantee, routine_name from information_schema.routine_privileges where routine_schema = 'private' and routine_name in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace') and grantee in ('anon', 'authenticated', 'PUBLIC');
+--      by authenticated, which the policies need). Expect 10 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
+--        select proname, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace');
+--        select grantee, routine_name from information_schema.routine_privileges where routine_schema = 'private' and routine_name in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace') and grantee in ('anon', 'authenticated', 'PUBLIC');
 --
 -- ROLLBACK (redeploy the app to a build from before it FIRST; run as one transaction. Archived processes come back as ordinary
 -- processes, with no card on the company map until someone places one; uploaded files stay in the bucket, unreachable from the
@@ -805,9 +939,20 @@ values ('20261204000000', 'process_admin_source_files', array[$mig$-- Everything
 --   drop policy if exists "sources: editors delete" on storage.objects;
 --   -- Keep the bucket row if it has objects (empty it from the dashboard, then): delete from storage.buckets where id = 'sources';
 --   drop function if exists private.storage_workspace(text);
+--   drop trigger if exists source_file_guard on public.sources;
+--   drop function if exists private.source_file_guard();
+--   drop index if exists public.sources_workspace_file_path;
 --   alter table public.sources drop constraint if exists sources_file_all_or_none, drop constraint if exists sources_file_path_shape,
 --     drop constraint if exists sources_file_type, drop constraint if exists sources_file_size, drop constraint if exists sources_file_name_length;
 --   alter table public.sources drop column if exists file_path, drop column if exists file_name, drop column if exists file_type, drop column if exists file_size;
+--   drop trigger if exists refuse_archived_service_link on public.services;
+--   drop trigger if exists refuse_archived_service_link on public.service_servicing;
+--   drop function if exists private.refuse_archived_service_link();
+--   drop trigger if exists refuse_archived_rows on public.steps;
+--   drop trigger if exists refuse_archived_rows on public.edges;
+--   drop function if exists private.refuse_archived_rows();
+--   drop trigger if exists refuse_archived_edit on public.processes;
+--   drop function if exists private.refuse_archived_edit();
 --   drop trigger if exists refuse_archived_placements on public.processes;
 --   drop function if exists private.refuse_archived_placements();
 --   drop trigger if exists refuse_archived_publish on public.processes;
@@ -868,10 +1013,13 @@ begin
     raise exception 'The company map can''t be archived' using errcode = '55000';
   end if;
   if new.archived_at is null then
-    -- Restore. Names are unique among the processes in use (an archived one gives its name up).
-    if exists (select 1 from public.processes p where p.workspace_id = new.workspace_id and p.id <> new.id and not p.is_company
-               and p.archived_at is null and lower(btrim(p.name)) = lower(btrim(new.name))) then
-      raise exception 'Another process is called %. Rename one of them, then restore it.', new.name using errcode = '55000';
+    -- Restore. Names are unique among the processes in use (an archived one gives its name up): the import's rule (ignoring
+    -- case and punctuation) under the lock its name check takes, so a restore and an import can't both take a name.
+    perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || new.workspace_id::text, 0));
+    if exists (select 1 from public.processes p where p.workspace_id = new.workspace_id and p.id <> new.id and not p.is_company and p.archived_at is null
+               and trim(regexp_replace(replace(lower(p.name), '&', ' and '), '[^[:alnum:]]+', ' ', 'g'))
+                 = trim(regexp_replace(replace(lower(new.name), '&', ' and '), '[^[:alnum:]]+', ' ', 'g'))) then
+      raise exception 'Another process is called %. Rename that one, then restore this.', new.name using errcode = '55000';
     end if;
     new.archived_by := null;
     return new;
@@ -958,6 +1106,69 @@ revoke all on function private.refuse_archived_publish() from public, anon, auth
 create trigger refuse_archived_publish before update of live_revision_id on public.processes
   for each row when (old.archived_at is not null and new.archived_at is not null and new.live_revision_id is distinct from old.live_revision_id)
   execute function private.refuse_archived_publish();
+
+-- Nor its name, kind, description or place, nor the steps and edges of a draft left open (deleting that draft stays allowed),
+-- and no service may start using it.
+create function private.refuse_archived_edit() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  raise exception '% is archived. Restore it from Processes (Archived) before changing it.', old.name using errcode = '55000';
+end;
+$$;
+
+revoke all on function private.refuse_archived_edit() from public, anon, authenticated;
+
+create trigger refuse_archived_edit before update of name, kind, entity_name, description, parent_process_id on public.processes
+  for each row when (old.archived_at is not null and new.archived_at is not null)
+  execute function private.refuse_archived_edit();
+
+create function private.refuse_archived_rows() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  proc public.processes;
+begin
+  select * into proc from public.processes p where p.id = new.process_id;
+  if proc.archived_at is not null then
+    raise exception '% is archived. Restore it from Processes (Archived) before changing it.', proc.name using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_archived_rows() from public, anon, authenticated;
+
+create trigger refuse_archived_rows before insert or update on public.steps
+  for each row execute function private.refuse_archived_rows();
+create trigger refuse_archived_rows before insert or update on public.edges
+  for each row execute function private.refuse_archived_rows();
+
+create function private.refuse_archived_service_link() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  target uuid := (to_jsonb(new) ->> case when tg_table_name = 'services' then 'entry_process_id' else 'process_id' end)::uuid;
+  proc public.processes;
+begin
+  select * into proc from public.processes p where p.id = target;
+  if proc.archived_at is not null then
+    raise exception '% is archived. Restore it from Processes (Archived) before a service uses it.', proc.name using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.refuse_archived_service_link() from public, anon, authenticated;
+
+create trigger refuse_archived_service_link before insert or update of entry_process_id on public.services
+  for each row when (new.entry_process_id is not null)
+  execute function private.refuse_archived_service_link();
+create trigger refuse_archived_service_link before insert or update of process_id on public.service_servicing
+  for each row execute function private.refuse_archived_service_link();
 
 -- After an archive or a restore: the company map follows, through its sync (a system version, mirrored into an open draft).
 create function private.process_archive_map() returns trigger
@@ -1312,6 +1523,11 @@ begin
     if not ((adopt ->> 'parent_id')::uuid = any (made)) then
       raise exception 'import_new_process: a process can only be moved inside a new one of this import' using errcode = '22023';
     end if;
+    -- B19: an archived process stays where it is.
+    select p.name into clash from public.processes p where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace and p.archived_at is not null;
+    if clash is not null then
+      raise exception '% is archived. Restore it from Processes (Archived) before moving it inside another.', clash using errcode = '55000';
+    end if;
     update public.processes p set parent_process_id = (adopt ->> 'parent_id')::uuid
     where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace and p.parent_process_id is null and not p.is_company
       and not ((adopt ->> 'id')::uuid = any (made));
@@ -1369,6 +1585,37 @@ alter table public.sources
   add constraint sources_file_size check (file_size is null or file_size between 1 and 10485760) not valid,
   add constraint sources_file_name_length check (file_name is null or char_length(btrim(file_name)) between 1 and 200) not valid;
 
+-- What the storage policies look up: the file a source keeps, by workspace. Plain `create index` (production's `sources` is small).
+create index sources_workspace_file_path on public.sources (workspace_id, file_path) where file_path is not null;
+
+-- A source keeps only a file its caller has just uploaded into that source's folder: for anyone signed in, a new `file_path`
+-- must name an object of the `sources` bucket that they own (`owner_id`, set by Storage on upload). So nobody points a source
+-- at someone else's unchecked upload, or at a name with nothing behind it. Clearing it is allowed. Security definer: it reads
+-- `storage.objects`, which the caller may not (an upload is readable only by its owner until it is kept).
+create function private.source_file_guard() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if new.file_path is null or (tg_op = 'UPDATE' and new.file_path is not distinct from old.file_path) then
+    return new;
+  end if;
+  -- Only for someone signed in (or anon): the operator and the migrations pass. (Security definer: current_user is the owner here.)
+  if auth.uid() is null and coalesce(current_setting('role', true), '') not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  if not exists (select 1 from storage.objects o where o.bucket_id = 'sources' and o.name = new.file_path and o.owner_id = (select auth.uid())::text) then
+    raise exception 'Upload the file first: a source keeps only a file you have just uploaded for it' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.source_file_guard() from public, anon, authenticated;
+
+create trigger source_file_guard before insert or update of file_path on public.sources
+  for each row execute function private.source_file_guard();
+
 -- The workspace an object of the `sources` bucket belongs to: the first folder of its name, when that is a uuid. Null
 -- otherwise, so a name that doesn't follow the layout is nobody's (and `can_read_workspace(null)` is false for members).
 create function private.storage_workspace(object_name text) returns uuid
@@ -1410,7 +1657,7 @@ create policy "sources: editors upload" on storage.objects for insert to authent
     and objects.owner_id = (select auth.uid())::text
     and objects.name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]{1,200}\.(txt|md|csv|xlsx|pdf)$'
     and exists (select 1 from public.sources s where s.workspace_id = private.storage_workspace(objects.name) and s.id::text = split_part(objects.name, '/', 2))
-    and not exists (select 1 from public.sources s where s.file_path = objects.name));
+    and not exists (select 1 from public.sources s where s.workspace_id = private.storage_workspace(objects.name) and s.file_path = objects.name));
 
 create policy "sources: editors delete" on storage.objects for delete to authenticated
   using (bucket_id = 'sources' and private.storage_workspace(objects.name) is not null and public.can_edit_workspace(private.storage_workspace(objects.name)));

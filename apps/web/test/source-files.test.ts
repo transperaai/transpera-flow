@@ -4,7 +4,7 @@ import { MAX_BODY } from "@/lib/sources/validate";
 import { EMPTY, TOO_BIG, WRONG_TYPE, checkSourceFile, displayName, fileTypeOf, parseStoragePath, safeFileName } from "@/lib/sources/file-check";
 
 vi.mock("server-only", () => ({}));
-const { MAX_PDF_PAGES, attributes, extractSourceText, scanXml, workbookText, xmlText } = await import("@/lib/sources/extract");
+const { MAX_PDF_PAGES, activePdfWorkers, attributes, extractSourceText, scanXml, workbookText, xmlText } = await import("@/lib/sources/extract");
 
 // A source's original file (issue #182, B19 2/2): the five kinds accepted, checked by name and by content (never by the type
 // the browser declares), the 10 MB limit, the name it is kept under, and the text read out of each kind on the server. Storage
@@ -169,6 +169,21 @@ describe("reading the text", () => {
     expect(attributes(` r="A1" t='s' name="a &amp; b" broken="x`)).toEqual(new Map([["r", "A1"], ["t", "s"], ["name", "a & b"]]));
   });
 
+  it("one 2 MB shared string used by 300 cells: read in bounded time and memory, cut at what a source keeps", async () => {
+    const big = "x".repeat(2 * 1024 * 1024);
+    const cells = Array.from({ length: 300 }, (_, i) => `<row r="${i + 1}"><c r="A${i + 1}" t="s"><v>0</v></c><c r="B${i + 1}" t="s"><v>0</v></c></row>`).join("");
+    const book = xlsx([{ name: "S", xml: cells }], [`<t>${big}</t>`]);
+    expect(book.length).toBeLessThan(100 * 1024);
+    const peakBefore = process.resourceUsage().maxRSS;
+    const started = performance.now();
+    const r = await extractSourceText("big-string.xlsx", book);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    // The process's peak memory grew by well under what 300 copies of the string would take (over 1 GB).
+    expect((process.resourceUsage().maxRSS - peakBefore) / 1024).toBeLessThan(150);
+    expect(r.ok && r.text.length).toBe(MAX_BODY);
+    expect(r.ok && r.text.endsWith("The whole file is kept.]")).toBe(true);
+  });
+
   it("refuses a workbook that takes too long to read, or holds too much XML", async () => {
     const rows = Array.from({ length: 20_000 }, (_, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c></row>`).join("");
     expect(await extractSourceText("big.xlsx", xlsx([{ name: "S", xml: rows }]), { xlsx: 0 })).toEqual({
@@ -197,6 +212,19 @@ describe("reading the text", () => {
     expect(r.ok && r.text.split("\n\n").length).toBe(MAX_PDF_PAGES + 1);
     expect(r.ok && r.text.endsWith(`[Only the first ${MAX_PDF_PAGES} of ${MAX_PDF_PAGES + 2} pages were read. The whole file is kept.]`)).toBe(true);
     expect(await extractSourceText("slow.pdf", many, { pdf: 0 })).toEqual({ ok: false, error: "That PDF took too long to read. Save a smaller copy and upload it again." });
+  }, 30_000);
+
+  it("reads a PDF in a worker thread that is stopped at the time limit, so a slow PDF never holds the server", async () => {
+    const many = pdf(Array.from({ length: MAX_PDF_PAGES }, (_, i) => `Page ${i + 1}`));
+    let seen = 0;
+    const watch = setInterval(() => (seen = Math.max(seen, activePdfWorkers())), 1);
+    const started = performance.now();
+    expect(await extractSourceText("slow.pdf", many, { pdf: 30 })).toEqual({ ok: false, error: "That PDF took too long to read. Save a smaller copy and upload it again." });
+    clearInterval(watch);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    // It ran in a worker, and the worker is gone.
+    expect(seen).toBe(1);
+    expect(activePdfWorkers()).toBe(0);
   }, 30_000);
 
   it("cuts very long text, and says so", async () => {

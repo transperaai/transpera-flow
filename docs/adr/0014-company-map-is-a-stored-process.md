@@ -234,11 +234,13 @@ Austin (5 Oct 2026): everything can be added by hand, including taking a process
   one ordinary edit. The Processes page says so before asking the database. The company map itself can't be archived. For the same
   reason (the simulation must not change behind anyone's back) a pipeline that is a service's way in, or client work a service
   generates, is refused too, naming the services.
-- **Archived means read only.** While archived, the database refuses opening a draft (even one already open), restoring a version
-  and publishing (so a draft opened before the archive can't move what it links); the app opens the process read only with a
+- **Archived means read only.** While archived, the database refuses opening a draft (even one already open), restoring a version,
+  publishing (so a draft opened before the archive can't move what it links), writing steps or edges into a draft left open
+  (discarding it is allowed), renaming it or changing its kind or place, a service starting to use it, and an import moving it; the app opens the process read only with a
   banner ("Archived on 3 Oct", Restore for editors) and no Edit or History actions.
 - **Names.** An archived process gives its name up: names are unique among the processes in use (the app's checks, the library's
-  `create_library_process` and the import's `import_new_process`). Restoring is refused while another process has the name.
+  `create_library_process` and the import's `import_new_process`). Restoring is refused while another process has the name (the
+  import's rule, ignoring case and punctuation, under its lock); since an archived process can't be renamed, the other one is.
 - **It can't come back in by another road.** `holder_allows` refuses placing an archived process in a draft ("Sales is archived:
   restore it from Processes (Archived) before placing it"); a draft that linked it before it was archived can't be published
   (`refuse_archived_placements`, on every road to a new live version); `restore_version` skips its card on a restored company map

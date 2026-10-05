@@ -21,6 +21,8 @@ export const MAX_SHEET_XML = 50 * 1024 * 1024;
 export const MAX_PDF_PAGES = 300;
 /** The longest reading a file may take. */
 export const READ_TIME_MS = { xlsx: 5_000, pdf: 20_000 };
+/** A workbook is read to one character past what a source keeps, so the cut (and its note) shows. */
+const BUDGET = MAX_BODY + 1;
 const CUT = `\n\n[The text was cut at ${MAX_BODY.toLocaleString("en-GB")} characters. The whole file is kept.]`;
 
 class NotAWorkbook extends Error {}
@@ -48,42 +50,116 @@ export async function extractSourceText(name: string, bytes: Uint8Array, limits:
 
 // --- PDF --------------------------------------------------------------------------------------------------------------
 
-/** `promise`, or TooSlow once `deadline` (a time in ms) has passed. */
-function by<T>(promise: Promise<T>, deadline: number): Promise<T> {
+/** `promise`, or TooSlow once `deadline` (a time in ms) has passed; `onLate` runs then (to stop the work). */
+function by<T>(promise: Promise<T>, deadline: number, onLate?: () => void): Promise<T> {
   if (Date.now() >= deadline) {
     promise.catch(() => undefined);
+    onLate?.();
     return Promise.reject(new TooSlow());
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TooSlow()), Math.max(deadline - Date.now(), 0));
+    timer = setTimeout(() => {
+      onLate?.();
+      reject(new TooSlow());
+    }, Math.max(deadline - Date.now(), 0));
   });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
+type PdfPages = { pages: string[]; numPages: number };
+
+/** The text of each page (up to `maxPages`, stopping past `maxChars`), with unpdf. Runs in the worker, or here as a fallback. */
+const READ_PAGES = `async function readPages(unpdf, bytes, maxPages, maxChars, onTask) {
+  const { getResolvedPDFJS } = unpdf;
+  const { getDocument } = await getResolvedPDFJS();
+  const task = getDocument({ data: bytes, isEvalSupported: false, useSystemFonts: false, verbosity: 0 });
+  onTask(task);
+  const pdf = await task.promise;
+  const pages = [];
+  const count = Math.min(pdf.numPages, maxPages);
+  let length = 0;
+  for (let n = 1; n <= count && length <= maxChars; n++) {
+    const page = await pdf.getPage(n);
+    const content = await page.getTextContent();
+    const text = content.items.map((item) => ("str" in item ? item.str + (item.hasEOL ? "\\n" : "") : "")).join("").trim();
+    page.cleanup();
+    if (text) pages.push(text);
+    length += text.length;
+  }
+  return { pages, numPages: pdf.numPages };
+}`;
+
+/** The worker: read the pages and post them back. It is terminated (all its work stops) if it takes too long. */
+const WORKER = `const { parentPort, workerData } = require("node:worker_threads");
+${READ_PAGES}
+readPages(require(workerData.unpdf), workerData.bytes, workerData.maxPages, workerData.maxChars, () => {}).then(
+  (result) => parentPort.postMessage({ ok: true, result }),
+  () => parentPort.postMessage({ ok: false }),
+);`;
+
+let workers = 0;
+/** How many PDF workers are running (for tests: none is left behind after a timeout). */
+export const activePdfWorkers = () => workers;
+
+/** Where unpdf's CommonJS build is, for the worker to load (null when it can't be found from here). */
+async function unpdfPath(): Promise<string | null> {
+  try {
+    const { createRequire } = await import("node:module");
+    const { join } = await import("node:path");
+    return createRequire(join(process.cwd(), "package.json")).resolve("unpdf");
+  } catch {
+    return null;
+  }
+}
+
+/** Reads the pages in a worker thread, terminated at the deadline: a PDF can't hold the server's own thread. */
+async function pagesInWorker(bytes: Uint8Array, deadline: number, unpdf: string): Promise<PdfPages> {
+  const { Worker } = await import("node:worker_threads");
+  const worker = new Worker(WORKER, { eval: true, workerData: { unpdf, bytes, maxPages: MAX_PDF_PAGES, maxChars: MAX_BODY }, resourceLimits: { maxOldGenerationSizeMb: 512 } });
+  workers++;
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    workers--;
+    void worker.terminate();
+  };
+  const done = new Promise<PdfPages>((resolve, reject) => {
+    worker.once("message", (m: { ok: boolean; result?: PdfPages }) => (m.ok && m.result ? resolve(m.result) : reject(new Error("unreadable"))));
+    worker.once("error", reject);
+    worker.once("exit", () => reject(new Error("worker ended")));
+  });
+  try {
+    return await by(done, deadline, end);
+  } finally {
+    end();
+  }
+}
+
+/** Reads the pages on this thread, destroying the document at the deadline (when no worker can be started). */
+async function pagesHere(bytes: Uint8Array, deadline: number): Promise<PdfPages> {
+  const unpdf = await import("unpdf");
+  let task: { destroy(): Promise<void> } | null = null;
+  const readPages = new Function(`return (${READ_PAGES})`)() as (
+    unpdf: unknown,
+    bytes: Uint8Array,
+    maxPages: number,
+    maxChars: number,
+    onTask: (t: { destroy(): Promise<void> }) => void,
+  ) => Promise<PdfPages>;
+  return by(readPages(unpdf, bytes, MAX_PDF_PAGES, MAX_BODY, (t) => (task = t)), deadline, () => void (task as { destroy(): Promise<void> } | null)?.destroy().catch(() => undefined));
+}
+
 async function pdfText(bytes: Uint8Array, ms: number): Promise<string> {
   const deadline = Date.now() + ms;
-  const { getDocumentProxy } = await import("unpdf");
+  if (Date.now() >= deadline) throw new TooSlow();
   // PDF.js takes the buffer over: give it a copy.
-  const pdf = await by(getDocumentProxy(new Uint8Array(bytes)), deadline);
-  try {
-    const pages: string[] = [];
-    const count = Math.min(pdf.numPages, MAX_PDF_PAGES);
-    let length = 0;
-    for (let n = 1; n <= count && length <= MAX_BODY; n++) {
-      const page = await by(pdf.getPage(n), deadline);
-      const content = await by(page.getTextContent(), deadline);
-      const text = content.items.map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : "") : "")).join("").trim();
-      page.cleanup();
-      if (text) pages.push(text);
-      length += text.length;
-    }
-    if (pdf.numPages > MAX_PDF_PAGES) pages.push(`[Only the first ${MAX_PDF_PAGES} of ${pdf.numPages} pages were read. The whole file is kept.]`);
-    return pages.join("\n\n");
-  } finally {
-    // Stop whatever PDF.js still has under way (it runs on this thread, in steps).
-    void pdf.cleanup().catch(() => undefined);
-  }
+  const copy = new Uint8Array(bytes);
+  const unpdf = await unpdfPath();
+  const { pages, numPages } = unpdf ? await pagesInWorker(copy, deadline, unpdf) : await pagesHere(copy, deadline);
+  if (numPages > MAX_PDF_PAGES) pages.push(`[Only the first ${MAX_PDF_PAGES} of ${numPages} pages were read. The whole file is kept.]`);
+  return pages.join("\n\n");
 }
 
 // --- Workbooks ----------------------------------------------------------------------------------------------------------
@@ -217,10 +293,12 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
   const workbook = read("xl/workbook.xml");
   if (!read("[Content_Types].xml") || !workbook) throw new NotAWorkbook("no workbook");
 
-  // Shared strings: each <si>'s text runs, leaving out phonetic hints (<rPh>).
+  // Shared strings: each <si>'s text runs, leaving out phonetic hints (<rPh>), each cut at what a source keeps (a cell can't
+  // show more than that, and one huge string used by many cells must not be copied for each).
   const shared: string[] = [];
   {
     let cur: string[] | null = null;
+    let curLength = 0;
     let inT = false;
     let skip = 0;
     scanXml(
@@ -228,7 +306,10 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
       {
         open: (name, _a, self) => {
           const n = local(name);
-          if (n === "si" && !self) cur = [];
+          if (n === "si" && !self) {
+            cur = [];
+            curLength = 0;
+          }
           else if (n === "rPh" && !self) skip++;
           else if (n === "t" && !self && cur && !skip) inT = true;
         },
@@ -241,7 +322,10 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
           else if (n === "t") inT = false;
         },
         text: (raw) => {
-          if (inT && cur) cur.push(xmlText(raw));
+          if (!inT || !cur || curLength >= BUDGET) return;
+          const piece = clip(raw, BUDGET - curLength);
+          cur.push(piece);
+          curLength += piece.length;
         },
       },
       deadline,
@@ -281,15 +365,21 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
     deadline,
   );
 
+  // The text so far (`length`, all sheets) and of the row being read (`rowLength`): once it passes what a source keeps, nothing
+  // more is built, so the work and the memory are bounded by BUDGET whatever the cells refer to. The time is checked every
+  // 256 cells as well as every 1,024 tags.
   const out: string[] = [];
   let length = 0;
+  let cellsRead = 0;
+  const room = (rowLength: number) => BUDGET - length - rowLength;
   for (const sheet of sheets) {
-    if (length > MAX_BODY) break;
+    if (length >= BUDGET) break;
     const xml = read(sheet.path);
     if (!xml) continue;
     const lines: string[] = [];
     let cells: string[] | null = null;
-    let cell: { col: number | null; t: string | undefined; v: string[]; is: string[] } | null = null;
+    let rowLength = 0;
+    let cell: { col: number | null; t: string | undefined; v: string; is: string } | null = null;
     let mode: "v" | "t" | null = null;
     let inIs = false;
     scanXml(
@@ -297,10 +387,13 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
       {
         open: (name, raw, self) => {
           const n = local(name);
-          if (n === "row") cells = [];
-          else if (n === "c" && cells) {
+          if (n === "row") {
+            cells = [];
+            rowLength = 0;
+          } else if (n === "c" && cells) {
+            if ((++cellsRead & 255) === 0 && Date.now() > deadline) throw new TooSlow();
             const a = attributes(raw);
-            cell = { col: columnIndex(a.get("r")), t: a.get("t"), v: [], is: [] };
+            cell = { col: columnIndex(a.get("r")), t: a.get("t"), v: "", is: "" };
           } else if (n === "v" && cell && !self) mode = "v";
           else if (n === "is" && cell) inIs = !self;
           else if (n === "t" && cell && inIs && !self) mode = "t";
@@ -310,32 +403,37 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
           if (n === "v" || n === "t") mode = null;
           else if (n === "is") inIs = false;
           else if (n === "c" && cell && cells) {
-            if (length > MAX_BODY) {
-              // Enough text already: the rest is cut anyway.
-              cell = null;
-              mode = null;
-              return;
+            const left = room(rowLength);
+            if (left > 0) {
+              const v = cell.v;
+              const value = cell.t === "s" ? (shared[Number(v)] ?? "") : cell.t === "inlineStr" ? cell.is : cell.t === "b" ? (v === "1" ? "TRUE" : "FALSE") : xmlText(v);
+              // Gaps before it, then its value: no more of either than there is room for.
+              const gap = cell.col === null ? 0 : Math.min(Math.max(cell.col - cells.length, 0), left);
+              for (let g = 0; g < gap; g++) cells.push("");
+              const shown = (value.length > left - gap ? value.slice(0, Math.max(left - gap, 0)) : value).replace(/[\t\n\r]+/g, " ");
+              cells.push(shown);
+              rowLength += gap + shown.length + 1;
             }
-            const v = cell.v.join("");
-            const value = cell.t === "s" ? (shared[Number(v)] ?? "") : cell.t === "inlineStr" ? cell.is.join("") : cell.t === "b" ? (v === "1" ? "TRUE" : "FALSE") : xmlText(v);
-            while (cell.col !== null && cells.length < cell.col) cells.push("");
-            cells.push(value.replace(/[\t\n\r]+/g, " "));
             cell = null;
             mode = null;
           } else if (n === "row" && cells) {
             while (cells.length && !cells.at(-1)) cells.pop();
-            if (cells.length && length <= MAX_BODY) {
+            if (cells.length && length < BUDGET) {
               const line = cells.join("\t");
               lines.push(line);
               length += line.length + 1;
             }
             cells = null;
+            rowLength = 0;
           }
         },
         text: (raw) => {
           if (!cell || !mode) return;
-          if (mode === "v") cell.v.push(raw);
-          else cell.is.push(xmlText(raw));
+          // A value is never longer than there is room for (a few characters more, for entities still to be decoded).
+          const left = room(rowLength) - (mode === "v" ? cell.v.length : cell.is.length);
+          if (left <= 0) return;
+          if (mode === "v") cell.v += raw.length > left + 16 ? raw.slice(0, left + 16) : raw;
+          else cell.is += clip(raw, left);
         },
       },
       deadline,
@@ -343,6 +441,14 @@ export function workbookText(bytes: Uint8Array, ms = READ_TIME_MS.xlsx): string 
     if (lines.length) out.push(`${sheets.length > 1 ? `${sheet.name}\n` : ""}${lines.join("\n")}`);
   }
   return out.join("\n\n");
+}
+
+/** At most `max` characters of decoded XML text from `raw`, without decoding more of it than that needs. */
+function clip(raw: string, max: number): string {
+  if (max <= 0) return "";
+  // An entity is at most 10 characters and decodes to one or two: `max * 10` raw characters are always enough.
+  const text = xmlText(raw.length > max * 10 ? raw.slice(0, max * 10) : raw);
+  return text.length > max ? text.slice(0, max) : text;
 }
 
 /** "C7" → 2 (zero-based column), or null when there is no reference (or it is past Excel's last column). */
