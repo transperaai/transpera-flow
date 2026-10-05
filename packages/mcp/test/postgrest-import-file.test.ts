@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE, processTextFrom, type Database, type ProcessFile } from "@transpera-flow/db";
-import { fetchPublicPage, importProcessFile, previewProcessFile, PUBLIC_POLICY, ToolError } from "../src";
+import { fetchPublicPage, importProcessFile, previewProcessFile, PUBLIC_POLICY, takeLinkFetch, ToolError } from "../src";
 import type { ToolContext } from "../src/context";
 import { signJwt } from "./helpers";
 
@@ -386,5 +386,48 @@ describe.skipIf(!POSTGREST_URL)("uploading a process file over PostgREST (a draf
     const r = await importProcessFile(ctx, file, { workspaceId, source: "nolog.json" });
     expect(r.warnings).toContain("The process was made, but the activity log entry for the import couldn't be written.");
     expect(await processRow("No log")).toBeDefined();
+  });
+
+  it("is all or nothing: a failure while the edges are written leaves nothing behind, and the same name can be uploaded again", async () => {
+    // Fail the edge insert for this one process, after its row, draft and steps are in (a trigger, so it is the database that fails).
+    await admin.query(`create function public.b13_fail_edges() returns trigger language plpgsql as $$ begin
+      if exists (select 1 from public.processes p where p.id = new.process_id and p.name = 'Fails at edges') then raise exception 'injected edge failure'; end if;
+      return new; end $$`);
+    await admin.query("create trigger b13_fail_edges before insert on public.edges for each row execute function public.b13_fail_edges()");
+    const counts = async () => ({
+      processes: await processCount(),
+      revisions: (await admin.query("select count(*)::int n from process_revisions where workspace_id = $1", [workspaceId])).rows[0].n as number,
+      steps: (await admin.query("select count(*)::int n from steps where workspace_id = $1", [workspaceId])).rows[0].n as number,
+      edges: (await admin.query("select count(*)::int n from edges where workspace_id = $1", [workspaceId])).rows[0].n as number,
+      audit: (await admin.query("select count(*)::int n from audit_log where workspace_id = $1", [workspaceId])).rows[0].n as number,
+    });
+    const file = example((f) => {
+      f.name = "Fails at edges";
+    });
+    const before = await counts();
+    try {
+      await expect(importProcessFile(editorCtx, file, { workspaceId, source: "fails.json" })).rejects.toThrow();
+      expect(await counts()).toEqual(before);
+      expect(await processRow("Fails at edges")).toBeUndefined();
+    } finally {
+      await admin.query("drop trigger b13_fail_edges on public.edges");
+      await admin.query("drop function public.b13_fail_edges()");
+    }
+    // Retrying with the same name works, and is complete.
+    const r = await importProcessFile(editorCtx, file, { workspaceId, source: "fails.json" });
+    expect(r.process.name).toBe("Fails at edges");
+    expect(await stepsOf(r.revision_id)).toHaveLength(8);
+    expect(await edgesOf(r.revision_id)).toHaveLength(7);
+    expect((await processRow("Fails at edges"))!.draft_revision_id).toBe(r.revision_id);
+  });
+
+  it("limits link fetches to 10 a minute per person, in words", async () => {
+    const ctx = contextFor(await createUser("upload-linker@example.com"));
+    for (let i = 0; i < 10; i++) expect(await takeLinkFetch(ctx)).toEqual({ allowed: true });
+    const eleventh = await takeLinkFetch(ctx);
+    expect(eleventh.allowed).toBe(false);
+    if (!eleventh.allowed) expect(eleventh.message).toMatch(/^You've opened 10 links in the last minute\. Try again in \d+ seconds?\.$/);
+    // Another person is not held up by it.
+    expect(await takeLinkFetch(contextFor(editorId))).toEqual({ allowed: true });
   });
 });

@@ -230,6 +230,17 @@ select proacl from pg_proc where pronamespace = 'public'::regnamespace and prona
 
 Expect one row, `authenticated` EXECUTE, and an ACL with an `authenticated=X/...` entry, no `anon=` and no `=X/...`.
 
+## All-or-nothing import and the link-fetch limit (B13 follow-ups, migration 20261128000000)
+
+Verified only against plain Postgres (`packages/db/test/import-atomic.test.ts`, and `packages/mcp/test/postgrest-import-file.test.ts` through PostgREST with the auth shim). `public.import_new_process` is `security invoker`, so the caller's RLS decides; it opens the draft through `open_draft` and inserts steps and edges with the same "union of keys, missing keys are null" semantics as a bulk PostgREST insert. `public.take_link_fetch` is `security definer` with an empty `search_path` and reads `auth.uid()`; its counter table `private.link_fetch_limits` has RLS on and no grants to `anon` or `authenticated`. The test database emulates Supabase's default privileges for the `public` schema only, so check on a real project, after applying:
+
+```sql
+select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name in ('import_new_process', 'take_link_fetch') and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1, 2;
+select grantee, privilege_type from information_schema.role_table_grants where table_schema = 'private' and table_name = 'link_fetch_limits' and grantee in ('anon', 'authenticated', 'PUBLIC');
+```
+
+Expect two rows (`authenticated` EXECUTE on each function) and no rows from the second query.
+
 ## Editing the company map (B11 slice 2, migration 20261127500000)
 
 Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/company-map-editing.test.ts` and `company-map.test.ts`, including both headers' rollbacks and both migrations re-applied over existing workspaces). No table or column is added. Two things rest on how Postgres behaves for the table owner, which should hold on Supabase but has not been seen there:
@@ -245,3 +256,5 @@ select has_function_privilege('anon', 'public.revision_history(uuid)', 'execute'
 ```
 
 Both must be empty or false. `revision_history` was dropped and re-created (one more column, `note`), so its grants were re-made in the migration: `authenticated` may execute it, `anon` may not.
+
+The link limit fails open when `take_link_fetch` is missing (a deploy that got ahead of its migration: PostgREST `PGRST202` or Postgres `42883`) and logs `[link-limit] take_link_fetch is missing ...` with `console.warn`, so search the server logs for that tag; any other error refuses the fetch. `import_new_process` takes an advisory lock per workspace so two imports with one name can't both succeed, and refuses imports over 200 processes or 1,000 steps (one statement must finish inside Supabase's 8 s `statement_timeout` for `authenticated`).
