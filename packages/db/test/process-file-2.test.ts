@@ -146,7 +146,7 @@ describe("sources", () => {
       [(f) => (f.sources = [1]), /Source 1 should be an object with an id and a title/],
       [(f) => delete f.sources[0].id, /Source 'Talk with Sam' has no id\. Give each source a short id/],
       [(f) => delete f.sources[0].title, /Source 'talk' has no title/],
-      [(f) => (f.sources[0].kind = "video"), /the kind 'video', which Transpera doesn't know\. Use transcript, notes, data or screenshot/],
+      [(f) => (f.sources[0].kind = "video"), /the kind 'video', which Transpera doesn't know\. Use transcript, notes, sop, spreadsheet, data, screenshot or other/],
       [(f) => (f.sources[0].date = "30 Sep"), /the date should be a day like 2026-09-30/],
       [(f) => (f.sources[0].date = "2026-02-31"), /the date should be a day like 2026-09-30/],
       [(f) => (f.sources[0].speakers = "Sam"), /speakers should be a list of names/],

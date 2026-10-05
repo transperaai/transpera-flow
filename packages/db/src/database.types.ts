@@ -2869,6 +2869,24 @@ export type Database = {
           },
         ]
       }
+      user_tours: {
+        Row: {
+          dismissed_at: string
+          tour: string
+          user_id: string
+        }
+        Insert: {
+          dismissed_at?: string
+          tour: string
+          user_id?: string
+        }
+        Update: {
+          dismissed_at?: string
+          tour?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       workspaces: {
         Row: {
           created_at: string
@@ -3096,6 +3114,32 @@ export type Database = {
           p_workspace: string
         }
         Returns: Json
+      }
+      search_sources: {
+        Args: {
+          p_kind?: string
+          p_limit?: number
+          p_offset?: number
+          p_process?: string
+          p_search?: string
+          p_sort?: string
+          p_unlinked?: boolean
+          p_workspace: string
+        }
+        Returns: {
+          created_at: string
+          excerpt: string
+          file_url: string
+          has_body: boolean
+          id: string
+          kind: string
+          recorded_at: string
+          speakers: string[]
+          title: string
+          total: number
+          updated_at: string
+          workspace_id: string
+        }[]
       }
       take_link_fetch: { Args: never; Returns: number }
       unlinked_source_count: {

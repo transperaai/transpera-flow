@@ -1,8 +1,9 @@
 "use server";
 
-import { SOURCE_COLUMNS, SOURCE_LINK_COLUMNS, linkColumns, type SourceLinkRow, type SourceRow } from "@transpera-flow/db";
+import { SOURCE_COLUMNS, SOURCE_LINK_COLUMNS, linkColumns, loadSourceBody, searchSources, type SourceLinkRow, type SourceListRow, type SourceRow } from "@transpera-flow/db";
 import { mapOutcome, type SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField } from "@/lib/fields/server";
+import { PAGE_SIZE, parseLibraryQuery } from "@/lib/sources/library";
 import { linkJson, parseNewSource, parseTarget } from "@/lib/sources/links";
 import type { LinkSourceResult, RemoveSourceResult, SaveSourceResult } from "@/lib/sources/store";
 import { cleanSourceField, formatSpeakers, isId, isSourceField, parseSpeakers, type Scalar } from "@/lib/sources/validate";
@@ -135,4 +136,42 @@ export async function deleteSource(id: unknown): Promise<RemoveSourceResult> {
   const { data, error } = await supabase.from("sources").delete().eq("id", id).select("id");
   if (error) return failure(error);
   return data?.length ? { status: "ok" } : forbidden;
+}
+
+export type LibraryPageResult = { status: "ok"; rows: SourceListRow[]; total: number } | { status: "error"; message: string };
+
+/** One page of the Sources library (the database's `search_sources`): rows without their full text, and how many match in all. */
+export async function searchSourcesPage(workspaceId: unknown, query: unknown, offset: unknown, limit: unknown): Promise<LibraryPageResult> {
+  const q = parseLibraryQuery(query);
+  const from = typeof offset === "number" && Number.isInteger(offset) && offset >= 0 && offset <= 1_000_000 ? offset : null;
+  const size = typeof limit === "number" && Number.isInteger(limit) && limit >= 1 && limit <= 200 ? limit : PAGE_SIZE;
+  if (!isId(workspaceId) || !q || from === null) return invalid;
+  const supabase = await signedInClient();
+  if (!supabase) return signedOut;
+  try {
+    const page = await searchSources(supabase, workspaceId, {
+      search: q.search,
+      ...(q.kind !== "all" ? { kind: q.kind } : {}),
+      ...(q.processId !== "all" ? { processId: q.processId } : {}),
+      unlinkedOnly: q.unlinkedOnly,
+      sort: q.sort,
+      limit: size,
+      offset: from,
+    });
+    return { status: "ok", ...page };
+  } catch {
+    return { status: "error", message: "Couldn't load the sources. Try again." };
+  }
+}
+
+/** A source's full text, read when it is opened. */
+export async function readSourceBody(sourceId: unknown): Promise<{ status: "ok"; body: string | null } | { status: "error"; message: string }> {
+  if (!isId(sourceId)) return invalid;
+  const supabase = await signedInClient();
+  if (!supabase) return signedOut;
+  try {
+    return { status: "ok", body: await loadSourceBody(supabase, sourceId) };
+  } catch {
+    return { status: "error", message: "Couldn't load the text. Try again." };
+  }
 }

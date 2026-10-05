@@ -35,6 +35,8 @@ import type {
   ServiceRow,
   ServiceServicingRow,
   SourceLinkRow,
+  SourceKind,
+  SourceListRow,
   SourceRow,
   StepRow,
   SuggestionRow,
@@ -614,6 +616,84 @@ export async function loadSources(db: Db, workspaceId: string): Promise<SourceRo
     .order("id");
   // The check constraint limits kind to SourceRow's union.
   return rows(r) as unknown as SourceRow[];
+}
+
+/** What the Sources library asks for: every part is optional, and the words are values (never built into a query string). */
+export interface SourceSearch {
+  search?: string;
+  kind?: SourceKind;
+  processId?: string;
+  unlinkedOnly?: boolean;
+  sort?: "newest" | "oldest" | "title" | "title-desc";
+  limit?: number;
+  offset?: number;
+}
+
+/** One page of the library: the rows without their full text, and how many match in all. */
+export interface SourcePage {
+  rows: SourceListRow[];
+  total: number;
+}
+
+/** The library's page size. */
+export const SOURCES_PAGE_SIZE = 50;
+
+/**
+ * One page of the workspace's sources (the `search_sources` function: every search word is matched as plain text against the
+ * title, speakers and text; RLS decides what is visible). Rows carry a short excerpt, never the full text.
+ */
+export async function searchSources(db: Db, workspaceId: string, q: SourceSearch = {}): Promise<SourcePage> {
+  const r = await db.rpc("search_sources", {
+    p_workspace: workspaceId,
+    ...(q.search?.trim() ? { p_search: q.search } : {}),
+    ...(q.kind ? { p_kind: q.kind } : {}),
+    ...(q.processId ? { p_process: q.processId } : {}),
+    ...(q.unlinkedOnly ? { p_unlinked: true } : {}),
+    ...(q.sort ? { p_sort: q.sort } : {}),
+    p_limit: q.limit ?? SOURCES_PAGE_SIZE,
+    p_offset: q.offset ?? 0,
+  });
+  if (r.error) throw r.error;
+  const list = (r.data ?? []) as unknown as (SourceListRow & { total: number })[];
+  return { rows: list.map(({ total: _total, ...row }) => row), total: list.length ? Number(list[0]!.total) : 0 };
+}
+
+/** How many sources the workspace has (RLS applies), whatever the library's filters say. */
+export async function countSources(db: Db, workspaceId: string): Promise<number> {
+  const r = await db.from("sources").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId);
+  if (r.error) throw r.error;
+  return r.count ?? 0;
+}
+
+/** Which of these sources still exist (RLS applies). In batches: every id goes into the request's URL, which PostgREST limits. */
+export async function existingSourceIds(db: Db, ids: readonly string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const r = await db.from("sources").select("id").in("id", ids.slice(i, i + 100));
+    if (r.error) throw r.error;
+    for (const row of r.data ?? []) found.add(row.id);
+  }
+  return found;
+}
+
+/** One source's full text, read when it is opened. Null when it has none, or is not visible. */
+export async function loadSourceBody(db: Db, sourceId: string): Promise<string | null> {
+  const r = await db.from("sources").select("body").eq("id", sourceId).maybeSingle();
+  if (r.error) throw r.error;
+  return r.data?.body ?? null;
+}
+
+/** The tours of the editor the signed-in person has dismissed (`process`, `company`); RLS shows only their own. */
+export async function loadDismissedTours(db: Db): Promise<string[]> {
+  const r = await db.from("user_tours").select("tour");
+  if (r.error) throw r.error;
+  return (r.data ?? []).map((t) => t.tour);
+}
+
+/** Remember that the signed-in person dismissed a tour, so it never opens on its own for them again. */
+export async function dismissTour(db: Db, tour: "process" | "company"): Promise<void> {
+  const r = await db.from("user_tours").upsert({ tour }, { onConflict: "user_id,tour", ignoreDuplicates: true });
+  if (r.error) throw r.error;
 }
 
 /** The `SourceLinkRow` columns. */

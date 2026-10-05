@@ -4,7 +4,7 @@ import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
 import { loadIdeaProposal } from "@/lib/company-data";
 import { ideaSeed } from "@/lib/suggestions/idea";
-import { loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
+import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
 import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
 import { loadLiveParts } from "@/lib/overview/data";
 import { loadLibrary } from "@/lib/editor/library-data";
@@ -43,13 +43,15 @@ export async function WorkspaceEditorPage({
   const base = company ? `/w/${slug}` : `/w/${slug}/p/${processId}`;
   const canEdit = await canEditWorkspace(live.workspace.id);
   if (!canEdit) redirect(base);
-  const [scenarios, blocks, sources, viewer, fpChanged] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, fpChanged, tours] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
     currentViewer(),
     company ? Promise.resolve(false) : firstPrinciplesDraftChanged(live.process.id, live.revision.id, draft?.revision.id ?? null),
+    loadDismissedEditorTours(),
   ]);
+  const tourDismissed = tours.includes(company ? "company" : "process");
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
   // The company map has no solutions or blocks: it is edited as a draft only.
   const editorMode = company ? "draft" : parseEditorMode(searchParams.mode);
@@ -74,6 +76,8 @@ export async function WorkspaceEditorPage({
       blocks={blocks}
       sources={sources}
       userId={viewer?.userId ?? null}
+      tourDismissed={tourDismissed}
+      historyHref={`/w/${slug}/p/${processId}/history`}
       viewer={viewer}
       sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}

@@ -37,6 +37,7 @@ export default async function DemoEditPage(props: PageProps<"/demo/edit">) {
       issue={issueRow && issueAboutProcess(issueRow, bundle.process.id) ? solutionIssueOf(issueRow, bundle.process.id, bundle.steps) : null}
       sources={demoSources()}
       sourcesHref="/demo/sources"
+      historyHref="/demo/history"
       exitHref={exitHref(search.from, back)}
       horizonMonths={parseHorizon(search.horizon)}
     />

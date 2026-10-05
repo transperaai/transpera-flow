@@ -103,11 +103,14 @@
             "enum": [
               "transcript",
               "notes",
+              "sop",
+              "spreadsheet",
               "data",
-              "screenshot"
+              "screenshot",
+              "other"
             ],
             "default": "transcript",
-            "description": "transcript (a conversation), notes (an SOP, a document), data (a spreadsheet or export) or screenshot."
+            "description": "transcript (a conversation), sop (a written procedure), spreadsheet, data (an export), notes (any other document, or a drawn map), screenshot or other."
           },
           "date": {
             "type": "string",
