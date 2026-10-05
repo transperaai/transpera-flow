@@ -2,7 +2,6 @@
 
 import { useActionState, useState } from "react";
 import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
-import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -49,14 +48,7 @@ function NewProcessForm({ create, onCancel }: { create: CreateProcess; onCancel:
         <Input id="new-process-name" name="name" required maxLength={120} autoFocus placeholder="e.g. Quarterly review" />
       </div>
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 flex items-center text-xs font-medium text-muted-foreground uppercase">
-          Type
-          <Help
-            label="Type"
-            description="A sales pipeline is how new work comes in: leads arrive from Demand and some are won. Client work is something this company does again and again for the clients it already has, run per client by the services linked to it."
-            example="Northbeam's enquiry-to-signed process is a sales pipeline; its monthly reporting is client work."
-          />
-        </legend>
+        <legend className="mb-1 text-xs font-medium text-muted-foreground uppercase">Type</legend>
         {PROCESS_KIND_CHOICES.map((k) => (
           <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
             <input type="radio" name="kind" value={k.value} required className="mt-1 accent-[var(--accent)]" />
