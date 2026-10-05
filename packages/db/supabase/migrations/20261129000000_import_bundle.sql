@@ -30,7 +30,7 @@
 --
 -- 3. Where an upload's suggestions and proposals came from: `created_via` also allows `upload` (check constraints widened;
 --    existing rows all pass), a nullable `import_source` text column on `suggestions` and `suggestion_proposals`, and
---    `private.suggestion_proposals_before_write` redefined as a full copy of 20261124000000's that records `upload` (and keeps
+--    `private.suggestion_proposals_before_write` (and `private.suggestions_before_write`, copies of the earlier definitions) records `upload` (and keeps
 --    `import_source`) only while `transpera.importing` is on, which only `import_process_bundle` sets, and never lets it change. The marker is a new key inside the existing `provenance`
 --    jsonb: no column changes, nothing that reads provenance looks at keys it does not know, and publishing is not blocked by it.
 --
@@ -62,7 +62,7 @@
 --
 --   begin;
 --   drop trigger if exists clear_branch_odds on public.edges;
---   -- first `create or replace function private.suggestion_proposals_before_write()` with the text from 20261124000000_suggestions_v2.sql (the column drop below needs it gone)
+--   -- first `create or replace` private.suggestion_proposals_before_write() (text from 20261124000000_suggestions_v2.sql) and private.suggestions_before_write() (20261015000000_suggestions.sql) (the column drop below needs them gone)
 --   delete from public.suggestions where created_via = 'upload';
 --   delete from public.suggestion_proposals where created_via = 'upload';
 --   alter table public.suggestions drop column import_source, drop constraint suggestions_created_via, add constraint suggestions_created_via check (created_via in ('mcp'));
@@ -139,6 +139,43 @@ begin
     or new.review_note is distinct from old.review_note then
     if old.status <> 'pending' or coalesce(current_setting('transpera.reviewing_proposals', true), '') <> 'on' then
       raise exception 'Proposals are decided with review_proposals' using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+-- The same rule for suggestions as for proposals: only the import path can record an upload, and where it came from never changes.
+create or replace function private.suggestions_before_write() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.status := 'pending';
+    new.applied := null;
+    new.review_note := null;
+    new.reviewed_by := null;
+    new.reviewed_at := null;
+    new.created_by := auth.uid();
+    -- Only an upload (public.import_process_bundle, which turns `transpera.importing` on for its own statement) can say so.
+    new.created_via := case when coalesce(current_setting('transpera.importing', true), '') = 'on' then 'upload' else 'mcp' end;
+    if new.created_via <> 'upload' then new.import_source := null; end if;
+    return new;
+  end if;
+  if new.workspace_id is distinct from old.workspace_id or new.target_table is distinct from old.target_table
+    or new.target_id is distinct from old.target_id or new.patch is distinct from old.patch
+    or new.evidence is distinct from old.evidence or new.note is distinct from old.note
+    or new.created_via is distinct from old.created_via or new.import_source is distinct from old.import_source or new.created_by is distinct from old.created_by
+    or new.created_at is distinct from old.created_at then
+    raise exception 'A suggestion can''t be changed, only accepted or rejected' using errcode = '42501';
+  end if;
+  if new.status is distinct from old.status or new.applied is distinct from old.applied
+    or new.reviewed_by is distinct from old.reviewed_by or new.reviewed_at is distinct from old.reviewed_at
+    or new.review_note is distinct from old.review_note then
+    if old.status <> 'pending' or coalesce(current_setting('transpera.reviewing', true), '') <> 'on' then
+      raise exception 'Suggestions are accepted or rejected with review_suggestions' using errcode = '42501';
     end if;
   end if;
   return new;
@@ -243,13 +280,14 @@ begin
     wrote_fp := true;
   end if;
 
-  -- Company facts wait as suggestions; the review path is the only way to apply one.
+  -- Company facts wait as suggestions; the review path is the only way to apply one. The triggers record them as uploads while
+  -- `transpera.importing` is on (set here, nowhere else), and it is off again after the proposals.
+  perform set_config('transpera.importing', 'on', true);
   insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, created_via, import_source)
   select p_workspace, x.target_table, x.target_id, x.patch, coalesce(x.evidence, '[]'::jsonb), x.note, 'upload', label
   from jsonb_to_recordset(sugg_txt::jsonb) as x(target_table text, target_id uuid, patch jsonb, evidence jsonb, note text);
 
-  -- Issues and ideas wait as proposals. The trigger records them as uploads while this is on, for this statement only.
-  perform set_config('transpera.importing', 'on', true);
+  -- Issues and ideas wait as proposals.
   insert into public.suggestion_proposals (workspace_id, kind, title, detail, payload, evidence, note, issue_id, import_source)
   select p_workspace, x.kind, x.title, x.detail, coalesce(x.payload, '{}'::jsonb), coalesce(x.evidence, '[]'::jsonb), x.note, x.issue_id, label
   from jsonb_to_recordset(props_txt::jsonb) as x(kind text, title text, detail text, payload jsonb, evidence jsonb, note text, issue_id uuid);

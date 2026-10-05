@@ -347,3 +347,22 @@ describe("hardening", () => {
     expect(await markerOf(rev, n.ids.decide)).toBe(true);
   });
 });
+
+describe("an upload's origin can't be forged", () => {
+  it("a direct insert into suggestions is recorded as MCP whatever it claims", async () => {
+    await as(editor.claims, async (c) => {
+      await c.query("insert into suggestions (workspace_id, target_table, patch, created_via, import_source) values ($1, 'roles', '{\"set\":{\"name\":\"Forged\"}}', 'upload', 'Payroll.xlsx')", [ws]);
+      expect((await c.query("select created_via, import_source from suggestions where patch -> 'set' ->> 'name' = 'Forged'")).rows[0]).toEqual({ created_via: "mcp", import_source: null });
+    });
+  });
+
+  it("nobody can change where an upload's suggestion came from", async () => {
+    const source = randomUUID();
+    const n = node("Bundle forge update", source);
+    await as(editor.claims, (c) => c.query("select public.import_process_bundle($1, $2, '[]', $3)", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source, n.node.id, n.ids.review))]));
+    for (const sql of ["update suggestions set import_source = 'Payroll.xlsx' where import_source = 'talk.json'", "update suggestions set created_via = 'upload' where created_via = 'mcp'"]) {
+      await expect(as(editor.claims, (c) => c.query(sql))).rejects.toThrow(/can't be changed/);
+    }
+    expect((await db.client.query("select count(*)::int n from suggestions where import_source = 'talk.json'")).rows[0].n).toBeGreaterThan(0);
+  });
+});
