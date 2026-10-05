@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 const SRC = join(__dirname, "..", "src");
 
 /** The screens that hold settings, as paths under src/ (directories are read recursively). */
-const SETTINGS_SOURCES = ["app/w/[slug]/settings", "components/rules", "components/levers", "app/new-workspace-form.tsx", "app/settings", "components/sources-page.tsx", "components/sources", "components/issues-register.tsx", "components/step-inspector.tsx", "components/editor", "components/evidence.tsx", "components/process-page.tsx", "components/wait-by-step.tsx", "components/utilisation-bars.tsx", "components/overview/headline-cards.tsx", "components/lever-panel.tsx", "components/horizon-picker.tsx", "components/history", "components/first-principles", "components/ai"];
+const SETTINGS_SOURCES = ["app/w/[slug]/settings", "components/rules", "components/levers", "app/new-workspace-form.tsx", "app/settings", "components/sources-page.tsx", "components/sources", "components/issues-register.tsx", "components/step-inspector.tsx", "components/editor", "components/evidence.tsx", "components/process-page.tsx", "components/wait-by-step.tsx", "components/utilisation-bars.tsx", "components/overview/headline-cards.tsx", "components/lever-panel.tsx", "components/horizon-picker.tsx", "components/history", "components/first-principles", "components/ai", "components/calibration"];
 
 /** Components that draw a label, a control and (when given `help`) its (i). */
 const FIELD_COMPONENTS = new Set(["TextField", "DateField", "NumberField", "SelectField", "ToggleField", "ChecklistField", "Field", "Setting"]);
