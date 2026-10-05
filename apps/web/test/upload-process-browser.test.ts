@@ -361,6 +361,7 @@ describe("the Upload process dialog with a transpera-process/2 file", () => {
     const f = v2();
     delete f.steps[3].hands_on_hours;
     delete f.steps[3].evidence;
+    delete f.links[5].probability;
     delete f.links[6].probability;
     f.steps[2].role = "Sales lead";
     const { page } = await mount(WITH_MD);
