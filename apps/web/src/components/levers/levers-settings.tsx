@@ -6,7 +6,7 @@
 // public demo keeps them in this tab.
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { LeverSettings } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { Page } from "@/components/shell/page";
@@ -35,12 +35,15 @@ export function LeversSettings({
   workspaceId,
   initial,
   settingsBase,
+  children,
 }: {
   mode: LeversMode;
   workspaceId: string | null;
   initial: LeverSettings;
   /** Where the workspace's Settings page is, so a lever set elsewhere can link there; omitted on the demo. */
   settingsBase?: string;
+  /** More of the page under the levers (the workspace's saved scenarios). */
+  children?: ReactNode;
 }) {
   const canEdit = mode !== "readonly";
   const [hidden, setHidden] = useState<string[]>(() => (mode === "demo" ? getDemoHiddenLevers() : initial.hidden));
@@ -176,6 +179,7 @@ export function LeversSettings({
           </Card>
         ))}
       </div>
+      {children}
     </Page>
   );
 }

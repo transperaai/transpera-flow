@@ -226,6 +226,7 @@ export function historyText(e: Pick<IssueEventRow, "kind" | "detail">, names: Om
     note?: string;
     solution?: string;
     solution_verdict?: { solution?: string; verdict?: "pass" | "fail" | null; was?: "pass" | "fail" | null; notes_changed?: boolean };
+    solution_deleted?: { solution?: string };
     fields?: string[];
     linked?: LinkedDetail;
   };
@@ -250,6 +251,7 @@ export function historyText(e: Pick<IssueEventRow, "kind" | "detail">, names: Om
         if (sv.verdict !== sv.was) parts.push(sv.verdict ? `Your verdict on ${name}: ${sv.verdict === "pass" ? "Pass" : "Fail"}` : `Cleared your verdict on ${name}`);
         if (sv.notes_changed) parts.push(`Updated your note on ${name}`);
       }
+      if (d.solution_deleted) parts.push(`Deleted solution ${d.solution_deleted.solution ? `“${d.solution_deleted.solution}”` : ""}`.trim());
       if (d.fields?.length) parts.push(`Changed ${list(d.fields.map((f) => FIELD_WORDS[f] ?? f))}`);
       const l = d.linked;
       if (l?.steps?.added?.length) parts.push(`Linked ${list(l.steps.added.map((s) => (s.step_id ? (names.step(s.step_id) ?? "a step") : "the whole process")))}`);
