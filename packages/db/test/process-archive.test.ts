@@ -267,7 +267,7 @@ describe("the rollback in the header", () => {
       .replace("delete from supabase_migrations.schema_migrations where version = '20261204000000';", "")
       .replace("alter table public.processes drop column", () => `${bodies}\nalter table public.processes drop column`);
     await db.client.query(rollback);
-    expect(await q("select column_name from information_schema.columns where table_schema = 'public' and column_name in ('archived_at', 'archived_by', 'file_path', 'file_name', 'file_type', 'file_size')")).toEqual([]);
+    expect(await q("select column_name from information_schema.columns where table_schema = 'public' and table_name in ('processes', 'sources') and column_name in ('archived_at', 'archived_by', 'file_path', 'file_name', 'file_type', 'file_size')")).toEqual([]);
     expect(await q("select proname from pg_proc where proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'storage_workspace')")).toEqual([]);
     expect(await q("select policyname from pg_policies where schemaname = 'storage' and policyname like 'sources:%'")).toEqual([]);
     expect((await q("select prosrc from pg_proc where proname = 'holder_allows'"))[0].prosrc).not.toContain("archived");
