@@ -862,6 +862,11 @@ interface CanvasProps {
   zoomControls?: boolean;
   /** Show the playback bar over the foot of the map. Default true; embedded maps turn it off. */
   showPlayback?: boolean;
+  /**
+   * Playback of the company map (issue #173): every item plays, pipeline and servicing, and what is inside a closed card
+   * is counted on the card. Default false: a process's own items only, on the steps drawn.
+   */
+  playbackRollUp?: boolean;
   /** Offer the swimlane view (when the map has no groups). Default true. */
   showLanes?: boolean;
   /**
@@ -911,6 +916,7 @@ function Canvas({
   focus = null,
   zoomControls = true,
   showPlayback = true,
+  playbackRollUp = false,
   showLanes = true,
   height: heightProp,
   onStepClick,
@@ -1010,7 +1016,8 @@ function Canvas({
   const [menu, setMenu] = useState<(MenuState & { bounds: { width: number; height: number } }) | null>(null);
   // Which step's menu is open, synchronously, so the context-menu event that follows Shift+F10 doesn't reopen it.
   const menuFor = useRef<string | null>(null);
-  const playback = usePlayback(bundle, result);
+  const playbackGroups = useMemo(() => (playbackRollUp ? { open: drawn } : null), [playbackRollUp, drawn]);
+  const playback = usePlayback(bundle, result, playbackGroups);
 
   const warnings = useMemo(() => (editable && !handoffs ? stepWarnings(bundle) : new Map<string, string>()), [bundle, editable, handoffs]);
   const order = useMemo(() => flowOrder(bundle), [bundle]);

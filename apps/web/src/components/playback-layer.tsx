@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PlaybackClock } from "@/lib/playback/clock";
 import { QUEUE_MAX_DRAWN, pointAlong, queueSlot, samplePath, type SampledPath } from "@/lib/playback/paths";
 import type { PlaybackIndex } from "@/lib/playback/trace-index";
-import type { PlaybackStep } from "@/lib/playback/use-playback";
+import { countsOf, type PlaybackStep } from "@/lib/playback/use-playback";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -97,6 +97,9 @@ export function PlaybackLayer({ clock, index, steps, bottleneck, reducedMotion }
 
     const draw = () => {
       const { index, steps, bottleneck, reducedMotion } = props.current;
+      // Steps inside a closed group queue on the card that holds them.
+      const drawnAs = new Map<string, string>();
+      for (const s of steps) for (const m of s.members ?? []) drawnAs.set(m, s.id);
       const { active } = clock.getState();
       svg.style.display = active ? "" : "none";
       badgeRoot.style.display = active ? "" : "none";
@@ -113,7 +116,7 @@ export function PlaybackLayer({ clock, index, steps, bottleneck, reducedMotion }
         place(circle(n++), pt.x, pt.y, tok.outcome === "lost" ? "playback-token lost" : "playback-token");
       }
       for (const [step, ids] of frame.queued) {
-        const node = nodeLookup.get(step);
+        const node = nodeLookup.get(drawnAs.get(step) ?? step);
         if (!node) continue;
         const { x, y } = node.internals.positionAbsolute;
         const height = node.measured.height ?? 0;
@@ -134,7 +137,7 @@ export function PlaybackLayer({ clock, index, steps, bottleneck, reducedMotion }
           const done = index.endedBy(s.id, t);
           text = done ? String(done) : "";
         } else {
-          const c = index.counts(s.id, t);
+          const c = countsOf(index, s, t);
           text = [c.queued && `${c.queued} queued`, c.service && `${c.service} active`, c.waiting && `${c.waiting} waiting`]
             .filter(Boolean)
             .join(" · ");

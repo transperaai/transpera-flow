@@ -6,6 +6,7 @@
 // "AI analysis isn't set up". On the public demo the text is written in advance and "Run again" calls nothing.
 
 import Link from "next/link";
+import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AI_NOT_SET_UP, type AiMode, type AiPanelData } from "@/lib/ai/types";
@@ -20,6 +21,7 @@ export function AiRead({
   ai,
   firstPrinciplesHref,
   canRun = true,
+  short = false,
 }: {
   mode: AiMode;
   /** "company" on the Overview, "process" on a process page: only the wording differs. */
@@ -29,21 +31,29 @@ export function AiRead({
   firstPrinciplesHref?: string;
   /** False on an earlier version, where nothing can be run. */
   canRun?: boolean;
+  /** Show the first paragraph only, with a button for the rest (the Overview's findings tier, issue #173). */
+  short?: boolean;
 }) {
   const { view, configured, hasFirstPrinciples, versionNumber } = ai;
   const demo = mode === "demo";
   const { pending, message, run } = useAiRun(demo, processId);
   const runnable = canRun && mode !== "readonly" && (demo || (configured && hasFirstPrinciples));
+  const [whole, setWhole] = useState(false);
 
   let body;
   if (view && view.summary.length) {
     body = (
       <>
-        {view.summary.map((p, i) => (
+        {(short && !whole ? view.summary.slice(0, 1) : view.summary).map((p, i) => (
           <p key={i} className="max-w-[75ch] text-sm leading-relaxed">
             {p}
           </p>
         ))}
+        {short && view.summary.length > 1 && (
+          <button type="button" className="self-start text-xs font-medium text-accent hover:underline" aria-expanded={whole} onClick={() => setWhole((w) => !w)} data-ai-read-more>
+            {whole ? "Show less" : "Read the rest"}
+          </button>
+        )}
         <p className="text-xs text-muted-foreground" data-ai-read-footer>
           {versionNumber ? `Version ${versionNumber}, ` : ""}written {when(view.at)}
           {view.model ? ` by ${view.model}` : ""}

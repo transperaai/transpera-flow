@@ -1,14 +1,14 @@
 "use client";
 
-// The Overview's two trend charts (issue #100, A35), drawn by hand in SVG and CSS from the theme's tokens: no
-// chart library is in the app. Each says what it shows in words for a screen reader, and carries the same numbers
+// The monthly recurring revenue chart (issue #100, A35; the Solution page's since B15 took revenue off the Overview), drawn
+// by hand in SVG and CSS from the theme's tokens: no chart library is in the app. Each says what it shows in words for a screen reader, and carries the same numbers
 // in a table only a screen reader sees. Colours come from the tokens (`--accent`, `--chart-*`, the rating colours),
 // so both themes work, and no meaning rests on colour alone: values are written next to the marks.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { useEffect, useRef, useState } from "react";
+import { formatCurrency } from "@/lib/format";
 import { labelIndexes, monthLabel, niceTicks } from "@/lib/overview/axis";
-import type { MrrPoint, RoleBusy } from "@/lib/overview/projection";
+import type { MrrPoint } from "@/lib/overview/projection";
 
 /** The width of an element, following it as it resizes (0 until it is measured). */
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
@@ -159,58 +159,5 @@ export function MrrChart({
         </tbody>
       </table>
     </div>
-  );
-}
-
-/** How busy each role is: a bar to the average, a whisker for the 10-90% range, and a dashed line where "too busy" starts. */
-export function RoleBusyChart({ roles, busyLine }: { roles: RoleBusy[]; busyLine: number }) {
-  const top = Math.max(1.1, busyLine + 0.15, ...roles.map((r) => r.hi * 1.05));
-  const at = (v: number) => `${(Math.min(v, top) / top) * 100}%`;
-  const tone = (v: number) => (v >= 0.95 ? "var(--rate-risk)" : v >= busyLine ? "var(--rate-bad)" : "var(--accent)");
-  return (
-    <div>
-      <ul className="flex flex-col" aria-label="How busy each role is">
-        {roles.map((r) => (
-          <li key={r.id} className="grid grid-cols-[minmax(6.5rem,9.5rem)_minmax(0,1fr)_4.5rem] sm:grid-cols-[minmax(6.5rem,9.5rem)_minmax(0,1fr)_9.5rem] items-center gap-x-3 py-1.5 text-sm">
-            <span className="truncate" title={r.name}>
-              {r.name}
-            </span>
-            <span className="relative h-5">
-              <span className="absolute inset-y-0 left-0 right-0 rounded-sm bg-muted/60" />
-              <span className="absolute top-1/2 left-0 h-3 -translate-y-1/2 rounded-sm" style={{ width: at(r.mean), minWidth: 2, background: tone(r.mean) }} />
-              <span className="absolute top-1/2 h-px -translate-y-1/2 bg-fg-2" style={{ left: at(r.lo), width: `calc(${at(r.hi)} - ${at(r.lo)})` }} />
-              <span className="absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-fg-2" style={{ left: at(r.lo) }} />
-              <span className="absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-fg-2" style={{ left: at(r.hi) }} />
-              <span aria-hidden className="absolute inset-y-0 w-0 border-l border-dashed border-fg-3" style={{ left: at(busyLine) }} />
-            </span>
-            <span className="text-right tabular-nums">
-              <b className="font-semibold">{formatPercent(r.mean)}</b>
-              <span className="sr-only ml-1 text-xs text-muted-foreground sm:not-sr-only sm:inline">
-                {formatPercent(r.lo)}–{formatPercent(r.hi)}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-      <div className="grid grid-cols-[minmax(6.5rem,9.5rem)_minmax(0,1fr)_4.5rem] sm:grid-cols-[minmax(6.5rem,9.5rem)_minmax(0,1fr)_9.5rem] gap-x-3 text-[11px] text-muted-foreground">
-        <span />
-        <span className="relative h-4">
-          <span className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: at(busyLine) }}>
-            {formatPercent(busyLine)} line
-          </span>
-        </span>
-        <span />
-      </div>
-    </div>
-  );
-}
-
-/** A legend entry: a swatch and a word. */
-export function LegendItem({ children, swatch }: { children: ReactNode; swatch: ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      {swatch}
-      {children}
-    </span>
   );
 }
