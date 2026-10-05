@@ -5,6 +5,10 @@ export interface SimRequest {
   model: EngineModel;
   reps: number;
   seed: number;
+  /** Month-by-month numbers too (`SimulationResult.monthly`; the forecast, issue #35). */
+  monthly?: boolean;
+  /** With `monthly`: where each month after the first starts, in working hours (calendar months; see `calendarMonthStarts`). */
+  monthStarts?: number[];
 }
 
 export type SimResponse =

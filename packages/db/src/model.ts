@@ -44,6 +44,12 @@ const nextDay = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + DAY_M
 export interface ModelOptions {
   /** ISO date the simulation starts on; leave and start/end dates are measured from it. Defaults to today. */
   startDate?: string;
+  /**
+   * The forecast (issue #35): planned hires (people whose start date is after the start date) join the run on their
+   * start date, and people with an end date leave it then. Off (the default): the team employed on the start date,
+   * for the whole run, as every other screen simulates it.
+   */
+  planned?: boolean;
 }
 
 export class ModelError extends Error {}
@@ -265,7 +271,7 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   }
 
   const startDate = options.startDate ?? new Date().toISOString().slice(0, 10);
-  const people = resolvePeopleRows(bundle, working, startDate);
+  const people = resolvePeopleRows(bundle, working, startDate, options.planned === true);
   const demand = engineDemand(bundle, startDate);
   // Client groups replace the named roster, which stays stored but is not simulated.
   const clientGroups = engineClientGroups(bundle, services);
@@ -629,15 +635,17 @@ function engineDemand(bundle: ProcessBundle, startDate: string): EngineDemand | 
  * steps of this process they are skilled for, and leave as simulation hours.
  * Returns undefined when the workspace has no people, so head-counts apply.
  */
-function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string) {
+function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string, planned = false) {
   const s = bundle.workspace.settings;
   const hoursPerDay = s.hours_per_week / WORKING_DAYS_PER_WEEK;
   const roleIds = new Set(bundle.roles.map((r) => r.id));
   const stepIds = new Set(working.map((st) => st.id));
   const employed = bundle.people
     .filter((p) => p.active)
-    .filter((p) => (!p.start_date || p.start_date <= startDate) && (!p.end_date || p.end_date >= startDate))
+    .filter((p) => (planned || !p.start_date || p.start_date <= startDate) && (!p.end_date || p.end_date >= startDate))
     .sort(byIdAsc);
+  /** Hours from the start date to the start of `iso` (a planned start), or to the end of it (an end date). */
+  const hoursTo = (iso: string) => workingDaysBetween(startDate, iso) * hoursPerDay;
   if (!employed.length) return undefined;
 
   const people: Record<string, EnginePerson> = {};
@@ -661,6 +669,8 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
       ...(p.cost_rate != null ? { cost: Number(p.cost_rate) } : {}),
       ...(skillRows.length ? { skills: skillRows.map((k) => k.step_id).filter((id) => stepIds.has(id)).sort() } : {}),
       ...(leave.length ? { leave } : {}),
+      ...(planned && p.start_date && p.start_date > startDate ? { from: hoursTo(p.start_date) } : {}),
+      ...(planned && p.end_date ? { until: hoursTo(nextDay(p.end_date)) } : {}),
     };
   }
   return people;
