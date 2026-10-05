@@ -46,17 +46,17 @@ async function refused(run: Promise<unknown>, code: string, why: RegExp) {
 
 let counter = 0;
 /** A workspace with an editor and a viewer; `names` made the ordinary way by the editor (each gets a card on the map), published. */
-async function world(names: [string, "pipeline" | "servicing"][]) {
+async function world<N extends string>(names: [N, "pipeline" | "servicing"][]) {
   const n = ++counter;
   const [{ id: ws }] = await q("insert into workspaces (name, slug) values ($1, $2) returning id", [`Archive ${n}`, `archive-${n}`]);
   for (const [user, role] of [[editor, "editor"], [viewer, "viewer"]] as const) {
     await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
   }
   const [{ id: cid }] = await q("select id from processes where workspace_id = $1 and is_company", [ws]);
-  const p: Record<string, string> = {};
+  const p = {} as Record<N, string>;
   for (const [name, kind] of names) {
     p[name] = await commitAs(editor.claims, async (c) => (await c.query("insert into processes (workspace_id, name, kind) values ($1, $2, $3) returning id", [ws, name, kind])).rows[0].id as string);
-    await publishWith(ws, p[name]!, []);
+    await publishWith(ws, p[name], []);
   }
   return { ws, cid, p };
 }
