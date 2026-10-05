@@ -6,7 +6,7 @@
 
 import { useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { ProcessBundle } from "@transpera-flow/db";
-import { Help } from "@/components/help";
+import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Selection } from "@/components/process-canvas";
@@ -112,7 +112,9 @@ function LibraryGroup({
   if (!entries.length && !empty) return null;
   return (
     <div className="flex flex-col gap-0.5" role="group" aria-label={title}>
-      <h3 className="text-xs font-medium text-fg-2">{title}</h3>
+      <h3>
+        <HelpLabel label={title} description={title === "On the map" ? "These already have a card on this map, or sit inside another process. A process can be on the map once, so they can't be added again." : "Processes with no card on this map. Tick the ones you want, then press Add."} example={title === "On the map" ? "Sales already has a card here, so it is greyed out." : "Tick Sales and Onboarding, press Add, and two cards appear."} />
+      </h3>
       {!entries.length && <p className="text-xs text-muted-foreground">{empty}</p>}
       {entries.map((e) => {
         const disabled = e.state !== "free";

@@ -44,7 +44,8 @@ describe("what the library lists", () => {
     };
     const off = without(nested, a, c, d);
     const entries = libraryEntries(off);
-    expect(entries.map((e) => e.state)).toEqual([...entries.map((e) => e.state)].sort((x, y) => ({ free: 0, placed: 1, inside: 2 })[x.state] - ({ free: 0, placed: 1, inside: 2 })[y.state]));
+    const rank = { free: 0, placed: 1, inside: 2 } as const;
+    expect(entries.map((e) => e.state)).toEqual(entries.map((e) => e.state).sort((x, y) => rank[x] - rank[y]));
     expect(entries.filter((e) => e.state === "free").map((e) => e.id).sort()).toEqual([a, c].sort());
     const inside = entries.find((e) => e.id === d)!;
     expect(inside).toMatchObject({ state: "inside", insideName: parts[0]!.process.name });
