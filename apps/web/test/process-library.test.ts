@@ -89,6 +89,23 @@ describe("placing processes", () => {
     expect(placed.edit.label).toBe(`Added ${ids.length - 1} processes to the map`);
   });
 
+  it("keeps clear of the ghost of a card the draft removed, which is still drawn where it is live", () => {
+    const b = companyBundle();
+    const target = b.otherProcesses![0]!.process;
+    const removed = b.steps.find((s) => s.child_process_id === target.id)!;
+    const off = without(b, target.id);
+    const ghost = { x: Number(removed.x), y: Number(removed.y), width: CARD_SIZE.width, height: CARD_SIZE.height };
+    // The view's centre is on the ghost's own place: the new card is put beside it, not on it.
+    const centre = { x: ghost.x + ghost.width / 2, y: ghost.y + ghost.height / 2 };
+    const placed = placeProcesses(off, [target.id], { x: centre.x, y: centre.y, occupied: [ghost] })!;
+    const card = applyEdit(off, placed.edit).steps.find((s) => placed.ids.includes(s.id))!;
+    expect(overlap({ x: Number(card.x), y: Number(card.y) }, ghost)).toBe(false);
+    // Without the ghost known, it would have gone right on it.
+    const naive = placeProcesses(off, [target.id], { x: centre.x, y: centre.y })!;
+    const onTop = applyEdit(off, naive.edit).steps.find((s) => naive.ids.includes(s.id))!;
+    expect(overlap({ x: Number(onTop.x), y: Number(onTop.y) }, ghost)).toBe(true);
+  });
+
   it("writes only holder steps: no edge, no update, and nothing about the processes themselves", () => {
     const b = companyBundle();
     const target = b.otherProcesses![0]!.process;

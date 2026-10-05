@@ -75,6 +75,8 @@ export interface ViewHint {
   visible?: { left: number; top: number; right: number; bottom: number };
   /** Each card's measured size, by step id (else a typical card). */
   sizes?: ReadonlyMap<string, Size>;
+  /** Places the map draws something that is not a step of the draft (the ghosts of steps the draft removed, drawn where they are live), kept clear too. */
+  occupied?: readonly { x: number; y: number; width: number; height: number }[];
 }
 export type ViewRef = { current: (() => ViewHint | null) | null };
 
@@ -97,7 +99,8 @@ export function nearestFreeSpot(bundle: ProcessBundle, view: ViewHint, size: Siz
     .map((s) => {
       const z = footprint(bundle, s, view.sizes);
       return { x: Number(s.x), y: Number(s.y), w: z.width, h: z.height };
-    });
+    })
+    .concat((view.occupied ?? []).map((o) => ({ x: o.x, y: o.y, w: o.width, h: o.height })));
   const x0 = view.x - size.width / 2;
   const y0 = view.y - size.height / 2;
   const free = (x: number, y: number) =>

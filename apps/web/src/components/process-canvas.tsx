@@ -91,7 +91,7 @@ import type { EditorState, ProcessEditor } from "@/lib/editor/editor";
 import type { InlineField } from "@/lib/editor/inline-edit";
 import type { Table } from "@/lib/editor/ops";
 import { laneLayout, type Lane } from "@/lib/editor/lanes";
-import { groupIds, openGroupSize } from "@/lib/map/groups";
+import { CARD_SIZE, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/groups";
 import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { RATING_STYLE, ratingOfRank } from "@/lib/map/rating";
 import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
@@ -992,12 +992,19 @@ function Canvas({
       if (!rect || !rect.width || !rect.height) return null;
       const from = flow.screenToFlowPosition({ x: rect.left, y: rect.top });
       const to = flow.screenToFlowPosition({ x: rect.right, y: rect.bottom });
-      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured };
+      // Steps the draft removed are still drawn where they are live (as ghosts): a new card does not go on one of them.
+      const occupied = [...(diff?.steps.values() ?? [])]
+        .filter((c) => c.kind === "removed" && c.live && (c.live.parent_step_id ?? null) === null)
+        .map((c) => {
+          const size = measured.get(ghostId(c.live!.id)) ?? (c.live!.kind === "start" || c.live!.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
+          return { x: Number(c.live!.x), y: Number(c.live!.y), width: size.width, height: size.height };
+        });
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied };
     };
     return () => {
       viewRef.current = null;
     };
-  }, [viewRef, flow, measured]);
+  }, [viewRef, flow, measured, diff]);
   const [lanes, setLanes] = useState(false);
   const [editing, setEditing] = useState<{ id: string; field: InlineField } | null>(null);
   const [menu, setMenu] = useState<(MenuState & { bounds: { width: number; height: number } }) | null>(null);
