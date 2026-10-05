@@ -5,8 +5,10 @@ import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { demoAiView } from "@/lib/ai/demo";
-import { processRatings } from "@/lib/processes/rows";
-import { DEMO_LIVE_VERSION, demoBundleAtVersion } from "@/lib/history/demo";
+import { processRatings, trailOf } from "@/lib/processes/rows";
+import { DEMO_LIVE_VERSION, demoBundleAtVersion, demoHistory } from "@/lib/history/demo";
+import { authorLabel } from "@/lib/history/versions";
+import { demoProposals } from "@/lib/suggestions/demo";
 import { parseVersion } from "@/lib/process-version";
 import { withDemoGroups } from "@/lib/demo/nested";
 import { demoBundle, demoSources } from "@/lib/sources/demo";
@@ -28,6 +30,8 @@ export default async function DemoProcessPage(props: PageProps<"/demo/p/[process
   const bundle = earlier ?? live;
   const processes = processesOf(pipeline).map((p) => ({ id: p.id, name: p.name, kind: p.kind, live: true, draft: false, parentId: p.parent_process_id }));
   const hrefs = Object.fromEntries(processes.map((p) => [p.id, `/demo/p/${p.id}`]));
+  const byId = new Map(processes.map((p) => [p.id, { id: p.id, name: p.name, parentId: p.parentId }]));
+  const latest = demoHistory(bundle.process.id)?.versions[0] ?? null;
   const ratings = processRatings(processes, northbeamIssues(), [...pipeline.steps, ...(pipeline.otherProcesses ?? []).flatMap((p) => p.steps)]);
   return (
     <ProcessPage
@@ -43,6 +47,12 @@ export default async function DemoProcessPage(props: PageProps<"/demo/p/[process
       editHref={`/demo/edit?process=${bundle.process.id}${nested === "1" ? "&nested=1" : ""}`}
       historyHref={`/demo/p/${bundle.process.id}/history`}
       solutions={{ data: { solutions: [], links: [] }, base: "/demo" }}
+      ideaIssueIds={demoProposals().flatMap((p) => (p.kind === "solution_idea" && p.status === "pending" && p.issue_id ? [p.issue_id] : []))}
+      aboutInfo={{
+        trail: trailOf({ id: bundle.process.id, parentId: bundle.process.parent_process_id }, byId).map((t) => t.name),
+        hasDraft: false,
+        lastChange: latest ? { at: latest.publishedAt, by: authorLabel(latest) } : null,
+      }}
       firstPrinciples={{ doc: null, href: `/demo/p/${bundle.process.id}/first-principles` }}
       // Written in advance: the demo never calls an AI. Only the pipeline has text.
       ai={{ view: earlier ? null : demoAiView(bundle.process.id), configured: true, hasFirstPrinciples: true, versionNumber: earlier ? earlier.revision.number : DEMO_LIVE_VERSION }}
