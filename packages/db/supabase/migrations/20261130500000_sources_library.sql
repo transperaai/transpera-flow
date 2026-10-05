@@ -17,6 +17,7 @@
 --   select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'user_tours';  -- 0
 --   select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'search_sources';  -- 0
 --   select pg_get_constraintdef(oid) from pg_constraint where conname = 'sources_kind';  -- allows transcript, notes, data, screenshot
+--   select count(*) from supabase_migrations.schema_migrations where version = '20261130000000';  -- 1 (B12 2/2 applied first)
 --   select count(*) from supabase_migrations.schema_migrations where version > '20261130500000';  -- 0 (nothing later is applied)
 --
 -- POST-APPLY CHECK:
@@ -26,9 +27,11 @@
 --   select relrowsecurity from pg_class where oid = 'public.user_tours'::regclass;  -- true
 --
 -- ROLLBACK (run in this order; roll the app back first: it calls the function and reads the table. Tour dismissals are lost, so
--- everyone sees each tour once more. Sources of the new kinds must be changed or deleted first, or the check cannot be narrowed):
+-- everyone sees each tour once more. Sources of the new kinds are rewritten to `notes` first (their text and links stay), or the
+-- check cannot be narrowed):
 --
 --   begin;
+--   update public.sources set kind = 'notes' where kind in ('sop','spreadsheet','other');
 --   drop function if exists public.search_sources(uuid, text, text, uuid, boolean, text, integer, integer);
 --   drop table if exists public.user_tours;
 --   alter table public.sources drop constraint sources_kind,
@@ -131,7 +134,7 @@ as $$
     case when p_sort = 'oldest' then coalesce(h.recorded_at, h.created_at::date) end asc,
     case when p_sort = 'title' then lower(h.title) end asc,
     case when p_sort = 'title-desc' then lower(h.title) end desc,
-    case when p_sort not in ('oldest', 'title', 'title-desc') then coalesce(h.recorded_at, h.created_at::date) end desc,
+    case when coalesce(p_sort, 'newest') not in ('oldest', 'title', 'title-desc') then coalesce(h.recorded_at, h.created_at::date) end desc,
     lower(h.title), h.id
   limit least(greatest(coalesce(p_limit, 50), 1), 200)
   offset greatest(coalesce(p_offset, 0), 0);
