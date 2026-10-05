@@ -515,7 +515,7 @@ function Values({ p }: { p: CalibrationProposal }) {
       <span className="col-start-2 flex flex-col gap-0.5 text-sm sm:col-span-2 sm:col-start-auto">
         {p.branches!.map((b) => (
           <span key={b.edgeId} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 sm:grid-cols-2">
-            <span className="truncate">
+            <span className="min-w-0 break-words">
               <span className="text-muted-foreground">to {b.toName}</span> <span className="tabular-nums">{b.current === null ? "—" : formatPercent(b.current)}</span>
             </span>
             <span className="tabular-nums font-medium">
