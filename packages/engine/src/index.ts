@@ -234,6 +234,7 @@ export {
   localExecutor,
   parameterLabel,
   plannedReplications,
+  leadsProvenance,
   provenanceFromRows,
   provenanceSource,
   robustness,
@@ -361,3 +362,19 @@ export {
   type AnalysisSettingsResult,
   type ResolvedAnalysisRule,
 } from "./analysis-settings";
+export {
+  CALIBRATION_MIN_SAMPLE,
+  CALIBRATION_MIN_WEEKS,
+  calibrate,
+  type CalibrationBranch,
+  type CalibrationEdge,
+  type CalibrationInput,
+  type CalibrationKind,
+  type CalibrationLeadSource,
+  type CalibrationProposal,
+  type CalibrationResult,
+  type CalibrationStep,
+  type CalibrationStepKind,
+  type CalibrationValueSource,
+  type StepLogRow,
+} from "./calibration";
