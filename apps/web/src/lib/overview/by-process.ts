@@ -1,10 +1,15 @@
 // "Findings by process" on the Overview (issue #173, B15): the insights and tracked issues grouped by the process they
 // sit in, each group with its rating, its top finding and its counts, and an "Across the company" group first for what
 // sits in no single process (how busy roles and people are, client groups and churn, the forecast). Pure.
+//
+// A group's rating is the one the map, the process page and the Processes table give the process (decision D24): the worst
+// of its confirmed open issues, never what a run only detected (`processRatings`). Insights not yet acknowledged show as
+// "N new insights", and the top finding carries its own rating.
 
 import { isActiveStatus, isVisibleIssue, type IssueRow, type ProcessPart, type SolutionRow } from "@transpera-flow/db";
 import { compareRatingsDesc, ratingOfStored, type DetectedIssue, type Rating } from "@transpera-flow/engine";
 import type { Insight } from "@/lib/insights/insights";
+import { processRatings } from "@/lib/processes/rows";
 import { worseOf } from "./health";
 
 /** The id of the "Across the company" group. */
@@ -49,8 +54,11 @@ export interface FindingGroup {
   /** A process id, or `COMPANY_GROUP`. */
   id: string;
   name: string;
-  /** The worst rating among its open issues and the insights not yet dealt with; Great when there are none. */
-  rating: Rating;
+  /**
+   * The worst rating among its confirmed open issues (a Great one is not a problem), as the map and the Processes table
+   * rate it; null ("Not rated") when it has none.
+   */
+  rating: Rating | null;
   /** Its insights, worst first (as the register sorts them). */
   insights: Insight[];
   /** Its tracked issues, every status (what the expanded list matches insights against). */
@@ -73,7 +81,7 @@ const isOpenInsight = (i: Insight) => !i.issue || isActiveStatus(i.issue.status)
  * in the order given.
  */
 export function findingsByProcess(input: {
-  parts: readonly Pick<ProcessPart, "process" | "steps">[];
+  parts: readonly { process: Pick<ProcessPart["process"], "id" | "name" | "kind" | "parent_process_id">; steps: ProcessPart["steps"] }[];
   pipelineId: string;
   insights: readonly Insight[];
   issues: readonly IssueRow[];
@@ -86,7 +94,12 @@ export function findingsByProcess(input: {
   const implemented = new Set(issues.flatMap((i) => (i.status === "resolved" && i.resolved_solution_id ? [i.resolved_solution_id] : [])));
 
   const groups = new Map<string, FindingGroup>();
-  const empty = (id: string, name: string): FindingGroup => ({ id, name, rating: "great", insights: [], issues: [], openIssues: 0, newInsights: 0, solutionsInProgress: 0, top: null });
+  const ratings = processRatings(
+    parts.map((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, parentId: p.process.parent_process_id })),
+    issues.filter(isVisibleIssue),
+    parts.flatMap((p) => p.steps),
+  );
+  const empty = (id: string, name: string): FindingGroup => ({ id, name, rating: null, insights: [], issues: [], openIssues: 0, newInsights: 0, solutionsInProgress: 0, top: null });
   groups.set(COMPANY_GROUP, empty(COMPANY_GROUP, "Across the company"));
   for (const p of parts) groups.set(p.process.id, empty(p.process.id, p.process.name));
   const at = (id: string) => groups.get(id) ?? groups.get(COMPANY_GROUP)!;
@@ -105,10 +118,11 @@ export function findingsByProcess(input: {
     const open = g.issues.filter((i) => isActiveStatus(i.status));
     g.openIssues = open.length;
     g.newInsights = g.insights.filter((i) => !i.issue).length;
-    let rating: Rating | null = null;
-    for (const i of g.insights) if (isOpenInsight(i)) rating = worseOf(rating, i.rating);
-    for (const i of open) rating = worseOf(rating, ratingOfStored(i.severity));
-    g.rating = rating ?? "great";
+    if (g.id === COMPANY_GROUP) {
+      let rating: Rating | null = null;
+      for (const i of open) if (ratingOfStored(i.severity) !== "great") rating = worseOf(rating, ratingOfStored(i.severity));
+      g.rating = rating;
+    } else g.rating = ratings[g.id] ?? null;
     const topInsight = g.insights.find(isOpenInsight);
     const topIssue = [...open].sort((a, b) => compareRatingsDesc(ratingOfStored(a.severity), ratingOfStored(b.severity)))[0];
     g.top = topInsight ? { title: topInsight.title, rating: topInsight.rating } : topIssue ? { title: topIssue.title, rating: ratingOfStored(topIssue.severity) } : null;

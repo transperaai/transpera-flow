@@ -7,7 +7,7 @@ import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber } from "@/lib/format";
-import { flowEfficiencyWords, type OpenIssues } from "@/lib/overview/health";
+import { flowEfficiencyWords, type OpenIssues, type ProcessHealth } from "@/lib/overview/health";
 import type { Delivered } from "@/lib/overview/impact";
 import { cn } from "@/lib/utils";
 
@@ -56,8 +56,8 @@ export function Meter({ parts, label }: { parts: { key: string; value: number; f
   );
 }
 
-/** Counts by rating as a line of dots and numbers, worst first. */
-function RatingLine({ counts }: { counts: { rating: Rating; count: number }[] }) {
+/** Counts by rating as a line of dots and numbers, worst first, then any not rated. */
+function RatingLine({ counts, notRated = 0 }: { counts: { rating: Rating; count: number }[]; notRated?: number }) {
   return (
     <ul className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs text-muted-foreground">
       {counts.map((c) => (
@@ -66,6 +66,12 @@ function RatingLine({ counts }: { counts: { rating: Rating; count: number }[] })
           <b className="font-semibold text-foreground tabular-nums">{c.count}</b> {RATING_LABELS[c.rating]}
         </li>
       ))}
+      {notRated > 0 && (
+        <li className="inline-flex items-center gap-1" data-rating="none">
+          <i aria-hidden className="size-2 rounded-full" style={{ background: "var(--line-2)" }} />
+          <b className="font-semibold text-foreground tabular-nums">{notRated}</b> Not rated
+        </li>
+      )}
     </ul>
   );
 }
@@ -74,23 +80,25 @@ const ratingParts = (counts: { rating: Rating; count: number }[]) => counts.map(
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatNumber(n, 0)} ${n === 1 ? one : many}`;
 
-export function ProcessHealthCard({ counts }: { counts: { rating: Rating; count: number }[] | null }) {
-  const total = counts?.reduce((a, c) => a + c.count, 0) ?? 0;
-  const attention = counts?.filter((c) => c.rating === "risk" || c.rating === "bad").reduce((a, c) => a + c.count, 0) ?? 0;
+/** Processes by the rating the map and the Processes table give them: the worst of their confirmed open issues. */
+export function ProcessHealthCard({ health }: { health: ProcessHealth | null }) {
   return (
-    <HealthCard id="process-health" label="Process health" busy={!counts}>
-      {!counts ? (
+    <HealthCard id="process-health" label="Process health" busy={!health}>
+      {!health ? (
         <Loading />
-      ) : total === 0 ? (
+      ) : health.total === 0 ? (
         <p className="text-sm text-muted-foreground">No process is published yet.</p>
       ) : (
         <>
           <p className={VALUE}>
-            {attention ? `${attention} of ${total}` : `${total} of ${total}`}
-            <span className="ml-1.5 text-sm font-normal text-muted-foreground">{attention ? "need attention" : "running well"}</span>
+            {health.attention ? `${health.attention} of ${health.total}` : `${health.total} of ${health.total}`}
+            <span className="ml-1.5 text-sm font-normal text-muted-foreground">{health.attention ? "need attention" : "running well"}</span>
           </p>
-          <Meter parts={ratingParts(counts)} label={counts.map((c) => `${c.count} ${RATING_LABELS[c.rating]}`).join(", ")} />
-          <RatingLine counts={counts.filter((c) => c.count > 0)} />
+          <Meter
+            parts={[...ratingParts(health.byRating), { key: "none", value: health.notRated, fill: "var(--line-2)" }]}
+            label={[...health.byRating.filter((c) => c.count).map((c) => `${c.count} ${RATING_LABELS[c.rating]}`), ...(health.notRated ? [`${health.notRated} not rated`] : [])].join(", ")}
+          />
+          <RatingLine counts={health.byRating.filter((c) => c.count > 0)} notRated={health.notRated} />
         </>
       )}
     </HealthCard>
@@ -155,39 +163,49 @@ export function FlowEfficiencyCard({ share, span, error = false }: { share: numb
 const hours = (h: number) => `${formatNumber(Math.abs(h), Math.abs(h) < 10 ? 1 : 0)} h`;
 const days = (d: number) => `${formatNumber(Math.abs(d), Math.abs(d) < 10 ? 1 : 0)} ${Math.abs(d) === 1 ? "day" : "days"}`;
 
-export function ImprovementCard({ delivered, status }: { delivered: Delivered | null; status: "running" | "done" | "error" }) {
+export function ImprovementCard({ delivered, status, unmeasured = 0 }: { delivered: Delivered | null; status: "running" | "done" | "error"; unmeasured?: number }) {
   if (status === "running")
     return (
       <HealthCard id="improvement" label="Improvement delivered" busy>
         <Loading />
       </HealthCard>
     );
+  const couldnt = unmeasured > 0 && (
+    <p className="text-xs text-muted-foreground" data-unmeasured>
+      Couldn&apos;t measure {plural(unmeasured, "implemented solution")}: the version {unmeasured === 1 ? "it was" : "they were"} copied from isn&apos;t available, or{" "}
+      {unmeasured === 1 ? "it" : "they"} can&apos;t be simulated.
+    </p>
+  );
   if (status === "error" || !delivered)
     return (
       <HealthCard id="improvement" label="Improvement delivered">
         <p className="text-sm text-muted-foreground" data-empty>
-          {status === "error" ? "The before and after of your solutions couldn't be worked out." : "Nothing implemented yet."}
+          {status === "error" ? "The before and after of your solutions couldn't be worked out." : unmeasured > 0 ? "Nothing measured yet." : "Nothing implemented yet."}
         </p>
-        {status !== "error" && (
+        {couldnt}
+        {status !== "error" && unmeasured === 0 && (
           <p className="text-xs text-muted-foreground">When an issue is resolved by a solution, the hours a month it saves and the days it cuts from the time to complete show here, from the solution&apos;s before and after.</p>
         )}
       </HealthCard>
     );
   const saved = delivered.hoursSaved;
+  const cut = delivered.daysCut;
   return (
     <HealthCard id="improvement" label="Improvement delivered">
       <p className={cn(VALUE, saved < 0 && "text-warn")}>
         {hours(saved)}
         <span className="ml-1.5 text-sm font-normal text-muted-foreground">{saved >= 0 ? "a month saved" : "a month added"}</span>
       </p>
-      {delivered.daysCut !== null && (
-        <p className="text-xs text-muted-foreground">
-          {days(delivered.daysCut)} {delivered.daysCut >= 0 ? "cut from" : "added to"} the time to complete
+      {cut !== null && (
+        <p className="text-xs text-muted-foreground" data-days-cut>
+          {days(cut.days)} {cut.days >= 0 ? "cut from" : "added to"} {cut.processName}&apos;s time to complete
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        By {plural(delivered.count, "implemented solution")}, from each one&apos;s before and after.
+        By {plural(delivered.count, "implemented solution")}, each against the version it was copied from, at the same demand.
+        {delivered.superseded > 0 && ` ${plural(delivered.superseded, "earlier solution")} built from the same version ${delivered.superseded === 1 ? "isn't" : "aren't"} counted again.`}
       </p>
+      {couldnt}
     </HealthCard>
   );
 }

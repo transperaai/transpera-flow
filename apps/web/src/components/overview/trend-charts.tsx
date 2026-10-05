@@ -16,7 +16,7 @@ import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { niceTicks } from "@/lib/overview/axis";
 import { totalOf, type MonthCount, type ProcessTimeSplit } from "@/lib/overview/health";
-import type { SolutionImpact } from "@/lib/overview/impact";
+import { hoursAMonth, type SolutionImpact } from "@/lib/overview/impact-run";
 import { cn } from "@/lib/utils";
 
 /** The width of an element, following it as it resizes (0 until it is measured). */
@@ -401,9 +401,10 @@ export function BeforeAfterChart({ impacts, hoursPerWeek }: { impacts: SolutionI
       </p>
     );
   const day = hoursPerWeek / 5;
-  const value = (n: SolutionImpact["before"]) => (measure === "hours" ? n.handsOnPerMonth : n.cycleHours === null ? null : n.cycleHours / day);
+  // Hours a month at the same demand on both sides (the demand before), so a solution that lets more through isn't more work.
+  const value = (i: SolutionImpact, side: "before" | "after") => (measure === "hours" ? hoursAMonth(i)[side] : i[side].cycleHours === null ? null : i[side].cycleHours! / day);
   const unit = (v: number) => (measure === "hours" ? `${formatNumber(v, v < 10 ? 1 : 0)} h` : `${formatNumber(v, v < 10 ? 1 : 0)} d`);
-  const top = Math.max(1e-9, ...impacts.flatMap((i) => [value(i.before) ?? 0, value(i.after) ?? 0]));
+  const top = Math.max(1e-9, ...impacts.flatMap((i) => [value(i, "before") ?? 0, value(i, "after") ?? 0]));
   const label = measure === "hours" ? "Hands-on hours a month" : "Time to complete, in working days";
   return (
     <div ref={tipBox} className="relative flex flex-col gap-3">
@@ -435,8 +436,8 @@ export function BeforeAfterChart({ impacts, hoursPerWeek }: { impacts: SolutionI
       </div>
       <ul className="flex flex-col gap-3" data-before-after aria-label={label}>
         {impacts.map((i) => {
-          const b = value(i.before);
-          const a = value(i.after);
+          const b = value(i, "before");
+          const a = value(i, "after");
           const change = b !== null && a !== null ? a - b : null;
           return (
             <li key={i.id} className="flex flex-col gap-1" data-solution={i.id}>
@@ -489,8 +490,8 @@ export function BeforeAfterChart({ impacts, hoursPerWeek }: { impacts: SolutionI
           {impacts.map((i) => (
             <tr key={i.id}>
               <th scope="row">{i.name}</th>
-              <td>{value(i.before) === null ? "None done" : unit(value(i.before)!)}</td>
-              <td>{value(i.after) === null ? "None done" : unit(value(i.after)!)}</td>
+              <td>{value(i, "before") === null ? "None done" : unit(value(i, "before")!)}</td>
+              <td>{value(i, "after") === null ? "None done" : unit(value(i, "after")!)}</td>
             </tr>
           ))}
         </tbody>

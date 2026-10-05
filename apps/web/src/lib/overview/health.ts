@@ -5,6 +5,9 @@
 // - Time split by process: the same, process by process.
 // - Process health and open issues: counts by rating.
 // - Issues opened versus resolved, month by month.
+//
+// Months are calendar months in a time zone: the workspace's if it ever has one, else the browser's own (the reader's
+// month), the same for "resolved this month" and the chart. `timeZone` undefined means the browser's.
 
 import { isActiveStatus, isVisibleIssue, type IssueRow, type ProcessPart } from "@transpera-flow/db";
 import { RATINGS, ratingOfStored, worseRating, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
@@ -26,7 +29,7 @@ export interface ProcessTimeSplit extends TimeSplit {
 }
 
 /** The time split of each process that had any work in the run, in the order given. A process's own steps only (not those of processes inside it). */
-export function timeSplitByProcess(model: Pick<EngineModel, "steps">, result: Pick<SimulationResult, "steps" | "stepFacts">, parts: readonly Pick<ProcessPart, "process" | "steps">[]): ProcessTimeSplit[] {
+export function timeSplitByProcess(model: Pick<EngineModel, "steps">, result: Pick<SimulationResult, "steps" | "stepFacts" | "H">, parts: readonly Pick<ProcessPart, "process" | "steps">[]): ProcessTimeSplit[] {
   return parts.flatMap((p) => {
     const split = timeSplitOf(model, result, new Set(p.steps.map((s) => s.id)));
     const share = split ? workingShare(split) : null;
@@ -42,11 +45,43 @@ export function countByRating(items: readonly (Rating | null)[], none: Rating = 
   return RATINGS_WORST_FIRST.map((rating) => ({ rating, count: items.filter((r) => (r ?? none) === rating).length }));
 }
 
+export interface ProcessHealth {
+  /** Processes at each rating, worst first (every rating listed, zeros included). */
+  byRating: { rating: Rating; count: number }[];
+  /** Processes with no open issue worse than Great: "Not rated", as on the Processes page. */
+  notRated: number;
+  total: number;
+  /** Rated Operational risk or Bad, not urgent. */
+  attention: number;
+}
+
+/** The Process health card, from each process's rating as the map and the Processes page give it (null: not rated). */
+export function processHealth(ratings: readonly (Rating | null)[]): ProcessHealth {
+  const byRating = RATINGS_WORST_FIRST.map((rating) => ({ rating, count: ratings.filter((r) => r === rating).length }));
+  return {
+    byRating,
+    notRated: ratings.filter((r) => r === null).length,
+    total: ratings.length,
+    attention: ratings.filter((r) => r === "risk" || r === "bad").length,
+  };
+}
+
 /** A tracked issue still to deal with: open or having a solution tested. */
 export const isOpenIssue = (i: Pick<IssueRow, "status">): boolean => isVisibleIssue(i) && isActiveStatus(i.status);
 
-/** The calendar month of an ISO date, "2026-10", in UTC. */
-export const monthOf = (iso: string): string => iso.slice(0, 7);
+/** The calendar month of an instant, "2026-10", in `timeZone` (the browser's when undefined). */
+export function monthKey(at: Date, timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric" }).formatToParts(at);
+  const year = parts.find((p) => p.type === "year")!.value;
+  const month = parts.find((p) => p.type === "month")!.value.padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+/** The calendar month of an ISO timestamp, "2026-10", in `timeZone` (the browser's when undefined); "" when it isn't a date. */
+export function monthOf(iso: string, timeZone?: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : monthKey(d, timeZone);
+}
 
 export interface OpenIssues {
   /** Open issues by rating, worst first. */
@@ -56,14 +91,14 @@ export interface OpenIssues {
   resolvedThisMonth: number;
 }
 
-/** The Open issues card: open issues by rating, and how many were resolved this month. */
-export function openIssues(issues: readonly IssueRow[], now: Date): OpenIssues {
+/** The Open issues card: open issues by rating, and how many were resolved this calendar month (in `timeZone`). */
+export function openIssues(issues: readonly IssueRow[], now: Date, timeZone?: string): OpenIssues {
   const open = issues.filter(isOpenIssue);
-  const thisMonth = now.toISOString().slice(0, 7);
+  const thisMonth = monthKey(now, timeZone);
   return {
     byRating: countByRating(open.map((i) => ratingOfStored(i.severity))),
     total: open.length,
-    resolvedThisMonth: issues.filter((i) => i.status === "resolved" && i.resolved_at && monthOf(i.resolved_at) === thisMonth).length,
+    resolvedThisMonth: issues.filter((i) => i.status === "resolved" && i.resolved_at && monthOf(i.resolved_at, timeZone) === thisMonth).length,
   };
 }
 
@@ -83,24 +118,24 @@ export interface MonthCount {
  * issue counts as opened when it was logged or acknowledged, and as resolved in the month it was resolved (Won't fix and
  * dismissed insights don't count as resolved; a dismissed insight was never an issue).
  */
-export function openedVersusResolved(issues: readonly IssueRow[], now: Date, months = 6): MonthCount[] {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
+export function openedVersusResolved(issues: readonly IssueRow[], now: Date, months = 6, timeZone?: string): MonthCount[] {
+  const [y, m] = monthKey(now, timeZone).split("-").map(Number) as [number, number];
   const out: MonthCount[] = [];
   for (let k = months - 1; k >= 0; k--) {
-    const d = new Date(Date.UTC(y, m - k, 1));
-    const key = d.toISOString().slice(0, 7);
-    const mo = d.getUTCMonth();
+    // Month arithmetic on the calendar's numbers, so no time zone can shift a month.
+    const index = y * 12 + (m - 1) - k;
+    const year = Math.floor(index / 12);
+    const mo = index % 12;
     const short = MONTH_SHORT[mo]!;
-    out.push({ month: key, label: k === months - 1 || mo === 0 ? `${short} ${String(d.getUTCFullYear() % 100).padStart(2, "0")}` : short, opened: 0, resolved: 0 });
+    out.push({ month: `${year}-${String(mo + 1).padStart(2, "0")}`, label: k === months - 1 || mo === 0 ? `${short} ${String(year % 100).padStart(2, "0")}` : short, opened: 0, resolved: 0 });
   }
   const at = new Map(out.map((c) => [c.month, c]));
   for (const i of issues) {
     if (!isVisibleIssue(i)) continue;
-    const opened = at.get(monthOf(i.created_at));
+    const opened = at.get(monthOf(i.created_at, timeZone));
     if (opened) opened.opened++;
     if (i.status === "resolved" && i.resolved_at) {
-      const resolved = at.get(monthOf(i.resolved_at));
+      const resolved = at.get(monthOf(i.resolved_at, timeZone));
       if (resolved) resolved.resolved++;
     }
   }

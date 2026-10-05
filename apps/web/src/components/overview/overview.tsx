@@ -13,8 +13,11 @@
 //   horizon);
 // - one at the horizon picked, month by month, with planned hires, end dates and leave (the forecast's model, B6), which
 //   the map plays and the flow efficiency, time split, team load and the forecast's "too busy" alerts read.
+// When the two models are the same (the horizon is the workspace's length and nobody joins, leaves or is away), the one
+// run serves both.
 // Solutions' before and after (Improvement delivered, and its chart) add two runs per solution compared, in their own
-// worker, only once the two runs above are in and only when something needs them. The trend charts load on their own.
+// worker, only once the two runs above are first in and only when something needs them; they don't depend on the horizon
+// and are kept for the session, so changing the horizon doesn't run them again. The trend charts load on their own.
 
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import type { FirstPrinciples } from "@transpera-flow/engine";
@@ -43,7 +46,7 @@ import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { sortFindings } from "@/lib/overview/findings";
 import { COMPANY_GROUP, findingsByProcess, type FindingGroup } from "@/lib/overview/by-process";
-import { countByRating, openIssues, openedVersusResolved, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
+import { countByRating, openIssues, openedVersusResolved, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
 import { improvementDelivered, impactPairs, solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { useImpacts } from "@/lib/overview/use-impacts";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
@@ -241,10 +244,16 @@ export function Overview({
   }, [live, start, weeks]);
   const horizonModel = error ? null : horizon.model;
 
-  const baseSim = useSimulation(base);
+  // The same model at the same length: one run serves both (its monthly numbers don't change the rest of it).
+  const sameModel = useMemo(() => !!base && !!horizonModel && JSON.stringify(base) === JSON.stringify(horizonModel), [base, horizonModel]);
   const horizonSim = useSimulation(horizonModel, 30, 1, { monthly: true, monthStarts: horizon.monthStarts });
-  const baseResult = current(baseSim.status === "done" ? baseSim.run.result : null, base);
   const horizonResult = current(horizonSim.status === "done" ? horizonSim.run.result : null, horizonModel);
+  // The shared run is kept as the base run, so picking another horizon afterwards doesn't simulate the base again.
+  const [shared, setShared] = useState<{ model: EngineModel; result: SimulationResult } | null>(null);
+  if (sameModel && base && horizonResult && shared?.result !== horizonResult) setShared({ model: base, result: horizonResult });
+  const haveBase = sameModel || (!!shared && shared.model === base);
+  const baseSim = useSimulation(haveBase ? null : base);
+  const baseResult = sameModel ? horizonResult : shared && shared.model === base ? shared.result : current(baseSim.status === "done" ? baseSim.run.result : null, base);
 
   // The findings, from the run at the workspace's own length, re-rated under the workspace's rules.
   const rules = useRatingSettings(mode === "demo", analysisRules);
@@ -310,7 +319,9 @@ export function Overview({
 
   // The health strip.
   const [now] = useState(() => new Date());
-  const health = useMemo(() => (groups ? countByRating(groups.filter((g) => g.id !== COMPANY_GROUP).map((g) => g.rating)) : null), [groups]);
+  // Each process as the map and the Processes table rate it: by its confirmed open issues (D24).
+  const health = useMemo(() => (groups ? processHealth(groups.filter((g) => g.id !== COMPANY_GROUP).map((g) => g.rating)) : null), [groups]);
+  // Months in the browser's time zone (workspaces have none of their own yet), for this card and the chart alike.
   const open = useMemo(() => openIssues(state.issues, now), [state.issues, now]);
   const flowShare = useMemo(() => {
     if (!horizonModel || !horizonResult) return undefined;
@@ -323,7 +334,13 @@ export function Overview({
   const chosen = useMemo(() => solutionsToCompare(solutionsData, state.issues), [solutionsData, state.issues]);
   const pairs = useMemo(() => (base ? impactPairs(live, chosen, solutionBases, base.horizonWeeks) : []), [base, live, chosen, solutionBases]);
   const anyImplemented = chosen.some((c) => c.implemented);
-  const impacts = useImpacts(pairs, !!baseResult && !!horizonResult && (anyImplemented || trendsNear));
+  // Implemented solutions whose before and after can't be worked out (the version they were copied from isn't loaded, or a side can't be simulated).
+  const unmeasured = chosen.filter((c) => c.implemented).length - pairs.filter((p) => p.implemented).length;
+  // Once wanted, the runs stay wanted: a horizon change empties the horizon run for a moment, which mustn't stop them.
+  const wanted = !!baseResult && !!horizonResult && (anyImplemented || trendsNear);
+  const [impactsWanted, setImpactsWanted] = useState(false);
+  if (wanted && !impactsWanted) setImpactsWanted(true);
+  const impacts = useImpacts(pairs, impactsWanted);
   const delivered = useMemo(() => (impacts.status === "done" ? improvementDelivered(impacts.impacts, hoursPerWeek) : null), [impacts, hoursPerWeek]);
 
   // The trends.
@@ -477,6 +494,7 @@ export function Overview({
                 onExpandedChange={setExpanded}
                 highlight={lit ? [...litIds(map.bundle.steps, expanded, lit)] : null}
                 playbackRollUp
+                playbackAbove
                 showLanes={false}
                 handoffs
                 height="auto"
@@ -490,10 +508,10 @@ export function Overview({
         </Section>
 
         <section aria-label="Health" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-tier="health">
-          <ProcessHealthCard counts={health} />
+          <ProcessHealthCard health={health} />
           <OpenIssuesCard issues={open} />
           <FlowEfficiencyCard share={flowShare} span={span} error={!!error} />
-          <ImprovementCard delivered={delivered} status={!anyImplemented ? "done" : impacts.status} />
+          <ImprovementCard delivered={delivered} status={!anyImplemented ? "done" : impacts.status} unmeasured={unmeasured} />
         </section>
 
         <Section

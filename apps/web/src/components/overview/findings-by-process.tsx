@@ -2,16 +2,22 @@
 
 // "Findings by process" (issue #173, B15): "Across the company" first, then one collapsed row per process with its rating,
 // its top finding and its counts. Opening a row shows all of that process's findings, with Acknowledge and Dismiss as
-// anywhere else (the page renders them, so this list stays free of the issue store).
+// anywhere else (the page renders them, so this list stays free of the issue store). A row's rating is the process's, as
+// the map and the Processes table give it (its confirmed open issues); the top finding carries its own.
 
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
+import { isActiveStatus } from "@transpera-flow/db";
+import { RatingPill as ProcessRatingPill } from "@/components/processes/rating";
 import { Skeleton } from "@/components/ui/skeleton";
 import { COMPANY_GROUP, type FindingGroup } from "@/lib/overview/by-process";
 import { cn } from "@/lib/utils";
 import { RatingPill } from "./rating-pill";
 
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Whether an open row has anything to list: insights, or issues logged by hand that are still open. */
+export const hasOpenFindings = (g: Pick<FindingGroup, "insights" | "issues">): boolean => g.insights.length > 0 || g.issues.some((i) => !i.detected_key && isActiveStatus(i.status));
 
 /** "2 open issues · 3 new insights · 1 solution in progress", leaving out the zeros (all zero: "Nothing open"). */
 export function countsLine(g: Pick<FindingGroup, "openIssues" | "newInsights" | "solutionsInProgress">): string {
@@ -60,7 +66,7 @@ export function FindingsByProcess({
             <button
               type="button"
               aria-expanded={expanded}
-              aria-controls={panel}
+              aria-controls={expanded ? panel : undefined}
               onClick={() => toggle(g.id)}
               className={cn(
                 "grid w-full grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 px-4 py-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
@@ -70,12 +76,12 @@ export function FindingsByProcess({
               <ChevronRight aria-hidden className={cn("mt-0.5 size-4 text-muted-foreground transition-transform sm:mt-0", expanded && "rotate-90")} />
               <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="truncate text-sm font-semibold">{g.name}</span>
-                <RatingPill rating={g.rating} />
+                <ProcessRatingPill rating={g.rating} />
               </span>
               <span className="col-start-2 mt-1 min-w-0 truncate text-sm text-muted-foreground sm:col-start-auto sm:mt-0" data-top-finding>
                 {g.top ? (
                   <>
-                    <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full align-middle" style={{ background: `var(--rate-${g.top.rating})` }} />
+                    <RatingPill rating={g.top.rating} className="mr-1.5 align-middle" />
                     <span className="text-foreground">{g.top.title}</span>
                   </>
                 ) : company ? (
@@ -91,7 +97,7 @@ export function FindingsByProcess({
             {expanded && (
               <div id={panel} role="region" aria-label={`${g.name}: findings`} className="border-t bg-background/40 px-4 py-3" data-findings-panel>
                 {company && <p className="mb-2 text-xs text-muted-foreground">How busy each role and person is, clients and churn, and the forecast: findings tied to no single process.</p>}
-                {g.insights.length || g.issues.length ? renderFindings(g) : <p className="text-sm text-muted-foreground">Nothing here in this run.</p>}
+                {hasOpenFindings(g) ? renderFindings(g) : <p className="text-sm text-muted-foreground">Nothing open.</p>}
               </div>
             )}
           </li>
