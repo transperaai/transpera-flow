@@ -5,10 +5,13 @@
 // company doesn't have, then create. The upload lands as a draft: nothing is live until it is published, and it never adds
 // roles, people or clients. "Copy prompt for Claude" and "Download example" are for making the file in the first place.
 
-import { useState, useTransition, type DragEvent } from "react";
+import { useMemo, useState, useTransition, type DragEvent } from "react";
 import { FileJson, Upload } from "lucide-react";
-import { claudePrompt, PROCESS_FILE_EXAMPLE, processTextFrom } from "@transpera-flow/db/process-file";
+import { processTextFrom } from "@transpera-flow/db/process-file";
+import { claudePrompt2, PROCESS_FILE_EXAMPLE_2 } from "@transpera-flow/db/process-file-2-schema";
+import { findGaps } from "@transpera-flow/db/simulation-gaps";
 import { Help } from "@/components/help";
+import { GAPS_HELP, GapList } from "@/components/simulation-gaps";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -25,7 +28,7 @@ export interface UploadProcess {
 
 /** The most errors or warnings listed at once; the rest are counted. */
 const MAX_SHOWN = 20;
-const EXAMPLE_TEXT = `${JSON.stringify(PROCESS_FILE_EXAMPLE, null, 2)}\n`;
+const EXAMPLE_TEXT = `${JSON.stringify(PROCESS_FILE_EXAMPLE_2, null, 2)}\n`;
 const norm = (s: string) => s.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 /** The (i) texts: what each part does, in plain words, with an example. */
@@ -134,7 +137,7 @@ function Choose({ upload, onLoaded, onCancel }: { upload: UploadProcess; onLoade
     read(e.dataTransfer.files[0]);
   };
   const copy = async () => {
-    const text = claudePrompt();
+    const text = claudePrompt2();
     try {
       await navigator.clipboard.writeText(text);
       setCopied("yes");
@@ -172,7 +175,7 @@ function Choose({ upload, onLoaded, onCancel }: { upload: UploadProcess; onLoade
       >
         <FileJson aria-hidden className="size-8 text-fg-3" />
         <span className="text-sm font-medium">{pending ? "Reading…" : "Drop a .json or .html file here, or choose one"}</span>
-        <span className="text-xs text-muted-foreground">A process file in the transpera-process/1 format, or a Claude Design page that carries one.</span>
+        <span className="text-xs text-muted-foreground">A process file in the transpera-process/2 (or /1) format, or a Claude Design page that carries one.</span>
         <input
           id="upload-file"
           type="file"
@@ -243,6 +246,12 @@ function Preview({ upload, loaded, onBack, onCancel }: { upload: UploadProcess; 
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const stopped = p.errors.length > 0;
+  // "Missing for simulation": the same check the process page runs, re-run as roles are mapped (a role left blank is still a gap).
+  const gaps = useMemo(() => {
+    if (!p.gap) return [];
+    const mapped = (role: string | undefined) => !!role && !!roles.get(role);
+    return findGaps({ ...p.gap.input, steps: p.gap.input.steps.map((s) => ({ ...s, role: s.role || mapped(p.gap!.roleOf[s.id]) })) });
+  }, [p.gap, roles]);
   const taken = p.nameTaken !== null && norm(name) === norm(p.nameTaken);
   const blocked = taken || !name.trim();
 
@@ -290,7 +299,71 @@ function Preview({ upload, loaded, onBack, onCancel }: { upload: UploadProcess; 
             )}{" "}
             · a {p.kind === "pipeline" ? "pipeline" : "servicing process"}
           </p>
+          {p.extras && (
+            <p className="text-sm" data-upload-extra-counts>
+              <b>{p.extras.sources.length}</b> {p.extras.sources.length === 1 ? "source" : "sources"} · <b>{p.extras.suggestions.length}</b> {p.extras.suggestions.length === 1 ? "suggestion" : "suggestions"} · <b>{p.extras.proposals.length}</b>{" "}
+              {p.extras.proposals.length === 1 ? "proposal" : "proposals"}
+              {p.extras.firstPrinciplesParts > 0 && (
+                <>
+                  {" "}
+                  · first principles: <b>{p.extras.firstPrinciplesParts}</b> {p.extras.firstPrinciplesParts === 1 ? "part" : "parts"}
+                </>
+              )}
+            </p>
+          )}
         </>
+      )}
+
+      {!stopped && p.extras && p.extras.conflicts.length > 0 && <Problems tone="warning" title="Conflicts (nothing is changed for you)" items={p.extras.conflicts} dataKey="conflicts" />}
+
+      {!stopped && gaps.length > 0 && (
+        <div role="status" data-upload-gaps data-missing-for-simulation className="rounded-lg border border-warn bg-warn-soft px-3 py-2.5 text-sm">
+          <p className="flex items-center font-medium">
+            Missing for simulation ({gaps.length})
+            <Help {...GAPS_HELP} />
+          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">The upload still goes ahead. Fill these in on the map afterwards.</p>
+          <div className="mt-1.5 pl-1">
+            <GapList gaps={gaps} />
+          </div>
+        </div>
+      )}
+
+      {!stopped && p.extras && (p.extras.sources.length > 0 || p.extras.suggestions.length > 0 || p.extras.proposals.length > 0 || p.extras.notes.length > 0) && (
+        <section className="flex flex-col gap-2 text-sm" data-upload-extras>
+          <h3 className="font-medium">Comes with it</h3>
+          {p.extras.sources.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Added to Sources and linked to this process: {p.extras.sources.map((s) => s.title).join("; ")}.
+            </p>
+          )}
+          {p.extras.suggestions.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground">Waiting in Suggestions for someone to accept or reject. Nothing about your company changes until then.</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                {p.extras.suggestions.slice(0, MAX_SHOWN).map((s, i) => (
+                  <li key={i} className="break-words">
+                    {s.headline}
+                  </li>
+                ))}
+                {p.extras.suggestions.length > MAX_SHOWN && <li>…and {p.extras.suggestions.length - MAX_SHOWN} more.</li>}
+              </ul>
+            </div>
+          )}
+          {p.extras.proposals.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground">Proposed issues and ideas, waiting in Suggestions. None is created until someone accepts it.</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                {p.extras.proposals.map((x, i) => (
+                  <li key={i} className="break-words">
+                    {x.kind === "issue" ? "Issue" : `Idea for ${x.forIssue}`}: {x.title}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {p.extras.notes.length > 0 && <Problems tone="warning" title="Left out or changed" items={p.extras.notes} dataKey="notes" />}
+        </section>
       )}
 
       {p.warnings.length > 0 && <Problems tone="warning" title={stopped ? "Also worth knowing" : "Worth a look (the upload still goes ahead)"} items={p.warnings} />}
@@ -355,11 +428,11 @@ function Preview({ upload, loaded, onBack, onCancel }: { upload: UploadProcess; 
   );
 }
 
-function Problems({ tone, title, items }: { tone: "error" | "warning"; title: string; items: string[] }) {
+function Problems({ tone, title, items, dataKey }: { tone: "error" | "warning"; title: string; items: string[]; dataKey?: string }) {
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
-      data-upload-problems={tone}
+      data-upload-problems={dataKey ?? tone}
       className={cn("rounded-lg border px-3 py-2.5 text-sm", tone === "error" ? "border-crit bg-crit-soft" : "border-warn bg-warn-soft")}
     >
       <p className="font-medium">{title}</p>

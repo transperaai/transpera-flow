@@ -294,6 +294,13 @@ export type Provenance = {
   conflict?: ProvenanceConflict;
   /** The accepted suggestion the value came from (issue #25). */
   suggestion_id?: string;
+  /**
+   * On a step's `branch_odds` entry (issue #167): its branches took the share the others leave because the file gave no odds.
+   * Goes away when anyone writes one of the branches' probabilities (a trigger), so "Missing for simulation" can list the step.
+   */
+  defaulted?: boolean;
+  /** On `branch_odds`: each branch's probability (by the id of the step it leads to) as it was when defaulted. Changing any of them clears the gap at once. */
+  was?: { [toStepId: string]: number };
 };
 
 /**
@@ -947,7 +954,9 @@ export interface SuggestionRow {
   /** The suggester's reasoning. */
   note: string | null;
   status: SuggestionStatus;
-  created_via: "mcp";
+  created_via: "mcp" | "upload";
+  /** The file or link an upload came from (shown as "Upload (name)"). */
+  import_source: string | null;
   applied: SuggestionApplied | null;
   review_note: string | null;
   reviewed_by: string | null;
@@ -1000,7 +1009,8 @@ export interface ProposalRow {
   /** The issue a solution idea is for. */
   issue_id: string | null;
   status: ProposalStatus;
-  created_via: "mcp" | "play_link";
+  created_via: "mcp" | "play_link" | "upload";
+  import_source: string | null;
   /** A play-link visitor's name (B4). Their email is stored but not readable by the app's users; B4 decides who sees it. */
   proposer_name: string | null;
   applied: ProposalApplied | null;

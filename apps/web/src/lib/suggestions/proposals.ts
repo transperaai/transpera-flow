@@ -52,7 +52,7 @@ const list = (names: string[]) => (names.length <= 2 ? names.join(" and ") : `${
 
 /** How a proposal reads to a reviewer. */
 export function describeProposal(p: ProposalRow, lookups: ProposalLookups): ProposalView {
-  const from = p.created_via === "play_link" ? `${p.proposer_name?.trim() || "A visitor"} (play link)` : "Claude (MCP)";
+  const from = p.created_via === "play_link" ? `${p.proposer_name?.trim() || "A visitor"} (play link)` : p.created_via === "upload" ? `Upload (${p.import_source ?? "a file"})` : "Claude (MCP)";
   if (p.kind === "issue") {
     const payload = p.payload as IssueProposalPayload;
     const rating = RATING_LABELS[ratingOfStored(STORED.includes(payload.severity as never) ? payload.severity! : "warning")];

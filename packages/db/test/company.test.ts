@@ -48,6 +48,7 @@ function suggestion(target: SuggestionTarget, targetId: string | null, patch: Su
     note: null,
     status: "pending",
     created_via: "mcp",
+    import_source: null,
     applied: null,
     review_note: null,
     reviewed_by: null,

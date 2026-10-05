@@ -3,6 +3,7 @@
 // in packages/db/src/process-file.ts; the company's roles come from the server (packages/mcp/src/import-file.ts).
 
 import type { ProcessFile } from "@transpera-flow/db/process-file";
+import type { GapInput, SimulationGap } from "@transpera-flow/db/simulation-gaps";
 
 /** A process file is a few kilobytes; this stops a wrong file (a video, a database dump) before it is read or sent. */
 export const MAX_UPLOAD_BYTES = 500_000;
@@ -27,6 +28,24 @@ export interface UploadPreview {
   unknownPeople: string[];
   /** The name of a process that already has this name, if any. */
   nameTaken: string | null;
+  /** A /2 file: what it carries beyond the steps. Absent for a /1 file. */
+  extras?: UploadExtras;
+  /** What the process still lacks for meaningful simulation numbers: the dialog re-runs the check as roles are mapped. */
+  gap?: { input: GapInput; roleOf: Record<string, string>; gaps: SimulationGap[] };
+}
+
+/** What a /2 file carries beyond its steps, counted per section for the preview. Nothing here is applied: it all waits for a person. */
+export interface UploadExtras {
+  sources: { title: string; kind: string; date: string | null }[];
+  /** Company facts that will wait in Suggestions, as the reviewer will read them. */
+  suggestions: { subject: string; headline: string; isNew: boolean }[];
+  proposals: { kind: "issue" | "solution_idea"; title: string; forIssue: string | null }[];
+  /** How many parts of the first principles the file fills (job, truths, requirements, ...). */
+  firstPrinciplesParts: number;
+  /** Things the upload will leave out or change, in plain words. */
+  notes: string[];
+  /** Where the file's sources disagree with each other, or the file disagrees with what the company has. */
+  conflicts: string[];
 }
 
 /** What the preview action returns: a preview to show (with the process text, for a link, which the server fetched), or why there isn't one. */

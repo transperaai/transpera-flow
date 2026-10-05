@@ -1,0 +1,1028 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Transpera process file (transpera-process/2)",
+  "description": "A process for Transpera Flow, with the evidence behind it. Only the fields marked required have to be there; anything left out is filled in and marked to confirm on the canvas. Nothing company-wide is applied: company facts and proposals wait for a person to accept them.",
+  "type": "object",
+  "required": [
+    "format",
+    "name",
+    "steps"
+  ],
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "required": [
+        "source",
+        "quote"
+      ],
+      "description": "One quote that backs a value.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The id of one of the file's sources."
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "The words said, verbatim. Quote just the sentence that gives the number."
+        },
+        "speaker": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Who said it."
+        },
+        "time": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Where in the source: a time in the recording (00:14:05), a page, a cell."
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The number they stated, in the units of the value it backs (hours; 0 to 1 for a share). Different values for one number are a conflict, shown for you to settle."
+        }
+      }
+    }
+  },
+  "properties": {
+    "format": {
+      "const": "transpera-process/2",
+      "description": "Always the text transpera-process/2."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "What the process is called, e.g. Enquiry to signed client."
+    },
+    "kind": {
+      "enum": [
+        "pipeline",
+        "servicing"
+      ],
+      "default": "pipeline",
+      "description": "pipeline: how new leads become clients (default). servicing: a recurring process for existing clients."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "A sentence on what the process covers."
+    },
+    "entity_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "What flows through it, e.g. lead, task. Default: lead for a pipeline, item for a servicing process."
+    },
+    "sources": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "The materials the file is built from. They are added to Sources and linked to this process. Evidence points at them by id.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A short unique id, e.g. interview-maya. Evidence uses it."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "e.g. Interview with Maya Chen, 30 Sep."
+          },
+          "kind": {
+            "enum": [
+              "transcript",
+              "notes",
+              "data",
+              "screenshot"
+            ],
+            "default": "transcript",
+            "description": "transcript (a conversation), notes (an SOP, a document), data (a spreadsheet or export) or screenshot."
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "The day it is from, like 2026-09-30."
+          },
+          "speakers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Who spoke or wrote it."
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 500000,
+            "description": "The text itself (optional; leave it out for a long one). When given, quotes are checked against it."
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "description": "Every step. Give each a short unique id that links refer to. Leave out any number nobody gave you: it is marked as missing, and never invented.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A short unique id, e.g. review. Links use it."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "What the step is called on the map."
+          },
+          "type": {
+            "enum": [
+              "step",
+              "decision",
+              "wait",
+              "start",
+              "end"
+            ],
+            "default": "step",
+            "description": "step: someone does work. decision: items branch. wait: items sit and wait. start and end: where items come in and finish."
+          },
+          "role": {
+            "type": "string",
+            "description": "The role that does it, e.g. Managing director. Roles the company doesn't have yet are matched in the preview; none are created."
+          },
+          "person": {
+            "type": "string",
+            "description": "A person to pin it to (only if they are already in the company; otherwise ignored)."
+          },
+          "hands_on_hours": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Hours of hands-on work per item (average)."
+          },
+          "wait_hours": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "Hours an item waits at this step per item (average)."
+          },
+          "rework_rate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Share of items sent back to do again, from 0 to 1 (0.1 is one in ten)."
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "x": {
+            "type": "number",
+            "description": "Position on the map. Give x and y together, or leave both out to be laid out left to right."
+          },
+          "y": {
+            "type": "number"
+          },
+          "hands_on_range": {
+            "type": "object",
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "min": {
+                "type": "number",
+                "minimum": 0
+              },
+              "max": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "description": "The lowest and highest hands-on time in hours. The typical value is the number beside it."
+          },
+          "wait_range": {
+            "type": "object",
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "min": {
+                "type": "number",
+                "minimum": 0
+              },
+              "max": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "description": "The lowest and highest wait in hours. The typical value is the number beside it."
+          },
+          "rework_to": {
+            "type": "string",
+            "description": "The id of the step rework goes back to. Default: this step."
+          },
+          "tool": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The tool used, e.g. HubSpot."
+          },
+          "sla_hours": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Target hours for one visit to the step."
+          },
+          "waiting_now": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Items sitting at the step right now."
+          },
+          "evidence": {
+            "type": "object",
+            "description": "Quotes by value: hands_on_hours, wait_hours, rework_rate, waiting_now, sla_hours. Every number that came from a source should have its quote.",
+            "properties": {
+              "hands_on_hours": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              },
+              "wait_hours": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              },
+              "rework_rate": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              },
+              "waiting_now": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              },
+              "sla_hours": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              }
+            }
+          },
+          "assumed": {
+            "type": "object",
+            "description": "Why a value is an assumption, by value: hands_on_hours, wait_hours, rework_rate, waiting_now, sla_hours.",
+            "properties": {
+              "hands_on_hours": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              },
+              "wait_hours": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              },
+              "rework_rate": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              },
+              "waiting_now": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              },
+              "sla_hours": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 500,
+      "description": "How the steps connect, each from one step id to another.",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "probability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The share of items that take this branch, from 0 to 1. Branches out of a step add up to 1."
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "e.g. Qualified"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/$defs/citation"
+            },
+            "description": "Quotes that back this, word for word, each from one of the file's sources."
+          },
+          "assumed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+          }
+        }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Optional boxes that gather steps on the map.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "steps"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the steps in the group (not start or end steps)."
+          }
+        }
+      }
+    },
+    "company": {
+      "type": "object",
+      "description": "Facts about the company found in the materials. Each becomes a suggestion for someone to accept or reject; nothing is applied.",
+      "properties": {
+        "people": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "The person's name."
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fte": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 1.5,
+                "description": "1 is full time."
+              },
+              "hours_per_week": {
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 168
+              },
+              "cost_rate": {
+                "type": "number",
+                "minimum": 0,
+                "description": "The hourly cost."
+              },
+              "email": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "The role's name."
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "The client's name."
+              },
+              "services": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mrr": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Monthly recurring revenue."
+              },
+              "start_date": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "health": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "notes": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "The service's name."
+              },
+              "pricing_model": {
+                "enum": [
+                  "retainer",
+                  "one_off",
+                  "hourly"
+                ]
+              },
+              "price": {
+                "type": "number",
+                "minimum": 0,
+                "description": "The monthly fee, the whole fee or the hourly rate."
+              },
+              "margin": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "tenure_months": {
+                "type": "number",
+                "minimum": 0
+              },
+              "monthly_churn": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "0.02 is 2% of clients leaving a month."
+              },
+              "mix_share": {
+                "type": "number",
+                "minimum": 0,
+                "description": "The relative share of new work."
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "demand": {
+          "type": "object",
+          "properties": {
+            "lead_sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "The lead source's name, e.g. Website form."
+                  },
+                  "volume_per_week": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Leads a week."
+                  },
+                  "conversion_to_qualified": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "evidence": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "$ref": "#/$defs/citation"
+                    },
+                    "description": "Quotes that back this, word for word, each from one of the file's sources."
+                  },
+                  "assumed": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+                  }
+                }
+              }
+            },
+            "growth_monthly": {
+              "type": "number",
+              "description": "0.02 is +2% a month."
+            },
+            "seasonality": {
+              "type": "array",
+              "minItems": 12,
+              "maxItems": 12,
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "description": "Twelve multipliers, January first (1 means no effect)."
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "$ref": "#/$defs/citation"
+              },
+              "description": "Quotes that back this, word for word, each from one of the file's sources."
+            },
+            "assumed": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+            }
+          }
+        }
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "Issues and ideas found in the materials. They wait in Suggestions for a person to accept; nothing is created.",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "title"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "issue",
+              "solution_idea"
+            ],
+            "description": "issue: a problem worth tracking. solution_idea: an idea for an issue you already track (give for_issue)."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 5000,
+            "description": "What was seen or said."
+          },
+          "rating": {
+            "enum": [
+              "great",
+              "good",
+              "bad",
+              "risk"
+            ],
+            "description": "Issues: great, good (could improve), bad (not urgent) or risk. Default good."
+          },
+          "issue_type": {
+            "enum": [
+              "bottleneck",
+              "spof",
+              "manual",
+              "delay",
+              "failure",
+              "idea",
+              "capacity",
+              "sla",
+              "churn_risk",
+              "perception_gap",
+              "broken_scenario"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issues: ids of the steps it touches. Without any it touches the whole process."
+          },
+          "target_measure": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "target_now": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "target_goal": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "for_issue": {
+            "type": "string",
+            "description": "Solution ideas: the number (12 or #12) or title of an issue you already track."
+          },
+          "proposed_steps": {
+            "type": "array",
+            "maxItems": 30,
+            "description": "Solution ideas: the steps it would put in place, in order.",
+            "items": {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "expect": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Solution ideas: what you expect it to do."
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/$defs/citation"
+            },
+            "description": "Quotes that back this, word for word, each from one of the file's sources."
+          },
+          "assumed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+          }
+        }
+      }
+    },
+    "first_principles": {
+      "type": "object",
+      "description": "Fill only what the materials say, with the quote. Leave the rest out.",
+      "properties": {
+        "job": {
+          "type": "object",
+          "properties": {
+            "who": {
+              "type": "string"
+            },
+            "progress": {
+              "type": "string"
+            },
+            "situation": {
+              "type": "string"
+            },
+            "done": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "$ref": "#/$defs/citation"
+              },
+              "description": "Quotes that back this, word for word, each from one of the file's sources."
+            },
+            "assumed": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+            }
+          },
+          "description": "The job the process does for the person it serves: who, the progress they want, the situation, and what done looks like."
+        },
+        "truths": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "truth",
+                  "assumption"
+                ]
+              },
+              "test": {
+                "type": "string",
+                "description": "For an assumption: how to test it."
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string",
+                "description": "A named person who set it, not a team."
+              },
+              "why": {
+                "type": "string"
+              },
+              "verdict": {
+                "enum": [
+                  "keep",
+                  "change",
+                  "drop",
+                  "challenge"
+                ]
+              },
+              "step": {
+                "type": "string",
+                "description": "The id of the step it creates."
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "measures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "kpi": {
+                "enum": [
+                  "won",
+                  "winsPerWeek",
+                  "winRate",
+                  "newMrr",
+                  "billed",
+                  "cycleHours",
+                  "labour",
+                  "wipEnd"
+                ]
+              },
+              "comparator": {
+                "enum": [
+                  "atLeast",
+                  "atMost"
+                ]
+              },
+              "target": {
+                "type": "number",
+                "description": "In the unit people read: a win rate of 30% is 30."
+              },
+              "horizon": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/citation"
+                },
+                "description": "Quotes that back this, word for word, each from one of the file's sources."
+              },
+              "assumed": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+              }
+            }
+          }
+        },
+        "why": {
+          "type": "object",
+          "properties": {
+            "problem": {
+              "type": "string"
+            },
+            "chain": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Each answer to 'why?', in order."
+            },
+            "root": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "$ref": "#/$defs/citation"
+              },
+              "description": "Quotes that back this, word for word, each from one of the file's sources."
+            },
+            "assumed": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "Why the value is an assumption: nobody said it, so say where the guess comes from (\"Typical for a proposal; Sam confirmed the order of magnitude\")."
+            }
+          }
+        }
+      }
+    }
+  }
+}

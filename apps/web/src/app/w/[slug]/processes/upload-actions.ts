@@ -107,6 +107,19 @@ export async function previewUpload(workspaceId: string, _slug: string, input: P
         unknownRoles: p.unknownRoles,
         unknownPeople: p.unknownPeople,
         nameTaken: p.nameTaken?.name ?? null,
+        gap: p.gap,
+        ...(p.extras
+          ? {
+              extras: {
+                sources: p.extras.sources,
+                suggestions: p.extras.suggestions.map((s) => ({ subject: s.subject, headline: s.headline, isNew: s.isNew })),
+                proposals: p.extras.proposals,
+                firstPrinciplesParts: p.extras.firstPrinciplesParts,
+                notes: p.extras.notes,
+                conflicts: [...(check.conflicts ?? []), ...p.extras.conflicts],
+              },
+            }
+          : {}),
       },
     };
   } catch (e) {
