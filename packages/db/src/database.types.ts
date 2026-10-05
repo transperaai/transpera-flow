@@ -315,6 +315,73 @@ export type Database = {
         }
         Relationships: []
       }
+      calibrations: {
+        Row: {
+          applied: boolean
+          applied_at: string | null
+          applied_by: string | null
+          applied_keys: string[]
+          created_at: string
+          created_by: string | null
+          dataset_id: string
+          id: string
+          process_id: string | null
+          results: Json
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          applied?: boolean
+          applied_at?: string | null
+          applied_by?: string | null
+          applied_keys?: string[]
+          created_at?: string
+          created_by?: string | null
+          dataset_id: string
+          id?: string
+          process_id?: string | null
+          results: Json
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          applied?: boolean
+          applied_at?: string | null
+          applied_by?: string | null
+          applied_keys?: string[]
+          created_at?: string
+          created_by?: string | null
+          dataset_id?: string
+          id?: string
+          process_id?: string | null
+          results?: Json
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calibrations_dataset_id_workspace_id_fkey"
+            columns: ["dataset_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "datasets"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "calibrations_process_id_workspace_id_fkey"
+            columns: ["process_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "processes"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "calibrations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       churn_drivers: {
         Row: {
           created_at: string
@@ -612,6 +679,60 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "clients_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      datasets: {
+        Row: {
+          column_map: Json
+          created_at: string
+          created_by: string | null
+          file_name: string
+          id: string
+          imported_at: string
+          kind: string
+          process_id: string | null
+          row_count: number
+          workspace_id: string
+        }
+        Insert: {
+          column_map?: Json
+          created_at?: string
+          created_by?: string | null
+          file_name: string
+          id?: string
+          imported_at?: string
+          kind: string
+          process_id?: string | null
+          row_count: number
+          workspace_id: string
+        }
+        Update: {
+          column_map?: Json
+          created_at?: string
+          created_by?: string | null
+          file_name?: string
+          id?: string
+          imported_at?: string
+          kind?: string
+          process_id?: string | null
+          row_count?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "datasets_process_id_workspace_id_fkey"
+            columns: ["process_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "processes"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "datasets_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -2913,6 +3034,10 @@ export type Database = {
       add_source: {
         Args: { p_links: Json; p_source: Json; p_workspace: string }
         Returns: string
+      }
+      apply_calibration: {
+        Args: { p_calibration: string; p_keys: string[] }
+        Returns: Json
       }
       build_proposal: {
         Args: {

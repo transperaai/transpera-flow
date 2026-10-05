@@ -7,7 +7,10 @@
 //
 //   work      hands-on hours per task step (mean of `hours`) and their spread
 //             (a lognormal's coefficient of variation, sd / mean);
-//   wait      the wait at a wait step (finished − started), in working hours;
+//   wait      the wait at a step nobody works on (a wait step, or a step with no
+//             role such as "Client decision"): finished − started, in working
+//             hours. At a step someone works on, whether `finished` includes the
+//             wait after the work is not known, so no wait is proposed there;
 //   rework    the share of a task step's visits that were done again straight
 //             away (the same step logged twice in a row for an item);
 //   routing   the odds of each way out of a step with more than one, from the
@@ -47,6 +50,8 @@ export interface CalibrationStep {
   entry?: string | null;
   /** Holds a child process (its steps are not in this log). */
   holder?: boolean;
+  /** Whether someone works on it (it has a role or a pinned person). Only steps nobody works on get a wait proposed. */
+  worked: boolean;
   workHours: number;
   workDist: string;
   /** The lognormal spread now, if one is set. */
@@ -266,9 +271,9 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
   const proposals: CalibrationProposal[] = [];
   const tooFew = (n: number) => `Too few to measure: ${n} of the ${minSample} needed.`;
 
-  // Work: hands-on hours of task steps.
+  // Work: hands-on hours of task steps someone works on.
   for (const s of steps) {
-    if (s.kind !== "task" || !logged.has(s.id)) continue;
+    if (s.kind !== "task" || !s.worked || s.holder || !logged.has(s.id)) continue;
     const hours = visits.filter((v) => v.step === s.id && v.row.hours !== null && v.row.hours >= 0).map((v) => v.row.hours!);
     if (!hours.length) continue;
     const n = hours.length;
@@ -299,9 +304,9 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
     });
   }
 
-  // Wait: elapsed time at wait steps, in working hours.
+  // Wait: elapsed time at steps nobody works on, in working hours.
   for (const s of steps) {
-    if (s.kind !== "wait" || !logged.has(s.id)) continue;
+    if (!(s.kind === "wait" || ((s.kind === "task" || s.kind === "decision") && !s.worked)) || s.holder || !logged.has(s.id)) continue;
     const waits = visits
       .filter((v) => v.step === s.id && v.row.finished !== null && v.row.finished >= v.row.started)
       .map((v) => ((v.row.finished! - v.row.started) / WEEK_MS) * input.hoursPerWeek);
@@ -336,7 +341,7 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
 
   // Rework: the same task step logged twice in a row for an item.
   for (const s of steps) {
-    if (s.kind !== "task" || !logged.has(s.id)) continue;
+    if (s.kind !== "task" || !s.worked || s.holder || !logged.has(s.id)) continue;
     let n = 0;
     let redo = 0;
     for (const list of byItem.values()) {

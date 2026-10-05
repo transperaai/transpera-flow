@@ -32,6 +32,7 @@ function step(id: string, kind: CalibrationStep["kind"], extra: Partial<Calibrat
     waitDist: "lognormal",
     waitCv: null,
     rework: 0,
+    worked: kind === "task",
     sources: est,
     ...extra,
   };
@@ -143,6 +144,16 @@ describe("calibrate", () => {
     expect(w.n).toBe(30);
     expect(w.proposed).toBe(Math.round(((2 / 7) * 40) * 100) / 100); // 11.43
     expect(w.set).toMatchObject({ wait_hours: 11.43, wait_dist: "lognormal" });
+  });
+
+  it("measures the wait at a step nobody works on, such as a client's decision", () => {
+    const steps = STEPS.map((s) => (s.id === "client_decides" ? { ...s, kind: "task" as const, worked: false } : s));
+    const w = find(calibrate(input({ steps })), "wait:client_decides");
+    expect(w.proposed).toBe(11.43);
+    // Nobody works on it, so it has no hands-on time or redo rate to measure.
+    expect(calibrate(input({ steps })).proposals.some((p) => p.key === "work:client_decides" || p.key === "rework:client_decides")).toBe(false);
+    // A step someone works on gets no wait: whether "finished" includes the wait after the work isn't known.
+    expect(r.proposals.some((p) => p.key === "wait:proposal" || p.key === "wait:qualify")).toBe(false);
   });
 
   it("measures rework as the same step done again straight away", () => {

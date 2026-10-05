@@ -11,7 +11,8 @@
     "./process-file-util": "./src/process-file-util.ts",
     "./process-file-2": "./src/process-file-2.ts",
     "./process-file-2-schema": "./src/process-file-2-schema.ts",
-    "./simulation-gaps": "./src/simulation-gaps.ts"
+    "./simulation-gaps": "./src/simulation-gaps.ts",
+    "./calibration": "./src/calibration.ts"
   },
   "scripts": {
     "lint": "eslint .",
