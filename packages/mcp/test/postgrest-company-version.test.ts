@@ -60,7 +60,8 @@ describe.skipIf(!POSTGREST_URL)("viewing an earlier company map over PostgREST (
 
     const mine = await companyMap(ids.ws, "Mine");
     await companyMap(ids.otherWs, "Theirs");
-    [ids.company, [ids.v1, ids.v2, ids.v3]] = [mine.company, mine.revisions];
+    ids.company = mine.company;
+    [ids.v1, ids.v2, ids.v3] = mine.revisions as [string, string, string];
 
     const session = signJwt({ sub: editor, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
     // supabase-js talks to <url>/rest/v1; PostgREST here serves from its root.
