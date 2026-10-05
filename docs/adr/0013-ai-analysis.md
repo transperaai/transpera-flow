@@ -1,6 +1,6 @@
 # 13. AI analysis: AI reads the run, a number check decides what is kept
 
-Date: 1 Oct 2026 · Status: accepted · Issue: #111 (A46) · Builds on ADR 0011 (narration), PRD §7.3 and §8, D15, docs/analysis-rules.md "What AI does", docs/research/first-principles.md Part B
+Date: 1 Oct 2026 · Status: accepted, amended by ADR 0015 (B17: AI runs only on demand and writes proposed findings citing facts; the publish and market triggers are gone) · Issue: #111 (A46) · Builds on ADR 0011 (narration), PRD §7.3 and §8, D15, docs/analysis-rules.md "What AI does", docs/research/first-principles.md Part B
 
 ## Context
 

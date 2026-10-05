@@ -13,6 +13,7 @@ export { buildClientSuggestion, buildCompanySuggestion, buildDemandSuggestions, 
 export { BUILDING_TOOL_NAMES, createProcessFromTemplate } from "./building-tools";
 export { buildNewStep, buildStepChange, planImport, resolveName, revisionDiff, type ImportInput, type ImportPlan, type RevisionDiff, type StepFields } from "./building";
 export { FIRST_PRINCIPLES_TOOL_NAMES } from "./first-principles-tools";
+export { FINDINGS_TOOL_NAMES } from "./findings-tools";
 export { mergeFirstPrinciples, type FpInput, type FpMergeResult, type FpMode } from "./first-principles";
 export { PROCESS_TEMPLATES, type ProcessTemplate } from "./templates";
 export { fileToProcessJson, importProcessFile, previewProcessFile, type ImportFileOptions, type ImportFileResult, type ImportPreview } from "./import-file";
