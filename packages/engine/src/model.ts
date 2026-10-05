@@ -486,6 +486,11 @@ export interface StepResult {
    */
   avgHandsOn?: number;
   avgFixedWait?: number;
+  /** Mean extra elapsed time of a worked visit from part-time availability (elapsed minus hands-on). */
+  avgStretch?: number;
+  /** The visits behind `avgHandsOn` / `avgStretch` and behind `avgFixedWait`, so means across runs can be weighted. */
+  handsOnVisits?: number;
+  fixedWaitVisits?: number;
 }
 
 /**
@@ -604,6 +609,8 @@ export interface ReplicationResult {
   people: Record<string, PersonResult>;
   /** What each rework loop did in the measured window, by loop id (empty when the model has none). */
   loops?: Record<string, LoopReplication>;
+  /** All repeat passes of the run together (each counted once, so overlapping loops don't double count). */
+  rework?: { roleHours: Record<string, number>; extraElapsed: number; items: number };
   /**
    * Entities in the measured window (replication 0 only). Those that entered
    * during the warm-up or as starting WIP have negative times.
@@ -619,9 +626,11 @@ export interface ReplicationResult {
 }
 
 /**
- * One rework loop in one replication (loops.ts). "Entered" items reached the
- * loop's first step in the measured window; "went round" is those sent back at
- * least once. Hours are working hours over the whole window.
+ * One rework loop in one replication (loops.ts). "Entered" items are those that
+ * came in at any step of the loop and left it in the measured window (items
+ * still inside at the horizon aren't counted); "went round" is those sent back
+ * at least once. Hands-on hours are over the measured window, in the innermost
+ * loop a repeat pass is on. Working hours.
  */
 export interface LoopReplication {
   entered: number;
@@ -631,8 +640,16 @@ export interface LoopReplication {
   rounds: number;
   /** Hands-on hours on repeat passes by role id (a person-pinned step with no role counts to the person's first role). */
   roleHours: Record<string, number>;
-  /** Elapsed hours (queue, hands-on and waiting) spent at the loop's steps on repeat passes, summed over items. */
+  /** Elapsed hours (queue, hands-on and waiting) spent on repeat passes, summed over the items that left (innermost loop only). */
   extraElapsed: number;
+}
+
+/** All rework together, across replications: what the loops add up to, with overlaps counted once (for the Overview's rework slice). */
+export interface ReworkTotal {
+  extraHandsOnHoursPerMonth: Record<string, Stat>;
+  extraHandsOnHoursPerMonthTotal: Stat;
+  /** Working hours repeat passes add per finished item (won, lost or done). */
+  extraCycleHoursPerItem: Stat;
 }
 
 /** A rework loop across replications (docs/PRD.md §6; issue #174). Means with a 10-90% band. */
@@ -654,11 +671,13 @@ export interface LoopResult extends Omit<Loop, "body"> {
 export interface StepFacts {
   /** Mean hands-on time of a visit worked by a person. */
   handsOnHours: number;
+  /** Mean extra elapsed time from part-time availability while it is worked (hands-on stretched over the person's pipeline share). */
+  stretchHours: number;
   /** Mean time queueing for a person. */
   queueWaitHours: number;
   /** Mean fixed (external) wait after the work. */
   fixedWaitHours: number;
-  /** `handsOnHours` as a share of hands-on plus queue plus fixed wait (0 when all are 0). */
+  /** `handsOnHours` as a share of hands-on plus stretch plus queue plus fixed wait (0 when all are 0). */
   handsOnShare: number;
   /**
    * Only one person can do it: the step is staffed and exactly one person with
@@ -666,6 +685,8 @@ export interface StepFacts {
    * alternative). Null when more than one can, or the step is a pure wait.
    */
   keyPerson: { personId: string; personName: string } | null;
+  /** The step is staffed but nobody can do it (a role with no head-count, a pinned person with no capacity, everyone able is away all run). */
+  nobodyCanDo: boolean;
 }
 
 /** A metric across replications: the mean and the 10th–90th percentile band. */
@@ -782,6 +803,8 @@ export interface SimulationResult {
   trace: TraceEntity[] | null;
   /** Rework loops, in `detectLoops` order, with what each costs (empty when none). Absent from runs saved before #174. */
   loops?: LoopResult[];
+  /** All rework loops together, overlaps counted once; the loops' hours add up to this. */
+  rework?: ReworkTotal;
   /** Hands-on versus waiting, and key-person risk, per step. Absent from runs saved before #174. */
   stepFacts?: Record<string, StepFacts>;
   H: number;

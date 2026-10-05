@@ -170,6 +170,97 @@ describe("loop outputs", () => {
   });
 });
 
+describe("loop outputs are unbiased and add up", () => {
+  it("never average in runs with nothing to divide by: rounds are at least 1 per looper, a 5 h step shows 5 h", () => {
+    // Few items in a short horizon: many runs have no looper or no visit at all.
+    const m = model([step("a", [to("b")], { work: 5, rework: 0.5 }), step("b", [to("done")])], { horizonWeeks: 6, leadsPerWeek: 0.5 });
+    const r = simulate(m, 30, 1);
+    const l = r.loops!.find((x) => x.id === "redo:a")!;
+    expect(l.meanRounds.mean).toBeGreaterThanOrEqual(1);
+    expect(l.meanRounds.p10).toBeGreaterThanOrEqual(1);
+    expect(l.extraCycleHoursPerLooper.mean).toBeGreaterThanOrEqual(5);
+    expect(r.steps.a!.avgHandsOn).toBeCloseTo(5, 9);
+    expect(r.stepFacts!.a!.handsOnHours).toBeCloseTo(5, 9);
+  });
+
+  it("is not biased low when the loop takes long relative to the run (300 h wait in the loop, 30% redo)", () => {
+    const m = model([step("a", [to("done")], { rework: 0.3, wait: 300, waitDist: { kind: "constant" } })], { horizonWeeks: 100, leadsPerWeek: 1 });
+    const l = simulate(m, 20, 1).loops![0]!;
+    expect(l.share.mean).toBeGreaterThan(0.27);
+    expect(l.share.mean).toBeLessThan(0.33);
+    // Rounds per looper 1 / 0.7 = 1.43, each repeat pass 1 h work + 300 h wait: about 431 h.
+    expect(l.meanRounds.mean).toBeGreaterThan(1.3);
+    expect(l.meanRounds.mean).toBeLessThan(1.57);
+    expect(l.extraCycleHoursPerLooper.mean).toBeGreaterThan(390);
+    expect(l.extraCycleHoursPerLooper.mean).toBeLessThan(470);
+  });
+
+  it("counts items that join a loop part-way, whatever order the edges are drawn in", () => {
+    const edges = (flip: boolean): EngineStep[] => [
+      step("a", flip ? [to("c", 0.5), to("b", 0.5)] : [to("b", 0.5), to("c", 0.5)]),
+      step("b", [to("c")]),
+      step("c", flip ? [to("done", 0.7), to("b", 0.3)] : [to("b", 0.3), to("done", 0.7)]),
+    ];
+    const m = model(edges(false), { leadsPerWeek: 4 });
+    const flipped = model(edges(true), { leadsPerWeek: 4 });
+    expect(detectLoops(m).map((l) => l.id)).toEqual(["back:c>b"]);
+    expect(detectLoops(flipped)).toEqual(detectLoops(m));
+    for (const x of [m, flipped]) {
+      const l = simulate(x, 20, 1).loops![0]!;
+      // Every item goes round with chance 0.3, wherever it joined; a round is 2 h (b and c), 0.3 / 0.7 rounds an item.
+      expect(l.share.mean).toBeGreaterThan(0.26);
+      expect(l.share.mean).toBeLessThan(0.34);
+      const expected = 4 * (52 / 12) * (0.3 / 0.7) * 2;
+      expect(l.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(expected * 0.88);
+      expect(l.extraHandsOnHoursPerMonthTotal.mean).toBeLessThan(expected * 1.12);
+    }
+  });
+
+  it("counts each repeat pass once when loops nest or overlap: loops add up to the total", () => {
+    const nested = model(
+      [
+        step("a", [to("b")]),
+        step("b", [to("c")]),
+        step("c", [to("b", 0.2), to("d", 0.8)], { rework: 0.2 }),
+        step("d", [to("a", 0.2), to("b", 0.1), to("done", 0.7)], { rework: 0.1 }),
+      ],
+      { leadsPerWeek: 3 },
+    );
+    expect(detectLoops(nested).length).toBeGreaterThanOrEqual(4);
+    const r = simulate(nested, 20, 1);
+    const sum = r.loops!.reduce((a, l) => a + l.extraHandsOnHoursPerMonthTotal.mean, 0);
+    expect(sum).toBeCloseTo(r.rework!.extraHandsOnHoursPerMonthTotal.mean, 6);
+    const byRole = r.loops!.reduce((a, l) => a + (l.extraHandsOnHoursPerMonth.r?.mean ?? 0), 0);
+    expect(byRole).toBeCloseTo(r.rework!.extraHandsOnHoursPerMonth.r!.mean, 6);
+    expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(0);
+    expect(r.rework!.extraCycleHoursPerItem.mean).toBeGreaterThan(0);
+  });
+
+  it("matches the hours actually worked on repeat passes for two back-edges into one step (hand count)", () => {
+    // a -> b -> {c 1}; c -> {b 0.2, d 0.8}; d -> {b 0.25, done 0.75}. Each step 1 h, one pass of b,c is 2 h and of b,c,d 3 h.
+    const m = model(
+      [step("a", [to("b")]), step("b", [to("c")]), step("c", [to("b", 0.2), to("d", 0.8)]), step("d", [to("b", 0.25), to("done", 0.75)])],
+      { leadsPerWeek: 4, horizonWeeks: 300 },
+    );
+    // Visits to b per item: geometric with return chance 1 - 0.8 * 0.75 = 0.4, so 1 / 0.6 = 1.667 visits to b, repeats 0.667.
+    // Hours per visit of b: always b and c (2 h); d only on 80% of the visits: 2.8 h. Repeat hours per item = 0.667 * 2.8.
+    const expected = 4 * (52 / 12) * (0.4 / 0.6) * 2.8;
+    const r = simulate(m, 20, 1);
+    expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeGreaterThan(expected * 0.93);
+    expect(r.rework!.extraHandsOnHoursPerMonthTotal.mean).toBeLessThan(expected * 1.07);
+    expect(r.loops!.reduce((a, l) => a + l.extraHandsOnHoursPerMonthTotal.mean, 0)).toBeCloseTo(r.rework!.extraHandsOnHoursPerMonthTotal.mean, 6);
+  });
+
+  it("puts a pinned person with no role under 'unassigned'", () => {
+    const m = model([step("a", [to("done")], { role: null, person: "p", rework: 0.5 })], {
+      people: { p: { name: "Pat", roles: [], capacity: 40 } },
+      leadsPerWeek: 2,
+    });
+    const l = simulate(m, 10, 1).loops![0]!;
+    expect(Object.keys(l.extraHandsOnHoursPerMonth)).toEqual(["unassigned"]);
+  });
+});
+
 describe("step facts", () => {
   it("split hands-on from waiting, and flag steps only one person can do", () => {
     const m = model(
@@ -196,6 +287,45 @@ describe("step facts", () => {
     expect(facts.b!.keyPerson).toEqual({ personId: "p3", personName: "Sam" });
     expect(facts.c!.keyPerson).toEqual({ personId: "p1", personName: "Pat" });
     expect(facts.c!.fixedWaitHours).toBe(0);
+  });
+
+  it("add part-time stretch so hands-on, stretch, queue and fixed wait cover the time at the step", () => {
+    const part = model([step("a", [to("done")], { work: 1, wait: 3, waitDist: { kind: "constant" } })], {
+      roles: { r: { name: "R", count: 1, cost: 1, ongoing: 4 } },
+      activeClients: 5,
+      leadsPerWeek: 0.5,
+    });
+    const f = simulate(part, 10, 1).stepFacts!.a!;
+    expect(f.handsOnHours).toBeCloseTo(1, 9);
+    expect(f.stretchHours).toBeGreaterThan(0.5);
+    expect(f.fixedWaitHours).toBeCloseTo(3, 9);
+    const none = simulate(model([step("a", [to("done")])], { leadsPerWeek: 0.5 }), 5, 1).stepFacts!.a!;
+    expect(none.stretchHours).toBe(0);
+  });
+
+  it("honour leave and empty roles for key-person risk", () => {
+    const people = {
+      p1: { name: "Pat", roles: ["r"], capacity: 40, leave: [[0, 1e9]] as [number, number][] },
+      p2: { name: "Quinn", roles: ["r"], capacity: 40 },
+      z: { name: "Zed", roles: ["z"], capacity: 0 },
+    };
+    const m = model(
+      [step("a", [to("b")]), step("b", [to("c")], { role: "z" }), step("c", [to("done")], { role: null, person: "z" })],
+      { roles: { r: { name: "R", count: 2, cost: 1, ongoing: 0 }, z: { name: "Z", count: 1, cost: 1, ongoing: 0 } }, people },
+    );
+    const f = simulate(m, 3, 1).stepFacts!;
+    // Pat is away the whole run, so Quinn is the only one for a.
+    expect(f.a!.keyPerson).toEqual({ personId: "p2", personName: "Quinn" });
+    expect(f.a!.nobodyCanDo).toBe(false);
+    // Zed has no capacity: nobody can do b or c, which is not a key person but a flag.
+    for (const id of ["b", "c"]) {
+      expect(f[id]!.keyPerson).toBeNull();
+      expect(f[id]!.nobodyCanDo).toBe(true);
+    }
+    const empty = model([step("a", [to("done")])], { roles: { r: { name: "R", count: 0, cost: 1, ongoing: 0 } } });
+    const e = simulate(empty, 3, 1).stepFacts!.a!;
+    expect(e.keyPerson).toBeNull();
+    expect(e.nobodyCanDo).toBe(true);
   });
 
   it("report the cycle time median and 90th percentile", () => {

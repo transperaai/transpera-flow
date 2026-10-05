@@ -5,8 +5,10 @@
 // - a back-edge: an edge that closes a cycle, found by a depth-first search.
 //
 // The search starts at the model's entry, then at each service's and servicing
-// process's entry in model order, and follows each step's edges in the order they
-// are written, so the loops and their order are stable. An edge into a step that
+// process's entry in model order, and follows each step's edges in the order of
+// the steps they lead to (not the order they were drawn), so the loops and their
+// order depend only on the graph. Any routing back is treated as a loop (rework);
+// a future "not rework" flag on edges could exclude some (see docs/PRD.md D41). An edge into a step that
 // is still on the search stack closes a cycle: the stack from that step to the
 // edge's source is the loop's `steps` (entry, ..., last step), and the edge goes
 // back to the first. Edges to ends (including hand-offs) are not followed.
@@ -57,6 +59,9 @@ export function detectLoops(model: EngineModel): Loop[] {
       if (!back.get(n.to)!.includes(s.id)) back.get(n.to)!.push(s.id);
     }
   }
+  // Canonical order: edges are followed in the order of the steps they lead to, not the order they were drawn, so the same graph gives the same loops.
+  const order = new Map(model.steps.map((s, i) => [s.id, i]));
+  for (const adj of [fwd, back]) for (const list of adj.values()) list.sort((a, b) => order.get(a)! - order.get(b)!);
   const reach = (from: string, adj: Map<string, string[]>): Set<string> => {
     const seen = new Set<string>([from]);
     const todo = [from];
