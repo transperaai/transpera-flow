@@ -1,9 +1,9 @@
-// What the Overview projects (issue #100, A35): the four headline cards and the two charts, from simulation runs.
+// Recurring revenue projected from simulation runs (issue #100, A35; now the Solution page's MRR chart).
 // The engine reports a run's totals at its horizon, not month by month, so the monthly recurring revenue chart is
 // built from runs of increasing length (same seed, so they line up): "MRR after 3 months" comes from a 3-month run.
 // Pure: no React, no workers.
 
-import { withClientGroups, type EngineModel, type SimulationResult, type Stat } from "@transpera-flow/engine";
+import { withClientGroups, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 
 /** Weeks in a month, as the engine counts them (52 a year). */
 const WEEKS_PER_MONTH = 52 / 12;
@@ -116,21 +116,4 @@ export function mrrSeries(model: EngineModel, months: readonly number[], runs: r
     if (run) points.push({ month: m, ...mrrAfter(model, run, start) });
   });
   return points;
-}
-
-/** One role's busy share over the run, for the "how busy each role is" chart. */
-export interface RoleBusy extends Band {
-  id: string;
-  name: string;
-}
-
-/** Roles that carry any work, busiest first. */
-export function roleBusy(model: EngineModel, result: SimulationResult): RoleBusy[] {
-  const out: RoleBusy[] = [];
-  for (const [id, role] of Object.entries(model.roles)) {
-    const util: Stat | undefined = result.kpi.roles[id]?.util;
-    if (!util) continue;
-    out.push({ id, name: role.name, mean: util.mean, lo: util.p10, hi: util.p90 });
-  }
-  return out.filter((r) => r.hi > 0.005).sort((a, b) => b.mean - a.mean);
 }

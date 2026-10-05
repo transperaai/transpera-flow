@@ -110,7 +110,7 @@ export function LeversSettings({
     <Page
       title="Levers"
       eyebrow="Settings"
-      description="Every input you can change when testing. Your choices are saved for the Overview's what-if controls, which are coming with the new Overview; process pages no longer show levers."
+      description="Every input you can change when testing. Your choices are saved, but no page shows lever sliders at the moment: process pages no longer do, and the Overview has no what-if controls."
       actions={
         <>
           <SaveStatus state={state} mode={mode} />

@@ -862,6 +862,16 @@ interface CanvasProps {
   zoomControls?: boolean;
   /** Show the playback bar over the foot of the map. Default true; embedded maps turn it off. */
   showPlayback?: boolean;
+  /**
+   * Put the playback bar in its own strip above the map rather than floating over its foot, so it never covers a card
+   * (the Overview's company map, where on a phone the bar wraps to two lines). Default false.
+   */
+  playbackAbove?: boolean;
+  /**
+   * Playback of the company map (issue #173): every item plays, pipeline and servicing, and what is inside a closed card
+   * is counted on the card. Default false: a process's own items only, on the steps drawn.
+   */
+  playbackRollUp?: boolean;
   /** Offer the swimlane view (when the map has no groups). Default true. */
   showLanes?: boolean;
   /**
@@ -911,6 +921,8 @@ function Canvas({
   focus = null,
   zoomControls = true,
   showPlayback = true,
+  playbackAbove = false,
+  playbackRollUp = false,
   showLanes = true,
   height: heightProp,
   onStepClick,
@@ -1010,7 +1022,8 @@ function Canvas({
   const [menu, setMenu] = useState<(MenuState & { bounds: { width: number; height: number } }) | null>(null);
   // Which step's menu is open, synchronously, so the context-menu event that follows Shift+F10 doesn't reopen it.
   const menuFor = useRef<string | null>(null);
-  const playback = usePlayback(bundle, result);
+  const playbackGroups = useMemo(() => (playbackRollUp ? { open: drawn } : null), [playbackRollUp, drawn]);
+  const playback = usePlayback(bundle, result, playbackGroups);
 
   const warnings = useMemo(() => (editable && !handoffs ? stepWarnings(bundle) : new Map<string, string>()), [bundle, editable, handoffs]);
   const order = useMemo(() => flowOrder(bundle), [bundle]);
@@ -1483,7 +1496,8 @@ function Canvas({
       let bounds = flow.getNodesBounds(wanted.length ? wanted : all);
       // Room around what is framed, so a step or two is seen in its surroundings and not blown up to fill the panel.
       if (wanted.length) bounds = { x: bounds.x - 260, y: bounds.y - 140, width: bounds.width + 520, height: bounds.height + 280 };
-      const pad = fitPadding(lanes, editable, showPlayback);
+      // A bar in its own strip above takes no room off the map.
+      const pad = fitPadding(lanes, editable, showPlayback && !playbackAbove);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
         panelHeight = autoPanelHeight(bounds, panel.width, pad);
@@ -1493,7 +1507,7 @@ function Canvas({
       void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
-    [flow, lanes, editable, showPlayback, heightMode, measureOverflow, focus],
+    [flow, lanes, editable, showPlayback, playbackAbove, heightMode, measureOverflow, focus],
   );
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -1604,6 +1618,17 @@ function Canvas({
               )}
             </div>
           )}
+          {showPlayback && playbackAbove && (
+            <div className="border-b border-line px-2.5 py-2" data-playback-strip>
+              <PlaybackBar
+                clock={playback.clock}
+                H={playback.index?.H ?? null}
+                hoursPerWeek={playback.hoursPerWeek}
+                reps={result?.reps ?? null}
+                describe={playback.describe}
+              />
+            </div>
+          )}
           <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
@@ -1621,7 +1646,7 @@ function Canvas({
             </p>
           )}
           {/* Playback of the run (issue #14), over the foot of the map; before it in the page, for Tab. */}
-          {showPlayback && (
+          {showPlayback && !playbackAbove && (
             <div className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
               <PlaybackBar
                 clock={playback.clock}

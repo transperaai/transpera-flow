@@ -5,7 +5,8 @@ import { Overview } from "@/components/overview/overview";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { aiConfigured, loadAiViews } from "@/lib/ai/data";
 import { ShellHeader } from "@/components/shell/shell-header";
-import { loadLiveProcess, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSources } from "@/lib/data";
+import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { companyMapView } from "@/lib/overview/company-version";
@@ -22,7 +23,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     return <EmptyOverview slug={slug} name={head.name} unpublished={overview?.processes ?? []} />;
   }
   const ws = live.workspace.id;
-  const [parts, company, issues, sources, rules, canEdit, firstPrinciples, aiViews] = await Promise.all([
+  const [parts, company, issues, sources, rules, canEdit, firstPrinciples, aiViews, solutions] = await Promise.all([
     loadLiveParts(ws),
     loadLiveCompany(ws),
     loadWorkspaceIssues(ws),
@@ -31,11 +32,17 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     canEditWorkspace(ws),
     loadLiveFirstPrinciples(live.process.id, live.revision.id),
     loadAiViews([live.revision.id]),
+    loadWorkspaceSolutions(ws),
   ]);
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
   const found = company && mapVersion ? await loadCompanyVersion(ws, mapVersion) : null;
   const view = companyMapView(company, found, canEdit);
+  // The solutions the Overview compares before and after (B15): for any copied from an earlier version than live, that version's steps.
+  const liveRevision = new Map(parts.map((p) => [p.process.id, p.revision.id]));
+  const older = solutionsToCompare(solutions, issues).filter(({ solution: s }) => liveRevision.get(s.process_id) !== s.base_revision_id);
+  const loaded = await Promise.all(older.map(({ solution: s }) => loadSolutionBase(slug, s.process_id, s.base_revision_id, live).catch(() => null)));
+  const solutionBases: SolutionBases = Object.fromEntries(older.flatMap(({ solution: s }, i) => (loaded[i] ? [[s.id, { steps: loaded[i]!.base.steps, edges: loaded[i]!.base.edges }]] : [])));
   return (
     <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
     <Overview
@@ -49,6 +56,8 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       mode={canEdit ? "live" : "readonly"}
       analysisRules={rules.settings}
       firstPrinciples={firstPrinciples}
+      solutions={solutions}
+      solutionBases={solutionBases}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
       processesHref={`${base}/processes`}
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
@@ -56,6 +65,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       bundleHref={`${base}/export/bundle`}
       issuesHref={`${base}/issues`}
       rulesHref={`${base}/settings/rules`}
+      forecastHref={`${base}/forecast`}
       ai={{ view: aiViews[live.revision.id] ?? null, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: live.revision.number }}
     />
     </SourceLinkingScope>
