@@ -457,6 +457,26 @@ describe("people", () => {
     expect(people[a] ?? people[c] ?? people[d]).toBeUndefined();
   });
 
+  it("for the forecast, brings planned hires in on their start date and takes people out after their end date (issue #35)", () => {
+    const b = northbeamBundle();
+    const [hire, leaver, gone] = [northbeamPersonIds["Tom Reed"]!, northbeamPersonIds["Rosa Diaz"]!, priya];
+    b.people = b.people.map((p) =>
+      // Start: Monday 2 November, 20 working days in. End: Friday 16 October, so gone from 9 working days in.
+      p.id === hire ? { ...p, start_date: "2026-11-02" } : p.id === leaver ? { ...p, end_date: "2026-10-16" } : p.id === gone ? { ...p, end_date: "2026-10-01" } : p,
+    );
+    const people = toEngineModel(b, { startDate: START, planned: true }).people!;
+    expect(people[hire]!.from).toBe(20 * 8);
+    expect(people[hire]!.until).toBeUndefined();
+    expect(people[leaver]!.until).toBe(10 * 8);
+    expect(people[leaver]!.from).toBeUndefined();
+    // Gone before the run starts: not there at all, as without planning.
+    expect(people[gone]).toBeUndefined();
+    // Without `planned`, nothing changes: the hire isn't there yet and the leaver is there for the whole run.
+    const today = toEngineModel(b, { startDate: START }).people!;
+    expect(today[hire]).toBeUndefined();
+    expect(today[leaver]).toEqual({ name: people[leaver]!.name, roles: people[leaver]!.roles, capacity: people[leaver]!.capacity });
+  });
+
   it("falls back to role head-counts when the workspace has no people", () => {
     const b = northbeamBundle();
     b.people = [];
