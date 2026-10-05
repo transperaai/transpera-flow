@@ -116,7 +116,7 @@ describe("row-level security", () => {
     });
   });
 
-  it("owners and editors add, change and remove clients; members and viewers can't", async () => {
+  it("owners and editors add and change clients but never delete one (B19: hidden, never deleted); members and viewers can't", async () => {
     for (const role of ["owner", "editor"]) {
       await db.as(users[role]!.claims, async (c) => {
         const id = (await c.query("insert into clients (workspace_id, name, mrr) values ($1, 'New Co', 2500) returning id", [ws])).rows[0].id;
@@ -128,9 +128,10 @@ describe("row-level security", () => {
           ws,
         ]);
         expect((await c.query("update clients set notes = 'Hi' where id = $1", [id])).rowCount).toBe(1);
-        expect((await c.query("delete from clients where id = $1", [id])).rowCount).toBe(1);
-        // Its services and assignments go with it.
-        expect((await c.query("select count(*)::int as n from client_assignments where client_id = $1", [id])).rows[0].n).toBe(0);
+        await c.query("savepoint d");
+        await expect(c.query("delete from clients where id = $1", [id])).rejects.toThrow(/never deleted: mark them inactive/);
+        await c.query("rollback to savepoint d");
+        expect((await c.query("select count(*)::int as n from client_assignments where client_id = $1", [id])).rows[0].n).toBe(1);
       });
     }
     for (const role of ["member", "viewer"]) {
@@ -188,12 +189,14 @@ describe("row-level security", () => {
 });
 
 describe("issues about a client", () => {
-  it("links an issue to a client in the workspace; deleting the client keeps the issue, unlinked", async () => {
+  it("links an issue to a client in the workspace; deleting the client (outside the app) keeps the issue, unlinked", async () => {
     await db.as(users.editor!.claims, async (c) => {
       const client = (await c.query("insert into clients (workspace_id, name) values ($1, 'Short-lived Ltd') returning id", [ws])).rows[0].id;
       const issue = (
         await c.query("insert into issues (workspace_id, client_id, type, title) values ($1, $2, 'churn_risk', 'May leave') returning id", [ws, client])
       ).rows[0].id;
+      // Nobody signed in deletes a client (B19); the operator can, outside the app.
+      await c.query("reset role");
       await c.query("delete from clients where id = $1", [client]);
       expect((await c.query("select client_id from issues where id = $1", [issue])).rows[0].client_id).toBeNull();
     });
