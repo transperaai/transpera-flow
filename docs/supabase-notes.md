@@ -245,3 +245,11 @@ select has_function_privilege('anon', 'public.revision_history(uuid)', 'execute'
 ```
 
 Both must be empty or false. `revision_history` was dropped and re-created (one more column, `note`), so its grants were re-made in the migration: `authenticated` may execute it, `anon` may not.
+
+## Harden versions and provenance (issue #171, migration 20261128500000)
+
+Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/harden-versions.test.ts`) and PostgREST v14 (`packages/mcp/test/postgrest-versions.test.ts`, as an editor with a session JWT).
+
+- `private.version_rules_guard` (`process_revisions`) and `private.process_rules_guard` (`processes`) refuse only when `current_user` is `authenticated` or `anon`. This relies on three behaviours that need confirming on the real project: `open_draft`, `discard_draft`, `publish_process` and `duplicate_version` are security invoker, so they run as `authenticated` and must satisfy the rules; `restore_version` and the company map functions are security definer and run as the function owner; referential actions (cascade delete of a process or workspace, `on delete set null` of `created_by`) run as the table owner. Check after applying: publish, restore, discard and duplicate a process in the app, and delete a throwaway process that has a published version.
+- Not closed: a direct `draft` to `published` update on a process with no published version, and a direct `published` to `superseded` update, are allowed for an editor (the functions make the same moves as the caller, so the database cannot tell them apart). They skip the audit entry. Closing it needs the functions to set a transaction-local marker the guard reads.
+- `created_by` can still be set on insert (column default `auth.uid()`); only changes after insert are refused.
