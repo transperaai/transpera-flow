@@ -306,13 +306,15 @@ export async function listPlacements(db: Db, workspaceId: string): Promise<Place
 export async function listProcesses(
   db: Db,
   workspaceId: string,
-  { includeCompany = false }: { includeCompany?: boolean } = {},
-): Promise<(ProcessRow & { draft_revision_id: string | null })[]> {
-  let q = db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id`).eq("workspace_id", workspaceId);
+  { includeCompany = false, includeArchived = false }: { includeCompany?: boolean; includeArchived?: boolean } = {},
+): Promise<(ProcessRow & { draft_revision_id: string | null; archived_at: string | null })[]> {
+  let q = db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id, archived_at`).eq("workspace_id", workspaceId);
   if (!includeCompany) q = q.eq("is_company", false);
+  // An archived process (B19, migration 20261204000000) is off every list, the map and the simulation until it is restored.
+  if (!includeArchived) q = q.is("archived_at", null);
   const [r, placements] = await Promise.all([q.order("created_at").order("id"), listPlacements(db, workspaceId)]);
   const parentOf = new Map(placements.filter((p) => !p.holderIsCompany).map((p) => [p.processId, p.holderId]));
-  return (rows(r) as (ProcessRow & { draft_revision_id: string | null })[]).map((p) => ({ ...p, parent_process_id: parentOf.get(p.id) ?? null }));
+  return (rows(r) as (ProcessRow & { draft_revision_id: string | null; archived_at: string | null })[]).map((p) => ({ ...p, parent_process_id: parentOf.get(p.id) ?? null }));
 }
 
 /**
@@ -417,9 +419,10 @@ export async function loadProcessBySlug(
   const { data: workspace, error } = await db.from("workspaces").select("id, name, slug, settings").eq("slug", slug).maybeSingle();
   if (error) throw error;
   if (!workspace) return null;
-  const everything = await listProcesses(db, workspace.id, { includeCompany });
+  // An archived process still opens by its id (its history is kept), but is never in the list or the default.
+  const everything = await listProcesses(db, workspace.id, { includeCompany, includeArchived: Boolean(processId) });
   // The company map (the Editor and History open it by its id) is never in the list of processes to pick from.
-  const all = everything.filter((p) => !p.is_company);
+  const all = everything.filter((p) => !p.is_company && !p.archived_at);
   // The default is a top-level process: a child process opens from the step that holds it, or from the list.
   const process = processId ? everything.find((p) => p.id === processId) : (all.find((p) => p.live_revision_id && !p.parent_process_id) ?? all.find((p) => p.live_revision_id));
   if (!process) return null;
@@ -681,6 +684,31 @@ export async function loadSourceBody(db: Db, sourceId: string): Promise<string |
   const r = await db.from("sources").select("body").eq("id", sourceId).maybeSingle();
   if (r.error) throw r.error;
   return r.data?.body ?? null;
+}
+
+/** The original file kept for a source (B19, migration 20261204000000): where it is in Storage, its name, type and size. */
+export interface SourceFile {
+  /** `<workspace id>/<uuid>/<name>` in the private `sources` bucket. */
+  path: string;
+  name: string;
+  type: SourceFileType;
+  /** Bytes. */
+  size: number;
+}
+
+/** The kinds of file a source can keep (the database checks them again). */
+export const SOURCE_FILE_TYPES = ["txt", "md", "csv", "xlsx", "pdf"] as const;
+export type SourceFileType = (typeof SOURCE_FILE_TYPES)[number];
+/** The largest file a source can keep: 10 MB (the bucket and the database refuse more). */
+export const MAX_SOURCE_FILE_BYTES = 10 * 1024 * 1024;
+
+/** A source's original file, or null when it has none (or isn't visible). */
+export async function loadSourceFile(db: Db, sourceId: string): Promise<SourceFile | null> {
+  const r = await db.from("sources").select("file_path, file_name, file_type, file_size").eq("id", sourceId).maybeSingle();
+  if (r.error) throw r.error;
+  const f = r.data;
+  if (!f?.file_path || !f.file_name || !f.file_type || f.file_size == null) return null;
+  return { path: f.file_path, name: f.file_name, type: f.file_type as SourceFileType, size: f.file_size };
 }
 
 /** The tours of the editor the signed-in person has dismissed (`process`, `company`); RLS shows only their own. */

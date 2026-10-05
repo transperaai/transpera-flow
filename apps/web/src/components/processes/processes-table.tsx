@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, CornerDownRight } from "lucide-react";
 import { Help } from "@/components/help";
 import { RatingPill } from "@/components/processes/rating";
@@ -28,12 +28,15 @@ export function ProcessesTable({
   rows,
   hrefs,
   loadCard,
+  actions,
 }: {
   rows: ProcessRowData[];
   /** Where each process opens, by id. */
   hrefs: Record<string, string>;
   /** The map card for a process (a server action); null when it has nothing to draw yet. */
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
+  /** A row's admin menu (rename, change type, archive), for editors. */
+  actions?: (row: ProcessRowData) => ReactNode;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [cards, setCards] = useState<Record<string, Card>>({});
@@ -103,6 +106,7 @@ export function ProcessesTable({
                 example="v4 · 29 Sep means the fourth published version, published on 29 September."
               />
             </th>
+            {actions && <th className="w-10 p-0" aria-label="Change the process" />}
             <th className="w-12 px-2 py-2 sm:w-20" aria-label="Open the process" />
           </tr>
         </thead>
@@ -152,6 +156,11 @@ export function ProcessesTable({
                   <td className="hidden px-2 py-2.5 text-xs whitespace-nowrap lg:table-cell">
                     {r.version ? `v${r.version.number}${r.version.publishedAt ? ` · ${shortDate(r.version.publishedAt)}` : ""}` : <span className="text-muted-foreground">Draft only</span>}
                   </td>
+                  {actions && (
+                    <td className="p-0 text-right" onClick={(e) => e.stopPropagation()}>
+                      {actions(r)}
+                    </td>
+                  )}
                   <td className="px-2 py-2.5 text-right">
                     <Link
                       href={hrefs[r.id] ?? "#"}
@@ -165,7 +174,7 @@ export function ProcessesTable({
                 </tr>
                 {isOpen && (
                   <tr id={panel} className="border-b bg-muted/20">
-                    <td colSpan={8} className="p-3 sm:p-4">
+                    <td colSpan={actions ? 9 : 8} className="p-3 sm:p-4">
                       <MapCard row={r} card={cards[r.id] ?? { state: "loading" }} href={hrefs[r.id] ?? "#"} />
                     </td>
                   </tr>

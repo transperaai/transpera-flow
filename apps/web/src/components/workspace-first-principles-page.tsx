@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { emptyFirstPrinciples, isBlank } from "@transpera-flow/engine";
 import { aiConfigured, loadAiViews } from "@/lib/ai/data";
 import { isUnpublished } from "@transpera-flow/db";
-import { createServicingProcess } from "@/app/w/[slug]/process-actions";
+import { createProcess } from "@/app/w/[slug]/process-actions";
 import { WorkspaceFirstPrinciplesFlow } from "@/components/first-principles/flow-clients";
 import type { FlowEditing } from "@/components/first-principles/first-principles-flow";
 import { ProcessNav } from "@/components/process-nav";
@@ -67,7 +67,7 @@ export async function WorkspaceFirstPrinciplesPage({ slug, processId }: { slug: 
           processes={processes}
           current={live.process.id}
           hrefs={hrefs}
-          create={canEdit ? createServicingProcess.bind(null, live.workspace.id, slug) : undefined}
+          create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}
           ratings={ratings}
           processesHref={`${base}/processes`}
           companyMapHref={base}

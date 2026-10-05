@@ -114,7 +114,7 @@ export function ProcessNav({
               {(create || processesHref) && <DropdownMenuSeparator />}
               {create && (
                 <DropdownMenuItem onSelect={() => setAdding(true)}>
-                  <Plus /> New servicing process…
+                  <Plus /> New process…
                 </DropdownMenuItem>
               )}
               {processesHref && (
