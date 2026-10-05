@@ -8,7 +8,7 @@ import { useState } from "react";
 import type { DetectedIssue } from "@transpera-flow/engine";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { headline, rest, sourceOf } from "@/lib/insights/insights";
+import { headline, sourceOf } from "@/lib/insights/insights";
 import { formatIssueCost } from "@/lib/issues/register";
 
 const DOT: Record<string, string> = { risk: "var(--rate-risk)", bad: "var(--rate-bad)", good: "var(--rate-good)", great: "var(--rate-great)" };
@@ -43,7 +43,7 @@ export function FactsList({
       <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
         {shown.map((f) => {
           const where = f.stepId ? stepName(f.stepId) : null;
-          const more = rest(f.evidence);
+          const said = headline(f.evidence);
           const light = f.stepId ? [f.stepId] : null;
           return (
             <li
@@ -59,8 +59,8 @@ export function FactsList({
               <span className="flex min-w-0 items-start gap-2">
                 <i aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full" style={{ background: DOT[f.rating] }} />
                 <span className="min-w-0">
-                  <span className="font-medium">{headline(f.evidence)}</span>
-                  {more && <span className="text-muted-foreground"> {more}</span>}
+                  <span className="font-medium">{f.title}</span>
+                  {said && said !== f.title && <span className="text-muted-foreground"> {said}</span>}
                 </span>
               </span>
               <span className="flex flex-wrap gap-x-2.5 pl-4 text-xs text-muted-foreground">
