@@ -333,6 +333,8 @@ export function ProcessView({
       steps: [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)],
       services: bundle.services,
       workspace: bundle.workspace.provenance,
+      // Calibrated lead volumes (issue #41): measured qualified leads are not perturbed.
+      leadSources: bundle.leadSources ?? [],
     }),
     [bundle],
   );
