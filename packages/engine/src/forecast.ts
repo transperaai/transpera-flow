@@ -135,7 +135,7 @@ export function forecastAlerts(
       if (days >= 1) consequences.push(`a ${num(days)}-working-day wait at ${stepName(wait.stepId)}`);
       else if (wait.hours >= 1) consequences.push(`a ${num(wait.hours, 0)}-hour wait at ${stepName(wait.stepId)}`);
     }
-    if (lateN > 0) consequences.push(`${lateN} client task${lateN === 1 ? "" : "s"} late or missed that month`);
+    if (lateN > 0) consequences.push(`${lateN} client task${lateN === 1 ? "" : "s"} across the business late or missed that month`);
     const act = at > 0 ? `Hire or move work by ${monthName(at - 1)}` : "Act now";
     const peak = series.reduce<{ i: number; v: number } | null>((p, s, i) => (s && (!p || s.mean > p.v) ? { i, v: s.mean } : p), null);
     const sentences = [

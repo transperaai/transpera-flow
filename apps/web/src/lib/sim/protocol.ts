@@ -5,6 +5,8 @@ export interface SimRequest {
   model: EngineModel;
   reps: number;
   seed: number;
+  /** Month-by-month numbers too (`SimulationResult.monthly`; the forecast, issue #35). */
+  monthly?: boolean;
 }
 
 export type SimResponse =

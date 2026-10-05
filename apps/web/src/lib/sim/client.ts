@@ -39,13 +39,13 @@ export class SimulationClient {
 
   constructor(private readonly createWorker: () => WorkerLike) {}
 
-  run(model: EngineModel, { reps = 30, seed = 1 }: { reps?: number; seed?: number } = {}): Promise<SimRun> {
+  run(model: EngineModel, { reps = 30, seed = 1, monthly = false }: { reps?: number; seed?: number; monthly?: boolean } = {}): Promise<SimRun> {
     this.cancel();
     const worker = this.ensureWorker();
     const id = this.nextId++;
     return new Promise<SimRun>((resolve, reject) => {
       this.pending = { id, resolve, reject };
-      worker.postMessage({ id, model, reps, seed });
+      worker.postMessage({ id, model, reps, seed, ...(monthly ? { monthly } : {}) });
     });
   }
 
