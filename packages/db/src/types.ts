@@ -479,7 +479,7 @@ export interface AiAnalysisRow {
   updated_at: string;
 }
 
-export type SourceKind = "transcript" | "notes" | "data" | "screenshot";
+export type SourceKind = "transcript" | "notes" | "sop" | "spreadsheet" | "data" | "screenshot" | "other";
 
 /**
  * A transcript, note set or screenshot from the audit (docs/PRD.md §3 Source,
@@ -500,6 +500,14 @@ export interface SourceRow {
   created_at: string;
   updated_at: string;
 }
+
+/** A source as the library lists it (migration 20261130500000, `search_sources`): everything but the full text. */
+export type SourceListRow = Omit<SourceRow, "body"> & {
+  /** The first words of the text, or the words around the first match of a search. Empty when there is no text. */
+  excerpt: string;
+  /** Whether there is any text to read when the source is opened. */
+  has_body: boolean;
+};
 
 /** What a source can be linked to (issue #118, A53). */
 export type SourceLinkKind = "process" | "step" | "insight" | "issue" | "solution";

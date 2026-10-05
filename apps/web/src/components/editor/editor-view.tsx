@@ -13,6 +13,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isUnpublished, type BlockRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
+import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
+import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryCreate } from "@/lib/editor/library-create";
 import { blockFromSteps } from "@/lib/blocks/blocks";
 import { markDemoIdeaBuilt } from "@/lib/demo/company-store";
 import { placeIdea, type IdeaSeed } from "@/lib/suggestions/idea";
@@ -45,6 +48,7 @@ import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
 import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
+import { useEditorTour } from "./editor-tour";
 import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
@@ -76,6 +80,9 @@ export function EditorView({
   extraChanges = 0,
   issue = null,
   idea = null,
+  tourDismissed = false,
+  historyHref,
+  library,
 }: {
   live: ProcessBundle;
   draft: ProcessBundle | null;
@@ -90,6 +97,10 @@ export function EditorView({
   /** Kept for the sources a step cites (issue #21). */
   sources?: SourceRow[];
   userId?: string | null;
+  /** The database says this person has already dismissed the Editor's written tour. */
+  tourDismissed?: boolean;
+  /** The History page of what is being edited, for the bar's History button. */
+  historyHref?: string;
   viewer?: Viewer | null;
   sourcesHref?: string;
   /** The workspace's Settings page, which "Missing for simulation" links to for incoming volume. */
@@ -104,12 +115,18 @@ export function EditorView({
   issue?: SolutionIssue | null;
   /** Solution mode opened from a solution idea (A52, "Build it"): its steps are placed on first load, and saving marks it built. */
   idea?: IdeaSeed | null;
+  /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
+  library?: { processes: LibraryProcess[]; templates: LibraryTemplate[] };
 }) {
   const router = useRouter();
   // The company map (B11): a picture of the business. Cards are moved and joined by handoff lines; nothing is simulated.
   const company = initialLive.process.is_company === true;
   const stamp = useCallback(() => ({ at: new Date().toISOString(), by: userId }), [userId]);
   const blockMode = editorMode === "block";
+  // The library makes new processes on the server, as the signed-in editor; the demo (memory) only places existing ones.
+  const workspaceId = initialLive.workspace.id;
+  const onCreate = useCallback<LibraryCreate>((input) => createLibraryProcess(workspaceId, input), [workspaceId]);
+  const libraryProps = useMemo(() => (library ? { ...library, ...(mode === "live" ? { onCreate } : {}) } : undefined), [library, mode, onCreate]);
   const solutionMode = editorMode === "solution";
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.
@@ -128,6 +145,8 @@ export function EditorView({
   const [placement] = useState(() => (solutionMode && idea ? placeIdea(initialLive, idea) : null));
   const [selection, setSelection] = useState<Selection>(placement?.id ? { steps: [placement.id], edges: [] } : NO_SELECTION);
   const me = viewer ?? (mode === "demo" ? DEMO_VIEWER : null);
+  // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
+  const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
   const [sync, realtime] = useRealtime(session, connection.transport, me, "draft");
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
@@ -348,6 +367,8 @@ export function EditorView({
         unresolved={unresolved}
         breaks={breaks}
         company={company}
+        onTour={tour.start}
+        historyHref={historyHref}
         simulating={simulating}
         onSimulate={simulate}
         onReview={select}
@@ -361,7 +382,7 @@ export function EditorView({
       />
       <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[264px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)]">
         <aside aria-label="Palette" className="flex flex-col gap-4 border-b border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-r lg:border-b-0">
-          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} />
+          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
           {solutionMode && placement && (
             <p role="note" data-idea-note className="rounded-token border border-edit/50 bg-edit-soft p-2 text-xs">
               {placement.note}
@@ -399,7 +420,7 @@ export function EditorView({
               This {solutionMode ? "solution" : "draft"} can&apos;t be simulated yet: {workingModel.error}.
             </p>
           )}
-          <div className="flex min-h-0 flex-1" data-highlight-tone={solutionMode ? "issue" : undefined}>
+          <div className="flex min-h-0 flex-1" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
             <ProcessCanvas
               bundle={working}
               result={!stale && pair?.draft.result ? pair.draft.result : null}
@@ -448,6 +469,7 @@ export function EditorView({
           />
         </aside>
       </div>
+      {tour.node}
       {!blockMode && !company && (
       <SimulateFooter
         asked={!!asked}

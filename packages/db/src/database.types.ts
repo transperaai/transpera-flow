@@ -2990,6 +2990,24 @@ export type Database = {
           },
         ]
       }
+      user_tours: {
+        Row: {
+          dismissed_at: string
+          tour: string
+          user_id: string
+        }
+        Insert: {
+          dismissed_at?: string
+          tour: string
+          user_id?: string
+        }
+        Update: {
+          dismissed_at?: string
+          tour?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       workspaces: {
         Row: {
           created_at: string
@@ -3028,7 +3046,17 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      process_placements: {
+        Row: {
+          holder_is_company: boolean | null
+          holder_name: string | null
+          holder_process_id: string | null
+          process_id: string | null
+          step_id: string | null
+          workspace_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       add_source: {
@@ -3056,6 +3084,17 @@ export type Database = {
       can_edit_workspace: { Args: { ws: string }; Returns: boolean }
       can_manage_workspace: { Args: { ws: string }; Returns: boolean }
       can_read_workspace: { Args: { ws: string }; Returns: boolean }
+      create_library_process: {
+        Args: {
+          p_description?: string
+          p_entity_name?: string
+          p_kind: string
+          p_name: string
+          p_source?: string
+          p_workspace: string
+        }
+        Returns: Json
+      }
       create_workspace: {
         Args: { ws_name: string; ws_settings?: Json; ws_slug: string }
         Returns: string
@@ -3212,6 +3251,32 @@ export type Database = {
           p_workspace: string
         }
         Returns: Json
+      }
+      search_sources: {
+        Args: {
+          p_kind?: string
+          p_limit?: number
+          p_offset?: number
+          p_process?: string
+          p_search?: string
+          p_sort?: string
+          p_unlinked?: boolean
+          p_workspace: string
+        }
+        Returns: {
+          created_at: string
+          excerpt: string
+          file_url: string
+          has_body: boolean
+          id: string
+          kind: string
+          recorded_at: string
+          speakers: string[]
+          title: string
+          total: number
+          updated_at: string
+          workspace_id: string
+        }[]
       }
       take_link_fetch: { Args: never; Returns: number }
       unlinked_source_count: {

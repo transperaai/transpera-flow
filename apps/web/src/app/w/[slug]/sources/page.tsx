@@ -14,11 +14,14 @@ export default async function WorkspaceSourcesPage(props: PageProps<"/w/[slug]/s
     <Page
       title="Sources"
       eyebrow="Company"
-      description="Every source must be linked to a process, a step, an insight, an issue or a solution. Cite one for a step's value from the step's inspector; sources that disagree turn the value into a range and log a perception gap."
+      description="Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for. Cite one for a step's value from the step's inspector."
     >
       <SourcesPage
         workspaceId={data.workspace.id}
         sources={data.sources}
+        total={data.total}
+        totalAll={data.totalAll}
+        deletedSourceIds={data.deletedSourceIds}
         citations={data.citations}
         links={data.links}
         targets={data.targets}

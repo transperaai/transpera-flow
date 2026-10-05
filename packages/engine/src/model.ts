@@ -40,6 +40,13 @@ export interface EnginePerson {
   leave?: [number, number][];
   /** Cost per hour, for overtime cost; omitted means the mean of their roles' costs. */
   cost?: number;
+  /**
+   * A planned hire's first hour, in simulation hours from t = 0 (the forecast, issue #35). Before it they take no
+   * work and carry no share of the clients' work: their role's pool is the others. Omitted: there from the start.
+   */
+  from?: number;
+  /** The hour a person leaves for good (their end date). From it on they are gone, as before `from`. Omitted: there to the end. */
+  until?: number;
 }
 
 export interface EngineEdge {
@@ -574,6 +581,74 @@ export interface WeeklySamples {
   won: number[];
 }
 
+/**
+ * One replication month by month (the forecast, issue #35), when the run is asked for it. Months are the engine's
+ * 52/12-week months from t = 0; the last ends at the horizon, so it may be part of one. Every array has one entry per
+ * month. Hours are totals over the month, not a week. Reading these never changes the run.
+ */
+export interface MonthlyReplication {
+  /** The months' edges in working hours: 0, each month's start, the horizon. */
+  bounds: number[];
+  /**
+   * Work per role id: pipeline and servicing hands-on time (spread over the time it is worked) and ongoing client
+   * hours, all of it, including the client hours of someone on leave.
+   */
+  roleWork: Record<string, number[]>;
+  /** Hours each role has: its people's capacity (split across their roles) less leave, and before a start or after an end date. */
+  roleCapacity: Record<string, number[]>;
+  /** Overtime hours, split across the roles of the people who worked it. */
+  roleOvertime: Record<string, number[]>;
+  /**
+   * Work nobody in the role was there to do: client hours no one of the role carried (nobody on the team), and in
+   * months the role has no hours at all, the hands-on time of the items that reached its steps (at each step's mean).
+   */
+  roleUncovered: Record<string, number[]>;
+  /**
+   * Work per person id. Client hours that fall in someone's leave go to the others of the same role who are there
+   * that month (not to them), by the hours each has, so a person's month is the work they actually face.
+   */
+  personWork: Record<string, number[]>;
+  personCapacity: Record<string, number[]>;
+  personOvertime: Record<string, number[]>;
+  /** Hours waited for a person, and the waits, per step id (by when the work was picked up). */
+  waitSum: Record<string, number[]>;
+  waitN: Record<string, number[]>;
+  /** Servicing tasks done late or not done within twice their deadline, by when that was decided. */
+  lateTasks: number[];
+  /** Active clients per service id (the first service a client takes; "" for none, and for the pooled count), averaged over the month's weekly ticks. */
+  clients: Record<string, number[]>;
+}
+
+/** One month of a role's or person's busy share across replications. */
+export interface MonthBusy extends Stat {
+  /** Hours a week they have that month (capacity less leave, and before a start or after an end date). */
+  capacity: number;
+  /** Hours a week of work that month, on average. */
+  work: number;
+}
+
+/**
+ * A run month by month (the forecast, issue #35): `simulate(model, reps, seed, { monthly: true })`. Busy shares are
+ * work ÷ (hours available + overtime), the same sum the run's own utilisation uses, but per month and with leave and
+ * planned starts and end dates taken off the hours available.
+ */
+export interface MonthlyResult {
+  /** Each month's start and end, in working hours from t = 0. */
+  months: { start: number; end: number }[];
+  /** Per role id and month; null when nobody in the role is there that month. */
+  roles: Record<string, (MonthBusy | null)[]>;
+  /** Per role id and month: hours a week of work nobody in the role was there to do (see `MonthlyReplication.roleUncovered`); null when none. */
+  uncovered: Record<string, (number | null)[]>;
+  /** Per person id and month; null when they aren't there at all that month. */
+  people: Record<string, (MonthBusy | null)[]>;
+  /** Mean hours waited for a person per step id and month (all replications together); null with no waits that month. */
+  waits: Record<string, (number | null)[]>;
+  /** Servicing tasks done late or missed, per month. */
+  lateTasks: Stat[];
+  /** Active clients per service id per month ("" for none, and for the pooled count). */
+  clients: Record<string, Stat[]>;
+}
+
 export interface ReplicationResult {
   /** Entities reaching their first `won` end. */
   won: number;
@@ -618,6 +693,8 @@ export interface ReplicationResult {
   entities: TraceEntity[] | null;
   /** Present only when the run was asked to sample weekly (see `WeeklySamples`). */
   weekly?: WeeklySamples;
+  /** Present only when the run was asked for month-by-month numbers (see `MonthlyReplication`). */
+  monthly?: MonthlyReplication;
   H: number;
   /** Warm-up simulated before t = 0 and discarded. */
   warmupHours: number;
@@ -819,4 +896,6 @@ export interface SimulationResult {
   clients?: Record<string, ClientResult>;
   /** With a client roster: how much of the churn each driver causes (docs/analysis-rules.md rule 10). */
   churnCauses?: ChurnCauses;
+  /** Month by month, only when the run was asked for it (`simulate(…, { monthly: true })`). */
+  monthly?: MonthlyResult;
 }

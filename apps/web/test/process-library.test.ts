@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { defaultCompanyPart, northbeamBundle, partOf, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
 import { deleteSteps } from "@/lib/editor/commands";
-import { filterLibrary, libraryEntries, placeProcesses } from "@/lib/editor/library";
-import { applyEdit } from "@/lib/editor/ops";
+import { filterLibrary, libraryEntries, placeProcesses, type LibraryProcess } from "@/lib/editor/library";
+import { applyEdit, invertEdit } from "@/lib/editor/ops";
 import { CARD_SIZE } from "@/lib/map/groups";
 
 // The process library on the company map (issue #164, B12): what it lists, search, and placing several processes at once as
@@ -44,7 +44,7 @@ describe("what the library lists", () => {
     };
     const off = without(nested, a, c, d);
     const entries = libraryEntries(off);
-    const rank = { free: 0, placed: 1, inside: 2 } as const;
+    const rank = { free: 0, map: 1, placed: 2, inside: 3, holds: 4 } as const;
     expect(entries.map((e) => e.state)).toEqual(entries.map((e) => e.state).sort((x, y) => rank[x] - rank[y]));
     expect(entries.filter((e) => e.state === "free").map((e) => e.id).sort()).toEqual([a, c].sort());
     const inside = entries.find((e) => e.id === d)!;
@@ -146,5 +146,86 @@ describe("placing processes", () => {
     const added = after.steps.filter((s) => placed.ids.includes(s.id));
     expect(added).toHaveLength(2);
     expect(overlap({ x: Number(added[0]!.x), y: Number(added[0]!.y) }, { x: Number(added[1]!.x), y: Number(added[1]!.y) })).toBe(false);
+  });
+});
+
+// B12 part 2: the same library in an ordinary process's editor. The Editor hands it the workspace's processes with where each
+// sits now (the process whose LIVE version holds it, from `process_placements`).
+describe("the library in an ordinary process's editor", () => {
+  const ordinary = () => northbeamBundle();
+  const lib = (b: ProcessBundle, holders: Record<string, LibraryProcess["holder"]> = {}): LibraryProcess[] => [
+    { id: b.process.id, name: b.process.name, kind: b.process.kind, live: true, holder: holders[b.process.id] ?? null },
+    ...(b.otherProcesses ?? []).map((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, live: true, holder: holders[p.process.id] ?? null })),
+    { id: "00000000-0000-4000-8000-0000000000a1", name: "Onboarding", kind: "servicing" as const, live: true, holder: holders["00000000-0000-4000-8000-0000000000a1"] ?? null },
+    { id: "00000000-0000-4000-8000-0000000000a2", name: "Offboarding", kind: "servicing" as const, live: false, holder: holders["00000000-0000-4000-8000-0000000000a2"] ?? null },
+  ];
+  const company = { id: "00000000-0000-4000-8000-00000000c0c0", name: "Company map", company: true };
+
+  it("lists what sits nowhere first, then what is on the company map (addable: it gives way), then the rest greyed; never the process itself", () => {
+    const b = ordinary();
+    const other = b.otherProcesses![0]!.process;
+    const entries = libraryEntries(b, lib(b, { [other.id]: company, [b.process.id]: company }));
+    expect(entries.some((e) => e.id === b.process.id)).toBe(false);
+    const free = entries.filter((e) => e.state === "free").map((e) => e.name);
+    expect(free).toEqual(expect.arrayContaining(["Offboarding", "Onboarding"]));
+    expect(free).toEqual([...free].sort((x, y) => x.localeCompare(y)));
+    expect(entries.find((e) => e.id === other.id)).toMatchObject({ state: "map" });
+    expect(entries.findIndex((e) => e.state === "map")).toBeGreaterThan(entries.findIndex((e) => e.state === "free"));
+    // ...and it can be placed (publishing moves it off the company map).
+    const placed = placeProcesses(b, [other.id], { x: 0, y: 0 }, lib(b, { [other.id]: company }))!;
+    expect(placed.ids).toHaveLength(1);
+    // A process inside another ordinary process says which.
+    const inOnboarding = libraryEntries(b, lib(b, { [other.id]: { id: "00000000-0000-4000-8000-0000000000a1", name: "Onboarding", company: false } }));
+    expect(inOnboarding.find((e) => e.id === other.id)).toMatchObject({ state: "inside", insideName: "Onboarding" });
+  });
+
+  it("greys out a process that holds this one (at any depth), so nothing ends up inside itself", () => {
+    const b = ordinary();
+    const onboarding = { id: "00000000-0000-4000-8000-0000000000a1", name: "Onboarding", company: false };
+    const offboarding = { id: "00000000-0000-4000-8000-0000000000a2", name: "Offboarding", company: false };
+    // This process sits inside Onboarding, which sits inside Offboarding.
+    const entries = libraryEntries(b, lib(b, { [b.process.id]: onboarding, [onboarding.id]: offboarding }));
+    expect(entries.find((e) => e.id === offboarding.id)).toMatchObject({ state: "holds" });
+    expect(entries.find((e) => e.id === onboarding.id)).toMatchObject({ state: "holds" });
+    expect(placeProcesses(b, [offboarding.id], { x: 0, y: 0 }, lib(b, { [b.process.id]: onboarding, [onboarding.id]: offboarding }))).toBeNull();
+  });
+
+  it("adds several processes in one go as links in view, and undo and redo take them out and put them back", () => {
+    const b = ordinary();
+    const list = lib(b);
+    const ids = ["00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000a2"];
+    const placed = placeProcesses(b, ids, { x: 600, y: 400, visible: { left: 0, top: 0, right: 1400, bottom: 800 } }, list)!;
+    expect(placed.ids).toHaveLength(2);
+    const after = applyEdit(b, placed.edit);
+    const added = after.steps.filter((s) => placed.ids.includes(s.id));
+    expect(added.map((s) => [s.kind, s.child_process_id, s.name])).toEqual([["subprocess", ids[0], "Onboarding"], ["subprocess", ids[1], "Offboarding"]]);
+    expect(overlap({ x: Number(added[0]!.x), y: Number(added[0]!.y) }, { x: Number(added[1]!.x), y: Number(added[1]!.y) })).toBe(false);
+    // Only steps are inserted: the other processes and this one's existing steps and edges are untouched.
+    expect(after.otherProcesses).toEqual(b.otherProcesses);
+    expect(after.edges).toEqual(b.edges);
+    expect(after.steps.filter((s) => !placed.ids.includes(s.id))).toEqual(b.steps);
+    // Now they are here: listed as such, not addable again.
+    expect(libraryEntries(after, list).filter((e) => ids.includes(e.id)).map((e) => e.state)).toEqual(["placed", "placed"]);
+    expect(placeProcesses(after, ids, { x: 0, y: 0 }, list)).toBeNull();
+    // Undo takes both out; redo puts them back.
+    const undone = applyEdit(after, invertEdit(placed.edit));
+    expect(undone.steps).toEqual(b.steps);
+    expect(applyEdit(undone, placed.edit).steps).toEqual(after.steps);
+  });
+
+  it("removing a link deletes the holder step only, and the process is free again", () => {
+    const b = ordinary();
+    const list = lib(b);
+    const id = "00000000-0000-4000-8000-0000000000a1";
+    const after = applyEdit(b, placeProcesses(b, [id], { x: 0, y: 0 }, list)!.edit);
+    const holder = after.steps.find((s) => s.child_process_id === id)!;
+    const removal = deleteSteps(after, [holder.id])!;
+    expect(removal.ops.map((op) => op.kind)).toEqual(["remove"]);
+    const back = applyEdit(after, removal);
+    expect(back.steps).toEqual(b.steps);
+    expect(libraryEntries(back, list).find((e) => e.id === id)?.state).toBe("free");
+    // A process held by this one's LIVE version, taken out in the draft, is free here again.
+    const heldHere = libraryEntries(b, lib(b, { [id]: { id: b.process.id, name: b.process.name, company: false } }));
+    expect(heldHere.find((e) => e.id === id)?.state).toBe("free");
   });
 });

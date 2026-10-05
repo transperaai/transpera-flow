@@ -166,6 +166,7 @@ describe("constraints", () => {
     await expect(insert({ file_url: "javascript:alert(1)" })).rejects.toMatchObject({ code: "23514" });
     await expect(insert({ speakers: Array.from({ length: 51 }, (_, i) => `P${i}`) })).rejects.toMatchObject({ code: "23514" });
     await expect(insert({ kind: "screenshot", file_url: "https://files.example.com/board.png" })).resolves.toBeTruthy();
+    for (const kind of ["sop", "spreadsheet", "other", "notes", "data"]) await expect(insert({ kind })).resolves.toBeTruthy();
   });
 });
 

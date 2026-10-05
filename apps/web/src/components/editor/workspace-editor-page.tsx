@@ -4,9 +4,10 @@ import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
 import { loadIdeaProposal } from "@/lib/company-data";
 import { ideaSeed } from "@/lib/suggestions/idea";
-import { loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
+import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
 import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
 import { loadLiveParts } from "@/lib/overview/data";
+import { loadLibrary } from "@/lib/editor/library-data";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
 import { issueAboutProcess, solutionIssueOf } from "@/lib/solutions/area";
 
@@ -27,21 +28,30 @@ export async function WorkspaceEditorPage({
   const process = await loadProcessForEditing(slug, processId, { includeCompany: true });
   if (!process) notFound();
   const company = process.live.process.is_company === true;
-  // The map's cards draw from the processes they link to (live), which the Editor is not editing.
-  const placed = company ? await loadLiveParts(process.live.workspace.id) : null;
-  const live = placed ? { ...process.live, otherProcesses: placed } : process.live;
-  const draft = placed && process.draft ? { ...process.draft, otherProcesses: placed } : process.draft;
+  // The map's cards draw from the processes they link to (live), which the Editor is not editing. In any other editor the process
+  // library (B12) can link any process into the draft, so every live process is at hand to draw and simulate through its link;
+  // the ones the run already carries keep their place (the pipeline first), the rest follow, and only a link brings one in.
+  const [parts, library] = await Promise.all([loadLiveParts(process.live.workspace.id), loadLibrary(process.live.workspace.id)]);
+  const withParts = (b: typeof process.live) => {
+    if (company) return { ...b, otherProcesses: parts };
+    const have = new Set([b.process.id, ...(b.otherProcesses ?? []).map((p) => p.process.id)]);
+    return { ...b, otherProcesses: [...(b.otherProcesses ?? []), ...parts.filter((p) => !have.has(p.process.id))] };
+  };
+  const live = withParts(process.live);
+  const draft = process.draft ? withParts(process.draft) : process.draft;
   // The company map is read at the Overview, not at a process page of its own.
   const base = company ? `/w/${slug}` : `/w/${slug}/p/${processId}`;
   const canEdit = await canEditWorkspace(live.workspace.id);
   if (!canEdit) redirect(base);
-  const [scenarios, blocks, sources, viewer, fpChanged] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, fpChanged, tours] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
     currentViewer(),
     company ? Promise.resolve(false) : firstPrinciplesDraftChanged(live.process.id, live.revision.id, draft?.revision.id ?? null),
+    loadDismissedEditorTours(),
   ]);
+  const tourDismissed = tours.includes(company ? "company" : "process");
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
   // The company map has no solutions or blocks: it is edited as a draft only.
   const editorMode = company ? "draft" : parseEditorMode(searchParams.mode);
@@ -66,11 +76,14 @@ export async function WorkspaceEditorPage({
       blocks={blocks}
       sources={sources}
       userId={viewer?.userId ?? null}
+      tourDismissed={tourDismissed}
+      historyHref={`/w/${slug}/p/${processId}/history`}
       viewer={viewer}
       sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exitHref(searchParams.from, base)}
       horizonMonths={parseHorizon(searchParams.horizon)}
+      library={editorMode === "draft" ? library : undefined}
     />
     </SourceLinkingScope>
   );

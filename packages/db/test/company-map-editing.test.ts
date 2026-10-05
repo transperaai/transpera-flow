@@ -61,6 +61,13 @@ async function world(): Promise<World> {
   return { ws, cid, sales, delivery, support };
 }
 
+/** `holder` gets a published version 1 holding `child` by a link (as publishing a draft from the library leaves it). */
+async function liveHolding(w: World, holder: string, child: string, name: string) {
+  const [rev] = await q("insert into process_revisions (workspace_id, process_id, number, status, published_at) values ($1, $2, 1, 'published', now()) returning id", [w.ws, holder]);
+  await q("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ($1, $2, $3, $4, 'subprocess', $5)", [rev.id, w.ws, holder, name, child]);
+  await q("update processes set live_revision_id = $2 where id = $1", [holder, rev.id]);
+}
+
 const processRow = async (id: string) => (await q("select live_revision_id, draft_revision_id from processes where id = $1", [id]))[0] as { live_revision_id: string; draft_revision_id: string | null };
 
 /** A revision's holders (and other steps), by name. */
@@ -353,9 +360,11 @@ describe("restoring a version of the company map re-links its processes", () => 
     const w = await world();
     const rows = await history(w.cid);
     const full = rows[0]!; // every holder the world made
-    // Later: Support is deleted, Delivery nests under Sales, a new process appears.
+    // Later: Support is deleted, Delivery nests under Sales, a new process appears. Nested means held by Sales's LIVE version
+    // (B12: "inside" comes from the live links; the old parent column only takes it off the map, as MCP's import still sets it).
     await q("delete from processes where id = $1", [w.support]);
     await q("update processes set parent_process_id = $1 where id = $2", [w.sales, w.delivery]);
+    await liveHolding(w, w.sales, w.delivery, "Delivery");
     const newer = randomUUID();
     await q("insert into processes (id, workspace_id, name, kind) values ($1, $2, 'Newer', 'pipeline')", [newer, w.ws]);
     await q("update processes set name = 'Sales (renamed)' where id = $1", [w.sales]);
@@ -409,7 +418,9 @@ describe("restoring a version of the company map re-links its processes", () => 
     const [second] = await q("insert into process_revisions (workspace_id, process_id, number, status, published_at) values ($1, $2, 2, 'superseded', now()) returning id", [w.ws, w.sales]);
     await q("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ($1, $2, $3, 'Qualify', 'subprocess', $4)", [second.id, w.ws, w.sales, child]);
     await q("delete from steps where revision_id = $1", [salesRev.id]);
+    // Moved out: Delivery's live version holds it now (B12: where a process sits is its live holder).
     await q("update processes set parent_process_id = $2 where id = $1", [child, w.delivery]);
+    await liveHolding(w, w.delivery, child, "Qualify");
     const restored = await commitAs(editor.claims, (c) => rpc(c, "restore_version", w.sales, second.id));
     expect(restored).toMatchObject({ status: "restored", unlinked_children: 1, skipped_holders: 0, added_holders: 0 });
     expect((await q("select child_process_id, kind from steps where revision_id = $1", [restored.revision_id]))[0]).toEqual({ child_process_id: null, kind: "subprocess" });

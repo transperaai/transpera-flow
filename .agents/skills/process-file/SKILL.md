@@ -12,7 +12,7 @@ Leading words: **evidence** (a verbatim quote that backs a number), **assumed** 
 ## Flow
 
 1. **Read** every material end to end: transcripts, SOPs, spreadsheets, and maps (look at the picture, or read the text).
-   - Done when each material has an id, title, kind, date and speakers (leave out any you cannot read from the material). The `kind`: interview or call → `transcript`; SOP or document → `notes`; spreadsheet or export → `data`; a drawn map, as a picture or as text → `notes`; a screenshot of a tool → `screenshot`.
+   - Done when each material has an id, title, kind, date and speakers (leave out any you cannot read from the material). The `kind`: interview or call → `transcript`; SOP → `sop`; any other document → `notes`; spreadsheet → `spreadsheet`; export → `data`; anything else → `other`; a drawn map, as a picture or as text → `notes`; a screenshot of a tool → `screenshot`.
 2. **List** what you found, in a message to Austin: processes (with the sources for each), people and roles, every number heard, and the places where sources disagree.
    - Done when every number heard is listed with its speaker and time.
 3. **Ask** about every gap and every ambiguity, in one message, numbered and grouped by process so Austin can answer by number. Ask about:

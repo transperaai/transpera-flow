@@ -157,7 +157,8 @@ describe("the MCP server can't write the company model", () => {
     ["person_roles", "delete from person_roles where person_id = $1", [sam]],
     ["person_leave", "insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, '2026-12-01', '2026-12-05')", [sam, ws]],
     ["services", "insert into services (workspace_id, name) values ($1, 'Content')", [ws]],
-    ["clients", "delete from clients where id = $1", [client]],
+    // Not a delete: nobody signed in deletes a client at all (B19).
+    ["clients", "update clients set mrr = 999 where id = $1", [client]],
     ["client_assignments", "update client_assignments set person_id = $2 where client_id = $1 and role_id = $3", [client, chloe, northbeamRoleIds.seo]],
     ["lead_sources", "update lead_sources set volume_week = 15 where id = $1", [ads]],
     ["seasonality", "insert into seasonality (workspace_id, month, multiplier) values ($1, 12, 0.5)", [ws]],

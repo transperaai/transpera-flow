@@ -105,9 +105,11 @@ describe("the Add / Link source dialog's rules", () => {
   });
 
   it("offers the types the database holds, in the prototype's order", () => {
-    expect(KIND_CHOICES).toEqual(["transcript", "notes", "data", "screenshot"]);
+    expect(KIND_CHOICES).toEqual(["transcript", "notes", "sop", "spreadsheet", "data", "screenshot", "other"]);
+    expect(SOURCE_KIND_LABELS.sop).toBe("SOP");
     expect(SOURCE_KIND_LABELS.data).toBe("Data");
     expect(cleanSourceField("kind", "data")).toEqual({ value: "data" });
+    for (const kind of ["sop", "spreadsheet", "other"]) expect(cleanSourceField("kind", kind)).toEqual({ value: kind });
     expect(cleanSourceField("kind", "video")).toBeNull();
     expect(draftToSubmission(draft({ kind: "data" }), targets)).toMatchObject({ ok: true, input: { kind: "data" } });
   });

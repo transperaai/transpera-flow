@@ -44,6 +44,12 @@ const nextDay = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + DAY_M
 export interface ModelOptions {
   /** ISO date the simulation starts on; leave and start/end dates are measured from it. Defaults to today. */
   startDate?: string;
+  /**
+   * The forecast (issue #35): planned hires (people whose start date is after the start date) join the run on their
+   * start date, and people with an end date leave it then. Off (the default): the team employed on the start date,
+   * for the whole run, as every other screen simulates it.
+   */
+  planned?: boolean;
 }
 
 export class ModelError extends Error {}
@@ -123,12 +129,15 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
       groups[step.id] = { name: step.name, ...parentOf(step), entry: entryStep.id, next };
       continue;
     }
-    const child = ctx.parts.get(step.child_process_id!);
-    if (!child) throw new ModelError(`'${step.name}' holds a child process that has no published version yet, or that no longer sits inside this process (it was moved); publish it, or remove or replace this step`);
-    if (child.process.parent_process_id !== ctx.stack[ctx.stack.length - 1]) {
-      throw new ModelError(`'${step.name}' holds '${child.process.name}', which no longer sits inside this process (it was moved); remove or replace that step`);
+    // The step's link is what puts the child here (B12): the revision being simulated says what it holds, whatever holds the
+    // child elsewhere. (A process is in at most one live version; the database refuses a second on publish.)
+    // A link back to a process this one sits inside (at any depth) is a loop, whether or not that process is among the parts.
+    if (ctx.stack.includes(step.child_process_id!)) {
+      const name = ctx.parts.get(step.child_process_id!)?.process.name ?? step.name;
+      throw new ModelError(`this would put '${name}' inside itself: '${step.name}' links back to it. Take one of the links out`);
     }
-    if (ctx.stack.includes(child.process.id)) throw new ModelError(`Child process '${child.process.name}' is inside itself`);
+    const child = ctx.parts.get(step.child_process_id!);
+    if (!child) throw new ModelError(`Publish '${step.name}' first: this step links to it, and it has no published version yet`);
     let sub: Graph;
     try {
       sub = resolveGraph(child.steps, child.edges, tags, { parts: ctx.parts, stack: [...ctx.stack, child.process.id] });
@@ -262,7 +271,7 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   }
 
   const startDate = options.startDate ?? new Date().toISOString().slice(0, 10);
-  const people = resolvePeopleRows(bundle, working, startDate);
+  const people = resolvePeopleRows(bundle, working, startDate, options.planned === true);
   const demand = engineDemand(bundle, startDate);
   // Client groups replace the named roster, which stays stored but is not simulated.
   const clientGroups = engineClientGroups(bundle, services);
@@ -305,19 +314,28 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     return flattenModel(model);
   } catch (err) {
     // A group with nowhere to go, or a loop of groups, is a problem with the process, as any other bad graph is.
-    if (err instanceof NestingError) throw new ModelError(err.message);
+    if (err instanceof NestingError) {
+      // The engine calls every holder a group; a step linking a process is called by its name, as the person sees it.
+      const stuck = /^Group '(.*)' has nothing leaving it/.exec(err.message)?.[1];
+      const all = [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)];
+      if (stuck !== undefined && all.some((x) => x.name === stuck && x.child_process_id) && !all.some((x) => x.name === stuck && x.kind === "group")) {
+        throw new ModelError(`'${stuck}' has nothing leaving it: join it to a next step`);
+      }
+      throw new ModelError(err.message);
+    }
     throw err;
   }
 }
 
 /**
- * The child processes steps of this run's processes may hold, by id, at their
- * live revisions: every one the bundle carries (`loadServicingContext` loads
- * the descendants of the processes a run needs).
+ * The processes steps of this run's processes may hold, by id, at their live
+ * revisions: every one the bundle carries (`loadServicingContext` loads the
+ * ones the run's revisions link to, any depth). Only a holder step's link
+ * brings one into the run.
  */
 function heldProcesses(bundle: ProcessBundle): Map<string, ProcessPart> {
   const parts = new Map<string, ProcessPart>();
-  for (const p of bundle.otherProcesses ?? []) if (p.process.parent_process_id) parts.set(p.process.id, p);
+  for (const p of bundle.otherProcesses ?? []) parts.set(p.process.id, p);
   return parts;
 }
 
@@ -617,15 +635,17 @@ function engineDemand(bundle: ProcessBundle, startDate: string): EngineDemand | 
  * steps of this process they are skilled for, and leave as simulation hours.
  * Returns undefined when the workspace has no people, so head-counts apply.
  */
-function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string) {
+function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string, planned = false) {
   const s = bundle.workspace.settings;
   const hoursPerDay = s.hours_per_week / WORKING_DAYS_PER_WEEK;
   const roleIds = new Set(bundle.roles.map((r) => r.id));
   const stepIds = new Set(working.map((st) => st.id));
   const employed = bundle.people
     .filter((p) => p.active)
-    .filter((p) => (!p.start_date || p.start_date <= startDate) && (!p.end_date || p.end_date >= startDate))
+    .filter((p) => (planned || !p.start_date || p.start_date <= startDate) && (!p.end_date || p.end_date >= startDate))
     .sort(byIdAsc);
+  /** Hours from the start date to the start of `iso` (a planned start), or to the end of it (an end date). */
+  const hoursTo = (iso: string) => workingDaysBetween(startDate, iso) * hoursPerDay;
   if (!employed.length) return undefined;
 
   const people: Record<string, EnginePerson> = {};
@@ -649,6 +669,8 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
       ...(p.cost_rate != null ? { cost: Number(p.cost_rate) } : {}),
       ...(skillRows.length ? { skills: skillRows.map((k) => k.step_id).filter((id) => stepIds.has(id)).sort() } : {}),
       ...(leave.length ? { leave } : {}),
+      ...(planned && p.start_date && p.start_date > startDate ? { from: hoursTo(p.start_date) } : {}),
+      ...(planned && p.end_date ? { until: hoursTo(nextDay(p.end_date)) } : {}),
     };
   }
   return people;

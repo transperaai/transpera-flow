@@ -11,6 +11,7 @@ import {
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
+  loadClients,
   loadMarket,
   type MarketConditionRow,
   type MarketScheduleRow,
@@ -22,6 +23,10 @@ import {
   loadProcessBySlug,
   loadScenarios,
   loadSources,
+  searchSources,
+  countSources,
+  loadDismissedTours,
+  existingSourceIds,
   loadSourceLinks,
   loadLinkTargets,
   loadStepNames,
@@ -31,6 +36,7 @@ import {
   type SourceCitation,
   type SourceLinkRow,
   type SourceRow,
+  type SourceListRow,
   SEASONALITY_COLUMNS,
   SERVICE_COLUMNS,
   SERVICE_SERVICING_COLUMNS,
@@ -85,7 +91,14 @@ export async function loadSourcesPage(
   slug: string,
 ): Promise<{
   workspace: Pick<WorkspaceRow, "id" | "name" | "slug">;
-  sources: SourceRow[];
+  /** The library's first page: rows without their full text. */
+  sources: SourceListRow[];
+  /** How many sources match (all of them, on the first page). */
+  total: number;
+  /** How many sources the workspace has. */
+  totalAll: number;
+  /** Cited sources that no longer exist: the page lists what cited them apart. */
+  deletedSourceIds: string[];
   citations: Record<string, SourceCitation[]>;
   links: SourceLinkRow[];
   targets: LinkTargets;
@@ -94,17 +107,21 @@ export async function loadSourcesPage(
   const { data: workspace, error } = await supabase.from("workspaces").select("id, name, slug").eq("slug", slug).maybeSingle();
   if (error) throw error;
   if (!workspace) return null;
-  const [sources, rows, links, targets] = await Promise.all([
-    loadSources(supabase, workspace.id),
+  const [page, totalAll, rows, links, targets] = await Promise.all([
+    searchSources(supabase, workspace.id, { sort: "newest" }),
+    countSources(supabase, workspace.id),
     loadCitingRows(supabase, workspace.id),
     loadSourceLinks(supabase, workspace.id),
     loadLinkTargets(supabase, workspace.id),
   ]);
   // A link to a step that is in no current version still has a name somewhere: an earlier version's.
   const current = new Set(targets.steps.map((s) => s.id));
+  const citations = Object.fromEntries(citationsBySource(rows));
+  const cited = Object.keys(citations);
+  const existing = await existingSourceIds(supabase, cited);
   const missing = [...new Set(links.flatMap((l) => (l.step_id && !current.has(l.step_id) ? [l.step_id] : [])))];
   const olderSteps = await loadStepNames(supabase, missing);
-  return { workspace, sources, citations: Object.fromEntries(citationsBySource(rows)), links, targets: { ...targets, olderSteps } };
+  return { workspace, sources: page.rows, total: page.total, totalAll, deletedSourceIds: cited.filter((id) => !existing.has(id)), citations, links, targets: { ...targets, olderSteps } };
 }
 
 /** What "+ Link" needs on any screen: the workspace's source links and the things a source can be linked to. */
@@ -216,6 +233,11 @@ async function loadAiSolutionIds(db: Awaited<ReturnType<typeof createClient>>, w
   } catch {
     return [];
   }
+}
+
+/** The workspace's named clients, their services and who looks after them (issue #182): everyone in the workspace reads them. */
+export async function loadWorkspaceClients(workspaceId: string) {
+  return loadClients(await createClient(), workspaceId);
 }
 
 /** The workspace's saved scenarios, oldest first (RLS: everyone in the workspace can read them). */
@@ -435,4 +457,13 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     churnDrivers,
     ...market,
   };
+}
+
+/** The tours of the Editor the signed-in person has dismissed (`process`, `company`). A failed read counts as none: the tour just shows. */
+export async function loadDismissedEditorTours(): Promise<string[]> {
+  try {
+    return await loadDismissedTours(await createClient());
+  } catch {
+    return [];
+  }
 }
