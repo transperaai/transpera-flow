@@ -1,71 +1,50 @@
 # Handover
 
-Updated 2 Oct 2026 (afternoon AEST). Milestone A's code is complete: 57 of 58 tickets closed; only A24 (#27) is open. Start a new session with:
+Updated 5 Oct 2026 (evening AEST). Milestone A is done (only A24, #27, open). The Milestone B redesign tickets (B11–B19) are
+merged and applied to production; only the map node redesign is left, to be designed with Austin. Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
 ## Where things stand
 
-**Redesign (Milestone A, #1):** Austin's QA turned into a redesign, validated with the HTML prototype
-(`apps/web/prototype/app-flow.html`, live at https://claude.ai/artifact/KqK4DAsAYLk4EnzbBGvLjr) and planned in
-`docs/plans/redesign-plan.md` (tickets A31–A58, #96–#123) and `docs/plans/build-plan.md` (rounds, guardrails).
-Builders follow `docs/plans/builder-brief.md`. Progress comments go on #1.
+**Milestone A** (redesign A31–A58, #96–#123): merged as #125–#160; see git history and #1 for the per-ticket log.
 
-Merged to `main` (live on https://transpera-flow.vercel.app):
+**Milestone B redesign.** Austin's decisions: B12 links processes and never edits them; B14 skill; B15 Overview spec;
+B16 process page; B17 hybrid analysis; B18 sources library and tour; B19 manual entry; stay on Supabase Free. Merged
+(rows refer to `docs/production-migrations.md`):
 
-| Ticket | PR | Notes |
-|---|---|---|
-| A31 record the redesign (#96) | #125 | PRD D21–D37, CONTEXT.md |
-| A32 remove Reports, Clients, Runs, Scenarios nav (#97) | #126 | |
-| A41 rating engine (#106) | #127 | ENGINE 1.1.0 |
-| A33 app shell v2, (i) help (#98, closes #93) | #128 | |
-| A44 Settings → Analysis rules (#109) | #131 | migration 20261104000000 |
-| A57 market conditions (#122) | #130 | migration 20261105000000, ENGINE 1.2.0 |
-| A37 processes inside processes (#102) | #129 | migration 20261108000000 |
-| A42 new rules (#107) | #133 | migration 20261110000000, ENGINE 1.3.0 |
-| A55 client groups (#120) | #134 | migration 20261111000000, ENGINE 1.4.0 |
-| A34 map v2 (#99) | #136 | |
-| A58 levers, help, 24-month horizon (#123) | #135 | migration 20261112000000 |
-| A43 cost per month (#108) | #132 | migration 20261113000000, ENGINE 1.5.0 |
-| A39 Editor as its own screen (#104) | #137 | `/p/<id>/edit` |
-| A36 Processes page and switcher (#101) | #139 | |
-| A35 Overview (#100) | #141 | `/w/<slug>` is the Overview; process pages moved to `/p/<id>` |
-| A38 process page v2 (#103) | #142 | read-only review page; levers inline in Projection; no Save run |
-| A56 churn drivers (#121) | #140 | migration 20261116000000, ENGINE 1.6.0 |
-| A51 block library (#116) | #143 | migration 20261117000000 |
-| A45 insights v2 (#110) | #145 | |
-| A40 process history (#105) | #144 | migration 20261118000000 |
-| Engine performance | #148 | recovers the A56 churn-tick cost; outputs bit-identical, ENGINE 1.6.0 |
-| A54 first principles (#119) | #147 | migration 20261119000000 |
-| A47 issues data and Acknowledge dialog (#112) | #149 | migration 20261120000000 (strictly additive; see below) |
-| A46 AI analysis (#111) | #150 | migration 20261121000000 (row 33) |
-| A48 issues pages (#113) | #152 | migration 20261121500000 (row 34); D38 |
-| A49 solutions (#114) | #153 | migration 20261122000000 (row 35) |
-| A52 suggestions v2, slice 1 (#117) | #154 | migration 20261124000000 (row 36) |
-| A53 sources must link, slice 1 (#118) | #155 | migration 20261124500000 (row 37); adds the "data" source type |
-| A50 solution page, slice 1 (#115) | #156 | migration 20261125000000 (row 38) |
-| Flaky `map-browser` test | #157 | test harness only |
-| A52 suggestions v2, slice 2 (#117) | #158 | migration 20261125500000 (row 39) |
-| A50 solution page, slice 2 (#115) | #159 | comparison, measures, MRR, stress test |
-| A53 sources must link, slice 2 (#118) | #160 | "+ Link" everywhere; MCP `add_source` needs links |
+| Ticket | Migrations |
+|---|---|
+| B11 company map (#163) | rows 40, 42 |
+| B13 process upload (#166) | rows 41, 43 |
+| Harden versions (#171) | row 44 |
+| B14 import bundle, part 1 (#167) | row 45 |
+| B12 process library (#164), parts 1 and 2 | rows 46, 47 |
+| B18 sources library and tour (#176) | row 48 |
+| B19 manual entry (#182), part 1 and part 2 (#194) | rows 49, 51 |
+| C2 calibration, part 1 (#41) | row 50 |
+| B6, B10 part 1, B16 process page, B15 Overview (#193) | none |
+| B17 analysis rework (#175, PR #195) | row 52 |
 
-No PRs are open. The last three tickets (A50, A52, A53) were each built as two vertical slices.
+**Production database:** applied up to `20261205000000` (row 52), each checked before and after. No PRs are open.
 
-**Production database:** applied up to `20261125500000` (row 39). Migrations go on strictly in version order, before the PR
-merges (the app reads the new tables). A PR that slips is renumbered, not applied out of order. See
-`docs/production-migrations.md`.
-
-**Austin's decisions on 1 Oct:** Northbeam's client groups are two services (SEO, PPC), no third "SEO + PPC"
-service; production numbers moving to client groups is fine ("it's an example, so clean it up"); the A41/A42 rule
-choices are confirmed (`docs/analysis-rules.md`). In the evening: churn drivers keep only late work and market on
-(no numbers move); dismissing an insight lasts until that process's next published version (built in A47); Save
-run stays removed (History replaces it; "Explain this run" has no entry point until A46/A52 give it one).
-
-**Issue statuses (A47):** the UI shows Open / Testing solutions / Resolved / Won't fix, stored as `open` /
-`in_progress` / `done` / `done` + `resolution = 'wont_fix'` (mapping in `packages/db/src/issue-status.ts`). A later
-"contract" migration that rewrites stored values and tightens the check needs Austin's go-ahead.
+**Design calls Claude made, for Austin to confirm:**
+- When a process is placed inside an ordinary process, the company map "gives way" (B12 part 2, #188).
+- Workspace name and currency are owner-only (#190).
+- Levers and the forecast are not on the Overview; the Settings help says so.
+- An archived process opens read-only with a banner.
+- A person's Pass verdict counts as Verified, with the simulation result shown too.
 
 **Waiting on Austin:**
+- **#39:** B10 part 2 (import), 4 questions.
+- **#41:** C2 part 2, 5 questions.
+- **#175:** B17, 4 questions: does Accept create the issue? First principles company-wide? Can MCP propose findings? What
+  happens to the old rule settings? (Production had 0 `analysis_rules` rows, so removing the rules editor moved no numbers.)
+- **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
+  PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
+- C5 is Austin's.
+
+**Still open from Milestone A:**
 - **CI timing tests:** the PRD §6.7 tests (`scenarios.test.ts`, `servicing.test.ts`) use absolute limits that shared
   GitHub runners miss by 15–20% now and then, even after #148. Options: a separate perf job with one retry, or
   budgets relative to a baseline measured on the same runner. Tests have not been loosened.
@@ -89,8 +68,10 @@ as in the app).
 
 - **Austin approves waves; within a wave, carry on without waiting.** Tell him when each wave finishes and go
   straight to the next unless he says otherwise.
-- **Delegate building to agents** to save the main session's context. Model policy (Austin's): plan with Opus,
-  build with Sonnet, review larger tickets with Opus. Give routine work (merges, small fixes) to Sonnet or do it
+- **Delegate building to agents** to save the main session's context. Model policy (Austin's, 5 Oct): **Opus scopes every
+  ticket first** into a precise brief (exact files and functions, data model and migration spec, patterns to copy, edge cases,
+  tests, out of scope, done criteria, Austin's decisions quoted verbatim); **Sonnet builds strictly from that brief** and asks
+  rather than guesses; **Opus does an adversarial review** before merge. Give routine work (merges, small fixes) to Sonnet or do it
   directly. Tell agents to **commit and push after every step**: a container restart once lost unpushed agent work.
 - **Keep GitHub issues current:** comment on a ticket when work starts (name the branch), put `Closes #N` in the
   PR, and post a progress comment on the milestone parent issue after each wave.
@@ -130,8 +111,16 @@ bash packages/db/scripts/prod-sql.sh -f apply.sql
 **CI:**
 - The GitHub `check` job runs lint, typecheck, tests, the build, and the PostgREST end-to-end tests. Each PR
   also gets a Vercel preview.
-- In the cloud container, use `gh api` REST calls; GraphQL is blocked.
-- Merge with `gh api -X PUT repos/transperaai/transpera-flow/pulls/<n>/merge -f merge_method=squash`.
+- In the cloud container there is no `gh`; use the GitHub MCP tools. Squash-merge with the full head SHA as
+  `expectedHeadSha`. Branch protection requires the `check` status: merging while it runs returns 405.
+- Per ticket: build, Opus review, fixes, merge `origin/main` (regenerate `bootstrap.sql` with
+  `pnpm --filter @transpera-flow/db gen:bootstrap`, never by hand), CI green, production preflight, apply
+  (`prod-sql.sh -f <apply file>`, which sets `lock_timeout`), post-apply checks, mark the row applied and push, CI, merge,
+  comment on the issue.
+- `prod-sql.sh` gotchas: errors come back as curl exit 22 with a 400; `[]` means success. Write SQL to a file first. Function
+  bodies store `can''t`, so a `like` against them needs `can''''t`; cast `"char"` columns (`tgenabled::text`); compare
+  `proconfig` with `array['search_path=""']`.
+- `apps/web/test/format.test.ts` (£27.4K) fails only in the cloud container (ICU); it passes in CI.
 
 **Local tests in the cloud container** (Postgres 16 and Chromium are preinstalled):
 
@@ -152,11 +141,15 @@ password to `postgres`.
 
 ## Next steps
 
-1. A24 (#27): needs Austin's transcripts.
-2. Austin's decisions under "Waiting on Austin" (the CI timing tests above all: they flake on most PRs).
-3. Austin's QA of the redesign on production; plan Milestone B from the follow-ups below.
+1. Austin's answers above (#39, #41, #175) and his live checks of B19 part 2.
+2. Build queue, each Opus-scoped then Sonnet-built: B1 (roles and visibility), then B3 and B4; B7 (forecast planning,
+   builds on B6); check B2 (People page) against B19; C1 (CSV import wizard); C4 (Storybook). B10 part 2 waits on #39,
+   C2 part 2 on #41.
+3. The map node redesign, designed with Austin.
+4. A24 (#27): needs Austin's transcripts.
 
-The 30 Sep plan (QA list → triage → build) is done: the triage became the redesign plan.
+Follow-ups from Milestone B: other source pickers still load full source text; four older PostgREST suites fail when
+re-run on the same database.
 
 ## Decisions from Austin (30 Sep)
 
