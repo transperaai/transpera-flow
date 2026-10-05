@@ -176,6 +176,8 @@ export function EditorView({
   const [solutionName, setSolutionName] = useState(solutionMode && idea ? idea.title : "");
   // Build it: the AI's steps go into the copy once, in place of the step the idea would replace (or, with none, at the end of the map).
   const seeded = useRef(false);
+  // Where the map is looking, for the palette (new steps appear there).
+  const viewCentreRef = useRef<(() => { x: number; y: number } | null) | null>(null);
   useEffect(() => {
     if (!placement?.edit || seeded.current) return;
     seeded.current = true;
@@ -351,7 +353,7 @@ export function EditorView({
       />
       <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[264px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)]">
         <aside aria-label="Palette" className="flex flex-col gap-4 border-b border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-r lg:border-b-0">
-          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} />
+          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} viewCentreRef={viewCentreRef} />
           {solutionMode && placement && (
             <p role="note" data-idea-note className="rounded-token border border-edit/50 bg-edit-soft p-2 text-xs">
               {placement.note}
@@ -404,6 +406,7 @@ export function EditorView({
               onRestore={restore}
               savedLabel={scratch ? "Edited" : hasDraft ? "Saved to draft" : "Saved"}
               hideAdd
+              viewCentreRef={viewCentreRef}
               // Nothing to play until Simulate has run.
               showPlayback={!company && !stale && !!pair?.draft.result}
             />

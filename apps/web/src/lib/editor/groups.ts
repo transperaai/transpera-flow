@@ -6,7 +6,7 @@
 // step must already be one of the group's own steps). Ungrouping runs the other way round.
 
 import { ancestorsOf, groupHasExit, isGroup, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
-import { GROUP_PADDING } from "@/lib/map/groups";
+import { CARD_SIZE, EMPTY_GROUP, GROUP_PADDING, TERMINAL_SIZE, openGroupSize, type Size } from "@/lib/map/groups";
 import { newId, newStepRow, type NewStepKind } from "./commands";
 import type { Edit, Op, Patch, RowChange } from "./ops";
 
@@ -53,13 +53,53 @@ export function freeSpot(bundle: ProcessBundle, parent: string | null, x: number
   return { x, y };
 }
 
+/** Space kept clear around a card, so a new one is not touching its neighbour. */
+const GAP = 24;
+/** How far, in map units, the search for a free place moves at a time, and how far it goes. */
+const NUDGE = { step: 24, reach: 1600 };
+const NUDGES: { dx: number; dy: number }[] = (() => {
+  const all: { dx: number; dy: number; d: number }[] = [];
+  for (let dx = -NUDGE.reach; dx <= NUDGE.reach; dx += NUDGE.step)
+    for (let dy = -NUDGE.reach; dy <= NUDGE.reach; dy += NUDGE.step) all.push({ dx, dy, d: Math.hypot(dx, dy) });
+  // Nearest first; on a tie, below and to the right before above and to the left, which is where the eye goes next.
+  return all.sort((a, b) => a.d - b.d || b.dy - a.dy || b.dx - a.dx);
+})();
+
+/** What a step takes up on the map (an open group at the size of its box, as the Editor draws groups open). */
+function footprint(bundle: ProcessBundle, s: StepRow): Size {
+  if (isGroup(s)) return openGroupSize(bundle.steps, s.id, "all");
+  return s.kind === "start" || s.kind === "end" ? TERMINAL_SIZE : CARD_SIZE;
+}
+
+/**
+ * Where a new card of this size goes so that its centre is as near (cx, cy) as it can be without touching a card of the
+ * same group (top level: map coordinates; in a group: relative to its box). Returns the card's top-left corner.
+ */
+export function nearestFreeSpot(bundle: ProcessBundle, parent: string | null, cx: number, cy: number, size: Size = CARD_SIZE): { x: number; y: number } {
+  const boxes = bundle.steps
+    .filter((s) => (s.parent_step_id ?? null) === parent)
+    .map((s) => {
+      const z = footprint(bundle, s);
+      return { x: Number(s.x), y: Number(s.y), w: z.width, h: z.height };
+    });
+  const x0 = cx - size.width / 2;
+  const y0 = cy - size.height / 2;
+  const free = (x: number, y: number) =>
+    !boxes.some((b) => x < b.x + b.w + GAP && x + size.width + GAP > b.x && y < b.y + b.h + GAP && y + size.height + GAP > b.y);
+  const hit = NUDGES.find((n) => free(x0 + n.dx, y0 + n.dy));
+  return { x: Math.round(x0 + (hit?.dx ?? 0)), y: Math.round(y0 + (hit?.dy ?? 0)) };
+}
+
 /**
  * Add a step, decision, wait or group after the selected step, in the same group as it (so inside a nested group, the new
  * one lands inside it). The new one is joined in: a selected step with nothing after it leads to it, and one with a
  * single next step now leads to the new one, which leads on to that step. A step with branches, or an end step, gets
- * the new one placed beside it, unconnected. With nothing selected, it goes at the end of the top level.
+ * the new one placed beside it, unconnected. With nothing selected, it is not connected to anything.
+ *
+ * `at` is the centre of what the person is looking at, in map coordinates: a new card at the top level goes there (or the
+ * nearest place that is free), so it appears on screen. Inside a group it still goes beside the selected step.
  */
-export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind: PaletteKind): { edit: Edit; id: string; note?: string } {
+export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind: PaletteKind, at?: { x: number; y: number } | null): { edit: Edit; id: string; note?: string } {
   const sel = selectedId ? stepOf(bundle, selectedId) : undefined;
   const parent = sel ? (sel.parent_step_id ?? null) : null;
   const siblings = bundle.steps.filter((s) => (s.parent_step_id ?? null) === parent);
@@ -68,7 +108,8 @@ export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind:
   // After a step with branches the right is crowded: put the new one just below it, where it is easy to find.
   const x0 = sel ? Number(sel.x) + (branches ? 0 : SLOT.x) : siblings.reduce((m, s) => Math.max(m, Number(s.x) + SLOT.x), 0);
   const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
-  const { x, y } = freeSpot(bundle, parent, x0, y0);
+  const size = kind === "group" ? EMPTY_GROUP : kind === "start" || kind === "end" ? TERMINAL_SIZE : CARD_SIZE;
+  const { x, y } = at && parent === null ? nearestFreeSpot(bundle, null, at.x, at.y, size) : freeSpot(bundle, parent, x0, y0);
 
   let added: StepRow;
   const extra: StepRow[] = [];

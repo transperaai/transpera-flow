@@ -19,6 +19,7 @@ const LAYOUT_CSS = `
   body { margin: 0; font: 14px sans-serif; }
   .absolute { position: absolute } .relative { position: relative } .inset-0 { inset: 0 } .isolate { isolation: isolate }
   .flex { display: flex } .flex-col { flex-direction: column } .flex-1 { flex: 1 1 0% } .min-h-0 { min-height: 0 } .min-w-0 { min-width: 0 }
+  .self-start { align-self: flex-start } .h-fit { height: fit-content }
   .w-48 { width: 12rem } .w-60 { width: 15rem } .h-full { height: 100% } .w-full { width: 100% }
   .border-b { border-bottom: 1px solid #ddd } .px-3 { padding: 0 .75rem } .py-2 { padding: .5rem 0 }
 `;
@@ -54,7 +55,7 @@ async function mount(options: Partial<HarnessOptions> = {}): Promise<Page> {
   });
   await page.setContent(`<style>${css}${LAYOUT_CSS}</style><div id="root"></div>`);
   await page.addScriptTag({ content: script });
-  await page.evaluate((o) => window.mountMap(o), { editable: false, nested: false, controlled: false, highlight: null, company: false, ...options });
+  await page.evaluate((o) => window.mountMap(o), { editable: false, nested: false, controlled: false, highlight: null, company: false, palette: false, card: false, ...options });
   await page.waitForSelector(".react-flow__node");
   // Wait for the first framing: the view leaves its starting place.
   await page.waitForFunction(() => !/translate\(0px, 0px\) scale\(1\)/.test(document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? ""), undefined, { timeout: 10_000 });
@@ -95,6 +96,17 @@ describe("framing the map", () => {
     await page.evaluate(() => window.mapApi.addStep());
     await page.waitForTimeout(600);
     expect(await view(page)).toBe(moved);
+    await page.close();
+  }, 60_000);
+});
+
+describe("the map's width", () => {
+  it("fills the card it sits in, whatever its toolbar measures (the Overview's right third was blank)", async () => {
+    const page = await mount({ card: true });
+    const panel = await page.locator(".react-flow").boundingBox();
+    const region = await page.locator("[data-process-map]").boundingBox();
+    expect(Math.round(region!.width)).toBe(1300);
+    expect(Math.round(panel!.width)).toBe(1300);
     await page.close();
   }, 60_000);
 });

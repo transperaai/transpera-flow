@@ -46,6 +46,7 @@ import {
   type Dispatch,
   type KeyboardEvent,
   type MouseEvent,
+  type MutableRefObject,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -828,6 +829,11 @@ interface CanvasProps {
   /** The Editor has its own palette (issue #104): leave "Add step" out of the toolbar. */
   hideAdd?: boolean;
   /**
+   * Filled in with a function that returns the centre of what the map is showing, in map coordinates (null before it is
+   * drawn), so the Editor's palette can put a new step where the person is looking.
+   */
+  viewCentreRef?: MutableRefObject<(() => { x: number; y: number } | null) | null>;
+  /**
    * The company map (B11): the lines between process cards are handoffs, drawn and labelled but visual only. They show their label
    * (not a branch share), are edited with a label field, and the loose-end warnings of a process's steps don't apply.
    */
@@ -895,6 +901,7 @@ function Canvas({
   openIssues,
   rating,
   hideAdd = false,
+  viewCentreRef,
   handoffs = false,
   expanded: expandedProp,
   onExpandedChange,
@@ -973,6 +980,18 @@ function Canvas({
     requestFit();
   };
   const wrapper = useRef<HTMLDivElement>(null);
+  // The centre of the map panel as it shows now, in map coordinates (not the bars above it).
+  useEffect(() => {
+    if (!viewCentreRef) return;
+    viewCentreRef.current = () => {
+      const rect = wrapper.current?.querySelector(".react-flow")?.getBoundingClientRect();
+      if (!rect || !rect.width || !rect.height) return null;
+      return flow.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    };
+    return () => {
+      viewCentreRef.current = null;
+    };
+  }, [viewCentreRef, flow]);
   // Positions of nodes mid-drag, and sizes React Flow measured; the rest comes from the bundle.
   const [dragging, setDragging] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [measured, setMeasured] = useState<Map<string, { width: number; height: number }>>(new Map());
@@ -1551,7 +1570,7 @@ function Canvas({
           tabIndex={-1}
           onDoubleClick={onDoubleClick}
           onKeyDownCapture={onKeyDownCapture}
-          className={`relative isolate flex min-w-0 flex-col rounded-lg border bg-card ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "self-start"}`}
+          className={`relative isolate flex min-w-0 flex-col rounded-lg border bg-card ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
