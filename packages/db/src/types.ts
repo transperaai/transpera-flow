@@ -131,6 +131,11 @@ export interface ProcessRow {
    * #163). It is never simulated and is left out of every list of processes. Absent (false) on fixtures.
    */
   is_company?: boolean;
+  /**
+   * When the process was archived (B19, #182): off the map, the lists and the simulation, read only, its history kept. Null or
+   * absent for a process in use.
+   */
+  archived_at?: string | null;
 }
 
 export interface ProcessRevisionRow {
@@ -1120,7 +1125,9 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonRoleRow, "person_roles">>,
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
-  Assert<Matches<Omit<ProcessRow, "is_company">, "processes">>,
+  // is_company and archived_at are optional here (absent on fixtures).
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,

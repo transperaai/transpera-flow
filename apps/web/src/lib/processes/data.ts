@@ -1,6 +1,7 @@
 import "server-only";
 import { listProcesses, loadIssues, loadProcessBySlug, type IssueRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { createClient } from "@/lib/supabase/server";
+import type { ArchivedProcess } from "./admin";
 import { isOnProcess, processRows, type LiveVersion, type ProcessRowData } from "./rows";
 
 /** What a row's map card needs: the process at its live revision, and its tracked issues (for the map's ratings and badges). */
@@ -11,8 +12,25 @@ export interface ProcessCardData {
 
 /** The Processes page: every process of a workspace with its numbers (RLS decides which are visible). */
 export async function loadProcessesPage(workspaceId: string): Promise<ProcessRowData[]> {
+  return (await loadProcessesAndArchived(workspaceId)).rows;
+}
+
+/** The Processes page's rows, and the archived processes for its Archived filter (issue #182), newest archived first. */
+export async function loadProcessesAndArchived(workspaceId: string): Promise<{ rows: ProcessRowData[]; archived: ArchivedProcess[] }> {
   const db = await createClient();
-  const [processes, issues] = await Promise.all([listProcesses(db, workspaceId), loadIssues(db, workspaceId)]);
+  const [everything, issues] = await Promise.all([listProcesses(db, workspaceId, { includeArchived: true }), loadIssues(db, workspaceId)]);
+  const processes = everything.filter((p) => !p.archived_at);
+  const archived = everything
+    .flatMap((p) => (p.archived_at ? [{ id: p.id, name: p.name, kind: p.kind, archivedAt: p.archived_at }] : []))
+    .sort((a, b) => b.archivedAt.localeCompare(a.archivedAt) || a.name.localeCompare(b.name));
+  return { rows: await rowsFor(db, processes, issues), archived };
+}
+
+async function rowsFor(
+  db: Awaited<ReturnType<typeof createClient>>,
+  processes: Awaited<ReturnType<typeof listProcesses>>,
+  issues: IssueRow[],
+): Promise<ProcessRowData[]> {
   const revisionIds = processes.flatMap((p) => (p.live_revision_id ? [p.live_revision_id] : []));
   const [revisions, steps] = revisionIds.length
     ? await Promise.all([

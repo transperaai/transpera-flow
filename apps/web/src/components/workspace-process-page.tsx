@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
-import { createServicingProcess } from "@/app/w/[slug]/process-actions";
+import { restoreProcess } from "@/app/w/[slug]/process-admin-actions";
+import { createProcess } from "@/app/w/[slug]/process-actions";
+import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { isUnpublished } from "@transpera-flow/db";
 import { isBlank } from "@transpera-flow/engine";
 import { aiConfigured, loadAiViews, loadLatestAiViews, loadWorkspaceAiSettings, loadWorkspaceFindings } from "@/lib/ai/data";
@@ -22,6 +24,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const process = await loadProcessForEditing(slug, processId);
   if (!process) notFound();
   const { live, draft, processes } = process;
+  // An archived process (issue #182) opens read only, with its date and, for editors, Restore.
+  const archivedAt = live.process.archived_at ?? null;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
   const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, findings, aiSettings] = await Promise.all([
@@ -67,7 +71,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const byId = new Map(processes.map((p) => [p.id, { id: p.id, name: p.name, parentId: p.parentId ?? null }]));
   const ratings = processRatings(processes, issues, [...live.steps, ...(live.otherProcesses ?? []).flatMap((p) => p.steps)]);
   return (
-    <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit={canEdit && !earlier}>
+    <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit={canEdit && !earlier && !archivedAt}>
     <ProcessPage
       key={live.process.id}
       // A process never published has only its draft to show.
@@ -75,7 +79,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       viewingVersion={earlier ? earlier.revision.number : null}
       liveVersion={isUnpublished(live) ? 0 : live.revision.number}
       // An earlier version is read only, so nothing on it can be logged or edited.
-      mode={canEdit && !earlier ? "live" : "readonly"}
+      mode={canEdit && !earlier && !archivedAt ? "live" : "readonly"}
+      notice={archivedAt ? <ArchivedBanner name={live.process.name} archivedAt={archivedAt} restore={canEdit ? restoreProcess.bind(null, live.process.id) : undefined} /> : undefined}
       scenarios={scenarios}
       issues={issues}
       sources={sources}
@@ -83,7 +88,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       registerHref={`${base}/issues`}
       settingsHref={`${base}/settings`}
       rating={ratings[live.process.id] ?? null}
-      editHref={canEdit ? `${base}/p/${live.process.id}/edit` : undefined}
+      editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
       ideaIssueIds={ideaIssueIds}
@@ -97,7 +102,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
           processes={processes}
           current={live.process.id}
           hrefs={hrefs}
-          create={canEdit ? createServicingProcess.bind(null, live.workspace.id, slug) : undefined}
+          create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}
           ratings={ratings}
           processesHref={`${base}/processes`}
           companyMapHref={base}

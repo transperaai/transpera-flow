@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 
-// Creates a throwaway database, loads the auth shim, every migration and the
+// Creates a throwaway database, loads the auth and storage shims, every migration and the
 // seed, and lets tests run queries as a given user (RLS applies).
 
 const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
@@ -37,6 +37,7 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
   await client.connect();
 
   await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
+  await client.query(readFileSync(dir("./sql/storage-shim.sql"), "utf8"));
   if (options.supabaseDefaultPrivileges) {
     await client.query("alter default privileges in schema public grant all on tables to anon, authenticated, service_role");
   }

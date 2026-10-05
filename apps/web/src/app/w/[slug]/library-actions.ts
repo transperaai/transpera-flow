@@ -25,7 +25,7 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
     const template = PROCESS_TEMPLATES.find((x) => x.id === input.templateId);
     if (!template) return { error: GENERIC };
     // The template's name, or the first of "Name 2", "Name 3", ... that is free, unless one was given.
-    const { data: existing } = await supabase.from("processes").select("name").eq("workspace_id", workspaceId).eq("is_company", false);
+    const { data: existing } = await supabase.from("processes").select("name").eq("workspace_id", workspaceId).eq("is_company", false).is("archived_at", null);
     const taken = new Set((existing ?? []).map((p) => p.name.trim().toLowerCase()));
     let name = typeof input.name === "string" && input.name.trim() ? input.name.trim().slice(0, MAX_NAME) : template.name;
     for (let n = 2; !input.name && taken.has(name.toLowerCase()) && n < 100; n++) name = `${template.name} ${n}`;

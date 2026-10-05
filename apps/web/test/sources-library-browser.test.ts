@@ -318,3 +318,64 @@ describe("the side panel", () => {
     await page.close();
   }, 60_000);
 });
+
+describe("a source's original file (issue #182)", () => {
+  it("an editor uploads a text file for a source: its text becomes the full text, and it downloads", async () => {
+    const { page, errors } = await open();
+    await page.getByRole("button", { name: "Open Sales team notes" }).click();
+    await panel(page).waitFor();
+    const section = panel(page).getByRole("region", { name: "Original file" });
+    expect(await section.innerText()).toContain("No file is kept for this source.");
+    await section.locator("input[type=file]").setInputFiles({ name: "Sales SOP.md", mimeType: "text/html", buffer: Buffer.from("# Sales SOP\n\n1. Reply within a day.") });
+    await section.locator("[data-source-file]").waitFor();
+    expect((await section.locator("[data-source-file]").innerText()).replace(/\s+/g, " ")).toContain("Sales SOP.md · Markdown · 35 bytes");
+    expect(await panel(page).locator("[data-full-text]").textContent()).toBe("# Sales SOP\n\n1. Reply within a day.");
+    // A download, never opened in the page.
+    const [download] = await Promise.all([page.waitForEvent("download"), section.getByRole("button", { name: "Download Sales SOP.md" }).click()]);
+    expect(download.suggestedFilename()).toBe("Sales SOP.md");
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("refuses a file of another kind, or one that isn't what its name says, whatever type the browser claims", async () => {
+    const { page } = await open();
+    await page.getByRole("button", { name: "Open Sales team notes" }).click();
+    await panel(page).waitFor();
+    const section = panel(page).getByRole("region", { name: "Original file" });
+    const input = section.locator("input[type=file]");
+    await input.setInputFiles({ name: "page.html", mimeType: "text/plain", buffer: Buffer.from("<script>alert(1)</script>") });
+    expect(await section.getByRole("alert").innerText()).toBe("Upload a .txt, .md, .csv, .xlsx or .pdf file.");
+    await input.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("%PDF-1.4 binary") });
+    await expect.poll(() => section.getByRole("alert").innerText()).toBe("That file isn't really a .txt file. Save it as one and upload it again.");
+    await input.setInputFiles({ name: "big.csv", mimeType: "text/csv", buffer: Buffer.alloc(10 * 1024 * 1024 + 1, 0x61) });
+    await expect.poll(() => section.getByRole("alert").innerText()).toBe("That file is over 10 MB. Split it, or keep it elsewhere and add a link to it.");
+    expect(await section.locator("[data-source-file]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("adds a source with a file: the title comes from its name and its text is the full text", async () => {
+    const { page, errors } = await open();
+    await page.getByRole("button", { name: "+ Add source" }).click();
+    const dialog = page.locator("[data-source-dialog]");
+    await dialog.locator("#src-file").setInputFiles({ name: "Deals 2025.csv", mimeType: "application/octet-stream", buffer: Buffer.from("client,mrr\nHarbour Lane,2400\n") });
+    await expect.poll(() => dialog.locator("#src-title").inputValue()).toBe("Deals 2025");
+    await dialog.locator("[data-link-kind=process]").click();
+    await dialog.locator("#src-target").selectOption({ index: 1 });
+    await dialog.getByRole("button", { name: "Add source" }).click();
+    await dialog.waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Open Deals 2025" }).click();
+    await panel(page).locator("[data-source-file='Deals 2025.csv']").waitFor();
+    expect(await panel(page).locator("[data-full-text]").textContent()).toBe("client,mrr\nHarbour Lane,2400");
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("a viewer can't upload", async () => {
+    const { page } = await open({ mode: "readonly" });
+    await page.getByRole("button", { name: "Open Sales team notes" }).click();
+    await panel(page).waitFor();
+    expect(await panel(page).locator("input[type=file]").count()).toBe(0);
+    expect(await panel(page).getByRole("button", { name: /Upload a file/ }).count()).toBe(0);
+    await page.close();
+  }, 60_000);
+});

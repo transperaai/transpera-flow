@@ -1896,6 +1896,8 @@ export type Database = {
       }
       processes: {
         Row: {
+          archived_at: string | null
+          archived_by: string | null
           created_at: string
           created_by: string | null
           description: string | null
@@ -1912,6 +1914,8 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          archived_at?: string | null
+          archived_by?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -1928,6 +1932,8 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          archived_at?: string | null
+          archived_by?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -2661,6 +2667,10 @@ export type Database = {
           body: string | null
           created_at: string
           created_by: string | null
+          file_name: string | null
+          file_path: string | null
+          file_size: number | null
+          file_type: string | null
           file_url: string | null
           id: string
           kind: string
@@ -2674,6 +2684,10 @@ export type Database = {
           body?: string | null
           created_at?: string
           created_by?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          file_size?: number | null
+          file_type?: string | null
           file_url?: string | null
           id?: string
           kind?: string
@@ -2687,6 +2701,10 @@ export type Database = {
           body?: string | null
           created_at?: string
           created_by?: string | null
+          file_name?: string | null
+          file_path?: string | null
+          file_size?: number | null
+          file_type?: string | null
           file_url?: string | null
           id?: string
           kind?: string

@@ -211,6 +211,7 @@ describe("the rollback in the header", () => {
     client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
     await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
+    await client.query(readFileSync(dir("./sql/storage-shim.sql"), "utf8"));
     for (const f of readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql")).sort()) {
       await client.query(readFileSync(dir(`../supabase/migrations/${f}`), "utf8"));
     }

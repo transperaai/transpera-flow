@@ -48,7 +48,8 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
       versions={history.versions}
       // The company map is drawn on the Overview; a process is shown on its own page.
       viewBase={history.company ? base : here}
-      actions={canEdit ? { restore: restoreVersion.bind(null, process.id), duplicate: duplicateVersion.bind(null, process.id) } : undefined}
+      // An archived process is read only until it is restored (issue #182): the database refuses both anyway.
+      actions={canEdit && !history.archived ? { restore: restoreVersion.bind(null, process.id), duplicate: duplicateVersion.bind(null, process.id) } : undefined}
       links={{ edit: `${here}/edit`, newProcessEdit: `${base}/p/{id}/edit` }}
     />
   );

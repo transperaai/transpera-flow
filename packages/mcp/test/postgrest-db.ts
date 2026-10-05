@@ -1,5 +1,5 @@
 // Prepares the database the PostgREST end-to-end suite (postgrest.test.ts)
-// runs against: auth shim, every migration, the seed, and Supabase's
+// runs against: auth and storage shims, every migration, the seed, and Supabase's
 // `authenticator` login role. Run it, then start PostgREST against it (CI does
 // both; see .github/workflows/ci.yml). Test-only: never point it at Supabase.
 //
@@ -24,6 +24,7 @@ url.pathname = `/${DATABASE_NAME}`;
 const db = new pg.Client({ connectionString: url.toString() });
 await db.connect();
 await db.query(readFileSync(new URL("../../db/test/sql/auth-shim.sql", import.meta.url), "utf8"));
+await db.query(readFileSync(new URL("../../db/test/sql/storage-shim.sql", import.meta.url), "utf8"));
 // Supabase's PostgREST login role, created before the migrations so the one
 // that registers the pre-request hook on it applies.
 await db.query(`do $$ begin
