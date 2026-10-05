@@ -68,6 +68,7 @@ export async function WorkspaceEditorPage({
       userId={viewer?.userId ?? null}
       viewer={viewer}
       sourcesHref={`/w/${slug}/sources`}
+      settingsHref={`/w/${slug}/settings`}
       exitHref={exitHref(searchParams.from, base)}
       horizonMonths={parseHorizon(searchParams.horizon)}
     />

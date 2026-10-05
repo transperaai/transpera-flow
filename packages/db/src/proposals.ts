@@ -7,7 +7,7 @@ import type { Db } from "./queries";
 import type { ProposalRow, ProposalStatus } from "./types";
 
 export const PROPOSAL_ROW_COLUMNS =
-  "id, workspace_id, kind, title, detail, payload, evidence, note, issue_id, status, created_via, proposer_name, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
+  "id, workspace_id, kind, title, detail, payload, evidence, note, issue_id, status, created_via, import_source, proposer_name, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
 
 /** The workspace's proposals, newest first; optionally only one status. */
 export async function loadProposals(db: Db, workspaceId: string, status?: ProposalStatus): Promise<ProposalRow[]> {

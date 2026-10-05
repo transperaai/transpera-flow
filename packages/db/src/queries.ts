@@ -713,7 +713,7 @@ export async function loadLiveRevisions(db: Db, workspaceId: string): Promise<Sn
 }
 
 export const SUGGESTION_ROW_COLUMNS =
-  "id, workspace_id, target_table, target_id, patch, evidence, note, status, created_via, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
+  "id, workspace_id, target_table, target_id, patch, evidence, note, status, created_via, import_source, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
 
 /** The workspace's suggestions, newest first; optionally only one status. */
 export async function loadSuggestions(db: Db, workspaceId: string, status?: SuggestionStatus): Promise<SuggestionRow[]> {

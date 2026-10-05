@@ -21939,6 +21939,1562 @@ revoke execute on function public.revision_history(uuid) from public, anon;
 grant execute on function public.revision_history(uuid) to authenticated;
 ']);
 
+-- 20261128000000_import_atomic_link_limit.sql
+-- B13 follow-ups (issue #166): an import that is all or nothing, and a limit on link fetches.
+--
+-- 1. `public.import_new_process(p_workspace, p_nodes, p_adopt)`: SECURITY INVOKER (RLS decides, as for every other write the
+--    app makes as the signed-in user). Today an upload writes the process, its draft, its steps and its edges in separate
+--    requests, so a failure part-way leaves a half-made process that then blocks a retry by name. This writes the new process,
+--    its draft and its steps and edges (and those of any child processes the import creates, and the existing processes it
+--    moves inside a step) in ONE transaction, from a plan the caller has already computed and checked. `p_nodes` is a jsonb
+--    array, parents first, each `{id, parent_id, name, kind, entity_name, description, steps: [...], edges: [...]}`; `p_adopt` is
+--    `[{id, parent_id}]`. Steps and edges are rows of those tables as the app would insert them; their revision, workspace and
+--    process columns are set here, and a group's first step is set after all its steps are in. The draft is opened through
+--    `public.open_draft`, so everything that runs on a normal write (triggers, audit, company-map checks, RLS) runs here too.
+--    Returns `[{process_id, revision_id, number}]`, one per node. Nothing existing is changed except the parent of an adopted
+--    process. It is not a general "move a process" or "create under" call: the first node is the top-level one (no parent), every
+--    other node's parent is an earlier node of the same call, an adopted process must have no parent and goes under a node of
+--    the call, at most 200 processes and 1,000 steps in all (one statement must finish inside the database's statement timeout),
+--    `created_by` is always the caller whatever the rows say, and a process name already taken (ignoring case and punctuation,
+--    the company map excluded) is refused under a per-workspace lock, so two imports with one name can't both succeed.
+--
+-- 2. `public.take_link_fetch()`: a per-user limit on fetching a page by link (the upload's link preview), 10 a minute. SECURITY
+--    DEFINER with an empty search_path, so it can only touch the caller's own counter (`auth.uid()`; not signed in is refused)
+--    in `private.link_fetch_limits`, a table clients cannot read or write. Fixed window: the first fetch opens a minute, the
+--    eleventh inside it is refused. Returns 0 when the fetch is allowed (and counted), else the seconds until the next
+--    allowed one. Works on any host (the count is in Postgres, not in a server's memory). One row per user, never more.
+--
+-- STRICTLY ADDITIVE: one table (private), two functions. Nothing existing is changed.
+--
+-- Preflight (run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each should be as described):
+--
+--   1. Neither function nor the table exists. Expect 0, 0:
+--        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('import_new_process', 'take_link_fetch');
+--        select count(*) from pg_class where relnamespace = 'private'::regnamespace and relname = 'link_fetch_limits';
+--   2. Nothing of ours is applied past this one. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= '20261128000000';
+--   3. What the import relies on exists (open_draft, can_edit_workspace). Expect 2:
+--        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('open_draft', 'can_edit_workspace');
+--   4. The private schema exists. Expect 1:
+--        select count(*) from pg_namespace where nspname = 'private';
+--   5. The company-map editing migration (PR #170) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261127500000';
+--
+-- Post-apply grant check (authenticated may execute both; anon and PUBLIC may not; clients have nothing on the table):
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name in ('import_new_process', 'take_link_fetch') and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1, 2;
+--        select proname, proacl from pg_proc where pronamespace = 'public'::regnamespace and proname in ('import_new_process', 'take_link_fetch');
+--        select grantee, privilege_type from information_schema.role_table_grants where table_schema = 'private' and table_name = 'link_fetch_limits' and grantee in ('anon', 'authenticated', 'PUBLIC');
+--   Expect: two rows, authenticated EXECUTE for each; each ACL has an `authenticated=X/...` entry and no `anon=` and no `=X/...`
+--   (an entry with an empty grantee is PUBLIC); no rows from the last query.
+--
+-- Rollback (run as one transaction; nothing existing was changed):
+--
+--   begin;
+--   drop function if exists public.import_new_process(uuid, jsonb, jsonb);
+--   drop function if exists public.take_link_fetch();
+--   drop table if exists private.link_fetch_limits;
+--   delete from supabase_migrations.schema_migrations where version = '20261128000000';
+--   commit;
+--
+-- Roll the app back (or redeploy the previous one) first: it calls both. Processes already imported stay as they are.
+--
+-- Production data: none needed.
+
+-- ---------------------------------------------------------------------------
+-- All-or-nothing import
+-- ---------------------------------------------------------------------------
+
+create function public.import_new_process(p_workspace uuid, p_nodes jsonb, p_adopt jsonb default '[]') returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  node jsonb;
+  adopt jsonb;
+  draft jsonb;
+  rev uuid;
+  proc uuid;
+  rows_json jsonb;
+  cols text;
+  revisions jsonb := '{}';
+  result jsonb := '[]';
+  made uuid[] := '{}';
+  total_steps integer;
+  clash text;
+  nname text;
+  names text[] := '{}';
+begin
+  if p_workspace is null or jsonb_typeof(p_nodes) is distinct from 'array' or jsonb_array_length(p_nodes) not between 1 and 200
+    or jsonb_typeof(coalesce(p_adopt, '[]')) is distinct from 'array' or jsonb_array_length(coalesce(p_adopt, '[]')) > 200 then
+    raise exception 'import_new_process: p_nodes must be an array of 1 to 200 processes and p_adopt an array' using errcode = '22023';
+  end if;
+  select coalesce(sum(case when jsonb_typeof(n.value -> 'steps') = 'array' then jsonb_array_length(n.value -> 'steps') else 0 end), 0)
+    into total_steps from jsonb_array_elements(p_nodes) n;
+  if total_steps > 1000 then
+    raise exception 'import_new_process: an import can have at most 1000 steps in all (this one has %)', total_steps using errcode = '22023';
+  end if;
+
+  -- One import at a time per workspace, so the name check below holds until this transaction commits.
+  perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || p_workspace::text, 0));
+
+  -- 1. Every process and its draft, parents first (a child names its parent).
+  for node in select value from jsonb_array_elements(p_nodes) loop
+    proc := (node ->> 'id')::uuid;
+    -- The first process is the top one; every other has an earlier process of this call as its parent.
+    if (node ->> 'parent_id') is null then
+      if cardinality(made) > 0 then
+        raise exception 'import_new_process: only the first process has no parent' using errcode = '22023';
+      end if;
+    elsif not ((node ->> 'parent_id')::uuid = any (made)) then
+      raise exception 'import_new_process: a process can only sit inside an earlier one of the same import' using errcode = '22023';
+    end if;
+    if proc = any (made) then
+      raise exception 'import_new_process: a process is listed twice' using errcode = '22023';
+    end if;
+    -- Same rule as the app's check: ignoring case and punctuation, the company map excluded, and the other new processes count too.
+    nname := trim(regexp_replace(replace(lower(coalesce(node ->> 'name', '')), '&', ' and '), '[^[:alnum:]]+', ' ', 'g'));
+    select p.name into clash from public.processes p
+    where p.workspace_id = p_workspace and not p.is_company
+      and trim(regexp_replace(replace(lower(p.name), '&', ' and '), '[^[:alnum:]]+', ' ', 'g')) = nname limit 1;
+    if clash is null and nname = any (names) then
+      clash := node ->> 'name';
+    end if;
+    names := names || nname;
+    if clash is not null then
+      raise exception 'You already have a process called ''%''. Give this one a different name.', clash using errcode = '23505', hint = 'name_taken';
+    end if;
+    made := made || proc;
+    insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+    values (proc, p_workspace, node ->> 'name', node ->> 'kind', node ->> 'entity_name', node ->> 'description', 'import', (node ->> 'parent_id')::uuid);
+    draft := public.open_draft(proc);
+    if draft ->> 'status' is distinct from 'ok' then
+      raise exception 'import_new_process: could not open a draft' using errcode = '42501';
+    end if;
+    revisions := revisions || jsonb_build_object(proc::text, draft ->> 'revision_id');
+    result := result || jsonb_build_object('process_id', proc, 'revision_id', draft ->> 'revision_id', 'number', (draft ->> 'number')::int);
+  end loop;
+
+  -- 2. Existing processes that move inside a step of the new ones.
+  for adopt in select value from jsonb_array_elements(coalesce(p_adopt, '[]')) loop
+    if not ((adopt ->> 'parent_id')::uuid = any (made)) then
+      raise exception 'import_new_process: a process can only be moved inside a new one of this import' using errcode = '22023';
+    end if;
+    update public.processes p set parent_process_id = (adopt ->> 'parent_id')::uuid
+    where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace and p.parent_process_id is null and not p.is_company
+      and not ((adopt ->> 'id')::uuid = any (made));
+    if not found then
+      raise exception 'import_new_process: a process to move inside another was not found, or already sits inside one' using errcode = '42501';
+    end if;
+  end loop;
+
+  -- 3. Each process's steps (a group's first step is set once they are all in), then its edges.
+  for node in select value from jsonb_array_elements(p_nodes) loop
+    proc := (node ->> 'id')::uuid;
+    rev := (revisions ->> proc::text)::uuid;
+
+    select coalesce(jsonb_agg(s.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'entry_step_id', null, 'created_by', auth.uid())), '[]')
+      into rows_json from jsonb_array_elements(coalesce(node -> 'steps', '[]')) s;
+    if jsonb_array_length(rows_json) > 0 then
+      select string_agg(quote_ident(k), ', ') into cols from (select distinct jsonb_object_keys(r.value) k from jsonb_array_elements(rows_json) r) q;
+      execute format('insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)', cols) using rows_json;
+      update public.steps st set entry_step_id = (s.value ->> 'entry_step_id')::uuid
+      from jsonb_array_elements(node -> 'steps') s
+      where st.revision_id = rev and st.id = (s.value ->> 'id')::uuid and s.value ->> 'entry_step_id' is not null;
+    end if;
+
+    select coalesce(jsonb_agg(e.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'created_by', auth.uid())), '[]')
+      into rows_json from jsonb_array_elements(coalesce(node -> 'edges', '[]')) e;
+    if jsonb_array_length(rows_json) > 0 then
+      select string_agg(quote_ident(k), ', ') into cols from (select distinct jsonb_object_keys(r.value) k from jsonb_array_elements(rows_json) r) q;
+      execute format('insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)', cols) using rows_json;
+    end if;
+  end loop;
+
+  return result;
+end;
+$$;
+
+revoke all on function public.import_new_process(uuid, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.import_new_process(uuid, jsonb, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- A limit on link fetches, per user
+-- ---------------------------------------------------------------------------
+
+create table private.link_fetch_limits (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  window_start timestamptz not null default now(),
+  hits integer not null default 0
+);
+
+alter table private.link_fetch_limits enable row level security;
+revoke all on private.link_fetch_limits from public, anon, authenticated;
+
+-- 0 when this fetch is allowed (and counted); otherwise the whole seconds until the next one is.
+create function public.take_link_fetch() returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  max_hits constant integer := 10;
+  window_len constant interval := interval '1 minute';
+  r private.link_fetch_limits;
+begin
+  if uid is null then
+    raise exception 'take_link_fetch: sign in first' using errcode = '42501';
+  end if;
+  insert into private.link_fetch_limits as l (user_id, window_start, hits) values (uid, now(), 1)
+  on conflict (user_id) do update set
+    window_start = case when l.window_start <= now() - window_len then now() else l.window_start end,
+    hits = case when l.window_start <= now() - window_len then 1 else l.hits + 1 end
+  returning * into r;
+  if r.hits <= max_hits then
+    return 0;
+  end if;
+  return greatest(1, ceil(extract(epoch from (r.window_start + window_len - now()))))::integer;
+end;
+$$;
+
+revoke all on function public.take_link_fetch() from public, anon, authenticated;
+grant execute on function public.take_link_fetch() to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261128000000', 'import_atomic_link_limit', array['-- B13 follow-ups (issue #166): an import that is all or nothing, and a limit on link fetches.
+--
+-- 1. `public.import_new_process(p_workspace, p_nodes, p_adopt)`: SECURITY INVOKER (RLS decides, as for every other write the
+--    app makes as the signed-in user). Today an upload writes the process, its draft, its steps and its edges in separate
+--    requests, so a failure part-way leaves a half-made process that then blocks a retry by name. This writes the new process,
+--    its draft and its steps and edges (and those of any child processes the import creates, and the existing processes it
+--    moves inside a step) in ONE transaction, from a plan the caller has already computed and checked. `p_nodes` is a jsonb
+--    array, parents first, each `{id, parent_id, name, kind, entity_name, description, steps: [...], edges: [...]}`; `p_adopt` is
+--    `[{id, parent_id}]`. Steps and edges are rows of those tables as the app would insert them; their revision, workspace and
+--    process columns are set here, and a group''s first step is set after all its steps are in. The draft is opened through
+--    `public.open_draft`, so everything that runs on a normal write (triggers, audit, company-map checks, RLS) runs here too.
+--    Returns `[{process_id, revision_id, number}]`, one per node. Nothing existing is changed except the parent of an adopted
+--    process. It is not a general "move a process" or "create under" call: the first node is the top-level one (no parent), every
+--    other node''s parent is an earlier node of the same call, an adopted process must have no parent and goes under a node of
+--    the call, at most 200 processes and 1,000 steps in all (one statement must finish inside the database''s statement timeout),
+--    `created_by` is always the caller whatever the rows say, and a process name already taken (ignoring case and punctuation,
+--    the company map excluded) is refused under a per-workspace lock, so two imports with one name can''t both succeed.
+--
+-- 2. `public.take_link_fetch()`: a per-user limit on fetching a page by link (the upload''s link preview), 10 a minute. SECURITY
+--    DEFINER with an empty search_path, so it can only touch the caller''s own counter (`auth.uid()`; not signed in is refused)
+--    in `private.link_fetch_limits`, a table clients cannot read or write. Fixed window: the first fetch opens a minute, the
+--    eleventh inside it is refused. Returns 0 when the fetch is allowed (and counted), else the seconds until the next
+--    allowed one. Works on any host (the count is in Postgres, not in a server''s memory). One row per user, never more.
+--
+-- STRICTLY ADDITIVE: one table (private), two functions. Nothing existing is changed.
+--
+-- Preflight (run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each should be as described):
+--
+--   1. Neither function nor the table exists. Expect 0, 0:
+--        select count(*) from pg_proc where pronamespace = ''public''::regnamespace and proname in (''import_new_process'', ''take_link_fetch'');
+--        select count(*) from pg_class where relnamespace = ''private''::regnamespace and relname = ''link_fetch_limits'';
+--   2. Nothing of ours is applied past this one. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261128000000'';
+--   3. What the import relies on exists (open_draft, can_edit_workspace). Expect 2:
+--        select count(*) from pg_proc where pronamespace = ''public''::regnamespace and proname in (''open_draft'', ''can_edit_workspace'');
+--   4. The private schema exists. Expect 1:
+--        select count(*) from pg_namespace where nspname = ''private'';
+--   5. The company-map editing migration (PR #170) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261127500000'';
+--
+-- Post-apply grant check (authenticated may execute both; anon and PUBLIC may not; clients have nothing on the table):
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = ''public'' and routine_name in (''import_new_process'', ''take_link_fetch'') and grantee in (''anon'', ''authenticated'', ''PUBLIC'') order by 1, 2;
+--        select proname, proacl from pg_proc where pronamespace = ''public''::regnamespace and proname in (''import_new_process'', ''take_link_fetch'');
+--        select grantee, privilege_type from information_schema.role_table_grants where table_schema = ''private'' and table_name = ''link_fetch_limits'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'');
+--   Expect: two rows, authenticated EXECUTE for each; each ACL has an `authenticated=X/...` entry and no `anon=` and no `=X/...`
+--   (an entry with an empty grantee is PUBLIC); no rows from the last query.
+--
+-- Rollback (run as one transaction; nothing existing was changed):
+--
+--   begin;
+--   drop function if exists public.import_new_process(uuid, jsonb, jsonb);
+--   drop function if exists public.take_link_fetch();
+--   drop table if exists private.link_fetch_limits;
+--   delete from supabase_migrations.schema_migrations where version = ''20261128000000'';
+--   commit;
+--
+-- Roll the app back (or redeploy the previous one) first: it calls both. Processes already imported stay as they are.
+--
+-- Production data: none needed.
+
+-- ---------------------------------------------------------------------------
+-- All-or-nothing import
+-- ---------------------------------------------------------------------------
+
+create function public.import_new_process(p_workspace uuid, p_nodes jsonb, p_adopt jsonb default ''[]'') returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  node jsonb;
+  adopt jsonb;
+  draft jsonb;
+  rev uuid;
+  proc uuid;
+  rows_json jsonb;
+  cols text;
+  revisions jsonb := ''{}'';
+  result jsonb := ''[]'';
+  made uuid[] := ''{}'';
+  total_steps integer;
+  clash text;
+  nname text;
+  names text[] := ''{}'';
+begin
+  if p_workspace is null or jsonb_typeof(p_nodes) is distinct from ''array'' or jsonb_array_length(p_nodes) not between 1 and 200
+    or jsonb_typeof(coalesce(p_adopt, ''[]'')) is distinct from ''array'' or jsonb_array_length(coalesce(p_adopt, ''[]'')) > 200 then
+    raise exception ''import_new_process: p_nodes must be an array of 1 to 200 processes and p_adopt an array'' using errcode = ''22023'';
+  end if;
+  select coalesce(sum(case when jsonb_typeof(n.value -> ''steps'') = ''array'' then jsonb_array_length(n.value -> ''steps'') else 0 end), 0)
+    into total_steps from jsonb_array_elements(p_nodes) n;
+  if total_steps > 1000 then
+    raise exception ''import_new_process: an import can have at most 1000 steps in all (this one has %)'', total_steps using errcode = ''22023'';
+  end if;
+
+  -- One import at a time per workspace, so the name check below holds until this transaction commits.
+  perform pg_advisory_xact_lock(hashtextextended(''import_new_process:'' || p_workspace::text, 0));
+
+  -- 1. Every process and its draft, parents first (a child names its parent).
+  for node in select value from jsonb_array_elements(p_nodes) loop
+    proc := (node ->> ''id'')::uuid;
+    -- The first process is the top one; every other has an earlier process of this call as its parent.
+    if (node ->> ''parent_id'') is null then
+      if cardinality(made) > 0 then
+        raise exception ''import_new_process: only the first process has no parent'' using errcode = ''22023'';
+      end if;
+    elsif not ((node ->> ''parent_id'')::uuid = any (made)) then
+      raise exception ''import_new_process: a process can only sit inside an earlier one of the same import'' using errcode = ''22023'';
+    end if;
+    if proc = any (made) then
+      raise exception ''import_new_process: a process is listed twice'' using errcode = ''22023'';
+    end if;
+    -- Same rule as the app''s check: ignoring case and punctuation, the company map excluded, and the other new processes count too.
+    nname := trim(regexp_replace(replace(lower(coalesce(node ->> ''name'', '''')), ''&'', '' and ''), ''[^[:alnum:]]+'', '' '', ''g''));
+    select p.name into clash from public.processes p
+    where p.workspace_id = p_workspace and not p.is_company
+      and trim(regexp_replace(replace(lower(p.name), ''&'', '' and ''), ''[^[:alnum:]]+'', '' '', ''g'')) = nname limit 1;
+    if clash is null and nname = any (names) then
+      clash := node ->> ''name'';
+    end if;
+    names := names || nname;
+    if clash is not null then
+      raise exception ''You already have a process called ''''%''''. Give this one a different name.'', clash using errcode = ''23505'', hint = ''name_taken'';
+    end if;
+    made := made || proc;
+    insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+    values (proc, p_workspace, node ->> ''name'', node ->> ''kind'', node ->> ''entity_name'', node ->> ''description'', ''import'', (node ->> ''parent_id'')::uuid);
+    draft := public.open_draft(proc);
+    if draft ->> ''status'' is distinct from ''ok'' then
+      raise exception ''import_new_process: could not open a draft'' using errcode = ''42501'';
+    end if;
+    revisions := revisions || jsonb_build_object(proc::text, draft ->> ''revision_id'');
+    result := result || jsonb_build_object(''process_id'', proc, ''revision_id'', draft ->> ''revision_id'', ''number'', (draft ->> ''number'')::int);
+  end loop;
+
+  -- 2. Existing processes that move inside a step of the new ones.
+  for adopt in select value from jsonb_array_elements(coalesce(p_adopt, ''[]'')) loop
+    if not ((adopt ->> ''parent_id'')::uuid = any (made)) then
+      raise exception ''import_new_process: a process can only be moved inside a new one of this import'' using errcode = ''22023'';
+    end if;
+    update public.processes p set parent_process_id = (adopt ->> ''parent_id'')::uuid
+    where p.id = (adopt ->> ''id'')::uuid and p.workspace_id = p_workspace and p.parent_process_id is null and not p.is_company
+      and not ((adopt ->> ''id'')::uuid = any (made));
+    if not found then
+      raise exception ''import_new_process: a process to move inside another was not found, or already sits inside one'' using errcode = ''42501'';
+    end if;
+  end loop;
+
+  -- 3. Each process''s steps (a group''s first step is set once they are all in), then its edges.
+  for node in select value from jsonb_array_elements(p_nodes) loop
+    proc := (node ->> ''id'')::uuid;
+    rev := (revisions ->> proc::text)::uuid;
+
+    select coalesce(jsonb_agg(s.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''entry_step_id'', null, ''created_by'', auth.uid())), ''[]'')
+      into rows_json from jsonb_array_elements(coalesce(node -> ''steps'', ''[]'')) s;
+    if jsonb_array_length(rows_json) > 0 then
+      select string_agg(quote_ident(k), '', '') into cols from (select distinct jsonb_object_keys(r.value) k from jsonb_array_elements(rows_json) r) q;
+      execute format(''insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)'', cols) using rows_json;
+      update public.steps st set entry_step_id = (s.value ->> ''entry_step_id'')::uuid
+      from jsonb_array_elements(node -> ''steps'') s
+      where st.revision_id = rev and st.id = (s.value ->> ''id'')::uuid and s.value ->> ''entry_step_id'' is not null;
+    end if;
+
+    select coalesce(jsonb_agg(e.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''created_by'', auth.uid())), ''[]'')
+      into rows_json from jsonb_array_elements(coalesce(node -> ''edges'', ''[]'')) e;
+    if jsonb_array_length(rows_json) > 0 then
+      select string_agg(quote_ident(k), '', '') into cols from (select distinct jsonb_object_keys(r.value) k from jsonb_array_elements(rows_json) r) q;
+      execute format(''insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)'', cols) using rows_json;
+    end if;
+  end loop;
+
+  return result;
+end;
+$$;
+
+revoke all on function public.import_new_process(uuid, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.import_new_process(uuid, jsonb, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- A limit on link fetches, per user
+-- ---------------------------------------------------------------------------
+
+create table private.link_fetch_limits (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  window_start timestamptz not null default now(),
+  hits integer not null default 0
+);
+
+alter table private.link_fetch_limits enable row level security;
+revoke all on private.link_fetch_limits from public, anon, authenticated;
+
+-- 0 when this fetch is allowed (and counted); otherwise the whole seconds until the next one is.
+create function public.take_link_fetch() returns integer
+language plpgsql
+security definer
+set search_path = ''''
+as $$
+declare
+  uid uuid := auth.uid();
+  max_hits constant integer := 10;
+  window_len constant interval := interval ''1 minute'';
+  r private.link_fetch_limits;
+begin
+  if uid is null then
+    raise exception ''take_link_fetch: sign in first'' using errcode = ''42501'';
+  end if;
+  insert into private.link_fetch_limits as l (user_id, window_start, hits) values (uid, now(), 1)
+  on conflict (user_id) do update set
+    window_start = case when l.window_start <= now() - window_len then now() else l.window_start end,
+    hits = case when l.window_start <= now() - window_len then 1 else l.hits + 1 end
+  returning * into r;
+  if r.hits <= max_hits then
+    return 0;
+  end if;
+  return greatest(1, ceil(extract(epoch from (r.window_start + window_len - now()))))::integer;
+end;
+$$;
+
+revoke all on function public.take_link_fetch() from public, anon, authenticated;
+grant execute on function public.take_link_fetch() to authenticated;
+']);
+
+-- 20261128500000_harden_versions.sql
+-- Harden process versions and provenance columns against direct API writes (issue #171; follows #170's company map guards).
+--
+-- The row-level security policies on `process_revisions` and `processes` are generic: an editor with the REST API could, on any
+-- ordinary process, delete a superseded version, set the live version back to a draft and edit it, point `live_revision_id` at an
+-- old version (no publish, no audit entry), insert a `superseded` version, or rewrite `created_by`, `created_at` and `source`
+-- (after which `log_process_import` would log "Imported from ..." for a colleague's process). #170 closed the history hole for the
+-- company map only (`private.company_revision_guard`). This gives every process the same rules.
+--
+-- NO TABLE OR COLUMN CHANGES: three trigger functions and three triggers. Nothing is dropped. Applies to a signed-in caller only
+-- (`current_user` is `authenticated` or `anon`); the system, the table owner, `service_role`, SECURITY DEFINER functions
+-- (restore_version, the company map functions, log_process_import) and referential cascades (deleting a process or a workspace) are
+-- not signed-in roles and pass, as in `private.refuse_row_moves`. The security-invoker functions the app calls (open_draft,
+-- discard_draft, publish_process, duplicate_version) run as the signed-in role, and every write they make is allowed by these rules.
+--
+--   * `private.version_rules_guard` and trigger `version_rules_guard` (before insert, update or delete, each row, on
+--     `public.process_revisions`): a signed-in caller may insert only a `draft`, made by themselves (`created_by` = auth.uid(),
+--     `created_at` = now(), not published), and delete only a `draft`. On update: published to superseded changes `status` and
+--     nothing else; a draft stays a draft with only its layout changed (number, author and dates are frozen); draft to published
+--     writes exactly what publish_process writes (`published_by` = auth.uid(), `published_at` = now(), `number` = the process's next
+--     number, nothing else but the layout). Every other status move is refused;
+--   * `private.version_pointer_check` and constraint trigger `version_pointer_check` (after insert, update of status or delete,
+--     deferred to commit): when a signed-in caller changed a process's versions, its live version is its published version and it
+--     has at most one (a process has a live version if and only if it has a published one). The functions change statuses and the
+--     pointer in separate statements, so this is checked at commit. It stops a direct supersede of the live version, or a direct
+--     publish, that leaves the pointer behind;
+--   * `private.process_rules_guard` and trigger `process_rules_guard` (before insert, or update of `live_revision_id`,
+--     `draft_revision_id`, `created_by`, `created_at`, `source`, each row, on `public.processes`): a signed-in caller inserts a process
+--     with no version pointers, `created_by` = auth.uid() and `created_at` = now(); and cannot change `created_by`, `created_at` or
+--     `source` afterwards; `live_revision_id` may move only to a published version of the same process and may not be
+--     cleared; `draft_revision_id` may move only to a draft of the same process, or be cleared (discard_draft). That is exactly what
+--     open_draft, publish_process, discard_draft and duplicate_version do (restore_version is security definer);
+--   * `private.version_rules_guard` overlaps `private.company_revision_guard` for the company map; both apply and neither is changed.
+--     (One published version per process is kept by the existing unique index `process_revisions_one_published`.)
+--
+-- Preflight (production):
+--   1. Nothing of ours is applied past 20261128000000 or this one. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= '20261128500000';
+--   2. 20261127500000 (company_map_editing) is applied, so private.refuse_row_moves exists. Expect one row, true:
+--        select count(*) = 1 from pg_proc where pronamespace = 'private'::regnamespace and proname = 'refuse_row_moves';
+--   3. The three functions are not there yet. Expect 0:
+--        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname in ('version_rules_guard', 'version_pointer_check', 'process_rules_guard');
+--   4. The functions the guards rely on are as reviewed: the four the app calls as the signed-in caller are security invoker, and
+--      restore_version is security definer. Expect 5 rows: duplicate_version, discard_draft, open_draft, publish_process false; restore_version true:
+--        select proname, prosecdef from pg_proc where pronamespace = 'public'::regnamespace and proname in ('open_draft', 'discard_draft', 'publish_process', 'duplicate_version', 'restore_version') order by 1;
+--   5. Every process is consistent, or the commit check would refuse an editor's next change to its versions. Expect 0 rows (a row
+--      is an old oddity to repair first: live must be the process's one published version, and a process with a published version must have it live):
+--        select p.id from public.processes p where p.live_revision_id is distinct from (select r.id from public.process_revisions r where r.process_id = p.id and r.status = 'published');
+--
+-- Post-apply checks:
+--   1. The three functions are executable by nobody signed in or anonymous. Expect 0 rows:
+--        select routine_name from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC')
+--          and routine_name in ('version_rules_guard', 'version_pointer_check', 'process_rules_guard');
+--   2. The three triggers are there, once each. Expect 1, 1, then 1:
+--        select count(*) from pg_trigger where tgrelid = 'public.process_revisions'::regclass and tgname = 'version_rules_guard' and not tgisinternal;
+--        select count(*) from pg_trigger where tgrelid = 'public.process_revisions'::regclass and tgname = 'version_pointer_check' and not tgisinternal;
+--        select count(*) from pg_trigger where tgrelid = 'public.processes'::regclass and tgname = 'process_rules_guard' and not tgisinternal;
+--   3. Nothing was changed by applying it: the row counts of the two tables are as before (note them first):
+--        select (select count(*) from public.processes), (select count(*) from public.process_revisions);
+--
+-- Rollback (run in one transaction; no app change is needed, the app never relies on the refusals):
+--
+--   begin;
+--   drop trigger process_rules_guard on public.processes;
+--   drop trigger version_pointer_check on public.process_revisions;
+--   drop trigger version_rules_guard on public.process_revisions;
+--   drop function private.process_rules_guard();
+--   drop function private.version_pointer_check();
+--   drop function private.version_rules_guard();
+--   delete from supabase_migrations.schema_migrations where version = '20261128500000';
+--   commit;
+
+-- ---------------------------------------------------------------------------
+-- Versions: history is kept
+-- ---------------------------------------------------------------------------
+
+create function private.version_rules_guard() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  fixed text[] := array['status', 'updated_at'];
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.status <> 'draft' then
+      raise exception 'A new version starts as a draft' using errcode = '55000';
+    end if;
+    if new.published_at is not null or new.published_by is not null or new.created_by is distinct from auth.uid() or new.created_at <> now() then
+      raise exception 'A new draft is made by the person saving it, now, and not yet published' using errcode = '55000';
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    if old.status <> 'draft' then
+      raise exception 'Published versions are kept: they are the history of the process' using errcode = '55000';
+    end if;
+    return old;
+  end if;
+  if old.status = 'published' and new.status = 'superseded' then
+    -- Superseding changes the status and nothing else.
+    if to_jsonb(new) - fixed is distinct from to_jsonb(old) - fixed then
+      raise exception 'A published version is kept as it was: only its status moves, when a newer one is published' using errcode = '55000';
+    end if;
+  elsif old.status = 'draft' and new.status = 'draft' then
+    -- A draft's contents are edited; who made it, when and its number are not.
+    if to_jsonb(new) - (fixed || array['layout']) is distinct from to_jsonb(old) - (fixed || array['layout']) then
+      raise exception 'A draft''s number, author and dates are not changed' using errcode = '55000';
+    end if;
+  elsif old.status = 'draft' and new.status = 'published' then
+    -- Exactly what publish_process writes: the caller, now, and the next number.
+    if to_jsonb(new) - (fixed || array['layout', 'number', 'published_at', 'published_by']) is distinct from to_jsonb(old) - (fixed || array['layout', 'number', 'published_at', 'published_by'])
+       or new.published_by is distinct from auth.uid()
+       or new.published_at is distinct from now()
+       or new.number is distinct from coalesce((select max(r.number) from public.process_revisions r where r.process_id = new.process_id and r.id <> new.id), 0) + 1 then
+      raise exception 'A draft is published by publishing it: the person, time and number are set then' using errcode = '55000';
+    end if;
+  else
+    raise exception 'A version can''t change status that way: publishing and restoring do it' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.version_rules_guard() from public, anon, authenticated;
+
+create trigger version_rules_guard before insert or update or delete on public.process_revisions
+  for each row execute function private.version_rules_guard();
+
+-- At commit, a signed-in caller's change to versions leaves the process consistent: it has a live version if and only if it has a
+-- published one, and the live version is that published version. publish_process, restore_version, discard_draft, open_draft,
+-- duplicate_version and the company map's system versions all do; a bare status update, or a bare delete, does not. Checked at
+-- commit (deferred) because those functions change the statuses and the pointer in separate statements. The unique index
+-- `process_revisions_one_published` keeps it to one published version.
+create function private.version_pointer_check() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  pid uuid := case when tg_op = 'DELETE' then old.process_id else new.process_id end;
+  live uuid;
+  published uuid[];
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return null;
+  end if;
+  select p.live_revision_id into live from public.processes p where p.id = pid;
+  if not found then
+    return null; -- the process was deleted, with its versions
+  end if;
+  select coalesce(array_agg(r.id), '{}') into published from public.process_revisions r where r.process_id = pid and r.status = 'published';
+  if live is distinct from published[1] or cardinality(published) > 1 then
+    raise exception 'The live version of a process is its published version: publish a draft or restore a version' using errcode = '55000';
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.version_pointer_check() from public, anon, authenticated;
+
+create constraint trigger version_pointer_check after insert or update of status or delete on public.process_revisions
+  deferrable initially deferred for each row execute function private.version_pointer_check();
+
+-- ---------------------------------------------------------------------------
+-- Processes: provenance and the version pointers
+-- ---------------------------------------------------------------------------
+
+create function private.process_rules_guard() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    -- A new process has no versions yet, and is made by the person saving it, now.
+    if new.live_revision_id is not null or new.draft_revision_id is not null or new.created_by is distinct from auth.uid() or new.created_at <> now() then
+      raise exception 'A new process has no versions yet and is made by the person saving it, now' using errcode = '55000';
+    end if;
+    return new;
+  end if;
+  if (new.created_by, new.created_at, new.source) is distinct from (old.created_by, old.created_at, old.source) then
+    raise exception 'Who made a process, when and from where is not changed' using errcode = '55000';
+  end if;
+  if new.live_revision_id is distinct from old.live_revision_id then
+    if new.live_revision_id is null then
+      raise exception 'A process keeps its live version' using errcode = '55000';
+    end if;
+    if not exists (select 1 from public.process_revisions r where r.id = new.live_revision_id and r.process_id = new.id and r.status = 'published') then
+      raise exception 'The live version is the process''s published version: publish a draft or restore a version' using errcode = '55000';
+    end if;
+  end if;
+  if new.draft_revision_id is distinct from old.draft_revision_id and new.draft_revision_id is not null
+     and not exists (select 1 from public.process_revisions r where r.id = new.draft_revision_id and r.process_id = new.id and r.status = 'draft') then
+    raise exception 'The open draft is one of the process''s own drafts' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.process_rules_guard() from public, anon, authenticated;
+
+create trigger process_rules_guard before insert or update of live_revision_id, draft_revision_id, created_by, created_at, source on public.processes
+  for each row execute function private.process_rules_guard();
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261128500000', 'harden_versions', array['-- Harden process versions and provenance columns against direct API writes (issue #171; follows #170''s company map guards).
+--
+-- The row-level security policies on `process_revisions` and `processes` are generic: an editor with the REST API could, on any
+-- ordinary process, delete a superseded version, set the live version back to a draft and edit it, point `live_revision_id` at an
+-- old version (no publish, no audit entry), insert a `superseded` version, or rewrite `created_by`, `created_at` and `source`
+-- (after which `log_process_import` would log "Imported from ..." for a colleague''s process). #170 closed the history hole for the
+-- company map only (`private.company_revision_guard`). This gives every process the same rules.
+--
+-- NO TABLE OR COLUMN CHANGES: three trigger functions and three triggers. Nothing is dropped. Applies to a signed-in caller only
+-- (`current_user` is `authenticated` or `anon`); the system, the table owner, `service_role`, SECURITY DEFINER functions
+-- (restore_version, the company map functions, log_process_import) and referential cascades (deleting a process or a workspace) are
+-- not signed-in roles and pass, as in `private.refuse_row_moves`. The security-invoker functions the app calls (open_draft,
+-- discard_draft, publish_process, duplicate_version) run as the signed-in role, and every write they make is allowed by these rules.
+--
+--   * `private.version_rules_guard` and trigger `version_rules_guard` (before insert, update or delete, each row, on
+--     `public.process_revisions`): a signed-in caller may insert only a `draft`, made by themselves (`created_by` = auth.uid(),
+--     `created_at` = now(), not published), and delete only a `draft`. On update: published to superseded changes `status` and
+--     nothing else; a draft stays a draft with only its layout changed (number, author and dates are frozen); draft to published
+--     writes exactly what publish_process writes (`published_by` = auth.uid(), `published_at` = now(), `number` = the process''s next
+--     number, nothing else but the layout). Every other status move is refused;
+--   * `private.version_pointer_check` and constraint trigger `version_pointer_check` (after insert, update of status or delete,
+--     deferred to commit): when a signed-in caller changed a process''s versions, its live version is its published version and it
+--     has at most one (a process has a live version if and only if it has a published one). The functions change statuses and the
+--     pointer in separate statements, so this is checked at commit. It stops a direct supersede of the live version, or a direct
+--     publish, that leaves the pointer behind;
+--   * `private.process_rules_guard` and trigger `process_rules_guard` (before insert, or update of `live_revision_id`,
+--     `draft_revision_id`, `created_by`, `created_at`, `source`, each row, on `public.processes`): a signed-in caller inserts a process
+--     with no version pointers, `created_by` = auth.uid() and `created_at` = now(); and cannot change `created_by`, `created_at` or
+--     `source` afterwards; `live_revision_id` may move only to a published version of the same process and may not be
+--     cleared; `draft_revision_id` may move only to a draft of the same process, or be cleared (discard_draft). That is exactly what
+--     open_draft, publish_process, discard_draft and duplicate_version do (restore_version is security definer);
+--   * `private.version_rules_guard` overlaps `private.company_revision_guard` for the company map; both apply and neither is changed.
+--     (One published version per process is kept by the existing unique index `process_revisions_one_published`.)
+--
+-- Preflight (production):
+--   1. Nothing of ours is applied past 20261128000000 or this one. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261128500000'';
+--   2. 20261127500000 (company_map_editing) is applied, so private.refuse_row_moves exists. Expect one row, true:
+--        select count(*) = 1 from pg_proc where pronamespace = ''private''::regnamespace and proname = ''refuse_row_moves'';
+--   3. The three functions are not there yet. Expect 0:
+--        select count(*) from pg_proc where pronamespace = ''private''::regnamespace and proname in (''version_rules_guard'', ''version_pointer_check'', ''process_rules_guard'');
+--   4. The functions the guards rely on are as reviewed: the four the app calls as the signed-in caller are security invoker, and
+--      restore_version is security definer. Expect 5 rows: duplicate_version, discard_draft, open_draft, publish_process false; restore_version true:
+--        select proname, prosecdef from pg_proc where pronamespace = ''public''::regnamespace and proname in (''open_draft'', ''discard_draft'', ''publish_process'', ''duplicate_version'', ''restore_version'') order by 1;
+--   5. Every process is consistent, or the commit check would refuse an editor''s next change to its versions. Expect 0 rows (a row
+--      is an old oddity to repair first: live must be the process''s one published version, and a process with a published version must have it live):
+--        select p.id from public.processes p where p.live_revision_id is distinct from (select r.id from public.process_revisions r where r.process_id = p.id and r.status = ''published'');
+--
+-- Post-apply checks:
+--   1. The three functions are executable by nobody signed in or anonymous. Expect 0 rows:
+--        select routine_name from information_schema.routine_privileges where routine_schema = ''private'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'')
+--          and routine_name in (''version_rules_guard'', ''version_pointer_check'', ''process_rules_guard'');
+--   2. The three triggers are there, once each. Expect 1, 1, then 1:
+--        select count(*) from pg_trigger where tgrelid = ''public.process_revisions''::regclass and tgname = ''version_rules_guard'' and not tgisinternal;
+--        select count(*) from pg_trigger where tgrelid = ''public.process_revisions''::regclass and tgname = ''version_pointer_check'' and not tgisinternal;
+--        select count(*) from pg_trigger where tgrelid = ''public.processes''::regclass and tgname = ''process_rules_guard'' and not tgisinternal;
+--   3. Nothing was changed by applying it: the row counts of the two tables are as before (note them first):
+--        select (select count(*) from public.processes), (select count(*) from public.process_revisions);
+--
+-- Rollback (run in one transaction; no app change is needed, the app never relies on the refusals):
+--
+--   begin;
+--   drop trigger process_rules_guard on public.processes;
+--   drop trigger version_pointer_check on public.process_revisions;
+--   drop trigger version_rules_guard on public.process_revisions;
+--   drop function private.process_rules_guard();
+--   drop function private.version_pointer_check();
+--   drop function private.version_rules_guard();
+--   delete from supabase_migrations.schema_migrations where version = ''20261128500000'';
+--   commit;
+
+-- ---------------------------------------------------------------------------
+-- Versions: history is kept
+-- ---------------------------------------------------------------------------
+
+create function private.version_rules_guard() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+declare
+  fixed text[] := array[''status'', ''updated_at''];
+begin
+  if current_user not in (''authenticated'', ''anon'') then
+    return case when tg_op = ''DELETE'' then old else new end;
+  end if;
+  if tg_op = ''INSERT'' then
+    if new.status <> ''draft'' then
+      raise exception ''A new version starts as a draft'' using errcode = ''55000'';
+    end if;
+    if new.published_at is not null or new.published_by is not null or new.created_by is distinct from auth.uid() or new.created_at <> now() then
+      raise exception ''A new draft is made by the person saving it, now, and not yet published'' using errcode = ''55000'';
+    end if;
+    return new;
+  elsif tg_op = ''DELETE'' then
+    if old.status <> ''draft'' then
+      raise exception ''Published versions are kept: they are the history of the process'' using errcode = ''55000'';
+    end if;
+    return old;
+  end if;
+  if old.status = ''published'' and new.status = ''superseded'' then
+    -- Superseding changes the status and nothing else.
+    if to_jsonb(new) - fixed is distinct from to_jsonb(old) - fixed then
+      raise exception ''A published version is kept as it was: only its status moves, when a newer one is published'' using errcode = ''55000'';
+    end if;
+  elsif old.status = ''draft'' and new.status = ''draft'' then
+    -- A draft''s contents are edited; who made it, when and its number are not.
+    if to_jsonb(new) - (fixed || array[''layout'']) is distinct from to_jsonb(old) - (fixed || array[''layout'']) then
+      raise exception ''A draft''''s number, author and dates are not changed'' using errcode = ''55000'';
+    end if;
+  elsif old.status = ''draft'' and new.status = ''published'' then
+    -- Exactly what publish_process writes: the caller, now, and the next number.
+    if to_jsonb(new) - (fixed || array[''layout'', ''number'', ''published_at'', ''published_by'']) is distinct from to_jsonb(old) - (fixed || array[''layout'', ''number'', ''published_at'', ''published_by''])
+       or new.published_by is distinct from auth.uid()
+       or new.published_at is distinct from now()
+       or new.number is distinct from coalesce((select max(r.number) from public.process_revisions r where r.process_id = new.process_id and r.id <> new.id), 0) + 1 then
+      raise exception ''A draft is published by publishing it: the person, time and number are set then'' using errcode = ''55000'';
+    end if;
+  else
+    raise exception ''A version can''''t change status that way: publishing and restoring do it'' using errcode = ''55000'';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.version_rules_guard() from public, anon, authenticated;
+
+create trigger version_rules_guard before insert or update or delete on public.process_revisions
+  for each row execute function private.version_rules_guard();
+
+-- At commit, a signed-in caller''s change to versions leaves the process consistent: it has a live version if and only if it has a
+-- published one, and the live version is that published version. publish_process, restore_version, discard_draft, open_draft,
+-- duplicate_version and the company map''s system versions all do; a bare status update, or a bare delete, does not. Checked at
+-- commit (deferred) because those functions change the statuses and the pointer in separate statements. The unique index
+-- `process_revisions_one_published` keeps it to one published version.
+create function private.version_pointer_check() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+declare
+  pid uuid := case when tg_op = ''DELETE'' then old.process_id else new.process_id end;
+  live uuid;
+  published uuid[];
+begin
+  if current_user not in (''authenticated'', ''anon'') then
+    return null;
+  end if;
+  select p.live_revision_id into live from public.processes p where p.id = pid;
+  if not found then
+    return null; -- the process was deleted, with its versions
+  end if;
+  select coalesce(array_agg(r.id), ''{}'') into published from public.process_revisions r where r.process_id = pid and r.status = ''published'';
+  if live is distinct from published[1] or cardinality(published) > 1 then
+    raise exception ''The live version of a process is its published version: publish a draft or restore a version'' using errcode = ''55000'';
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.version_pointer_check() from public, anon, authenticated;
+
+create constraint trigger version_pointer_check after insert or update of status or delete on public.process_revisions
+  deferrable initially deferred for each row execute function private.version_pointer_check();
+
+-- ---------------------------------------------------------------------------
+-- Processes: provenance and the version pointers
+-- ---------------------------------------------------------------------------
+
+create function private.process_rules_guard() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+begin
+  if current_user not in (''authenticated'', ''anon'') then
+    return new;
+  end if;
+  if tg_op = ''INSERT'' then
+    -- A new process has no versions yet, and is made by the person saving it, now.
+    if new.live_revision_id is not null or new.draft_revision_id is not null or new.created_by is distinct from auth.uid() or new.created_at <> now() then
+      raise exception ''A new process has no versions yet and is made by the person saving it, now'' using errcode = ''55000'';
+    end if;
+    return new;
+  end if;
+  if (new.created_by, new.created_at, new.source) is distinct from (old.created_by, old.created_at, old.source) then
+    raise exception ''Who made a process, when and from where is not changed'' using errcode = ''55000'';
+  end if;
+  if new.live_revision_id is distinct from old.live_revision_id then
+    if new.live_revision_id is null then
+      raise exception ''A process keeps its live version'' using errcode = ''55000'';
+    end if;
+    if not exists (select 1 from public.process_revisions r where r.id = new.live_revision_id and r.process_id = new.id and r.status = ''published'') then
+      raise exception ''The live version is the process''''s published version: publish a draft or restore a version'' using errcode = ''55000'';
+    end if;
+  end if;
+  if new.draft_revision_id is distinct from old.draft_revision_id and new.draft_revision_id is not null
+     and not exists (select 1 from public.process_revisions r where r.id = new.draft_revision_id and r.process_id = new.id and r.status = ''draft'') then
+    raise exception ''The open draft is one of the process''''s own drafts'' using errcode = ''55000'';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.process_rules_guard() from public, anon, authenticated;
+
+create trigger process_rules_guard before insert or update of live_revision_id, draft_revision_id, created_by, created_at, source on public.processes
+  for each row execute function private.process_rules_guard();
+']);
+
+-- 20261129000000_import_bundle.sql
+-- B14 (1/2, issue #167): upload a `transpera-process/2` file in one transaction, and mark the values an upload had to leave out.
+--
+-- 1. `public.import_process_bundle(p_workspace, p_nodes, p_adopt, p_extras)`: SECURITY INVOKER (RLS decides, as for every other
+--    write the app makes as the signed-in user). It is `import_new_process` (20261128000000, which it calls) plus everything a
+--    /2 file carries, so a failed upload leaves nothing behind (no half-made process, no orphan sources, no stray suggestions).
+--    `p_nodes` and `p_adopt` are exactly what `import_new_process` takes. `p_extras` is a jsonb object, all keys optional:
+--      * `sources`: [{ref, kind, title, speakers[], recorded_at, body}], at most 50, bodies at most 2,000,000 characters in all.
+--        The database makes each source's id: `ref` is a placeholder uuid the caller put in the steps', suggestions' and
+--        proposals' evidence, and it is replaced by the new id wherever it appears (the caller never chooses an id, so a
+--        refused insert can't say whether some id exists). Sources are written FIRST, so the step rows that cite them are linked
+--        to them as they are inserted (the
+--        `link_cited_sources` trigger of 20261124500000). Each is then linked to the new process (`source_links`, kind process),
+--        so none shows "Not linked to anything yet".
+--      * `first_principles`: the columns of `first_principles` (job_who ... measures), written to the new process's draft.
+--      * `import_source`: the file name or link, shown in the review queue as "Upload (<name>)".
+--      * `suggestions`: [{target_table, target_id, patch, evidence, note}], at most 300: company-model changes, written as
+--        PENDING `suggestions` (created_via `upload`; the review path of 20261015000000 is the only way to apply one).
+--      * `proposals`: [{kind, title, detail, payload, evidence, note, issue_id}], at most 50: proposed issues and solution
+--        ideas, written as PENDING `suggestion_proposals` (20261124000000; accepting one goes through `review_proposals`).
+--    Nothing company-level is applied: the function writes no role, person, client, service, setting or issue. Every table's
+--    own checks, triggers and row-level security run as the caller, so a viewer or a stranger is refused whole.
+--    Returns `{processes: [{process_id, revision_id, number}], sources, suggestions, proposals, first_principles}`.
+--
+-- 2. `private.clear_branch_odds()` and the trigger `clear_branch_odds` on `public.edges` (after insert, update of probability,
+--    delete): an upload marks a step whose branches had no odds given (`steps.provenance.branch_odds`, with the probabilities it
+--    defaulted to), so "Missing for simulation" can list it (packages/db/src/simulation-gaps.ts). The marker is taken off when
+--    the step's branch set changes, or when at most one of its branches still has its defaulted probability (the last can be
+--    inferred), so the warning clears once the odds are filled in. It only ever touches a DRAFT, and never a step created in
+--    the same transaction (the import's own edge inserts).
+--
+-- 3. Where an upload's suggestions and proposals came from: `created_via` also allows `upload` (check constraints widened;
+--    existing rows all pass), a nullable `import_source` text column on `suggestions` and `suggestion_proposals`, and
+--    `private.suggestion_proposals_before_write` (and `private.suggestions_before_write`, copies of the earlier definitions) records `upload` (and keeps
+--    `import_source`) only while `transpera.importing` is on, which only `import_process_bundle` sets, and never lets it change. The marker is a new key inside the existing `provenance`
+--    jsonb: no column changes, nothing that reads provenance looks at keys it does not know, and publishing is not blocked by it.
+--
+-- STRICTLY ADDITIVE: functions, one trigger, two nullable columns, two widened checks.
+--
+-- Preflight (run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each should be as described):
+--
+--   1. Neither function nor the trigger exists, and the columns don't. Expect 0, 0, 0, 0:
+--        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_process_bundle';
+--        select count(*) from pg_proc where pronamespace = 'private'::regnamespace and proname = 'clear_branch_odds';
+--        select count(*) from pg_trigger where tgname = 'clear_branch_odds' and not tgisinternal;
+--        select count(*) from information_schema.columns where table_schema = 'public' and table_name in ('suggestions', 'suggestion_proposals') and column_name = 'import_source';
+--   2. Nothing of ours is applied past this one (row 44, #177, 20261128500000, is applied and is independent). Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= '20261129000000' and version < '20261140000000';
+--   3. The import it calls and the tables it writes exist. Expect 1, then 6:
+--        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_new_process';
+--        select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('sources', 'source_links', 'first_principles', 'suggestions', 'suggestion_proposals', 'edges');
+--   4. The atomic import migration (row 43) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261128000000';
+--
+-- Post-apply grant check (authenticated may execute the import; anon and PUBLIC may not; the trigger function is private):
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name = 'import_process_bundle' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 2;
+--        select proname, proacl from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_process_bundle';
+--        select tgname, tgenabled from pg_trigger where tgname = 'clear_branch_odds' and not tgisinternal;
+--   Expect: one row, authenticated EXECUTE; the ACL has an `authenticated=X/...` entry and no `anon=` and no `=X/...` (an entry
+--   with an empty grantee is PUBLIC); the trigger enabled ('O').
+--
+-- Rollback (run as one transaction; nothing existing was changed):
+--
+--   begin;
+--   drop trigger if exists clear_branch_odds on public.edges;
+--   -- first `create or replace` private.suggestion_proposals_before_write() (text from 20261124000000_suggestions_v2.sql) and private.suggestions_before_write() (20261015000000_suggestions.sql) (the column drop below needs them gone)
+--   delete from public.suggestions where created_via = 'upload';
+--   delete from public.suggestion_proposals where created_via = 'upload';
+--   alter table public.suggestions drop column import_source, drop constraint suggestions_created_via, add constraint suggestions_created_via check (created_via in ('mcp'));
+--   alter table public.suggestion_proposals drop column import_source, drop constraint suggestion_proposals_created_via, add constraint suggestion_proposals_created_via check (created_via in ('mcp', 'play_link'));
+--   drop function if exists private.clear_branch_odds();
+--   drop function if exists public.import_process_bundle(uuid, jsonb, jsonb, jsonb);
+--   delete from supabase_migrations.schema_migrations where version = '20261129000000';
+--   commit;
+--
+-- Roll the app back (or redeploy the previous one) first: it calls the function. Processes, sources, suggestions and proposals
+-- already uploaded stay as they are. A `branch_odds` key left in a step's provenance is ignored by everything.
+--
+-- Production data: none needed.
+
+
+-- ---------------------------------------------------------------------------
+-- Where an upload's suggestions and proposals came from
+-- ---------------------------------------------------------------------------
+
+alter table public.suggestions add column import_source text constraint suggestions_import_source check (char_length(import_source) <= 300);
+alter table public.suggestion_proposals add column import_source text constraint suggestion_proposals_import_source check (char_length(import_source) <= 300);
+
+alter table public.suggestions drop constraint suggestions_created_via,
+  add constraint suggestions_created_via check (created_via in ('mcp', 'upload')) not valid;
+alter table public.suggestions validate constraint suggestions_created_via;
+alter table public.suggestion_proposals drop constraint suggestion_proposals_created_via,
+  add constraint suggestion_proposals_created_via check (created_via in ('mcp', 'play_link', 'upload')) not valid;
+alter table public.suggestion_proposals validate constraint suggestion_proposals_created_via;
+
+-- SELECT on proposals is granted column by column (a visitor's email is left out): the new column is shown to everyone who can read.
+grant select (import_source) on public.suggestion_proposals to authenticated;
+
+create or replace function private.suggestion_proposals_before_write() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.status := 'pending';
+    new.applied := null;
+    new.review_note := null;
+    new.reviewed_by := null;
+    new.reviewed_at := null;
+    new.created_by := auth.uid();
+    -- A signed-in request (the app, or the MCP server with a token) can't pass as a visitor.
+    if auth.uid() is not null then
+      -- An upload (public.import_process_bundle) says so for the duration of its own statement; anything else is MCP.
+      new.created_via := case when coalesce(current_setting('transpera.importing', true), '') = 'on' then 'upload' else 'mcp' end;
+      new.proposer_name := null;
+      new.proposer_email := null;
+      if new.created_via <> 'upload' then new.import_source := null; end if;
+    end if;
+    return new;
+  end if;
+  -- Deleting a user sets `created_by` or `reviewed_by` to null through the foreign key's own trigger (depth 2 here).
+  -- That, and nothing else, is let through.
+  if pg_catalog.pg_trigger_depth() > 1
+    and (to_jsonb(new) - 'created_by' - 'reviewed_by' - 'updated_at') = (to_jsonb(old) - 'created_by' - 'reviewed_by' - 'updated_at')
+    and (new.created_by is null or new.created_by is not distinct from old.created_by)
+    and (new.reviewed_by is null or new.reviewed_by is not distinct from old.reviewed_by) then
+    return new;
+  end if;
+  if new.workspace_id is distinct from old.workspace_id or new.kind is distinct from old.kind
+    or new.title is distinct from old.title or new.detail is distinct from old.detail
+    or new.payload is distinct from old.payload or new.evidence is distinct from old.evidence
+    or new.note is distinct from old.note or new.issue_id is distinct from old.issue_id
+    or new.created_via is distinct from old.created_via or new.import_source is distinct from old.import_source or new.proposer_name is distinct from old.proposer_name
+    or new.proposer_email is distinct from old.proposer_email or new.created_by is distinct from old.created_by
+    or new.created_at is distinct from old.created_at then
+    raise exception 'A proposal can''t be changed, only accepted, rejected or dismissed' using errcode = '42501';
+  end if;
+  if new.status is distinct from old.status or new.applied is distinct from old.applied
+    or new.reviewed_by is distinct from old.reviewed_by or new.reviewed_at is distinct from old.reviewed_at
+    or new.review_note is distinct from old.review_note then
+    if old.status <> 'pending' or coalesce(current_setting('transpera.reviewing_proposals', true), '') <> 'on' then
+      raise exception 'Proposals are decided with review_proposals' using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+-- The same rule for suggestions as for proposals: only the import path can record an upload, and where it came from never changes.
+create or replace function private.suggestions_before_write() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.status := 'pending';
+    new.applied := null;
+    new.review_note := null;
+    new.reviewed_by := null;
+    new.reviewed_at := null;
+    new.created_by := auth.uid();
+    -- Only an upload (public.import_process_bundle, which turns `transpera.importing` on for its own statement) can say so.
+    new.created_via := case when coalesce(current_setting('transpera.importing', true), '') = 'on' then 'upload' else 'mcp' end;
+    if new.created_via <> 'upload' then new.import_source := null; end if;
+    return new;
+  end if;
+  if new.workspace_id is distinct from old.workspace_id or new.target_table is distinct from old.target_table
+    or new.target_id is distinct from old.target_id or new.patch is distinct from old.patch
+    or new.evidence is distinct from old.evidence or new.note is distinct from old.note
+    or new.created_via is distinct from old.created_via or new.import_source is distinct from old.import_source or new.created_by is distinct from old.created_by
+    or new.created_at is distinct from old.created_at then
+    raise exception 'A suggestion can''t be changed, only accepted or rejected' using errcode = '42501';
+  end if;
+  if new.status is distinct from old.status or new.applied is distinct from old.applied
+    or new.reviewed_by is distinct from old.reviewed_by or new.reviewed_at is distinct from old.reviewed_at
+    or new.review_note is distinct from old.review_note then
+    if old.status <> 'pending' or coalesce(current_setting('transpera.reviewing', true), '') <> 'on' then
+      raise exception 'Suggestions are accepted or rejected with review_suggestions' using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- The all-or-nothing /2 upload
+-- ---------------------------------------------------------------------------
+
+create function public.import_process_bundle(p_workspace uuid, p_nodes jsonb, p_adopt jsonb default '[]', p_extras jsonb default '{}') returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  extras jsonb := coalesce(nullif(p_extras, 'null'::jsonb), '{}');
+  srcs jsonb;
+  fp jsonb;
+  sugg jsonb;
+  props jsonb;
+  s jsonb;
+  top uuid;
+  made jsonb;
+  rev uuid;
+  fresh uuid;
+  ref uuid;
+  fresh_ids uuid[] := '{}';
+  nodes_txt text;
+  sugg_txt text;
+  props_txt text;
+  label text;
+  n_sources integer;
+  n_suggestions integer;
+  n_proposals integer;
+  body_chars bigint;
+  wrote_fp boolean := false;
+begin
+  if p_workspace is null or jsonb_typeof(p_nodes) is distinct from 'array' or jsonb_array_length(p_nodes) < 1 then
+    raise exception 'import_process_bundle: p_nodes must be an array of processes' using errcode = '22023';
+  end if;
+  if jsonb_typeof(extras) is distinct from 'object' then
+    raise exception 'import_process_bundle: p_extras must be an object' using errcode = '22023';
+  end if;
+  -- A section that is JSON null is a section that is left out.
+  srcs := coalesce(nullif(extras -> 'sources', 'null'::jsonb), '[]');
+  sugg := coalesce(nullif(extras -> 'suggestions', 'null'::jsonb), '[]');
+  props := coalesce(nullif(extras -> 'proposals', 'null'::jsonb), '[]');
+  fp := nullif(extras -> 'first_principles', 'null'::jsonb);
+  if jsonb_typeof(srcs) is distinct from 'array' or jsonb_typeof(sugg) is distinct from 'array' or jsonb_typeof(props) is distinct from 'array'
+    or (fp is not null and jsonb_typeof(fp) is distinct from 'object') then
+    raise exception 'import_process_bundle: sources, suggestions and proposals must be arrays and first_principles an object' using errcode = '22023';
+  end if;
+  n_sources := jsonb_array_length(srcs);
+  n_suggestions := jsonb_array_length(sugg);
+  n_proposals := jsonb_array_length(props);
+  if n_sources > 50 or n_suggestions > 300 or n_proposals > 50 then
+    raise exception 'import_process_bundle: at most 50 sources, 300 suggestions and 50 proposals in one import' using errcode = '22023';
+  end if;
+  select coalesce(sum(char_length(coalesce(x ->> 'body', ''))), 0) into body_chars from jsonb_array_elements(srcs) x;
+  if body_chars > 2000000 then
+    raise exception 'The sources'' text is too long: % characters in all, and one upload takes at most 2,000,000. Leave the text out of the longest sources.', body_chars using errcode = '22023';
+  end if;
+  label := left(nullif(extras ->> 'import_source', ''), 300);
+  top := (p_nodes -> 0 ->> 'id')::uuid;
+  nodes_txt := p_nodes::text;
+  sugg_txt := sugg::text;
+  props_txt := props::text;
+
+  -- Sources first: the steps that cite them are linked to them as they are written. Each gets an id made here; the file's
+  -- placeholder (`ref`) is replaced by it wherever the file cites the source.
+  for s in select value from jsonb_array_elements(srcs) loop
+    ref := (s ->> 'ref')::uuid;
+    fresh := gen_random_uuid();
+    insert into public.sources (id, workspace_id, kind, title, speakers, recorded_at, body)
+    values (fresh, p_workspace, coalesce(s ->> 'kind', 'transcript'), s ->> 'title',
+      coalesce(array(select jsonb_array_elements_text(case when jsonb_typeof(s -> 'speakers') = 'array' then s -> 'speakers' else '[]'::jsonb end)), '{}'),
+      nullif(s ->> 'recorded_at', '')::date, nullif(s ->> 'body', ''));
+    fresh_ids := fresh_ids || fresh;
+    nodes_txt := replace(nodes_txt, ref::text, fresh::text);
+    sugg_txt := replace(sugg_txt, ref::text, fresh::text);
+    props_txt := replace(props_txt, ref::text, fresh::text);
+  end loop;
+
+  -- The process, its draft, its steps and edges (and any child processes), as the atomic import writes them.
+  made := public.import_new_process(p_workspace, nodes_txt::jsonb, p_adopt);
+  rev := (made -> 0 ->> 'revision_id')::uuid;
+
+  -- Every source of the file is evidence for the process it came with.
+  insert into public.source_links (workspace_id, source_id, kind, process_id)
+  select p_workspace, f, 'process', top from unnest(fresh_ids) f
+  on conflict do nothing;
+
+  if fp is not null then
+    -- A key the caller leaves out is the column's default (jsonb_populate_record gives null, which the columns refuse).
+    insert into public.first_principles (workspace_id, process_id, revision_id, job_who, job_progress, job_situation, job_done, statements, requirements, deletes, improvements, why_problem, why_chain, root_cause, measures)
+    select p_workspace, top, rev, coalesce(r.job_who, ''), coalesce(r.job_progress, ''), coalesce(r.job_situation, ''), coalesce(r.job_done, ''),
+      coalesce(r.statements, '[]'::jsonb), coalesce(r.requirements, '[]'::jsonb), coalesce(r.deletes, '[]'::jsonb), coalesce(r.improvements, '[]'::jsonb),
+      coalesce(r.why_problem, ''), coalesce(r.why_chain, '[]'::jsonb), coalesce(r.root_cause, ''), coalesce(r.measures, '[]'::jsonb)
+    from jsonb_populate_record(null::public.first_principles, fp) r;
+    wrote_fp := true;
+  end if;
+
+  -- Company facts wait as suggestions; the review path is the only way to apply one. The triggers record them as uploads while
+  -- `transpera.importing` is on (set here, nowhere else), and it is off again after the proposals.
+  perform set_config('transpera.importing', 'on', true);
+  insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, created_via, import_source)
+  select p_workspace, x.target_table, x.target_id, x.patch, coalesce(x.evidence, '[]'::jsonb), x.note, 'upload', label
+  from jsonb_to_recordset(sugg_txt::jsonb) as x(target_table text, target_id uuid, patch jsonb, evidence jsonb, note text);
+
+  -- Issues and ideas wait as proposals.
+  insert into public.suggestion_proposals (workspace_id, kind, title, detail, payload, evidence, note, issue_id, import_source)
+  select p_workspace, x.kind, x.title, x.detail, coalesce(x.payload, '{}'::jsonb), coalesce(x.evidence, '[]'::jsonb), x.note, x.issue_id, label
+  from jsonb_to_recordset(props_txt::jsonb) as x(kind text, title text, detail text, payload jsonb, evidence jsonb, note text, issue_id uuid);
+  perform set_config('transpera.importing', '', true);
+
+  return jsonb_build_object('processes', made, 'sources', n_sources, 'suggestions', n_suggestions, 'proposals', n_proposals, 'first_principles', wrote_fp);
+end;
+$$;
+
+revoke all on function public.import_process_bundle(uuid, jsonb, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.import_process_bundle(uuid, jsonb, jsonb, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- A step's missing branch odds clear when its branches are filled in
+-- ---------------------------------------------------------------------------
+
+create function private.clear_branch_odds() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  rev uuid := case when tg_op = 'DELETE' then old.revision_id else new.revision_id end;
+  from_step uuid := case when tg_op = 'DELETE' then old.from_step_id else new.from_step_id end;
+  marker jsonb;
+  untouched integer;
+begin
+  -- History is never touched: only a draft's step is looked at.
+  if not exists (select 1 from public.process_revisions r where r.id = rev and r.status = 'draft') then
+    return null;
+  end if;
+  -- A step made in this very transaction is the import (or a copy of a version) still writing its edges.
+  select s.provenance -> 'branch_odds' into marker from public.steps s
+  where s.revision_id = rev and s.id = from_step and s.created_at < now();
+  if marker is null then
+    return null;
+  end if;
+  if tg_op = 'UPDATE' then
+    -- Branches that still have the probability the upload gave them by default: with one or none left, the last is inferred.
+    select count(*) into untouched from public.edges e
+    where e.revision_id = rev and e.from_step_id = from_step
+      and (marker -> 'was' ->> e.to_step_id::text) is not null
+      and (marker -> 'was' ->> e.to_step_id::text)::numeric = e.probability;
+    if untouched > 1 then
+      return null;
+    end if;
+  end if;
+  -- Runs as the caller, who is editing the draft the step is in (the drafts-only guard on steps still applies).
+  update public.steps s set provenance = s.provenance - 'branch_odds'
+  where s.revision_id = rev and s.id = from_step;
+  return null;
+end;
+$$;
+
+revoke all on function private.clear_branch_odds() from public, anon, authenticated;
+
+create trigger clear_branch_odds after insert or delete or update of probability on public.edges
+  for each row execute function private.clear_branch_odds();
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261129000000', 'import_bundle', array['-- B14 (1/2, issue #167): upload a `transpera-process/2` file in one transaction, and mark the values an upload had to leave out.
+--
+-- 1. `public.import_process_bundle(p_workspace, p_nodes, p_adopt, p_extras)`: SECURITY INVOKER (RLS decides, as for every other
+--    write the app makes as the signed-in user). It is `import_new_process` (20261128000000, which it calls) plus everything a
+--    /2 file carries, so a failed upload leaves nothing behind (no half-made process, no orphan sources, no stray suggestions).
+--    `p_nodes` and `p_adopt` are exactly what `import_new_process` takes. `p_extras` is a jsonb object, all keys optional:
+--      * `sources`: [{ref, kind, title, speakers[], recorded_at, body}], at most 50, bodies at most 2,000,000 characters in all.
+--        The database makes each source''s id: `ref` is a placeholder uuid the caller put in the steps'', suggestions'' and
+--        proposals'' evidence, and it is replaced by the new id wherever it appears (the caller never chooses an id, so a
+--        refused insert can''t say whether some id exists). Sources are written FIRST, so the step rows that cite them are linked
+--        to them as they are inserted (the
+--        `link_cited_sources` trigger of 20261124500000). Each is then linked to the new process (`source_links`, kind process),
+--        so none shows "Not linked to anything yet".
+--      * `first_principles`: the columns of `first_principles` (job_who ... measures), written to the new process''s draft.
+--      * `import_source`: the file name or link, shown in the review queue as "Upload (<name>)".
+--      * `suggestions`: [{target_table, target_id, patch, evidence, note}], at most 300: company-model changes, written as
+--        PENDING `suggestions` (created_via `upload`; the review path of 20261015000000 is the only way to apply one).
+--      * `proposals`: [{kind, title, detail, payload, evidence, note, issue_id}], at most 50: proposed issues and solution
+--        ideas, written as PENDING `suggestion_proposals` (20261124000000; accepting one goes through `review_proposals`).
+--    Nothing company-level is applied: the function writes no role, person, client, service, setting or issue. Every table''s
+--    own checks, triggers and row-level security run as the caller, so a viewer or a stranger is refused whole.
+--    Returns `{processes: [{process_id, revision_id, number}], sources, suggestions, proposals, first_principles}`.
+--
+-- 2. `private.clear_branch_odds()` and the trigger `clear_branch_odds` on `public.edges` (after insert, update of probability,
+--    delete): an upload marks a step whose branches had no odds given (`steps.provenance.branch_odds`, with the probabilities it
+--    defaulted to), so "Missing for simulation" can list it (packages/db/src/simulation-gaps.ts). The marker is taken off when
+--    the step''s branch set changes, or when at most one of its branches still has its defaulted probability (the last can be
+--    inferred), so the warning clears once the odds are filled in. It only ever touches a DRAFT, and never a step created in
+--    the same transaction (the import''s own edge inserts).
+--
+-- 3. Where an upload''s suggestions and proposals came from: `created_via` also allows `upload` (check constraints widened;
+--    existing rows all pass), a nullable `import_source` text column on `suggestions` and `suggestion_proposals`, and
+--    `private.suggestion_proposals_before_write` (and `private.suggestions_before_write`, copies of the earlier definitions) records `upload` (and keeps
+--    `import_source`) only while `transpera.importing` is on, which only `import_process_bundle` sets, and never lets it change. The marker is a new key inside the existing `provenance`
+--    jsonb: no column changes, nothing that reads provenance looks at keys it does not know, and publishing is not blocked by it.
+--
+-- STRICTLY ADDITIVE: functions, one trigger, two nullable columns, two widened checks.
+--
+-- Preflight (run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each should be as described):
+--
+--   1. Neither function nor the trigger exists, and the columns don''t. Expect 0, 0, 0, 0:
+--        select count(*) from pg_proc where pronamespace = ''public''::regnamespace and proname = ''import_process_bundle'';
+--        select count(*) from pg_proc where pronamespace = ''private''::regnamespace and proname = ''clear_branch_odds'';
+--        select count(*) from pg_trigger where tgname = ''clear_branch_odds'' and not tgisinternal;
+--        select count(*) from information_schema.columns where table_schema = ''public'' and table_name in (''suggestions'', ''suggestion_proposals'') and column_name = ''import_source'';
+--   2. Nothing of ours is applied past this one (row 44, #177, 20261128500000, is applied and is independent). Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261129000000'' and version < ''20261140000000'';
+--   3. The import it calls and the tables it writes exist. Expect 1, then 6:
+--        select count(*) from pg_proc where pronamespace = ''public''::regnamespace and proname = ''import_new_process'';
+--        select count(*) from information_schema.tables where table_schema = ''public'' and table_name in (''sources'', ''source_links'', ''first_principles'', ''suggestions'', ''suggestion_proposals'', ''edges'');
+--   4. The atomic import migration (row 43) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261128000000'';
+--
+-- Post-apply grant check (authenticated may execute the import; anon and PUBLIC may not; the trigger function is private):
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = ''public'' and routine_name = ''import_process_bundle'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'') order by 2;
+--        select proname, proacl from pg_proc where pronamespace = ''public''::regnamespace and proname = ''import_process_bundle'';
+--        select tgname, tgenabled from pg_trigger where tgname = ''clear_branch_odds'' and not tgisinternal;
+--   Expect: one row, authenticated EXECUTE; the ACL has an `authenticated=X/...` entry and no `anon=` and no `=X/...` (an entry
+--   with an empty grantee is PUBLIC); the trigger enabled (''O'').
+--
+-- Rollback (run as one transaction; nothing existing was changed):
+--
+--   begin;
+--   drop trigger if exists clear_branch_odds on public.edges;
+--   -- first `create or replace` private.suggestion_proposals_before_write() (text from 20261124000000_suggestions_v2.sql) and private.suggestions_before_write() (20261015000000_suggestions.sql) (the column drop below needs them gone)
+--   delete from public.suggestions where created_via = ''upload'';
+--   delete from public.suggestion_proposals where created_via = ''upload'';
+--   alter table public.suggestions drop column import_source, drop constraint suggestions_created_via, add constraint suggestions_created_via check (created_via in (''mcp''));
+--   alter table public.suggestion_proposals drop column import_source, drop constraint suggestion_proposals_created_via, add constraint suggestion_proposals_created_via check (created_via in (''mcp'', ''play_link''));
+--   drop function if exists private.clear_branch_odds();
+--   drop function if exists public.import_process_bundle(uuid, jsonb, jsonb, jsonb);
+--   delete from supabase_migrations.schema_migrations where version = ''20261129000000'';
+--   commit;
+--
+-- Roll the app back (or redeploy the previous one) first: it calls the function. Processes, sources, suggestions and proposals
+-- already uploaded stay as they are. A `branch_odds` key left in a step''s provenance is ignored by everything.
+--
+-- Production data: none needed.
+
+
+-- ---------------------------------------------------------------------------
+-- Where an upload''s suggestions and proposals came from
+-- ---------------------------------------------------------------------------
+
+alter table public.suggestions add column import_source text constraint suggestions_import_source check (char_length(import_source) <= 300);
+alter table public.suggestion_proposals add column import_source text constraint suggestion_proposals_import_source check (char_length(import_source) <= 300);
+
+alter table public.suggestions drop constraint suggestions_created_via,
+  add constraint suggestions_created_via check (created_via in (''mcp'', ''upload'')) not valid;
+alter table public.suggestions validate constraint suggestions_created_via;
+alter table public.suggestion_proposals drop constraint suggestion_proposals_created_via,
+  add constraint suggestion_proposals_created_via check (created_via in (''mcp'', ''play_link'', ''upload'')) not valid;
+alter table public.suggestion_proposals validate constraint suggestion_proposals_created_via;
+
+-- SELECT on proposals is granted column by column (a visitor''s email is left out): the new column is shown to everyone who can read.
+grant select (import_source) on public.suggestion_proposals to authenticated;
+
+create or replace function private.suggestion_proposals_before_write() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+begin
+  if tg_op = ''INSERT'' then
+    new.status := ''pending'';
+    new.applied := null;
+    new.review_note := null;
+    new.reviewed_by := null;
+    new.reviewed_at := null;
+    new.created_by := auth.uid();
+    -- A signed-in request (the app, or the MCP server with a token) can''t pass as a visitor.
+    if auth.uid() is not null then
+      -- An upload (public.import_process_bundle) says so for the duration of its own statement; anything else is MCP.
+      new.created_via := case when coalesce(current_setting(''transpera.importing'', true), '''') = ''on'' then ''upload'' else ''mcp'' end;
+      new.proposer_name := null;
+      new.proposer_email := null;
+      if new.created_via <> ''upload'' then new.import_source := null; end if;
+    end if;
+    return new;
+  end if;
+  -- Deleting a user sets `created_by` or `reviewed_by` to null through the foreign key''s own trigger (depth 2 here).
+  -- That, and nothing else, is let through.
+  if pg_catalog.pg_trigger_depth() > 1
+    and (to_jsonb(new) - ''created_by'' - ''reviewed_by'' - ''updated_at'') = (to_jsonb(old) - ''created_by'' - ''reviewed_by'' - ''updated_at'')
+    and (new.created_by is null or new.created_by is not distinct from old.created_by)
+    and (new.reviewed_by is null or new.reviewed_by is not distinct from old.reviewed_by) then
+    return new;
+  end if;
+  if new.workspace_id is distinct from old.workspace_id or new.kind is distinct from old.kind
+    or new.title is distinct from old.title or new.detail is distinct from old.detail
+    or new.payload is distinct from old.payload or new.evidence is distinct from old.evidence
+    or new.note is distinct from old.note or new.issue_id is distinct from old.issue_id
+    or new.created_via is distinct from old.created_via or new.import_source is distinct from old.import_source or new.proposer_name is distinct from old.proposer_name
+    or new.proposer_email is distinct from old.proposer_email or new.created_by is distinct from old.created_by
+    or new.created_at is distinct from old.created_at then
+    raise exception ''A proposal can''''t be changed, only accepted, rejected or dismissed'' using errcode = ''42501'';
+  end if;
+  if new.status is distinct from old.status or new.applied is distinct from old.applied
+    or new.reviewed_by is distinct from old.reviewed_by or new.reviewed_at is distinct from old.reviewed_at
+    or new.review_note is distinct from old.review_note then
+    if old.status <> ''pending'' or coalesce(current_setting(''transpera.reviewing_proposals'', true), '''') <> ''on'' then
+      raise exception ''Proposals are decided with review_proposals'' using errcode = ''42501'';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+-- The same rule for suggestions as for proposals: only the import path can record an upload, and where it came from never changes.
+create or replace function private.suggestions_before_write() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+begin
+  if tg_op = ''INSERT'' then
+    new.status := ''pending'';
+    new.applied := null;
+    new.review_note := null;
+    new.reviewed_by := null;
+    new.reviewed_at := null;
+    new.created_by := auth.uid();
+    -- Only an upload (public.import_process_bundle, which turns `transpera.importing` on for its own statement) can say so.
+    new.created_via := case when coalesce(current_setting(''transpera.importing'', true), '''') = ''on'' then ''upload'' else ''mcp'' end;
+    if new.created_via <> ''upload'' then new.import_source := null; end if;
+    return new;
+  end if;
+  if new.workspace_id is distinct from old.workspace_id or new.target_table is distinct from old.target_table
+    or new.target_id is distinct from old.target_id or new.patch is distinct from old.patch
+    or new.evidence is distinct from old.evidence or new.note is distinct from old.note
+    or new.created_via is distinct from old.created_via or new.import_source is distinct from old.import_source or new.created_by is distinct from old.created_by
+    or new.created_at is distinct from old.created_at then
+    raise exception ''A suggestion can''''t be changed, only accepted or rejected'' using errcode = ''42501'';
+  end if;
+  if new.status is distinct from old.status or new.applied is distinct from old.applied
+    or new.reviewed_by is distinct from old.reviewed_by or new.reviewed_at is distinct from old.reviewed_at
+    or new.review_note is distinct from old.review_note then
+    if old.status <> ''pending'' or coalesce(current_setting(''transpera.reviewing'', true), '''') <> ''on'' then
+      raise exception ''Suggestions are accepted or rejected with review_suggestions'' using errcode = ''42501'';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- The all-or-nothing /2 upload
+-- ---------------------------------------------------------------------------
+
+create function public.import_process_bundle(p_workspace uuid, p_nodes jsonb, p_adopt jsonb default ''[]'', p_extras jsonb default ''{}'') returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  extras jsonb := coalesce(nullif(p_extras, ''null''::jsonb), ''{}'');
+  srcs jsonb;
+  fp jsonb;
+  sugg jsonb;
+  props jsonb;
+  s jsonb;
+  top uuid;
+  made jsonb;
+  rev uuid;
+  fresh uuid;
+  ref uuid;
+  fresh_ids uuid[] := ''{}'';
+  nodes_txt text;
+  sugg_txt text;
+  props_txt text;
+  label text;
+  n_sources integer;
+  n_suggestions integer;
+  n_proposals integer;
+  body_chars bigint;
+  wrote_fp boolean := false;
+begin
+  if p_workspace is null or jsonb_typeof(p_nodes) is distinct from ''array'' or jsonb_array_length(p_nodes) < 1 then
+    raise exception ''import_process_bundle: p_nodes must be an array of processes'' using errcode = ''22023'';
+  end if;
+  if jsonb_typeof(extras) is distinct from ''object'' then
+    raise exception ''import_process_bundle: p_extras must be an object'' using errcode = ''22023'';
+  end if;
+  -- A section that is JSON null is a section that is left out.
+  srcs := coalesce(nullif(extras -> ''sources'', ''null''::jsonb), ''[]'');
+  sugg := coalesce(nullif(extras -> ''suggestions'', ''null''::jsonb), ''[]'');
+  props := coalesce(nullif(extras -> ''proposals'', ''null''::jsonb), ''[]'');
+  fp := nullif(extras -> ''first_principles'', ''null''::jsonb);
+  if jsonb_typeof(srcs) is distinct from ''array'' or jsonb_typeof(sugg) is distinct from ''array'' or jsonb_typeof(props) is distinct from ''array''
+    or (fp is not null and jsonb_typeof(fp) is distinct from ''object'') then
+    raise exception ''import_process_bundle: sources, suggestions and proposals must be arrays and first_principles an object'' using errcode = ''22023'';
+  end if;
+  n_sources := jsonb_array_length(srcs);
+  n_suggestions := jsonb_array_length(sugg);
+  n_proposals := jsonb_array_length(props);
+  if n_sources > 50 or n_suggestions > 300 or n_proposals > 50 then
+    raise exception ''import_process_bundle: at most 50 sources, 300 suggestions and 50 proposals in one import'' using errcode = ''22023'';
+  end if;
+  select coalesce(sum(char_length(coalesce(x ->> ''body'', ''''))), 0) into body_chars from jsonb_array_elements(srcs) x;
+  if body_chars > 2000000 then
+    raise exception ''The sources'''' text is too long: % characters in all, and one upload takes at most 2,000,000. Leave the text out of the longest sources.'', body_chars using errcode = ''22023'';
+  end if;
+  label := left(nullif(extras ->> ''import_source'', ''''), 300);
+  top := (p_nodes -> 0 ->> ''id'')::uuid;
+  nodes_txt := p_nodes::text;
+  sugg_txt := sugg::text;
+  props_txt := props::text;
+
+  -- Sources first: the steps that cite them are linked to them as they are written. Each gets an id made here; the file''s
+  -- placeholder (`ref`) is replaced by it wherever the file cites the source.
+  for s in select value from jsonb_array_elements(srcs) loop
+    ref := (s ->> ''ref'')::uuid;
+    fresh := gen_random_uuid();
+    insert into public.sources (id, workspace_id, kind, title, speakers, recorded_at, body)
+    values (fresh, p_workspace, coalesce(s ->> ''kind'', ''transcript''), s ->> ''title'',
+      coalesce(array(select jsonb_array_elements_text(case when jsonb_typeof(s -> ''speakers'') = ''array'' then s -> ''speakers'' else ''[]''::jsonb end)), ''{}''),
+      nullif(s ->> ''recorded_at'', '''')::date, nullif(s ->> ''body'', ''''));
+    fresh_ids := fresh_ids || fresh;
+    nodes_txt := replace(nodes_txt, ref::text, fresh::text);
+    sugg_txt := replace(sugg_txt, ref::text, fresh::text);
+    props_txt := replace(props_txt, ref::text, fresh::text);
+  end loop;
+
+  -- The process, its draft, its steps and edges (and any child processes), as the atomic import writes them.
+  made := public.import_new_process(p_workspace, nodes_txt::jsonb, p_adopt);
+  rev := (made -> 0 ->> ''revision_id'')::uuid;
+
+  -- Every source of the file is evidence for the process it came with.
+  insert into public.source_links (workspace_id, source_id, kind, process_id)
+  select p_workspace, f, ''process'', top from unnest(fresh_ids) f
+  on conflict do nothing;
+
+  if fp is not null then
+    -- A key the caller leaves out is the column''s default (jsonb_populate_record gives null, which the columns refuse).
+    insert into public.first_principles (workspace_id, process_id, revision_id, job_who, job_progress, job_situation, job_done, statements, requirements, deletes, improvements, why_problem, why_chain, root_cause, measures)
+    select p_workspace, top, rev, coalesce(r.job_who, ''''), coalesce(r.job_progress, ''''), coalesce(r.job_situation, ''''), coalesce(r.job_done, ''''),
+      coalesce(r.statements, ''[]''::jsonb), coalesce(r.requirements, ''[]''::jsonb), coalesce(r.deletes, ''[]''::jsonb), coalesce(r.improvements, ''[]''::jsonb),
+      coalesce(r.why_problem, ''''), coalesce(r.why_chain, ''[]''::jsonb), coalesce(r.root_cause, ''''), coalesce(r.measures, ''[]''::jsonb)
+    from jsonb_populate_record(null::public.first_principles, fp) r;
+    wrote_fp := true;
+  end if;
+
+  -- Company facts wait as suggestions; the review path is the only way to apply one. The triggers record them as uploads while
+  -- `transpera.importing` is on (set here, nowhere else), and it is off again after the proposals.
+  perform set_config(''transpera.importing'', ''on'', true);
+  insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, created_via, import_source)
+  select p_workspace, x.target_table, x.target_id, x.patch, coalesce(x.evidence, ''[]''::jsonb), x.note, ''upload'', label
+  from jsonb_to_recordset(sugg_txt::jsonb) as x(target_table text, target_id uuid, patch jsonb, evidence jsonb, note text);
+
+  -- Issues and ideas wait as proposals.
+  insert into public.suggestion_proposals (workspace_id, kind, title, detail, payload, evidence, note, issue_id, import_source)
+  select p_workspace, x.kind, x.title, x.detail, coalesce(x.payload, ''{}''::jsonb), coalesce(x.evidence, ''[]''::jsonb), x.note, x.issue_id, label
+  from jsonb_to_recordset(props_txt::jsonb) as x(kind text, title text, detail text, payload jsonb, evidence jsonb, note text, issue_id uuid);
+  perform set_config(''transpera.importing'', '''', true);
+
+  return jsonb_build_object(''processes'', made, ''sources'', n_sources, ''suggestions'', n_suggestions, ''proposals'', n_proposals, ''first_principles'', wrote_fp);
+end;
+$$;
+
+revoke all on function public.import_process_bundle(uuid, jsonb, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.import_process_bundle(uuid, jsonb, jsonb, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- A step''s missing branch odds clear when its branches are filled in
+-- ---------------------------------------------------------------------------
+
+create function private.clear_branch_odds() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+declare
+  rev uuid := case when tg_op = ''DELETE'' then old.revision_id else new.revision_id end;
+  from_step uuid := case when tg_op = ''DELETE'' then old.from_step_id else new.from_step_id end;
+  marker jsonb;
+  untouched integer;
+begin
+  -- History is never touched: only a draft''s step is looked at.
+  if not exists (select 1 from public.process_revisions r where r.id = rev and r.status = ''draft'') then
+    return null;
+  end if;
+  -- A step made in this very transaction is the import (or a copy of a version) still writing its edges.
+  select s.provenance -> ''branch_odds'' into marker from public.steps s
+  where s.revision_id = rev and s.id = from_step and s.created_at < now();
+  if marker is null then
+    return null;
+  end if;
+  if tg_op = ''UPDATE'' then
+    -- Branches that still have the probability the upload gave them by default: with one or none left, the last is inferred.
+    select count(*) into untouched from public.edges e
+    where e.revision_id = rev and e.from_step_id = from_step
+      and (marker -> ''was'' ->> e.to_step_id::text) is not null
+      and (marker -> ''was'' ->> e.to_step_id::text)::numeric = e.probability;
+    if untouched > 1 then
+      return null;
+    end if;
+  end if;
+  -- Runs as the caller, who is editing the draft the step is in (the drafts-only guard on steps still applies).
+  update public.steps s set provenance = s.provenance - ''branch_odds''
+  where s.revision_id = rev and s.id = from_step;
+  return null;
+end;
+$$;
+
+revoke all on function private.clear_branch_odds() from public, anon, authenticated;
+
+create trigger clear_branch_odds after insert or delete or update of probability on public.edges
+  for each row execute function private.clear_branch_odds();
+']);
+
 -- seed.sql
 -- Generated by `pnpm --filter @transpera-flow/db gen:seed`. Do not edit by hand.
 

@@ -29,6 +29,7 @@ import {
   isOpenAssumption,
   isRetiredStep,
   openConflict,
+  SERVER_DEFAULT_NOTE_PREFIX,
   stepValue,
   triangularRange,
   type ConflictValue,
@@ -442,7 +443,7 @@ export function buildNewStep(
       assumptions.push(`Step '${name}': ${column} ${formatParameter(column, given)} has no cited source; marked as an assumption${reasoning ? ` (${reasoning.replace(/[.\s]+$/, "")})` : ""}.`);
     } else if (defaults.assumed.includes(column)) {
       const value = stepValue(b.cur, column) ?? 0;
-      b.set(`provenance.${column}`, estimatedEntry(stamp, { assumption: true, note: reasoning ?? `Server default for a ${kind} step${from}.` }));
+      b.set(`provenance.${column}`, estimatedEntry(stamp, { assumption: true, note: reasoning ?? `${SERVER_DEFAULT_NOTE_PREFIX} ${kind} step${from}.` }));
       assumptions.push(`Step '${name}': ${column} defaulted to ${formatParameter(column, value)} (estimated; confirm it on the canvas).`);
     }
   }
@@ -1023,6 +1024,8 @@ export function planImport(
   const removeEdges = draft.edges.filter((e) => gone.has(e.from_step_id) || gone.has(e.to_step_id));
   const insertEdges: EdgeRow[] = [];
   const updateEdges: EdgeChange[] = [];
+  /** Steps whose branches took the share the others leave: new ones are marked so "Missing for simulation" can list them (issue #167). */
+  const oddsMissing = new Set<string>();
   const byFrom = new Map<string, { edge: ImportEdge; to: string }[]>();
   for (const e of input.edges) {
     const from = ref(e.from, "an edge's from");
@@ -1042,6 +1045,7 @@ export function planImport(
     const share = missing.length ? Math.max(0, round((1 - given) / missing.length)) : 0;
     const fromName = rows.get(from)?.name ?? from;
     if (missing.length && list.length > 1) {
+      if (missing.length > 1) oddsMissing.add(from);
       assumptions.push(`'${fromName}': ${missing.length === 1 ? "one branch's" : `${missing.length} branches'`} probability defaulted to ${Math.round(share * 1000) / 10}% (the share the others leave).`);
     }
     const existing = edges.filter((e) => e.from_step_id === from);
@@ -1076,6 +1080,14 @@ export function planImport(
       };
       insertEdges.push(row);
       edges = [...edges, row];
+    }
+  }
+
+  for (const id of oddsMissing) {
+    const inserted = insertSteps.find((r) => r.id === id);
+    if (inserted) {
+      const was = Object.fromEntries(insertEdges.filter((e) => e.from_step_id === id).map((e) => [e.to_step_id, Number(e.probability)]));
+      inserted.provenance = { ...inserted.provenance, branch_odds: estimatedEntry(stamp, { defaulted: true, was, note: "No odds were given for its branches; they share what is left equally. Enter the odds to confirm them." }) };
     }
   }
 
@@ -1174,6 +1186,8 @@ function rowFields(a: Record<string, unknown> | null, b: Record<string, unknown>
         const xs = isObject(x) ? x[sub] : undefined;
         const ys = isObject(y) ? y[sub] : undefined;
         if (same(xs, ys)) continue;
+        // The "no odds were given" marker (issue #167) is bookkeeping: its going away is not a change to the step.
+        if (key === "provenance" && sub === "branch_odds") continue;
         out[`${key}.${sub}`] = key === "provenance" ? { live: provenanceSummary(xs), draft: provenanceSummary(ys) } : { live: xs ?? null, draft: ys ?? null };
       }
     } else if (!same(x, y)) out[key] = { live: x ?? null, draft: y ?? null };

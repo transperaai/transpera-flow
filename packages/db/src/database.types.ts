@@ -2647,6 +2647,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_via: string
+          import_source: string | null
           detail: string | null
           evidence: Json
           id: string
@@ -2669,6 +2670,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_via?: string
+          import_source?: string | null
           detail?: string | null
           evidence?: Json
           id?: string
@@ -2691,6 +2693,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_via?: string
+          import_source?: string | null
           detail?: string | null
           evidence?: Json
           id?: string
@@ -2724,6 +2727,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_via: string
+          import_source: string | null
           evidence: Json
           id: string
           note: string | null
@@ -2742,6 +2746,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_via?: string
+          import_source?: string | null
           evidence?: Json
           id?: string
           note?: string | null
@@ -2760,6 +2765,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_via?: string
+          import_source?: string | null
           evidence?: Json
           id?: string
           note?: string | null
@@ -2934,6 +2940,14 @@ export type Database = {
         Args: { new_name: string; source_revision: string }
         Returns: Json
       }
+      import_new_process: {
+        Args: { p_adopt?: Json; p_nodes: Json; p_workspace: string }
+        Returns: Json
+      }
+      import_process_bundle: {
+        Args: { p_adopt?: Json; p_extras?: Json; p_nodes: Json; p_workspace: string }
+        Returns: Json
+      }
       is_agency_admin: { Args: never; Returns: boolean }
       is_free_mail_domain: { Args: { domain: string }; Returns: boolean }
       log_process_import: {
@@ -3062,6 +3076,7 @@ export type Database = {
         }
         Returns: Json
       }
+      take_link_fetch: { Args: never; Returns: number }
       unlinked_source_count: {
         Args: { p_workspace: string }
         Returns: number

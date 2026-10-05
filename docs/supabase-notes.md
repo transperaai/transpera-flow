@@ -230,6 +230,17 @@ select proacl from pg_proc where pronamespace = 'public'::regnamespace and prona
 
 Expect one row, `authenticated` EXECUTE, and an ACL with an `authenticated=X/...` entry, no `anon=` and no `=X/...`.
 
+## All-or-nothing import and the link-fetch limit (B13 follow-ups, migration 20261128000000)
+
+Verified only against plain Postgres (`packages/db/test/import-atomic.test.ts`, and `packages/mcp/test/postgrest-import-file.test.ts` through PostgREST with the auth shim). `public.import_new_process` is `security invoker`, so the caller's RLS decides; it opens the draft through `open_draft` and inserts steps and edges with the same "union of keys, missing keys are null" semantics as a bulk PostgREST insert. `public.take_link_fetch` is `security definer` with an empty `search_path` and reads `auth.uid()`; its counter table `private.link_fetch_limits` has RLS on and no grants to `anon` or `authenticated`. The test database emulates Supabase's default privileges for the `public` schema only, so check on a real project, after applying:
+
+```sql
+select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name in ('import_new_process', 'take_link_fetch') and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1, 2;
+select grantee, privilege_type from information_schema.role_table_grants where table_schema = 'private' and table_name = 'link_fetch_limits' and grantee in ('anon', 'authenticated', 'PUBLIC');
+```
+
+Expect two rows (`authenticated` EXECUTE on each function) and no rows from the second query.
+
 ## Editing the company map (B11 slice 2, migration 20261127500000)
 
 Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/company-map-editing.test.ts` and `company-map.test.ts`, including both headers' rollbacks and both migrations re-applied over existing workspaces). No table or column is added. Two things rest on how Postgres behaves for the table owner, which should hold on Supabase but has not been seen there:
@@ -245,3 +256,21 @@ select has_function_privilege('anon', 'public.revision_history(uuid)', 'execute'
 ```
 
 Both must be empty or false. `revision_history` was dropped and re-created (one more column, `note`), so its grants were re-made in the migration: `authenticated` may execute it, `anon` may not.
+
+The link limit fails open when `take_link_fetch` is missing (a deploy that got ahead of its migration: PostgREST `PGRST202` or Postgres `42883`) and logs `[link-limit] take_link_fetch is missing ...` with `console.warn`, so search the server logs for that tag; any other error refuses the fetch. `import_new_process` takes an advisory lock per workspace so two imports with one name can't both succeed, and refuses imports over 200 processes or 1,000 steps (one statement must finish inside Supabase's 8 s `statement_timeout` for `authenticated`).
+
+## Harden versions and provenance (issue #171, migration 20261128500000)
+
+Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/harden-versions.test.ts`) and PostgREST v14 (`packages/mcp/test/postgrest-versions.test.ts`, as an editor with a session JWT).
+
+- `private.version_rules_guard`, `private.version_pointer_check` (a deferred constraint trigger) and `private.process_rules_guard` act only when `current_user` is `authenticated` or `anon`. This relies on behaviours that need confirming on the real project: `open_draft`, `discard_draft`, `publish_process` and `duplicate_version` are security invoker, so they run as `authenticated` and must satisfy the rules; `restore_version` and the company map functions are security definer and run as the function owner (but the deferred check runs at commit as the session role, so it also checks what they leave behind: the live version is the process's one published version); referential actions (cascade delete of a process or workspace, `on delete set null` of `created_by`) run as the table owner. Check after applying: publish, restore, discard and duplicate a process in the app, upload a process, and delete a throwaway process that has a published version.
+- A hand-written publish (supersede the live version, publish the draft with `published_by` = the caller, `published_at` = now and the next number, repoint `live_revision_id`) is allowed: it writes exactly what `publish_process` writes, and the audit trigger on `process_revisions` records it like any publish. What is refused is every variation: forged person, time or number; changing any other column when superseding; superseding or publishing without the pointer following (checked at commit).
+- `created_by` and `created_at` of a new process or draft must be the caller and now; only `source` is free on insert.
+
+## Format v2 upload (issue #167, migration 20261129000000)
+
+Verified only against plain Postgres, with Supabase's default table privileges emulated (`packages/db/test/import-bundle.test.ts`) and PostgREST v14 (`packages/mcp/test/postgrest-import-v2.test.ts`, which also accepts a proposal through `review_proposals`):
+
+- `import_process_bundle` is SECURITY INVOKER, so every table's own policy and trigger (including #177's version guards) runs as the signed-in user; a viewer or stranger is refused whole. `anon` and PUBLIC have no EXECUTE (checked through `proacl`).
+- Sources are inserted with ids the caller chose, before the process, so the `link_cited_sources` trigger links the steps that cite them as they are written. This relies on Supabase's `sources` insert grant covering `id` (the table-level `insert` grant does).
+- `clear_branch_odds` updates `steps` from an AFTER UPDATE trigger on `edges`. It only ever fires in a draft (the drafts-only guard on `edges` refuses anything else), so the guard on `steps` passes.

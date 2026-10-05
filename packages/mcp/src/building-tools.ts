@@ -85,6 +85,9 @@ export const BUILDING_TOOL_NAMES = [
 ] as const;
 
 const MAX_IMPORT_STEPS = 200;
+/** Most processes and steps one import creates in one transaction (the same limits as `import_new_process`). */
+const MAX_IMPORT_PROCESSES = 200;
+const MAX_IMPORT_TOTAL_STEPS = 1000;
 const MAX_IMPORT_EDGES = 500;
 const PROBABILITY_TOLERANCE = 1e-3;
 
@@ -392,11 +395,13 @@ async function lookupsFor(
   ws: WorkspaceRef,
   from: { roles: readonly Named[]; people: readonly Named[]; steps: StepRow[] },
   needsSources: boolean,
+  /** Sources an upload is about to add in the same transaction (not in the database yet), which its steps' evidence cites. */
+  pendingSources: Lookups["sources"] = [],
 ): Promise<Lookups> {
   return {
     roles: from.roles.map((r) => ({ id: r.id, name: r.name })),
     people: from.people.map((p) => ({ id: p.id, name: p.name })),
-    sources: needsSources ? await loadSources(ctx, ws) : [],
+    sources: needsSources ? [...(await loadSources(ctx, ws)), ...pendingSources] : [],
     steps: from.steps,
     warnings: [],
   };
@@ -625,14 +630,36 @@ export interface ImportOutcome {
   warnings: string[];
   /** The child processes of its sub-process steps that this call created or wrote into. */
   children: (ImportOutcome & { step: string })[];
+  /** A /2 upload: what was written beside the process (sources, pending suggestions and proposals, first principles). */
+  bundle?: ImportBundleResult;
   text: string;
 }
 
 interface PreparedImport {
-  /** Create the process and its draft, or open the existing draft (as a child of `parent`). Writes nothing else. */
+  /**
+   * Create the process and its draft, or open the existing draft (as a child of `parent`). For a new process at the top of
+   * an import (`parent` null) this writes the whole import, children included, in one database transaction
+   * (`import_new_process`): it is all there afterwards or none of it is. Anything else writes only the process and draft.
+   */
   ensure(parent: ProcessWithDraft | null): Promise<{ proc: ProcessWithDraft; draft: Draft }>;
+  /** A new process's part of the one-transaction write, and those of the new processes inside it. */
+  collect(parentId: string | null, nodes: ImportNode[], adopts: { id: string; parent_id: string }[]): void;
+  /** Take what the one-transaction write returned (the draft of each new process). */
+  settle(parentId: string | null, results: ReadonlyMap<string, { revision_id: string; number: number }>): void;
   /** Write the steps and edges, then the child processes'. */
   write(): Promise<ImportOutcome>;
+}
+
+/** A new process as `import_new_process` takes it: its row, and the steps and edges of its first draft. */
+interface ImportNode {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  kind: "pipeline" | "servicing";
+  entity_name: string;
+  description: string | null;
+  steps: unknown[];
+  edges: unknown[];
 }
 
 interface ImportScope {
@@ -646,6 +673,34 @@ interface ImportScope {
   /** The step holding each child process in this call, so no process is held twice. */
   claimed: Map<string, string>;
   stamp: Stamp;
+  /** A /2 upload's sources, rows and ids, written in the same transaction as the process (issue #167). */
+  bundle?: ImportBundle;
+  /** What `import_process_bundle` returned (the counts it wrote), for the top-level process. */
+  bundleResult?: ImportBundleResult;
+}
+
+/**
+ * What a `transpera-process/2` upload carries beyond the process itself (issue #167). Everything is written by one call to
+ * `import_process_bundle`, so it is all there afterwards or none of it is. Ids are chosen by the caller so rows that point at
+ * each other (a step's evidence cites a source, a proposal links to the new process) can be built before anything is written.
+ */
+export interface ImportBundle {
+  /** The new process's id. */
+  processId: string;
+  /** The file name or link, shown in the review queue as "Upload (name)". */
+  importSource: string;
+  /** Sources to add. Each `id` is a placeholder the evidence cites; the database replaces it with the id it makes. Each is linked to the process. */
+  sources: { id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; body: string | null }[];
+  /** The rest of the extras, as `import_process_bundle` takes them: `first_principles` (its columns), `suggestions`, `proposals`. */
+  extras: { first_principles?: Json; suggestions?: Json; proposals?: Json };
+}
+
+/** What `import_process_bundle` wrote beyond the process. */
+export interface ImportBundleResult {
+  sources: number;
+  suggestions: number;
+  proposals: number;
+  first_principles: boolean;
 }
 
 /**
@@ -658,7 +713,7 @@ interface ImportScope {
 async function prepareImport(
   scope: ImportScope,
   json: ProcessJson,
-  opts: { target?: ProcessWithDraft; create?: { name: string; kind: "pipeline" | "servicing"; entity_name: string; source: "import" }; ancestors: string[] },
+  opts: { target?: ProcessWithDraft; create?: { id: string; name: string; kind: "pipeline" | "servicing"; entity_name: string; source: "import" }; ancestors: string[] },
 ): Promise<PreparedImport> {
   const { ctx, ws, assumptions, stamp } = scope;
   const { steps: flat, holders } = flattenNesting(json.steps);
@@ -710,17 +765,19 @@ async function prepareImport(
     }
     const inlineJson = h.process!;
     const existing = now ? (processById.get(now) ?? null) : null;
+    const childId = existing?.id ?? newId();
     if (existing) claim(existing.id, existing.name, h.step);
     const name = inlineJson.name ?? h.step;
     const childOpts = existing
       ? { target: existing, ancestors: [...opts.ancestors, ...(self ? [self] : [])] }
-      : { create: { name, kind: inlineJson.kind ?? json.kind ?? target?.kind ?? opts.create?.kind ?? "pipeline", entity_name: inlineJson.entity_name ?? target?.entity_name ?? opts.create?.entity_name ?? "item", source: "import" as const }, ancestors: [...opts.ancestors, ...(self ? [self] : [])] };
+      : { create: { id: childId, name, kind: inlineJson.kind ?? json.kind ?? target?.kind ?? opts.create?.kind ?? "pipeline", entity_name: inlineJson.entity_name ?? target?.entity_name ?? opts.create?.entity_name ?? "item", source: "import" as const }, ancestors: [...opts.ancestors, ...(self ? [self] : [])] };
     const prepared = await prepareImport(scope, { ...inlineJson, ...(existing ? {} : { name }) }, childOpts);
-    held.push({ step: h.step, id: existing?.id ?? newId(), inline: { json: inlineJson, existing, prepared } });
+    held.push({ step: h.step, id: childId, inline: { json: inlineJson, existing, prepared } });
   }
   const childIds = new Map(held.map((x) => [normalizeName(x.step), x.id]));
 
   let create: Parameters<typeof createProcessWithDraft>[2] | null = null;
+  let createId = "";
   if (!target) {
     const c = opts.create;
     if (!c) throw new ToolError("invalid_input", "process_json needs a name for a new process (or pass `target` to write into an existing one).");
@@ -730,10 +787,17 @@ async function prepareImport(
     }
     scope.reserved.add(normalizeName(c.name));
     create = { name: c.name, kind: c.kind, entity_name: c.entity_name, description: json.description?.trim() || null, source: c.source };
+    createId = c.id;
   }
 
   const planFor = async (from: DraftBundle, owner: StepOwner, ids: ReadonlyMap<string, string>) => {
-    const l = await lookupsFor(ctx, ws, from as Graph & { roles: readonly Named[]; people: readonly Named[]; steps: StepRow[] }, hasCitations(flat));
+    const l = await lookupsFor(
+      ctx,
+      ws,
+      from as Graph & { roles: readonly Named[]; people: readonly Named[]; steps: StepRow[] },
+      hasCitations(flat),
+      (scope.bundle?.sources ?? []).map((s) => ({ id: s.id, workspace_id: ws.id, kind: s.kind, title: s.title, speakers: s.speakers, recorded_at: s.recorded_at, body: s.body, file_url: null, name: s.title }) as unknown as Lookups["sources"][number]),
+    );
     const steps: ImportStep[] = withTopLevelReasoning(flat, json.assumptions).map((st) => {
       const { id, name, rework_to, ...rest } = st;
       const child = ids.get(normalizeName(name));
@@ -751,8 +815,9 @@ async function prepareImport(
     return { l, plan };
   };
 
-  // Plan against what the draft will be (the open draft, else a copy of live, else empty).
-  await planFor(
+  // Plan against what the draft will be (the open draft, else a copy of live, else empty). A new process's draft starts empty,
+  // so this plan is the one that gets written (in one transaction, see `ensure`); for an existing process it is a check.
+  const dry = await planFor(
     currentBundle ??
       ({
         steps: [],
@@ -760,28 +825,88 @@ async function prepareImport(
         roles: check(await ctx.db.from("roles").select("id, name").eq("workspace_id", ws.id)),
         people: check(await ctx.db.from("people").select("id, name").eq("workspace_id", ws.id)),
       } as DraftBundle),
-    { revision_id: current ?? newId(), workspace_id: ws.id, process_id: target?.id ?? newId() },
+    { revision_id: current ?? newId(), workspace_id: ws.id, process_id: target?.id ?? (createId || newId()) },
     childIds,
   );
 
   let ensured: { proc: ProcessWithDraft; draft: Draft } | null = null;
+  // Set when the whole import has been written by `import_new_process`: steps, edges and moves are already in.
+  let writtenAtOnce = false;
   const prepared: PreparedImport = {
+    collect(parentId, nodes, adopts) {
+      const { plan } = dry;
+      if (!create || plan.updateSteps.length || plan.removeSteps.length || plan.updateEdges.length || plan.removeEdges.length) {
+        throw new Error("a new process's import plan only adds steps and connections");
+      }
+      nodes.push({
+        id: createId,
+        parent_id: parentId,
+        name: create.name,
+        kind: create.kind,
+        entity_name: create.entity_name,
+        description: create.description,
+        steps: plan.insertSteps,
+        edges: plan.insertEdges,
+      });
+      for (const h of held) if (h.adopt) adopts.push({ id: h.adopt.id, parent_id: createId });
+      for (const h of held) h.inline?.prepared.collect(createId, nodes, adopts);
+    },
+    settle(parentId, results) {
+      const r = results.get(createId);
+      if (!create || !r) throw new Error("import_new_process returned no draft for a new process");
+      const draft: Draft = { revision_id: r.revision_id, number: r.number, created: true };
+      ensured = {
+        proc: { id: createId, workspace_id: ws.id, name: create.name, kind: create.kind, entity_name: create.entity_name, description: create.description, live_revision_id: null, draft_revision_id: r.revision_id, parent_process_id: parentId } as ProcessWithDraft,
+        draft,
+      };
+      writtenAtOnce = true;
+      for (const h of held) h.inline?.prepared.settle(createId, results);
+    },
     async ensure(parent) {
       if (ensured) return ensured;
       if (target) {
         const draft = await openDraft(ctx, target);
         ensured = { proc: { ...target, draft_revision_id: draft.revision_id }, draft };
+      } else if (!parent) {
+        const nodes: ImportNode[] = [];
+        const adopts: { id: string; parent_id: string }[] = [];
+        prepared.collect(null, nodes, adopts);
+        // One transaction has to finish inside the database's statement timeout, so an import has a size limit (checked again there).
+        const stepCount = nodes.reduce((n, x) => n + x.steps.length, 0);
+        if (nodes.length > MAX_IMPORT_PROCESSES) throw new ToolError("invalid_input", `An import can create at most ${MAX_IMPORT_PROCESSES} processes (this one has ${nodes.length}). Split it into smaller imports.`);
+        if (stepCount > MAX_IMPORT_TOTAL_STEPS) throw new ToolError("invalid_input", `An import can have at most ${MAX_IMPORT_TOTAL_STEPS} steps in all, child processes included (this one has ${stepCount}). Split it into smaller imports.`);
+        const bundle = scope.bundle;
+        const { data, error } = bundle
+          ? await ctx.db.rpc("import_process_bundle", {
+              p_workspace: ws.id,
+              p_nodes: nodes as unknown as Json,
+              p_adopt: adopts as unknown as Json,
+              p_extras: { sources: bundle.sources.map(({ id, ...rest }) => ({ ref: id, ...rest })), import_source: bundle.importSource, ...bundle.extras } as unknown as Json,
+            })
+          : await ctx.db.rpc("import_new_process", { p_workspace: ws.id, p_nodes: nodes as unknown as Json, p_adopt: adopts as unknown as Json });
+        if (error) {
+          if (error.code === "23505" && error.hint === "name_taken") throw new ToolError("name_taken", error.message);
+          throw writeError(error, "create processes");
+        }
+        let made = data as unknown as { process_id: string; revision_id: string; number: number }[];
+        if (bundle) {
+          const out = data as unknown as { processes: typeof made } & ImportBundleResult;
+          made = out.processes;
+          scope.bundleResult = { sources: out.sources, suggestions: out.suggestions, proposals: out.proposals, first_principles: out.first_principles };
+        }
+        const results = new Map(made.map((r) => [r.process_id, r]));
+        prepared.settle(null, results);
       } else {
         const made = await createProcessWithDraft(ctx, ws, { ...create!, ...(parent ? { parent_process_id: parent.id } : {}) });
         ensured = { proc: made.proc, draft: made.draft };
       }
-      return ensured;
+      return ensured!;
     },
     async write() {
       const { proc, draft } = await prepared.ensure(null);
       // Every child exists, and belongs to this process, before the step that holds it is written.
       for (const h of held) {
-        if (h.adopt) {
+        if (h.adopt && !writtenAtOnce) {
           const { error } = await ctx.db.from("processes").update({ parent_process_id: proc.id }).eq("id", h.adopt.id);
           if (error) throw writeError(error, "move a process inside another");
         }
@@ -790,9 +915,9 @@ async function prepareImport(
       const ids = new Map(held.map((x) => [normalizeName(x.step), x.id]));
       const bundle = await loadDraft(ctx, ws, proc, draft);
       const e: Editing = { ws, proc, draft, bundle, owner: { revision_id: draft.revision_id, workspace_id: ws.id, process_id: proc.id }, stamp };
-      const { l, plan } = await planFor(bundle, e.owner, ids);
+      const { l, plan } = writtenAtOnce ? dry : await planFor(bundle, e.owner, ids);
       assumptions.push(...plan.assumptions);
-      const editConflicts = await applyPlan(ctx, draft.revision_id, plan);
+      const editConflicts = writtenAtOnce ? [] : await applyPlan(ctx, draft.revision_id, plan);
 
       const after = await loadDraft(ctx, ws, proc, draft);
       const live = proc.live_revision_id ? await loadProcessBundle(ctx.db, ws, proc, proc.live_revision_id) : null;
@@ -816,6 +941,7 @@ async function prepareImport(
         checklist: items,
         warnings,
         children,
+        ...(scope.bundleResult && !opts.ancestors.length && !target ? { bundle: scope.bundleResult } : {}),
         text:
           `${!created ? `Wrote into the draft of '${proc.name}'` : `Created '${proc.name}' as a draft`}: ${diff.text}` +
           (!created ? ` Matched ${plan.matched.filter((m) => m.by === "id").length} by id and ${plan.matched.filter((m) => m.by === "name").length} by name.` : "") +
@@ -845,7 +971,7 @@ function prepareNewProcess(scope: ImportScope, json: ProcessJson): Promise<Prepa
   if (!json.kind) scope.assumptions.push("kind defaulted to pipeline.");
   const entity = json.entity_name ?? (kind === "pipeline" ? "lead" : "item");
   if (!json.entity_name) scope.assumptions.push(`entity_name defaulted to '${entity}'.`);
-  return prepareImport(scope, json, { create: { name: json.name, kind, entity_name: entity, source: "import" }, ancestors: [] });
+  return prepareImport(scope, json, { create: { id: scope.bundle?.processId ?? newId(), name: json.name, kind, entity_name: entity, source: "import" }, ancestors: [] });
 }
 
 /**
@@ -853,11 +979,11 @@ function prepareNewProcess(scope: ImportScope, json: ProcessJson): Promise<Prepa
  * aren't an MCP session (the web app's upload, issue #166). Acts as `ctx.db`'s user through RLS, so it needs an editor;
  * checks the whole import before writing any of it; never publishes.
  */
-export async function importNewProcess(ctx: ToolContext, workspaceId: string, json: ProcessJson, assumptions: string[] = []): Promise<ImportOutcome> {
+export async function importNewProcess(ctx: ToolContext, workspaceId: string, json: ProcessJson, assumptions: string[] = [], bundle?: ImportBundle): Promise<ImportOutcome> {
   const ws = await resolveWorkspace(ctx, workspaceId, assumptions);
   await requireCanEdit(ctx, ws);
   const processes = await listProcesses(ctx.db, ws.id);
-  const scope: ImportScope = { ctx, ws, assumptions, reserved: new Set(), processes, claimed: new Map(), stamp: await stampOf(ctx) };
+  const scope: ImportScope = { ctx, ws, assumptions, reserved: new Set(), processes, claimed: new Map(), stamp: await stampOf(ctx), ...(bundle ? { bundle } : {}) };
   const prepared = await prepareNewProcess(scope, json);
   await prepared.ensure(null);
   return prepared.write();

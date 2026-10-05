@@ -2,7 +2,8 @@ import { build } from "esbuild";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { claudePrompt, PROCESS_FILE_EXAMPLE } from "@transpera-flow/db/process-file";
+import { PROCESS_FILE_EXAMPLE } from "@transpera-flow/db/process-file";
+import { claudePrompt2, PROCESS_FILE_EXAMPLE_2 } from "@transpera-flow/db/process-file-2-schema";
 import type { HarnessCompany } from "./upload-harness/entry";
 
 // The Upload process dialog in a real browser (issue #166, B13): choosing a file, the preview with its errors and
@@ -82,7 +83,7 @@ describe("the Upload process dialog", () => {
     const { page, errors } = await mount();
     await page.getByRole("button", { name: "Copy prompt for Claude" }).click();
     await page.getByRole("button", { name: "Copied" }).waitFor();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(claudePrompt());
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(claudePrompt2());
     expect(errors).toEqual([]);
     await page.close();
   }, 60_000);
@@ -92,7 +93,7 @@ describe("the Upload process dialog", () => {
     const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download example" }).click()]);
     expect(download.suggestedFilename()).toBe("transpera-process-example.json");
     const { readFile } = await import("node:fs/promises");
-    expect(JSON.parse(await readFile((await download.path())!, "utf8"))).toEqual(PROCESS_FILE_EXAMPLE);
+    expect(JSON.parse(await readFile((await download.path())!, "utf8"))).toEqual(PROCESS_FILE_EXAMPLE_2);
     await page.close();
   }, 60_000);
 
@@ -203,6 +204,8 @@ describe("the Upload process dialog", () => {
     await page.locator("[data-upload-create]").click();
     await page.waitForSelector("[data-upload-error]");
     expect(await page.locator("[data-upload-error]").innerText()).toBe("You don't have permission to add processes here.");
+    // The error renders as soon as it is set; the button comes back when the transition that was creating settles, a render later.
+    await page.waitForFunction(() => document.querySelector<HTMLButtonElement>("[data-upload-create]")?.disabled === false);
     expect(await page.locator("[data-upload-create]").isEnabled()).toBe(true);
     await page.close();
   }, 60_000);
@@ -307,6 +310,86 @@ describe("the Upload process dialog", () => {
     await page.locator("[data-upload-fetch]").click();
     await page.waitForFunction(() => document.querySelector("[data-upload-error]")?.textContent?.includes("no Transpera process"));
     expect(await page.locator("[data-upload-step=preview]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+});
+
+// A /2 file (issue #167): counts per section, what waits for review, conflicts, and "Missing for simulation".
+describe("the Upload process dialog with a transpera-process/2 file", () => {
+  const v2 = () => JSON.parse(JSON.stringify(PROCESS_FILE_EXAMPLE_2));
+  /** The company has the example's roles, so only roles a test changes are unknown. */
+  const WITH_MD: HarnessCompany = { ...COMPANY, roles: [...COMPANY.roles, { id: "10000000-0000-4000-8000-000000000003", name: "Managing director" }] };
+
+  it("shows the counts per section, what waits in Suggestions, and says nothing is applied", async () => {
+    const { page, errors } = await mount();
+    await choose(page, file("v2.json", json(v2())));
+    expect(await page.locator("[data-upload-counts]").innerText()).toBe("8 steps · 7 links · a pipeline");
+    expect(await page.locator("[data-upload-extra-counts]").innerText()).toBe("3 sources · 4 suggestions · 1 proposal · first principles: 3 parts");
+    const extras = await page.locator("[data-upload-extras]").innerText();
+    expect(extras).toContain("Interview with Maya Chen, managing director");
+    expect(extras).toContain("Nothing about your company changes until then.");
+    expect(extras).toContain("The file suggests adding service Monthly retainer");
+    expect(extras).toContain("Issue: Proposals sit for a day before review");
+    expect(await page.locator("[data-upload-problems=error]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("lists the conflicts between the file's sources, and goes ahead", async () => {
+    const f = v2();
+    f.sources.push({ id: "lead-notes", title: "Sales call notes", kind: "notes", speakers: [] });
+    f.steps.find((s: { id: string }) => s.id === "proposal").evidence.hands_on_hours.push({ source: "lead-notes", time: "page 1", quote: "A proposal takes a day.", value: 7.5 });
+    const { page } = await mount();
+    await choose(page, file("conflict.json", json(f)));
+    const conflicts = await page.locator("[data-upload-problems=conflicts]").innerText();
+    expect(conflicts).toContain("Conflicts (nothing is changed for you)");
+    expect(conflicts).toContain("Step 'Write proposal': the sources disagree on hands-on time");
+    expect(await page.locator("[data-upload-create]").isEnabled()).toBe(true);
+    await page.close();
+  }, 60_000);
+
+  it("says what is wrong with a v2 file in plain words and stops: a quote from a source that isn't listed", async () => {
+    const f = v2();
+    f.steps[1].evidence.hands_on_hours[0].source = "interview-mayo";
+    const { page } = await mount();
+    await choose(page, file("bad.json", json(f)));
+    const text = await page.locator("[data-upload-problems=error]").innerText();
+    expect(text).toContain("cites the source 'interview-mayo', which isn't in the file's sources. Did you mean 'interview-maya'?");
+    expect(await page.locator("[data-upload-create]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("lists what is missing for simulation, by step, in plain words, and never blocks the upload", async () => {
+    const f = v2();
+    delete f.steps[3].hands_on_hours;
+    delete f.steps[3].evidence;
+    delete f.links[5].probability;
+    delete f.links[6].probability;
+    f.steps[2].role = "Sales lead";
+    const { page } = await mount(WITH_MD);
+    await choose(page, file("gaps.json", json(f)));
+    const gaps = await page.locator("[data-upload-gaps]").innerText();
+    expect(gaps).toContain("Missing for simulation (4)");
+    expect(gaps).toContain("Discovery call has no role");
+    expect(gaps).toContain("Write proposal has no hands-on time");
+    expect(gaps).toContain("Client decides: branch odds missing");
+    expect(gaps).toContain("No incoming volume yet: accept the lead volume suggestion, or add it in Settings");
+    expect(await page.locator("[data-upload-create]").isEnabled()).toBe(true);
+    // Mapping the unknown role to one of the company's clears that gap, live; a role left blank keeps it.
+    await page.locator("#upload-role-0").selectOption({ label: "Consultant" });
+    const after = await page.locator("[data-upload-gaps]").innerText();
+    expect(after).toContain("Missing for simulation (3)");
+    expect(after).not.toContain("Discovery call has no role");
+    await page.close();
+  }, 60_000);
+
+  it("shows no Missing for simulation group when nothing is missing", async () => {
+    const f = v2();
+    f.company.demand = undefined;
+    const { page } = await mount({ ...WITH_MD, hasVolume: true });
+    await choose(page, file("whole.json", json(f)));
+    await page.waitForSelector("[data-upload-counts]");
+    expect(await page.locator("[data-upload-gaps]").count()).toBe(0);
     await page.close();
   }, 60_000);
 });

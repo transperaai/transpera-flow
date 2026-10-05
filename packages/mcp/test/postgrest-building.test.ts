@@ -847,6 +847,14 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
         process_json: { name: "Twin parent", steps: [{ name: "One", process: { name: "Twin child", steps: [] } }, { name: "Two", process: { name: "twin child", steps: [] } }] },
       }),
     ).toMatchObject({ ok: false, error: { code: "name_taken" } });
+    // More than 1000 steps in all (six children of 200) is refused in plain words, and nothing is written.
+    const big = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `Step ${i + 1}` }));
+    const tooMany = await call<never>(editor, "import_process", {
+      process_json: { name: "Too many steps", steps: Array.from({ length: 6 }, (_, i) => ({ name: `Holder ${i + 1}`, process: { name: `Big child ${i + 1}`, steps: big(200) } })) },
+    });
+    expect(tooMany).toMatchObject({ ok: false, error: { code: "invalid_input", message: expect.stringMatching(/at most 1000 steps in all.*\(this one has 1\d{3}\)/) } });
+    expect((await processRow("Too many steps")) ?? null).toBeNull();
+    expect((await processRow("Big child 1")) ?? null).toBeNull();
     // Bad nesting inside a child stops the whole call before the parent is written.
     expect(
       await call(editor, "import_process", {
