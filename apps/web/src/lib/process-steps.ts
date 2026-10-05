@@ -3,21 +3,25 @@
 
 import type { ProcessBundle, StepRow } from "@transpera-flow/db";
 
-/** The steps of the bundle's process and of every process nested inside it, any depth. */
+/**
+ * The steps of the bundle's process and of every process nested inside it, any depth. "Inside" is a link (B12): a holder step
+ * of this revision, or of a process it holds, whose `child_process_id` is the process.
+ */
 export function processSteps(bundle: ProcessBundle): StepRow[] {
-  const others = bundle.otherProcesses ?? [];
+  const others = new Map((bundle.otherProcesses ?? []).map((o) => [o.process.id, o]));
   const inside = new Set([bundle.process.id]);
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const o of others) {
-      const parent = o.process.parent_process_id;
-      if (!inside.has(o.process.id) && parent && inside.has(parent)) {
-        inside.add(o.process.id);
-        grew = true;
-      }
+  const out = [...bundle.steps];
+  const visit = (steps: readonly StepRow[]) => {
+    for (const s of steps) {
+      const child = s.child_process_id ? others.get(s.child_process_id) : undefined;
+      if (!child || inside.has(child.process.id)) continue;
+      inside.add(child.process.id);
+      out.push(...child.steps);
+      visit(child.steps);
     }
-  }
-  return [...bundle.steps, ...others.filter((o) => inside.has(o.process.id)).flatMap((o) => o.steps)];
+  };
+  visit(bundle.steps);
+  return out;
 }
 
 export const processStepIds = (bundle: ProcessBundle): Set<string> => new Set(processSteps(bundle).map((s) => s.id));

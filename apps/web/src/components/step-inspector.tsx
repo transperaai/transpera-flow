@@ -109,8 +109,9 @@ export function StepInspector({
   // A group (or a step holding a child process) has no numbers of its own: the steps inside it do the work.
   const holder = step.kind === "group" || step.child_process_id !== null;
   const working = step.kind !== "start" && step.kind !== "end" && !holder;
-  // A process placed on the company map (B11): a link to the process, named after it. It is taken off the map with Remove from this map, which leaves the process itself alone.
-  const placed = bundle.process.is_company === true && step.child_process_id !== null;
+  // A process placed here by a link (B11, B12): named after it. It is taken out with Remove from this map, which leaves the process itself alone.
+  const placed = step.child_process_id !== null && step.child_process_id !== undefined;
+  const company = bundle.process.is_company === true;
 
   const kindOptions: SelectOption[] = [...STEP_KINDS, ...(step.kind === "subprocess" || step.kind === "group" ? [step.kind] : [])]
     .filter((k) => k === step.kind || !kindProblem(bundle, id, k))
@@ -198,9 +199,9 @@ export function StepInspector({
         <p className="rounded-token border border-line bg-panel-2 px-2 py-1.5 text-xs text-fg-2">
           {step.kind === "group"
             ? "A group is a box of steps. It has no hours, role or rework of its own: the steps inside it do the work, and the numbers are the same whether it is open or closed on the map."
-            : placed
+            : placed && company
               ? "This card is a process placed on the company map. Moving it, or joining it to another with a handoff line, changes only this map: the process itself is never edited here. Open its page to change it."
-              : "This step holds a child process, a process with its own page and versions. The numbers are those of the child's steps."}
+              : "This step is a link to another process, with its own page and versions. The numbers are those of its steps, and changes to it show here. The process itself is never edited here."}
         </p>
       )}
 

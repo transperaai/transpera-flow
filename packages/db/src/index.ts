@@ -182,6 +182,8 @@ export {
   loadProcessBundle,
   loadProcessBySlug,
   loadServicingContext,
+  listPlacements,
+  type Placement,
   isUnpublished,
   unpublishedLive,
   UNPUBLISHED_REVISION_ID,
@@ -304,3 +306,4 @@ export {
   type GapStep,
   type SimulationGap,
 } from "./simulation-gaps";
+export * from "./workspace-bundle";

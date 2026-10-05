@@ -765,13 +765,16 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
     expect(Number(holder.work_hours)).toBe(0);
     expect((await stepsOf(child.draft_revision_id!)).map((s) => s.name).sort()).toEqual(["Build", "Delivered", "Go live", "Kickoff", "Start delivery"]);
 
+    // Where a process sits is read from the LIVE links (B12, ADR 0014): until the parent is published, the child sits nowhere yet.
     const read = await call<{ process: { parent_process_id: string | null } }>(editor, "get_process", { process: "Delivery process", revision: "draft" });
-    expect(read.data.process.parent_process_id).toBe(parent.id);
+    expect(read.data.process.parent_process_id).toBeNull();
 
     // Publish the child, then the parent, and simulate: the child's steps are simulated inside the parent.
     expect(await call(editor, "publish_process", { process: "Flat delivery", accept_estimates: true })).toMatchObject({ ok: true });
     expect(await call(editor, "publish_process", { process: "Delivery process", accept_estimates: true })).toMatchObject({ ok: true });
     expect(await call(editor, "publish_process", { process: "Company delivery", accept_estimates: true })).toMatchObject({ ok: true });
+    const placed = await call<{ process: { parent_process_id: string | null } }>(editor, "get_process", { process: "Delivery process" });
+    expect(placed.data.process.parent_process_id).toBe(parent.id);
     const a = await call<Run>(editor, "run_scenario", { process: "Flat delivery", ...SIM });
     const b = await call<Run>(editor, "run_scenario", { process: "Company delivery", ...SIM });
     expect(b.ok, JSON.stringify(b)).toBe(true);
@@ -806,11 +809,17 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
       process_json: { steps: [{ name: "Standalone step", child_process: "Standalone" }] },
     });
     expect(adopt.ok, JSON.stringify(adopt)).toBe(true);
-    expect(adopt.data.text).toContain("(moved inside it)");
+    // Linked, not moved (B12, as the web library): the process is not written; publishing the holder moves it, and the company
+    // map, its default home, gives way.
+    expect(adopt.data.text).toContain("(it moves inside it when you publish)");
     const parent = await processRow("Company delivery");
-    expect(await processRow("Standalone")).toMatchObject({ parent_process_id: parent.id });
+    expect(await processRow("Standalone")).toMatchObject({ parent_process_id: null });
+    const where = async () => (await admin.query("select holder_name from process_placements where process_id = $1", [(await processRow("Standalone")).id])).rows.map((r) => r.holder_name);
+    expect(await where()).toEqual(["Company map"]);
+    expect(await call(editor, "publish_process", { process: "Company delivery", accept_estimates: true })).toMatchObject({ ok: true });
+    expect(await where()).toEqual([parent.name]);
 
-    // A process has one parent.
+    // A process sits in one place only.
     expect(await call(editor, "import_process", { target: "Flat delivery", process_json: { steps: [{ name: "Also here", child_process: "Standalone" }] } })).toMatchObject({
       ok: false,
       error: { code: "invalid_input", message: expect.stringContaining("already sits inside") },

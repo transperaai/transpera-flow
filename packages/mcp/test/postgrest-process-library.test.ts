@@ -7,7 +7,7 @@ import { signJwt } from "./helpers";
 // The process library on the company map (issue #164, B12; migration 20261129500000), as the web app writes it: over PostgREST
 // with Supabase's default table privileges and RLS. An editor places processes on the map's draft in one request and takes
 // cards off it, publishes, and the processes are byte-identical. A process sits on the map at most once; another workspace's
-// process, the company map itself and a process held by another are refused; a viewer and an anonymous caller change nothing;
+// process and the company map itself are refused; a viewer and an anonymous caller change nothing;
 // a card of a published version is not removable and unlinking by update is refused. Skipped unless POSTGREST_URL is set
 // (see postgrest-db.ts).
 
@@ -110,7 +110,7 @@ describe.skipIf(!POSTGREST_URL)("the process library over PostgREST", () => {
     expect(((await one("select count(*)::int n from processes where id = any($1) and parent_process_id is not null", [mine])).n)).toBe(0);
   });
 
-  it("refuses a second card for a process already on the map, another workspace's process, the company map, and a process inside another", async () => {
+  it("refuses a second card for a process already on the map, another workspace's process, and the company map", async () => {
     const draft = await openDraft();
     const dup = await editor.from("steps").insert(card(draft, ids.sales, "Sales again", 700));
     expect(dup.error?.message).toMatch(/duplicate key|steps_one_holder_per_child/);
@@ -118,13 +118,7 @@ describe.skipIf(!POSTGREST_URL)("the process library over PostgREST", () => {
     expect(theirs.error).not.toBeNull();
     const self = await editor.from("steps").insert(card(draft, ids.company, "Company map", 700));
     expect(self.error).not.toBeNull();
-    // A process held by another is not placeable (take its card off first so the refusal is about nesting).
-    await admin.query("update processes set parent_process_id = $2 where id = $1", [ids.support, ids.sales]);
-    const supportCard = (await holders(draft)).find((h) => h.child_process_id === ids.support);
-    if (supportCard) expect((await editor.from("steps").delete().eq("id", supportCard.id as string)).error).toBeNull();
-    const nested = await editor.from("steps").insert(card(draft, ids.support, "Support", 700));
-    expect(nested.error).not.toBeNull();
-    await admin.query("update processes set parent_process_id = null where id = $1", [ids.support]);
+    // A process held by another may be linked in a draft (B12 part 2); publishing is refused (postgrest-process-library-everywhere.test.ts).
     expect((await editor.rpc("discard_draft", { target_process: ids.company })).error).toBeNull();
   });
 
