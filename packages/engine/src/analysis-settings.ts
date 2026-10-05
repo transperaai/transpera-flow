@@ -410,6 +410,8 @@ export function toRatingConfig(settings: AnalysisSettings | null | undefined, ho
 
 const RULE_OF_KEY_PREFIX: Record<string, AnalysisRuleId> = {
   capacity: "busy",
+  // The forecast's "gets too busy in <month>" alerts (forecast.ts) are rule 1's too.
+  forecast: "busy",
   overtime: "overtime",
   queue: "queue",
   wait: "wait",
