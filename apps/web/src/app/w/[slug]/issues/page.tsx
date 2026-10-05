@@ -4,7 +4,6 @@ import { Page } from "@/components/shell/page";
 import { IssuesPage } from "@/components/issues-page";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { canEditWorkspace } from "@/lib/access-data";
-import { loadWorkspaceAnalysisRules } from "@/lib/rules/data";
 import { loadLiveProcess, loadProcessNames, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /** The Issues list (A48): the problems people have confirmed, filtered by Open / Resolved / All and rating (both in the URL). */
@@ -13,12 +12,11 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
   const bundle = await loadLiveProcess(slug);
   if (!bundle) notFound();
   const ws = bundle.workspace.id;
-  const [canEdit, issues, scenarios, processes, rules, sources, liveRevisions, firstPrinciples, solutions] = await Promise.all([
+  const [canEdit, issues, scenarios, processes, sources, liveRevisions, firstPrinciples, solutions] = await Promise.all([
     canEditWorkspace(ws),
     loadWorkspaceIssues(ws),
     loadWorkspaceScenarios(ws),
     loadProcessNames(ws),
-    loadWorkspaceAnalysisRules(ws),
     loadWorkspaceSources(ws),
     loadWorkspaceLiveRevisionIds(ws),
     loadLiveFirstPrinciples(bundle.process.id, bundle.revision.id),
@@ -30,11 +28,7 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
       eyebrow="Improve"
       description={
         <>
-          Problems you&apos;ve confirmed, linked to a whole process or to specific steps. Resolved issues stay here with their full history. Ratings follow your{" "}
-          <Link href={`/w/${slug}/settings/rules`} className="underline">
-            analysis rules
-          </Link>
-          .
+          Problems you&apos;ve confirmed, linked to a whole process or to specific steps. Resolved issues stay here with their full history. Each one keeps the rating agreed when it was confirmed.
         </>
       }
     >
@@ -46,7 +40,6 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
         sources={sources}
         liveRevisions={liveRevisions}
         solutions={solutions}
-        analysisRules={rules.settings}
         firstPrinciples={firstPrinciples}
         base={`/w/${slug}`}
         mode={canEdit ? "live" : "readonly"}

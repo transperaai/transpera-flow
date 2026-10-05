@@ -3,14 +3,16 @@
 // Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps, Kept out of process-view.tsx so that file only wires it in.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { detectBrokenScenarios, resolveMoney, type AnalysisSettings, type EngineModel, type RetiredSteps, type SimulationResult, type SuccessMeasureSource } from "@transpera-flow/engine";
-import { aiDetections, type AiInsight } from "@/lib/ai/types";
+import type { FindingRow, IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
+import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult, type SuccessMeasureSource } from "@transpera-flow/engine";
+import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
+import type { FindingsState } from "@/lib/findings/use-findings";
+import { pageDetections } from "@/lib/findings/view";
 import { processStepIds, processSteps } from "@/lib/process-steps";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { visibleFindings } from "@/lib/rules/edit";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
-import { useRatingSettings } from "@/lib/rules/use-rating-settings";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { entryView, mapFeed, promoteInput, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { useIssues } from "@/lib/issues/use-issues";
 import { issueFormOptions } from "@/lib/issues/draft";
@@ -26,8 +28,10 @@ export interface ProcessIssues {
   badges: ReactNode;
   /** The Insights panel: `utilisation` in one tab, the issues in another. */
   rail: (utilisation: ReactNode) => ReactNode;
-  /** The process page's Insights section: what the run found that nobody has confirmed yet. */
+  /** The process page's Findings list: the accepted findings, each with Acknowledge as issue. */
   insightsList: ReactNode;
+  /** The run's facts (the evidence the findings rest on), worst first; null until the run is in. */
+  facts: DetectedIssue[] | null;
   /** The process page's Issues section: confirmed issues linked to this process or its steps, with "+ New issue". */
   issuesList: ReactNode;
   /** Switch the rail to its Issues tab (the sidebar's Issues item, on the demo). */
@@ -58,11 +62,11 @@ export function useProcessIssues({
   initialIssues,
   initialScenarios,
   registerHref,
-  rulesHref,
   retired = NO_RETIRED,
-  analysisRules,
   successMeasures,
-  aiInsights,
+  findings,
+  findingsState,
+  findingOptions,
   onShowIssues,
   sources = NO_SOURCES,
   liveRevisions,
@@ -70,8 +74,11 @@ export function useProcessIssues({
 }: {
   /** Drawn under each confirmed issue in the page's Issues section (the status track). */
   issueExtra?: (issue: IssueRow) => ReactNode;
-  /** The AI insights stored for this version (A46); they join the list marked AI. */
-  aiInsights?: readonly AiInsight[];
+  /** This process's findings (B17): the accepted ones are listed, and can be acknowledged as issues. */
+  findings?: readonly FindingRow[];
+  /** Where a finding is dismissed and edited. */
+  findingsState?: FindingsState;
+  findingOptions?: FindingDialogOptions;
   bundle: ProcessBundle;
   model: EngineModel | null;
   result: SimulationResult | null;
@@ -81,12 +88,8 @@ export function useProcessIssues({
   initialScenarios: ScenarioRow[];
   /** Link to the full register page, if there is one. */
   registerHref?: string;
-  /** Settings → Analysis rules, which an insight links to for how it was worked out. */
-  rulesHref?: string;
   /** Steps the model no longer has and what replaced them, for broken-scenario issues (issue #16). */
   retired?: RetiredSteps;
-  /** The workspace's analysis rules (Settings → Analysis rules); omitted means the defaults. On the demo, the ones edited in this tab. */
-  analysisRules?: AnalysisSettings;
   /** The process's success measures (its first principles), which rule 11 rates; none rates nothing. */
   successMeasures?: SuccessMeasureSource;
   /** A step's issue badge was clicked: the caller opens the panel the Issues tab is in. */
@@ -104,16 +107,17 @@ export function useProcessIssues({
 
   // Saved scenarios whose targets no longer resolve raise a broken_scenario issue each (issue #16).
   const broken = useMemo(() => (model ? detectBrokenScenarios(model, scenarios, retired) : []), [model, scenarios, retired]);
-  // A change to the rules re-rates this run (and drops what a switched-off rule found); it is not simulated again.
-  const rules = useRatingSettings(mode === "demo", analysisRules);
+  // Every page rates the run with the documented defaults (D40): the rules give facts, not findings.
+  const rules = ANALYSIS_DEFAULTS;
   // Perception gaps from the steps' evidence (issue #21), unless that rule is off.
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(bundle.steps)), [bundle.steps, rules]);
   // The absence test (rule 8) runs in its own worker once the baseline is done; until it returns, that rule raises nothing.
   const absence = useAbsenceTest(model && result && !running ? model : null, result?.seed ?? 1, resolveMoney(rules).absenceWeeks);
   const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence, successMeasures);
-  // What AI wrote about this version (A46) joins the rules' findings, marked AI. It isn't rated by a rule, so no rule switch hides it.
-  const aiFindings = useMemo(() => aiDetections(aiInsights ?? [], processStepIds(bundle)), [aiInsights, bundle]);
-  const detected = useMemo(() => (found ? [...visibleFindings(rules, [...broken, ...found, ...gaps]), ...aiFindings] : null), [found, broken, gaps, rules, aiFindings]);
+  // The run's facts (D40): evidence, never listed as findings. The list is the accepted findings, and the issues
+  // acknowledged before (each costed by its live fact).
+  const facts = useMemo(() => (found ? visibleFindings(rules, [...broken, ...found, ...gaps]) : null), [found, broken, gaps, rules]);
+  const detected = useMemo(() => (facts ? pageDetections({ findings: findings ?? [], issues: state.issues, facts }) : null), [facts, findings, state.issues]);
   const brokenScenarios = useMemo(() => new Set(broken.flatMap((d) => (d.scenarioId ? [d.scenarioId] : []))), [broken]);
 
   // A tracked broken-scenario issue resolves itself once its scenario is fixed (re-pointed or deleted).
@@ -227,9 +231,10 @@ export function useProcessIssues({
       currency={bundle.workspace.settings.currency}
       stepName={(id) => stepNames.get(id) ?? null}
       onLight={setLit}
-      rulesHref={rulesHref}
       registerHref={registerHref}
       canEdit={mode !== "readonly"}
+      findings={findingsState}
+      findingOptions={findingOptions}
     />
   );
 
@@ -307,6 +312,7 @@ export function useProcessIssues({
     highlight,
     rail,
     insightsList: insights,
+    facts,
     issuesList: section("issues"),
     showIssues: () => setTab("issues"),
     onScenariosChange: setScenarios,

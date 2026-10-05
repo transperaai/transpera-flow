@@ -14,7 +14,6 @@ export default function DemoForecastPage() {
         sources={demoSources()}
         mode="demo"
         issuesHref="/demo/issues"
-        rulesHref="/demo/settings/rules"
         startDate={DEMO_FORECAST_START}
         note="Who gets too busy, and when. Demo mode: Northbeam from 5 October 2026 with a sample plan: Jade Hart joins as a PPC specialist in February, Leah Brooks is on leave over Christmas, and the sample market schedule applies."
       />

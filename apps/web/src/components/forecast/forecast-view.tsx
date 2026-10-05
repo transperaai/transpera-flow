@@ -11,7 +11,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { partOf, type IssueRow, type ProcessBundle, type SourceRow } from "@transpera-flow/db";
-import { toRatingConfig, type AnalysisSettings } from "@transpera-flow/engine";
+import { toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { InsightsSection } from "@/components/insights";
@@ -23,7 +23,7 @@ import { timelineData } from "@/lib/forecast/timeline";
 import { horizonLabel, horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import { issueFormOptions } from "@/lib/issues/draft";
 import { useIssues } from "@/lib/issues/use-issues";
-import { useRatingSettings } from "@/lib/rules/use-rating-settings";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
 import { ForecastTimeline, TimelineLegend } from "./forecast-timeline";
@@ -35,8 +35,6 @@ export interface ForecastViewProps {
   issues: IssueRow[];
   sources?: SourceRow[];
   mode: "live" | "demo" | "readonly";
-  /** The workspace's analysis rules; omitted means the defaults. On the demo, the ones edited in this tab. */
-  analysisRules?: AnalysisSettings;
   issuesHref: string;
   rulesHref?: string;
   /** Settings, where people's start dates, end dates and leave are set. Null on the demo. */
@@ -51,7 +49,7 @@ const NO_SOURCES: SourceRow[] = [];
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 const isForecastIssue = (i: IssueRow) => i.detected_key?.startsWith("forecast:") ?? false;
 
-export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysisRules, issuesHref, rulesHref, peopleHref = null, startDate, note }: ForecastViewProps) {
+export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesHref, peopleHref = null, startDate, note }: ForecastViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -69,7 +67,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
   const built = useMemo(() => forecastModel(live, months, start), [live, months, start]);
   const sim = useSimulation(built.model, 30, 1, { monthly: true, monthStarts: built.monthStarts });
   const result = sim.status === "done" && built.model && sim.run.result.H === built.model.horizonWeeks * built.model.hoursPerWeek ? sim.run.result : null;
-  const rules = useRatingSettings(mode === "demo", analysisRules);
+  const rules = ANALYSIS_DEFAULTS;
   const cutoffs = useMemo(() => toRatingConfig(rules, live.workspace.settings.hours_per_week).rules.busy.cutoffs, [rules, live.workspace.settings.hours_per_week]);
   const busyLine = cutoffs[1];
   const alerts = useMemo(() => (built.model && result ? forecastInsights(built.model, result, rules, start) : null), [built.model, result, rules, start]);
@@ -118,7 +116,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
             Who gets too busy, and when
             <Help
               label="Too busy alerts"
-              description="For each role and person, the first month their work passes the “Too busy” line from your analysis rules, on average or in a bad month (the worst 10% of the 30 simulated runs). Each is an insight: acknowledge it to track it as an issue."
+              description="For each role and person, the first month their work passes the “Too busy” line, on average or in a bad month (the worst 10% of the 30 simulated runs). Each is an insight: acknowledge it to track it as an issue."
               example="“PPC specialist gets too busy in February (92% in a bad month)” means hiring or moving work before February avoids it."
             />
           </h2>
@@ -145,7 +143,6 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
             }}
             processOfStep={(id) => processOfStepMap.get(id) ?? null}
             onLight={() => {}}
-            rulesHref={rulesHref}
             registerHref={issuesHref}
             canEdit={mode !== "readonly"}
           />
@@ -180,7 +177,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
             <TimelineLegend busyLine={busyLine} hasUncovered={data?.roles.some((r) => r.uncovered) ?? false} hasMarkers={planned > 0} hasMarket={(data?.market.length ?? 0) > 0} />
             <Help
               label="The “Too busy” line"
-              description="Where your analysis rules say a role or person is too busy (rule 1, Bad). Above it there is little room for a bad month or a new client. You can change it in Settings, Analysis rules."
+              description="Where a role or person counts as too busy (the “Too busy” cut-off for Bad). Above it there is little room for a bad month or a new client. You can change it in Settings, Analysis rules."
               example="At 85%, someone with 40 hours spends more than 34 of them on work."
             />
           </div>
@@ -209,15 +206,6 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, analysi
                 , under People.
               </>
             ) : null}{" "}
-            {rulesHref ? (
-              <>
-                The line follows your{" "}
-                <Link href={rulesHref} className="underline">
-                  analysis rules
-                </Link>
-                .
-              </>
-            ) : null}
           </p>
         </Card>
       </section>

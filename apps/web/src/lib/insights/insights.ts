@@ -2,16 +2,29 @@
 // acted on; once acknowledged it is a tracked issue and the row says "Issue #N". Pure: the components render the
 // results, and nothing here touches the map (D24: only acknowledged issues reach it).
 
-import type { IssueRow } from "@transpera-flow/db";
+import type { FindingCitation, IssueRow } from "@transpera-flow/db";
 import { compareCostsDesc, compareRatingsDesc, noCost, ruleOfFinding, type DetectedIssue, type IssueCost, type IssueType, type Rating } from "@transpera-flow/engine";
 import { RULES_UI } from "@/lib/rules/catalogue";
 import { TYPE_LABELS, type RegisterEntry } from "@/lib/issues/register";
 
-/** What produced an insight: one of the analysis rules, or the AI writer (A46). */
-export type InsightSource = { kind: "rule"; name: string; ruleId: string | null } | { kind: "ai"; name: "AI" };
+/**
+ * What produced an insight: one of the analysis rules (only insights acknowledged before B17: rules now give facts, not
+ * findings), AI (A46), or a person who added it by hand (B17).
+ */
+export type InsightSource = { kind: "rule"; name: string; ruleId: string | null } | { kind: "ai"; name: "AI" } | { kind: "manual"; name: "By hand" };
 
-/** A detection that may carry its origin. A rule's has none; the AI's (A46) is `origin: "ai"`, with its own "why it matters". */
-export type Detection = DetectedIssue & { origin?: "rule" | "ai"; why?: string };
+/**
+ * A detection that may carry its origin. A rule's has none; the AI's (A46) is `origin: "ai"`, with its own "why it
+ * matters"; a finding (B17) also carries its id, where it sits (`findingProcessId`, null across the company) and the facts
+ * it rests on.
+ */
+export type Detection = DetectedIssue & {
+  origin?: "rule" | "ai" | "manual";
+  why?: string;
+  findingId?: string;
+  findingProcessId?: string | null;
+  facts?: FindingCitation[];
+};
 
 export interface Insight {
   key: string;
@@ -63,6 +76,7 @@ export function headline(evidence: string): string {
 
 export function sourceOf(d: Detection): InsightSource {
   if (d.origin === "ai") return { kind: "ai", name: "AI" };
+  if (d.origin === "manual") return { kind: "manual", name: "By hand" };
   const id = ruleOfFinding(d);
   return { kind: "rule", ruleId: id, name: id ? RULES_UI[id].name : TYPE_LABELS[d.type] };
 }

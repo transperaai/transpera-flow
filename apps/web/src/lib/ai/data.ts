@@ -1,5 +1,5 @@
 import "server-only";
-import { DEFAULT_AI_SETTINGS, loadAiAnalyses, loadAiSettings, type AiSettings } from "@transpera-flow/db";
+import { DEFAULT_AI_SETTINGS, loadAiAnalyses, loadAiSettings, loadFindings, loadLatestAiAnalyses, type AiSettings, type FindingRow } from "@transpera-flow/db";
 import { narrationConfigured } from "@/lib/narration/anthropic";
 import { createClient } from "../supabase/server";
 import { aiViewFromRow, type AiAnalysisView } from "./types";
@@ -25,5 +25,26 @@ export async function loadAiViews(revisionIds: readonly string[]): Promise<Recor
   } catch (err) {
     console.error("Couldn't load the AI analysis; showing none.", err instanceof Error ? err.message : err);
     return {};
+  }
+}
+
+/** The latest stored analysis of each of these processes, whichever version it read (B17), by process id; none if they can't be read. */
+export async function loadLatestAiViews(processIds: readonly string[]): Promise<Record<string, AiAnalysisView>> {
+  try {
+    const rows = await loadLatestAiAnalyses(await createClient(), processIds);
+    return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, aiViewFromRow(row)]));
+  } catch (err) {
+    console.error("Couldn't load the AI analysis; showing none.", err instanceof Error ? err.message : err);
+    return {};
+  }
+}
+
+/** The workspace's findings a page shows or reviews (proposed and accepted; RLS: every member reads); none if they can't be read. */
+export async function loadWorkspaceFindings(workspaceId: string): Promise<FindingRow[]> {
+  try {
+    return await loadFindings(await createClient(), workspaceId);
+  } catch (err) {
+    console.error("Couldn't load the findings; showing none.", err instanceof Error ? err.message : err);
+    return [];
   }
 }

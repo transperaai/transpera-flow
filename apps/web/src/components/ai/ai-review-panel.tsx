@@ -66,7 +66,7 @@ export function AiReviewPanel({
       </>
     );
   } else if (view) {
-    body = <p className="text-xs text-fg-2">AI couldn&apos;t review this version{view.reason ? `: ${view.reason}` : ""}. Run again to try once more.</p>;
+    body = <p className="text-xs text-fg-2">AI couldn&apos;t review this version{view.reason ? `: ${view.reason}` : ""}. Analyse again to try once more.</p>;
   } else if (!configured && !demo) {
     body = (
       <p className="text-xs text-fg-2">
@@ -76,7 +76,7 @@ export function AiReviewPanel({
   } else if (!hasFirstPrinciples && !demo) {
     body = <p className="text-xs text-fg-2">AI reviews the first principles of the published version. Publish this one, then it can judge the process against them.</p>;
   } else {
-    body = <p className="text-xs text-fg-2">AI hasn&apos;t reviewed this version yet. It runs when you publish{runnable ? ", or press Run again" : ""}.</p>;
+    body = <p className="text-xs text-fg-2">AI hasn&apos;t reviewed this version yet. It runs when someone presses Analyse{runnable ? " here or on the process page" : ""}.</p>;
   }
 
   return (
@@ -85,19 +85,14 @@ export function AiReviewPanel({
         AI review
         <Help
           label="AI review"
-          description="A reviewer that reads these answers next to the simulation's results and writes findings. It uses only numbers the simulation produced, and leaves out any finding whose number doesn't match. It reviews the published version, each time one is published."
+          description="A reviewer that reads these answers next to the simulation's results and writes findings. It uses only numbers the simulation produced, and leaves out any finding whose number doesn't match. It reviews the published version when someone presses Analyse."
           example="“You named proposal review; the simulation's bottleneck is the discovery call.”"
         />
         {canRun && mode !== "readonly" && (
           <span className="ml-auto flex items-center">
             <Button variant="ghost" size="sm" disabled={!runnable || pending} onClick={run} title={!runnable ? (!configured ? AI_NOT_SET_UP : "Publish first principles first") : undefined}>
-              {pending ? "Running…" : "Run again"}
+              {pending ? "Analysing…" : "Analyse"}
             </Button>
-            <Help
-              label="Run again"
-              description="Asks AI to review the published version again now and replace what is shown. It also runs by itself when you publish, if that switch is on in Settings → AI analysis."
-              example="You published new answers and want the review straight away."
-            />
           </span>
         )}
       </p>

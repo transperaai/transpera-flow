@@ -90,7 +90,6 @@ export function ProcessView({
   viewer = null,
   sources = [],
   liveRevisions,
-  analysisRules,
   firstPrinciples,
   hiddenLevers,
   processPicker,
@@ -116,8 +115,6 @@ export function ProcessView({
   sources?: SourceRow[];
   /** Each process's live revision id, which a dismissed insight is measured against. Omitted: this bundle's own. */
   liveRevisions?: Record<string, string>;
-  /** The workspace's analysis rules, which rate the run (Settings → Analysis rules). Omitted: the defaults. */
-  analysisRules?: AnalysisSettings;
   /** The live version's first principles (success measures for rule 11). */
   firstPrinciples?: FirstPrinciples | null;
   /** The lever kinds the workspace has switched off in Settings -> Levers (the demo keeps its own in the tab). */
@@ -364,7 +361,6 @@ export function ProcessView({
     initialScenarios: scenarios,
     registerHref,
     retired,
-    analysisRules,
     sources,
     liveRevisions: liveRevisions ?? { [bundle.process.id]: bundle.revision.id },
     successMeasures,

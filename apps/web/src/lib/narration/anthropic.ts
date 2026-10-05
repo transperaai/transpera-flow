@@ -74,6 +74,7 @@ async function ask(client: Anthropic, req: Request): Promise<{ text: string; mod
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
       cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
     },
   };
 }

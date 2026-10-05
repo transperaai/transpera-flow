@@ -7,6 +7,7 @@
 import type { AiAnalysisRow, AiAnalysisStatus, AiAnalysisTrigger } from "@transpera-flow/db";
 import { noCost, type FpFlagLevel, type FpStepKey, type IssueType, type Rating } from "@transpera-flow/engine";
 import type { Detection } from "@/lib/insights/insights";
+import { costOfUsage } from "./cost";
 
 /** What the AI may file an insight under. Perception gaps and broken scenarios are the app's own. */
 export const AI_ISSUE_TYPES = ["bottleneck", "spof", "manual", "delay", "failure", "idea", "capacity", "sla", "churn_risk"] as const satisfies readonly IssueType[];
@@ -32,6 +33,8 @@ export interface AiInsight {
   /** Why it matters, in AI's words (it ties the number to the process's first principles). */
   why: string;
   stepId: string | null;
+  /** The facts (and quotes) it rests on, as they read when cited (B17). Empty on analyses from before. */
+  facts?: { kind: "fact" | "quote"; key: string; text: string }[];
 }
 
 export interface AiReviewFinding {
@@ -60,6 +63,12 @@ export interface AiAnalysisView {
   revisionId: string;
   /** Who ran it (the name recorded when the run was reserved), if known. AI wrote the text; this person started it. */
   runBy?: string | null;
+  /** The stored row's id (what its proposed findings cite). */
+  id?: string;
+  /** The hash of the model it read (B17); null on analyses from before. */
+  modelHash?: string | null;
+  /** Roughly what the model calls cost, in US dollars; null when it can't be priced. */
+  costUsd?: number | null;
 }
 
 export type AiMode = "live" | "readonly" | "demo";
@@ -74,6 +83,8 @@ export interface AiPanelData {
   hasFirstPrinciples: boolean;
   /** The version the analysis is of (null when unknown). */
   versionNumber: number | null;
+  /** True when the model has changed since `view` was written (B17): it is kept, marked out of date, until someone analyses again. */
+  stale?: boolean;
 }
 
 /** The text shown when the server has no API key (and elsewhere that AI can't run). */
@@ -92,7 +103,12 @@ export function readInsights(json: unknown): AiInsight[] {
     const key = str(o.key, 200);
     const title = str(o.title, 200);
     if (!type || !rating || !title || !/^ai:insight:[^\s]{1,150}$/.test(key)) continue;
-    out.push({ key, type, rating, title, evidence: str(o.evidence, 1000), why: str(o.why, 1000), stepId: str(o.stepId, 100) || null });
+    const facts = objects(o.facts).flatMap((f) => {
+      const kind: "fact" | "quote" | null = f.kind === "quote" ? "quote" : f.kind === "fact" ? "fact" : null;
+      const text = str(f.text, 1000);
+      return kind && text ? [{ kind, key: str(f.key, 300), text }] : [];
+    });
+    out.push({ key, type, rating, title, evidence: str(o.evidence, 1000), why: str(o.why, 1000), stepId: str(o.stepId, 100) || null, ...(facts.length ? { facts } : {}) });
   }
   return out.slice(0, AI_MAX_INSIGHTS);
 }
@@ -127,6 +143,9 @@ export function aiViewFromRow(row: AiAnalysisRow & { run_by?: string | null }): 
     at: row.updated_at,
     revisionId: row.revision_id,
     runBy: row.run_by ?? null,
+    id: row.id,
+    modelHash: row.model_hash ?? null,
+    costUsd: costOfUsage(row.model, row.usage),
   };
 }
 

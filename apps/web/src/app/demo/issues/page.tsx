@@ -13,11 +13,7 @@ export default function DemoIssuesPage() {
       eyebrow="Improve"
       description={
         <>
-          Problems you&apos;ve confirmed, linked to a whole process or to specific steps. Ratings follow the{" "}
-          <Link href="/demo/settings/rules" className="underline">
-            analysis rules
-          </Link>
-          . Demo mode: changes stay in this tab and are gone when you reload.
+          Problems you&apos;ve confirmed, linked to a whole process or to specific steps. Each one keeps the rating agreed when it was confirmed. Demo mode: changes stay in this tab and are gone when you reload.
         </>
       }
     >

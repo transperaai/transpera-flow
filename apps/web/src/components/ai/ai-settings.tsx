@@ -51,7 +51,7 @@ export function AiSettingsPage({ mode, workspaceId, initial, configured }: { mod
     <Page
       title="AI analysis"
       eyebrow="Settings"
-      description="Runs alongside the rules. It reads the results, each process's first principles and your sources, and writes insights labelled AI. It never invents numbers: every figure it uses comes from the simulation."
+      description="Runs when you press Analyse on a process or on the Overview. It reads the facts from the simulation, each process's first principles and your sources, and proposes findings for you to accept or dismiss. It never invents numbers: every figure it uses comes from the simulation."
       actions={<SaveStatus state={state} mode={mode} />}
     >
       {mode === "readonly" && (

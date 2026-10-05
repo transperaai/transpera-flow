@@ -4,7 +4,8 @@
 //
 // 1. The company map, with Play and the horizon (1, 3, 6, 12 or 24 months). The cards and charts follow the horizon.
 // 2. The health strip: Process health, Open issues, Flow efficiency, Improvement delivered.
-// 3. Findings by process: the AI read as a short summary, "Across the company", then one row per process.
+// 3. Findings by process: the AI analysis of the company (Analyse, its read, the findings waiting for review, Add a
+//    finding), "Across the company", then one row per process, each with its accepted findings and the run's facts (B17).
 // 4. Trends: open issues, time split by process, team load by role, issues opened versus resolved, before and after per
 //    solution.
 //
@@ -28,7 +29,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
-import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ProcessPart, type SourceRow } from "@transpera-flow/db";
+import { ModelError, toEngineModel, type FindingRow, type IssueRow, type ProcessBundle, type ProcessPart, type SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, ratingOfStored, resolveMoney, toRatingConfig, type AnalysisSettings, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
@@ -52,13 +53,19 @@ import { useImpacts } from "@/lib/overview/use-impacts";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
 import { calendarMonthStarts, timelineData } from "@/lib/forecast/timeline";
 import { rerate, visibleFindings } from "@/lib/rules/edit";
-import { useRatingSettings } from "@/lib/rules/use-rating-settings";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { NO_SOLUTIONS_DATA, type SolutionsData } from "@/lib/solutions/cards";
-import { AiRead } from "@/components/ai/ai-read";
-import { aiDetections, type AiPanelData } from "@/lib/ai/types";
+import { analyseCompany } from "@/app/w/[slug]/ai-actions";
+import { AnalysisPanel } from "@/components/findings/analysis-panel";
+import { FactsList } from "@/components/findings/facts-list";
+import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
+import type { AiPanelData } from "@/lib/ai/types";
+import { demoAnalyse } from "@/lib/findings/demo";
+import { useFindings } from "@/lib/findings/use-findings";
+import { pageDetections, proposedFindings } from "@/lib/findings/view";
 import { InsightsSection } from "@/components/insights";
 import { buildInsights } from "@/lib/insights/insights";
 import { useIssues } from "@/lib/issues/use-issues";
@@ -89,8 +96,6 @@ export interface OverviewProps {
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
   sources?: SourceRow[];
   mode: "live" | "demo" | "readonly";
-  /** The workspace's analysis rules; omitted means the defaults. On the demo, the ones edited in this tab. */
-  analysisRules?: AnalysisSettings;
   /** The pipeline's live first principles, whose success measures rule 11 (goals met) rates. */
   firstPrinciples?: FirstPrinciples | null;
   /** The workspace's solutions and their verdicts (the demo reads the ones built in this tab instead). */
@@ -110,14 +115,16 @@ export interface OverviewProps {
   /** The earlier version of the company map being shown (`?version=N`, read only), or null for live. Only the map changes. */
   viewingMapVersion?: number | null;
   issuesHref: string;
-  rulesHref?: string;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
-  /** What AI wrote about the company model's live version, for the AI read and the AI insights (A46). */
+  /** The latest AI analysis of the whole company (B17): its read, and whether it is out of date. */
   ai?: AiPanelData;
+  /** The workspace's findings (B17): the accepted ones are listed by process, the proposed ones wait for review. */
+  findings?: FindingRow[];
 }
 
 const NO_SOURCES: SourceRow[] = [];
+const NO_FINDINGS: FindingRow[] = [];
 const NO_BASES: SolutionBases = {};
 
 /** The company's engine model, the same object while it is unchanged. */
@@ -192,7 +199,6 @@ export function Overview({
   issues,
   sources = NO_SOURCES,
   mode,
-  analysisRules,
   firstPrinciples,
   solutions,
   solutionBases = NO_BASES,
@@ -204,9 +210,9 @@ export function Overview({
   bundleHref,
   viewingMapVersion = null,
   issuesHref,
-  rulesHref,
   forecastHref,
   ai,
+  findings: initialFindings = NO_FINDINGS,
 }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -255,26 +261,24 @@ export function Overview({
   const baseSim = useSimulation(haveBase ? null : base);
   const baseResult = sameModel ? horizonResult : shared && shared.model === base ? shared.result : current(baseSim.status === "done" ? baseSim.run.result : null, base);
 
-  // The findings, from the run at the workspace's own length, re-rated under the workspace's rules.
-  const rules = useRatingSettings(mode === "demo", analysisRules);
+  // The facts (D40), from the run at the workspace's own length, rated with the documented defaults: evidence, never findings.
+  const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(base && baseResult ? base : null, baseResult?.seed ?? 1, resolveMoney(rules).absenceWeeks);
   const successMeasures = useSuccessMeasures(live.process.id, mode === "demo", firstPrinciples);
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(parts.flatMap((p) => p.steps))), [rules, parts]);
-  // What AI wrote about the live version (A46) joins the rules' findings, marked AI; it isn't rated by a rule, so no rule switch hides it.
-  const aiFindings = useMemo(() => aiDetections(ai?.view?.insights ?? []), [ai]);
   // Who gets too busy, and when, over the horizon (B6): "Across the company".
   const forecastFindings = useMemo(() => (horizonModel && horizonResult ? forecastInsights(horizonModel, horizonResult, rules, start) : []), [horizonModel, horizonResult, rules, start]);
-  const findings = useMemo(
-    () =>
-      base && baseResult
-        ? sortFindings([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings, ...aiFindings])
-        : null,
-    [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, aiFindings, forecastFindings],
+  const facts = useMemo(
+    () => (base && baseResult ? sortFindings([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings]) : null),
+    [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, forecastFindings],
   );
   // Acknowledging an insight tracks it here, so it badges the map straight away.
   // A dismissed insight stays away until its process's next published version: each part is at its live revision.
   const liveRevisions = useMemo(() => Object.fromEntries(parts.map((p) => [p.process.id, p.revision.id])), [parts]);
   const state = useIssues(live.workspace.id, issues, mode, liveRevisions);
+  // The findings (B17): the accepted ones are listed, with the issues acknowledged before; the proposed ones wait for review.
+  const findingsState = useFindings(live.workspace.id, initialFindings, mode);
+  const findings = useMemo(() => (facts ? pageDetections({ findings: findingsState.findings, issues: state.issues, facts }) : null), [facts, findingsState.findings, state.issues]);
   const entries = useMemo(() => registerEntries(state.issues, findings ?? [], state.revisionOf), [state.issues, state.revisionOf, findings]);
   const formOptions = useMemo(
     () =>
@@ -286,6 +290,14 @@ export function Overview({
       }),
     [parts, live.people, sources],
   );
+  const findingOptions = useMemo<FindingDialogOptions>(
+    () => ({
+      processes: parts.map((p) => ({ id: p.process.id, name: p.process.name })),
+      company: true,
+      steps: parts.flatMap((p) => p.steps.filter((s) => s.kind !== "start" && s.kind !== "end").map((s) => ({ id: s.id, name: s.name, processId: p.process.id }))),
+    }),
+    [parts],
+  );
   const insightList = useMemo(() => (findings ? buildInsights(entries) : null), [findings, entries]);
   const feed = useMemo(() => mapFeed(entries), [entries]);
   const openIssueBadges = useMemo(() => Object.fromEntries(Object.entries(feed.badges).map(([id, b]) => [id, b.count])), [feed]);
@@ -296,8 +308,8 @@ export function Overview({
   const solutionsData = mode === "demo" ? inTab : (solutions ?? NO_SOLUTIONS_DATA);
 
   const groups = useMemo(
-    () => (insightList ? findingsByProcess({ parts, pipelineId: live.process.id, insights: insightList, issues: state.issues, solutions: solutionsData.solutions }) : null),
-    [insightList, parts, live.process.id, state.issues, solutionsData.solutions],
+    () => (insightList ? findingsByProcess({ parts, pipelineId: live.process.id, insights: insightList, facts: facts ?? [], issues: state.issues, solutions: solutionsData.solutions }) : null),
+    [insightList, parts, live.process.id, facts, state.issues, solutionsData.solutions],
   );
 
   // The company map: open groups in place; opening one moves its neighbours.
@@ -373,10 +385,17 @@ export function Overview({
             processName={processNameOfStep}
             processOfStep={processOfStep}
             onLight={setLit}
-            rulesHref={rulesHref}
             registerHref={issuesHref}
             canEdit={mode !== "readonly"}
+            findings={findingsState}
+            findingOptions={findingOptions}
           />
+        )}
+        {g.facts.length > 0 && (
+          <div className="flex flex-col gap-1.5" data-group-facts>
+            <p className="text-xs font-medium text-muted-foreground">Facts from the run</p>
+            <FactsList facts={g.facts} currency={live.workspace.settings.currency} stepName={(id) => stepNames.get(id) ?? null} onLight={setLit} initialLimit={4} />
+          </div>
         )}
         {manual.length > 0 && (
           <div className="flex flex-col gap-1.5" data-manual-issues>
@@ -520,12 +539,27 @@ export function Overview({
           description={<FindingsLine groups={groups} />}
           action={
             <Link href={issuesHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-              See all insights
+              See all issues
               <ArrowRight aria-hidden />
             </Link>
           }
         >
-          {ai && <AiRead mode={mode} scope="company" processId={live.process.id} ai={ai} short firstPrinciplesHref={hrefs[live.process.id] ? `${hrefs[live.process.id]}/first-principles` : undefined} />}
+          {ai && (
+            <AnalysisPanel
+              mode={mode}
+              scope="company"
+              ai={ai}
+              findings={findingsState}
+              proposed={proposedFindings(findingsState.findings)}
+              options={findingOptions}
+              defaultProcessId={null}
+              stepName={(id) => stepNames.get(id) ?? null}
+              analyse={() => (mode === "demo" ? demoAnalyse(findingsState, live.process.id) : analyseCompany(live.workspace.id))}
+              canRun={viewingMapVersion === null}
+              firstPrinciplesHref={hrefs[live.process.id] ? `${hrefs[live.process.id]}/first-principles` : undefined}
+              short
+            />
+          )}
           <FindingsByProcess groups={groups} renderFindings={renderFindings} />
         </Section>
 
@@ -544,15 +578,6 @@ export function Overview({
               note={
                 <>
                   How busy each role is, month by month over the next {span}, with planned hires and leave.{" "}
-                  {rulesHref && (
-                    <>
-                      The line follows your{" "}
-                      <Link href={rulesHref} className="underline">
-                        analysis rules
-                      </Link>
-                      .{" "}
-                    </>
-                  )}
                   {forecastHref && (
                     <Link href={forecastHref} className="underline">
                       Open the forecast

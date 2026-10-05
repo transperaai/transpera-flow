@@ -26,7 +26,7 @@ import { issuesCsv } from "@/lib/issues/csv";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { visibleFindings } from "@/lib/rules/edit";
-import { useRatingSettings } from "@/lib/rules/use-rating-settings";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { retiredSteps } from "@/lib/scenarios/broken";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { useSimulation } from "@/lib/sim/use-simulation";
@@ -45,7 +45,6 @@ export function IssuesPage({
   processes,
   sources = [],
   mode,
-  analysisRules,
   firstPrinciples,
   base,
   liveRevisions,
@@ -60,8 +59,6 @@ export function IssuesPage({
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
   sources?: SourceRow[];
   mode: "live" | "demo" | "readonly";
-  /** The workspace's analysis rules (Settings → Analysis rules); omitted means the defaults. On the demo, the ones edited in this tab. */
-  analysisRules?: AnalysisSettings;
   /** Where the workspace's pages live: `/w/<slug>` or `/demo`. An issue's page is `<base>/issues/<number>`. */
   base: string;
   liveRevisions?: Record<string, string>;
@@ -81,7 +78,7 @@ export function IssuesPage({
     router.push(`${pathname}${listQuery(next)}`, { scroll: false });
   };
 
-  const costs = useIssueCosts(bundle, scenarios, mode, analysisRules, firstPrinciples);
+  const costs = useIssueCosts(bundle, scenarios, mode, firstPrinciples);
   const costOf = (i: IssueRow): IssueCost | null => (i.detected_key ? (costs?.get(i.detected_key) ?? null) : null);
 
   const options = useMemo(
@@ -307,7 +304,6 @@ function useIssueCosts(
   bundle: ProcessBundle,
   scenarios: ScenarioRow[],
   mode: "live" | "demo" | "readonly",
-  analysisRules: AnalysisSettings | undefined,
   firstPrinciples: FirstPrinciples | null | undefined,
 ): Map<string, IssueCost> | null {
   const model = useMemo(() => {
@@ -322,7 +318,7 @@ function useIssueCosts(
   const result = sim.run?.result ?? null;
   const broken = useMemo(() => (model ? detectBrokenScenarios(model, scenarios, retiredSteps(bundle)) : []), [model, scenarios, bundle]);
   const gaps = useMemo(() => perceptionGapDetections(bundle.steps), [bundle.steps]);
-  const rules = useRatingSettings(mode === "demo", analysisRules);
+  const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(model && result && sim.status === "done" ? model : null, result?.seed ?? 1, resolveMoney(rules).absenceWeeks);
   const successMeasures = useSuccessMeasures(bundle.process.id, mode === "demo", firstPrinciples);
   const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence, successMeasures);

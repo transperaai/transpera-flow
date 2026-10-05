@@ -21,7 +21,7 @@ export interface Draft {
   paragraphs: string[];
   /** The model that wrote it (a server-side fallback may name another). */
   model: string;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number } | null;
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens?: number } | null;
 }
 
 /** A model that drafts narration: Claude in production (anthropic.ts), fakes in tests, the stand-in on /demo. */

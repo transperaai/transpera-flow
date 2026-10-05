@@ -1,10 +1,11 @@
-// "Findings by process" on the Overview (issue #173, B15): the insights and tracked issues grouped by the process they
-// sit in, each group with its rating, its top finding and its counts, and an "Across the company" group first for what
-// sits in no single process (how busy roles and people are, client groups and churn, the forecast). Pure.
+// "Findings by process" on the Overview (issue #173, B15; B17): the accepted findings, the facts of the run and the tracked
+// issues grouped by the process they sit in, each group with its rating, its top finding and its counts, and an "Across the
+// company" group first for what sits in no single process (how busy roles and people are, client groups and churn, the
+// forecast, and findings someone put across the company). Pure.
 //
 // A group's rating is the one the map, the process page and the Processes table give the process (decision D24): the worst
-// of its confirmed open issues, never what a run only detected (`processRatings`). Insights not yet acknowledged show as
-// "N new insights", and the top finding carries its own rating.
+// of its confirmed open issues, never what a run only detected (`processRatings`). Findings not yet acknowledged show as
+// "N new findings", and the top finding carries its own rating.
 
 import { isActiveStatus, isVisibleIssue, type IssueRow, type ProcessPart, type SolutionRow } from "@transpera-flow/db";
 import { compareRatingsDesc, ratingOfStored, type DetectedIssue, type Rating } from "@transpera-flow/engine";
@@ -25,10 +26,12 @@ const COMPANY_SUBJECTS = new Set(["role", "person", "client", "group", "driver",
  * first principles.
  */
 export function groupOfFinding(
-  finding: Pick<DetectedIssue, "key" | "stepId">,
+  finding: Pick<DetectedIssue, "key" | "stepId"> & { findingProcessId?: string | null },
   processOfStep: (stepId: string) => string | null | undefined,
   pipelineId: string,
 ): string {
+  // A finding (B17) says where it sits: a process, or null across the company.
+  if (finding.findingProcessId !== undefined) return finding.findingProcessId ?? COMPANY_GROUP;
   const [detector, subject, id] = finding.key.split(":");
   if (detector === "forecast" || (subject && COMPANY_SUBJECTS.has(subject))) return COMPANY_GROUP;
   if (detector === "cycle" && subject === "process") return !id || id === "pipeline" ? pipelineId : id;
@@ -43,7 +46,8 @@ export function groupOfIssue(
   pipelineId: string,
   processIds: ReadonlySet<string>,
 ): string {
-  if (issue.detected_key) return groupOfFinding({ key: issue.detected_key, stepId: issue.step_id }, processOfStep, pipelineId);
+  // An issue acknowledged from a rule's or AI's insight sits where that insight did; one from a finding (B17), where it was logged.
+  if (issue.detected_key && !issue.detected_key.startsWith("finding:")) return groupOfFinding({ key: issue.detected_key, stepId: issue.step_id }, processOfStep, pipelineId);
   const named = [issue.process_id, ...issue.links.map((l) => l.process_id)].find((p): p is string => !!p && processIds.has(p));
   if (named) return named;
   const step = [issue.step_id, ...issue.links.map((l) => l.step_id)].find((s): s is string => !!s && !!processOfStep(s));
@@ -59,13 +63,15 @@ export interface FindingGroup {
    * rate it; null ("Not rated") when it has none.
    */
   rating: Rating | null;
-  /** Its insights, worst first (as the register sorts them). */
+  /** Its accepted findings (and insights acknowledged before B17), worst first (as the register sorts them). */
   insights: Insight[];
+  /** The run's facts about it: the evidence, worst first. */
+  facts: DetectedIssue[];
   /** Its tracked issues, every status (what the expanded list matches insights against). */
   issues: IssueRow[];
   /** Tracked issues still open or having a solution tested. */
   openIssues: number;
-  /** Insights nobody has acknowledged yet. */
+  /** Accepted findings nobody has acknowledged as an issue yet. */
   newInsights: number;
   /** Solutions of this process not yet used to resolve an issue. */
   solutionsInProgress: number;
@@ -84,10 +90,12 @@ export function findingsByProcess(input: {
   parts: readonly { process: Pick<ProcessPart["process"], "id" | "name" | "kind" | "parent_process_id">; steps: ProcessPart["steps"] }[];
   pipelineId: string;
   insights: readonly Insight[];
+  /** The run's facts (evidence); omitted: none. */
+  facts?: readonly DetectedIssue[];
   issues: readonly IssueRow[];
   solutions: readonly Pick<SolutionRow, "id" | "process_id">[];
 }): FindingGroup[] {
-  const { parts, pipelineId, insights, issues, solutions } = input;
+  const { parts, pipelineId, insights, issues, solutions, facts = [] } = input;
   const stepProcess = new Map(parts.flatMap((p) => p.steps.map((s) => [s.id, p.process.id] as const)));
   const processOfStep = (id: string) => stepProcess.get(id);
   const processIds = new Set(parts.map((p) => p.process.id));
@@ -99,12 +107,13 @@ export function findingsByProcess(input: {
     issues.filter(isVisibleIssue),
     parts.flatMap((p) => p.steps),
   );
-  const empty = (id: string, name: string): FindingGroup => ({ id, name, rating: null, insights: [], issues: [], openIssues: 0, newInsights: 0, solutionsInProgress: 0, top: null });
+  const empty = (id: string, name: string): FindingGroup => ({ id, name, rating: null, insights: [], facts: [], issues: [], openIssues: 0, newInsights: 0, solutionsInProgress: 0, top: null });
   groups.set(COMPANY_GROUP, empty(COMPANY_GROUP, "Across the company"));
   for (const p of parts) groups.set(p.process.id, empty(p.process.id, p.process.name));
   const at = (id: string) => groups.get(id) ?? groups.get(COMPANY_GROUP)!;
 
   for (const insight of insights) at(groupOfFinding(insight.detection, processOfStep, pipelineId)).insights.push(insight);
+  for (const fact of facts) at(groupOfFinding(fact, processOfStep, pipelineId)).facts.push(fact);
   for (const issue of issues) {
     if (!isVisibleIssue(issue)) continue;
     at(groupOfIssue(issue, processOfStep, pipelineId, processIds)).issues.push(issue);
