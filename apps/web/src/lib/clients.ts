@@ -37,17 +37,41 @@ export function parseNewClient(form: { name: unknown; mrr: unknown; start_date: 
   return { ok: true, value: { name, mrr, start_date: start } };
 }
 
-/**
- * Whether the simulation uses the named clients (PRD D42): only while no client group counts any clients. Once one does,
- * the groups are simulated and this list is a record.
- */
-export function namedClientsSimulated(clientGroups: readonly { client_count: number | string }[]): boolean {
-  return !clientGroups.some((g) => Number(g.client_count) > 0);
+/** Which processes simulate client groups and which the named clients, by process name (PRD D42). */
+export interface ClientSources {
+  groups: string[];
+  named: string[];
 }
 
+/**
+ * Per process, as the engine decides it (packages/db/src/model.ts, `engineServices` and `engineClientGroups`): a process
+ * simulates client groups when a group counts clients (rounded, above 0) for one of its services (active, and either open to
+ * every process or entered through this one); otherwise it simulates the active named clients. Only pipeline processes run
+ * on their own; servicing work runs inside them.
+ */
+export function clientSources(
+  processes: readonly { id: string; name: string; kind: string }[],
+  services: readonly { id: string; active: boolean; entry_process_id: string | null }[],
+  groups: readonly { service_id: string; client_count: number | string }[],
+): ClientSources {
+  const counted = new Set(groups.filter((g) => Math.round(Number(g.client_count)) > 0).map((g) => g.service_id));
+  const out: ClientSources = { groups: [], named: [] };
+  for (const p of processes) {
+    if (p.kind !== "pipeline") continue;
+    const usesGroups = services.some((s) => s.active && (s.entry_process_id === null || s.entry_process_id === p.id) && counted.has(s.id));
+    (usesGroups ? out.groups : out.named).push(p.name);
+  }
+  return out;
+}
+
+const list = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
 /** The sentence under the Clients heading that says how the list reaches the simulation. */
-export function clientsRuleSentence(simulated: boolean): string {
-  return simulated
-    ? "No clients are counted in client groups, so the simulation uses the active clients on this list. Inactive clients are left out."
-    : "Your client groups drive the simulation, so this list is a record of who your clients are and doesn't change the numbers.";
+export function clientsRuleSentence({ groups, named }: ClientSources): string {
+  if (!groups.length && !named.length) {
+    return "A process whose services have clients counted in client groups simulates the groups; any other simulates the active clients on this list. Inactive clients are always left out.";
+  }
+  if (!named.length) return "Every process's services have clients counted in client groups, so the groups drive the simulation and this list is a record that doesn't change the numbers.";
+  if (!groups.length) return "No client group counts clients for your processes' services, so the simulation uses the active clients on this list. Inactive clients are left out.";
+  return `Client groups drive the simulation of ${list(groups)}, whose services have clients counted; ${list(named)} ${named.length === 1 ? "uses" : "use"} the active clients on this list. Inactive clients are always left out.`;
 }

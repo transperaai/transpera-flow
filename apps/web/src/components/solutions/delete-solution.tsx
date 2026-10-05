@@ -49,7 +49,7 @@ export function DeleteSolution({
             <DialogDescription>
               The solution and its copy of the map are deleted. This can&apos;t be undone.
               {linked > 0
-                ? ` The ${linked === 1 ? "issue it was linked to keeps" : `${linked} issues it was linked to keep`} a note in ${linked === 1 ? "its" : "their"} history, and its verdicts stay in the audit log.`
+                ? ` The ${linked === 1 ? "issue it was linked to keeps" : `${linked} issues it was linked to keep`} a note in ${linked === 1 ? "its" : "their"} history, and its verdicts stay in the audit log. An issue being tested with no other solution goes back to Open.`
                 : ""}
             </DialogDescription>
           </DialogHeader>

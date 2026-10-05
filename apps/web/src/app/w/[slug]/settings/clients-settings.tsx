@@ -7,7 +7,7 @@ import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
-import { clientsRuleSentence, MAX_MRR, type ClientField } from "@/lib/clients";
+import { clientsRuleSentence, MAX_MRR, type ClientField, type ClientSources } from "@/lib/clients";
 import { formatWholeCurrency } from "@/lib/format";
 import { SettingsSection } from "./section";
 import type { AddClientResult, saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
@@ -37,8 +37,8 @@ export interface ClientsSettingsProps {
   personRoles: { person_id: string; role_id: string }[];
   /** Owners and editors. */
   canEdit: boolean;
-  /** Whether the simulation uses these clients (no client group counts any): PRD D42. */
-  simulated: boolean;
+  /** Which processes simulate client groups and which these clients (PRD D42). */
+  sources: ClientSources;
   ops: ClientOps;
 }
 
@@ -58,7 +58,7 @@ const HELP: Record<"name" | "status" | "mrr" | "start" | "services" | "role", Fi
 };
 
 export function ClientsSettings(props: ClientsSettingsProps) {
-  const { clients, canEdit, simulated } = props;
+  const { clients, canEdit, sources } = props;
   const [showInactive, setShowInactive] = useState(false);
   const active = clients.filter((c) => c.active);
   const inactive = clients.filter((c) => !c.active);
@@ -68,7 +68,7 @@ export function ClientsSettings(props: ClientsSettingsProps) {
       title="Clients"
       description={
         <>
-          {active.length} active{inactive.length ? `, ${inactive.length} inactive (hidden)` : ""}. {clientsRuleSentence(simulated)}
+          {active.length} active{inactive.length ? `, ${inactive.length} inactive` : ""}. {clientsRuleSentence(sources)}
         </>
       }
     >

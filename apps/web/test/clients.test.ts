@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLIENT_FIELDS, clientsRuleSentence, namedClientsSimulated, parseNewClient } from "@/lib/clients";
+import { CLIENT_FIELDS, clientSources, clientsRuleSentence, parseNewClient } from "@/lib/clients";
 
 // Clients by hand (issue #182, B19; PRD D42): what the add form and field saves accept, and which clients the simulation uses.
 
@@ -21,12 +21,35 @@ describe("a new client", () => {
   });
 });
 
-describe("which clients are simulated", () => {
-  it("the named clients only while no client group counts any", () => {
-    expect(namedClientsSimulated([])).toBe(true);
-    expect(namedClientsSimulated([{ client_count: 0 }, { client_count: "0" }])).toBe(true);
-    expect(namedClientsSimulated([{ client_count: 0 }, { client_count: 3 }])).toBe(false);
-    expect(clientsRuleSentence(false)).toMatch(/client groups drive the simulation/);
-    expect(clientsRuleSentence(true)).toMatch(/uses the active clients on this list/);
+describe("which clients each process simulates", () => {
+  const processes = [
+    { id: "sales", name: "Sales", kind: "pipeline" },
+    { id: "partners", name: "Partnerships", kind: "pipeline" },
+    { id: "delivery", name: "Monthly reporting", kind: "servicing" },
+  ];
+  // SEO is open to every process; Referral is entered through Partnerships only; PPC is inactive.
+  const services = [
+    { id: "seo", active: true, entry_process_id: null },
+    { id: "referral", active: true, entry_process_id: "partners" },
+    { id: "ppc", active: false, entry_process_id: null },
+  ];
+
+  it("a process uses groups only when a group counts clients for one of its own services, as the engine does", () => {
+    expect(clientSources(processes, services, [])).toEqual({ groups: [], named: ["Sales", "Partnerships"] });
+    expect(clientSources(processes, services, [{ service_id: "seo", client_count: 0.4 }])).toEqual({ groups: [], named: ["Sales", "Partnerships"] });
+    expect(clientSources(processes, services, [{ service_id: "seo", client_count: 12 }])).toEqual({ groups: ["Sales", "Partnerships"], named: [] });
+    // A group for a service only another process takes doesn't switch this one.
+    expect(clientSources(processes, services, [{ service_id: "referral", client_count: 5 }])).toEqual({ groups: ["Partnerships"], named: ["Sales"] });
+    // Nor does a group for an inactive service.
+    expect(clientSources(processes, services, [{ service_id: "ppc", client_count: "9" }])).toEqual({ groups: [], named: ["Sales", "Partnerships"] });
+  });
+
+  it("says so in one sentence", () => {
+    expect(clientsRuleSentence({ groups: ["Sales"], named: [] })).toMatch(/groups drive the simulation and this list is a record/);
+    expect(clientsRuleSentence({ groups: [], named: ["Sales"] })).toMatch(/uses the active clients on this list/);
+    expect(clientsRuleSentence({ groups: ["Sales", "Upsell"], named: ["Partnerships"] })).toBe(
+      "Client groups drive the simulation of Sales and Upsell, whose services have clients counted; Partnerships uses the active clients on this list. Inactive clients are always left out.",
+    );
+    expect(clientsRuleSentence({ groups: [], named: [] })).toMatch(/^A process whose services have clients counted/);
   });
 });

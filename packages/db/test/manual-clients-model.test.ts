@@ -59,6 +59,25 @@ describe("with client groups counted, named clients are a record only", () => {
   });
 });
 
+describe("the rule is per process", () => {
+  it("a group that counts clients for a service this process doesn't take leaves it on the named clients", () => {
+    const b = northbeamBundle();
+    // PPC is now entered through another process, so this process doesn't take it; only PPC's group counts clients.
+    const elsewhere = {
+      ...b,
+      services: b.services.map((s) => (s.id === northbeamServiceIds.ppc ? { ...s, entry_process_id: "ffffffff-0000-4000-8000-0000000000b1" } : s)),
+      clientGroups: b.clientGroups!.map((g) => (g.service_id === northbeamServiceIds.ppc ? g : { ...g, client_count: 0 })),
+    };
+    expect(elsewhere.clientGroups.find((g) => g.service_id === northbeamServiceIds.ppc)!.client_count).toBeGreaterThan(0);
+    const m = toEngineModel(elsewhere, { startDate: START });
+    expect(m).not.toHaveProperty("clientGroups");
+    expect(Object.keys(m.clients!)).toHaveLength(26);
+    // So clients added by hand count here, and inactive ones don't.
+    expect(toEngineModel(withHandMade(elsewhere), { startDate: START }).activeClients).toBe(27);
+    expect(toEngineModel(withHandMade(elsewhere, { active: false }), { startDate: START })).toEqual(m);
+  });
+});
+
 describe("with no clients counted, the active named clients are simulated", () => {
   const named = { ...northbeamBundle(), clientGroups: [] };
 

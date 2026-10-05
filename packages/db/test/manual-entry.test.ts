@@ -118,11 +118,48 @@ describe("deleting a solution", () => {
         ].sort(),
       );
       for (const issue of [openIssue, testingIssue]) {
-        const last = (await c.query("select kind, actor, detail from issue_events where issue_id = $1 order by seq desc limit 1", [issue])).rows[0];
-        expect(last).toEqual({ kind: "edited", actor: users.editor!.id, detail: { solution_deleted: { solution_id: sol, solution: "Second check" } } });
+        // Both were in Testing solutions with only this solution linked: back to Open, in ONE history entry with the deletion.
+        expect((await c.query("select status from issues where id = $1", [issue])).rows[0].status).toBe("open");
+        const last = (await c.query("select kind, actor, detail from issue_events where issue_id = $1 order by seq desc limit 2", [issue])).rows;
+        expect(last[0]).toEqual({
+          kind: "edited",
+          actor: users.editor!.id,
+          detail: { from: "testing", to: "open", solution_deleted: { solution_id: sol, solution: "Second check" } },
+        });
+        expect(last[1].detail).not.toHaveProperty("solution_deleted");
         // The earlier "started testing" entries keep the solution's name.
         const tested = (await c.query("select detail from issue_events where issue_id = $1 and kind = 'solution_tested' and detail ->> 'solution_id' = $2", [issue, sol])).rows;
         expect(tested.map((t) => t.detail.solution)).toEqual(["Second check"]);
+      }
+    });
+  });
+
+  it("leaves an issue still testing another solution, and a resolved one, as they were", async () => {
+    await db.as(users.editor!.claims, async (c) => {
+      const steps = JSON.stringify({ steps: [], edges: [], entry_step_id: null });
+      const saveOne = async (name: string, issues: string[]) =>
+        (
+          await c.query("select public.save_solution($1, $2, $3, $4, $5::jsonb, '[]', '[]', $6::jsonb) as r", [
+            ws,
+            NORTHBEAM_PROCESS_ID,
+            NORTHBEAM_REVISION_ID,
+            name,
+            steps,
+            JSON.stringify(issues.map((issue_id) => ({ issue_id, auto_verdict: "pass", holds_pct: 90, auto_note: "" }))),
+          ])
+        ).rows[0].r.id as string;
+      const first = await saveOne("First idea", [openIssue, testingIssue]);
+      await saveOne("Second idea", [openIssue]);
+      // testingIssue is resolved by the first solution; openIssue is still testing the second.
+      await c.query("select public.resolve_issue($1, $2, 'solution', 'Shipped', 'resolved', $3)", [ws, testingIssue, first]);
+      const before = (await c.query("select status from issues where id = $1", [testingIssue])).rows[0].status;
+      expect(before).toBe("done"); // stored "done": shown as Resolved
+      expect((await c.query("delete from solutions where id = $1", [first])).rowCount).toBe(1);
+      expect((await c.query("select status from issues where id = $1", [openIssue])).rows[0].status).toBe("in_progress");
+      expect((await c.query("select status from issues where id = $1", [testingIssue])).rows[0].status).toBe(before);
+      for (const issue of [openIssue, testingIssue]) {
+        const last = (await c.query("select kind, detail from issue_events where issue_id = $1 order by seq desc limit 1", [issue])).rows[0];
+        expect(last).toEqual({ kind: "edited", detail: { solution_deleted: { solution_id: first, solution: "First idea" } } });
       }
     });
   });

@@ -10,11 +10,11 @@ import { ClientsSettings, type ClientOps } from "@/app/w/[slug]/settings/clients
 import { WorkspaceDetails } from "@/app/w/[slug]/settings/workspace-details";
 import { SavedScenarios } from "@/components/levers/saved-scenarios";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
-import { parseNewClient } from "@/lib/clients";
+import { parseNewClient, type ClientSources } from "@/lib/clients";
 
 declare global {
   interface Window {
-    mountManual: (opts: { canEdit: boolean; canManage: boolean; simulated?: boolean }) => void;
+    mountManual: (opts: { canEdit: boolean; canManage: boolean; sources?: ClientSources }) => void;
     /** Every write the page asked for, as the server action would have received it. */
     calls: unknown[][];
     deleted: string[];
@@ -46,7 +46,7 @@ const client = (id: string, name: string, over: Partial<ClientRow> = {}): Client
 const scenario = (id: string, name: string, changes: number): ScenarioRow =>
   ({ id, workspace_id: WS, name, description: "", patch: Array.from({ length: changes }, () => ({ path: "demand.leads_per_week", op: "multiply", value: 1.2 })), parent_scenario_id: null }) as unknown as ScenarioRow;
 
-function Harness({ canEdit, canManage, simulated = false }: { canEdit: boolean; canManage: boolean; simulated?: boolean }) {
+function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] } }: { canEdit: boolean; canManage: boolean; sources?: ClientSources }) {
   const [clients, setClients] = useState<ClientRow[]>([
     client("40000000-0000-4000-8000-000000000001", "Harbour Lane Dental"),
     client("40000000-0000-4000-8000-000000000002", "Old Mill Bakery", { active: false, mrr: 1200 }),
@@ -123,7 +123,7 @@ function Harness({ canEdit, canManage, simulated = false }: { canEdit: boolean; 
           { person_id: TOM, role_id: AM },
         ]}
         canEdit={canEdit}
-        simulated={simulated}
+        sources={sources}
         ops={ops}
       />
       <SavedScenarios

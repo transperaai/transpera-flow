@@ -32,7 +32,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(opts: { canEdit: boolean; canManage: boolean; simulated?: boolean }): Promise<{ page: Page; errors: string[] }> {
+async function mount(opts: { canEdit: boolean; canManage: boolean; sources?: { groups: string[]; named: string[] } }): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -105,13 +105,18 @@ describe("clients by hand", () => {
     await page.close();
   }, 60_000);
 
-  it("says whether the list is simulated", async () => {
-    const groups = await mount({ canEdit: true, canManage: false, simulated: false });
-    expect(await groups.page.locator("#clients-heading ~ *").first().innerText()).toContain("Your client groups drive the simulation");
+  it("says, per process, whether the list is simulated", async () => {
+    const groups = await mount({ canEdit: true, canManage: false, sources: { groups: ["Sales"], named: [] } });
+    expect(await groups.page.locator("#clients-heading ~ *").first().innerText()).toContain("so the groups drive the simulation and this list is a record");
     await groups.page.close();
-    const named = await mount({ canEdit: true, canManage: false, simulated: true });
+    const named = await mount({ canEdit: true, canManage: false, sources: { groups: [], named: ["Sales"] } });
     expect(await named.page.locator("#clients-heading ~ *").first().innerText()).toContain("the simulation uses the active clients on this list");
     await named.page.close();
+    const mixed = await mount({ canEdit: true, canManage: false, sources: { groups: ["Sales"], named: ["Partnerships"] } });
+    expect(await mixed.page.locator("#clients-heading ~ *").first().innerText()).toContain(
+      "Client groups drive the simulation of Sales, whose services have clients counted; Partnerships uses the active clients on this list.",
+    );
+    await mixed.page.close();
   }, 60_000);
 });
 
@@ -163,6 +168,7 @@ describe("deleting", () => {
     await page.getByRole("button", { name: "Delete solution" }).click();
     const dialog = page.locator("[data-delete-solution-dialog]");
     expect(await dialog.innerText()).toContain("The 2 issues it was linked to keep a note in their history, and its verdicts stay in the audit log.");
+    expect(await dialog.innerText()).toContain("An issue being tested with no other solution goes back to Open.");
     await dialog.getByRole("button", { name: "Keep it" }).click();
     expect(await calls(page)).toEqual([]);
     await page.getByRole("button", { name: "Delete solution" }).click();

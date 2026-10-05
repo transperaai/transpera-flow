@@ -147,7 +147,9 @@ describe.skipIf(!POSTGREST_URL)("adding things by hand over PostgREST", () => {
       expect.objectContaining({ issue_id: ids.issue, auto_verdict: "pass", holds_pct: 80, auto_note: "Wait 2 h against under 4 hours" }),
     ]);
     const last = await one("select kind, detail from issue_events where issue_id = $1 order by seq desc limit 1", [ids.issue]);
-    expect(last).toEqual({ kind: "edited", detail: { solution_deleted: { solution_id: sol, solution: "Reply templates" } } });
+    // It was the issue's only solution, so the issue is back to Open: one entry says both.
+    expect(last).toEqual({ kind: "edited", detail: { from: "testing", to: "open", solution_deleted: { solution_id: sol, solution: "Reply templates" } } });
+    expect((await one("select status from issues where id = $1", [ids.issue])).status).toBe("open");
     // The editor can't read the audit log (owners can) and can't write it.
     expect((await editor.from("audit_log").select("id").eq("target_id", sol)).data).toEqual([]);
     expect((await owner.from("audit_log").select("action").eq("target_id", sol)).data).toEqual([{ action: "delete" }]);

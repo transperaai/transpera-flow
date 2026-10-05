@@ -13,9 +13,12 @@
 --   * `private.log_solution_delete` and the trigger `log_solution_delete` (before delete on `public.solutions`): deleting a
 --     solution writes one `audit_log` row (action `delete`, target `solutions`) with the solution's name, process, base
 --     version, lever changes and every issue link it had (verdicts, how often it held, notes), and adds an `edited` entry
---     `{"solution_deleted": {solution_id, solution}}` to the history of each issue it was linked to. The links themselves
---     still go with the solution (`on delete cascade`); the copy of the map is not kept in the log. Nothing is logged when
---     the workspace itself is being deleted.
+--     `{"solution_deleted": {solution_id, solution}}` to the history of each issue it was linked to. An issue in Testing
+--     solutions (stored `in_progress`) that this leaves with no solution linked goes back to Open; its history gets ONE
+--     entry, the status change `issue_log` writes with `solution_deleted` folded into its detail. Resolved and won't-fix
+--     issues, and issues still linked to another solution, keep their status. The links themselves still go with the
+--     solution (`on delete cascade`); the copy of the map is not kept in the log. Nothing is logged when the workspace
+--     itself is being deleted.
 --   * Two checks on `public.workspaces`, added NOT VALID (existing rows are not re-checked; the preflight shows there are
 --     none to fix): the name is 1 to 200 characters once trimmed, and `settings.currency`, when set, is a three-letter code
 --     such as AUD, as `create_workspace` already insists. An owner can now change both from Settings, through `save_fields`
@@ -24,7 +27,11 @@
 -- STRICTLY ADDITIVE: two trigger functions, two triggers and two NOT VALID check constraints. No table, column, policy,
 -- grant or existing function changes. Data: none to move.
 --
+-- ORDER: apply after 20261130500000 (row 48 of docs/production-migrations.md).
+--
 -- PREFLIGHT (read-only; each must return the stated result before applying):
+--   0. The migration before this one is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261130500000';
 --   1. Nothing later is applied. Expect 0:
 --        select count(*) from supabase_migrations.schema_migrations where version >= '20261201000000';
 --   2. The tables this builds on exist. Expect 5:
@@ -93,6 +100,10 @@ set search_path = ''
 as $$
 declare
   links jsonb;
+  extra jsonb;
+  r record;
+  ev_id uuid;
+  last_seq bigint;
   kind text := case when coalesce(auth.jwt(), '{}') ? 'api_token_id' then 'mcp' when auth.uid() is null then 'system' else 'user' end;
 begin
   if not exists (select 1 from public.workspaces w where w.id = old.workspace_id) then
@@ -112,13 +123,32 @@ begin
       'created_at', old.created_at, 'created_by', old.created_by),
     'issue_links', links));
 
-  insert into public.issue_events (issue_id, workspace_id, kind, actor, detail)
-  select l.issue_id, l.workspace_id, 'edited', auth.uid(),
-    jsonb_build_object('solution_deleted', jsonb_build_object('solution_id', old.id, 'solution', old.name))
-  from public.solution_issues l
-  join public.issues i on i.id = l.issue_id and i.workspace_id = l.workspace_id
-  where l.solution_id = old.id and l.workspace_id = old.workspace_id
-  order by l.created_at, l.issue_id;
+  extra := jsonb_build_object('solution_deleted', jsonb_build_object('solution_id', old.id, 'solution', old.name));
+  for r in
+    select l.issue_id, i.status
+    from public.solution_issues l
+    join public.issues i on i.id = l.issue_id and i.workspace_id = l.workspace_id
+    where l.solution_id = old.id and l.workspace_id = old.workspace_id
+    order by l.created_at, l.issue_id
+  loop
+    ev_id := null;
+    -- Testing solutions with nothing left to test: back to Open. `issue_log` writes that change; the deletion joins its entry.
+    if r.status = 'in_progress' and not exists (
+      select 1 from public.solution_issues o
+      where o.issue_id = r.issue_id and o.workspace_id = old.workspace_id and o.solution_id <> old.id
+    ) then
+      select coalesce(max(e.seq), 0) into last_seq from public.issue_events e where e.issue_id = r.issue_id;
+      update public.issues set status = 'open' where id = r.issue_id and workspace_id = old.workspace_id;
+      select e.id into ev_id from public.issue_events e
+        where e.issue_id = r.issue_id and e.seq > last_seq and e.detail ? 'from' order by e.seq desc limit 1;
+    end if;
+    if ev_id is not null then
+      update public.issue_events set detail = detail || extra where id = ev_id;
+    else
+      insert into public.issue_events (issue_id, workspace_id, kind, actor, detail)
+        values (r.issue_id, old.workspace_id, 'edited', auth.uid(), extra);
+    end if;
+  end loop;
   return old;
 end;
 $$;

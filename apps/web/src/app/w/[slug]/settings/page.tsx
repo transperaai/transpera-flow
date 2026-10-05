@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Page } from "@/components/shell/page";
 import { buttonVariants } from "@/components/ui/button";
 import { loadLiveProcess, loadWorkspaceClients, loadWorkspaceSettings } from "@/lib/data";
-import { namedClientsSimulated } from "@/lib/clients";
+import { clientSources } from "@/lib/clients";
 import { addClient, saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
 import { ClientsSettings } from "./clients-settings";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
@@ -65,7 +65,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         people={data.people}
         personRoles={data.personRoles}
         canEdit={data.canEdit}
-        simulated={namedClientsSimulated(data.clientGroups)}
+        sources={clientSources(data.processes, data.services, data.clientGroups)}
         ops={{ add: addClient, saveField: saveClientField, saveServices: saveClientServices, saveAssignment: saveClientAssignment }}
       />
       <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />

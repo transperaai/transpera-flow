@@ -158,6 +158,8 @@ describe("resolving with a solution", () => {
     expect(text({ solution_verdict: { solution: "Lead scoring", verdict: "pass", was: "pass", notes_changed: true } })).toBe("Updated your note on “Lead scoring”.");
     // A deleted solution (issue #182) leaves a line on each issue it was linked to.
     expect(text({ solution_deleted: { solution_id: "x", solution: "Lead scoring" } })).toBe("Deleted solution “Lead scoring”.");
+    // Its only solution gone, the issue went back to Open in the same entry.
+    expect(text({ from: "testing", to: "open", solution_deleted: { solution_id: "x", solution: "Lead scoring" } })).toBe("Deleted solution “Lead scoring”. Status Testing solutions to Open.");
   });
 });
 
