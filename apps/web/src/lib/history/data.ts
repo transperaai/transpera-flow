@@ -13,6 +13,8 @@ export interface HistoryData {
   hasDraft: boolean;
   /** The company map (B11): the screen lists what changed. */
   company: boolean;
+  /** Archived (issue #182): read only until it is restored. */
+  archived: boolean;
 }
 
 /** Everything the History screen shows for a process, or null if it isn't visible (RLS decides). */
@@ -40,5 +42,6 @@ export async function loadHistory(slug: string, processId: string): Promise<Hist
     versions,
     hasDraft: draft !== null,
     company: Boolean(live.process.is_company),
+    archived: Boolean(live.process.archived_at),
   };
 }

@@ -135,7 +135,7 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
 export const shellCounts = cache(async (workspaceId: string): Promise<{ processes: number; openIssues: number; unlinkedSources: number }> => {
   const supabase = await createClient();
   const [processes, issues, unlinked] = await Promise.all([
-    supabase.from("processes").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("is_company", false),
+    supabase.from("processes").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("is_company", false).is("archived_at", null),
     supabase.from("issues").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).in("status", ACTIVE_STORED_STATUSES),
     supabase.rpc("unlinked_source_count", { p_workspace: workspaceId }),
   ]);

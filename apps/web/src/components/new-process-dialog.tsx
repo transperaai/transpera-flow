@@ -5,10 +5,11 @@ import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PROCESS_KIND_CHOICES } from "@/lib/processes/admin";
 
 export type CreateProcess = (prev: CreateProcessResult, form: FormData) => Promise<CreateProcessResult>;
 
-/** The Processes page's "New process" button: asks for a name, then opens the new process in a draft. */
+/** The Processes page's "New process" button: asks for a name and the kind, then opens the new process in a draft. */
 export function NewProcessButton({ create }: { create: CreateProcess }) {
   const [open, setOpen] = useState(false);
   return (
@@ -21,37 +22,45 @@ export function NewProcessButton({ create }: { create: CreateProcess }) {
   );
 }
 
-/** The "New servicing process" dialog, shared by the process switcher and the Processes page. Creating opens the new process in a draft. */
+/** The "New process" dialog, shared by the process switcher and the Processes page. Creating opens the new process in a draft. */
 export function NewProcessDialog({ open, onOpenChange, create }: { open: boolean; onOpenChange: (open: boolean) => void; create: CreateProcess }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New servicing process</DialogTitle>
-          <DialogDescription>A recurring process this workspace runs for its own existing clients, such as a monthly report. It belongs to this workspace only and simulates beside the pipeline.</DialogDescription>
+          <DialogTitle>New process</DialogTitle>
+          <DialogDescription>It belongs to this workspace only and gets a card on the company map. You can rename it or change its type later.</DialogDescription>
         </DialogHeader>
-        <NewServicingProcess create={create} onCancel={() => onOpenChange(false)} />
+        <NewProcessForm create={create} onCancel={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function NewServicingProcess({
-  create,
-  onCancel,
-}: {
-  create: CreateProcess;
-  onCancel: () => void;
-}) {
+function NewProcessForm({ create, onCancel }: { create: CreateProcess; onCancel: () => void }) {
   const [state, action, pending] = useActionState(create, {});
   return (
-    <form action={action} className="flex flex-col gap-3">
-      <label className="sr-only" htmlFor="new-servicing-name">
-        Name of the servicing process
-      </label>
-      <Input id="new-servicing-name" name="name" required maxLength={120} autoFocus placeholder="e.g. Quarterly review" />
+    <form action={action} className="flex flex-col gap-3" data-new-process>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground uppercase" htmlFor="new-process-name">
+          Name
+        </label>
+        <Input id="new-process-name" name="name" required maxLength={120} autoFocus placeholder="e.g. Quarterly review" />
+      </div>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-muted-foreground uppercase">Type</legend>
+        {PROCESS_KIND_CHOICES.map((k) => (
+          <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+            <input type="radio" name="kind" value={k.value} required className="mt-1 accent-[var(--accent)]" />
+            <span>
+              <span className="font-semibold">{k.label}</span>
+              <span className="block text-xs text-muted-foreground">{k.description}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
       {state.error && (
-        <p role="alert" className="text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {state.error}
         </p>
       )}

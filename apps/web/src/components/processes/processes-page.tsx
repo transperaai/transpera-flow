@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { Network } from "lucide-react";
 import { NewProcessButton, type CreateProcess } from "@/components/new-process-dialog";
-import { ProcessesTable } from "@/components/processes/processes-table";
+import { ProcessesList } from "@/components/processes/processes-list";
 import { UploadProcessButton, type UploadProcess } from "@/components/processes/upload-process-dialog";
 import { Page } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
+import type { ArchivedProcess, ProcessAdminOps } from "@/lib/processes/admin";
 import type { ProcessCardData } from "@/lib/processes/data";
 import type { ProcessRowData } from "@/lib/processes/rows";
 
 /**
  * The Processes page (issue #101): the company map as a list, sub-processes indented under their parent. A row
- * opens in place to that process's map card. Replaces the A33 placeholder list.
+ * opens in place to that process's map card. Replaces the A33 placeholder list. Editors rename, re-type, archive and
+ * restore processes here (issue #182).
  */
 export function ProcessesPage({
   rows,
@@ -19,6 +21,8 @@ export function ProcessesPage({
   loadCard,
   create,
   upload,
+  archived,
+  admin,
   note,
 }: {
   rows: ProcessRowData[];
@@ -30,6 +34,10 @@ export function ProcessesPage({
   create?: CreateProcess;
   /** Bring in a process from a file (signed-in editors only; issue #166). */
   upload?: UploadProcess;
+  /** The archived processes, for the Archived filter (issue #182). */
+  archived?: ArchivedProcess[];
+  /** Rename, change type, archive and restore (signed-in editors only; issue #182). */
+  admin?: ProcessAdminOps;
   /** A line under the table, such as the demo's reminder that nothing is kept. */
   note?: string;
 }) {
@@ -51,7 +59,7 @@ export function ProcessesPage({
         </>
       }
     >
-      <ProcessesTable rows={rows} hrefs={hrefs} loadCard={loadCard} />
+      <ProcessesList rows={rows} hrefs={hrefs} loadCard={loadCard} archived={archived} admin={admin} />
       {note && <p className="text-xs text-muted-foreground">{note}</p>}
     </Page>
   );

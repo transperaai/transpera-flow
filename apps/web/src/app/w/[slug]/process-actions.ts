@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { isId } from "@/lib/editor/validate";
 import { createClient } from "@/lib/supabase/server";
 
-// Creating a process from the app (issues #19, #76). The process row is
+// Creating a process from the app (issues #19, #76; the kind is chosen since B19, #182). The process row is
 // written directly (processes aren't revisioned); its first steps go into a
 // draft opened with open_draft, as every signed-in edit does (the database's
 // edit_drafts_only trigger refuses the rest). It opens on the canvas in Draft
@@ -16,21 +16,28 @@ export interface CreateProcessResult {
 
 const MAX_NAME = 120;
 
-export async function createServicingProcess(workspaceId: string, slug: string, _prev: CreateProcessResult, form: FormData): Promise<CreateProcessResult> {
+const KINDS = { pipeline: { entity: "lead", start: "New lead", end: "Won", outcome: "won" }, servicing: { entity: "task", start: "Task due", end: "Done", outcome: "done" } } as const;
+
+/** Make a process of the kind chosen (`kind`: pipeline or servicing) with a start and an end, and open it in a draft. */
+export async function createProcess(workspaceId: string, slug: string, _prev: CreateProcessResult, form: FormData): Promise<CreateProcessResult> {
   const name = String(form.get("name") ?? "").trim();
+  const chosen = form.get("kind");
   if (!isId(workspaceId) || typeof slug !== "string") return { error: "Couldn't create it. Try again." };
   if (!name || name.length > MAX_NAME) return { error: `Give it a name (up to ${MAX_NAME} characters).` };
+  if (chosen !== "pipeline" && chosen !== "servicing") return { error: "Choose Sales pipeline or Client work." };
+  const kind = KINDS[chosen];
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return { error: "Your session has ended. Sign in again." };
 
-  // The company map isn't an ordinary process: its name doesn't count (the MCP server's import ignores it too).
-  const { data: existing } = await supabase.from("processes").select("name").eq("workspace_id", workspaceId).eq("is_company", false);
+  // The company map isn't an ordinary process: its name doesn't count (the MCP server's import ignores it too). Nor does an
+  // archived one's (issue #182): names are unique among the processes in use, and restoring checks again.
+  const { data: existing } = await supabase.from("processes").select("name").eq("workspace_id", workspaceId).eq("is_company", false).is("archived_at", null);
   if ((existing ?? []).some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) return { error: `There is already a process called '${name}'.` };
 
   const { data: proc, error } = await supabase
     .from("processes")
-    .insert({ workspace_id: workspaceId, name, kind: "servicing", entity_name: "task", source: "manual" })
+    .insert({ workspace_id: workspaceId, name, kind: chosen, entity_name: kind.entity, source: "manual" })
     .select("id")
     .single();
   if (error || !proc) {
@@ -40,13 +47,13 @@ export async function createServicingProcess(workspaceId: string, slug: string, 
   const draft = opened as { status: string; revision_id?: string } | null;
   if (openError || draft?.status !== "ok" || !draft.revision_id) return { error: "Created it, but couldn't open a draft. Open it from the list." };
 
-  // A start and a done end, joined, to build on.
+  // A start and an end, joined, to build on.
   const start = crypto.randomUUID();
   const end = crypto.randomUUID();
   const base = { revision_id: draft.revision_id, workspace_id: workspaceId, process_id: proc.id };
   const { error: stepError } = await supabase.from("steps").insert([
-    { ...base, id: start, name: "Task due", kind: "start", x: 60, y: 60 },
-    { ...base, id: end, name: "Done", kind: "end", outcome: "done", x: 520, y: 60 },
+    { ...base, id: start, name: kind.start, kind: "start", x: 60, y: 60 },
+    { ...base, id: end, name: kind.end, kind: "end", outcome: kind.outcome, x: 520, y: 60 },
   ]);
   if (!stepError) {
     await supabase.from("edges").insert({ ...base, from_step_id: start, to_step_id: end, probability: 1 });
