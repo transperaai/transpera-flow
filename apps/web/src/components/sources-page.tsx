@@ -1,9 +1,9 @@
 "use client";
 
-// The Sources screen (docs/PRD.md §8 screen 7, issue #21; A53, issue #118): transcripts, notes
-// data exports and screenshots from the audit, each with its quote, what it is linked to (chips, "+ Link") and
-// every value that cites it, so any inferred number can be traced to what someone said. A source
-// linked to nothing is flagged: it doesn't count as evidence.
+// The Sources library (docs/PRD.md §8 screen 7, issues #21, #118, #176): transcripts, notes, data exports and screenshots from
+// the audit as a searchable table. A row opens a side panel with the full text, what it is linked to ("Link to…") and the values
+// that quote it, so any inferred number can be traced to what someone said. A source linked to nothing is flagged: it doesn't
+// count as evidence.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -20,7 +20,9 @@ import {
 import { DateField, SelectField, TextField } from "@/components/fields";
 import { LinkChips, LinkedToLabel, UnlinkedWarning } from "@/components/sources/link-chips";
 import { SourceDialog, type SourceSubmission } from "@/components/sources/source-dialog";
+import { SourcesLibrary } from "@/components/sources/sources-library";
 import { buttonVariants } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Saver } from "@/lib/fields/field-controller";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { demoSourceStore } from "@/lib/sources/demo-store";
@@ -41,14 +43,6 @@ const SOURCE_HELP = {
 
 const button = buttonVariants({ variant: "outline", size: "sm" });
 const primary = buttonVariants({ size: "sm" });
-const EXCERPT = 280;
-/** The start of a source's text, as the card's quote: whole words, and an ellipsis when there is more. */
-const excerpt = (body: string | null) => {
-  const text = (body ?? "").trim().replace(/\s+/g, " ");
-  if (text.length <= EXCERPT) return text;
-  const cut = text.slice(0, EXCERPT);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), EXCERPT - 40))}…`;
-};
 const kindOptions = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k] }));
 
 const FIELD_NAMES: Record<string, string> = {
@@ -72,6 +66,7 @@ export function SourcesPage({
   targets: initialTargets,
   mode,
   processBase,
+  initialOpenId = null,
 }: {
   workspaceId: string;
   sources: SourceRow[];
@@ -84,6 +79,8 @@ export function SourcesPage({
   mode: "live" | "demo" | "readonly";
   /** Link to the process page, so a citing step can be opened. */
   processBase?: string;
+  /** A source to open in the side panel on arrival. */
+  initialOpenId?: string | null;
 }) {
   const canEdit = mode !== "readonly";
   const router = useRouter();
@@ -99,6 +96,8 @@ export function SourcesPage({
   const [status, setStatus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ source: SourceRow | null } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(initialOpenId);
+  const open = sources.find((x) => x.id === openId) ?? null;
   const cited = new Set(Object.keys(citations));
   const orphans = Object.entries(citations).filter(([id]) => !sources.some((s) => s.id === id));
   const unlinked = unlinkedSources(sources, links);
@@ -179,40 +178,50 @@ export function SourcesPage({
         </p>
       )}
       {sources.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
+        <p data-no-sources className="rounded-lg border border-dashed border-line p-4 text-fg-2">
           No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an
           insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
         </p>
       ) : (
-        <ul aria-label="Sources" className="flex flex-col gap-3">
-          {sources.map((s) => (
-            <li key={s.id}>
-              <SourceItem
-                source={s}
-                citations={citations[s.id] ?? []}
-                links={links.filter((l) => l.source_id === s.id)}
-                targets={targets}
-                canEdit={canEdit}
-                busy={busy}
-                saver={saver}
-                processBase={processBase}
-                onLink={() => setDialog({ source: s })}
-                onUnlink={(l) => void unlink(l)}
-                onRemove={async () => {
-                  const r = await store.remove(s.id);
-                  if (r.status === "error") setError(r.message);
-                  else {
-                    setSources((list) => list.filter((x) => x.id !== s.id));
-                    setLinks((list) => list.filter((l) => l.source_id !== s.id));
-                    changed("Source deleted.");
-                  }
-                }}
-                cited={cited.has(s.id)}
-              />
-            </li>
-          ))}
-        </ul>
+        <SourcesLibrary
+          sources={sources}
+          links={links}
+          targets={targets}
+          citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
+          openId={openId}
+          onOpen={setOpenId}
+        />
       )}
+      <Sheet open={open !== null} onOpenChange={(o) => !o && setOpenId(null)}>
+        <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-source-panel>
+          {open && (
+            <SourcePanel
+              key={open.id}
+              source={open}
+              citations={citations[open.id] ?? []}
+              links={links.filter((l) => l.source_id === open.id)}
+              targets={targets}
+              canEdit={canEdit}
+              busy={busy}
+              saver={saver}
+              processBase={processBase}
+              onLink={() => setDialog({ source: open })}
+              onUnlink={(l) => void unlink(l)}
+              onRemove={async () => {
+                const r = await store.remove(open.id);
+                if (r.status === "error") setError(r.message);
+                else {
+                  setOpenId(null);
+                  setSources((list) => list.filter((x) => x.id !== open.id));
+                  setLinks((list) => list.filter((l) => l.source_id !== open.id));
+                  changed("Source deleted.");
+                }
+              }}
+              cited={cited.has(open.id)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
       {orphans.length > 0 && (
         <section aria-label="Citations of deleted sources" className="rounded-lg border border-warn bg-warn-soft p-3 text-xs">
           <h2 className="mb-1 text-sm font-bold">Citing a deleted source</h2>
@@ -224,7 +233,7 @@ export function SourcesPage({
   );
 }
 
-function SourceItem({
+function SourcePanel({
   source: s,
   citations,
   links,
@@ -253,24 +262,27 @@ function SourceItem({
 }) {
   const [confirming, setConfirming] = useState(false);
   const value = (f: SourceField) => sourceFieldValue(s, f) as string | null;
-  const quote = excerpt(s.body);
+  const text = (s.body ?? "").trim();
   return (
-    <article aria-label={s.title} data-linked={links.length > 0} className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3 shadow-xs">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-base font-bold">{s.title}</h2>
-        <span className="rounded-full border border-line px-1.5 text-[11px] font-semibold text-fg-2">{SOURCE_KIND_LABELS[s.kind]}</span>
-        {s.recorded_at && <span className="text-fg-3 tabular-nums">{s.recorded_at}</span>}
-        {s.speakers.length > 0 && <span className="text-fg-2">{s.speakers.join(", ")}</span>}
-        <span className="ml-auto flex items-baseline gap-3">
-          <span className="text-fg-3">{citations.length ? `Cited by ${citations.length} value${citations.length === 1 ? "" : "s"}` : "Not cited yet"}</span>
-          {canEdit && (
-            <button type="button" className={button} onClick={onLink} aria-label={`Link ${s.title} to something`}>
-              + Link
-            </button>
-          )}
-        </span>
-      </header>
-      {quote && <blockquote className="text-fg-2">“{quote}”</blockquote>}
+    <article aria-label={s.title} data-linked={links.length > 0} className="flex flex-col gap-3 p-4">
+      <SheetHeader className="p-0 pr-10">
+        <SheetTitle className="text-base font-bold">{s.title}</SheetTitle>
+        <SheetDescription asChild>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="rounded-full border border-line px-1.5 text-[11px] font-semibold text-fg-2">{SOURCE_KIND_LABELS[s.kind]}</span>
+            {s.recorded_at && <span className="text-fg-3 tabular-nums">{s.recorded_at}</span>}
+            {s.speakers.length > 0 && <span className="text-fg-2">{s.speakers.join(", ")}</span>}
+            <span className="text-fg-3">{citations.length ? `Cited by ${citations.length} value${citations.length === 1 ? "" : "s"}` : "Not cited yet"}</span>
+          </div>
+        </SheetDescription>
+      </SheetHeader>
+      {canEdit && (
+        <div>
+          <button type="button" className={button} onClick={onLink} aria-label={`Link ${s.title} to something`}>
+            Link to…
+          </button>
+        </div>
+      )}
       {links.length > 0 ? (
         <div className="flex flex-col gap-1">
           <LinkedToLabel />
@@ -279,8 +291,26 @@ function SourceItem({
       ) : (
         <UnlinkedWarning />
       )}
-      <Citations citations={citations} processBase={processBase} />
-      <details className="mt-2">
+      <section aria-label="Full text" className="flex flex-col gap-1">
+        <h3 className="text-xs font-semibold text-fg-2">Full text</h3>
+        {text ? (
+          <p data-full-text className="max-h-80 overflow-y-auto rounded-lg bg-panel-2 p-2 whitespace-pre-wrap break-words text-fg">
+            {text}
+          </p>
+        ) : (
+          <p className="text-fg-3">No text. {s.file_url ? "The original is at the link below." : "Add some under Details and edit."}</p>
+        )}
+        {s.file_url && (
+          <a href={s.file_url} target="_blank" rel="noreferrer noopener" className="text-xs text-accent underline">
+            Open {s.kind === "screenshot" ? "the screenshot" : "the file"}
+          </a>
+        )}
+      </section>
+      <section aria-label="Cited in" className="flex flex-col gap-1">
+        <h3 className="text-xs font-semibold text-fg-2">Cited in</h3>
+        {citations.length ? <Citations citations={citations} processBase={processBase} /> : <p className="text-fg-3">No value quotes this yet. Cite it from a step&apos;s details.</p>}
+      </section>
+      <details className="mt-1">
         <summary className="cursor-pointer text-fg-2 hover:underline">{canEdit ? "Details and edit" : "Details"}</summary>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <TextField label="Title" value={s.title} save={saver(s.id, "title")} disabled={!canEdit} help={SOURCE_HELP.title} />
@@ -304,11 +334,6 @@ function SourceItem({
           <DateField label="Date" value={s.recorded_at} save={saver(s.id, "recorded_at")} disabled={!canEdit} help={SOURCE_HELP.date} />
           <div className="sm:col-span-2">
             <TextField label="Link (file or recording)" value={s.file_url} optional save={saver(s.id, "file_url")} disabled={!canEdit} help={SOURCE_HELP.link} />
-            {s.file_url && (
-              <a href={s.file_url} target="_blank" rel="noreferrer noopener" className="text-xs text-accent underline">
-                Open {s.kind === "screenshot" ? "the screenshot" : "the file"}
-              </a>
-            )}
           </div>
           <div className="sm:col-span-2">
             <TextField label="Transcript or notes" value={s.body} optional multiline save={saver(s.id, "body")} disabled={!canEdit} help={SOURCE_HELP.body} />

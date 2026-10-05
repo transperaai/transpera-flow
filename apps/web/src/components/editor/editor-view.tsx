@@ -45,6 +45,7 @@ import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
 import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
+import { useEditorTour } from "./editor-tour";
 import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
@@ -128,6 +129,8 @@ export function EditorView({
   const [placement] = useState(() => (solutionMode && idea ? placeIdea(initialLive, idea) : null));
   const [selection, setSelection] = useState<Selection>(placement?.id ? { steps: [placement.id], edges: [] } : NO_SELECTION);
   const me = viewer ?? (mode === "demo" ? DEMO_VIEWER : null);
+  // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
+  const tour = useEditorTour({ userId, company });
   const [sync, realtime] = useRealtime(session, connection.transport, me, "draft");
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
@@ -348,6 +351,7 @@ export function EditorView({
         unresolved={unresolved}
         breaks={breaks}
         company={company}
+        onTour={tour.start}
         simulating={simulating}
         onSimulate={simulate}
         onReview={select}
@@ -399,7 +403,7 @@ export function EditorView({
               This {solutionMode ? "solution" : "draft"} can&apos;t be simulated yet: {workingModel.error}.
             </p>
           )}
-          <div className="flex min-h-0 flex-1" data-highlight-tone={solutionMode ? "issue" : undefined}>
+          <div className="flex min-h-0 flex-1" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
             <ProcessCanvas
               bundle={working}
               result={!stale && pair?.draft.result ? pair.draft.result : null}
@@ -448,6 +452,7 @@ export function EditorView({
           />
         </aside>
       </div>
+      {tour.node}
       {!blockMode && !company && (
       <SimulateFooter
         asked={!!asked}

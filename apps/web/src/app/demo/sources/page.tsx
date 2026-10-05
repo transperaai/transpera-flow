@@ -9,7 +9,7 @@ export default function DemoSourcesPage() {
     <Page
       title="Sources"
       eyebrow="Company"
-      description="Every source must be linked to a process, a step, an insight, an issue or a solution. Demo mode: changes stay in this tab and are gone when you reload."
+      description="Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for. Demo mode: changes stay in this tab and are gone when you reload."
     >
       <SourcesPage
         workspaceId={bundle.workspace.id}
