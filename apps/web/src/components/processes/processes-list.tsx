@@ -283,7 +283,7 @@ function AdminDialog({
       if (!next || next.length > MAX_PROCESS_NAME) return setError(`Give it a name (up to ${MAX_PROCESS_NAME} characters).`);
       return run(() => admin.rename(row.id, next), `Renamed ${row.name} to ${next}.`);
     }
-    if (mode === "kind") return run(() => admin.changeKind(row.id, kind), `${row.name} is now ${PROCESS_KIND_LABELS[kind].toLowerCase()}.`);
+    if (mode === "kind") return run(() => admin.changeKind(row.id, kind), `${row.name} is now ${kind === "servicing" ? "client work" : "a sales pipeline"}.`);
     return run(() => admin.archive(row.id), `Archived ${row.name}. Find it under Archived to restore it.`);
   };
 
@@ -296,7 +296,7 @@ function AdminDialog({
             {mode === "rename"
               ? "The new name shows everywhere at once, including its card on the company map. Its history keeps the old name."
               : mode === "kind"
-                ? `${row.name} is ${PROCESS_KIND_LABELS[row.kind].toLowerCase()} now.`
+                ? `${row.name} is ${row.kind === "servicing" ? "client work" : "a sales pipeline"} now. Changing it changes how it is simulated.`
                 : `Archive ${row.name}?`}
           </DialogDescription>
         </DialogHeader>
