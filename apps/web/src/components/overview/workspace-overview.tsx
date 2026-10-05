@@ -8,6 +8,7 @@ import { ShellHeader } from "@/components/shell/shell-header";
 import { loadLiveProcess, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSources } from "@/lib/data";
 import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
+import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { loadWorkspaceAnalysisRules } from "@/lib/rules/data";
 
@@ -33,15 +34,16 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
   ]);
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
-  const earlier = company && mapVersion ? await loadCompanyVersion(company, mapVersion) : null;
+  const found = company && mapVersion ? await loadCompanyVersion(ws, mapVersion) : null;
+  const view = companyMapView(company, found, canEdit);
   return (
     <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
     <Overview
       workspaceName={live.workspace.name}
       live={live}
       parts={parts}
-      company={earlier ?? company}
-      viewingMapVersion={earlier ? earlier.revision.number : null}
+      company={view.map}
+      viewingMapVersion={view.viewingVersion}
       issues={issues}
       sources={sources}
       mode={canEdit ? "live" : "readonly"}
@@ -49,7 +51,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       firstPrinciples={firstPrinciples}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
       processesHref={`${base}/processes`}
-      companyEditHref={canEdit && company && !earlier ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
+      companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       issuesHref={`${base}/issues`}
       rulesHref={`${base}/settings/rules`}

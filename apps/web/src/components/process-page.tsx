@@ -4,7 +4,7 @@
 // drawers. First principles, Map, Insights, Issues, Solutions, then Supporting data and, closed at the bottom, Sources. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -339,24 +339,37 @@ export function ProcessPage({
   );
 }
 
-/** The sources that are evidence for the whole process, with "+ Link", in a section at the very bottom that starts closed. Only where the page loads source links (the others have nothing to show). */
+/**
+ * The sources that are evidence for the whole process, with "+ Link", in a section at the very bottom that starts closed
+ * (and opens for a #sources address). A heading holding a button that opens and closes it. Only where the page loads source
+ * links (the others have nothing to show).
+ */
 function ProcessSources({ processId, name }: { processId: string; name: string }) {
   const linking = useSourceLinking();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const fromHash = () => {
+      if (window.location.hash !== "#sources") return;
+      setOpen(true);
+      document.getElementById("sources")?.scrollIntoView({ block: "start" });
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
   if (!linking) return null;
   return (
-    <section id="sources" aria-labelledby="sources-heading" className="min-w-0 scroll-mt-16">
-      <details className="group rounded-xl border bg-card">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
-          <ChevronRight aria-hidden className="size-4 text-fg-2 transition-transform group-open:rotate-90" />
-          <h2 id="sources-heading" className="font-display text-lg font-bold">
-            Sources
-          </h2>
-          <span className="text-sm text-fg-2">The interviews, notes and data that are evidence for this process as a whole.</span>
-        </summary>
-        <div className="px-4 pb-4">
-          <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />
-        </div>
-      </details>
+    <section id="sources" aria-labelledby="sources-heading" className="min-w-0 scroll-mt-16 rounded-xl border bg-card">
+      <h2 id="sources-heading" className="font-display text-lg font-bold">
+        <button type="button" aria-expanded={open} aria-controls="sources-body" onClick={() => setOpen((o) => !o)} className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left">
+          <ChevronRight aria-hidden className={`size-4 shrink-0 text-fg-2 transition-transform ${open ? "rotate-90" : ""}`} />
+          Sources
+          <span className="text-sm font-normal text-fg-2">The interviews, notes and data that are evidence for this process as a whole.</span>
+        </button>
+      </h2>
+      <div id="sources-body" hidden={!open} className="px-4 pb-4">
+        <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />
+      </div>
     </section>
   );
 }

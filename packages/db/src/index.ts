@@ -196,6 +196,7 @@ export {
   loadCitingRows,
   loadCompanyModel,
   loadLiveCompanyPart,
+  loadCompanyPartVersion,
   loadLiveRevisions,
   loadRun,
   loadRuns,

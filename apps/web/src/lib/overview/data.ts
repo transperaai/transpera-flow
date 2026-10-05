@@ -1,5 +1,5 @@
 import "server-only";
-import { listProcesses, loadLiveCompanyPart, partitionSteps, type EdgeRow, type ProcessPart, type ProcessRevisionRow, type StepRow } from "@transpera-flow/db";
+import { listProcesses, loadCompanyPartVersion, loadLiveCompanyPart, partitionSteps, type EdgeRow, type ProcessPart, type ProcessRevisionRow, type StepRow } from "@transpera-flow/db";
 import { createClient } from "../supabase/server";
 
 /**
@@ -12,22 +12,11 @@ export async function loadLiveCompany(workspaceId: string): Promise<ProcessPart 
 }
 
 /**
- * An earlier published version of the company map, for the Overview's `?version=N` (read only). Null when `number` is not an
- * earlier version of this map (the live one, a draft, or none): the Overview then shows the live map.
+ * The company map at published version `number`, for the Overview's `?version=N` (read only). Null when `number` is not a
+ * published version of this workspace's map; the live number gives the live map. As the signed-in user (RLS decides).
  */
-export async function loadCompanyVersion(live: ProcessPart, number: number): Promise<ProcessPart | null> {
-  const db = await createClient();
-  const found = await db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("process_id", live.process.id).eq("number", number).in("status", ["published", "superseded"]).maybeSingle();
-  if (found.error) throw found.error;
-  const revision = found.data as ProcessRevisionRow | null;
-  if (!revision || revision.id === live.revision.id) return null;
-  const [steps, edges] = await Promise.all([
-    db.from("steps").select("*").eq("revision_id", revision.id).order("y").order("x").order("id"),
-    db.from("edges").select("*").eq("revision_id", revision.id).order("id"),
-  ]);
-  if (steps.error) throw steps.error;
-  if (edges.error) throw edges.error;
-  return { process: live.process, revision, steps: steps.data as unknown as StepRow[], edges: edges.data as unknown as EdgeRow[] };
+export async function loadCompanyVersion(workspaceId: string, number: number): Promise<ProcessPart | null> {
+  return loadCompanyPartVersion(await createClient(), workspaceId, number);
 }
 
 /**

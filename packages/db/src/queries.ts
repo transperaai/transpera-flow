@@ -283,23 +283,39 @@ export async function listProcesses(
  * nothing here is simulated.
  */
 export async function loadLiveCompanyPart(db: Db, workspaceId: string): Promise<ProcessPart | null> {
+  return loadCompanyPartAt(db, workspaceId, null);
+}
+
+/**
+ * The company map as it was at published version `number` (live or earlier), for viewing it read only. Null when the workspace
+ * has no company map, it isn't visible, or `number` is not a published version of it: a draft, a number only another process
+ * has, or one from another workspace all read as not found.
+ */
+export async function loadCompanyPartVersion(db: Db, workspaceId: string, number: number): Promise<ProcessPart | null> {
+  return loadCompanyPartAt(db, workspaceId, number);
+}
+
+async function loadCompanyPartAt(db: Db, workspaceId: string, number: number | null): Promise<ProcessPart | null> {
   const found = await db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id`).eq("workspace_id", workspaceId).eq("is_company", true).maybeSingle();
   if (found.error) throw found.error;
   const company = found.data as unknown as (ProcessRow & { draft_revision_id: string | null }) | null;
   if (!company?.live_revision_id) return null;
-  const [revision, steps, edges] = await Promise.all([
-    db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("id", company.live_revision_id).maybeSingle(),
-    db.from("steps").select("*").eq("revision_id", company.live_revision_id).order("y").order("x").order("id"),
-    db.from("edges").select("*").eq("revision_id", company.live_revision_id).order("id"),
+  const { data: revision, error } =
+    number === null
+      ? await db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("id", company.live_revision_id).maybeSingle()
+      : await db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("process_id", company.id).eq("number", number).in("status", ["published", "superseded"]).maybeSingle();
+  if (error) throw error;
+  if (!revision) return null;
+  const [steps, edges] = await Promise.all([
+    db.from("steps").select("*").eq("revision_id", revision.id).order("y").order("x").order("id"),
+    db.from("edges").select("*").eq("revision_id", revision.id).order("id"),
   ]);
-  if (revision.error) throw revision.error;
   if (steps.error) throw steps.error;
   if (edges.error) throw edges.error;
-  if (!revision.data) return null;
   const { draft_revision_id: _draft, ...process } = company;
   return {
     process,
-    revision: revision.data as ProcessRevisionRow,
+    revision: revision as ProcessRevisionRow,
     steps: steps.data as unknown as StepRow[],
     edges: edges.data as unknown as EdgeRow[],
   };

@@ -2,10 +2,9 @@
 // from it by giving the busiest steps longer times, the way a process that has since been tightened up would have
 // looked. Each version's changes are worked out from the steps that differ, as the database does for a real publish.
 
-import { bundleForProcess, toEngineModel, type ProcessBundle, type StepRow } from "@transpera-flow/db";
+import { bundleForProcess, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { demoBundle } from "@/lib/sources/demo";
-import type { VersionModel } from "./use-version-runs";
-import type { AuthorKind, ProcessKind, RevisionChanges, VersionMeta } from "./versions";
+import type { AuthorKind, RevisionChanges, VersionMeta } from "./versions";
 
 interface DemoVersion {
   number: number;
@@ -48,21 +47,19 @@ function atVersion(bundle: ProcessBundle, v: DemoVersion): ProcessBundle {
   };
 }
 
-/** The demo process's versions (newest first) and their models, or null if the sample has no such process. */
-export function demoHistory(processId: string): { versions: VersionMeta[]; models: Record<string, VersionModel>; processName: string; kind: ProcessKind } | null {
+/** The demo process's versions (newest first), or null if the sample has no such process. */
+export function demoHistory(processId: string): { versions: VersionMeta[]; processName: string; kind: "pipeline" | "servicing" } | null {
   const base = bundleForProcess(demoBundle(), processId);
   if (!base) return null;
   const bundles = VERSIONS.map((v) => atVersion(base, v));
-  const models: Record<string, VersionModel> = {};
   const versions = VERSIONS.map((v, i): VersionMeta => {
     const now = bundles[i]!;
     const before = i > 0 ? bundles[i - 1]! : null;
-    models[revisionId(v.number)] = { model: toEngineModel(now) };
     const changed = before ? now.steps.filter((s, k) => s.work_hours !== before.steps[k]!.work_hours || s.wait_hours !== before.steps[k]!.wait_hours).length : 0;
     const changes: RevisionChanges | null = before ? { steps: { added: 0, removed: 0, changed }, edges: { added: 0, removed: 0, changed: 0 } } : null;
     return { revisionId: revisionId(v.number), number: v.number, live: v.number === VERSIONS.length, publishedAt: v.publishedAt, authorKind: v.authorKind, authorName: v.authorName, changes };
   });
-  return { versions: versions.reverse(), models, processName: base.process.name, kind: base.process.kind };
+  return { versions: versions.reverse(), processName: base.process.name, kind: base.process.kind };
 }
 
 /** The number of the demo's live version. */

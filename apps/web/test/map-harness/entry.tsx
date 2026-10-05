@@ -24,7 +24,7 @@ export interface HarnessOptions {
   company?: boolean;
   /** The Editor's palette beside the map (as the Editor lays it out), whose buttons add steps where the map is looking. */
   palette?: boolean;
-  /** A read-only map in a flex column, as the Overview's card holds it (the default is a plain block). */
+  /** A read-only map in a flex column as wide as the page, as the Overview's card holds it (the default is a plain 1300px block). */
   card?: boolean;
 }
 
@@ -92,7 +92,7 @@ function Harness({ options }: { options: HarnessOptions }) {
     // Where the app puts the map: an editor's map fills a flex panel; a read-only one sits in a block, as wide as the page.
     // (In a bare flex row a read-only map shrinks to its toolbar, and the "drag the map" hint it adds after framing widens
     // that toolbar, so the panel resizes and the map refits at a time that depends on load: the flake in #99's test.)
-    <div style={options.editable || options.palette ? { width: 1300, height: 560, display: "flex" } : options.card ? { width: 1300, display: "flex", flexDirection: "column" } : { width: 1300 }}>
+    <div style={options.editable || options.palette ? { width: 1300, height: 560, display: "flex" } : options.card ? { width: "100%", display: "flex", flexDirection: "column" } : { width: 1300 }}>
       {options.palette && editor && (
         <aside style={{ width: 220, padding: 8 }}>
           <Palette bundle={state?.bundle ?? base} editor={editor} selected={selection} setSelection={setSelection} blocks={NO_BLOCKS} viewRef={viewRef} />

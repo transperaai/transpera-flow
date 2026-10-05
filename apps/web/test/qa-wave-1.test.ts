@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import type { ProcessPart } from "@transpera-flow/db";
+import { companyMapView } from "@/lib/overview/company-version";
 import { CompanyHistoryView } from "@/components/history/company-history-view";
 import { HistoryView } from "@/components/history/history-view";
 import type { VersionLinks } from "@/components/history/version-dialogs";
@@ -27,8 +29,12 @@ describe("the process page", () => {
   it("puts Sources last, in a section that starts closed", () => {
     expect(page.lastIndexOf("<ProcessSources")).toBeGreaterThan(page.lastIndexOf('id="supporting-data"'));
     const sources = page.slice(page.indexOf("function ProcessSources"), page.indexOf("function Section("));
-    expect(sources).toContain("<details");
-    expect(sources).not.toMatch(/<details[^>]*\bopen\b/);
+    // A heading holding a button (not a heading inside a <summary>), closed to start, opened by a #sources address.
+    expect(sources).not.toContain("<summary");
+    expect(sources).toContain("useState(false)");
+    expect(sources).toContain("aria-expanded={open}");
+    expect(sources).toContain("aria-controls=\"sources-body\"");
+    expect(sources).toContain('"#sources"');
   });
 });
 
@@ -58,12 +64,13 @@ describe("the company map History", () => {
     expect(renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x", actions }))).toContain("Restore");
     expect(renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x" }))).not.toContain("Restore");
   });
-  it("the Overview shows the old version read only, with a way back to live and no Edit button", () => {
-    const overview = read("components/overview/overview.tsx");
-    expect(overview).toContain("data-viewing-map-version");
-    expect(overview).toContain("Back to live");
-    const server = read("components/overview/workspace-overview.tsx");
-    expect(server).toContain("canEdit && company && !earlier");
+  it("the Overview draws the live map unless ?version= names an earlier one, which is read only with no Editor link", () => {
+    const part = (id: string, number: number) => ({ revision: { id, number } }) as unknown as ProcessPart;
+    const [live, old] = [part("r2", 2), part("r1", 1)];
+    expect(companyMapView(live, null, true)).toEqual({ map: live, viewingVersion: null, canEdit: true });
+    expect(companyMapView(live, live, true)).toEqual({ map: live, viewingVersion: null, canEdit: true });
+    expect(companyMapView(live, old, true)).toEqual({ map: old, viewingVersion: 1, canEdit: false });
+    expect(companyMapView(null, null, true).canEdit).toBe(false);
   });
 });
 

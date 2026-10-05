@@ -45,8 +45,8 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(options: Partial<HarnessOptions> = {}): Promise<Page> {
-  const page = await browser.newPage({ viewport: { width: 1400, height: 800 } });
+async function mount(options: Partial<HarnessOptions> = {}, width = 1400): Promise<Page> {
+  const page = await browser.newPage({ viewport: { width, height: 800 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   // A page set from a string isn't a secure context, where the editor's ids come from.
@@ -63,6 +63,17 @@ async function mount(options: Partial<HarnessOptions> = {}): Promise<Page> {
   expect(errors).toEqual([]);
   return page;
 }
+
+/** Waits until every card has been measured and has stopped moving (the same place on two frames running). */
+const settled = (page: Page) =>
+  page.waitForFunction(() => {
+    const w = window as unknown as { __cards?: string };
+    const nodes = [...document.querySelectorAll(".react-flow__node")];
+    const now = nodes.map((e) => { const r = e.getBoundingClientRect(); return `${e.getAttribute("data-id")}:${r.left}:${r.top}:${r.width}:${r.height}`; }).join("|");
+    const steady = now === w.__cards && nodes.every((e) => e.getBoundingClientRect().width > 0);
+    w.__cards = now;
+    return steady;
+  });
 
 const view = (page: Page) => page.evaluate(() => document.querySelector<HTMLElement>(".react-flow__viewport")!.style.transform);
 const openGroups = (page: Page) => page.locator("[data-group='open']").count();
@@ -101,14 +112,16 @@ describe("framing the map", () => {
 });
 
 describe("the map's width", () => {
-  it("fills the card it sits in, whatever its toolbar measures (the Overview's right third was blank)", async () => {
-    const page = await mount({ card: true });
-    const panel = await page.locator(".react-flow").boundingBox();
-    const region = await page.locator("[data-process-map]").boundingBox();
-    expect(Math.round(region!.width)).toBe(1300);
-    expect(Math.round(panel!.width)).toBe(1300);
-    await page.close();
-  }, 60_000);
+  for (const width of [1440, 1280, 400]) {
+    it(`fills the card it sits in at ${width}px wide, whatever its toolbar measures (the Overview's right third was blank)`, async () => {
+      const page = await mount({ card: true }, width);
+      const panel = await page.locator(".react-flow").boundingBox();
+      const region = await page.locator("[data-process-map]").boundingBox();
+      expect(Math.round(region!.width)).toBe(width);
+      expect(Math.round(panel!.width)).toBe(width);
+      await page.close();
+    }, 60_000);
+  }
 });
 
 describe("open groups and highlight", () => {
@@ -191,7 +204,7 @@ describe("adding from the Editor's palette", () => {
       const before = new Set((await cards(page)).map((c) => c.id));
       await page.getByRole("button", { name: label, exact: true }).click();
       await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length > n, before.size);
-      await page.waitForTimeout(300);
+      await settled(page);
       const after = await cards(page);
       const added = after.filter((c) => !before.has(c.id));
       expect(added.length).toBeGreaterThanOrEqual(1);
@@ -211,19 +224,20 @@ describe("adding from the Editor's palette", () => {
     const page = await mount({ editable: true, palette: true });
     const p = await panel(page);
     // Drag the empty map so it is looking at a different place.
+    const framed = await view(page);
     await page.mouse.move(p.x + p.width - 60, p.y + p.height - 40);
     await page.mouse.down();
     await page.mouse.move(p.x + p.width - 560, p.y + p.height - 240, { steps: 8 });
     await page.mouse.up();
-    await page.waitForTimeout(300);
+    await page.waitForFunction((v) => document.querySelector<HTMLElement>(".react-flow__viewport")!.style.transform !== v, framed);
     const known = new Set((await cards(page)).map((c) => c.id));
     await page.getByRole("button", { name: "+ Step", exact: true }).click();
     await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length > n, known.size);
     // The first is measured by the time a person presses again.
-    await page.waitForTimeout(400);
+    await settled(page);
     await page.getByRole("button", { name: "+ Step", exact: true }).click();
     await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length >= n + 2, known.size);
-    await page.waitForTimeout(300);
+    await settled(page);
     const added = (await cards(page)).filter((c) => !known.has(c.id));
     expect(added).toHaveLength(2);
     for (const c of added) expect(within(c, p)).toBe(true);
@@ -285,11 +299,11 @@ describe("the company map in the Editor (B11)", () => {
     const page = await mount({ editable: true, company: true });
     await page.locator(".react-flow__node").first().click();
     await page.keyboard.press("Delete");
-    await page.waitForTimeout(300);
+    await settled(page);
     expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
     await page.keyboard.press("Control+a");
     await page.keyboard.press("Delete");
-    await page.waitForTimeout(300);
+    await settled(page);
     expect(await page.evaluate(() => window.mapApi.getSteps())).toHaveLength(3);
     await page.close();
   }, 60_000);
