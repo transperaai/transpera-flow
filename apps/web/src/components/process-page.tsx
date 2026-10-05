@@ -35,6 +35,8 @@ import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import { processStepIds } from "@/lib/process-steps";
 import { useSimulation } from "@/lib/sim/use-simulation";
+import { ExportMenu } from "@/components/export/export-menu";
+import { ratingOfRank } from "@/lib/map/rating";
 import { ProcessCanvas } from "./process-canvas";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
@@ -307,6 +309,28 @@ export function ProcessPage({
         <Section
           id="map"
           title="Map"
+          action={
+            <ExportMenu
+              name={bundle.process.name}
+              note="Groups are drawn open."
+              input={() => {
+                const names = new Map([...bundle.roles.map((r) => [r.id, r.name] as const), ...bundle.people.map((x) => [x.id, x.name] as const)]);
+                return {
+                  title: bundle.process.name,
+                  subtitle: old ? `Version ${viewingVersion}` : unpublished ? "Draft, not published yet" : `Live, version ${liveVersion}`,
+                  steps: bundle.steps,
+                  edges: bundle.edges,
+                  expanded: "all",
+                  rating: (id) => {
+                    const r = issuesUi.rating(id);
+                    return r ? ratingOfRank(r.rank) : null;
+                  },
+                  issues: issuesUi.openIssues,
+                  who: (step) => names.get(step.person_id ?? step.role_id ?? "") ?? null,
+                };
+              }}
+            />
+          }
           hint="Coloured by rating. Red badges are confirmed issues. Click a step for detail."
           help={{
             label: "Map colours",
@@ -430,24 +454,30 @@ function Section({
   title,
   hint,
   help,
+  action,
   children,
 }: {
   id: string;
   title: string;
   hint?: string;
   help?: { label: string; description: string; example: string };
+  /** Sits at the right of the heading (the map's Export menu). */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section id={id} aria-labelledby={`${id}-heading`} className="flex min-w-0 scroll-mt-16 flex-col gap-3">
-      <div>
-        <div className="flex items-center">
-          <h2 id={`${id}-heading`} className="font-display text-lg font-bold">
-            {title}
-          </h2>
-          {help && <Help {...help} />}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center">
+            <h2 id={`${id}-heading`} className="font-display text-lg font-bold">
+              {title}
+            </h2>
+            {help && <Help {...help} />}
+          </div>
+          {hint && <p className="text-sm text-fg-2">{hint}</p>}
         </div>
-        {hint && <p className="text-sm text-fg-2">{hint}</p>}
+        {action}
       </div>
       {children}
     </section>
