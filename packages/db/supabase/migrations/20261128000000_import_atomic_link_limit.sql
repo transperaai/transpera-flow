@@ -10,7 +10,11 @@
 --    process columns are set here, and a group's first step is set after all its steps are in. The draft is opened through
 --    `public.open_draft`, so everything that runs on a normal write (triggers, audit, company-map checks, RLS) runs here too.
 --    Returns `[{process_id, revision_id, number}]`, one per node. Nothing existing is changed except the parent of an adopted
---    process.
+--    process. It is not a general "move a process" or "create under" call: the first node is the top-level one (no parent), every
+--    other node's parent is an earlier node of the same call, an adopted process must have no parent and goes under a node of
+--    the call, at most 200 processes and 1,000 steps in all (one statement must finish inside the database's statement timeout),
+--    `created_by` is always the caller whatever the rows say, and a process name already taken (ignoring case and punctuation,
+--    the company map excluded) is refused under a per-workspace lock, so two imports with one name can't both succeed.
 --
 -- 2. `public.take_link_fetch()`: a per-user limit on fetching a page by link (the upload's link preview), 10 a minute. SECURITY
 --    DEFINER with an empty search_path, so it can only touch the caller's own counter (`auth.uid()`; not signed in is refused)
@@ -31,6 +35,8 @@
 --        select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('open_draft', 'can_edit_workspace');
 --   4. The private schema exists. Expect 1:
 --        select count(*) from pg_namespace where nspname = 'private';
+--   5. The company-map editing migration (PR #170) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261127500000';
 --
 -- Post-apply grant check (authenticated may execute both; anon and PUBLIC may not; clients have nothing on the table):
 --        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name in ('import_new_process', 'take_link_fetch') and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1, 2;
@@ -71,15 +77,52 @@ declare
   cols text;
   revisions jsonb := '{}';
   result jsonb := '[]';
+  made uuid[] := '{}';
+  total_steps integer;
+  clash text;
+  nname text;
+  names text[] := '{}';
 begin
   if p_workspace is null or jsonb_typeof(p_nodes) is distinct from 'array' or jsonb_array_length(p_nodes) not between 1 and 200
     or jsonb_typeof(coalesce(p_adopt, '[]')) is distinct from 'array' or jsonb_array_length(coalesce(p_adopt, '[]')) > 200 then
     raise exception 'import_new_process: p_nodes must be an array of 1 to 200 processes and p_adopt an array' using errcode = '22023';
   end if;
+  select coalesce(sum(case when jsonb_typeof(n.value -> 'steps') = 'array' then jsonb_array_length(n.value -> 'steps') else 0 end), 0)
+    into total_steps from jsonb_array_elements(p_nodes) n;
+  if total_steps > 1000 then
+    raise exception 'import_new_process: an import can have at most 1000 steps in all (this one has %)', total_steps using errcode = '22023';
+  end if;
+
+  -- One import at a time per workspace, so the name check below holds until this transaction commits.
+  perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || p_workspace::text, 0));
 
   -- 1. Every process and its draft, parents first (a child names its parent).
   for node in select value from jsonb_array_elements(p_nodes) loop
     proc := (node ->> 'id')::uuid;
+    -- The first process is the top one; every other has an earlier process of this call as its parent.
+    if (node ->> 'parent_id') is null then
+      if cardinality(made) > 0 then
+        raise exception 'import_new_process: only the first process has no parent' using errcode = '22023';
+      end if;
+    elsif not ((node ->> 'parent_id')::uuid = any (made)) then
+      raise exception 'import_new_process: a process can only sit inside an earlier one of the same import' using errcode = '22023';
+    end if;
+    if proc = any (made) then
+      raise exception 'import_new_process: a process is listed twice' using errcode = '22023';
+    end if;
+    -- Same rule as the app's check: ignoring case and punctuation, the company map excluded, and the other new processes count too.
+    nname := trim(regexp_replace(replace(lower(coalesce(node ->> 'name', '')), '&', ' and '), '[^[:alnum:]]+', ' ', 'g'));
+    select p.name into clash from public.processes p
+    where p.workspace_id = p_workspace and not p.is_company
+      and trim(regexp_replace(replace(lower(p.name), '&', ' and '), '[^[:alnum:]]+', ' ', 'g')) = nname limit 1;
+    if clash is null and nname = any (names) then
+      clash := node ->> 'name';
+    end if;
+    names := names || nname;
+    if clash is not null then
+      raise exception 'You already have a process called ''%''. Give this one a different name.', clash using errcode = '23505', hint = 'name_taken';
+    end if;
+    made := made || proc;
     insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
     values (proc, p_workspace, node ->> 'name', node ->> 'kind', node ->> 'entity_name', node ->> 'description', 'import', (node ->> 'parent_id')::uuid);
     draft := public.open_draft(proc);
@@ -92,10 +135,14 @@ begin
 
   -- 2. Existing processes that move inside a step of the new ones.
   for adopt in select value from jsonb_array_elements(coalesce(p_adopt, '[]')) loop
+    if not ((adopt ->> 'parent_id')::uuid = any (made)) then
+      raise exception 'import_new_process: a process can only be moved inside a new one of this import' using errcode = '22023';
+    end if;
     update public.processes p set parent_process_id = (adopt ->> 'parent_id')::uuid
-    where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace;
+    where p.id = (adopt ->> 'id')::uuid and p.workspace_id = p_workspace and p.parent_process_id is null and not p.is_company
+      and not ((adopt ->> 'id')::uuid = any (made));
     if not found then
-      raise exception 'import_new_process: a process to move inside another was not found' using errcode = '42501';
+      raise exception 'import_new_process: a process to move inside another was not found, or already sits inside one' using errcode = '42501';
     end if;
   end loop;
 
@@ -104,7 +151,7 @@ begin
     proc := (node ->> 'id')::uuid;
     rev := (revisions ->> proc::text)::uuid;
 
-    select coalesce(jsonb_agg(s.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'entry_step_id', null)), '[]')
+    select coalesce(jsonb_agg(s.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'entry_step_id', null, 'created_by', auth.uid())), '[]')
       into rows_json from jsonb_array_elements(coalesce(node -> 'steps', '[]')) s;
     if jsonb_array_length(rows_json) > 0 then
       select string_agg(quote_ident(k), ', ') into cols from (select distinct jsonb_object_keys(r.value) k from jsonb_array_elements(rows_json) r) q;
@@ -114,7 +161,7 @@ begin
       where st.revision_id = rev and st.id = (s.value ->> 'id')::uuid and s.value ->> 'entry_step_id' is not null;
     end if;
 
-    select coalesce(jsonb_agg(e.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc)), '[]')
+    select coalesce(jsonb_agg(e.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'created_by', auth.uid())), '[]')
       into rows_json from jsonb_array_elements(coalesce(node -> 'edges', '[]')) e;
     if jsonb_array_length(rows_json) > 0 then
       select string_agg(quote_ident(k), ', ') into cols from (select distinct jsonb_object_keys(r.value) k from jsonb_array_elements(rows_json) r) q;

@@ -33,6 +33,8 @@ export interface VersionMeta {
   /** A person's name, when the workspace knows it. */
   authorName: string | null;
   changes: RevisionChanges | null;
+  /** What a system-made version did, in words ("Added Sales"): only the company map's versions made by sync have one. */
+  note?: string | null;
 }
 
 /** "Claude (MCP)" for a publish through MCP, else the person's name. */

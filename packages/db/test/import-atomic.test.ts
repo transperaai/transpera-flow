@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NORTHBEAM_WORKSPACE_ID } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
@@ -113,7 +114,8 @@ describe("import_new_process", () => {
       await c.query("savepoint s");
       await expect(c.query("select public.import_new_process($1, $2, '[]')", [ws, JSON.stringify([parent, child])])).rejects.toThrow();
       await c.query("rollback to savepoint s");
-      await expect(c.query("select public.import_new_process($1, $2, $3)", [ws, JSON.stringify([node("Atomic half two")]), JSON.stringify([{ id: randomUUID(), parent_id: parent.id }])])).rejects.toThrow(/not found/);
+      const two = node("Atomic half two");
+      await expect(c.query("select public.import_new_process($1, $2, $3)", [ws, JSON.stringify([two]), JSON.stringify([{ id: randomUUID(), parent_id: two.id }])])).rejects.toThrow(/not found/);
       await c.query("rollback to savepoint s");
       expect((await c.query("select count(*)::int n from processes where name like 'Atomic half%'")).rows[0].n).toBe(0);
     });
@@ -143,6 +145,106 @@ describe("import_new_process", () => {
       await c.query("rollback to savepoint s");
       await expect(c.query("select public.import_new_process($1, '{}', '[]')", [ws])).rejects.toThrow(/p_nodes must be/);
     });
+  });
+});
+
+describe("import_new_process is not a general move or create-under call", () => {
+  const call = (c: { query: (s: string, p?: unknown[]) => Promise<unknown> }, nodes: unknown[], adopt: unknown[] = []) =>
+    c.query("select public.import_new_process($1, $2, $3)", [ws, JSON.stringify(nodes), JSON.stringify(adopt)]);
+  const refused = async (nodes: unknown[], adopt: unknown[], message: RegExp) => {
+    await db.as(editor.claims, async (c) => {
+      await expect(call(c, nodes, adopt)).rejects.toThrow(message);
+    });
+  };
+
+  it("refuses a new process under an existing one, or a parent that comes later or is missing", async () => {
+    const existing = randomUUID();
+    await db.client.query("insert into processes (id, workspace_id, name) values ($1, $2, 'Guard existing')", [existing, ws]);
+    await refused([node("Guard under existing", { parent: existing })], [], /sit inside an earlier one/);
+    const first = node("Guard first");
+    const second = node("Guard second", { parent: first.id });
+    await refused([second, first], [], /(only the first process has no parent|sit inside an earlier one)/);
+    await refused([first, node("Guard second parentless")], [], /only the first process has no parent/);
+  });
+
+  it("moves only processes that have no parent, and only under a new process of the call", async () => {
+    const top = randomUUID();
+    const nested = randomUUID();
+    const loose = randomUUID();
+    await db.client.query("insert into processes (id, workspace_id, name) values ($1, $2, 'Guard top'), ($3, $2, 'Guard loose')", [top, ws, loose]);
+    await db.client.query("insert into processes (id, workspace_id, name, parent_process_id) values ($1, $2, 'Guard nested', $3)", [nested, ws, top]);
+    const mine = node("Guard mine");
+    await refused([mine], [{ id: nested, parent_id: mine.id }], /not found, or already sits inside one/);
+    await refused([mine], [{ id: loose, parent_id: top }], /inside a new one of this import/);
+    await db.as(editor.claims, async (c) => {
+      await call(c, [mine], [{ id: loose, parent_id: mine.id }]);
+      expect((await c.query("select parent_process_id from processes where id = $1", [loose])).rows[0].parent_process_id).toBe(mine.id);
+      expect((await c.query("select parent_process_id from processes where id = $1", [nested])).rows[0].parent_process_id).toBe(top);
+    });
+  });
+
+  it("makes created_by the caller whatever the rows say", async () => {
+    const n = node("Guard created by");
+    (n.steps[0] as Record<string, unknown>).created_by = other.id;
+    (n.edges[0] as Record<string, unknown>).created_by = other.id;
+    await db.as(editor.claims, async (c) => {
+      const r = (await call(c, [n])) as { rows: { import_new_process: { revision_id: string }[] }[] };
+      const rev = r.rows[0]!.import_new_process[0]!.revision_id;
+      expect((await c.query("select distinct created_by from steps where revision_id = $1", [rev])).rows).toEqual([{ created_by: editor.id }]);
+      expect((await c.query("select distinct created_by from edges where revision_id = $1", [rev])).rows).toEqual([{ created_by: editor.id }]);
+    });
+  });
+
+  it("refuses more than 1000 steps in all, and accepts 1000", async () => {
+    const big = (name: string, steps: number) => {
+      const n = node(name);
+      n.steps = Array.from({ length: steps }, (_, i) => step(randomUUID(), `S${i}`, "task"));
+      n.edges = [];
+      return n;
+    };
+    await refused([big("Guard big a", 600), { ...big("Guard big b", 401), parent_id: null }], [], /at most 1000 steps in all \(this one has 1001\)/);
+    await db.as(editor.claims, async (c) => {
+      await call(c, [big("Guard big ok", 1000)]);
+      expect((await c.query("select count(*)::int n from steps s join processes p on p.id = s.process_id where p.name = 'Guard big ok'")).rows[0].n).toBe(1000);
+    });
+  });
+
+  it("refuses a name that is taken, ignoring case and punctuation, but not the company map's", async () => {
+    await db.client.query("insert into processes (workspace_id, name) values ($1, 'Guard Sales & Co.')", [ws]);
+    await refused([node("guard sales and co")], [], /already have a process called 'Guard Sales & Co\.'/);
+    const a = node("Guard twin");
+    await refused([a, node("GUARD twin!", { parent: a.id })], [], /already have a process called 'Guard twin'/);
+    const company = (await db.client.query("select name from processes where workspace_id = $1 and is_company", [ws])).rows[0].name as string;
+    await db.as(editor.claims, async (c) => {
+      await call(c, [node(company)]);
+    });
+  });
+
+  it("lets only one of two concurrent imports with the same name win", async () => {
+    const other2 = new pg.Client({ connectionString: db.url });
+    await other2.connect();
+    const run = async (client: pg.Client, n: unknown) => {
+      await client.query("begin");
+      await client.query("set local role authenticated");
+      await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(editor.claims)]);
+      await call(client, [n]);
+    };
+    try {
+      await run(db.client, node("Guard race"));
+      // The second import waits for the first (same workspace lock) and then finds the name taken.
+      const second = run(other2, node("Guard race")).then(
+        () => "ok",
+        (e: Error) => e.message,
+      );
+      await new Promise((r) => setTimeout(r, 300));
+      await db.client.query("commit");
+      expect(await second).toMatch(/already have a process called 'Guard race'/);
+      expect(await named("Guard race")).toBe(1);
+    } finally {
+      await other2.query("rollback").catch(() => {});
+      await db.client.query("rollback").catch(() => {});
+      await other2.end();
+    }
   });
 });
 

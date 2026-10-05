@@ -202,14 +202,17 @@ type BranchData = {
   restorable: boolean;
   /** Drawn to or from a closed group in place of the steps inside it: no share, not editable. */
   rolled?: boolean;
+  /** A handoff line's label, on the company map. */
+  label?: string | null;
 };
 type BranchFlowEdge = Edge<BranchData, "branch">;
 
 /** Lets custom nodes and edges reach the editor without threading it through React Flow's data. */
-const CanvasContext = createContext<{ editor: ProcessEditor | null; restore: ((table: Table, id: string) => void) | null; toggleGroup: (id: string) => void }>({
+const CanvasContext = createContext<{ editor: ProcessEditor | null; restore: ((table: Table, id: string) => void) | null; toggleGroup: (id: string) => void; handoffs: boolean }>({
   editor: null,
   restore: null,
   toggleGroup: () => undefined,
+  handoffs: false,
 });
 
 const badgeClass = "pointer-events-none absolute -top-2 left-2 rounded-full border px-1.5 text-[10px] leading-4 font-semibold";
@@ -413,7 +416,7 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
 
 function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
   const { step, open, expandable, roll, worstRating, warning, editable } = data;
-  const { toggleGroup } = useContext(CanvasContext);
+  const { toggleGroup, handoffs } = useContext(CanvasContext);
   const toggle = expandable && (
     <button
       type="button"
@@ -469,7 +472,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
           {toggle}
         </div>
         <p className="mt-0.5 text-xs text-fg-2">
-          {expandable ? "Group" : "Child process"} · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
+          {expandable ? "Group" : handoffs ? "Process" : "Child process"} · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
         </p>
         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs text-fg-2 tabular-nums">
           <span title="Hands-on time of every step inside, added up">{roll.handsOnHours ? `${formatHours(roll.handsOnHours)} work` : "no work entered"}</span>
@@ -524,13 +527,14 @@ function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
 /** A branch: its probability (and condition tag) as a label, edited inline when selected. */
 function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   const { id, data, selected, markerEnd, style } = props;
-  const { editor } = useContext(CanvasContext);
+  const { editor, handoffs } = useContext(CanvasContext);
   const zoom = useStore((s) => s.transform[2]);
   const [path, labelX, labelY] = getSmoothStepPath(props);
   const p = data?.probability ?? 1;
   const tag = data?.tag ?? null;
   const editing = selected && data?.alone && editor;
-  const text = [p < 1 ? percent(p) : null, tag].filter(Boolean).join(" · ");
+  // A handoff line says what is handed over, not a share of the work.
+  const text = handoffs ? (data?.label ?? "") : [p < 1 ? percent(p) : null, tag].filter(Boolean).join(" · ");
   const ghost = data?.ghost ?? false;
   const was = data?.was ?? null;
   if (data?.rolled) return <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={0} />;
@@ -564,7 +568,7 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
                 pointerEvents: "all",
               }}
             >
-              <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />
+              {handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />}
             </div>
           </EdgeLabelRenderer>
         )}
@@ -590,14 +594,67 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
             }}
           >
             {editing ? (
-              <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />
+              handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />
             ) : (
-              <span title={text} className="block max-w-[5.5rem] truncate rounded-token bg-panel px-1 font-mono text-[11px] text-fg-2 tabular-nums">{text}</span>
+              <span title={text} className={`block truncate rounded-token bg-panel px-1 text-[11px] text-fg-2 ${handoffs ? "max-w-[9rem] font-sans" : "max-w-[5.5rem] font-mono tabular-nums"}`}>{text}</span>
             )}
           </div>
         </EdgeLabelRenderer>
       )}
     </>
+  );
+}
+
+/** A handoff line's label and removal, on the company map: no share or tag, the lines are pictures. */
+function HandoffEditor({ editor, edgeId, label }: { editor: ProcessEditor; edgeId: string; label: string | null }) {
+  const [text, setText] = useState(label ?? "");
+  // Take the stored value when it changes (a save, an undo), without remounting under the cursor.
+  const [seen, setSeen] = useState(label);
+  if (seen !== label) {
+    setSeen(label);
+    setText(label ?? "");
+  }
+  const commit = () => {
+    const next = text.trim() || null;
+    if (next !== (label ?? null)) editor.run((b) => updateEdge(b, edgeId, { label: next }));
+  };
+  const dropping = useRef(false);
+  return (
+    <div
+      data-edge-editor={edgeId}
+      role="group"
+      aria-label="Edit handoff"
+      onKeyDown={(e) => e.stopPropagation()}
+      className="flex flex-col gap-1 rounded-token border border-accent bg-panel p-1.5 text-xs shadow-token"
+    >
+      <label className="flex items-center gap-1">
+        <span className="w-9 text-fg-2">Label</span>
+        <input
+          aria-label="Handoff label"
+          value={text}
+          maxLength={200}
+          placeholder="What is handed over"
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => {
+            if (!dropping.current) commit();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setText(label ?? "");
+              dropping.current = true;
+              focusEdge(edgeId);
+              dropping.current = false;
+            }
+          }}
+          className={`${edgeInputClass} w-40`}
+        />
+      </label>
+      <button type="button" onClick={() => editor.run((b) => deleteEdges(b, [edgeId]))} className="self-start text-crit hover:underline">
+        Remove handoff
+      </button>
+    </div>
   );
 }
 
@@ -771,6 +828,11 @@ interface CanvasProps {
   /** The Editor has its own palette (issue #104): leave "Add step" out of the toolbar. */
   hideAdd?: boolean;
   /**
+   * The company map (B11): the lines between process cards are handoffs, drawn and labelled but visual only. They show their label
+   * (not a branch share), are edited with a label field, and the loose-end warnings of a process's steps don't apply.
+   */
+  handoffs?: boolean;
+  /**
    * Which groups are open. Pass it with `onExpandedChange` to share open state between maps (the Solution page shows two);
    * left out, the map keeps its own (closed when read-only, open when editable).
    */
@@ -833,6 +895,7 @@ function Canvas({
   openIssues,
   rating,
   hideAdd = false,
+  handoffs = false,
   expanded: expandedProp,
   onExpandedChange,
   highlight = null,
@@ -902,7 +965,7 @@ function Canvas({
       }),
     [setExpanded],
   );
-  const canvasContext = useMemo(() => ({ editor, restore: editor ? onRestore : null, toggleGroup }), [editor, onRestore, toggleGroup]);
+  const canvasContext = useMemo(() => ({ editor, restore: editor ? onRestore : null, toggleGroup, handoffs }), [editor, onRestore, toggleGroup, handoffs]);
   const flow = useReactFlow();
   // Expand all / Collapse all; the map re-frames itself unless it was zoomed by hand.
   const toggleAllGroups = () => {
@@ -920,7 +983,7 @@ function Canvas({
   const menuFor = useRef<string | null>(null);
   const playback = usePlayback(bundle, result);
 
-  const warnings = useMemo(() => (editable ? stepWarnings(bundle) : new Map<string, string>()), [bundle, editable]);
+  const warnings = useMemo(() => (editable && !handoffs ? stepWarnings(bundle) : new Map<string, string>()), [bundle, editable, handoffs]);
   const order = useMemo(() => flowOrder(bundle), [bundle]);
   const editingId = editing && bundle.steps.some((s) => s.id === editing.id) ? editing.id : null;
   const layout = useMemo(() => {
@@ -988,7 +1051,7 @@ function Canvas({
             type: "group",
             position: dragging.get(step.id) ?? { x: Number(step.x), y: Number(step.y) },
             selected: selected.has(step.id),
-            ariaLabel: `${step.name}, ${isGroup(step) ? "group" : "child process"} of ${roll.steps} ${roll.steps === 1 ? "step" : "steps"}${isGroup(step) ? (open ? ", open" : ", closed") : ""}`,
+            ariaLabel: `${step.name}, ${isGroup(step) ? "group" : handoffs ? "process" : "child process"} of ${roll.steps} ${roll.steps === 1 ? "step" : "steps"}${isGroup(step) ? (open ? ", open" : ", closed") : ""}`,
             ...(step.parent_step_id ? { parentId: step.parent_step_id } : {}),
             // An open group is as big as its steps need: React Flow takes the size from here, and so shows it at once.
             ...(box ? { width: box.width, height: box.height, style: { width: box.width, height: box.height } } : {}),
@@ -1085,7 +1148,7 @@ function Canvas({
         };
       });
     return [...ghosts, ...drafted];
-  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating]);
+  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs]);
 
   const edges = useMemo(() => {
     const selected = new Set(selection.edges);
@@ -1106,8 +1169,8 @@ function Canvas({
       .sort((a, b) => rank(a) - rank(b))
       .map((e): BranchFlowEdge => {
         const change = e.rolled ? undefined : diff?.edges.get(e.id);
-        const relabelled = change?.kind === "changed" && change.fields.some((f) => f.field === "probability" || f.field === "condition_tag");
-        const was = relabelled ? labelOf(Number(change.live!.probability), change.live!.condition_tag) : null;
+        const relabelled = change?.kind === "changed" && change.fields.some((f) => (handoffs ? f.field === "label" : f.field === "probability" || f.field === "condition_tag"));
+        const was = relabelled ? (handoffs ? (change.live!.label ?? "no label") : labelOf(Number(change.live!.probability), change.live!.condition_tag)) : null;
         const tone = selected.has(e.id) || change ? "var(--edit)" : "var(--line-2)";
         return {
           id: e.id,
@@ -1125,6 +1188,7 @@ function Canvas({
             ghost: false,
             restorable: false,
             rolled: e.rolled,
+            label: e.label,
           },
           style: {
             stroke: tone,
@@ -1132,7 +1196,9 @@ function Canvas({
             ...(change?.kind === "added" ? { strokeDasharray: "6 4" } : e.rolled ? { strokeDasharray: "2 4" } : {}),
           },
           markerEnd: { type: MarkerType.ArrowClosed, color: tone },
-          ariaLabel: `Connection from ${names.get(e.from_step_id)} to ${names.get(e.to_step_id)}, ${percent(Number(e.probability))}${e.condition_tag ? `, tag ${e.condition_tag}` : ""}${
+          ariaLabel: handoffs
+            ? `Handoff from ${names.get(e.from_step_id)} to ${names.get(e.to_step_id)}${e.label ? `: ${e.label}` : ""}${change?.kind === "added" ? ", new in this draft" : change ? `, changed in this draft${was ? `, was ${was}` : ""}` : ""}`
+            : `Connection from ${names.get(e.from_step_id)} to ${names.get(e.to_step_id)}, ${percent(Number(e.probability))}${e.condition_tag ? `, tag ${e.condition_tag}` : ""}${
             change?.kind === "added" ? ", new in this draft" : change ? `, changed in this draft${was ? `, was ${was}` : ""}` : ""
           }`,
         };
@@ -1159,6 +1225,7 @@ function Canvas({
             was: null,
             ghost: true,
             restorable: editable && !discardProblem(bundle, c),
+            label: e.label,
           },
           style: { stroke: "var(--crit)", strokeWidth: 1.5, strokeDasharray: "4 4", opacity: 0.7 },
           markerEnd: { type: MarkerType.ArrowClosed, color: "var(--crit)" },
@@ -1166,7 +1233,7 @@ function Canvas({
         };
       });
     return [...ghosts, ...drafted];
-  }, [bundle, selection.edges, selection.steps.length, order, diff, editable, drawn]);
+  }, [bundle, selection.edges, selection.steps.length, order, diff, editable, drawn, handoffs]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     const moves: { id: string; x: number; y: number }[] = [];

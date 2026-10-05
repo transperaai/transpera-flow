@@ -30,6 +30,7 @@ export function Inspector({
   mode,
   draft,
   blocks,
+  company = false,
 }: {
   bundle: ProcessBundle;
   editor: ProcessEditor;
@@ -45,9 +46,11 @@ export function Inspector({
   draft: ((step: StepRow) => DraftInfo) | null;
   /** The block library as the Editor uses it: a selected group can be saved as a block. */
   blocks: BlockTools;
+  /** The company map (B11): no loose ends to chase, no first principles, no blocks. */
+  company?: boolean;
 }) {
   const step = selected.steps.length === 1 && !selected.edges.length ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
-  const warnings = useMemo(() => stepWarnings(bundle), [bundle]);
+  const warnings = useMemo(() => (company ? new Map<string, string>() : stepWarnings(bundle)), [bundle, company]);
   const loose = useMemo(() => bundle.steps.filter((s) => warnings.has(s.id)), [bundle.steps, warnings]);
   return (
     <>
@@ -76,7 +79,7 @@ export function Inspector({
             label={`Step: ${step.name}`}
             empty="None linked"
           />
-          {isGroup(step) && <GroupPanel bundle={bundle} editor={editor} group={step} setSelection={setSelection} blocks={blocks} />}
+          {isGroup(step) && <GroupPanel bundle={bundle} editor={editor} group={step} setSelection={setSelection} blocks={blocks} company={company} />}
           {warnings.get(step.id) && <p role="note" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">{warnings.get(step.id)}</p>}
         </>
       ) : (
@@ -117,7 +120,7 @@ export function Inspector({
         </section>
       )}
 
-      {mode !== "block" && (
+      {mode !== "block" && !company && (
         <section aria-label="First principles" className="flex flex-col gap-1.5">
           <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
             First principles
@@ -142,12 +145,14 @@ function GroupPanel({
   group,
   setSelection,
   blocks,
+  company,
 }: {
   bundle: ProcessBundle;
   editor: ProcessEditor;
   group: StepRow;
   setSelection: Dispatch<SetStateAction<Selection>>;
   blocks: BlockTools;
+  company: boolean;
 }): ReactNode {
   const members = membersOf(bundle, group.id);
   const [saving, setSaving] = useState(false);
@@ -157,6 +162,7 @@ function GroupPanel({
       <p className="text-xs text-fg-2">
         {members.length === 0 ? "Nothing inside yet. Select steps beside it and press Group, or add steps with + Step." : `${members.length} ${members.length === 1 ? "step" : "steps"} inside. Groups are open in the Editor so you can edit inside them; use Collapse on the map to close one.`}
       </p>
+      {!company && (
       <label className="flex flex-col gap-1 text-xs font-semibold">
         <span className="flex items-center">
           First step
@@ -179,7 +185,8 @@ function GroupPanel({
           ))}
         </NativeSelect>
       </label>
-      {!entry && members.length > 0 && <p className="text-xs text-crit">This group needs a first step before the process can be simulated.</p>}
+      )}
+      {!company && !entry && members.length > 0 && <p className="text-xs text-crit">This group needs a first step before the process can be simulated.</p>}
       <div className="flex flex-wrap gap-1.5">
         <Button
           type="button"
@@ -191,6 +198,8 @@ function GroupPanel({
         >
           Ungroup
         </Button>
+        {!company && (
+        <>
         <Button
           type="button"
           variant="outline"
@@ -210,6 +219,8 @@ function GroupPanel({
           description="Saves this group's steps and the connections between them in the block library, named after the group, so you can drop a copy into any process later. The group on the map is left as it is."
           example="Save your “Sales conversation” group, then insert it into the next client's onboarding process."
         />
+        </>
+        )}
       </div>
       {blocks.note?.kind === "save" && (
         <p role="status" className={`rounded-token border px-2 py-1 text-xs ${blocks.note.tone === "ok" ? "border-good bg-good-soft" : "border-warn bg-warn-soft"}`}>

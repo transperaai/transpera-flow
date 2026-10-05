@@ -54,7 +54,7 @@ export function splitProblem(bundle: ProcessBundle, id: string): string | null {
  * the first part. The old step's row is kept, retired, with `replaced_by`.
  */
 export function splitStep(bundle: ProcessBundle, id: string, newId: () => string = () => crypto.randomUUID()): { edit: Edit; ids: [string, string] } | null {
-  if (splitProblem(bundle, id)) return null;
+  if (splitProblem(bundle, id) || bundle.process.is_company) return null;
   const old = bundle.steps.find((s) => s.id === id)!;
   const [a, b] = [newId(), newId()];
 

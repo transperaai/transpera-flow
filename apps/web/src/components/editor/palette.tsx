@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
+import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
 import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind } from "@/lib/editor/groups";
 import { Badge } from "@/components/ui/badge";
 import type { BlockTools } from "./use-blocks";
@@ -28,6 +29,7 @@ export function Palette({
   selected,
   setSelection,
   blocks,
+  company = false,
 }: {
   bundle: ProcessBundle;
   editor: ProcessEditor;
@@ -35,6 +37,8 @@ export function Palette({
   setSelection: Dispatch<SetStateAction<Selection>>;
   /** The block library as the Editor uses it. */
   blocks: BlockTools;
+  /** The company map (B11): cards are processes placed by link, so there are no steps or blocks to add, and none to remove. */
+  company?: boolean;
 }) {
   const only = selected.steps.length === 1 ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
   // What the last add left for the person to do ("connect the new step yourself").
@@ -71,6 +75,23 @@ export function Palette({
 
   return (
     <>
+      {company && (
+        <section aria-label="The company map" className="flex flex-col gap-2">
+          <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+            The company map
+            <Help
+              label="The company map"
+              description="Each card is a process, placed here as a link: moving it or joining it to another changes only this map, never the process. Draw a line from one card's right edge to another's left edge to show a handoff, then click the line to give it a label."
+              example="Draw a line from “Sales” to “Onboarding” and label it “Signed contract”."
+            />
+          </h2>
+          <p className="text-xs text-muted-foreground">Drag cards to move them. Draw a handoff line from a card&apos;s right edge to another card, then click the line to label it.</p>
+          <p role="note" data-placed-note className="rounded-token border border-line bg-panel-2 px-2 py-1.5 text-xs text-fg-2">
+            {PLACED_REMOVE_NOTE}
+          </p>
+        </section>
+      )}
+      {!company && (
       <section aria-label="Add to the process" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
           Add
@@ -100,6 +121,7 @@ export function Palette({
           </p>
         )}
       </section>
+      )}
 
       <section aria-label="Groups" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
@@ -121,6 +143,7 @@ export function Palette({
         </p>
       </section>
 
+      {!company && (
       <section aria-label="Blocks" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
           Blocks
@@ -179,6 +202,7 @@ export function Palette({
           </p>
         )}
       </section>
+      )}
     </>
   );
 }

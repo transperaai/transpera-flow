@@ -44,6 +44,10 @@ export interface SolutionForm {
   error: string | null;
 }
 
+const COMPANY_TITLE = "Draft of the company map";
+const COMPANY_HINT =
+  "You're editing a draft of the company map. Move cards, draw and label handoff lines, or put cards in groups. Handoff lines are pictures: they never change a simulation. The live map doesn't change until you publish.";
+
 export function EditorBar({
   mode,
   subject,
@@ -63,6 +67,7 @@ export function EditorBar({
   blockForm,
   solutionForm,
   issue = null,
+  company = false,
 }: {
   mode: EditorMode;
   /** What is being edited: the process's name. */
@@ -94,6 +99,8 @@ export function EditorBar({
   solutionForm?: SolutionForm;
   /** Solution mode only: the issue the solution is built for, if any. */
   issue?: SolutionIssue | null;
+  /** The company map (B11): a picture of the business, so nothing to simulate and the words say "map". */
+  company?: boolean;
 }) {
   const info = MODE_INFO[mode];
   const router = useRouter();
@@ -113,7 +120,7 @@ export function EditorBar({
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-edit px-4 py-2.5 text-edit-fg">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="rounded border-[1.5px] border-current px-1.5 py-px font-mono text-[11px] font-semibold tracking-widest uppercase">✎ Editor</span>
-          <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : info.title(subject)}</h1>
+          <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : company ? COMPANY_TITLE : info.title(subject)}</h1>
           {mode === "draft" && (
             <span className="rounded-full bg-edit-fg/15 px-2 py-0.5 text-xs font-semibold" aria-live="polite">
               {unpublished ? "Not published yet" : hasDraft ? `Draft version ${draftNumber} · live is version ${liveNumber}` : `New draft (version ${draftNumber}) · live is version ${liveNumber}`}
@@ -125,7 +132,7 @@ export function EditorBar({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {mode !== "block" && (
+          {mode !== "block" && !company && (
             <>
             <Button type="button" variant="outline" size="sm" className={onBar} onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>
               {simulating ? "Simulating…" : "▶ Simulate"}
@@ -232,7 +239,7 @@ export function EditorBar({
         </div>
       </div>
       <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
-        {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : info.hint}
+        {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : info.hint}
         {drafts.notice && (
           <span role="status" className="ml-2 font-semibold">
             {drafts.notice}{" "}
@@ -308,9 +315,11 @@ export function EditorBar({
           <DialogHeader>
             <DialogTitle>Publish version {draftNumber}?</DialogTitle>
             <DialogDescription>
-              {unpublished
-                ? `This makes ${subject} live for the first time.`
-                : `This replaces the live map of ${subject}. Version ${liveNumber} stays in History and can be restored.`}
+              {company
+                ? `This replaces the live company map. Version ${liveNumber} stays in History and can be restored.`
+                : unpublished
+                  ? `This makes ${subject} live for the first time.`
+                  : `This replaces the live map of ${subject}. Version ${liveNumber} stays in History and can be restored.`}
             </DialogDescription>
           </DialogHeader>
           {estimates.length > 0 && (

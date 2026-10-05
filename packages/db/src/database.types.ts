@@ -2999,6 +2999,7 @@ export type Database = {
           author_kind: string | null
           author_name: string | null
           changes: Json | null
+          note: string | null
           number: number
           published_at: string | null
           revision_id: string

@@ -232,8 +232,10 @@ export async function loadWorkspaceScenarios(workspaceId: string): Promise<Scena
 export async function loadProcessForEditing(
   slug: string,
   processId?: string,
+  /** The Editor also opens the company map (B11), by its id; no other page does. */
+  { includeCompany = false }: { includeCompany?: boolean } = {},
 ): Promise<{ live: ProcessBundle; draft: ProcessBundle | null; processes: ProcessListing[] } | null> {
-  return loadProcessBySlug(await createClient(), slug, processId ? { processId } : {});
+  return loadProcessBySlug(await createClient(), slug, { ...(processId ? { processId } : {}), includeCompany });
 }
 
 /**

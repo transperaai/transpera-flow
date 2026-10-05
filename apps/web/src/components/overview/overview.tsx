@@ -23,6 +23,7 @@ import { PageHeader } from "@/components/shell/page";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { horizonLabel, horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/lib/horizon";
 import { perceptionGapDetections } from "@/lib/issues/perception";
@@ -68,6 +69,9 @@ export interface OverviewProps {
   /** Where each process's page is, by process id. */
   hrefs: Record<string, string>;
   processesHref: string;
+  /** Editors only: the Editor on the company map (its draft, handoff lines and publishing), and its History (B11). */
+  companyEditHref?: string;
+  companyHistoryHref?: string;
   issuesHref: string;
   rulesHref?: string;
   /** What AI wrote about the company model's live version, for the AI read and the AI insights (A46). */
@@ -115,7 +119,7 @@ function Section({ title, description, action, help, children }: { title: string
   );
 }
 
-export function Overview({ workspaceName, live, parts, company, issues, sources = NO_SOURCES, mode, analysisRules, firstPrinciples, hrefs, processesHref, issuesHref, rulesHref, ai }: OverviewProps) {
+export function Overview({ workspaceName, live, parts, company, issues, sources = NO_SOURCES, mode, analysisRules, firstPrinciples, hrefs, processesHref, companyEditHref, companyHistoryHref, issuesHref, rulesHref, ai }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -245,10 +249,22 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
           title="Company map"
           description="Every process in the business. Expand one in place, or click it to open its page."
           action={
-            <Link href={processesHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-              All processes
-              <ArrowRight aria-hidden />
-            </Link>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {companyEditHref && (
+                <Link href={companyEditHref} data-edit-company-map className={cn(buttonVariants({ size: "sm" }), "bg-edit text-edit-fg hover:bg-edit/90")}>
+                  ✎ Edit company map
+                </Link>
+              )}
+              {companyHistoryHref && (
+                <Link href={companyHistoryHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+                  History
+                </Link>
+              )}
+              <Link href={processesHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+                All processes
+                <ArrowRight aria-hidden />
+              </Link>
+            </div>
           }
         >
           <Card className="gap-0 overflow-hidden p-0">
@@ -265,6 +281,7 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
                 highlight={lit ? [...litIds(map.bundle.steps, expanded, lit)] : null}
                 showPlayback={false}
                 showLanes={false}
+                handoffs
                 height="auto"
                 stepDetail={false}
                 onStepClick={openProcess}

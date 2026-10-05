@@ -12,8 +12,12 @@ export type LinkFetchTurn = { allowed: true } | { allowed: false; message: strin
 export async function takeLinkFetch(ctx: Pick<ToolContext, "db">): Promise<LinkFetchTurn> {
   const { data, error } = await ctx.db.rpc("take_link_fetch");
   if (error) {
-    // Before the migration is applied the function doesn't exist: the preview still works, without the limit.
-    if (error.code === "PGRST202" || error.code === "42883") return { allowed: true };
+    // Before the migration is applied the function doesn't exist: the preview still works, without the limit. Logged, so a
+    // deploy that got ahead of its migration is visible rather than silently unlimited.
+    if (error.code === "PGRST202" || error.code === "42883") {
+      console.warn("[link-limit] take_link_fetch is missing (migration 20261128000000 not applied?): link fetches are NOT rate limited.");
+      return { allowed: true };
+    }
     return { allowed: false, message: "Couldn't open that link right now. Try again in a moment." };
   }
   const wait = typeof data === "number" ? data : 0;

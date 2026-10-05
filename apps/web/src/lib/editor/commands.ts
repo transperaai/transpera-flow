@@ -101,12 +101,24 @@ export function addStep(
   return { edit: { label: `Added ${step.name}`, ops: [{ kind: "insert", steps: [step], edges: [] }] }, id: step.id };
 }
 
+/**
+ * A process placed on the company map (B11): a card that is a link to the process. Cards are moved, joined by handoff lines and
+ * put in groups, but not copied, split or removed here: adding and removing processes comes with the process library (B12).
+ */
+export const isPlacedStep = (bundle: Pick<ProcessBundle, "process">, step: Pick<StepRow, "child_process_id">): boolean =>
+  bundle.process.is_company === true && step.child_process_id !== null;
+
+/** What the Editor says where a card can't be removed. */
+export const PLACED_REMOVE_NOTE = "Removing processes from the map comes with the process library.";
+
 /** Delete steps with every edge into or out of them; rework targets pointing at them are cleared. */
 export function deleteSteps(bundle: ProcessBundle, ids: readonly string[]): Edit | null {
   const gone = new Set(ids);
   // A group takes the steps inside it with it (as the database does), at any depth.
   const byId = new Map(bundle.steps.map((s) => [s.id, s]));
   for (const s of bundle.steps) if (ancestorsOf(s.id, byId).some((g) => gone.has(g))) gone.add(s.id);
+  // A process card stays on the map, and so does a group with one inside.
+  if (bundle.steps.some((s) => gone.has(s.id) && isPlacedStep(bundle, s))) return null;
   const steps = bundle.steps.filter((s) => gone.has(s.id));
   if (!steps.length) return null;
   const edges = bundle.edges.filter((e) => gone.has(e.from_step_id) || gone.has(e.to_step_id));
@@ -335,6 +347,8 @@ export function copySteps(bundle: ProcessBundle, ids: readonly string[]): StepCl
   // Copying a group copies the steps inside it.
   const byId = new Map(bundle.steps.map((s) => [s.id, s]));
   for (const s of bundle.steps) if (ancestorsOf(s.id, byId).some((g) => wanted.has(g))) wanted.add(s.id);
+  // A process is on the company map once.
+  if (bundle.steps.some((s) => wanted.has(s.id) && isPlacedStep(bundle, s))) return null;
   const steps = bundle.steps.filter((s) => wanted.has(s.id) && s.kind !== "start");
   if (!steps.length) return null;
   const kept = new Set(steps.map((s) => s.id));
@@ -430,6 +444,8 @@ export function outgoingTotal(bundle: ProcessBundle, stepId: string): number {
 export function addEdge(bundle: ProcessBundle, from: string, to: string): { edit: Edit; id: string } | null {
   if (connectionProblem(bundle, from, to)) return null;
   const { revision } = bundle;
+  // A handoff line on the company map is a picture, not a branch: it has no share to divide.
+  const handoff = bundle.process.is_company === true;
   const edge: EdgeRow = {
     id: newId(),
     revision_id: revision.id,
@@ -437,7 +453,7 @@ export function addEdge(bundle: ProcessBundle, from: string, to: string): { edit
     process_id: revision.process_id,
     from_step_id: from,
     to_step_id: to,
-    probability: Math.max(0, round(1 - outgoingTotal(bundle, from))),
+    probability: handoff ? 1 : Math.max(0, round(1 - outgoingTotal(bundle, from))),
     condition_tag: null,
     label: null,
   };

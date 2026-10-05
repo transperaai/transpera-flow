@@ -216,7 +216,8 @@ export async function loadProcessBundle(
       loadClients(db, ws),
       loadClientGroups(db, ws),
       loadChurnDrivers(db, ws),
-      loadServicingContext(db, ws, process),
+      // The company map runs nothing: it needs no other processes (the Editor draws its cards from the live processes it is given).
+      process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process),
       loadMarket(db, ws),
       db.from("workspaces").select("provenance").eq("id", ws).maybeSingle(),
     ]);
@@ -357,14 +358,16 @@ export const isUnpublished = (bundle: Pick<ProcessBundle, "revision">) => bundle
 export async function loadProcessBySlug(
   db: Db,
   slug: string,
-  { draft = true, processId }: { draft?: boolean; processId?: string } = {},
+  { draft = true, processId, includeCompany = false }: { draft?: boolean; processId?: string; includeCompany?: boolean } = {},
 ): Promise<{ live: ProcessBundle; draft: ProcessBundle | null; processes: ProcessListing[] } | null> {
   const { data: workspace, error } = await db.from("workspaces").select("id, name, slug, settings").eq("slug", slug).maybeSingle();
   if (error) throw error;
   if (!workspace) return null;
-  const all = await listProcesses(db, workspace.id);
+  const everything = await listProcesses(db, workspace.id, { includeCompany });
+  // The company map (the Editor and History open it by its id) is never in the list of processes to pick from.
+  const all = everything.filter((p) => !p.is_company);
   // The default is a top-level process: a child process opens from the step that holds it, or from the list.
-  const process = processId ? all.find((p) => p.id === processId) : (all.find((p) => p.live_revision_id && !p.parent_process_id) ?? all.find((p) => p.live_revision_id));
+  const process = processId ? everything.find((p) => p.id === processId) : (all.find((p) => p.live_revision_id && !p.parent_process_id) ?? all.find((p) => p.live_revision_id));
   if (!process) return null;
   const processes = all.map((p) => ({ id: p.id, name: p.name, kind: p.kind, live: Boolean(p.live_revision_id), draft: Boolean(p.draft_revision_id), parentId: p.parent_process_id }));
   const { draft_revision_id: draftId, ...row } = process;

@@ -85,6 +85,9 @@ export const BUILDING_TOOL_NAMES = [
 ] as const;
 
 const MAX_IMPORT_STEPS = 200;
+/** Most processes and steps one import creates in one transaction (the same limits as `import_new_process`). */
+const MAX_IMPORT_PROCESSES = 200;
+const MAX_IMPORT_TOTAL_STEPS = 1000;
 const MAX_IMPORT_EDGES = 500;
 const PROBABILITY_TOLERANCE = 1e-3;
 
@@ -830,8 +833,15 @@ async function prepareImport(
         const nodes: ImportNode[] = [];
         const adopts: { id: string; parent_id: string }[] = [];
         prepared.collect(null, nodes, adopts);
+        // One transaction has to finish inside the database's statement timeout, so an import has a size limit (checked again there).
+        const stepCount = nodes.reduce((n, x) => n + x.steps.length, 0);
+        if (nodes.length > MAX_IMPORT_PROCESSES) throw new ToolError("invalid_input", `An import can create at most ${MAX_IMPORT_PROCESSES} processes (this one has ${nodes.length}). Split it into smaller imports.`);
+        if (stepCount > MAX_IMPORT_TOTAL_STEPS) throw new ToolError("invalid_input", `An import can have at most ${MAX_IMPORT_TOTAL_STEPS} steps in all, child processes included (this one has ${stepCount}). Split it into smaller imports.`);
         const { data, error } = await ctx.db.rpc("import_new_process", { p_workspace: ws.id, p_nodes: nodes as unknown as Json, p_adopt: adopts as unknown as Json });
-        if (error) throw writeError(error, "create processes");
+        if (error) {
+          if (error.code === "23505" && error.hint === "name_taken") throw new ToolError("name_taken", error.message);
+          throw writeError(error, "create processes");
+        }
         const results = new Map((data as unknown as { process_id: string; revision_id: string; number: number }[]).map((r) => [r.process_id, r]));
         prepared.settle(null, results);
       } else {
