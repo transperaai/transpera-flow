@@ -198,7 +198,7 @@ describe("restore_version", () => {
     expect((await processRow()).draft_revision_id).toBeNull();
   });
 
-  it("clears the link of a step holding a child process that no longer sits inside this one", async () => {
+  it("clears the link of a step holding a child process another ordinary process now holds (one only on the company map stays linked)", async () => {
     // A child process held by a step of a published version, then (after that step is removed and the next
     // version published) moved to the top level.
     const child = randomUUID();
@@ -221,8 +221,20 @@ describe("restore_version", () => {
     expect((await db.client.query("select child_process_id from steps where revision_id = $1 and id = $2", [kept.revision_id, holder])).rows[0].child_process_id).toBe(child);
     await commitAs(users.editor!.claims, (c) => rpc(c, "discard_draft", proc));
 
-    // Now the child moves to the top level: the restored step stays, without its link.
+    // Now the child moves to the top level, onto the company map. B12: the map gives way, so restoring still keeps the link
+    // (publishing it would move the child off the map again).
     await db.client.query("update processes set parent_process_id = null where id = $1", [child]);
+    const onMap = await commitAs(users.editor!.claims, (c) => rpc(c, "restore_version", proc, withChild, true));
+    expect(onMap).toMatchObject({ status: "restored", unlinked_children: 0 });
+    await commitAs(users.editor!.claims, (c) => rpc(c, "discard_draft", proc));
+
+    // Held live by another ORDINARY process instead: the restored step stays, without its link.
+    const other = randomUUID();
+    const otherRev = randomUUID();
+    await db.client.query("insert into processes (id, workspace_id, name, kind) values ($1, $2, 'Other holder', 'pipeline')", [other, ws]);
+    await db.client.query("insert into process_revisions (id, workspace_id, process_id, number, status, published_at) values ($1, $2, $3, 1, 'published', now())", [otherRev, ws, other]);
+    await db.client.query("insert into steps (revision_id, workspace_id, process_id, name, kind, child_process_id) values ($1, $2, $3, 'Onboarding detail', 'subprocess', $4)", [otherRev, ws, other, child]);
+    await db.client.query("update processes set live_revision_id = $2 where id = $1", [other, otherRev]);
     const unlinked = await commitAs(users.editor!.claims, (c) => rpc(c, "restore_version", proc, withChild, true));
     expect(unlinked).toMatchObject({ status: "restored", unlinked_children: 1 });
     const row = (await db.client.query("select name, kind, child_process_id from steps where revision_id = $1 and id = $2", [unlinked.revision_id, holder])).rows[0];

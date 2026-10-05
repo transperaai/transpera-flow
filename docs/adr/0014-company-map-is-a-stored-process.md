@@ -165,7 +165,12 @@ process is a **link** and placing **never edits it**; a process appears **at mos
   of the map (the remove path the map's sync already has; an open draft of the map loses the card too). The placed process is still
   never written. When nothing holds it any more (the holder publishes without the link, or is deleted), it gets its card back on
   the company map, as a system version. Taking a card off the company map itself is a person's choice and leaves the process off
-  ("Not on any map").
+  ("Not on any map"). Two consequences to know: a child MCP's import CREATED inside another process (its `parent_process_id` set)
+  does not come back to the map when its holder drops the link (the map's sync follows that column, which still names the parent);
+  and when the map gives way, removing the card from the map's open draft also drops the handoff lines drawn to and from it there.
+  Restoring an ordinary process keeps a link whose process now sits only on the company map (publishing it moves the process again);
+  only a live ORDINARY holder elsewhere unlinks it. A live version must be a version of the process itself: the publish check
+  ignores anything else (the version guard refuses it), so its message can't name another workspace's processes.
 - **Publishing enforces "once" and "no loops".** A trigger on `processes` (`check_live_placements`, before `live_revision_id` changes,
   for every caller and road: publish, restore, the company map's system versions), for each process the new live version holds that
   the old one did not: refuses it holding, at any depth through live versions, the process being published ("... would sit inside

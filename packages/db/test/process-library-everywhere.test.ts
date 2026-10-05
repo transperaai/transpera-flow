@@ -355,4 +355,53 @@ describe("the company map is the default home, and gives way", () => {
     expect(restored).not.toContain(fresh);
     expect(restored).not.toContain(w.p.Delivery);
   });
+
+  it("restoring an ordinary process keeps a link whose process now sits only on the company map (the map gives way again on publish)", async () => {
+    const w = await world();
+    await publishWith(w.cid, [w.p.Sales!]);
+    await publishWith(w.p.Onboarding!, [w.p.Sales!]);
+    const withSales = (await processRow(w.p.Onboarding!)).live_revision_id!;
+    expect((await mapState(w)).cards).toEqual([]);
+    // Onboarding publishes without Sales: Sales returns to the map.
+    const draft = await openDraft(w.p.Onboarding!);
+    await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and child_process_id = $2", [draft, w.p.Sales]));
+    await publish(w.p.Onboarding!);
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.cid });
+    // Restoring the version that held Sales keeps the link...
+    const r = await commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Onboarding, withSales, true));
+    expect(r).toMatchObject({ status: "restored", unlinked_children: 0 });
+    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = $2", [r.revision_id, w.p.Sales]))[0].n).toBe(1);
+    // ...and publishing it moves Sales off the map again.
+    expect((await publish(w.p.Onboarding!)).status).toBe("published");
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.p.Onboarding });
+    expect((await mapState(w)).cards).toEqual([]);
+  });
+
+  it("restoring still unlinks a process an ORDINARY process holds live", async () => {
+    const w = await world();
+    await publishWith(w.p.Onboarding!, [w.p.Sales!]);
+    const withSales = (await processRow(w.p.Onboarding!)).live_revision_id!;
+    const draft = await openDraft(w.p.Onboarding!);
+    await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and child_process_id = $2", [draft, w.p.Sales]));
+    await publish(w.p.Onboarding!);
+    await publishWith(w.p.Delivery!, [w.p.Sales!]);
+    const r = await commitAs(editor.claims, (c) => rpc(c, "restore_version", w.p.Onboarding, withSales, true));
+    expect(r).toMatchObject({ status: "restored", unlinked_children: 1 });
+  });
+});
+
+describe("a live version from elsewhere", () => {
+  it("never names another workspace's processes: pointing live at a foreign version gets the ordinary refusal", async () => {
+    const w = await world(["Sales"]);
+    const theirs = await world(["Secret holder", "Secret child"]);
+    await publishWith(theirs.p["Secret holder"]!, [theirs.p["Secret child"]!]);
+    const foreign = (await processRow(theirs.p["Secret holder"]!)).live_revision_id!;
+    const err = (await commitAs(editor.claims, (c) => c.query("update processes set live_revision_id = $2 where id = $1", [w.p.Sales, foreign])).then(
+      () => null,
+      (e: { message?: string }) => e,
+    )) as { message?: string } | null;
+    expect(err).not.toBeNull();
+    expect(err!.message).not.toMatch(/Secret/);
+    expect((await processRow(w.p.Sales!)).live_revision_id).not.toBe(foreign);
+  });
 });

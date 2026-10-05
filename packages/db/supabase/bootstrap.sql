@@ -23708,8 +23708,9 @@ revoke all on function private.company_holder_guard() from public, anon, authent
 --     not: if the company map holds it live, takes its card off the map (`company_map_apply` 'remove': a system version of the
 --     map, its open draft updated too); if another ORDINARY process holds it live, refuses (23514, "Sales is already inside
 --     Onboarding. ..."); and refuses when it holds, at any depth through live versions, the process being published ("... would
---     sit inside itself."). One check at a time per workspace (the company map's row, then an advisory lock). Links live already
---     had are not checked again;
+--     sit inside itself."). One check at a time per workspace (the company map's row, made first if missing, then an advisory
+--     lock). Links live already had are not checked again; a live version that is not the process's own is ignored (the version
+--     guard refuses it), so nothing of another workspace is read or named;
 --   * `private.give_back_placements` and trigger `give_back_placements` (new; after update of `live_revision_id`, ordinary
 --     processes only), `private.give_back_on_delete` and trigger `give_back_on_delete` (new; before delete, ordinary processes
 --     with a live version): a process the old live version held that nothing holds live any more gets its card back on the
@@ -23721,7 +23722,8 @@ revoke all on function private.company_holder_guard() from public, anon, authent
 --   * `private.company_add_holder` and `private.company_map_apply` (replaced, full copies of 20261127500000's): the system never
 --     adds a card to the company map for a process another process holds live; `company_map_apply` takes the placement lock;
 --   * `public.restore_version` (replaced, a full copy of 20261127500000's): a holder keeps its link only while no OTHER process
---     holds that process live (before: while the process's parent was this one); otherwise it is unlinked (ordinary process) or
+--     holds that process live, or only the company map does (it gives way on publish) (before: while the process's parent was
+--     this one); otherwise it is unlinked (ordinary process) or
 --     skipped (company map), as before; a restored company map does not add back a process another process links, live or in
 --     its draft.
 --
@@ -23955,6 +23957,15 @@ declare
   c record;
   other public.processes;
 begin
+  -- Only a version of this process can be its live version (process_rules_guard refuses anything else for signed-in callers): never
+  -- read, or name in a message, what a foreign version holds.
+  if not exists (select 1 from public.process_revisions r where r.id = new.live_revision_id and r.process_id = new.id and r.workspace_id = new.workspace_id) then
+    return new;
+  end if;
+  -- The company map's row (made first if the workspace has none yet, so the lock order is always the same), then the advisory lock.
+  if not new.is_company then
+    perform private.ensure_company_map(new.workspace_id);
+  end if;
   perform 1 from public.processes m where m.workspace_id = new.workspace_id and m.is_company and m.id <> new.id for no key update;
   perform pg_advisory_xact_lock(hashtextextended('process_placements:' || new.workspace_id::text, 0));
   for c in
@@ -24331,16 +24342,19 @@ begin
     returning * into draft;
   end if;
 
-  -- A holder step keeps its child process only while that process may still sit inside this one.
+  -- A holder step keeps its child process only while that process may still sit inside this one: nothing else holds it live, or
+  -- only the company map does (B12: the map gives way when this is published, as for a fresh link in a draft).
   select count(*) into unlinked from public.steps s
   where s.revision_id = src.id and s.child_process_id is not null
-    and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null);
+    and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true));
   -- company map: a holder with no process to link (gone, marked when it went, or nested since) is not restored, with the lines on it;
   -- a subprocess step nobody linked (a placeholder a person drew) is.
   if proc.is_company then
     select coalesce(array_agg(s.id), '{}') into skipped from public.steps s
     where s.revision_id = src.id and s.kind = 'subprocess'
-      and (s.child_process_id is not null and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null)
+      and (s.child_process_id is not null and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true))
            or s.child_process_id is null and exists (
                 select 1 from public.audit_log l where l.workspace_id = proc.workspace_id and l.action = 'map_cards_removed'
                   and l.target_table = 'processes' and l.diff -> 'step_ids' ? s.id::text));
@@ -24353,9 +24367,11 @@ begin
       'revision_id', draft.id,
       'created_at', now(),
       'updated_at', now(),
-      'child_process_id', (select c.id from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null),
+      'child_process_id', (select c.id from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true)),
       -- company map: a holder is called what its process is called now
-      'name', coalesce((select c.name from public.processes c where proc.is_company and c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null), s.name),
+      'name', coalesce((select c.name from public.processes c where proc.is_company and c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true)), s.name),
       'entry_step_id', case when s.entry_step_id = any (skipped) then null else s.entry_step_id end,
       'rework_to_step_id', case when s.rework_to_step_id = any (skipped) then null else s.rework_to_step_id end))).*
   from public.steps s where s.revision_id = src.id and not (s.id = any (skipped));
@@ -24431,8 +24447,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     not: if the company map holds it live, takes its card off the map (`company_map_apply` ''remove'': a system version of the
 --     map, its open draft updated too); if another ORDINARY process holds it live, refuses (23514, "Sales is already inside
 --     Onboarding. ..."); and refuses when it holds, at any depth through live versions, the process being published ("... would
---     sit inside itself."). One check at a time per workspace (the company map''s row, then an advisory lock). Links live already
---     had are not checked again;
+--     sit inside itself."). One check at a time per workspace (the company map''s row, made first if missing, then an advisory
+--     lock). Links live already had are not checked again; a live version that is not the process''s own is ignored (the version
+--     guard refuses it), so nothing of another workspace is read or named;
 --   * `private.give_back_placements` and trigger `give_back_placements` (new; after update of `live_revision_id`, ordinary
 --     processes only), `private.give_back_on_delete` and trigger `give_back_on_delete` (new; before delete, ordinary processes
 --     with a live version): a process the old live version held that nothing holds live any more gets its card back on the
@@ -24444,7 +24461,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * `private.company_add_holder` and `private.company_map_apply` (replaced, full copies of 20261127500000''s): the system never
 --     adds a card to the company map for a process another process holds live; `company_map_apply` takes the placement lock;
 --   * `public.restore_version` (replaced, a full copy of 20261127500000''s): a holder keeps its link only while no OTHER process
---     holds that process live (before: while the process''s parent was this one); otherwise it is unlinked (ordinary process) or
+--     holds that process live, or only the company map does (it gives way on publish) (before: while the process''s parent was
+--     this one); otherwise it is unlinked (ordinary process) or
 --     skipped (company map), as before; a restored company map does not add back a process another process links, live or in
 --     its draft.
 --
@@ -24678,6 +24696,15 @@ declare
   c record;
   other public.processes;
 begin
+  -- Only a version of this process can be its live version (process_rules_guard refuses anything else for signed-in callers): never
+  -- read, or name in a message, what a foreign version holds.
+  if not exists (select 1 from public.process_revisions r where r.id = new.live_revision_id and r.process_id = new.id and r.workspace_id = new.workspace_id) then
+    return new;
+  end if;
+  -- The company map''s row (made first if the workspace has none yet, so the lock order is always the same), then the advisory lock.
+  if not new.is_company then
+    perform private.ensure_company_map(new.workspace_id);
+  end if;
   perform 1 from public.processes m where m.workspace_id = new.workspace_id and m.is_company and m.id <> new.id for no key update;
   perform pg_advisory_xact_lock(hashtextextended(''process_placements:'' || new.workspace_id::text, 0));
   for c in
@@ -25054,16 +25081,19 @@ begin
     returning * into draft;
   end if;
 
-  -- A holder step keeps its child process only while that process may still sit inside this one.
+  -- A holder step keeps its child process only while that process may still sit inside this one: nothing else holds it live, or
+  -- only the company map does (B12: the map gives way when this is published, as for a fresh link in a draft).
   select count(*) into unlinked from public.steps s
   where s.revision_id = src.id and s.child_process_id is not null
-    and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null);
+    and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true));
   -- company map: a holder with no process to link (gone, marked when it went, or nested since) is not restored, with the lines on it;
   -- a subprocess step nobody linked (a placeholder a person drew) is.
   if proc.is_company then
     select coalesce(array_agg(s.id), ''{}'') into skipped from public.steps s
     where s.revision_id = src.id and s.kind = ''subprocess''
-      and (s.child_process_id is not null and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null)
+      and (s.child_process_id is not null and not exists (select 1 from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true))
            or s.child_process_id is null and exists (
                 select 1 from public.audit_log l where l.workspace_id = proc.workspace_id and l.action = ''map_cards_removed''
                   and l.target_table = ''processes'' and l.diff -> ''step_ids'' ? s.id::text));
@@ -25076,9 +25106,11 @@ begin
       ''revision_id'', draft.id,
       ''created_at'', now(),
       ''updated_at'', now(),
-      ''child_process_id'', (select c.id from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null),
+      ''child_process_id'', (select c.id from public.processes c where c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true)),
       -- company map: a holder is called what its process is called now
-      ''name'', coalesce((select c.name from public.processes c where proc.is_company and c.id = s.child_process_id and private.holder_allows(proc.id, c) and private.live_holder(c.id, proc.id) is null), s.name),
+      ''name'', coalesce((select c.name from public.processes c where proc.is_company and c.id = s.child_process_id and private.holder_allows(proc.id, c)
+      and coalesce((select h.is_company and not proc.is_company from public.processes h where h.id = private.live_holder(c.id, proc.id)), true)), s.name),
       ''entry_step_id'', case when s.entry_step_id = any (skipped) then null else s.entry_step_id end,
       ''rework_to_step_id'', case when s.rework_to_step_id = any (skipped) then null else s.rework_to_step_id end))).*
   from public.steps s where s.revision_id = src.id and not (s.id = any (skipped));
