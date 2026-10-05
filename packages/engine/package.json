@@ -12,7 +12,8 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --tags-filter='!perf'",
+    "test:perf": "vitest run --tags-filter=perf --no-file-parallelism",
     "golden:approve": "node scripts/golden-approve.mjs"
   },
   "devDependencies": {

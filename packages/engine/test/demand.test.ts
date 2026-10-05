@@ -238,7 +238,7 @@ describe("checks", () => {
 });
 
 describe("performance", () => {
-  it("keeps the 40-step, 25-person model within the PRD target with seasonality and growth", () => {
+  it("keeps the 40-step, 25-person model within the PRD target with seasonality and growth", { tags: ["perf"] }, () => {
     const model: EngineModel = { ...largeModel(), demand: { seasonality: SEASONS.map((m) => m || 1), growthMonthly: 0.03, startMonth: 2.2 } };
     simulate(model, 3, 1);
     let best = Infinity;

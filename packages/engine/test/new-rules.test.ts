@@ -208,7 +208,7 @@ describe("the absence test (rule 8)", () => {
       expect(find(issues, "spof:step:audit")?.rating).toBe("risk");
     });
 
-    it("is cheap enough to run beside the baseline: its own pass within the seeded target (250 ms)", () => {
+    it("is cheap enough to run beside the baseline: its own pass within the seeded target (250 ms)", { tags: ["perf"] }, () => {
       absenceTest(m, { reps: 2 }); // warm up
       let best = Infinity;
       for (let i = 0; i < 3; i++) {

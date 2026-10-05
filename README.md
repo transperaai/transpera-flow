@@ -36,6 +36,10 @@ pnpm typecheck
 pnpm test           # database tests need Postgres, see below
 ```
 
+`pnpm test` runs the PRD §6.7 timing tests (tagged `perf`) last, on their own, so
+the other suites don't share the CPU with them. A package's own `pnpm test` leaves
+them out; run them there with `pnpm test:perf`.
+
 Database tests create a throwaway database on the Postgres at `DATABASE_URL`
 (default `postgres://postgres:postgres@localhost:5432/postgres`) and load a
 small stand-in for Supabase auth, the migrations and the seed.
