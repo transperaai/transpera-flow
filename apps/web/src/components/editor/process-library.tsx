@@ -15,7 +15,7 @@ import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
 import type { ViewRef } from "@/lib/editor/groups";
-import { filterLibrary, libraryEntries, placeProcesses, processesOfBundle, type LibraryEntry, type LibraryProcess, type LibraryTemplate } from "@/lib/editor/library";
+import { filterLibrary, isAddable, libraryEntries, placeProcesses, processesOfBundle, type LibraryEntry, type LibraryProcess, type LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 
 export function ProcessLibrary({
@@ -56,16 +56,17 @@ export function ProcessLibrary({
   const all = useMemo(() => libraryEntries(bundle, known), [bundle, known]);
   const shown = useMemo(() => filterLibrary(all, query), [all, query]);
   const free = shown.filter((e) => e.state === "free");
+  const onMap = shown.filter((e) => e.state === "map");
   const here = shown.filter((e) => e.state === "placed");
   const holds = shown.filter((e) => e.state === "holds");
   // Those that sit somewhere else, one group per place.
   const elsewhere = new Map<string, LibraryEntry[]>();
   for (const e of shown) if (e.state === "inside") elsewhere.set(e.insideName ?? "another process", [...(elsewhere.get(e.insideName ?? "another process") ?? []), e]);
   // What was picked may since have been placed (or taken out again): only what can still be added counts.
-  const addable = new Set(all.filter((e) => e.state === "free").map((e) => e.id));
+  const addable = new Set(all.filter(isAddable).map((e) => e.id));
   const chosen = [...picked].filter((id) => addable.has(id));
   // Ticked processes that the search is hiding are still ticked, and still added: the button says so.
-  const shownIds = new Set(free.map((e) => e.id));
+  const shownIds = new Set([...free, ...onMap].map((e) => e.id));
   const hidden = chosen.filter((id) => !shownIds.has(id)).length;
   const shownTemplates = filterLibrary(templates, query);
 
@@ -90,7 +91,7 @@ export function ProcessLibrary({
     setPicked(new Set());
     setNote(null);
   };
-  const pickAll = () => setPicked(new Set([...picked, ...free.map((e) => e.id)]));
+  const pickAll = () => setPicked(new Set([...picked, ...free.map((e) => e.id), ...onMap.map((e) => e.id)]));
   const create = (input: Parameters<LibraryCreate>[0]) =>
     startTransition(async () => {
       if (!onCreate) return;
@@ -132,11 +133,23 @@ export function ProcessLibrary({
           <LibraryGroup
             title="Not on any map"
             help={{ description: "Processes that sit nowhere yet. Tick the ones you want, then press Add.", example: "Tick Sales and Onboarding, press Add, and both appear here." }}
-            empty={query.trim() ? null : "Every process already sits somewhere."}
+            empty={query.trim() || onMap.length ? null : "Every process already sits somewhere."}
             entries={free}
             picked={picked}
             onToggle={toggle}
           />
+          {onMap.length > 0 && (
+            <LibraryGroup
+              title="On the company map"
+              help={{
+                description: "The company map is where a process sits until you put it somewhere else. Add one here and it moves here when you publish: its card comes off the company map.",
+                example: "Tick Client check-in, add it, publish: it now sits in this process, not on the company map.",
+              }}
+              entries={onMap}
+              picked={picked}
+              onToggle={toggle}
+            />
+          )}
           {here.length > 0 && (
             <LibraryGroup
               title="On this map"
@@ -169,8 +182,8 @@ export function ProcessLibrary({
         <Button type="button" size="sm" disabled={!chosen.length} onClick={add} data-library-add className="flex-1">
           {chosen.length ? `Add ${chosen.length} to the map${hidden ? ` (${hidden} hidden by search)` : ""}` : "Add to the map"}
         </Button>
-        {free.length > 1 && (
-          <Button type="button" variant="outline" size="sm" onClick={pickAll} disabled={free.every((e) => picked.has(e.id))}>
+        {free.length + onMap.length > 1 && (
+          <Button type="button" variant="outline" size="sm" onClick={pickAll} disabled={[...free, ...onMap].every((e) => picked.has(e.id))}>
             Select all
           </Button>
         )}
@@ -250,7 +263,7 @@ function LibraryGroup({
       <h3>{help ? <HelpLabel label={title} description={help.description} example={help.example} /> : <span className="text-xs font-medium text-fg-2">{title}</span>}</h3>
       {!entries.length && <p className="text-xs text-muted-foreground">{empty}</p>}
       {entries.map((e) => {
-        const disabled = e.state !== "free";
+        const disabled = !isAddable(e);
         return (
           <label
             key={e.id}
@@ -272,6 +285,9 @@ function LibraryGroup({
                 {e.kind === "pipeline" ? "Pipeline" : "Servicing"}
                 {e.live ? "" : " · not published yet"}
               </span>
+              {e.state === "map" && (
+                <span className="text-xs text-muted-foreground">On the company map — moves here when you publish.</span>
+              )}
               {e.state === "placed" && (
                 <span id={`${e.id}-why`} className="text-xs text-muted-foreground">
                   Already here. A process sits in one place only.

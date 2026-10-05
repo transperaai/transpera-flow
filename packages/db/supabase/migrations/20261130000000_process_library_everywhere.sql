@@ -5,32 +5,41 @@
 -- placed process (its row, versions, steps or edges). "Inside" and "on the map" now come from ONE place, the holder steps of LIVE
 -- versions (`public.process_placements`), not from `processes.parent_process_id`, which no rule here reads any more (ADR 0014,
 -- "B12 part 2"). Publishing is where the rules bite: a process sits in at most one live version across every map, and no process
--- ends up inside itself.
+-- ends up inside itself. The company map is every process's default home and GIVES WAY: publishing a link to a process that is on
+-- the map takes its card off the map (a system version of the map); when nothing holds it any more, its card comes back.
 --
--- NO TABLE OR COLUMN CHANGE, NO DATA CHANGE. New: one view, three functions, one trigger. Replaced with identical signatures:
--- six functions.
+-- NO TABLE OR COLUMN CHANGE, NO DATA CHANGE ON APPLYING. New: one view, five functions, three triggers, one partial index.
+-- Replaced with identical signatures: six functions.
 --
 --   * `public.process_placements` (new view, security invoker; authenticated may select): every link in a live version
 --     (process, holder, holder's name, whether the holder is the company map, the step).
 --   * `private.live_holder(uuid, uuid)` (new, security definer, executable by nobody signed in): the process whose live version
---     holds a process, other than a given one.
---   * `private.holder_allows(owner, child)` (replaced, same signature): any process of the workspace other than the owner itself
+--     holds a process, other than a given one (and other than a holder being deleted).
+--   * index `steps_child_process_id` (new, partial: `child_process_id is not null`): "who holds this process" by the child.
+--   * `private.holder_allows(owner, child)` (replaced, from 20261126000000, same signature): any process of the workspace other than the owner itself
 --     and other than a company map. It no longer looks at `parent_process_id`. So a DRAFT of any process may hold any process;
 --   * `private.check_step_nesting` (replaced, a full copy of 20261127500000's): only its refusal message changes, to match;
 --   * `private.check_live_placements` and trigger `check_live_placements` (new; before update of `live_revision_id` on
 --     `public.processes`, for every process and every caller): for each process the new live version holds and the old one did
---     not, refuses (23514) when another process holds it live ("Sales is already on the company map. ...", "... already inside
---     Onboarding. ...") and when it holds, at any depth through live versions, the process being published ("... would sit inside
---     itself."). One check at a time per workspace (advisory lock). Links live already had are not checked again;
+--     not: if the company map holds it live, takes its card off the map (`company_map_apply` 'remove': a system version of the
+--     map, its open draft updated too); if another ORDINARY process holds it live, refuses (23514, "Sales is already inside
+--     Onboarding. ..."); and refuses when it holds, at any depth through live versions, the process being published ("... would
+--     sit inside itself."). One check at a time per workspace (the company map's row, then an advisory lock). Links live already
+--     had are not checked again;
+--   * `private.give_back_placements` and trigger `give_back_placements` (new; after update of `live_revision_id`, ordinary
+--     processes only), `private.give_back_on_delete` and trigger `give_back_on_delete` (new; before delete, ordinary processes
+--     with a live version): a process the old live version held that nothing holds live any more gets its card back on the
+--     company map (`company_map_apply` 'add', a system version);
 --   * `public.create_library_process(uuid, text, text, text, text, text)` (new, security invoker; authenticated may execute):
 --     the library's "New process" and templates. An ordinary insert as the caller, except that the company map's sync does not
 --     give the new process a card of its own (it is placed where the person puts it);
 --   * `private.company_map_membership` (replaced, a full copy of 20261127500000's): honours that note on insert;
 --   * `private.company_add_holder` and `private.company_map_apply` (replaced, full copies of 20261127500000's): the system never
---     adds a card to the company map for a process another process holds live;
+--     adds a card to the company map for a process another process holds live; `company_map_apply` takes the placement lock;
 --   * `public.restore_version` (replaced, a full copy of 20261127500000's): a holder keeps its link only while no OTHER process
 --     holds that process live (before: while the process's parent was this one); otherwise it is unlinked (ordinary process) or
---     skipped (company map), as before.
+--     skipped (company map), as before; a restored company map does not add back a process another process links, live or in
+--     its draft.
 --
 -- `parent_process_id` stays as a column (additive only). Nothing here writes it. `check_process_parent` and the company map's
 -- sync still react when something else does (MCP `import_process` still sets it for a process it creates inside another, or moves
@@ -49,8 +58,8 @@
 --        select prosrc like '%company_map_apply(new.workspace_id, new.id, ''add''%' and prosrc not like '%library_create%' from pg_proc where pronamespace = 'private'::regnamespace and proname = 'company_map_membership';
 --        select prosrc like '%skipped_holders%' and prosrc not like '%live_holder%' from pg_proc where pronamespace = 'public'::regnamespace and proname = 'restore_version';
 --   4. What this adds is not there yet. Expect 0, then 0:
---        select count(*) from pg_proc where proname in ('live_holder', 'check_live_placements', 'create_library_process');
---        select count(*) from pg_class where relname = 'process_placements';
+--        select count(*) from pg_proc where proname in ('live_holder', 'check_live_placements', 'create_library_process', 'give_back_placements', 'give_back_on_delete');
+--        select count(*) from pg_class where relname in ('process_placements', 'steps_child_process_id');
 --   5. Data: no process is held in two live versions today. Expect 0 rows (a row would be refused by nothing, but it breaks "at
 --      most once"; repair it first by taking one of the links out in a draft and publishing):
 --        select s.child_process_id, count(*) from public.steps s join public.processes h on h.live_revision_id = s.revision_id
@@ -78,10 +87,11 @@
 --        select has_table_privilege('authenticated', 'public.process_placements', 'select');
 --        select has_function_privilege('authenticated', 'private.live_holder(uuid, uuid)', 'execute');
 --        select routine_name from information_schema.routine_privileges where routine_schema = 'private' and grantee in ('anon', 'authenticated', 'PUBLIC')
---          and routine_name in ('live_holder', 'check_live_placements', 'company_add_holder', 'company_map_apply', 'company_map_membership');
---   2. The trigger is there once and the view is security invoker. Expect 1, then true:
---        select count(*) from pg_trigger where tgrelid = 'public.processes'::regclass and tgname = 'check_live_placements' and not tgisinternal;
+--          and routine_name in ('live_holder', 'check_live_placements', 'give_back_placements', 'give_back_on_delete', 'company_add_holder', 'company_map_apply', 'company_map_membership');
+--   2. The three triggers are there once each, the view is security invoker and the index exists. Expect 3, then true, then 1:
+--        select count(*) from pg_trigger where tgrelid = 'public.processes'::regclass and tgname in ('check_live_placements', 'give_back_placements', 'give_back_on_delete') and not tgisinternal;
 --        select 'security_invoker=true' = any (reloptions) from pg_class where relname = 'process_placements';
+--        select count(*) from pg_indexes where schemaname = 'public' and indexname = 'steps_child_process_id';
 --   3. Nothing was changed by applying it: preflight 8's counts are the same.
 --
 -- ROLLBACK (one transaction; redeploy the app to a build from before this migration FIRST: it calls create_library_process and
@@ -94,6 +104,11 @@
 --   begin;
 --   drop trigger check_live_placements on public.processes;
 --   drop function private.check_live_placements();
+--   drop trigger give_back_placements on public.processes;
+--   drop function private.give_back_placements();
+--   drop trigger give_back_on_delete on public.processes;
+--   drop function private.give_back_on_delete();
+--   drop index public.steps_child_process_id;
 --   drop function public.create_library_process(uuid, text, text, text, text, text);
 --   drop view public.process_placements;
 --   -- Re-create, as `create or replace function`, from packages/db/supabase/migrations/20261126000000_company_map.sql:
@@ -119,6 +134,8 @@ as $$
   from public.steps s
   join public.processes h on h.live_revision_id = s.revision_id
   where s.child_process_id = p_child and h.id is distinct from p_except
+    -- A holder being deleted (private.give_back_on_delete) no longer counts.
+    and h.id is distinct from nullif(current_setting('transpera.leaving_holder', true), '')::uuid
   order by h.is_company, h.id
   limit 1;
 $$;
@@ -141,6 +158,10 @@ create view public.process_placements with (security_invoker = true) as
 
 revoke all on public.process_placements from public, anon;
 grant select on public.process_placements to authenticated;
+
+-- "Who holds this process?" is now asked on every publish and in every editor: look it up by the child, not by scanning steps.
+-- (Production's steps table is small, so a plain create index inside the apply transaction is fine.)
+create index steps_child_process_id on public.steps (child_process_id) where child_process_id is not null;
 
 -- ---------------------------------------------------------------------------
 -- Who may hold whom: any process may hold any other (B12)
@@ -234,11 +255,14 @@ $$;
 
 -- Runs whenever a process's live version changes (publish_process, a system version of the company map, any other road), before
 -- the pointer moves. For each process the new live version holds that the old one did not:
---   * no OTHER process may hold it in its live version ("Sales is already on the company map ..."), so a process is in the
---     published tree at most once, across every map;
+--   * if the company map holds it (live), it GIVES WAY: the card is taken off the map in this transaction, as an ordinary system
+--     version of the map (its open draft updated too), so the process moves here. The placed process itself is not written;
+--   * if another ORDINARY process holds it (live), the publish is refused and says where it sits ("Sales is already inside
+--     Onboarding. ..."), so a process is in the published tree at most once, across every map;
 --   * it may not hold, at any depth through live versions, the process being published (that would put it inside itself).
 -- Processes the old live version already held are not checked again, so a publish never fails over a state that was already there.
--- One placement check at a time per workspace (an advisory lock), so two drafts placing the same process can't both pass.
+-- One placement check at a time per workspace: the company map's row first (as the map's own sync and publish take it), then an
+-- advisory lock, so two drafts placing the same process can't both pass and the order never deadlocks with the map's sync.
 create function private.check_live_placements() returns trigger
 language plpgsql security definer
 set search_path = ''
@@ -247,6 +271,7 @@ declare
   c record;
   other public.processes;
 begin
+  perform 1 from public.processes m where m.workspace_id = new.workspace_id and m.is_company and m.id <> new.id for no key update;
   perform pg_advisory_xact_lock(hashtextextended('process_placements:' || new.workspace_id::text, 0));
   for c in
     select distinct p.id, p.name
@@ -255,12 +280,6 @@ begin
       and not exists (select 1 from public.steps o where o.revision_id = old.live_revision_id and o.child_process_id = s.child_process_id)
     order by p.name, p.id
   loop
-    select h.* into other from public.processes h where h.id = private.live_holder(c.id, new.id);
-    if other.id is not null then
-      raise exception '% is already %. A process can sit in one place only: take it off there first, then publish again.',
-        c.name, case when other.is_company then 'on the company map' else 'inside ' || other.name end
-        using errcode = '23514';
-    end if;
     if exists (
       with recursive down(id) as (
         select c.id
@@ -275,6 +294,17 @@ begin
       raise exception '% can''t hold %: % already holds %, so % would sit inside itself.', new.name, c.name, c.name, new.name, new.name
         using errcode = '23514';
     end if;
+    select h.* into other from public.processes h where h.id = private.live_holder(c.id, new.id);
+    if other.id is not null and other.is_company and not new.is_company then
+      -- The company map is every process's default home: it gives way.
+      perform private.company_map_apply(new.workspace_id, c.id, 'remove', 'Moved ' || c.name || ' inside ' || new.name);
+      select h.* into other from public.processes h where h.id = private.live_holder(c.id, new.id);
+    end if;
+    if other.id is not null then
+      raise exception '% is already %. A process can sit in one place only: take it off there first, then publish again.',
+        c.name, case when other.is_company then 'on the company map' else 'inside ' || other.name end
+        using errcode = '23514';
+    end if;
   end loop;
   return new;
 end;
@@ -285,6 +315,68 @@ revoke all on function private.check_live_placements() from public, anon, authen
 create trigger check_live_placements before update of live_revision_id on public.processes
   for each row when (new.live_revision_id is not null and new.live_revision_id is distinct from old.live_revision_id)
   execute function private.check_live_placements();
+
+-- The company map is the default home a process goes back to. When an ordinary process publishes a version that no longer holds a
+-- process its old live version held, and nothing else holds that process live, it gets its card back on the company map (a
+-- system version, as when it was made). Taking a card off the company map itself leaves the process off ("Not on any map"):
+-- that is a person's choice. A process with a stored parent (made inside another by MCP's import) is the map's sync's business.
+create function private.give_back_placements() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  c record;
+begin
+  for c in
+    select distinct s.child_process_id as id, p.name
+    from public.steps s join public.processes p on p.id = s.child_process_id
+    where s.revision_id = old.live_revision_id
+      and not exists (select 1 from public.steps n where n.revision_id = new.live_revision_id and n.child_process_id = s.child_process_id)
+    order by p.name, s.child_process_id
+  loop
+    if private.live_holder(c.id) is null then
+      perform private.company_map_apply(new.workspace_id, c.id, 'add', 'Put ' || c.name || ' back on the map: ' || new.name || ' no longer holds it');
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+
+revoke all on function private.give_back_placements() from public, anon, authenticated;
+
+create trigger give_back_placements after update of live_revision_id on public.processes
+  for each row when (not new.is_company and old.live_revision_id is not null and new.live_revision_id is distinct from old.live_revision_id)
+  execute function private.give_back_placements();
+
+-- The same when the holder is deleted: what it held live, and nothing else holds, goes back on the company map.
+create function private.give_back_on_delete() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  c record;
+begin
+  perform set_config('transpera.leaving_holder', old.id::text, true);
+  for c in
+    select distinct s.child_process_id as id, p.name
+    from public.steps s join public.processes p on p.id = s.child_process_id
+    where s.revision_id = old.live_revision_id
+    order by p.name, s.child_process_id
+  loop
+    if private.live_holder(c.id) is null then
+      perform private.company_map_apply(old.workspace_id, c.id, 'add', 'Put ' || c.name || ' back on the map: ' || old.name || ' was deleted');
+    end if;
+  end loop;
+  perform set_config('transpera.leaving_holder', '', true);
+  return old;
+end;
+$$;
+
+revoke all on function private.give_back_on_delete() from public, anon, authenticated;
+
+create trigger give_back_on_delete before delete on public.processes
+  for each row when (not old.is_company and old.live_revision_id is not null)
+  execute function private.give_back_on_delete();
 
 -- ---------------------------------------------------------------------------
 -- A new process from the library
@@ -403,6 +495,9 @@ begin
   -- One event at a time per workspace: two processes made together each get their own place and lines. (NO KEY UPDATE, as
   -- check_step_nesting takes it: it does not wait for the writers of the map's rows, who hold KEY SHARE.)
   perform 1 from public.processes c where c.id = cid for no key update;
+  -- B12: and the placement check's lock (after the map's row, as check_live_placements takes them), so "who holds it live" below
+  -- can't change under it.
+  perform pg_advisory_xact_lock(hashtextextended('process_placements:' || p_ws::text, 0));
   select * into proc from public.processes p where p.id = p_proc;
   select c.live_revision_id, c.draft_revision_id into live_id, draft_id from public.processes c where c.id = cid;
   -- The guards let the system through, whoever's statement this runs inside.
@@ -591,6 +686,9 @@ begin
       select p.id from public.processes p
       where p.workspace_id = proc.workspace_id and not p.is_company and p.parent_process_id is null
         and not exists (select 1 from public.steps s where s.revision_id = draft.id and s.child_process_id = p.id)
+        -- B12: not one another process links, live or in its draft (one the library made sits there, not here).
+        and not exists (select 1 from public.steps s join public.processes h on s.revision_id in (h.live_revision_id, h.draft_revision_id)
+          where s.child_process_id = p.id and h.id <> proc.id)
       order by p.created_at, p.id
     loop
       if private.company_add_holder(draft.id, np.id) then

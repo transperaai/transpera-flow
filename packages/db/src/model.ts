@@ -125,9 +125,13 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
     }
     // The step's link is what puts the child here (B12): the revision being simulated says what it holds, whatever holds the
     // child elsewhere. (A process is in at most one live version; the database refuses a second on publish.)
+    // A link back to a process this one sits inside (at any depth) is a loop, whether or not that process is among the parts.
+    if (ctx.stack.includes(step.child_process_id!)) {
+      const name = ctx.parts.get(step.child_process_id!)?.process.name ?? step.name;
+      throw new ModelError(`this would put '${name}' inside itself: '${step.name}' links back to it. Take one of the links out`);
+    }
     const child = ctx.parts.get(step.child_process_id!);
-    if (!child) throw new ModelError(`'${step.name}' holds a process that has no published version yet; publish it, or remove or replace this step`);
-    if (ctx.stack.includes(child.process.id)) throw new ModelError(`Child process '${child.process.name}' is inside itself`);
+    if (!child) throw new ModelError(`Publish '${step.name}' first: this step links to it, and it has no published version yet`);
     let sub: Graph;
     try {
       sub = resolveGraph(child.steps, child.edges, tags, { parts: ctx.parts, stack: [...ctx.stack, child.process.id] });
@@ -304,7 +308,15 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     return flattenModel(model);
   } catch (err) {
     // A group with nowhere to go, or a loop of groups, is a problem with the process, as any other bad graph is.
-    if (err instanceof NestingError) throw new ModelError(err.message);
+    if (err instanceof NestingError) {
+      // The engine calls every holder a group; a step linking a process is called by its name, as the person sees it.
+      const stuck = /^Group '(.*)' has nothing leaving it/.exec(err.message)?.[1];
+      const all = [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)];
+      if (stuck !== undefined && all.some((x) => x.name === stuck && x.child_process_id) && !all.some((x) => x.name === stuck && x.kind === "group")) {
+        throw new ModelError(`'${stuck}' has nothing leaving it: join it to a next step`);
+      }
+      throw new ModelError(err.message);
+    }
     throw err;
   }
 }

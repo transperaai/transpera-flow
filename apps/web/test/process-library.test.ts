@@ -44,7 +44,7 @@ describe("what the library lists", () => {
     };
     const off = without(nested, a, c, d);
     const entries = libraryEntries(off);
-    const rank = { free: 0, placed: 1, inside: 2, holds: 3 } as const;
+    const rank = { free: 0, map: 1, placed: 2, inside: 3, holds: 4 } as const;
     expect(entries.map((e) => e.state)).toEqual(entries.map((e) => e.state).sort((x, y) => rank[x] - rank[y]));
     expect(entries.filter((e) => e.state === "free").map((e) => e.id).sort()).toEqual([a, c].sort());
     const inside = entries.find((e) => e.id === d)!;
@@ -161,7 +161,7 @@ describe("the library in an ordinary process's editor", () => {
   ];
   const company = { id: "00000000-0000-4000-8000-00000000c0c0", name: "Company map", company: true };
 
-  it("lists what sits nowhere first, then by where each sits, greyed with a plain reason; never the process itself", () => {
+  it("lists what sits nowhere first, then what is on the company map (addable: it gives way), then the rest greyed; never the process itself", () => {
     const b = ordinary();
     const other = b.otherProcesses![0]!.process;
     const entries = libraryEntries(b, lib(b, { [other.id]: company, [b.process.id]: company }));
@@ -169,8 +169,11 @@ describe("the library in an ordinary process's editor", () => {
     const free = entries.filter((e) => e.state === "free").map((e) => e.name);
     expect(free).toEqual(expect.arrayContaining(["Offboarding", "Onboarding"]));
     expect(free).toEqual([...free].sort((x, y) => x.localeCompare(y)));
-    expect(entries.find((e) => e.id === other.id)).toMatchObject({ state: "inside", insideName: "the company map" });
-    expect(entries.findIndex((e) => e.state === "inside")).toBeGreaterThan(entries.findIndex((e) => e.state === "free"));
+    expect(entries.find((e) => e.id === other.id)).toMatchObject({ state: "map" });
+    expect(entries.findIndex((e) => e.state === "map")).toBeGreaterThan(entries.findIndex((e) => e.state === "free"));
+    // ...and it can be placed (publishing moves it off the company map).
+    const placed = placeProcesses(b, [other.id], { x: 0, y: 0 }, lib(b, { [other.id]: company }))!;
+    expect(placed.ids).toHaveLength(1);
     // A process inside another ordinary process says which.
     const inOnboarding = libraryEntries(b, lib(b, { [other.id]: { id: "00000000-0000-4000-8000-0000000000a1", name: "Onboarding", company: false } }));
     expect(inOnboarding.find((e) => e.id === other.id)).toMatchObject({ state: "inside", insideName: "Onboarding" });
@@ -183,7 +186,7 @@ describe("the library in an ordinary process's editor", () => {
     // This process sits inside Onboarding, which sits inside Offboarding.
     const entries = libraryEntries(b, lib(b, { [b.process.id]: onboarding, [onboarding.id]: offboarding }));
     expect(entries.find((e) => e.id === offboarding.id)).toMatchObject({ state: "holds" });
-    expect(entries.find((e) => e.id === onboarding.id)).toMatchObject({ state: "inside", insideName: "Offboarding" });
+    expect(entries.find((e) => e.id === onboarding.id)).toMatchObject({ state: "holds" });
     expect(placeProcesses(b, [offboarding.id], { x: 0, y: 0 }, lib(b, { [b.process.id]: onboarding, [onboarding.id]: offboarding }))).toBeNull();
   });
 

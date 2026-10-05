@@ -120,16 +120,25 @@ describe.skipIf(!POSTGREST_URL)("the process library in every editor, over Postg
     expect(r.data?.map((x) => [x.process_id, x.holder_name]).sort()).toEqual([[p.Delivery, "Onboarding"], [p.Sales, "Onboarding"]].sort());
   });
 
-  it("refuses publishing a process that already sits somewhere, and names where", async () => {
-    // On the company map: Support first goes on the map.
+  it("moves a process off the company map when another process publishes a link to it (the map gives way)", async () => {
     const map = await openDraft(ids.company);
     expect((await editor.from("steps").insert(link(map, ids.company, p.Support!, "Support", 0))).error).toBeNull();
     expect((await publish(ids.company)).error).toBeNull();
+    const mapLive = (await one("select live_revision_id from processes where id = $1", [ids.company])).live_revision_id;
+    const before = await processState(p.Support!);
     const draft = await openDraft(p.Delivery!);
     expect((await editor.from("steps").insert([link(draft, p.Delivery!, p.Support!, "Support", 0)])).error).toBeNull();
-    const onMap = await publish(p.Delivery!);
-    expect(onMap.error?.message).toBe("Support is already on the company map. A process can sit in one place only: take it off there first, then publish again.");
-    await discard(p.Delivery!);
+    const moved = await publish(p.Delivery!);
+    expect(moved.error).toBeNull();
+    expect((await placements(editor)).data?.find((x) => x.process_id === p.Support)?.holder_name).toBe("Delivery");
+    // A system version of the map, without the card; the process itself untouched.
+    const after = (await one("select live_revision_id from processes where id = $1", [ids.company])).live_revision_id;
+    expect(after).not.toBe(mapLive);
+    expect((await one("select count(*)::int n from steps where revision_id = $1 and child_process_id = $2", [after, p.Support])).n).toBe(0);
+    expect(await processState(p.Support!)).toEqual(before);
+  });
+
+  it("refuses publishing a process that already sits inside an ordinary process, and names where", async () => {
     // Inside another process: Sales sits inside Onboarding; the company map may not have it too.
     const map2 = await openDraft(ids.company);
     expect((await editor.from("steps").insert(link(map2, ids.company, p.Sales!, "Sales", 300))).error).toBeNull();

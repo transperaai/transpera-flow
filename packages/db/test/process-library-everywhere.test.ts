@@ -157,18 +157,18 @@ describe("any process holds others by a link", () => {
     expect((await q("select count(*)::int n from processes where id = any($1) and parent_process_id is not null", [held]))[0].n).toBe(0);
   });
 
-  it("taking a link out (in a draft, then publishing) leaves the process untouched and sitting nowhere", async () => {
+  it("taking a link out (in a draft, then publishing) leaves the process untouched, back in its default home, the company map", async () => {
     const w = await world();
     await publishWith(w.p.Onboarding!, [w.p.Sales!]);
     const before = await snapshot([w.p.Sales!]);
     const draft = await openDraft(w.p.Onboarding!);
     await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and child_process_id = $2", [draft, w.p.Sales]));
     expect((await publish(w.p.Onboarding!)).status).toBe("published");
-    expect(await placements(w.ws)).toEqual({});
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.cid });
     expect(await snapshot([w.p.Sales!])).toEqual(before);
-    // ...and it can be placed again, anywhere (here, the company map).
-    expect((await publishWith(w.cid, [w.p.Sales!])).status).toBe("published");
-    expect((await placements(w.ws))[w.p.Sales!]).toBe(w.cid);
+    // ...and it can be placed again, anywhere (the map gives way again).
+    expect((await publishWith(w.p.Delivery!, [w.p.Sales!])).status).toBe("published");
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.p.Delivery });
   });
 
   it("discarding a draft drops its pending links", async () => {
@@ -206,13 +206,6 @@ describe("any process holds others by a link", () => {
 });
 
 describe("at most once in the published tree, across every map", () => {
-  it("refuses publishing a process that is on the company map inside another, and names where it sits", async () => {
-    const w = await world();
-    await publishWith(w.cid, [w.p.Sales!]);
-    await draftWith(w.ws, w.p.Onboarding!, [w.p.Sales!]);
-    await refused(publish(w.p.Onboarding!), "23514", /^Sales is already on the company map\. A process can sit in one place only: take it off there first, then publish again\.$/);
-    expect((await placements(w.ws))[w.p.Sales!]).toBe(w.cid);
-  });
 
   it("refuses a process inside one process from being published inside another, and on the company map", async () => {
     const w = await world();
@@ -258,5 +251,108 @@ describe("no process inside itself", () => {
     await draftWith(w.ws, w.p.Support!, [w.p.Sales!]);
     await refused(publish(w.p.Support!), "23514", /^Support can't hold Sales: Sales already holds Support, so Support would sit inside itself\.$/);
     expect(await placements(w.ws)).toEqual({ [w.p.Support!]: w.p.Delivery, [w.p.Delivery!]: w.p.Onboarding, [w.p.Onboarding!]: w.p.Sales });
+  });
+});
+
+/** The company map's live version, and the last system 'publish' entry's note. */
+const mapState = async (w: World) => {
+  const live = (await processRow(w.cid)).live_revision_id!;
+  const cards = (await q("select child_process_id from steps where revision_id = $1 and child_process_id is not null order by child_process_id", [live])).map((r) => r.child_process_id);
+  const [note] = await q("select diff ->> 'note' as note from audit_log where target_id = $1 and action = 'publish' and actor_kind = 'system' order by created_at desc, id desc limit 1", [w.cid]);
+  return { live, cards, note: (note?.note as string | undefined) ?? null };
+};
+
+describe("the company map is the default home, and gives way", () => {
+  it("publishing a link to a process on the company map moves it: its card comes off the map (a system version), the process is untouched", async () => {
+    const w = await world();
+    await publishWith(w.cid, [w.p.Sales!, w.p.Support!]);
+    const mapBefore = await mapState(w);
+    // A person's open draft of the map has the card too: it is taken off there as well.
+    const mapDraft = await openDraft(w.cid);
+    const before = await snapshot([w.p.Sales!]);
+    await draftWith(w.ws, w.p.Onboarding!, [w.p.Sales!]);
+    expect((await publish(w.p.Onboarding!)).status).toBe("published");
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.p.Onboarding, [w.p.Support!]: w.cid });
+    const mapAfter = await mapState(w);
+    expect(mapAfter.live).not.toBe(mapBefore.live);
+    expect(mapAfter.cards).toEqual([w.p.Support]);
+    expect(mapAfter.note).toBe("Moved Sales inside Onboarding");
+    expect((await q("select count(*)::int n from steps where revision_id = $1 and child_process_id = $2", [mapDraft, w.p.Sales]))[0].n).toBe(0);
+    expect(await snapshot([w.p.Sales!])).toEqual(before);
+  });
+
+  it("still refuses a process that sits inside an ordinary process, and names it", async () => {
+    const w = await world();
+    await publishWith(w.p.Onboarding!, [w.p.Sales!]);
+    await draftWith(w.ws, w.p.Delivery!, [w.p.Sales!]);
+    await refused(publish(w.p.Delivery!), "23514", /^Sales is already inside Onboarding\. A process can sit in one place only: take it off there first, then publish again\.$/);
+  });
+
+  it("gives a process its card back when its holder is deleted and nothing else holds it", async () => {
+    const w = await world();
+    await publishWith(w.cid, [w.p.Sales!]);
+    await publishWith(w.p.Onboarding!, [w.p.Sales!]);
+    expect((await mapState(w)).cards).toEqual([]);
+    await commitAs(editor.claims, (c) => c.query("delete from processes where id = $1", [w.p.Onboarding]));
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.cid });
+    expect((await mapState(w)).note).toBe("Put Sales back on the map: Onboarding was deleted");
+  });
+
+  it("leaves a card a person took off the company map off it (Not on any map)", async () => {
+    const w = await world();
+    await publishWith(w.cid, [w.p.Sales!]);
+    const draft = await openDraft(w.cid);
+    await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and child_process_id = $2", [draft, w.p.Sales]));
+    await publish(w.cid);
+    expect(await placements(w.ws)).toEqual({});
+  });
+
+  it("two drafts placing the same company-map process at once: the first to commit moves it, the second waits and is refused", async () => {
+    const w = await world();
+    await publishWith(w.cid, [w.p.Sales!]);
+    await draftWith(w.ws, w.p.Onboarding!, [w.p.Sales!]);
+    await draftWith(w.ws, w.p.Delivery!, [w.p.Sales!]);
+    const other = new pg.Client({ connectionString: db.url });
+    await other.connect();
+    try {
+      const setClaims = async (c: pg.Client) => {
+        await c.query("begin");
+        await c.query("set local role authenticated");
+        await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(editor.claims)]);
+      };
+      await setClaims(db.client);
+      expect((await rpc(db.client, "publish_process", w.p.Onboarding)).status).toBe("published");
+      // The second publish blocks on the first's locks until it commits, then sees Sales inside Onboarding.
+      await setClaims(other);
+      const second = rpc(other, "publish_process", w.p.Delivery).then(
+        () => null,
+        (e: { message?: string }) => e.message ?? "",
+      );
+      await new Promise((r) => setTimeout(r, 300));
+      await db.client.query("commit");
+      expect(await second).toMatch(/^Sales is already inside Onboarding\./);
+      await other.query("rollback");
+    } finally {
+      await other.end();
+    }
+    expect(await placements(w.ws)).toEqual({ [w.p.Sales!]: w.p.Onboarding });
+    expect((await mapState(w)).cards).toEqual([]);
+  });
+
+  it("restoring the company map does not pull in a process another process links, live or in its draft (one the library made included)", async () => {
+    const w = await world(["Onboarding", "Delivery"]);
+    // Version with nothing on it.
+    const empty = (await processRow(w.cid)).live_revision_id!;
+    await publishWith(w.cid, [w.p.Delivery!]);
+    // The library makes Fresh and places it in Onboarding's draft; Delivery moves inside Onboarding (live).
+    const made = await commitAs(editor.claims, (c) => rpc(c, "create_library_process", w.ws, "Fresh", "servicing"));
+    const fresh = made.process_id as string;
+    await publishWith(w.p.Onboarding!, [w.p.Delivery!]);
+    await draftWith(w.ws, w.p.Onboarding!, [fresh]);
+    const r = await commitAs(editor.claims, (c) => rpc(c, "restore_version", w.cid, empty, true));
+    expect(r.status).toBe("restored");
+    const restored = (await q("select child_process_id from steps where revision_id = $1 and child_process_id is not null", [r.revision_id])).map((x) => x.child_process_id);
+    expect(restored).not.toContain(fresh);
+    expect(restored).not.toContain(w.p.Delivery);
   });
 });

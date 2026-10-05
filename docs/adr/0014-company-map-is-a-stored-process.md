@@ -159,12 +159,21 @@ process is a **link** and placing **never edits it**; a process appears **at mos
 - **Any process may hold any other by a link.** `private.holder_allows` (migration 20261130000000) now allows any process of the same
   workspace other than the holder itself and other than a company map. It no longer reads `parent_process_id`. So a DRAFT may link a
   process that sits somewhere else; the rules are checked where they matter, on **publish**.
+- **The company map is the default home, and gives way** (design change adopted in review of #188; **for Austin to confirm**). A
+  process on the company map can be added from any editor's library ("On the company map — moves here when you publish"). When an
+  ordinary process publishes a link to it, its card comes off the company map in the same transaction, as an ordinary system version
+  of the map (the remove path the map's sync already has; an open draft of the map loses the card too). The placed process is still
+  never written. When nothing holds it any more (the holder publishes without the link, or is deleted), it gets its card back on
+  the company map, as a system version. Taking a card off the company map itself is a person's choice and leaves the process off
+  ("Not on any map").
 - **Publishing enforces "once" and "no loops".** A trigger on `processes` (`check_live_placements`, before `live_revision_id` changes,
-  for every caller and road: publish, restore, the company map's system versions) refuses, for each process the new live version holds
-  that the old one did not, (a) another process holding it live ("Sales is already on the company map." / "... already inside
-  Onboarding."), and (b) it holding, at any depth through live versions, the process being published ("... would sit inside itself").
-  Links the old live version already had are not re-checked, so a publish never fails over a state that was already there. A
-  per-workspace advisory lock serialises the check, so two drafts placing the same process can't both pass.
+  for every caller and road: publish, restore, the company map's system versions), for each process the new live version holds that
+  the old one did not: refuses it holding, at any depth through live versions, the process being published ("... would sit inside
+  itself"); takes it off the company map if the map holds it; and refuses it if another ORDINARY process holds it live ("Sales is
+  already inside Onboarding. ..."). Links the old live version already had are not re-checked. Locks: the company map's row, then a
+  per-workspace advisory lock (the map's own sync takes them in the same order, so they can't deadlock), so two drafts placing the
+  same process can't both pass: the second waits and is refused. `give_back_placements` (after the pointer moves) and
+  `give_back_on_delete` give cards back. A partial index on `steps(child_process_id)` serves "who holds this process".
 - **Decision: "inside" is derived from live links; `parent_process_id` is legacy.** Where a process sits is the process whose LIVE
   version holds it (`public.process_placements`, a security-invoker view over `steps` and `processes`). `listProcesses` derives
   `parent_process_id` from it (the holder, or null when nothing holds it or the holder is the company map), so the app, the Processes
@@ -172,10 +181,11 @@ process is a **link** and placing **never edits it**; a process appears **at mos
   `get_process` and `list_processes` all mean the same thing. The column stays (migrations are additive) and nothing in the app writes
   it. We chose deriving over "keep the column in sync on publish" because it needs no data migration, cannot drift, and a draft's
   pending links never show as "inside" before they are published.
-  - **MCP `import_process` still writes the column** when it creates a process inside another or moves one inside (the database's
-    `check_process_parent` and the company map's sync still react to it, which keeps that process off the company map). Its own checks
-    read "where a process sits" as the live holder, or else the stored column, so it never moves a process the import itself just put
-    somewhere. Until the holder is published, `get_process` says the child sits nowhere yet (deliberate; it used to read the column).
+  - **MCP `import_process` follows the library's rule.** Linking an existing process (`child_process`) only writes the holder step:
+    publishing moves it, and a company-map process gives way, as in the web app; one that sits inside an ordinary process is refused,
+    naming where. It still writes the column for a process it CREATES inside another (that keeps the new process off the company
+    map until the holder is published). Its checks read where a process sits as the live holder, or else that column. Until the
+    holder is published, `get_process` says the child sits nowhere yet (deliberate; it used to read the column).
   - Processes whose column names a parent whose live version does not hold them (an import whose parent was never published) now read
     as top level / "Not on any map". Nothing is changed for them; publishing the parent puts them inside it. Migration preflight 7
     lists them.
@@ -188,9 +198,11 @@ process is a **link** and placing **never edits it**; a process appears **at mos
   (the sync rule) and would then sit in two places. `public.create_library_process` (security invoker; editors only) inserts it as the
   caller with a transaction-local note that the map's sync reads to leave that one process alone; templates go through the same path
   (`createProcessFromTemplate`, the shared body of MCP's `create_from_template`). Nothing is published.
-- **A process on the company map must come off it before it can go inside another.** That follows from "at most once"; the library
-  says "On the company map" and why. The company map's system versions never add a card for a process another process holds live.
+- **Plain messages in the editor.** A draft that links a process with no published version says "Publish 'X' first"; a link back to
+  a process this one sits inside says it would put that process inside itself; a linked process with no next step says so (the
+  engine's message calls it a group; the engine is unchanged).
 - **Restore.** `restore_version` keeps a holder's link only while no OTHER process holds that process live; otherwise it unlinks it
-  (ordinary process) or skips it (company map), as before.
+  (ordinary process) or skips it (company map), as before. A restored company map no longer adds back a process another process
+  links, live or in its draft (so one the library made and placed in a draft stays there).
 - **Simulation is unchanged:** a held process is simulated through its holder step, so nested equals flattened, and seeded goldens are
   unchanged (tested).

@@ -158,6 +158,20 @@ describe("toEngineModel with groups", () => {
 });
 
 describe("toEngineModel with a child process", () => {
+  it("says plainly what is wrong with a link: nowhere to go, nothing published yet, or a loop (B12 wording)", () => {
+    const { bundle, heldBy, child } = withChildProcess();
+    // No next step after a linked process: called by its name, not "Group".
+    const stuck = { ...bundle, edges: bundle.edges.filter((e) => e.from_step_id !== heldBy) };
+    expect(() => modelOf(stuck)).toThrow(/^'Delivery' has nothing leaving it: join it to a next step$/);
+    // The linked process has no published version (not among the parts).
+    const unpublished = { ...bundle, otherProcesses: (bundle.otherProcesses ?? []).filter((p) => p.process.id !== child.process.id) };
+    expect(() => modelOf(unpublished)).toThrow(/^Publish 'Delivery' first: this step links to it, and it has no published version yet$/);
+    // The linked process links back to this one.
+    const back = { ...child, steps: [...child.steps, holder(bundle, randomUUID(), "Back", { kind: "subprocess", child_process_id: bundle.process.id, process_id: child.process.id, revision_id: child.revision.id })] };
+    const loop = { ...bundle, otherProcesses: (bundle.otherProcesses ?? []).map((p) => (p.process.id === child.process.id ? back : p)) };
+    expect(() => modelOf(loop)).toThrow(/would put '.*' inside itself: 'Back' links back to it\. Take one of the links out/);
+  });
+
   it("resolves Northbeam with its delivery as a child process to the flat Northbeam model", () => {
     expect(modelOf(withChildProcess().bundle)).toEqual(modelOf(flat()));
   });

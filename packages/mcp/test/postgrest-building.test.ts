@@ -809,11 +809,17 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
       process_json: { steps: [{ name: "Standalone step", child_process: "Standalone" }] },
     });
     expect(adopt.ok, JSON.stringify(adopt)).toBe(true);
-    expect(adopt.data.text).toContain("(moved inside it)");
+    // Linked, not moved (B12, as the web library): the process is not written; publishing the holder moves it, and the company
+    // map, its default home, gives way.
+    expect(adopt.data.text).toContain("(it moves inside it when you publish)");
     const parent = await processRow("Company delivery");
-    expect(await processRow("Standalone")).toMatchObject({ parent_process_id: parent.id });
+    expect(await processRow("Standalone")).toMatchObject({ parent_process_id: null });
+    const where = async () => (await admin.query("select holder_name from process_placements where process_id = $1", [(await processRow("Standalone")).id])).rows.map((r) => r.holder_name);
+    expect(await where()).toEqual(["Company map"]);
+    expect(await call(editor, "publish_process", { process: "Company delivery", accept_estimates: true })).toMatchObject({ ok: true });
+    expect(await where()).toEqual([parent.name]);
 
-    // A process has one parent.
+    // A process sits in one place only.
     expect(await call(editor, "import_process", { target: "Flat delivery", process_json: { steps: [{ name: "Also here", child_process: "Standalone" }] } })).toMatchObject({
       ok: false,
       error: { code: "invalid_input", message: expect.stringContaining("already sits inside") },

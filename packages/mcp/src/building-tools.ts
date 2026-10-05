@@ -777,7 +777,7 @@ async function prepareImport(
       const child = resolveProcessRef(scope.processes, h.child_process, `for step '${h.step}'`);
       if (child.id === self || opts.ancestors.includes(child.id)) throw new ToolError("invalid_input", `Step '${h.step}': a process can't sit inside itself; '${child.name}' is this process or one that holds it.`);
       if (child.parent_process_id && child.parent_process_id !== self) {
-        throw new ToolError("invalid_input", `Step '${h.step}': '${child.name}' already sits inside '${processById.get(child.parent_process_id)?.name ?? "another process"}'; a process has one parent.`);
+        throw new ToolError("invalid_input", `Step '${h.step}': '${child.name}' already sits inside '${processById.get(child.parent_process_id)?.name ?? "another process"}'; a process sits in one place only: take it out there first.`);
       }
       if (now && now !== child.id) throw new ToolError("invalid_input", `Step '${h.step}' already holds '${processById.get(now)?.name ?? "another process"}'; remove that first.`);
       claim(child.id, child.name, h.step);
@@ -869,7 +869,8 @@ async function prepareImport(
         steps: plan.insertSteps,
         edges: plan.insertEdges,
       });
-      for (const h of held) if (h.adopt) adopts.push({ id: h.adopt.id, parent_id: createId });
+      // An existing process is linked, never moved by writing its parent (B12, as the web app's library): publishing the step
+      // that holds it is what moves it (off the company map, which gives way).
       for (const h of held) h.inline?.prepared.collect(createId, nodes, adopts);
     },
     settle(parentId, results) {
@@ -927,10 +928,6 @@ async function prepareImport(
       const { proc, draft } = await prepared.ensure(null);
       // Every child exists, and belongs to this process, before the step that holds it is written.
       for (const h of held) {
-        if (h.adopt && !writtenAtOnce) {
-          const { error } = await ctx.db.from("processes").update({ parent_process_id: proc.id }).eq("id", h.adopt.id);
-          if (error) throw writeError(error, "move a process inside another");
-        }
         if (h.inline) h.id = (await h.inline.prepared.ensure(proc)).proc.id;
       }
       const ids = new Map(held.map((x) => [normalizeName(x.step), x.id]));
@@ -969,7 +966,7 @@ async function prepareImport(
           (plan.kept.length ? ` ${plural(plan.kept.length, "entered value")} kept and flagged as ${plan.kept.length === 1 ? "a conflict" : "conflicts"}.` : "") +
           ` To confirm before publishing: ${plural(nConflicts, "conflict")}, ${plural(items.length - nConflicts, "assumption")}.` +
           (held.length
-            ? ` Child processes: ${held.map((x) => `'${x.step}' holds '${(children.find((c) => c.step === x.step)?.process.name ?? x.adopt?.name ?? processById.get(x.id)?.name) ?? x.step}'${x.adopt ? " (moved inside it)" : ""}`).join("; ")}.`
+            ? ` Child processes: ${held.map((x) => `'${x.step}' holds '${(children.find((c) => c.step === x.step)?.process.name ?? x.adopt?.name ?? processById.get(x.id)?.name) ?? x.step}'${x.adopt ? " (it moves inside it when you publish)" : ""}`).join("; ")}.`
             : "") +
           conflictNote(editConflicts),
       };

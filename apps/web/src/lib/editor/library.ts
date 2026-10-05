@@ -39,11 +39,12 @@ export interface LibraryEntry {
   kind: ProcessRow["kind"];
   live: boolean;
   /**
-   * `free`: not on any map, can be added. `placed`: already linked in the draft being edited (a process sits in one place).
-   * `inside`: another process (or the company map) holds it, so it can't be added here too. `holds`: it holds the process being
-   * edited, at some depth, so placing it here would put a process inside itself.
+   * `free`: not on any map, can be added. `map`: on the company map, can be added too (the company map is the default home and
+   * gives way: publishing moves it here). `placed`: already linked in the draft being edited (a process sits in one place).
+   * `inside`: another process holds it, so it can't be added here too. `holds`: it holds the process being edited, at some depth,
+   * so placing it here would put a process inside itself.
    */
-  state: "free" | "placed" | "inside" | "holds";
+  state: "free" | "map" | "placed" | "inside" | "holds";
   /** For `inside`: where it sits ("the company map", or the process's name). */
   insideName: string | null;
 }
@@ -83,7 +84,9 @@ export function libraryEntries(bundle: ProcessBundle, processes: readonly Librar
     .map<LibraryEntry>((p) => {
       // Held by this process's live version: if the draft still has it, it is here; if the draft took it out, it is free again.
       const elsewhere = p.holder && p.holder.id !== self ? p.holder : null;
-      const state = here.has(p.id) ? "placed" : elsewhere ? "inside" : above.has(p.id) ? "holds" : "free";
+      // The company map gives way to any other process: one on it can be added here (it moves when this is published).
+      const onMap = !!elsewhere?.company && bundle.process.is_company !== true;
+      const state = here.has(p.id) ? "placed" : above.has(p.id) ? "holds" : onMap ? "map" : elsewhere ? "inside" : "free";
       return {
         id: p.id,
         name: p.name,
@@ -93,9 +96,12 @@ export function libraryEntries(bundle: ProcessBundle, processes: readonly Librar
         insideName: state === "inside" && elsewhere ? (elsewhere.company ? "the company map" : elsewhere.name) : null,
       };
     });
-  const rank = { free: 0, placed: 1, inside: 2, holds: 3 } as const;
+  const rank = { free: 0, map: 1, placed: 2, inside: 3, holds: 4 } as const;
   return entries.sort((a, b) => rank[a.state] - rank[b.state] || (a.insideName ?? "").localeCompare(b.insideName ?? "") || a.name.localeCompare(b.name));
 }
+
+/** Whether the library lets this entry be ticked and added here. */
+export const isAddable = (e: Pick<LibraryEntry, "state">): boolean => e.state === "free" || e.state === "map";
 
 /** The entries whose name contains what was typed (ignoring case and extra spaces); everything for an empty search. */
 export function filterLibrary<T extends { name: string }>(entries: readonly T[], query: string): T[] {
@@ -116,7 +122,7 @@ export function placeProcesses(
   view?: ViewHint | null,
   processes: readonly LibraryProcess[] = processesOfBundle(bundle),
 ): { edit: Edit; ids: string[] } | null {
-  const free = new Map(libraryEntries(bundle, processes).filter((e) => e.state === "free").map((e) => [e.id, e]));
+  const free = new Map(libraryEntries(bundle, processes).filter(isAddable).map((e) => [e.id, e]));
   const wanted = [...new Set(ids)].map((id) => free.get(id)).filter((e): e is LibraryEntry => !!e);
   if (!wanted.length) return null;
   const cards: StepRow[] = [];

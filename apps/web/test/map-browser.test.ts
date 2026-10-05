@@ -429,19 +429,22 @@ describe("the process library in an ordinary process's editor (B12 part 2)", () 
     await page.locator("[data-process-library]").waitFor();
   };
 
-  it("+ Process opens the library: what sits nowhere can be ticked, what sits on the company map is greyed and says so", async () => {
+  it("+ Process opens the library: what sits nowhere, and what sits on the company map (it gives way), can be ticked", async () => {
     const page = await mount({ editable: true, palette: true, library: true });
     expect(await page.locator("[data-process-library]").count()).toBe(0);
     await openLibrary(page);
     const freeNames = await free(page).locator("> span > span:first-child").allTextContents();
     expect(freeNames).toContain("Renewals");
     expect(freeNames).toEqual([...freeNames].sort((a, b) => a.localeCompare(b)));
-    const greyed = page.locator("[data-library-item][data-state='inside']");
-    expect(await greyed.count()).toBe(1);
-    expect(await greyed.locator("input").isDisabled()).toBe(true);
-    expect(await greyed.innerText()).toContain("Referrals");
-    expect(await greyed.innerText()).toContain("Already on the company map. A process sits in one place only: take it off there first.");
+    // One on the company map is offered too (the map gives way when this is published), and says so.
+    const onMap = page.locator("[data-library-item][data-state='map']");
+    expect(await onMap.count()).toBe(1);
+    expect(await onMap.locator("input").isEnabled()).toBe(true);
+    expect(await onMap.innerText()).toContain("Referrals");
+    expect(await onMap.innerText()).toContain("On the company map — moves here when you publish.");
     expect(await page.locator("[data-process-library] [role=group]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).toContain("On the company map");
+    await onMap.locator("input").check();
+    await page.waitForFunction(() => document.querySelector("[data-library-add]")?.textContent === "Add 1 to the map");
     // The process being edited is never offered.
     expect(await page.locator("[data-library-item]").allTextContents()).not.toContain(expect.stringContaining("Lead to live"));
     await page.close();
