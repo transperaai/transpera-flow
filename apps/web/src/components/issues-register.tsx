@@ -95,7 +95,13 @@ export function IssuesRegister({
   stepFilter,
   onStepFilterChange,
   onHighlight,
+  issueExtra,
+  includeClosed = false,
 }: {
+  /** With `issues`: also list resolved and won't-fix issues (open ones first), so the status track can show them through to Verified. */
+  includeClosed?: boolean;
+  /** Drawn under a confirmed issue's row (the process page's status track and linked solutions). */
+  issueExtra?: (issue: IssueRow) => ReactNode;
   /** The workspace currency, for each issue's cost per month. */
   currency: string;
   /** `rail`: narrow, beside the map; `page`: the full register screen. */
@@ -135,7 +141,8 @@ export function IssuesRegister({
   const sectioned = view !== "all";
   const all = registerEntries(state.issues, detected ?? [], state.revisionOf).filter((e) => !sectioned || e.kind === (view === "insights" ? "detected" : "tracked"));
   const entries = sectioned && stepIds ? entriesInProcess(all, processId, stepIds) : all;
-  const shown = filterEntries(entries, { ...filters, step: stepFilter, ...(sectioned ? { process: processId } : {}) }, processId);
+  const listed = filterEntries(entries, { ...filters, step: stepFilter, ...(sectioned ? { process: processId } : {}), ...(includeClosed ? { status: "" as const } : {}) }, processId);
+  const shown = includeClosed ? [...listed.filter((e) => entryView(e).open), ...listed.filter((e) => !entryView(e).open)] : listed;
   const active = entries.filter((e) => entryView(e).open);
   const count = (r: Rating) => active.filter((e) => entryView(e).rating === r).length;
   const names = {
@@ -253,6 +260,7 @@ export function IssuesRegister({
               state={state}
               showProcess={processes.length > 1}
               onHighlight={onHighlight}
+              extra={issueExtra}
               onEdit={(issue) => setDialog({ mode: "edit", draft: draftFromIssue(issue), number: issue.number })}
             />
           ))}
@@ -286,7 +294,9 @@ function IssueItem({
   showProcess,
   onHighlight,
   onEdit,
+  extra,
 }: {
+  extra?: (issue: IssueRow) => ReactNode;
   currency: string;
   entry: RegisterEntry;
   names: { step: Map<string, string>; person: Map<string, string>; process: Map<string, string> };
@@ -390,6 +400,7 @@ function IssueItem({
       ) : (
         fix && <p className="mt-1 text-xs text-fg-3">Fix: {fix.name}</p>
       )}
+      {issue && extra?.(issue)}
       {issue && editing && canEdit && (
         <div className="mt-2 grid gap-2 border-t border-line pt-2">
           <IssueFields issue={issue} people={people} scenarios={scenarios} state={state} />

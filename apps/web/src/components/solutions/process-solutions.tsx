@@ -24,7 +24,10 @@ export function ProcessSolutions({
   canEdit,
   data,
   issues,
+  otherOnly = false,
 }: {
+  /** The process page's "Other improvements": only solutions not linked to an issue (those sit under their issue), with no build-from-issue list. */
+  otherOnly?: boolean;
   processId: string;
   processName: string;
   viewerId?: string | null;
@@ -40,8 +43,9 @@ export function ProcessSolutions({
   issues: IssueRow[];
 }) {
   const inTab = useDemoSolutions();
-  const solutions = demo ? inTab.solutions.filter((s) => s.process_id === processId) : data.solutions.filter((s) => s.process_id === processId);
+  const own = demo ? inTab.solutions.filter((s) => s.process_id === processId) : data.solutions.filter((s) => s.process_id === processId);
   const links = demo ? inTab.links : data.links;
+  const solutions = otherOnly ? own.filter((s) => !links.some((l) => l.solution_id === s.id)) : own;
   const from = `${base}/p/${processId}#solutions`;
   const toSolve = issues.filter(
     (i) => (i.status === "open" || i.status === "testing") && (i.process_id === processId || i.links.some((l) => l.process_id === processId)),
@@ -74,8 +78,9 @@ export function ProcessSolutions({
         viewerId={viewerId}
         memberNames={memberNames}
         from={from}
+        empty={otherOnly ? "Nothing else yet. Every solution here is for an issue above." : undefined}
       />
-      {canEdit && toSolve.length > 0 && (
+      {canEdit && !otherOnly && toSolve.length > 0 && (
         <div className="flex flex-col gap-1.5" data-testid="build-from-issue">
           <span className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
             Build from an issue

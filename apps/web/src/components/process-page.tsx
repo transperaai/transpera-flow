@@ -1,7 +1,7 @@
 "use client";
 
 // The process page (issue #103, A38): a read-only review of one process on a single scrolling column, no tabs and no
-// drawers. First principles, Map, Insights, Issues, Solutions, then Supporting data and, closed at the bottom, Sources. Editing happens in the
+// drawers. About this process, First principles, Map, Insights, Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -10,7 +10,10 @@ import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, type AnalysisSettings, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
+import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
+import { IssueTrackView } from "@/components/issue-track";
+import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { AiRead } from "@/components/ai/ai-read";
 import type { AiPanelData } from "@/lib/ai/types";
@@ -21,6 +24,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
+import { aboutProcess } from "@/lib/process-page/about";
+import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
+import { linkedSolutions, trackOf } from "@/lib/process-page/track";
+import { buildSolutionHref } from "@/lib/solutions/links";
+import { useDemoSolutions } from "@/lib/solutions/demo";
 import { withHorizon } from "@/lib/editor/modes";
 import { useDemoFirstPrinciples } from "@/lib/first-principles/demo-store";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
@@ -29,6 +37,7 @@ import { processStepIds } from "@/lib/process-steps";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { ProcessCanvas } from "./process-canvas";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
+import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
 import { useEngineModel, type EditMode } from "./process-view";
 import { ServicingBanner } from "./servicing-banner";
@@ -41,8 +50,6 @@ const RATING_PILL: Record<Rating, string> = {
   good: "border-warn bg-warn-soft",
   great: "border-line bg-panel-2",
 };
-
-const KIND_LABEL = { pipeline: "Pipeline", servicing: "Servicing" } as const;
 
 /** A process inside this one, for the "Inside:" chips. */
 export interface ChildProcess {
@@ -72,7 +79,13 @@ export function ProcessPage({
   processPicker,
   notice,
   ai,
+  aboutInfo,
+  ideaIssueIds = [],
 }: {
+  /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
+  aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
+  /** Issues with an AI solution idea waiting, for the status track's "Solution idea". */
+  ideaIssueIds?: readonly string[];
   /** What AI wrote about the version on screen (A46): its read, and the insights that join the list marked AI. */
   ai?: AiPanelData;
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
@@ -133,7 +146,22 @@ export function ProcessPage({
   const fpDoc = mode === "demo" ? demoFirstPrinciples : (firstPrinciples?.doc ?? null);
   const successMeasures = useSuccessMeasures(bundle.process.id, mode === "demo", firstPrinciples?.doc);
 
+  // Solutions: the demo keeps its own in this tab. Each issue's status track and the "Other improvements" read them.
+  const inTab = useDemoSolutions();
+  const solData = mode === "demo" ? inTab : (solutions?.data ?? NO_SOLUTIONS_DATA);
+  const solBase = solutions?.base ?? (mode === "demo" ? "/demo" : "");
+  const canBuild = mode !== "readonly" && viewingVersion === null && !!solutions?.base;
+  const ideaSet = useMemo(() => new Set(ideaIssueIds), [ideaIssueIds]);
+  const issueExtra = (issue: IssueRow) => (
+    <IssueTrackView
+      track={trackOf(issue, linkedSolutions(solData, issue.id), ideaSet.has(issue.id))}
+      base={solBase}
+      buildHref={canBuild && (issue.status === "open" || issue.status === "testing") ? buildSolutionHref(solBase, issue, `${solBase}/p/${bundle.process.id}#issues`) : null}
+    />
+  );
+
   const issuesUi = useProcessIssues({
+    issueExtra,
     bundle,
     model,
     result,
@@ -164,6 +192,26 @@ export function ProcessPage({
   // The steps of this process and of the processes inside it, which the wait chart is about (the model may hold more).
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
   const unpublished = liveVersion === 0;
+  const linking = useSourceLinking();
+  const about = useMemo(() => {
+    const ids = new Set([bundle.process.id, ...(bundle.otherProcesses ?? []).map((o) => o.process.id)]);
+    const linked = linking
+      ? new Set(linking.links.filter((l) => (l.kind === "process" && l.process_id && ids.has(l.process_id)) || (l.kind === "step" && l.step_id && stepIds.has(l.step_id))).map((l) => l.source_id))
+      : null;
+    return aboutProcess({ bundle, doc: fpDoc, trail: aboutInfo?.trail ?? [], liveVersion, hasDraft: aboutInfo?.hasDraft ?? false, sources: linked ? linked.size : null, lastChange: aboutInfo?.lastChange ?? null });
+  }, [bundle, fpDoc, aboutInfo, liveVersion, linking, stepIds]);
+  const supporting = useMemo(
+    () =>
+      model
+        ? {
+            timeSplit: timeSplitRows(model, result, stepIds),
+            spread: cycleSpread(result),
+            keyPeople: keyPersonRows(model, result, stepIds),
+            loops: loopRows(model, result, { processId: bundle.process.id, stepIds, issues, solutions: solData.solutions.filter((s) => s.process_id === bundle.process.id) }),
+          }
+        : null,
+    [model, result, stepIds, bundle.process.id, issues, solData.solutions],
+  );
 
   return (
     <div className="flex min-h-svh flex-1 flex-col">
@@ -192,9 +240,6 @@ export function ProcessPage({
                 {unpublished ? "Viewing the draft · not published yet" : `Viewing live · version ${liveVersion}`}
               </span>
             )}
-            <span className="inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs">
-              {KIND_LABEL[bundle.process.kind]}
-            </span>
             {rating && (
               <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${RATING_PILL[rating]}`} data-process-rating={rating}>
                 {RATING_LABELS[rating]}
@@ -240,6 +285,8 @@ export function ProcessPage({
             )}
           </div>
         )}
+
+        <AboutProcess about={about} />
 
         <Section
           id="first-principles"
@@ -292,8 +339,8 @@ export function ProcessPage({
 
         <Section
           id="issues"
-          title="Issues"
-          hint="Open issues linked to this process or its steps."
+          title="Issues and solutions"
+          hint="Each issue with its solutions, and how far it has got. Solutions never change the live map."
         >
           {issuesUi.issuesList}
           {registerHref && (
@@ -301,31 +348,35 @@ export function ProcessPage({
               Open the full register →
             </Link>
           )}
-        </Section>
-
-        <Section
-          id="solutions"
-          title="Solutions"
-          hint="Bundles of steps tested against an issue. They never change the live map."
-        >
-          <ProcessSolutions
-            processId={bundle.process.id}
-            processName={bundle.process.name}
-            viewerId={solutions?.viewerId}
-            memberNames={solutions?.memberNames}
-            base={solutions?.base ?? (mode === "demo" ? "/demo" : "")}
-            demo={mode === "demo"}
-            canEdit={mode !== "readonly" && !old && !!solutions?.base}
-            data={solutions?.data ?? { solutions: [], links: [] }}
-            issues={issues}
-          />
+          <div id="solutions" className="mt-2 flex scroll-mt-16 flex-col gap-2">
+            <h3 className="text-sm font-bold">Other improvements</h3>
+            <p className="-mt-1.5 text-xs text-fg-3">Solutions that are not for a particular issue.</p>
+            <ProcessSolutions
+              otherOnly
+              processId={bundle.process.id}
+              processName={bundle.process.name}
+              viewerId={solutions?.viewerId}
+              memberNames={solutions?.memberNames}
+              base={solBase}
+              demo={mode === "demo"}
+              canEdit={canBuild}
+              data={solutions?.data ?? NO_SOLUTIONS_DATA}
+              issues={issues}
+            />
+          </div>
         </Section>
 
         <Section id="supporting-data" title="Supporting data" hint="From the latest run.">
-          {model ? (
+          {model && supporting ? (
             <div className="grid gap-3 md:grid-cols-2">
               <WaitByStep model={model} result={result} stepIds={stepIds} />
               <UtilisationBars model={model} result={result} />
+              <TimeSplit rows={supporting.timeSplit} result={result} />
+              <CycleSpreadPanel spread={supporting.spread} hoursPerWeek={model.hoursPerWeek} result={result} />
+              <KeyPersonPanel rows={supporting.keyPeople} result={result} />
+              <div className="min-w-0 md:col-span-2">
+                <ReworkLoopsPanel rows={supporting.loops} result={result} hoursPerWeek={model.hoursPerWeek} base={solBase} />
+              </div>
             </div>
           ) : (
             <p className="text-sm text-fg-2">Nothing to show until the process can be simulated.</p>
