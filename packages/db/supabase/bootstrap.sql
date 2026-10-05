@@ -26928,7 +26928,9 @@ grant execute on function public.record_calibration(uuid, uuid, text, jsonb, int
 --   * While archived, nothing changes the process: `private.refuse_archived_revision` (before insert or update on
 --     `process_revisions`: no draft opened, no version restored into a new or an open draft) and `private.refuse_archived_publish` (before its `live_revision_id` moves: an
 --     old draft can't be published), `private.refuse_archived_edit` (its name, kind, description or place),
---     `private.refuse_archived_rows` (steps and edges written into a draft left open; deleting the draft stays allowed) and
+--     `private.refuse_archived_rows` (steps and edges of any of its versions written, e.g. into a draft left open; deleting
+--     the draft stays allowed, and so do the foreign keys' `on delete set null` clearing `created_by`, `child_process_id` or
+--     `entry_step_id`, as `private.only_cleared` checks; `published_by` and `created_by` of its versions likewise) and
 --     `private.refuse_archived_service_link` (a service's way in or client work pointed at it), each with its trigger(s);
 --     `public.open_draft` (full copy of 20261006000000's, changed) refuses it too, even when a draft is already open.
 --   * `private.refuse_archived_placements` and its trigger (before update of `live_revision_id`, every caller): publishing (or
@@ -26967,7 +26969,7 @@ grant execute on function public.record_calibration(uuid, uuid, text, jsonb, int
 --        select count(*) from supabase_migrations.schema_migrations where version >= '20261204000000';
 --   2. Nothing this migration creates exists yet. Expect 0 rows from each:
 --        select column_name from information_schema.columns where table_schema = 'public' and ((table_name = 'processes' and column_name in ('archived_at', 'archived_by')) or (table_name = 'sources' and column_name in ('file_path', 'file_name', 'file_type', 'file_size')));
---        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace');
+--        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'only_cleared', 'storage_workspace');
 --        select indexname from pg_indexes where schemaname = 'public' and indexname = 'sources_workspace_file_path';
 --        select id from storage.buckets where id = 'sources';
 --        select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'sources:%';
@@ -26995,9 +26997,9 @@ grant execute on function public.record_calibration(uuid, uuid, text, jsonb, int
 --   3. Three policies, all for authenticated (read, upload, delete; no update). Expect 3 rows, roles {authenticated}:
 --        select policyname, cmd, roles from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'sources:%';
 --   4. The new private functions have an empty search_path and no EXECUTE for anon or PUBLIC (storage_workspace is executable
---      by authenticated, which the policies need). Expect 10 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
---        select proname, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace');
---        select grantee, routine_name from information_schema.routine_privileges where routine_schema = 'private' and routine_name in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'storage_workspace') and grantee in ('anon', 'authenticated', 'PUBLIC');
+--      by authenticated, which the policies need). Expect 11 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
+--        select proname, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'only_cleared', 'storage_workspace');
+--        select grantee, routine_name from information_schema.routine_privileges where routine_schema = 'private' and routine_name in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'refuse_archived_edit', 'refuse_archived_rows', 'refuse_archived_service_link', 'source_file_guard', 'only_cleared', 'storage_workspace') and grantee in ('anon', 'authenticated', 'PUBLIC');
 --
 -- ROLLBACK (redeploy the app to a build from before it FIRST; run as one transaction. Archived processes come back as ordinary
 -- processes, with no card on the company map until someone places one; uploaded files stay in the bucket, unreachable from the
@@ -27021,6 +27023,7 @@ grant execute on function public.record_calibration(uuid, uuid, text, jsonb, int
 --   drop trigger if exists refuse_archived_rows on public.steps;
 --   drop trigger if exists refuse_archived_rows on public.edges;
 --   drop function if exists private.refuse_archived_rows();
+--   drop function if exists private.only_cleared(jsonb, jsonb, text[]);
 --   drop trigger if exists refuse_archived_edit on public.processes;
 --   drop function if exists private.refuse_archived_edit();
 --   drop trigger if exists refuse_archived_placements on public.processes;
@@ -27074,7 +27077,8 @@ begin
     return new;
   end if;
   if new.archived_at is not distinct from old.archived_at then
-    if new.archived_by is distinct from old.archived_by then
+    -- Only clearing it is allowed (the person who archived it was deleted: `on delete set null`).
+    if new.archived_by is distinct from old.archived_by and new.archived_by is not null then
       raise exception 'Who archived a process is recorded by the database, not set by hand' using errcode = '55000';
     end if;
     return new;
@@ -27142,6 +27146,20 @@ create trigger process_archive_guard before insert or update of archived_at, arc
 
 -- While a process is archived nothing changes it: no version made or changed (a draft opened, a version restored into a new
 -- or an open draft) and no new live version (publishing a draft opened before it was archived). Every caller and road.
+-- True when an update clears some of `cols` (sets them to null) and changes nothing else (but `updated_at`): what a
+-- foreign key's `on delete set null` does to a row of an archived process (a person deleted, a linked process deleted). Those
+-- are allowed; every other change is refused.
+create function private.only_cleared(old_row jsonb, new_row jsonb, cols text[]) returns boolean
+language sql immutable
+set search_path = ''
+as $$
+  select (old_row - cols - 'updated_at') = (new_row - cols - 'updated_at')
+     and exists (select 1 from unnest(cols) c where new_row -> c is distinct from old_row -> c)
+     and not exists (select 1 from unnest(cols) c where new_row -> c is distinct from old_row -> c and new_row -> c <> 'null'::jsonb);
+$$;
+
+revoke all on function private.only_cleared(jsonb, jsonb, text[]) from public, anon, authenticated;
+
 create function private.refuse_archived_revision() returns trigger
 language plpgsql security definer
 set search_path = ''
@@ -27150,7 +27168,8 @@ declare
   proc public.processes;
 begin
   select * into proc from public.processes p where p.id = new.process_id;
-  if proc.archived_at is not null then
+  if proc.archived_at is not null
+     and not (tg_op = 'UPDATE' and private.only_cleared(to_jsonb(old), to_jsonb(new), array['created_by', 'published_by'])) then
     raise exception '% is archived. Restore it from Processes (Archived) before changing it.', proc.name using errcode = '55000';
   end if;
   return new;
@@ -27202,7 +27221,8 @@ declare
   proc public.processes;
 begin
   select * into proc from public.processes p where p.id = new.process_id;
-  if proc.archived_at is not null then
+  if proc.archived_at is not null
+     and not (tg_op = 'UPDATE' and private.only_cleared(to_jsonb(old), to_jsonb(new), array['created_by', 'child_process_id', 'entry_step_id'])) then
     raise exception '% is archived. Restore it from Processes (Archived) before changing it.', proc.name using errcode = '55000';
   end if;
   return new;
@@ -27754,7 +27774,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * While archived, nothing changes the process: `private.refuse_archived_revision` (before insert or update on
 --     `process_revisions`: no draft opened, no version restored into a new or an open draft) and `private.refuse_archived_publish` (before its `live_revision_id` moves: an
 --     old draft can''t be published), `private.refuse_archived_edit` (its name, kind, description or place),
---     `private.refuse_archived_rows` (steps and edges written into a draft left open; deleting the draft stays allowed) and
+--     `private.refuse_archived_rows` (steps and edges of any of its versions written, e.g. into a draft left open; deleting
+--     the draft stays allowed, and so do the foreign keys'' `on delete set null` clearing `created_by`, `child_process_id` or
+--     `entry_step_id`, as `private.only_cleared` checks; `published_by` and `created_by` of its versions likewise) and
 --     `private.refuse_archived_service_link` (a service''s way in or client work pointed at it), each with its trigger(s);
 --     `public.open_draft` (full copy of 20261006000000''s, changed) refuses it too, even when a draft is already open.
 --   * `private.refuse_archived_placements` and its trigger (before update of `live_revision_id`, every caller): publishing (or
@@ -27793,7 +27815,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        select count(*) from supabase_migrations.schema_migrations where version >= ''20261204000000'';
 --   2. Nothing this migration creates exists yet. Expect 0 rows from each:
 --        select column_name from information_schema.columns where table_schema = ''public'' and ((table_name = ''processes'' and column_name in (''archived_at'', ''archived_by'')) or (table_name = ''sources'' and column_name in (''file_path'', ''file_name'', ''file_type'', ''file_size'')));
---        select proname from pg_proc where pronamespace = ''private''::regnamespace and proname in (''process_archive_guard'', ''process_archive_map'', ''refuse_archived_placements'', ''refuse_archived_revision'', ''refuse_archived_publish'', ''refuse_archived_edit'', ''refuse_archived_rows'', ''refuse_archived_service_link'', ''source_file_guard'', ''storage_workspace'');
+--        select proname from pg_proc where pronamespace = ''private''::regnamespace and proname in (''process_archive_guard'', ''process_archive_map'', ''refuse_archived_placements'', ''refuse_archived_revision'', ''refuse_archived_publish'', ''refuse_archived_edit'', ''refuse_archived_rows'', ''refuse_archived_service_link'', ''source_file_guard'', ''only_cleared'', ''storage_workspace'');
 --        select indexname from pg_indexes where schemaname = ''public'' and indexname = ''sources_workspace_file_path'';
 --        select id from storage.buckets where id = ''sources'';
 --        select policyname from pg_policies where schemaname = ''storage'' and tablename = ''objects'' and policyname like ''sources:%'';
@@ -27821,9 +27843,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   3. Three policies, all for authenticated (read, upload, delete; no update). Expect 3 rows, roles {authenticated}:
 --        select policyname, cmd, roles from pg_policies where schemaname = ''storage'' and tablename = ''objects'' and policyname like ''sources:%'';
 --   4. The new private functions have an empty search_path and no EXECUTE for anon or PUBLIC (storage_workspace is executable
---      by authenticated, which the policies need). Expect 10 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
---        select proname, proconfig from pg_proc where pronamespace = ''private''::regnamespace and proname in (''process_archive_guard'', ''process_archive_map'', ''refuse_archived_placements'', ''refuse_archived_revision'', ''refuse_archived_publish'', ''refuse_archived_edit'', ''refuse_archived_rows'', ''refuse_archived_service_link'', ''source_file_guard'', ''storage_workspace'');
---        select grantee, routine_name from information_schema.routine_privileges where routine_schema = ''private'' and routine_name in (''process_archive_guard'', ''process_archive_map'', ''refuse_archived_placements'', ''refuse_archived_revision'', ''refuse_archived_publish'', ''refuse_archived_edit'', ''refuse_archived_rows'', ''refuse_archived_service_link'', ''source_file_guard'', ''storage_workspace'') and grantee in (''anon'', ''authenticated'', ''PUBLIC'');
+--      by authenticated, which the policies need). Expect 11 rows with {search_path=""}, then 1 row (authenticated, storage_workspace):
+--        select proname, proconfig from pg_proc where pronamespace = ''private''::regnamespace and proname in (''process_archive_guard'', ''process_archive_map'', ''refuse_archived_placements'', ''refuse_archived_revision'', ''refuse_archived_publish'', ''refuse_archived_edit'', ''refuse_archived_rows'', ''refuse_archived_service_link'', ''source_file_guard'', ''only_cleared'', ''storage_workspace'');
+--        select grantee, routine_name from information_schema.routine_privileges where routine_schema = ''private'' and routine_name in (''process_archive_guard'', ''process_archive_map'', ''refuse_archived_placements'', ''refuse_archived_revision'', ''refuse_archived_publish'', ''refuse_archived_edit'', ''refuse_archived_rows'', ''refuse_archived_service_link'', ''source_file_guard'', ''only_cleared'', ''storage_workspace'') and grantee in (''anon'', ''authenticated'', ''PUBLIC'');
 --
 -- ROLLBACK (redeploy the app to a build from before it FIRST; run as one transaction. Archived processes come back as ordinary
 -- processes, with no card on the company map until someone places one; uploaded files stay in the bucket, unreachable from the
@@ -27847,6 +27869,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop trigger if exists refuse_archived_rows on public.steps;
 --   drop trigger if exists refuse_archived_rows on public.edges;
 --   drop function if exists private.refuse_archived_rows();
+--   drop function if exists private.only_cleared(jsonb, jsonb, text[]);
 --   drop trigger if exists refuse_archived_edit on public.processes;
 --   drop function if exists private.refuse_archived_edit();
 --   drop trigger if exists refuse_archived_placements on public.processes;
@@ -27900,7 +27923,8 @@ begin
     return new;
   end if;
   if new.archived_at is not distinct from old.archived_at then
-    if new.archived_by is distinct from old.archived_by then
+    -- Only clearing it is allowed (the person who archived it was deleted: `on delete set null`).
+    if new.archived_by is distinct from old.archived_by and new.archived_by is not null then
       raise exception ''Who archived a process is recorded by the database, not set by hand'' using errcode = ''55000'';
     end if;
     return new;
@@ -27968,6 +27992,20 @@ create trigger process_archive_guard before insert or update of archived_at, arc
 
 -- While a process is archived nothing changes it: no version made or changed (a draft opened, a version restored into a new
 -- or an open draft) and no new live version (publishing a draft opened before it was archived). Every caller and road.
+-- True when an update clears some of `cols` (sets them to null) and changes nothing else (but `updated_at`): what a
+-- foreign key''s `on delete set null` does to a row of an archived process (a person deleted, a linked process deleted). Those
+-- are allowed; every other change is refused.
+create function private.only_cleared(old_row jsonb, new_row jsonb, cols text[]) returns boolean
+language sql immutable
+set search_path = ''''
+as $$
+  select (old_row - cols - ''updated_at'') = (new_row - cols - ''updated_at'')
+     and exists (select 1 from unnest(cols) c where new_row -> c is distinct from old_row -> c)
+     and not exists (select 1 from unnest(cols) c where new_row -> c is distinct from old_row -> c and new_row -> c <> ''null''::jsonb);
+$$;
+
+revoke all on function private.only_cleared(jsonb, jsonb, text[]) from public, anon, authenticated;
+
 create function private.refuse_archived_revision() returns trigger
 language plpgsql security definer
 set search_path = ''''
@@ -27976,7 +28014,8 @@ declare
   proc public.processes;
 begin
   select * into proc from public.processes p where p.id = new.process_id;
-  if proc.archived_at is not null then
+  if proc.archived_at is not null
+     and not (tg_op = ''UPDATE'' and private.only_cleared(to_jsonb(old), to_jsonb(new), array[''created_by'', ''published_by''])) then
     raise exception ''% is archived. Restore it from Processes (Archived) before changing it.'', proc.name using errcode = ''55000'';
   end if;
   return new;
@@ -28028,7 +28067,8 @@ declare
   proc public.processes;
 begin
   select * into proc from public.processes p where p.id = new.process_id;
-  if proc.archived_at is not null then
+  if proc.archived_at is not null
+     and not (tg_op = ''UPDATE'' and private.only_cleared(to_jsonb(old), to_jsonb(new), array[''created_by'', ''child_process_id'', ''entry_step_id''])) then
     raise exception ''% is archived. Restore it from Processes (Archived) before changing it.'', proc.name using errcode = ''55000'';
   end if;
   return new;

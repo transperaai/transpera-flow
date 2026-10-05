@@ -337,6 +337,45 @@ describe("while it is archived, nothing else changes it either", () => {
   });
 });
 
+describe("deletes elsewhere still reach an archived process", () => {
+  it("lets a deleted person's steps, edges, versions and archive stamp go to nobody", async () => {
+    const maker = await createUser(db, `maker-${randomUUID()}@process-archive.example.com`);
+    const w = await world([["Sales", "pipeline"]]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [w.ws, maker.id]);
+    const draft = (await commitAs(maker.claims, (c) => rpc(c, "open_draft", w.p.Sales))).revision_id as string;
+    const [a, b] = [randomUUID(), randomUUID()];
+    await commitAs(maker.claims, async (c) => {
+      await c.query("insert into steps (id, revision_id, workspace_id, process_id, name, kind, outcome, x, y) values ($1, $3, $4, $5, 'Start', 'start', null, 0, 0), ($2, $3, $4, $5, 'Won', 'end', 'won', 200, 0)", [a, b, draft, w.ws, w.p.Sales]);
+      await c.query("insert into edges (revision_id, workspace_id, process_id, from_step_id, to_step_id, probability) values ($1, $2, $3, $4, $5, 1)", [draft, w.ws, w.p.Sales, a, b]);
+    });
+    expect((await commitAs(maker.claims, (c) => rpc(c, "publish_process", w.p.Sales))).status).toBe("published");
+    await archive(maker.claims, w.p.Sales);
+    await q("delete from auth.users where id = $1", [maker.id]);
+    expect(await q("select archived_by, archived_at is not null archived from processes where id = $1", [w.p.Sales])).toEqual([{ archived_by: null, archived: true }]);
+    expect(await q("select count(*)::int n from steps where process_id = $1 and created_by = $2", [w.p.Sales, maker.id])).toEqual([{ n: 0 }]);
+    expect(await q("select count(*)::int n from edges where process_id = $1 and created_by = $2", [w.p.Sales, maker.id])).toEqual([{ n: 0 }]);
+    expect(await q("select count(*)::int n from process_revisions where process_id = $1 and (created_by = $2 or published_by = $2)", [w.p.Sales, maker.id])).toEqual([{ n: 0 }]);
+    expect(await q("select count(*)::int n from steps where process_id = $1 and created_by is null", [w.p.Sales])).toEqual([{ n: 2 }]);
+    // A real edit is still refused, and so is setting archived_by to someone.
+    await refused(q("update steps set name = 'Edited' where id = $1 and revision_id = $2", [a, draft]), "55000", /^Sales is archived/);
+    await refused(q("update processes set archived_by = $2 where id = $1", [w.p.Sales, editor.id]), "55000", /^Who archived a process is recorded by the database/);
+  });
+
+  it("lets a process be deleted that an old version of an archived process still links", async () => {
+    const w = await world([["Sales", "pipeline"], ["Kickoff", "pipeline"]]);
+    await publishWith(w.ws, w.p.Sales, [w.p.Kickoff]);
+    const old = await liveOf(w.p.Sales);
+    // Taken out again (the old version still links it), then Sales is archived.
+    const draft = await openDraft(w.p.Sales);
+    await commitAs(editor.claims, (c) => c.query("delete from steps where revision_id = $1 and child_process_id is not null", [draft]));
+    await publish(w.p.Sales);
+    await commitAs(editor.claims, (c) => rpc(c, "discard_draft", w.p.Sales));
+    await archive(editor.claims, w.p.Sales);
+    await q("delete from processes where id = $1", [w.p.Kickoff]);
+    expect(await q("select count(*)::int n from steps where revision_id = $1 and child_process_id is not null", [old])).toEqual([{ n: 0 }]);
+  });
+});
+
 describe("who archived it, and what still needs it", () => {
   it("never takes archived_by from the caller, and a new process never starts archived", async () => {
     const w = await world([["Sales", "pipeline"]]);
