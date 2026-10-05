@@ -5,6 +5,7 @@
 // process, simulated here in a worker as on the process page; until it is back the issues are sorted without it.
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type AnalysisSettings, type FirstPrinciples, type IssueCost, type Rating } from "@transpera-flow/engine";
@@ -20,6 +21,8 @@ import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { useIssues } from "@/lib/issues/use-issues";
+import { downloadBlob, exportFileName } from "@/lib/export/map-image";
+import { issuesCsv } from "@/lib/issues/csv";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { visibleFindings } from "@/lib/rules/edit";
@@ -102,6 +105,12 @@ export function IssuesPage({
   const ratings = ratingCounts(state.issues, filters.show);
   const list = listIssues(state.issues, filters, costOf);
   const canEdit = mode !== "readonly";
+  // The CSV is the list as drawn: the same filters, order and costs.
+  const exportCsv = () => {
+    const names = { processes: processNames, steps: stepNames, people: peopleNames };
+    const csv = issuesCsv(list, names, costOf, bundle.workspace.settings.currency);
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), exportFileName(`${bundle.workspace.name} issues ${filters.show}${filters.rating ? ` ${filters.rating}` : ""}`, "csv", new Date().toISOString().slice(0, 10)));
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -124,14 +133,27 @@ export function IssuesPage({
           <Help {...LIST_HELP.show} className="ml-0" />
           <RatingChips ratings={ratings} value={filters.rating} onChange={(rating) => setFilter({ ...filters, rating })} />
         </div>
-        {canEdit && (
-          <span className="flex items-center">
-            <Button type="button" onClick={() => setNewOpen(true)}>
-              + New issue
-            </Button>
-            <Help {...LIST_HELP.newIssue} />
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            data-export-csv
+            disabled={list.length === 0 || costs === null}
+            title={costs === null ? "Waiting for the costs from the latest run." : "Download the issues listed here as a CSV file. It follows the filters above."}
+            onClick={exportCsv}
+          >
+            <Download aria-hidden />
+            Export CSV
+          </Button>
+          {canEdit && (
+            <span className="flex items-center">
+              <Button type="button" onClick={() => setNewOpen(true)}>
+                + New issue
+              </Button>
+              <Help {...LIST_HELP.newIssue} />
+            </span>
+          )}
+        </div>
       </div>
 
       {state.error && (

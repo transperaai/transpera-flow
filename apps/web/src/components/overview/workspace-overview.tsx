@@ -53,6 +53,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       processesHref={`${base}/processes`}
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
+      bundleHref={`${base}/export/bundle`}
       issuesHref={`${base}/issues`}
       rulesHref={`${base}/settings/rules`}
       ai={{ view: aiViews[live.revision.id] ?? null, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: live.revision.number }}
