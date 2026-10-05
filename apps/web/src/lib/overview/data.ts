@@ -12,6 +12,25 @@ export async function loadLiveCompany(workspaceId: string): Promise<ProcessPart 
 }
 
 /**
+ * An earlier published version of the company map, for the Overview's `?version=N` (read only). Null when `number` is not an
+ * earlier version of this map (the live one, a draft, or none): the Overview then shows the live map.
+ */
+export async function loadCompanyVersion(live: ProcessPart, number: number): Promise<ProcessPart | null> {
+  const db = await createClient();
+  const found = await db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("process_id", live.process.id).eq("number", number).in("status", ["published", "superseded"]).maybeSingle();
+  if (found.error) throw found.error;
+  const revision = found.data as ProcessRevisionRow | null;
+  if (!revision || revision.id === live.revision.id) return null;
+  const [steps, edges] = await Promise.all([
+    db.from("steps").select("*").eq("revision_id", revision.id).order("y").order("x").order("id"),
+    db.from("edges").select("*").eq("revision_id", revision.id).order("id"),
+  ]);
+  if (steps.error) throw steps.error;
+  if (edges.error) throw edges.error;
+  return { process: live.process, revision, steps: steps.data as unknown as StepRow[], edges: edges.data as unknown as EdgeRow[] };
+}
+
+/**
  * Every process of the workspace at its live revision, for the Overview's company map (issue #100): the
  * pipelines, the servicing processes and the child processes, in creation order. Processes never published
  * aren't on the map. As the signed-in user (RLS decides what is visible).

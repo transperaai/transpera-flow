@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Help } from "@/components/help";
 import { RestoreDialog, type VersionActions, type VersionLinks } from "@/components/history/version-dialogs";
@@ -18,7 +19,10 @@ export function CompanyHistoryView({
   actions,
   links,
   note,
+  viewBase,
 }: {
+  /** Where the company map is drawn (the Overview): View adds `?version=N`. Omitted: no View buttons. */
+  viewBase?: string;
   /** Newest first. */
   versions: VersionMeta[];
   /** Restore; omitted for people who can't edit, who then see no buttons. */
@@ -33,7 +37,7 @@ export function CompanyHistoryView({
     <>
       <p className="max-w-prose text-sm text-muted-foreground">
         Every published version of the company map. When someone adds, renames or removes a process, the map records a new version of its own, so this
-        list says what happened. {actions ? "Restore one to bring it back into your draft." : ""}
+        list says what happened. {viewBase ? "View one to see how the map looked, read only." : ""} {actions ? "Restore one to bring it back into your draft." : ""}
       </p>
       <div className="relative overflow-x-auto rounded-token border bg-card">
         <table className="w-full border-collapse text-sm">
@@ -57,16 +61,9 @@ export function CompanyHistoryView({
                   example="“Added Delivery” is a new process on the map; “1 connection added” is a new handoff line."
                 />
               </th>
-              {actions && (
+              {(viewBase || actions) && (
                 <th className="px-3 py-2 font-medium whitespace-nowrap">
-                  <span className="inline-flex items-center">
-                    Restore
-                    <Help
-                      label="Restore"
-                      description="Copies that version of the map into your draft so you can check it and publish it again. It does not touch the live map until you publish. Processes that were deleted or moved inside another since are left out; processes made since stay on the map."
-                      example="Restore v2 after a tidy-up made the map worse, check it in the Editor, then publish it as v6."
-                    />
-                  </span>
+                  <span className="sr-only">Actions</span>
                 </th>
               )}
             </tr>
@@ -87,13 +84,20 @@ export function CompanyHistoryView({
                 <td className="min-w-48 px-3 py-2.5" data-what-changed>
                   {v.note ?? describeChanges(v.changes, v.number === firstNumber)}
                 </td>
-                {actions && (
+                {(viewBase || actions) && (
                   <td className="px-3 py-2.5">
-                    {!v.live && (
-                      <Button variant="outline" size="sm" onClick={() => setRestoring(v)}>
-                        Restore
-                      </Button>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {viewBase && !v.live && (
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`${viewBase}?version=${v.number}`}>View</Link>
+                        </Button>
+                      )}
+                      {actions && !v.live && (
+                        <Button variant="outline" size="sm" onClick={() => setRestoring(v)}>
+                          Restore
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>

@@ -28,7 +28,7 @@ export function NewProcessDialog({ open, onOpenChange, create }: { open: boolean
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New servicing process</DialogTitle>
-          <DialogDescription>A recurring process for existing clients, such as a monthly report. It simulates beside the pipeline.</DialogDescription>
+          <DialogDescription>A recurring process this workspace runs for its own existing clients, such as a monthly report. It belongs to this workspace only and simulates beside the pipeline.</DialogDescription>
         </DialogHeader>
         <NewServicingProcess create={create} onCancel={() => onOpenChange(false)} />
       </DialogContent>

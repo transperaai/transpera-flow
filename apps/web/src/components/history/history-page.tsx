@@ -39,7 +39,7 @@ export function HistoryPage({
           <h2 className="font-heading text-2xl leading-tight font-semibold tracking-tight">{company ? "Company map history" : "Process history"}</h2>
         </header>
         {company ? (
-          <CompanyHistoryView versions={versions} actions={actions} links={links} note={note} />
+          <CompanyHistoryView versions={versions} actions={actions} links={links} note={note} viewBase={viewBase} />
         ) : (
         <HistoryView processName={processName} versions={versions} viewBase={viewBase} actions={actions} links={links} note={note} />
         )}

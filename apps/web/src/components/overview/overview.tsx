@@ -72,6 +72,8 @@ export interface OverviewProps {
   /** Editors only: the Editor on the company map (its draft, handoff lines and publishing), and its History (B11). */
   companyEditHref?: string;
   companyHistoryHref?: string;
+  /** The earlier version of the company map being shown (`?version=N`, read only), or null for live. Only the map changes. */
+  viewingMapVersion?: number | null;
   issuesHref: string;
   rulesHref?: string;
   /** What AI wrote about the company model's live version, for the AI read and the AI insights (A46). */
@@ -118,7 +120,7 @@ function Section({ title, description, action, children }: { title: string; desc
   );
 }
 
-export function Overview({ workspaceName, live, parts, company, issues, sources = NO_SOURCES, mode, analysisRules, firstPrinciples, hrefs, processesHref, companyEditHref, companyHistoryHref, issuesHref, rulesHref, ai }: OverviewProps) {
+export function Overview({ workspaceName, live, parts, company, issues, sources = NO_SOURCES, mode, analysisRules, firstPrinciples, hrefs, processesHref, companyEditHref, companyHistoryHref, viewingMapVersion = null, issuesHref, rulesHref, ai }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -134,6 +136,13 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
     next.set("horizon", String(months));
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   };
+  // Back to live: the same address without ?version=.
+  const backToLive = (() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("version");
+    const q = next.toString();
+    return q ? `${pathname}?${q}` : pathname;
+  })();
   const weeks = picked === null ? (base?.horizonWeeks ?? live.workspace.settings.horizon_weeks) : horizonWeeks(picked);
   const months = picked ?? monthsForWeeks(weeks) ?? Math.max(1, Math.round(weeks / (52 / 12)));
 
@@ -266,6 +275,14 @@ export function Overview({ workspaceName, live, parts, company, issues, sources 
             </div>
           }
         >
+          {viewingMapVersion !== null && (
+            <div data-viewing-map-version className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
+              <Link href={backToLive} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                Back to live
+              </Link>
+            </div>
+          )}
           <Card className="gap-0 overflow-hidden p-0">
             {map.bundle.steps.length ? (
               <ProcessCanvas
