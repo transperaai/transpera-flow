@@ -7,6 +7,7 @@ import { type SourceLinkRow } from "@transpera-flow/db";
 import { SourcesPage } from "@/components/sources-page";
 import { LINK_HELP } from "@/components/sources/link-chips";
 import { SOURCE_DIALOG_HELP } from "@/components/sources/source-dialog";
+import { LIBRARY_HELP } from "@/components/sources/library-filters";
 import { demoBundle, demoCitations, demoLinkTargets, demoPageSources, demoSourceLinks, DEMO_UNLINKED_SOURCE_ID } from "@/lib/sources/demo";
 import { demoNav, flatItems, workspaceNav } from "@/lib/shell/nav";
 
@@ -17,6 +18,8 @@ vi.mock("@/app/w/[slug]/source-actions", () => ({
   deleteSource: async () => ({ status: "error", message: "" }),
   linkSource: async () => ({ status: "error", message: "" }),
   unlinkSource: async () => ({ status: "error", message: "" }),
+  searchSourcesPage: async () => ({ status: "error", message: "" }),
+  readSourceBody: async () => ({ status: "error", message: "" }),
 }));
 
 // The Sources page (issue #118, A53): each source with its title, type, date, quote and links as chips, "+ Link", a warning
@@ -27,7 +30,7 @@ const page = (over: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     createElement(SourcesPage, {
       workspaceId: bundle.workspace.id,
-      sources: demoPageSources(),
+      memory: demoPageSources(),
       citations: demoCitations(bundle),
       links: demoSourceLinks(),
       targets: demoLinkTargets(bundle),
@@ -36,77 +39,77 @@ const page = (over: Record<string, unknown> = {}) =>
       ...over,
     }),
   );
-/** The markup of one source's card. */
-const card = (html: string, title: string) => new RegExp(`<article aria-label="${title}"[\\s\\S]*?</article>`).exec(html)![0];
+/** The markup of one source's row in the library table. */
+const row = (html: string, title: string) => new RegExp(`<tr data-source-row="[^"]*"[^>]*>(?:(?!</tr>)[\\s\\S])*?aria-label="Open ${title}"[\\s\\S]*?</tr>`).exec(html)![0];
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
+// What a person sees once a row is open (the full text, chips, "Link to…", the quotes) needs a browser: see
+// sources-library-browser.test.ts. Here is the table the page draws first.
 describe("the Sources page", () => {
   const html = page();
 
-  it("lists each source with its title, type, date and quote", () => {
-    const interview = card(html, "Strategy walkthrough");
-    expect(interview).toContain("Transcript");
+  it("lists each source as a table row with its title, kind, date and speakers", () => {
+    const interview = row(html, "Strategy walkthrough");
+    expect(text(interview)).toContain("Strategy walkthrough");
+    expect(text(interview)).toContain("Transcript");
     expect(interview).toContain("2026-09-12");
-    expect(text(interview)).toContain("“[00:14:05] Maya Collins: A proper audit and proposal is a day's work");
-    const notes = card(html, "Notes: ops walkthrough with Leah");
-    expect(notes).toContain("Notes");
-    expect(text(notes)).toContain("“Access requests go back and forth for about a week on most new clients.”");
+    expect(text(interview)).toContain("Maya Collins, Rosa Diaz");
+    const notes = row(html, "Notes: ops walkthrough with Leah");
+    expect(text(notes)).toContain("Notes");
+    expect(notes).toContain("2026-09-18");
+    expect(html).toContain('aria-label="Sources"');
+    for (const heading of ["Title", "Kind", "Date", "Speakers", "Linked to"]) expect(html).toContain(`>${heading}</th>`);
   });
 
-  it("shows a source's links as chips, named by what they are", () => {
-    const interview = card(html, "Strategy walkthrough");
-    expect(interview).toContain('aria-label="Linked to"');
-    expect(text(interview)).toContain("Step: Audit & proposal");
-    expect(text(interview)).toMatch(/Issue #\d+/);
-    // Two links make two chips, each removable.
-    expect((interview.match(/data-link-kind=/g) ?? []).length).toBe(demoSourceLinks().filter((l) => l.source_id === "30000000-0000-4000-8000-000000000001").length);
-    expect(interview).toContain("Remove link: Step: Audit");
+  it("says what each source is linked to, by group", () => {
+    const interview = text(row(html, "Strategy walkthrough"));
+    expect(interview).toMatch(/Processes .*Issues #\d+/);
   });
 
-  it("has a + Link on every source and a + Add source at the top", () => {
-    expect((html.match(/>\+ Link<\/button>/g) ?? []).length).toBe(demoPageSources().length);
+  it("has the search, the kind and process filters, Not linked only and the sort above the table, and + Add source", () => {
+    expect(html).toContain('aria-label="Search sources"');
+    expect(html).toContain('aria-label="Filter by kind"');
+    expect(html).toContain('aria-label="Filter by process"');
+    expect(html).toContain('aria-label="Sort sources"');
+    expect(text(html)).toContain("Not linked only");
     expect(html).toContain("+ Add source");
-    expect(html).toContain("Link Strategy walkthrough to something");
+    expect(text(html)).toContain("3 sources.");
   });
 
-  it("flags a source that is linked to nothing, in the prototype's words, and only that one", () => {
-    const warning = "Not linked to anything yet. Link it, or it won't count as evidence.";
-    expect(text(card(html, "Notes: ops walkthrough with Leah"))).toContain(warning);
-    expect(text(card(html, "Strategy walkthrough"))).not.toContain(warning);
-    expect(text(card(html, "Sales team notes"))).not.toContain(warning);
-    expect((html.match(/data-unlinked(?!-)/g) ?? []).length).toBe(1);
+  it("flags a source that is linked to nothing, and only that one", () => {
+    expect(text(row(html, "Notes: ops walkthrough with Leah"))).toContain("Not linked");
+    expect(text(row(html, "Strategy walkthrough"))).not.toContain("Not linked");
+    expect(text(row(html, "Sales team notes"))).not.toContain("Not linked");
     expect(text(html)).toContain("1 source isn't linked to anything yet.");
+    expect(html).toContain('data-unlinked-count="1"');
   });
 
   it("flags every source when none is linked, and none when all are", () => {
     const none = page({ links: [] });
-    expect((none.match(/data-unlinked(?!-)/g) ?? []).length).toBe(demoPageSources().length);
+    expect((none.match(/data-linked="false"/g) ?? []).length).toBe(demoPageSources().length);
     expect(text(none)).toContain("3 sources aren't linked to anything yet.");
     const sources = demoPageSources();
     const links: SourceLinkRow[] = sources.map((s, i) => ({ ...demoSourceLinks()[0]!, id: `x${i}`, source_id: s.id }));
     const all = page({ links });
-    expect(all).not.toContain("data-unlinked");
+    expect(all).not.toContain('data-linked="false"');
+    expect(all).not.toContain("data-unlinked-flag");
     expect(all).not.toContain("aren't linked");
   });
 
-  it("is read-only for a viewer: no + Add source, no + Link, no way to remove a link", () => {
+  it("is read-only for a viewer: no + Add source, and the table still shows", () => {
     const view = page({ mode: "readonly" });
     expect(view).not.toContain("+ Add source");
-    expect(view).not.toContain(">+ Link</button>");
-    expect(view).not.toContain("Remove link");
     expect(text(view)).toContain("You can read the sources here");
-    // The warning and the chips still show.
-    expect(text(view)).toContain("Not linked to anything yet");
-    expect(view).toContain('aria-label="Linked to"');
+    expect(text(view)).toContain("Not linked");
+    expect(view).toContain("data-source-row");
   });
 
   it("says what to do when there are no sources", () => {
-    expect(text(page({ sources: [], links: [], citations: {} }))).toContain("No sources yet. Add the audit's transcripts and notes and link each one");
+    expect(text(page({ memory: [], links: [], citations: {} }))).toContain("No sources yet. Add the audit's transcripts and notes and link each one");
   });
 
-  it("gives the linked sources' (i) and the warning's", () => {
-    expect(html).toContain(`About ${LINK_HELP.linked.label}`);
-    expect(html).toContain(`About ${LINK_HELP.unlinked.label}`);
+  it("gives the search, each filter, the sort and the 'Not linked only' toggle their (i)", () => {
+    for (const help of Object.values(LIBRARY_HELP)) expect(html).toContain(`About ${help.label}`);
   });
 });
 
@@ -134,8 +137,9 @@ describe("help on the Sources screen", () => {
   const chips = read("components/sources/link-chips.tsx");
 
   it("has a description and an example for every control and rule", () => {
+    expect(Object.keys(LIBRARY_HELP).sort()).toEqual(["kind", "process", "search", "sort", "unlinked"]);
     expect(Object.keys(SOURCE_DIALOG_HELP).sort()).toEqual(["choice", "date", "existing", "kind", "quote", "target", "title", "type"]);
-    for (const [key, help] of [...Object.entries(SOURCE_DIALOG_HELP), ...Object.entries(LINK_HELP)]) {
+    for (const [key, help] of [...Object.entries(SOURCE_DIALOG_HELP), ...Object.entries(LINK_HELP), ...Object.entries(LIBRARY_HELP)]) {
       expect(help.label.length, key).toBeGreaterThan(2);
       expect(help.description.length, `${key} description`).toBeGreaterThan(30);
       expect(help.example.length, `${key} example`).toBeGreaterThan(8);
@@ -157,7 +161,7 @@ describe("help on the Sources screen", () => {
   });
 
   it("keeps to plain English: no jargon words", () => {
-    for (const help of [...Object.values(SOURCE_DIALOG_HELP), ...Object.values(LINK_HELP)]) {
+    for (const help of [...Object.values(SOURCE_DIALOG_HELP), ...Object.values(LINK_HELP), ...Object.values(LIBRARY_HELP)]) {
       expect(`${help.description} ${help.example}`).not.toMatch(/\b(RLS|jsonb|payload|enum|schema|FK|provenance|foreign key)\b/i);
     }
   });
