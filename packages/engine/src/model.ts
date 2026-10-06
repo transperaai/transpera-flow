@@ -626,7 +626,7 @@ export interface MonthlyReplication {
   /**
    * Monthly recurring revenue of the active clients at each weekly tick, averaged over the month's ticks: with a client
    * roster (named clients or client groups), each retainer client's monthly fee as it bills (`weeklyBill × 4.33`); without
-   * one, the interim client count × the pooled monthly fee (`pooledMonthlyFee`). One-off and hourly services add nothing.
+   * one, what the interim clients pay (their count × `pooledMonthlyFee`) plus each retainer won since at its price at the market's, less churn. One-off and hourly services add nothing.
    */
   mrr: number[];
   /**

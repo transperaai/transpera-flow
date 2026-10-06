@@ -364,6 +364,18 @@ describe("monthly recurring revenue and clients at risk (B7)", () => {
     expect(mo.mrr[0]!.mean).toBeCloseTo(mo.clients[""]![0]!.mean * pooledMonthlyFee(m), 6);
   });
 
+  it("pooled models count hourly clients as active but bill them nothing", () => {
+    const svc = (name: string, pricingModel: "retainer" | "hourly", price: number, mixShare: number) => ({ name, pricingModel, price, margin: 0.4, tenureMonths: 12, churnMonthly: 0, mixShare, pathTags: [] as string[] });
+    // Wins are all hourly (retainer mix 0, which only sets the fee), no churn: recurring revenue stays what the interim clients pay.
+    const m = { ...northbeamModel(), horizonWeeks: months(6), churnMonthly: 0, leadsPerWeek: 40, services: { r: svc("Retainer", "retainer", 2000, 0), h: svc("Hourly", "hourly", 90, 1) } };
+    const r = simulate(m, 10, 1, { monthly: true });
+    const fee = pooledMonthlyFee(m);
+    expect(fee).toBe(2000);
+    expect(r.kpi.won.mean).toBeGreaterThan(0);
+    expect(r.monthly!.clients[""]!.at(-1)!.mean).toBeGreaterThan(m.activeClients);
+    for (const month of r.monthly!.mrr) expect(month.mean).toBeCloseTo(m.activeClients * fee, 6);
+  });
+
   it("is deterministic for a seed", () => {
     const m = { ...roster(), horizonWeeks: months(6) };
     expect(simulate(m, 10, 3, { monthly: true }).monthly).toEqual(simulate(m, 10, 3, { monthly: true }).monthly);

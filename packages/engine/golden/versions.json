@@ -52,5 +52,11 @@
     "date": "2026-10-06",
     "note": "Overtime evidence states no money and the overtime_cost metric is gone, so saved issues hold no pay (B1 2b)",
     "digest": "sha256:8ebb2e033f8c654ea90369a9817f5d7aab8e7dc56bd53ff4c1df809a256bd6d4"
+  },
+  {
+    "version": "1.9.0",
+    "date": "2026-10-06",
+    "note": "MonthlyResult gains mrr and atRisk (B7); no simulated number moved",
+    "digest": "sha256:8ebb2e033f8c654ea90369a9817f5d7aab8e7dc56bd53ff4c1df809a256bd6d4"
   }
 ]

@@ -976,6 +976,8 @@ export function runOnce(
   const nR = roleIds.length;
   const nP = people.length;
   const pooledFee = sampleMonthly ? pooledMonthlyFee(model) : 0;
+  /** Pooled model, for the month-by-month MRR only: what the interim clients and the retainers won since pay a month. */
+  let pooledMrr = roster ? 0 : model.activeClients * pooledFee;
   const mon = sampleMonthly
     ? {
         roleWork: new Float64Array(nR * nM),
@@ -1612,7 +1614,9 @@ export function runOnce(
    */
   const churnTick = (t: number) => {
     if (!roster) {
+      const before = active;
       active = Math.max(0, active - active * ((model.churnMonthly * churnMarket(t)) / WEEKS_PER_MONTH));
+      if (mon && before > 0) pooledMrr *= active / before;
       setPooledLoads(t);
       return;
     }
@@ -1865,6 +1869,8 @@ export function runOnce(
           addWonClient(sv, t);
         } else {
           active += 1;
+          // Hourly clients are active (they load the team) but add no recurring revenue; a retainer pays its price at the market's.
+          if (mon && sv.s.pricingModel === "retainer") pooledMrr += sv.s.price * (market ? mkt(t).price : 1);
           setPooledLoads(t);
         }
       }
@@ -2384,7 +2390,7 @@ export function runOnce(
           }
         } else {
           add("", active);
-          mon.mrr[m]! += active * pooledFee;
+          mon.mrr[m]! += pooledMrr;
         }
       }
       if (weekly) {

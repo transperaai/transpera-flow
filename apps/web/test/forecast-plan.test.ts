@@ -86,7 +86,7 @@ describe("parsePlanInput", () => {
     ];
     const context = { solutions, processName: (p: string) => (p === "p1" ? "Sales pipeline" : "Servicing") };
     const [a, b, c] = solutions.map((s) => s.id) as [string, string, string];
-    const same = parsePlanInput({ name: "P", markers: [solution("2027-04-01", a), solution("2027-04-15", b)] }, context);
+    const same = parsePlanInput({ name: "P", markers: [solution("2027-04-01", a), solution("2027-04-01", b)] }, context);
     expect(same).toEqual({ ok: false, error: "Two solutions for Sales pipeline can't go live in the same month." });
     expect(parsePlanInput({ name: "P", markers: [solution("2027-04-01", a), solution("2027-05-01", b)] }, context).ok).toBe(true);
     expect(parsePlanInput({ name: "P", markers: [solution("2027-04-01", a), solution("2027-04-01", c)] }, context).ok).toBe(true);
