@@ -1,8 +1,8 @@
 # Handover
 
-Updated 6 Oct 2026 (afternoon AEST). This session finished B10 (#39) and B1 slices 1 and 2a (#30), with migrations rows
-53–55 applied to production. Sessions now build two or three tickets each, to keep the context window small. Start a new
-session with:
+Updated 6 Oct 2026 (evening AEST). This session built B1 slices 2b and 3/3 (#30) and C2 part 2 (#41). All three are
+reviewed, green or nearly green, and **waiting only on production**: the stored Supabase token now returns 401, so
+nothing was applied. Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -10,8 +10,8 @@ session with:
 
 **Milestone A** (redesign A31–A58, #96–#123): merged as #125–#160; see git history and #1 for the per-ticket log.
 
-**Milestone B.** B11–B19 merged on 2–5 Oct (rows 40–52; see `docs/production-migrations.md` and the git log). This session
-(6 Oct):
+**Milestone B.** B11–B19 merged on 2–5 Oct (rows 40–52; see `docs/production-migrations.md` and the git log). Earlier on
+6 Oct:
 
 | Ticket | PR | Migration |
 |---|---|---|
@@ -20,12 +20,34 @@ session with:
 | B10 (2b) restore a workspace from a backup, closes #39 | #201 | row 54 |
 | B1 (2/3a) per-person privacy in the database, no pay data for members (#30) | #202 | row 55, ENGINE 1.7.0 |
 
-**Production database:** applied up to `20261207500000` (row 55), each checked before and after. No PRs are open.
+**Open PRs (this session, 6 Oct evening).** Each was built by Sonnet from an Opus brief, adversarially reviewed by Opus,
+and every finding fixed with a test. Apply and merge **in this order**:
 
-**Briefs** (in `docs/plans/`): `b1-brief.md` (slices 2b and 3 left), `c2-2-brief.md` (C2 part 2, ready to build),
-`b10-2-brief.md` (done). Every ticket gets one before building.
+| Order | PR | Branch | Migration | Row | CI |
+|---|---|---|---|---|---|
+| 1 | #205 B1 (2/3b) privacy on screen; no pay or names in saved text (#30) | `claude/amazing-planck-64op6x` | `20261207700000_saved_text_privacy` | 56 | green; ready for review |
+| 2 | #207 C2 (2/2) client churn back-solve, the two CSVs, measured checks; closes #41 | `claude/c2-2-calibration` | `20261208000000_client_calibration` | 57 | test fix pushed (705a258), check CI |
+| 3 | #206 B1 (3/3) agency workspace list; editors change client health rules; closes #30 | `claude/b1-3-agency-list` | `20261209000000_agency_list` | 58 | green; draft |
+
+- #205 bumps `ENGINE_VERSION` to 1.8.0 (overtime evidence states hours only; no golden number moved). It had two Opus
+  reviews. Its migration also re-keys stored AI keys that hashed real names (Austin's call, below).
+- #207 keeps 1.7.0 itself; after #205 merges it sits on 1.8.0. It needs no bump.
+- All three hand-edited `packages/db/src/database.types.ts` (`gen:types` needs the linked project). Regenerate once all
+  three are applied.
+
+**Production database:** applied up to `20261207500000` (row 55). Rows 56–58 are written, with apply files, preflight
+and post-apply checks in each migration's header, and logged in `docs/production-migrations.md` as NOT applied.
+
+**Briefs** (in `docs/plans/`): `b1-brief.md` (all slices built; 2b's section has the leak fixes and "Changes after the
+review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets one before building.
 
 **Austin's decisions on 6 Oct** (each recorded on its issue):
+- **#30 (B1 2b), evening:** Q10 and Q11 defaults stand: an issue title an editor pre-fills from an insight keeps the real
+  name (like any typed title); AI text saved before 2b may quote overtime money, so after the migration editors re-run
+  Analyse and check accepted AI findings (older revisions too). **Stored keys must hold no names:** `findings.ai_key`, the
+  `ai:insight:` issue keys, source-link insight keys and saved insight keys are re-keyed to opaque ids (accepted: a finding
+  may be proposed once more; old pre-B17 insights lose their "acknowledged" link). New finding keys hash the title with
+  person ids, so they survive roster changes.
 - **#39 (B10):** import makes each process a draft of its live version, with no history; the new workspace keeps its own
   company map; hidden clients go in the bundle; only agency admins, owners and editors export or import; one additive
   SECURITY INVOKER function is fine; saved solutions are listed as not restored; a restored workspace's results match the
@@ -47,12 +69,18 @@ session with:
 - A person's Pass verdict counts as Verified, with the simulation result shown too.
 - B1: a workspace with a single rated person in a role still shows that role's default rate to members (a planning default,
   not a person's pay).
+- C2 part 2: a due time of exactly 00:00 with no zone in a servicing log is a date-only due (end of that day); Northbeam
+  has no ad-hoc servicing, so the demo's response-time check reads "No servicing work is set to come in as ad-hoc requests"
+  (adding one would move goldens).
+- B1 3/3: headline numbers are a closed five-key shape; `computed_by`/`computed_at` are stamped by a trigger.
 
 **Waiting on Austin:**
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
   PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
-- **Auto mode:** its safety check blocks `prod-sql.sh` (and once a plain `git fetch`) even though `.claude/settings.json`
-  allows it. Production steps this session ran after Austin left auto mode. Decide how future sessions should run them.
+- **Supabase token (blocking):** `SUPABASE_ACCESS_TOKEN` in the cloud environment returns `401 Unauthorized` from the
+  Management API (6 Oct evening). Austin put a new token in the environment settings on 6 Oct evening; it takes effect in a new session.
+- **Auto mode:** its safety check blocks `prod-sql.sh` as "Production Reads", even read-only preflight. Austin plans an
+  overnight run with access granted; run production steps with auto mode off or a permission rule for `prod-sql.sh`.
 - C5 is Austin's.
 
 **Still open from Milestone A:**
@@ -157,24 +185,97 @@ password to `postgres`.
 
 ## Next steps
 
-1. **B1 (2/3b), the screens** (brief: `b1-brief.md`, "part 2b"; no migration planned, but item 1 needs one). Must fix
-   two leaks that members can read today:
-   - **Saved issues leak pay:** overtime issues store an evidence sentence and an `overtime_cost` figure
-     (`apps/web/src/lib/overtime-issues.ts` ~66,72, `apps/web/src/lib/issues/draft.ts` ~129-133) from which a member can
-     compute a rate. Build saved issues without pay-dependent text and figures, and clean existing rows with a migration.
-   - **Saved AI text keeps real names** (`analyse.ts` ~113, `narrate.ts` ~148 swap names back in before saving
-     `ai_analyses`, `findings` and narrations). Save with labels; put names back only for readers who may see them.
-   - Also: own-row filtering and "A team member" naming across ~15 files; issues of the same rating may reorder for members
-     (cost is the second sort key).
-2. **B1 (3/3):** the agency workspace list (a stored headline snapshot), plus an editor-gated SECURITY DEFINER save for the
-   four client-health-rule keys (they're owner-only today because they save through `save_fields('workspaces')`). Closes
-   #30 if 2b has merged. Its brief gives migration `20261209000000`; renumber to follow row 55 and C2 if needed.
-3. **C2 part 2 (#41)**, from `c2-2-brief.md`: slices 2a (estimators and parsers) and 2b (migration `20261208000000`, page);
-   closes #41.
-4. Then: B20 (#197), B3, B4, B7, B5, check B2 against B19, C1, C4; B21 (#203) raises restore limits; the map node
-   redesign with Austin.
+**Start: land the three open PRs, then build the overnight list below.** First check the
+token: `bash packages/db/scripts/prod-sql.sh -c "select 1"` must return a row, not 401. If it fails, stop and say so.
+
+**#207's CI (as of 6 Oct evening):** after the PostgREST test fix (705a258), one CI run failed in
+`packages/db/test/workspace-import.test.ts` ("a restore is a round trip > Northbeam … within run-to-run variation"):
+`costPerWin` restored 4038.9 vs source 3337.2, tolerance 655.5. #207 doesn't touch restore. A restored workspace gets new
+ids, which feed the random streams, so this check is statistical and can fail by chance (it also failed once locally under
+load). The second run on the same commit passed, so it fails by chance. **First job of the run:** make it robust in its
+own small PR (e.g. more replications, or a tolerance derived from the measured run-to-run spread), never by skipping or
+loosening it blindly, and merge that before the three PRs so their CI is reliable.
+
+For each PR in order (#205, then #207, then #206), follow "Applying a migration" below:
+1. Bring `origin/main` into the branch (merge, never rebase). For #207 and #206 that brings the previous migration in:
+   regenerate `bootstrap.sql` with `pnpm --filter @transpera-flow/db gen:bootstrap` and fix the
+   `docs/production-migrations.md` rows (56, 57, 58). Push; wait for CI to go green.
+2. Run the migration header's **preflight** queries one file at a time (`prod-sql.sh -f`; it returns only the last
+   statement's result). Record the numbers in the PR. Stop on any surprise.
+3. Apply the apply file (`packages/db/scripts/apply/<version>.sql`).
+4. Run the **post-apply checks**. #205's check 7 must run **before** its merge deploys the app.
+5. Mark the row applied in `docs/production-migrations.md`, push, wait for CI, take the PR out of draft, and squash-merge
+   with the full head SHA (`expectedHeadSha`). Merging deploys.
+6. Comment on the issue (#30 or #41) with what was applied and checked.
+
+Then:
+- After #205 deploys: tell Austin to re-run Analyse in each workspace and check accepted AI findings (Q11).
+- After #206: check on the live site that an editor can change a client health rule, and that the owner's change log names
+  the editor. Close #30.
+- Regenerate `database.types.ts` if a linked machine is available; otherwise leave the hand edits (they match the
+  generator's output and order).
+
+### Overnight run (Austin, 6 Oct): finish everything that doesn't need him
+
+Austin is asleep for this run. The aim is to finish Milestones B and C as far as they can go without him. The usual
+two-or-three-tickets rule is relaxed for this run only: keep the main session's context small by delegating everything,
+and update this handover (a docs-only PR, merged when green) **after every merged ticket**, so a restart loses nothing.
+
+**Order** (dependencies from each issue's "Blocked by"; after the three PRs above have merged):
+
+| # | Ticket | Notes |
+|---|---|---|
+| 1 | B2 People page (#31) | Unblocked once #30 closes. Check it against what B19 and B1 2b already built; the member view must stay own-row only |
+| 2 | B3 View-only share links with redacted snapshots (#32) | Redaction must follow #30's rules: no pay, no names beyond labels |
+| 3 | B4 Play links, proposals into Suggestions (#33) | Blocked by B3. A52's schema already supports `created_via='play_link'` |
+| 4 | B20 Claude outside the app proposes findings (#197) | MCP; Austin's #175 decision: "MCP may propose findings" |
+| 5 | B7 Forecast planning: drag markers, compare two plans (#36) | |
+| 6 | B5 Client branding (#34) | |
+| 7 | B21 Restore bigger workspaces (#203) | Raises the restore limits in "Follow-ups" |
+| 8 | C1 CSV import wizard with column mapping (#40) | C2 (#41) is built; check what it already parses before building |
+| 9 | C4 Storybook and visual regression (#43) | Last: least product risk |
+
+Not tonight: C5 (#44, Austin's), C6 (#198, parked), the map node redesign (needs Austin), performance (parked).
+
+**Per ticket** (as in "How we work"):
+1. Comment on the issue that work has started, naming the branch.
+2. An Opus agent writes `docs/plans/<ticket>-brief.md`. It covers exact files, the data model and migration spec, patterns
+   to copy, edge cases, tests, what's out of scope, and done criteria. It quotes Austin's decisions verbatim and lists
+   open questions, **each with a default**.
+3. A Sonnet agent builds from the brief on its own branch, `claude/<ticket>-…`, and opens a draft PR. It commits and pushes
+   after every step.
+4. An Opus agent does an adversarial review; Sonnet fixes every finding, each with a test. Re-review if the fixes are
+   large.
+5. Get CI green, then apply the migration with preflight and post-apply checks (additive only), then merge.
+6. Comment on the issue and on the milestone parent (#2 or #3), then update this handover.
+
+Two independent tickets may be built in parallel in separate worktrees. Number migrations in merge order, and
+regenerate `bootstrap.sql` after each merge of `main`.
+
+**Rules while Austin is away:**
+- **Open questions:** take the brief's default. Record each default on the issue and under "Design calls Claude made,
+  for Austin to confirm". Never block waiting for an answer.
+- **Stop and skip** (note it here and move on to the next ticket) for:
+  - anything destructive in production: dropping or rewriting data, other than an additive clean-up a brief specifies
+    and a review has passed;
+  - anything needing a new secret or a paid service;
+  - anything needing a design decision only Austin can make.
+- **Never weaken a test to get green.** A test that is flaky by chance gets made robust in its own small PR.
+- If the token, the auto-mode classifier or a permission prompt blocks a production step, stop the production steps,
+  carry on building and reviewing the other tickets, and say so at the top of this handover.
+- **End of run:** a summary comment on #2 and #3, and this handover rewritten for Austin's morning: what merged, what's
+  open, decisions he needs to confirm, and anything skipped.
 
 Follow-ups noted this session:
+- B1 2b: read-time key masking (`hideAiIssueKey`, `loadIssuesForReader`) stays as defence in depth after the re-key; it
+  costs one `can_see_people` rpc per issues load.
+- B1 2b: a source link to an AI insight nobody acknowledged is orphaned by the re-key (`ai:insight:<link id>`); delete if
+  wanted.
+- B1 2b: the engine's first-principles flag text now gets first-name aliasing, so a step whose first word matches a
+  person's first name (same capitals) is relabelled inside that flag sent to the model.
+- B1 3/3: `agency_workspace_list` scans `process_revisions` without a workspace-first index; fine at agency scale.
+- Flaky under load in the cloud container (pass alone): `restore-browser.test.ts` "refuses a file over the size limit",
+  `editor-tour-browser`, once `prototype-parity` "double leads" and `workspace-import.test.ts`. Green in CI.
 - The owner guard has a known gap: an owner who joined by domain can delete that domain (ADR 0003 addendum).
 - A member can join a process presence channel via dev tools and see editors' names (names only).
 - `sources.speakers` and transcripts name people (accepted).
