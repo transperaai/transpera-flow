@@ -1,6 +1,6 @@
 // Client branding (issue #34): what a workspace's stored branding becomes on screen. Pure and framework-free.
 
-import { accentTokens, checkAccent, deriveDarkAccent, type AccentTokens, type Hex } from "./contrast";
+import { accentTokens, checkAccent, deriveDarkAccent, type AccentTokens, type AccentVerdict, type Hex, type Theme } from "./contrast";
 
 export interface Branding {
   accent: Hex | null;
@@ -53,4 +53,23 @@ export function brandingCss(b: Branding): string | null {
 export function logoUrl(path: string | null, supabaseUrl: string | undefined): string | null {
   if (!path || !supabaseUrl || !LOGO_PATH.test(path)) return null;
   return `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/public/branding/${path}`;
+}
+
+/** What the logo actions answer: the kept path and its public URL (both null once removed), or a plain message. */
+export type LogoResult = { status: "ok"; path: string | null; url: string | null } | { status: "error"; message: string };
+
+/** A ratio as a person reads it. A failing one is rounded down, so "4.5:1" never sits beside a refusal. */
+export function formatRatio(ratio: number, passing: boolean): string {
+  const v = passing ? Math.round(ratio * 10) / 10 : Math.floor(ratio * 10) / 10;
+  return `${v.toFixed(1)}:1`;
+}
+
+/** The sentence for a failing accent: what is wrong, the number, and the nearest passing colour. */
+export function failureMessage(v: Extract<AccentVerdict, { ok: false }>, theme: Theme): string {
+  const shade = theme === "light" ? "darker" : "lighter";
+  const needs = `${formatRatio(v.worst, false)}, and text needs 4.5:1`;
+  const fix = `Try ${v.suggestion}, the nearest ${shade} shade.`;
+  if (v.against === "fg") return `Button text can't be read on this colour: ${needs}. ${fix}`;
+  if (theme === "light") return `Too light to read on a white page: ${needs}. ${fix}`;
+  return `Too dark to read on the dark page: ${needs}. ${fix}`;
 }
