@@ -51,6 +51,21 @@ const FIELD_TABLES = new Set<string>(["services", "people", "clients", "lead_sou
 
 const SKIP = new Set(["updated_at", "created_at", "created_by", "provenance", "id", "workspace_id"]);
 
+/** What changed in a workspace's branding (issue #34): colours by value, the logo never by its storage path. */
+function describeBrandingChange(before: unknown, after: unknown): string[] {
+  if (JSON.stringify(before ?? {}) === JSON.stringify(after ?? {})) return [];
+  const read = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+  const [a, b] = [read(before), read(after)];
+  const out: string[] = [];
+  const colour = (v: unknown) => (typeof v === "string" ? v : null);
+  if (colour(a.accent) !== colour(b.accent)) out.push(`accent colour ${colour(a.accent) ?? "default"} → ${colour(b.accent) ?? "default"}`);
+  if (colour(a.accent_dark) !== colour(b.accent_dark)) out.push(`dark-mode accent → ${colour(b.accent_dark) ?? "automatic"}`);
+  const [logoBefore, logoAfter] = [typeof a.logo_path === "string", typeof b.logo_path === "string"];
+  if (logoBefore !== logoAfter) out.push(logoAfter ? "logo added" : "logo removed");
+  else if (logoAfter && a.logo_path !== b.logo_path) out.push("logo changed");
+  return out;
+}
+
 /** One entry as the change log shows it. */
 export function describeAuditEntry(e: AuditEntry, model: CompanyModel): string {
   const currency = model.workspace.settings.currency || "GBP";
@@ -109,6 +124,9 @@ export function describeAuditEntry(e: AuditEntry, model: CompanyModel): string {
       changes.push(`${meta.label} ${formatCompanyValue(meta.format, before[k], currency)} → ${formatCompanyValue(meta.format, after[k], currency)}`);
     }
     if (newRow.name !== undefined) changes.push(`name → ${String(newRow.name)}`);
+    const branding = describeBrandingChange(oldRow.branding, newRow.branding);
+    if (branding.length && !changes.length) return `Branding: ${branding.join(", ")}`;
+    changes.push(...branding);
     return changes.length ? `Company settings: ${changes.join(", ")}` : "Company settings updated";
   }
   for (const k of Object.keys(newRow)) {

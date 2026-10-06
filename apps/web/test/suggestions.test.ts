@@ -122,6 +122,29 @@ describe("the change log", () => {
       describeAuditEntry(entry({ target_table: "suggestions", action: "rejected", diff: { old: { status: "pending" }, new: { status: "rejected", review_note: "No" } } }), m),
     ).toBe("Rejected a suggested change to the company model: “No”");
   });
+
+  it("tells branding changes (issue #34): colours by value, the logo never by its storage path", () => {
+    const WS = "0d5f6f0e-0000-4000-8000-000000000001";
+    const logo = (n: number) => `${WS}/00000000-0000-4000-8000-00000000000${n}.png`;
+    const say = (oldB: unknown, newB: unknown, extra: { old?: object; new?: object } = {}) =>
+      describeAuditEntry(entry({ target_table: "workspaces", diff: { old: { branding: oldB, ...extra.old }, new: { branding: newB, ...extra.new } } }), m);
+    expect(say({}, { accent: "#0b6e8a" })).toBe("Branding: accent colour default → #0b6e8a");
+    expect(say({ accent: "#0b6e8a" }, { accent: "#7a1fa2" })).toBe("Branding: accent colour #0b6e8a → #7a1fa2");
+    expect(say({ accent: "#0b6e8a" }, { accent: null })).toBe("Branding: accent colour #0b6e8a → default");
+    expect(say({ accent: "#0b6e8a" }, { accent: "#0b6e8a", accent_dark: "#4cc3e0" })).toBe("Branding: dark-mode accent → #4cc3e0");
+    expect(say({ accent: "#0b6e8a", accent_dark: "#4cc3e0" }, { accent: "#0b6e8a", accent_dark: null })).toBe("Branding: dark-mode accent → automatic");
+    expect(say({}, { logo_path: logo(1) })).toBe("Branding: logo added");
+    expect(say({ logo_path: logo(1) }, { logo_path: logo(2) })).toBe("Branding: logo changed");
+    expect(say({ logo_path: logo(1) }, {})).toBe("Branding: logo removed");
+    expect(say({ logo_path: logo(1) }, { logo_path: null })).toBe("Branding: logo removed");
+    for (const s of [say({}, { logo_path: logo(1) }), say({ logo_path: logo(1) }, { logo_path: logo(2) })]) expect(s).not.toContain(WS);
+    // Beside another setting, it joins the company settings line.
+    expect(say({}, { accent: "#0b6e8a" }, { old: { settings: { overtime_cap: 0.1 } }, new: { settings: { overtime_cap: 0.2 } } })).toBe(
+      "Company settings: Overtime cap 10% → 20%, accent colour default → #0b6e8a",
+    );
+    // Nothing about branding changed: the old wording stands.
+    expect(say({}, {})).toBe("Company settings updated");
+  });
 });
 
 describe("saving runs", () => {

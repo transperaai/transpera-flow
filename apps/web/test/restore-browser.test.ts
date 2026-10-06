@@ -68,7 +68,7 @@ function backup(change: (b: Record<string, unknown>) => void = () => {}): string
 
 const file = (name: string, text: string) => ({ name, mimeType: "application/json", buffer: Buffer.from(text) });
 
-async function mount(answer?: { status: number; body: unknown }): Promise<{ page: Page; errors: string[] }> {
+async function mount(answer?: Parameters<Window["mountRestore"]>[0]): Promise<{ page: Page; errors: string[] }> {
   await context.clearCookies();
   const page = await context.newPage();
   const errors: string[] = [];
@@ -135,7 +135,14 @@ describe("the restore component", () => {
 
   it("refuses a file over the size limit before reading it", async () => {
     const { page } = await mount();
-    await page.setInputFiles("input[type=file]", { name: "huge.json", mimeType: "application/json", buffer: Buffer.alloc(MAX_BACKUP_BYTES + 1, 32) });
+    // Made inside the page: sending 25 MB through setInputFiles over CDP took most of the 5 s timeout on a busy CI runner.
+    await page.evaluate((bytes) => {
+      const input = document.querySelector<HTMLInputElement>("input[type=file]")!;
+      const files = new DataTransfer();
+      files.items.add(new File([new Uint8Array(bytes).fill(32)], "huge.json", { type: "application/json" }));
+      input.files = files.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, MAX_BACKUP_BYTES + 1);
     await page.waitForSelector("[data-restore-problem]");
     expect(await page.locator("[data-restore-problem]").innerText()).toMatch(/That file is 25\.0 MB; a restore takes at most 25\.0 MB\./);
     await page.close();
@@ -149,6 +156,52 @@ describe("the restore component", () => {
     await page.waitForSelector("[data-restore-failed]");
     expect(await page.locator("[data-restore-failed]").innerText()).toContain("Backups restore only into an empty workspace.");
     expect(await page.evaluate(() => document.cookie)).not.toContain("tf-restore-notice");
+    await page.close();
+  });
+
+  // B21 (#203): a restore can take up to 40 s, so the page says so while it waits, and never claims "Nothing was restored" when no
+  // answer came back from the route (the database may still commit after the connection drops).
+  const LOST = "We lost the connection before the restore answered. It may still finish: reload this page in a minute. If the workspace then has processes, the restore worked; if not, nothing was restored.";
+
+  it("says a big backup can take up to a minute while it restores, and not before or after", async () => {
+    const { page, errors } = await mount({ status: 409, body: { message: "Refused." }, delayMs: 1500 });
+    await page.setInputFiles("input[type=file]", file("mini.json", backup()));
+    await page.waitForSelector("[data-restore-summary]");
+    expect(await page.locator("[data-restore-wait]").count()).toBe(0);
+    await page.click("[data-restore-submit]");
+    await page.waitForSelector("[data-restore-wait]");
+    expect(await page.locator("[data-restore-wait]").innerText()).toBe("A big backup can take up to a minute. Keep this page open.");
+    expect(await page.locator("[data-restore-submit]").innerText()).toBe("Restoring…");
+    await page.waitForSelector("[data-restore-failed]");
+    expect(await page.locator("[data-restore-wait]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it.each([
+    ["the connection drops (fetch throws)", { status: 0, throws: true }],
+    ["a gateway answers with an HTML 504", { status: 504, html: "<html><body><h1>504 Gateway Time-out</h1></body></html>" }],
+    ["an answer that is JSON but has no message", { status: 502, body: { error: "bad gateway" } }],
+  ])("when %s it says the connection was lost, and not that nothing was restored", async (_name, answer) => {
+    const { page } = await mount(answer);
+    await page.setInputFiles("input[type=file]", file("mini.json", backup()));
+    await page.waitForSelector("[data-restore-summary]");
+    await page.click("[data-restore-submit]");
+    await page.waitForSelector("[data-restore-failed]");
+    const said = await page.locator("[data-restore-failed]").innerText();
+    expect(said).toBe(LOST);
+    expect(said).not.toContain("Nothing was restored");
+    expect(await page.evaluate(() => document.cookie)).not.toContain("tf-restore-notice");
+    await page.close();
+  });
+
+  it("keeps the route's own message, 'Nothing was restored' included, when the route answered", async () => {
+    const { page } = await mount({ status: 504, body: { message: "This backup is too big to restore in one go (the database ran out of time). Nothing was restored." } });
+    await page.setInputFiles("input[type=file]", file("mini.json", backup()));
+    await page.waitForSelector("[data-restore-summary]");
+    await page.click("[data-restore-submit]");
+    await page.waitForSelector("[data-restore-failed]");
+    expect(await page.locator("[data-restore-failed]").innerText()).toBe("This backup is too big to restore in one go (the database ran out of time). Nothing was restored.");
     await page.close();
   });
 });

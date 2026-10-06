@@ -7,7 +7,13 @@ import { RestoreBackup } from "@/components/restore/restore-backup";
 
 interface Answer {
   status: number;
-  body: unknown;
+  body?: unknown;
+  /** Answer with this page instead of JSON (a gateway's own 504, say). */
+  html?: string;
+  /** Throw as `fetch` does when the connection drops. */
+  throws?: boolean;
+  /** Answer only after this many ms (a restore that takes a while). */
+  delayMs?: number;
 }
 
 export interface Posted {
@@ -41,6 +47,9 @@ window.mountRestore = (answer = { status: 200, body: { processes: [{ id: "p1", n
         const buf = new Uint8Array(await blob.arrayBuffer());
         const text = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
         window.posts.push({ url, contentType: headers.get("content-type"), backupName: headers.get("x-backup-name"), magic: [buf[0]!, buf[1]!], size: buf.length, text });
+        if (answer.delayMs) await new Promise((resolve) => setTimeout(resolve, answer.delayMs));
+        if (answer.throws) throw new TypeError("Failed to fetch");
+        if (answer.html !== undefined) return new Response(answer.html, { status: answer.status, headers: { "content-type": "text/html" } });
         return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
       }}
     />,

@@ -6,12 +6,13 @@
 set -euo pipefail
 PROJECT_REF="${SUPABASE_PROJECT_REF:-vgsjkpwvxkpqvyazwcyq}"
 case "${1:-}" in
-  -f) sql="$(cat "$2")" ;;
-  -c) sql="$2" ;;
+  # --rawfile, not --arg: a large apply file overflows the argument list.
+  -f) body() { jq -n --rawfile q "$2" '{query:$q}'; } ;;
+  -c) body() { jq -n --arg q "$2" '{query:$q}'; } ;;
   *) echo "Usage: $0 -f file.sql | -c \"sql\"" >&2; exit 2 ;;
 esac
 : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is not set}"
-jq -n --arg q "$sql" '{query:$q}' | curl -sS --fail-with-body -X POST \
+body "$@" | curl -sS --fail-with-body -X POST \
   "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
   -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
   -H "Content-Type: application/json" --data @-

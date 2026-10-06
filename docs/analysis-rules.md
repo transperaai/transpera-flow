@@ -44,7 +44,9 @@ run their old logic, mapped onto ratings until their tickets land. Choices the s
   Good band) and weeks to recover by `absence.recoveryCutoffs` (the last two inputs of the stored rule, `1 / 1 / 4`; rule-wide: a per-person or per-step override changes the work-lost cut-offs only; a value on a cut-off falls in the better band), the
   worse of the two wins, and a missed client deadline is Operational risk. No escalators. One finding per step only that
   person can do, keyed `spof:step:<step id>` as before, all rated from the same absence run. Without an absence result
-  (`DetectOptions.absence`), the rule raises nothing: the app runs it in a worker after the baseline.
+  (`DetectOptions.absence`), the rule raises nothing: the app runs it in a worker after the baseline. The rating is the
+  exported `absenceRating(config, finding, subject)` (B2, #31), so the People page's "If someone is away" card, which
+  shows every tested person's rating, Great included, rates exactly as the Issues register does.
 - **Work lost at a step (12)** counts the visits a step sends straight to a lost end (`StepResult.lostHere`, a win that
   is lost further on isn't counted) ÷ the visits that left it, against the step's benchmark (a step with none isn't
   rated). A bad month raises it, like the other rules.

@@ -863,6 +863,7 @@ export type Database = {
           origin: string
           person_labels: Json
           process_id: string | null
+          proposed_via: string | null
           rating: string
           run_id: string | null
           source_ids: string[]
@@ -889,6 +890,7 @@ export type Database = {
           origin: string
           person_labels?: Json
           process_id?: string | null
+          proposed_via?: string | null
           rating: string
           run_id?: string | null
           source_ids?: string[]
@@ -915,6 +917,7 @@ export type Database = {
           origin?: string
           person_labels?: Json
           process_id?: string | null
+          proposed_via?: string | null
           rating?: string
           run_id?: string | null
           source_ids?: string[]
@@ -3182,6 +3185,7 @@ export type Database = {
       }
       workspaces: {
         Row: {
+          branding: Json
           created_at: string
           created_by: string | null
           id: string
@@ -3193,6 +3197,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          branding?: Json
           created_at?: string
           created_by?: string | null
           id?: string
@@ -3204,6 +3209,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          branding?: Json
           created_at?: string
           created_by?: string | null
           id?: string

@@ -12,6 +12,8 @@
   --accent: oklch(0.52 0.105 223.128);
   --accent-soft: oklch(0.95 0.025 215);
   --accent-fg: oklch(0.984 0.019 200.873);
+  /* A client's logo always sits on white, in both themes (issue #34), so a dark logo stays visible. */
+  --logo-tile: #ffffff;
   --good: #1baf7a;
   --warn: #eda100;
   --serious: #eb6834;
@@ -23,6 +25,8 @@
   --edit: #6d3fc4;
   --edit-soft: #ece4fa;
   --edit-fg: #ffffff;
+  /* The Transpera Flow mark in the sidebar header: its own token, so a client's accent (issue #34) never recolours it. */
+  --brand-mark: oklch(0.52 0.105 223.128);
   /* Map ratings (A34): Great, Good could improve (lime, so it doesn't clash with the brand blue), Bad not urgent, Operational risk. */
   --rate-great: oklch(0.6 0.14 155);
   --rate-great-soft: oklch(0.95 0.045 155);
@@ -97,6 +101,7 @@
     --edit: #a37ef0;
     --edit-soft: #2e2248;
     --edit-fg: #140a26;
+    --brand-mark: oklch(0.715 0.143 215.221);
     --rate-great: oklch(0.66 0.14 155);
     --rate-great-soft: oklch(0.3 0.05 155);
     --rate-good: oklch(0.75 0.15 128);
@@ -111,6 +116,7 @@
 }
 
 :root[data-theme="dark"] {
+  --brand-mark: oklch(0.715 0.143 215.221);
   --bg: oklch(0.145 0 0);
   --panel: oklch(0.205 0 0);
   --panel-2: oklch(0.269 0 0);
