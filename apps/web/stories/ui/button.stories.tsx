@@ -22,7 +22,7 @@ export const Variants: StoryObj = {
             disabled
           </Button>
           <Button variant={v} aria-invalid>
-            invalid
+            invalid!
           </Button>
         </div>
       ))}
