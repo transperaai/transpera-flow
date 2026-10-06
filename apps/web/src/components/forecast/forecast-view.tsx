@@ -27,6 +27,7 @@ import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
 import { ForecastTimeline, TimelineLegend } from "./forecast-timeline";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export interface ForecastViewProps {
   /** The company model's process (the first sales pipeline), with the servicing processes it runs beside. */
@@ -86,10 +87,10 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
       issueFormOptions({
         processes: parts.map((p) => ({ id: p.process.id, name: p.process.name })),
         steps: parts.flatMap((p) => p.steps),
-        people: live.people.filter((p) => p.active),
+        people: namedForViewer(viewerOf(live), live.people.filter((p) => p.active)),
         sources,
       }),
-    [parts, live.people, sources],
+    [parts, live, sources],
   );
 
   const span = horizonLabel(months);

@@ -6,7 +6,7 @@
 // and delete (the database enforces it too).
 
 import { useState, type FormEvent } from "react";
-import type { ScenarioRow } from "@transpera-flow/db";
+import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import type { BrokenPatch, EngineModel, RetiredSteps } from "@transpera-flow/engine";
 import { repointTargets } from "@/lib/scenarios/broken";
 import { MAX_DESCRIPTION, MAX_NAME } from "@/lib/scenarios/validate";
@@ -21,18 +21,20 @@ const buttonClass = "rounded-token border border-line px-2 py-0.5 text-xs hover:
  */
 function BrokenChange({
   model,
+  viewer,
   problem,
   canEdit,
   busy,
   onRepoint,
 }: {
   model: EngineModel;
+  viewer?: Viewer;
   problem: BrokenPatch;
   canEdit: boolean;
   busy: boolean;
   onRepoint: (targetId: string) => void;
 }) {
-  const { suggested, others } = repointTargets(model, problem);
+  const { suggested, others } = repointTargets(model, problem, viewer);
   const what = problem.kind === "steps" ? "step" : problem.kind === "people" ? "person" : problem.kind === "roles" ? "role" : "service";
   return (
     <li className="flex flex-col gap-1" data-broken-path={problem.path}>
@@ -71,6 +73,7 @@ function BrokenChange({
 function ScenarioItem({
   scenario,
   model,
+  viewer,
   position,
   problems,
   retired,
@@ -83,6 +86,7 @@ function ScenarioItem({
 }: {
   scenario: ScenarioRow;
   model: EngineModel;
+  viewer?: Viewer;
   /** 1-based place in the stack, or null when not applied. */
   position: number | null;
   problems: BrokenPatch[];
@@ -128,7 +132,7 @@ function ScenarioItem({
       </div>
       <ul className="text-xs text-fg-3">
         {scenario.patch.map((p, i) => (
-          <li key={i}>{describePatch(model, p, retired)}</li>
+          <li key={i}>{describePatch(model, p, retired, viewer)}</li>
         ))}
       </ul>
       {broken && (
@@ -138,7 +142,7 @@ function ScenarioItem({
           </p>
           <ul className="flex flex-col gap-1.5">
             {problems.map((p) => (
-              <BrokenChange key={p.index} model={model} problem={p} canEdit={canEdit} busy={busy} onRepoint={(id) => onRepoint(p.index, id)} />
+              <BrokenChange key={p.index} model={model} viewer={viewer} problem={p} canEdit={canEdit} busy={busy} onRepoint={(id) => onRepoint(p.index, id)} />
             ))}
           </ul>
         </div>
@@ -179,6 +183,7 @@ function ScenarioItem({
 export function ScenarioLibrary({
   scenarios,
   model,
+  viewer,
   stack,
   problems,
   retired = {},
@@ -195,6 +200,8 @@ export function ScenarioLibrary({
 }: {
   scenarios: ScenarioRow[];
   model: EngineModel;
+  /** Who is looking: other people are named "A team member" (B1 2b). */
+  viewer?: Viewer;
   stack: string[];
   problems: Record<string, BrokenPatch[]>;
   /** Steps the model no longer has, to name them in broken changes. */
@@ -250,6 +257,7 @@ export function ScenarioLibrary({
               key={s.id}
               scenario={s}
               model={model}
+              viewer={viewer}
               position={at >= 0 ? at + 1 : null}
               problems={problems[s.id] ?? []}
               retired={retired}

@@ -45,7 +45,7 @@ export async function saveAiSetting(db: Db, workspaceId: string, key: string, va
   return { status: "saved", settings: await loadAiSettings(db, workspaceId) };
 }
 
-const ANALYSIS_COLUMNS = "id, workspace_id, process_id, revision_id, status, reason, trigger, summary, insights, review, checked, dropped, input_hash, model, model_hash, usage, run_id, created_by, created_at, updated_at";
+const ANALYSIS_COLUMNS = "id, workspace_id, process_id, revision_id, status, reason, trigger, summary, insights, review, checked, dropped, input_hash, model, model_hash, usage, run_id, person_labels, created_by, created_at, updated_at";
 
 export type AiAnalysisWithRun = AiAnalysisRow & {
   /** Who ran it (the name recorded when the run was reserved); null if unknown. */
@@ -134,6 +134,8 @@ export interface SaveAiAnalysisInput {
   usage: Json;
   /** The run reserved for this analysis (`reserveAiRun`). */
   run_id: string;
+  /** The labels its text uses and the person each stands for (B1 2b): `{ "Team member A": "<person id>" }`. */
+  person_labels: Json;
 }
 
 /** Store (or replace) the analysis of a revision. Owners and editors only; returns its id, or null when it couldn't be written. */

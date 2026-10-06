@@ -179,8 +179,8 @@ describe("a member's simulation equals an editor's", () => {
       if (m.cost.payHidden) {
         hidden++;
         expect(m.cost, key).toMatchObject({ perMonth: null, hoursPerMonth: null, payHidden: true });
-        // Everything else about it is the same; its evidence and metrics only drop the pay-dependent sentence and figure.
-        expect({ ...m, cost: null, evidence: null, metrics: null }, key).toEqual({ ...e, cost: null, evidence: null, metrics: null });
+        // Everything else about it is the same, evidence and metrics included: since B1 2b they state no money.
+        expect({ ...m, cost: null }, key).toEqual({ ...e, cost: null });
         expect(m.metrics, key).not.toHaveProperty("overtime_cost");
       } else {
         expect(m, key).toEqual(e);

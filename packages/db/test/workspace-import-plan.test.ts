@@ -549,6 +549,17 @@ describe("planWorkspaceImport", () => {
     expect(plan.issues.map((i) => i.title)).toEqual(["First", "Later"]);
   });
 
+  it("restores an issue without the overtime money an old backup holds (B1 2b)", () => {
+    const b = clone(makeBundle().bundle);
+    const old = "Simulated: 44 h/wk against 40 h/wk, so 4 h/wk overtime on average within the 10% cap, costing about £1,040 at cost rates over the 26-week run. The cap is used up.";
+    const first = b.issues.find((i) => i.title === "First")!;
+    first.evidence = old;
+    first.evidence_metrics = { overtime_hours_week: 4, overtime_cost: 1040 };
+    const planned = planOf(recount(b)).plan.issues.find((i) => i.title === "First")!;
+    expect(planned.evidence).toBe("Simulated: 44 h/wk against 40 h/wk, so 4 h/wk overtime on average within the 10% cap. The cap is used up.");
+    expect(planned.evidence_metrics).toEqual({ overtime_hours_week: 4 });
+  });
+
   it("carries the seeded scenario library like any other scenario (the restore skips equal ones)", () => {
     const b = clone(makeBundle().bundle);
     b.scenarios.push({ id: id(), workspace_id: b.workspace.id, name: "Seeded", description: null, parent_scenario_id: null, patch: { x: 1 }, created_at: "2026-01-01" });

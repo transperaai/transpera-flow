@@ -31065,6 +31065,1626 @@ revoke execute on function public.revision_history(uuid) from public, anon;
 grant execute on function public.revision_history(uuid) to authenticated;
 ']);
 
+-- 20261207700000_saved_text_privacy.sql
+-- Saved text carries no pay and no real names (issue #30, B1 part 2 of 3, slice 2b; docs/plans/b1-brief.md).
+--
+-- The review of slice 2a (#202) found two leaks that no screen change can fix, because both sit in rows every member reads:
+--
+--   1. SAVED OVERTIME ISSUES HOLD PAY. The engine's overtime issue said "...h/wk overtime on average within the 10% cap,
+--      costing about £1,234 at cost rates over the 26-week run." and saved the same money as `evidence_metrics.overtime_cost`.
+--      With the hours in the same sentence, a member divides one by the other and gets a person's rate. Austin, 6 Oct:
+--      members and viewers get no pay data. (Engine 1.8.0 states hours only and the app strips the clause on save; this
+--      migration cleans the rows already saved.)
+--   2. SAVED AI TEXT HOLDS REAL NAMES. AI analysis is sent labels ("Team member A"), but the app put the real names back
+--      before saving, so `ai_analyses` and `findings` named people to every member. Austin's Q2: members see their own name
+--      and "A team member" for everyone else. From now on AI text is saved as the model wrote it, with labels, and a
+--      `person_labels` map (label -> person id) beside it; names go back at render, per reader. This migration relabels
+--      what is already saved.
+--
+-- What changes:
+--   * Two columns: `ai_analyses.person_labels` and `findings.person_labels` (jsonb object, not null, default '{}', at most
+--     32 KB). Both tables have table-level grants, so the new columns need none. No policy, grant or trigger is created, no
+--     existing function is redefined, and `save_fields` is not touched.
+--   * EVERY `issues` row, whatever its `detected_key`, whose evidence holds the clause ", costing about ... at cost rates over
+--     the N-week run." (it becomes ".") or whose `evidence_metrics` holds `overtime_cost`: the same rule as the app's
+--     `payFreeIssueFields`. History and updated_at stay as they were: it is a clean-up, not an edit (the `issue_log` and
+--     `set_updated_at` triggers are switched off for the statement, then back on).
+--   * `ai_analyses` (summary, insights, review, reason) and AI `findings` (title, evidence, why, facts): every FULL NAME of a
+--     person in the row's workspace, as written (case-sensitive) and not inside a longer word, becomes 'Team member ' || n,
+--     where n ranks the workspace's people by (created_at, id): the same numbering as `team_capacity`. The labels used are
+--     written to `person_labels`. The same money clause is cut from the text of EVERY analysis (summary, insights with their
+--     facts, review, reason), including analyses of superseded revisions, which members can read, and from every AI
+--     finding's title, evidence, why and facts (a fact quoted the overtime evidence; inside jsonb the match is kept inside
+--     one JSON string, so it can't run across two). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
+--     reserved run) and `set_updated_at` are switched off for those statements, then back on. Findings added by hand are
+--     human-typed text and are not touched.
+--   * KEYS HOLD NO NAME. A finding's `ai_key`, an AI insight's `issues.detected_key` and a saved insight's `key` inside
+--     `ai_analyses.insights` were `ai:insight:` + a sha1 of the real-name title, so a member reading them through the API could
+--     hash guessed names and check them. They are re-keyed to `ai:insight:<finding id>`, `ai:insight:<issue id>` and
+--     `ai:insight:<analysis id>:<position>`; `source_links` to an AI insight follow the issue's new key (one nobody
+--     acknowledged gets `ai:insight:<link id>`, which matches nothing). New findings are keyed on the labelled title by the app.
+--     Austin accepted that an already-proposed finding may be proposed once more, and that old pre-B17 insights lose their
+--     "acknowledged" link. `issues_before_write` (which refuses a change to `detected_key`) is switched off for that statement.
+--   * Four helper functions are created in `private` and dropped again inside this migration.
+--
+-- ACCEPTED LIMITS:
+--   * In rows written before this migration, a person named only by first name, a nickname or a misspelling keeps it (first
+--     names in old rows mostly come from source quotes, which every member already reads; matching them would also catch
+--     words like "May" or "Will"). Names under 3 characters, and names with a double quote or a backslash, are skipped.
+--     Two people with the same name both match the lower-numbered label.
+--   * Old AI text may PARAPHRASE a pay-dependent cost the model was given ("overtime here costs about £1.2k a month"). The
+--     exact clause is gone from every revision after this migration, but free text can't be recognised reliably. Production
+--     has no members or viewers yet, so nobody can read it today. After applying, re-run Analyse on each analysed process and
+--     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
+--     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
+--     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
+--   * An `insight` source link whose insight nobody acknowledged is not re-pointed at anything: it gets `ai:insight:<link id>`,
+--     which matches no insight, so the link is orphaned (it holds no name, and can be deleted).
+--   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
+--     check 4.
+--
+-- Apply BEFORE deploying the app: the app selects `person_labels`.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; with prod-sql.sh a `like` against a
+-- function body needs `can''''t`, and `tgenabled` needs `::text`):
+--   0. Row 55 the latest. Expect exactly 20261207000000 and 20261207500000 (nothing >= 20261207700000):
+--        select version from supabase_migrations.schema_migrations where version >= '20261207000000' order by 1;
+--   1. The columns don't exist yet. Expect 0:
+--        select count(*) from information_schema.columns
+--        where table_schema = 'public' and table_name in ('ai_analyses', 'findings') and column_name = 'person_labels';
+--   2. The seven triggers this disables and re-enables exist and are enabled. Expect 7 rows, each O:
+--        select tgrelid::regclass, tgname, tgenabled::text from pg_trigger
+--        where not tgisinternal and (tgrelid, tgname) in (
+--          ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'), ('public.issues'::regclass, 'issues_before_write'),
+--          ('public.ai_analyses'::regclass, 'ai_analyses_stamp'), ('public.ai_analyses'::regclass, 'set_updated_at'),
+--          ('public.findings'::regclass, 'findings_before_write'), ('public.findings'::regclass, 'set_updated_at'))
+--        order by 1, 2;
+--   3. The regex features work here (lookbehind, lookbehind after a JSON escape, classes, shortest match). Expect
+--      'x T y.', 'a\nT b', 'a.' and '[{"t":"a, costing about £1 a month"},{"t":"b. c"}]' (the last: the match stays
+--      inside one JSON string, so the first "costing about" is left alone):
+--        select regexp_replace('x Ann Lee y.', '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])', 'T', 'g'),
+--               regexp_replace('a\nAnn Lee b', '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])', 'T', 'g'),
+--               regexp_replace('a, costing about £1,234 at cost rates over the 26-week run.', ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
+--               regexp_replace('[{"t":"a, costing about £1 a month"},{"t":"b, costing about £2 at cost rates over the 26-week run. c"}]',
+--                              ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g');
+--   4. For the log, and to compare after: what will change (every issue, every analysis, every AI finding), the history size
+--      and the latest timestamps.
+--        select count(*) filter (where evidence_metrics ? 'overtime_cost') as with_metric,
+--               count(*) filter (where evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.') as with_sentence
+--        from public.issues;
+--        select (select count(*) from public.ai_analyses
+--                where (summary::text || insights::text || review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
+--                   or reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.') as analyses_with_sentence,
+--               (select count(*) from public.findings
+--                where origin = 'ai' and (title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.')) as findings_with_sentence;
+--        select (select count(*) from public.issue_events) as issue_events,
+--               (select count(*) from public.ai_analyses) as analyses, (select max(updated_at) from public.ai_analyses) as analyses_latest,
+--               (select count(*) from public.findings where origin = 'ai') as ai_findings, (select max(updated_at) from public.findings) as findings_latest;
+--   5. No saved AI text already holds a label (it would stay unmapped). Expect 0, 0:
+--        select (select count(*) from public.ai_analyses where (summary::text || insights::text || review::text || coalesce(reason, '')) ~ 'Team member [A-Z0-9]'),
+--               (select count(*) from public.findings where (title || evidence || why || facts::text) ~ 'Team member [A-Z0-9]');
+--   6. Room for longer text. Expect each well under its limit (262144, 131072, 32768):
+--        select max(octet_length(insights::text)), max(octet_length(review::text)) from public.ai_analyses;
+--        select max(octet_length(facts::text)) from public.findings;
+--   7b. For the log, and to compare after: the keys that will be re-keyed. After applying, post-apply check 7 returns 0 x 4:
+--        select (select count(*) from public.findings where origin = 'ai') as ai_findings,
+--               (select count(*) from public.issues where detected_key like 'ai:insight:%') as ai_issues,
+--               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%') as ai_links,
+--               (select count(*) from public.ai_analyses where jsonb_typeof(insights) = 'array' and jsonb_array_length(insights) > 0) as analyses_with_insights;
+--   7. For the log: names the clean-up skips (under 3 characters, or a quote or backslash) and names two people share (both
+--      get the lower-numbered label). Expect no rows from either:
+--        select workspace_id, name from public.people where char_length(btrim(name)) < 3 or name ~ '["\\]';
+--        select workspace_id, btrim(name), count(*) from public.people group by 1, 2 having count(*) > 1;
+--
+-- POST-APPLY CHECKS:
+--   1. Re-run preflight 1: `2`. Re-run preflight 2: still 7 rows, all `O`.
+--   2. select to_regprocedure('private.b1_2b_relabel(text, uuid)'), to_regprocedure('private.b1_2b_labels(text, uuid)'),
+--             to_regprocedure('private.b1_2b_people(uuid)'), to_regprocedure('private.b1_2b_rekey(jsonb, uuid)');   -- null x4
+--   3. Re-run the first two queries of preflight 4: `0, 0` and `0, 0`. The third: `issue_events` and both `max(updated_at)`
+--      unchanged.
+--   4. No AI text still holds a full name of its workspace. Expect 0, 0:
+--        select (select count(*) from public.ai_analyses a join public.people p on p.workspace_id = a.workspace_id
+--                where char_length(btrim(p.name)) >= 3 and (a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''))
+--                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])')),
+--               (select count(*) from public.findings f join public.people p on p.workspace_id = f.workspace_id
+--                where f.origin = 'ai' and char_length(btrim(p.name)) >= 3 and (f.title || f.evidence || f.why || f.facts::text)
+--                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
+--   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
+--   6. The schema_migrations row is present.
+--   7. No key is derived from a name any more. Run it BEFORE deploying the app (an analysis run by the new app writes
+--      hashed keys of the labelled title, which this check reads as names; so it only holds until the deploy). Expect 0, 0, 0, 0:
+--        select (select count(*) from public.findings where origin = 'ai' and ai_key <> 'ai:insight:' || id),
+--               (select count(*) from public.issues where detected_key like 'ai:insight:%' and detected_key <> 'ai:insight:' || id),
+--               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%'
+--                  and insight_key !~ '^ai:insight:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+--               (select count(*) from public.ai_analyses a, jsonb_array_elements(case when jsonb_typeof(a.insights) = 'array' then a.insights else '[]' end) with ordinality as e(v, i)
+--                where jsonb_typeof(e.v) = 'object' and e.v ? 'key' and e.v ->> 'key' is distinct from 'ai:insight:' || a.id || ':' || (e.i - 1));
+--
+-- ROLLBACK (one transaction; redeploy the app from before 2b first, since 2b's app selects the column). The overtime clause
+-- and `overtime_cost` are NOT put back: the money is still shown live to editors, so nothing is lost. Nor are the old keys
+-- (hashes of names): the re-keyed ones stay.
+--   begin;
+--     -- Put names back where labels were written: each label in a row's person_labels becomes that person's current name,
+--     -- or "A team member" if they were deleted. Inside jsonb the name is JSON-escaped.
+--     create function private.b1_2b_unlabel(t text, labels jsonb, as_json boolean) returns text
+--     language plpgsql stable set search_path = ''
+--     as $f$
+--     declare l record; nm text;
+--     begin
+--       if t is null then return null; end if;
+--       for l in select k.label, k.pid from jsonb_each_text(labels) as k(label, pid) order by char_length(k.label) desc, k.label loop
+--         select p.name into nm from public.people p where p.id = l.pid::uuid;
+--         nm := coalesce(nm, 'A team member');
+--         if as_json then nm := substr(to_jsonb(nm)::text, 2, char_length(to_jsonb(nm)::text) - 2); end if;
+--         t := regexp_replace(t, l.label || '(?![[:alnum:]])', replace(replace(nm, '\', '\\'), '&', '\&'), 'g');
+--       end loop;
+--       return t;
+--     end;
+--     $f$;
+--     alter table public.ai_analyses disable trigger ai_analyses_stamp;
+--     alter table public.ai_analyses disable trigger set_updated_at;
+--     update public.ai_analyses
+--     set summary  = private.b1_2b_unlabel(summary::text, person_labels, true)::jsonb,
+--         insights = private.b1_2b_unlabel(insights::text, person_labels, true)::jsonb,
+--         review   = private.b1_2b_unlabel(review::text, person_labels, true)::jsonb,
+--         reason   = left(private.b1_2b_unlabel(reason, person_labels, false), 2000)
+--     where person_labels <> '{}';
+--     alter table public.ai_analyses enable trigger set_updated_at;
+--     alter table public.ai_analyses enable trigger ai_analyses_stamp;
+--     alter table public.findings disable trigger findings_before_write;
+--     alter table public.findings disable trigger set_updated_at;
+--     update public.findings
+--     set title    = left(private.b1_2b_unlabel(title, person_labels, false), 200),
+--         evidence = left(private.b1_2b_unlabel(evidence, person_labels, false), 2000),
+--         why      = left(private.b1_2b_unlabel(why, person_labels, false), 2000),
+--         facts    = private.b1_2b_unlabel(facts::text, person_labels, true)::jsonb
+--     where person_labels <> '{}';
+--     alter table public.findings enable trigger set_updated_at;
+--     alter table public.findings enable trigger findings_before_write;
+--     drop function private.b1_2b_unlabel(text, jsonb, boolean);
+--     alter table public.findings drop column person_labels;
+--     alter table public.ai_analyses drop column person_labels;
+--     delete from supabase_migrations.schema_migrations where version = '20261207700000';
+--   commit;
+
+-- 1. Columns
+
+alter table public.ai_analyses add column person_labels jsonb not null default '{}'
+  constraint ai_analyses_person_labels_shape check (jsonb_typeof(person_labels) = 'object' and octet_length(person_labels::text) <= 32768);
+alter table public.findings add column person_labels jsonb not null default '{}'
+  constraint findings_person_labels_shape check (jsonb_typeof(person_labels) = 'object' and octet_length(person_labels::text) <= 32768);
+
+-- 2. Saved issues: no money. Every issue, whatever its key: the rule is `payFreeIssueFields`'s (the app's save path).
+
+-- History and updated_at stay as they were: this is a clean-up, not an edit.
+alter table public.issues disable trigger issue_log;
+alter table public.issues disable trigger set_updated_at;
+alter table public.issues disable trigger issues_before_write;  -- it refuses a change to detected_key, which the re-key below makes
+-- Source links to an AI insight follow the issue's new key (this needs the issues' old keys, so it runs first). A link to an
+-- insight nobody acknowledged has no issue: it gets a key of its own, which matches nothing (a name-free orphan).
+update public.source_links sl
+set insight_key = 'ai:insight:' || coalesce(
+  (select i.id from public.issues i where i.workspace_id = sl.workspace_id and i.detected_key = sl.insight_key), sl.id)::text
+where sl.kind = 'insight' and sl.insight_key like 'ai:insight:%';
+update public.issues
+set evidence = regexp_replace(evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
+    evidence_metrics = evidence_metrics - 'overtime_cost'
+where evidence_metrics ? 'overtime_cost'
+   or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
+-- An acknowledged pre-B17 AI insight is keyed 'ai:insight:' + a hash of the real-name text, which a member could check a
+-- guessed name against. It becomes 'ai:insight:' + the issue's id; the insight's "acknowledged" link to the old key is lost.
+update public.issues set detected_key = 'ai:insight:' || id where detected_key like 'ai:insight:%';
+alter table public.issues enable trigger issues_before_write;
+alter table public.issues enable trigger set_updated_at;
+alter table public.issues enable trigger issue_log;
+
+-- 3. Saved AI text: full names to labels, best effort.
+
+-- Temporary helpers, dropped below. Longest names first, so "Ann Lee" goes before "Ann". Names under 3 characters, and
+-- names with a double quote or a backslash (they would break the jsonb text), are skipped. In jsonb text a name can follow a
+-- JSON escape ("Busy week.\nMaya Collins"), and the `n` of `\n` is a letter: so the lookbehind also accepts a backslash
+-- plus one of n r t b f just before the name.
+create function private.b1_2b_people(ws uuid) returns table (id uuid, name text, pattern text, label text)
+language sql stable set search_path = ''
+as $$
+  select n.id, n.name,
+    '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(n.name, '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])',
+    n.label
+  from (
+    select pe.id, btrim(pe.name) as name, 'Team member ' || row_number() over (order by pe.created_at, pe.id) as label
+    from public.people pe where pe.workspace_id = ws
+  ) n
+  where char_length(n.name) >= 3 and n.name !~ '["\\]'
+  order by char_length(n.name) desc, n.label;
+$$;
+
+create function private.b1_2b_relabel(t text, ws uuid) returns text
+language plpgsql stable set search_path = ''
+as $$
+declare p record;
+begin
+  if t is null then return null; end if;
+  for p in select * from private.b1_2b_people(ws) loop
+    t := regexp_replace(t, p.pattern, p.label, 'g');
+  end loop;
+  return t;
+end;
+$$;
+
+-- The labels relabel would use in `t`: { label: person id }.
+create function private.b1_2b_labels(t text, ws uuid) returns jsonb
+language plpgsql stable set search_path = ''
+as $$
+declare p record; found jsonb := '{}';
+begin
+  if t is null then return found; end if;
+  for p in select * from private.b1_2b_people(ws) loop
+    if t ~ p.pattern then
+      found := found || jsonb_build_object(p.label, p.id);
+      t := regexp_replace(t, p.pattern, p.label, 'g');  -- so a shorter name inside a longer one isn't counted again
+    end if;
+  end loop;
+  return found;
+end;
+$$;
+
+-- Saved insights' own keys (pre-B17 analyses; a hash of the real-name title) become 'ai:insight:<analysis id>:<position>'.
+create function private.b1_2b_rekey(insights jsonb, analysis uuid) returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select case when jsonb_typeof(insights) = 'array' then
+    coalesce((select jsonb_agg(case when jsonb_typeof(e.v) = 'object' and e.v ? 'key' then jsonb_set(e.v, '{key}', to_jsonb('ai:insight:' || analysis::text || ':' || (e.i - 1))) else e.v end order by e.i)
+              from jsonb_array_elements(insights) with ordinality as e(v, i)), '[]'::jsonb)
+  else insights end;
+$$;
+
+alter table public.ai_analyses disable trigger ai_analyses_stamp;  -- it requires a run the caller reserved in the last 15 minutes
+alter table public.ai_analyses disable trigger set_updated_at;     -- "latest analysis" is ordered by updated_at
+-- EVERY analysis, of any revision (members can read earlier revisions): the money clause goes from summary, insights (pre-B17
+-- analyses keep facts inside them), review and reason, and full names become labels. Inside jsonb text the money can't hold
+-- a raw double quote, so `[^"]+?` keeps the match inside one JSON string.
+update public.ai_analyses a
+set summary  = private.b1_2b_relabel(regexp_replace(a.summary::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    insights = private.b1_2b_rekey(private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb, a.id),
+    review   = private.b1_2b_relabel(regexp_replace(a.review::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    reason   = left(private.b1_2b_relabel(regexp_replace(a.reason, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id), 2000),
+    person_labels = a.person_labels || private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
+where jsonb_typeof(a.insights) = 'array' and jsonb_array_length(a.insights) > 0
+   or private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
+   or (a.summary::text || a.insights::text || a.review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
+   or a.reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
+alter table public.ai_analyses enable trigger set_updated_at;
+alter table public.ai_analyses enable trigger ai_analyses_stamp;
+
+alter table public.findings disable trigger findings_before_write;  -- it forbids changing an AI finding's facts, and would mark it edited
+alter table public.findings disable trigger set_updated_at;
+update public.findings f
+set title    = left(private.b1_2b_relabel(regexp_replace(f.title, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 200),
+    evidence = left(private.b1_2b_relabel(regexp_replace(f.evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
+    why      = left(private.b1_2b_relabel(regexp_replace(f.why, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
+    facts    = private.b1_2b_relabel(regexp_replace(f.facts::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id)::jsonb,
+    ai_key   = 'ai:insight:' || f.id,
+    person_labels = f.person_labels || private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
+where f.origin = 'ai';  -- every AI finding, so every ai_key is re-keyed
+alter table public.findings enable trigger set_updated_at;
+alter table public.findings enable trigger findings_before_write;
+
+drop function private.b1_2b_rekey(jsonb, uuid);
+drop function private.b1_2b_labels(text, uuid);
+drop function private.b1_2b_relabel(text, uuid);
+drop function private.b1_2b_people(uuid);
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261207700000', 'saved_text_privacy', array['-- Saved text carries no pay and no real names (issue #30, B1 part 2 of 3, slice 2b; docs/plans/b1-brief.md).
+--
+-- The review of slice 2a (#202) found two leaks that no screen change can fix, because both sit in rows every member reads:
+--
+--   1. SAVED OVERTIME ISSUES HOLD PAY. The engine''s overtime issue said "...h/wk overtime on average within the 10% cap,
+--      costing about £1,234 at cost rates over the 26-week run." and saved the same money as `evidence_metrics.overtime_cost`.
+--      With the hours in the same sentence, a member divides one by the other and gets a person''s rate. Austin, 6 Oct:
+--      members and viewers get no pay data. (Engine 1.8.0 states hours only and the app strips the clause on save; this
+--      migration cleans the rows already saved.)
+--   2. SAVED AI TEXT HOLDS REAL NAMES. AI analysis is sent labels ("Team member A"), but the app put the real names back
+--      before saving, so `ai_analyses` and `findings` named people to every member. Austin''s Q2: members see their own name
+--      and "A team member" for everyone else. From now on AI text is saved as the model wrote it, with labels, and a
+--      `person_labels` map (label -> person id) beside it; names go back at render, per reader. This migration relabels
+--      what is already saved.
+--
+-- What changes:
+--   * Two columns: `ai_analyses.person_labels` and `findings.person_labels` (jsonb object, not null, default ''{}'', at most
+--     32 KB). Both tables have table-level grants, so the new columns need none. No policy, grant or trigger is created, no
+--     existing function is redefined, and `save_fields` is not touched.
+--   * EVERY `issues` row, whatever its `detected_key`, whose evidence holds the clause ", costing about ... at cost rates over
+--     the N-week run." (it becomes ".") or whose `evidence_metrics` holds `overtime_cost`: the same rule as the app''s
+--     `payFreeIssueFields`. History and updated_at stay as they were: it is a clean-up, not an edit (the `issue_log` and
+--     `set_updated_at` triggers are switched off for the statement, then back on).
+--   * `ai_analyses` (summary, insights, review, reason) and AI `findings` (title, evidence, why, facts): every FULL NAME of a
+--     person in the row''s workspace, as written (case-sensitive) and not inside a longer word, becomes ''Team member '' || n,
+--     where n ranks the workspace''s people by (created_at, id): the same numbering as `team_capacity`. The labels used are
+--     written to `person_labels`. The same money clause is cut from the text of EVERY analysis (summary, insights with their
+--     facts, review, reason), including analyses of superseded revisions, which members can read, and from every AI
+--     finding''s title, evidence, why and facts (a fact quoted the overtime evidence; inside jsonb the match is kept inside
+--     one JSON string, so it can''t run across two). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding''s facts and require a
+--     reserved run) and `set_updated_at` are switched off for those statements, then back on. Findings added by hand are
+--     human-typed text and are not touched.
+--   * KEYS HOLD NO NAME. A finding''s `ai_key`, an AI insight''s `issues.detected_key` and a saved insight''s `key` inside
+--     `ai_analyses.insights` were `ai:insight:` + a sha1 of the real-name title, so a member reading them through the API could
+--     hash guessed names and check them. They are re-keyed to `ai:insight:<finding id>`, `ai:insight:<issue id>` and
+--     `ai:insight:<analysis id>:<position>`; `source_links` to an AI insight follow the issue''s new key (one nobody
+--     acknowledged gets `ai:insight:<link id>`, which matches nothing). New findings are keyed on the labelled title by the app.
+--     Austin accepted that an already-proposed finding may be proposed once more, and that old pre-B17 insights lose their
+--     "acknowledged" link. `issues_before_write` (which refuses a change to `detected_key`) is switched off for that statement.
+--   * Four helper functions are created in `private` and dropped again inside this migration.
+--
+-- ACCEPTED LIMITS:
+--   * In rows written before this migration, a person named only by first name, a nickname or a misspelling keeps it (first
+--     names in old rows mostly come from source quotes, which every member already reads; matching them would also catch
+--     words like "May" or "Will"). Names under 3 characters, and names with a double quote or a backslash, are skipped.
+--     Two people with the same name both match the lower-numbered label.
+--   * Old AI text may PARAPHRASE a pay-dependent cost the model was given ("overtime here costs about £1.2k a month"). The
+--     exact clause is gone from every revision after this migration, but free text can''t be recognised reliably. Production
+--     has no members or viewers yet, so nobody can read it today. After applying, re-run Analyse on each analysed process and
+--     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
+--     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
+--     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
+--   * An `insight` source link whose insight nobody acknowledged is not re-pointed at anything: it gets `ai:insight:<link id>`,
+--     which matches no insight, so the link is orphaned (it holds no name, and can be deleted).
+--   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
+--     check 4.
+--
+-- Apply BEFORE deploying the app: the app selects `person_labels`.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; with prod-sql.sh a `like` against a
+-- function body needs `can''''''''t`, and `tgenabled` needs `::text`):
+--   0. Row 55 the latest. Expect exactly 20261207000000 and 20261207500000 (nothing >= 20261207700000):
+--        select version from supabase_migrations.schema_migrations where version >= ''20261207000000'' order by 1;
+--   1. The columns don''t exist yet. Expect 0:
+--        select count(*) from information_schema.columns
+--        where table_schema = ''public'' and table_name in (''ai_analyses'', ''findings'') and column_name = ''person_labels'';
+--   2. The seven triggers this disables and re-enables exist and are enabled. Expect 7 rows, each O:
+--        select tgrelid::regclass, tgname, tgenabled::text from pg_trigger
+--        where not tgisinternal and (tgrelid, tgname) in (
+--          (''public.issues''::regclass, ''issue_log''), (''public.issues''::regclass, ''set_updated_at''), (''public.issues''::regclass, ''issues_before_write''),
+--          (''public.ai_analyses''::regclass, ''ai_analyses_stamp''), (''public.ai_analyses''::regclass, ''set_updated_at''),
+--          (''public.findings''::regclass, ''findings_before_write''), (''public.findings''::regclass, ''set_updated_at''))
+--        order by 1, 2;
+--   3. The regex features work here (lookbehind, lookbehind after a JSON escape, classes, shortest match). Expect
+--      ''x T y.'', ''a\nT b'', ''a.'' and ''[{"t":"a, costing about £1 a month"},{"t":"b. c"}]'' (the last: the match stays
+--      inside one JSON string, so the first "costing about" is left alone):
+--        select regexp_replace(''x Ann Lee y.'', ''(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])'', ''T'', ''g''),
+--               regexp_replace(''a\nAnn Lee b'', ''(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])'', ''T'', ''g''),
+--               regexp_replace(''a, costing about £1,234 at cost rates over the 26-week run.'', '', costing about .+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''),
+--               regexp_replace(''[{"t":"a, costing about £1 a month"},{"t":"b, costing about £2 at cost rates over the 26-week run. c"}]'',
+--                              '', costing about [^"]+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g'');
+--   4. For the log, and to compare after: what will change (every issue, every analysis, every AI finding), the history size
+--      and the latest timestamps.
+--        select count(*) filter (where evidence_metrics ? ''overtime_cost'') as with_metric,
+--               count(*) filter (where evidence ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.'') as with_sentence
+--        from public.issues;
+--        select (select count(*) from public.ai_analyses
+--                where (summary::text || insights::text || review::text) ~ '', costing about [^"]+ at cost rates over the [0-9,]+-week run\.''
+--                   or reason ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.'') as analyses_with_sentence,
+--               (select count(*) from public.findings
+--                where origin = ''ai'' and (title ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.''
+--                   or evidence ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.''
+--                   or why ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.''
+--                   or facts::text ~ '', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'')) as findings_with_sentence;
+--        select (select count(*) from public.issue_events) as issue_events,
+--               (select count(*) from public.ai_analyses) as analyses, (select max(updated_at) from public.ai_analyses) as analyses_latest,
+--               (select count(*) from public.findings where origin = ''ai'') as ai_findings, (select max(updated_at) from public.findings) as findings_latest;
+--   5. No saved AI text already holds a label (it would stay unmapped). Expect 0, 0:
+--        select (select count(*) from public.ai_analyses where (summary::text || insights::text || review::text || coalesce(reason, '''')) ~ ''Team member [A-Z0-9]''),
+--               (select count(*) from public.findings where (title || evidence || why || facts::text) ~ ''Team member [A-Z0-9]'');
+--   6. Room for longer text. Expect each well under its limit (262144, 131072, 32768):
+--        select max(octet_length(insights::text)), max(octet_length(review::text)) from public.ai_analyses;
+--        select max(octet_length(facts::text)) from public.findings;
+--   7b. For the log, and to compare after: the keys that will be re-keyed. After applying, post-apply check 7 returns 0 x 4:
+--        select (select count(*) from public.findings where origin = ''ai'') as ai_findings,
+--               (select count(*) from public.issues where detected_key like ''ai:insight:%'') as ai_issues,
+--               (select count(*) from public.source_links where kind = ''insight'' and insight_key like ''ai:insight:%'') as ai_links,
+--               (select count(*) from public.ai_analyses where jsonb_typeof(insights) = ''array'' and jsonb_array_length(insights) > 0) as analyses_with_insights;
+--   7. For the log: names the clean-up skips (under 3 characters, or a quote or backslash) and names two people share (both
+--      get the lower-numbered label). Expect no rows from either:
+--        select workspace_id, name from public.people where char_length(btrim(name)) < 3 or name ~ ''["\\]'';
+--        select workspace_id, btrim(name), count(*) from public.people group by 1, 2 having count(*) > 1;
+--
+-- POST-APPLY CHECKS:
+--   1. Re-run preflight 1: `2`. Re-run preflight 2: still 7 rows, all `O`.
+--   2. select to_regprocedure(''private.b1_2b_relabel(text, uuid)''), to_regprocedure(''private.b1_2b_labels(text, uuid)''),
+--             to_regprocedure(''private.b1_2b_people(uuid)''), to_regprocedure(''private.b1_2b_rekey(jsonb, uuid)'');   -- null x4
+--   3. Re-run the first two queries of preflight 4: `0, 0` and `0, 0`. The third: `issue_events` and both `max(updated_at)`
+--      unchanged.
+--   4. No AI text still holds a full name of its workspace. Expect 0, 0:
+--        select (select count(*) from public.ai_analyses a join public.people p on p.workspace_id = a.workspace_id
+--                where char_length(btrim(p.name)) >= 3 and (a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''''))
+--                      ~ (''(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))'' || regexp_replace(btrim(p.name), ''([.^$*+?(){}|\[\]\\-])'', ''\\\1'', ''g'') || ''(?![[:alnum:]_])'')),
+--               (select count(*) from public.findings f join public.people p on p.workspace_id = f.workspace_id
+--                where f.origin = ''ai'' and char_length(btrim(p.name)) >= 3 and (f.title || f.evidence || f.why || f.facts::text)
+--                      ~ (''(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))'' || regexp_replace(btrim(p.name), ''([.^$*+?(){}|\[\]\\-])'', ''\\\1'', ''g'') || ''(?![[:alnum:]_])''));
+--   5. For the log: select count(*) from public.ai_analyses where person_labels <> ''{}'';  and the same for public.findings.
+--   6. The schema_migrations row is present.
+--   7. No key is derived from a name any more. Run it BEFORE deploying the app (an analysis run by the new app writes
+--      hashed keys of the labelled title, which this check reads as names; so it only holds until the deploy). Expect 0, 0, 0, 0:
+--        select (select count(*) from public.findings where origin = ''ai'' and ai_key <> ''ai:insight:'' || id),
+--               (select count(*) from public.issues where detected_key like ''ai:insight:%'' and detected_key <> ''ai:insight:'' || id),
+--               (select count(*) from public.source_links where kind = ''insight'' and insight_key like ''ai:insight:%''
+--                  and insight_key !~ ''^ai:insight:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''),
+--               (select count(*) from public.ai_analyses a, jsonb_array_elements(case when jsonb_typeof(a.insights) = ''array'' then a.insights else ''[]'' end) with ordinality as e(v, i)
+--                where jsonb_typeof(e.v) = ''object'' and e.v ? ''key'' and e.v ->> ''key'' is distinct from ''ai:insight:'' || a.id || '':'' || (e.i - 1));
+--
+-- ROLLBACK (one transaction; redeploy the app from before 2b first, since 2b''s app selects the column). The overtime clause
+-- and `overtime_cost` are NOT put back: the money is still shown live to editors, so nothing is lost. Nor are the old keys
+-- (hashes of names): the re-keyed ones stay.
+--   begin;
+--     -- Put names back where labels were written: each label in a row''s person_labels becomes that person''s current name,
+--     -- or "A team member" if they were deleted. Inside jsonb the name is JSON-escaped.
+--     create function private.b1_2b_unlabel(t text, labels jsonb, as_json boolean) returns text
+--     language plpgsql stable set search_path = ''''
+--     as $f$
+--     declare l record; nm text;
+--     begin
+--       if t is null then return null; end if;
+--       for l in select k.label, k.pid from jsonb_each_text(labels) as k(label, pid) order by char_length(k.label) desc, k.label loop
+--         select p.name into nm from public.people p where p.id = l.pid::uuid;
+--         nm := coalesce(nm, ''A team member'');
+--         if as_json then nm := substr(to_jsonb(nm)::text, 2, char_length(to_jsonb(nm)::text) - 2); end if;
+--         t := regexp_replace(t, l.label || ''(?![[:alnum:]])'', replace(replace(nm, ''\'', ''\\''), ''&'', ''\&''), ''g'');
+--       end loop;
+--       return t;
+--     end;
+--     $f$;
+--     alter table public.ai_analyses disable trigger ai_analyses_stamp;
+--     alter table public.ai_analyses disable trigger set_updated_at;
+--     update public.ai_analyses
+--     set summary  = private.b1_2b_unlabel(summary::text, person_labels, true)::jsonb,
+--         insights = private.b1_2b_unlabel(insights::text, person_labels, true)::jsonb,
+--         review   = private.b1_2b_unlabel(review::text, person_labels, true)::jsonb,
+--         reason   = left(private.b1_2b_unlabel(reason, person_labels, false), 2000)
+--     where person_labels <> ''{}'';
+--     alter table public.ai_analyses enable trigger set_updated_at;
+--     alter table public.ai_analyses enable trigger ai_analyses_stamp;
+--     alter table public.findings disable trigger findings_before_write;
+--     alter table public.findings disable trigger set_updated_at;
+--     update public.findings
+--     set title    = left(private.b1_2b_unlabel(title, person_labels, false), 200),
+--         evidence = left(private.b1_2b_unlabel(evidence, person_labels, false), 2000),
+--         why      = left(private.b1_2b_unlabel(why, person_labels, false), 2000),
+--         facts    = private.b1_2b_unlabel(facts::text, person_labels, true)::jsonb
+--     where person_labels <> ''{}'';
+--     alter table public.findings enable trigger set_updated_at;
+--     alter table public.findings enable trigger findings_before_write;
+--     drop function private.b1_2b_unlabel(text, jsonb, boolean);
+--     alter table public.findings drop column person_labels;
+--     alter table public.ai_analyses drop column person_labels;
+--     delete from supabase_migrations.schema_migrations where version = ''20261207700000'';
+--   commit;
+
+-- 1. Columns
+
+alter table public.ai_analyses add column person_labels jsonb not null default ''{}''
+  constraint ai_analyses_person_labels_shape check (jsonb_typeof(person_labels) = ''object'' and octet_length(person_labels::text) <= 32768);
+alter table public.findings add column person_labels jsonb not null default ''{}''
+  constraint findings_person_labels_shape check (jsonb_typeof(person_labels) = ''object'' and octet_length(person_labels::text) <= 32768);
+
+-- 2. Saved issues: no money. Every issue, whatever its key: the rule is `payFreeIssueFields`''s (the app''s save path).
+
+-- History and updated_at stay as they were: this is a clean-up, not an edit.
+alter table public.issues disable trigger issue_log;
+alter table public.issues disable trigger set_updated_at;
+alter table public.issues disable trigger issues_before_write;  -- it refuses a change to detected_key, which the re-key below makes
+-- Source links to an AI insight follow the issue''s new key (this needs the issues'' old keys, so it runs first). A link to an
+-- insight nobody acknowledged has no issue: it gets a key of its own, which matches nothing (a name-free orphan).
+update public.source_links sl
+set insight_key = ''ai:insight:'' || coalesce(
+  (select i.id from public.issues i where i.workspace_id = sl.workspace_id and i.detected_key = sl.insight_key), sl.id)::text
+where sl.kind = ''insight'' and sl.insight_key like ''ai:insight:%'';
+update public.issues
+set evidence = regexp_replace(evidence, '', costing about .+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''),
+    evidence_metrics = evidence_metrics - ''overtime_cost''
+where evidence_metrics ? ''overtime_cost''
+   or evidence ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.'';
+-- An acknowledged pre-B17 AI insight is keyed ''ai:insight:'' + a hash of the real-name text, which a member could check a
+-- guessed name against. It becomes ''ai:insight:'' + the issue''s id; the insight''s "acknowledged" link to the old key is lost.
+update public.issues set detected_key = ''ai:insight:'' || id where detected_key like ''ai:insight:%'';
+alter table public.issues enable trigger issues_before_write;
+alter table public.issues enable trigger set_updated_at;
+alter table public.issues enable trigger issue_log;
+
+-- 3. Saved AI text: full names to labels, best effort.
+
+-- Temporary helpers, dropped below. Longest names first, so "Ann Lee" goes before "Ann". Names under 3 characters, and
+-- names with a double quote or a backslash (they would break the jsonb text), are skipped. In jsonb text a name can follow a
+-- JSON escape ("Busy week.\nMaya Collins"), and the `n` of `\n` is a letter: so the lookbehind also accepts a backslash
+-- plus one of n r t b f just before the name.
+create function private.b1_2b_people(ws uuid) returns table (id uuid, name text, pattern text, label text)
+language sql stable set search_path = ''''
+as $$
+  select n.id, n.name,
+    ''(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))'' || regexp_replace(n.name, ''([.^$*+?(){}|\[\]\\-])'', ''\\\1'', ''g'') || ''(?![[:alnum:]_])'',
+    n.label
+  from (
+    select pe.id, btrim(pe.name) as name, ''Team member '' || row_number() over (order by pe.created_at, pe.id) as label
+    from public.people pe where pe.workspace_id = ws
+  ) n
+  where char_length(n.name) >= 3 and n.name !~ ''["\\]''
+  order by char_length(n.name) desc, n.label;
+$$;
+
+create function private.b1_2b_relabel(t text, ws uuid) returns text
+language plpgsql stable set search_path = ''''
+as $$
+declare p record;
+begin
+  if t is null then return null; end if;
+  for p in select * from private.b1_2b_people(ws) loop
+    t := regexp_replace(t, p.pattern, p.label, ''g'');
+  end loop;
+  return t;
+end;
+$$;
+
+-- The labels relabel would use in `t`: { label: person id }.
+create function private.b1_2b_labels(t text, ws uuid) returns jsonb
+language plpgsql stable set search_path = ''''
+as $$
+declare p record; found jsonb := ''{}'';
+begin
+  if t is null then return found; end if;
+  for p in select * from private.b1_2b_people(ws) loop
+    if t ~ p.pattern then
+      found := found || jsonb_build_object(p.label, p.id);
+      t := regexp_replace(t, p.pattern, p.label, ''g'');  -- so a shorter name inside a longer one isn''t counted again
+    end if;
+  end loop;
+  return found;
+end;
+$$;
+
+-- Saved insights'' own keys (pre-B17 analyses; a hash of the real-name title) become ''ai:insight:<analysis id>:<position>''.
+create function private.b1_2b_rekey(insights jsonb, analysis uuid) returns jsonb
+language sql immutable set search_path = ''''
+as $$
+  select case when jsonb_typeof(insights) = ''array'' then
+    coalesce((select jsonb_agg(case when jsonb_typeof(e.v) = ''object'' and e.v ? ''key'' then jsonb_set(e.v, ''{key}'', to_jsonb(''ai:insight:'' || analysis::text || '':'' || (e.i - 1))) else e.v end order by e.i)
+              from jsonb_array_elements(insights) with ordinality as e(v, i)), ''[]''::jsonb)
+  else insights end;
+$$;
+
+alter table public.ai_analyses disable trigger ai_analyses_stamp;  -- it requires a run the caller reserved in the last 15 minutes
+alter table public.ai_analyses disable trigger set_updated_at;     -- "latest analysis" is ordered by updated_at
+-- EVERY analysis, of any revision (members can read earlier revisions): the money clause goes from summary, insights (pre-B17
+-- analyses keep facts inside them), review and reason, and full names become labels. Inside jsonb text the money can''t hold
+-- a raw double quote, so `[^"]+?` keeps the match inside one JSON string.
+update public.ai_analyses a
+set summary  = private.b1_2b_relabel(regexp_replace(a.summary::text, '', costing about [^"]+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), a.workspace_id)::jsonb,
+    insights = private.b1_2b_rekey(private.b1_2b_relabel(regexp_replace(a.insights::text, '', costing about [^"]+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), a.workspace_id)::jsonb, a.id),
+    review   = private.b1_2b_relabel(regexp_replace(a.review::text, '', costing about [^"]+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), a.workspace_id)::jsonb,
+    reason   = left(private.b1_2b_relabel(regexp_replace(a.reason, '', costing about .+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), a.workspace_id), 2000),
+    person_labels = a.person_labels || private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''''), a.workspace_id)
+where jsonb_typeof(a.insights) = ''array'' and jsonb_array_length(a.insights) > 0
+   or private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''''), a.workspace_id) <> ''{}''
+   or (a.summary::text || a.insights::text || a.review::text) ~ '', costing about [^"]+ at cost rates over the [0-9,]+-week run\.''
+   or a.reason ~ '', costing about .+ at cost rates over the [0-9,]+-week run\.'';
+alter table public.ai_analyses enable trigger set_updated_at;
+alter table public.ai_analyses enable trigger ai_analyses_stamp;
+
+alter table public.findings disable trigger findings_before_write;  -- it forbids changing an AI finding''s facts, and would mark it edited
+alter table public.findings disable trigger set_updated_at;
+update public.findings f
+set title    = left(private.b1_2b_relabel(regexp_replace(f.title, '', costing about .+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), f.workspace_id), 200),
+    evidence = left(private.b1_2b_relabel(regexp_replace(f.evidence, '', costing about .+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), f.workspace_id), 2000),
+    why      = left(private.b1_2b_relabel(regexp_replace(f.why, '', costing about .+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), f.workspace_id), 2000),
+    facts    = private.b1_2b_relabel(regexp_replace(f.facts::text, '', costing about [^"]+? at cost rates over the [0-9,]+-week run\.'', ''.'', ''g''), f.workspace_id)::jsonb,
+    ai_key   = ''ai:insight:'' || f.id,
+    person_labels = f.person_labels || private.b1_2b_labels(f.title || '' '' || f.evidence || '' '' || f.why || '' '' || f.facts::text, f.workspace_id)
+where f.origin = ''ai'';  -- every AI finding, so every ai_key is re-keyed
+alter table public.findings enable trigger set_updated_at;
+alter table public.findings enable trigger findings_before_write;
+
+drop function private.b1_2b_rekey(jsonb, uuid);
+drop function private.b1_2b_labels(text, uuid);
+drop function private.b1_2b_relabel(text, uuid);
+drop function private.b1_2b_people(uuid);
+']);
+
+-- 20261208000000_client_calibration.sql
+-- Calibration from historical data, part 2 (issue #41, C2; PRD §5 `datasets` and `calibrations`, §6.6, D44; docs/plans/c2-2-brief.md).
+--
+-- A person pastes or uploads a CLIENTS FILE (client, service, started, ended) and/or a SERVICING LOG (task, client, due, done) on
+-- Settings → Historical data. The app parses them in the browser and computes, with packages/engine/src/client-calibration.ts:
+--   * each client group's NORMAL CHURN, back-solved so that today's simulated churn (normal churn x driver pressure) matches the
+--     churn measured in the clients file (Austin's answer 1 on #41: otherwise the drivers count today's late work twice);
+--   * three CHECKS shown beside the simulated values (late or missed share, response time to ad-hoc requests, onboarding speed),
+--     which are never applied.
+-- The person ticks the churn proposals to apply; nothing is applied without that. Client ids, and service and task names that
+-- match nothing, never reach the database: the page sends counts, the proposals (service names and numbers) and the checks
+-- (D27). The raw rows are never stored.
+--
+-- ADDITIVE: it widens one check, replaces two of row 50's functions with full copies that each add one branch (the same rule as
+-- `save_fields`: the latest definition, copied; the added lines are marked `-- C2 part 2`), and adds one function. No table,
+-- column, policy or grant changes. It does NOT touch `save_fields`, `record_calibration` or the `calibrations` trigger.
+--
+--   * `datasets_kind` also allows `clients` and `servicing_log` (precedent: `sources_kind` in row 48).
+--   * `private.calibration_payload_problem(kind, set, before)` knows the kind `churn`: `churn_monthly` must be a share from 0 to 1
+--     and the earlier one a number or null; otherwise the proposal is skipped as `invalid`, with a reason.
+--   * `public.apply_calibration(p_calibration, p_keys)` applies a `churn` proposal targeting `client_groups` LIVE, as a person's
+--     edit to the group (like leads a week, D19): `client_groups.churn_monthly` is set and its provenance entry is `measured`
+--     with `at`, `by`, `dataset_id`, `calibration_id`, `n`, `leavers`, `measured` and `multiplier`. The provenance is written in
+--     the same statement, so `stamp_provenance` doesn't turn it `entered`. A group whose churn changed since the proposal
+--     (`before` no longer matches) is `changed`, another workspace's or a missing group is `not_found`, a key applied before is
+--     `already_applied`. `audit_company_write` logs the change as for any edit; the API-token refusal at the top applies.
+--   * `public.record_client_calibration(p_workspace, p_clients, p_log, p_results, p_keys)` (SECURITY INVOKER): what the page
+--     calls. `p_clients` and `p_log` are each null or {file_name, column_map, row_count}. It records one dataset per file given
+--     (`kind` `clients` / `servicing_log`, no process), one calibration (`results.datasets` holds both dataset ids) and applies
+--     the ticked keys, in ONE transaction: a failed or refused apply leaves no record behind. With no keys it records the
+--     checks and applies nothing. Refuses an API token (42501) and a call with neither file (22023). Returns apply_calibration's
+--     answer (or {status: 'ok', draft: null, results: []}) plus `calibration_id` and `datasets`.
+-- Row-level security and grants are row 50's: everyone in the workspace reads; owners and editors insert and apply.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Nothing at or past this version. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= '20261208000000';
+--   1. Row 50 (part 1) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261202000000';
+--   2. The two functions this replaces are row 50's, unchanged. Expect these two md5s (computed on a local database migrated
+--      to 20261205000000; none of the later migrations touches either):
+--        private.calibration_payload_problem | e8583ea0b5b46f08bb0c7f4f79e6f88e
+--        public.apply_calibration            | cee525a1f74c702cb70048abfa716ad6
+--        select n.nspname || '.' || p.proname, md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--        where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem')) order by 1;
+--   3. Only step logs recorded so far. Expect only step_log (or no rows):
+--        select kind, count(*) from public.datasets group by 1;
+--   4. Nothing created yet. Expect null:
+--        select to_regprocedure('public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[])');
+--   5. The columns the new branch writes exist. Expect 2 rows:
+--        select column_name from information_schema.columns where table_schema = 'public' and table_name = 'client_groups'
+--          and column_name in ('churn_monthly', 'provenance');
+--
+-- POST-APPLY CHECK:
+--   * `pg_get_constraintdef` of `datasets_kind` lists the two new kinds:
+--        select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_kind';
+--   * `record_client_calibration` is not SECURITY DEFINER, has an empty search_path, is executable by authenticated and not anon;
+--     `apply_calibration` and `calibration_payload_problem` keep the same:
+--        select proname, prosecdef, proconfig = array['search_path=""'], has_function_privilege('authenticated', p.oid, 'execute'),
+--               has_function_privilege('anon', p.oid, 'execute')
+--        from pg_proc p where proname in ('record_client_calibration', 'apply_calibration', 'calibration_payload_problem') order by 1;
+--     Expect: f, t, t, f for the first two; for `calibration_payload_problem` f, t, t, f too (row 50 grants it to authenticated).
+--
+-- ROLLBACK (one transaction; roll the app back first):
+--
+--   begin;
+--   drop function if exists public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]);
+--   -- Put back row 50's apply_calibration and calibration_payload_problem: re-run their
+--   -- `create function ... $$;` blocks from 20261202000000_calibration.sql as `create or replace`, with their grants.
+--   delete from public.datasets where kind in ('clients', 'servicing_log');  -- cascades to their calibrations
+--   alter table public.datasets drop constraint datasets_kind,
+--     add constraint datasets_kind check (kind in ('step_log', 'leads', 'deals', 'jobs', 'time_logs', 'invoices'));
+--   delete from supabase_migrations.schema_migrations where version = '20261208000000';
+--   commit;
+--
+-- Rolling back deletes the clients and servicing-log records. Applied churn keeps its number and its `measured` provenance,
+-- whose `dataset_id` then points at nothing (the app shows it as measured without a link).
+--
+-- Production data: none needed.
+
+-- 1. A clients file and a servicing log are recorded as datasets too.
+alter table public.datasets drop constraint datasets_kind,
+  add constraint datasets_kind check (kind in ('step_log', 'clients', 'servicing_log', 'leads', 'deals', 'jobs', 'time_logs', 'invoices'));
+
+-- ---------------------------------------------------------------------------
+-- 2. What is wrong with a proposal's values: row 50's function with one more kind (C2 part 2 lines marked)
+-- ---------------------------------------------------------------------------
+
+create or replace function private.calibration_payload_problem(kind text, setv jsonb, beforev jsonb) returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  p text;
+  v jsonb;
+begin
+  -- `before` holds what the value was: a number, or null when it had none.
+  if kind = 'arrivals' then
+    if (case when jsonb_typeof(setv -> 'volume_week') = 'number' then (setv ->> 'volume_week')::numeric < 0 else true end) then
+      return 'volume_week is not a number of leads';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'volume_week'), 'null') not in ('number', 'null') then
+      return 'the earlier volume_week is not a number';
+    end if;
+    return null;
+  end if;
+  if kind = 'rework' then
+    if (case when jsonb_typeof(setv -> 'rework_rate') = 'number' then (setv ->> 'rework_rate')::numeric not between 0 and 1 else true end) then
+      return 'rework_rate is not a share from 0 to 1';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'rework_rate'), 'null') not in ('number', 'null') then
+      return 'the earlier rework_rate is not a number';
+    end if;
+    return null;
+  end if;
+  if kind in ('work', 'wait') then
+    p := kind;
+    if (case when jsonb_typeof(setv -> (p || '_hours')) = 'number' then (setv ->> (p || '_hours'))::numeric < 0 else true end) then
+      return p || '_hours is not a number of hours';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || '_dist')), '') <> 'string' or setv ->> (p || '_dist') not in ('constant', 'triangular', 'lognormal') then
+      return p || '_dist is not a distribution';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || '_params')), '') <> 'object' then
+      return p || '_params is not an object';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> (p || '_hours')), 'null') not in ('number', 'null')
+       or coalesce(jsonb_typeof(beforev -> (p || '_params_cv')), 'null') not in ('number', 'null')
+       or coalesce(jsonb_typeof(beforev -> (p || '_dist')), 'null') not in ('string', 'null') then
+      return 'the earlier values are not numbers';
+    end if;
+    return null;
+  end if;
+  if kind = 'routing' then
+    if coalesce(jsonb_typeof(setv -> 'probabilities'), '') <> 'object' then
+      return 'probabilities is not an object';
+    end if;
+    for p, v in select e.key, e.value from jsonb_each(setv -> 'probabilities') e loop
+      if p !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        return 'a way out is not an edge id';
+      end if;
+      if (case when jsonb_typeof(v) = 'number' then (v #>> '{}')::numeric not between 0 and 1 else true end) then
+        return 'odds are not shares from 0 to 1';
+      end if;
+    end loop;
+    if coalesce(jsonb_typeof(beforev -> 'probabilities'), '') <> 'object' then
+      return 'the earlier odds are not an object';
+    end if;
+    for v in select e.value from jsonb_each(beforev -> 'probabilities') e loop
+      if jsonb_typeof(v) not in ('number', 'null') then
+        return 'the earlier odds are not numbers';
+      end if;
+    end loop;
+    return null;
+  end if;
+  -- C2 part 2: a client group's normal churn, back-solved from a clients file.
+  if kind = 'churn' then
+    if (case when jsonb_typeof(setv -> 'churn_monthly') = 'number' then (setv ->> 'churn_monthly')::numeric not between 0 and 1 else true end) then
+      return 'churn_monthly is not a share from 0 to 1';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> 'churn_monthly'), 'null') not in ('number', 'null') then
+      return 'the earlier churn_monthly is not a number';
+    end if;
+    return null;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.calibration_payload_problem(text, jsonb, jsonb) from public, anon;
+-- apply_calibration runs as the caller.
+grant execute on function private.calibration_payload_problem(text, jsonb, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. apply_calibration: row 50's function with one more branch (C2 part 2 lines marked)
+-- ---------------------------------------------------------------------------
+
+create or replace function public.apply_calibration(p_calibration uuid, p_keys text[]) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  cal public.calibrations;
+  k text;
+  prop jsonb;
+  pkind text;
+  target_id uuid;
+  setv jsonb;
+  beforev jsonb;
+  opened jsonb := null;
+  draft_id uuid := null;
+  st public.steps;
+  ls public.lead_sources;
+  cg public.client_groups; -- C2 part 2
+  cols text[];
+  col text;
+  prov jsonb;
+  entry jsonb;
+  newprov jsonb;
+  stamp jsonb;
+  had_assumption boolean;
+  left_assumption boolean;
+  had_conflict boolean;
+  left_conflict boolean;
+  edge_ids uuid[];
+  matches boolean;
+  keys text[];
+  problem text;
+  done text[] := '{}';
+  results jsonb := '[]';
+begin
+  if coalesce(auth.jwt(), '{}') ? 'api_token_id' then
+    raise exception 'Calibration is applied by a person in the app, not over the API' using errcode = '42501';
+  end if;
+  if p_keys is null or cardinality(p_keys) = 0 or cardinality(p_keys) > 2000 then
+    raise exception 'Give between 1 and 2000 proposals' using errcode = '22023';
+  end if;
+
+  -- RLS: a calibration the user can't update (not an editor of its workspace) is not found.
+  select * into cal from public.calibrations c where c.id = p_calibration for update;
+  if cal.id is null then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+
+  stamp := jsonb_build_object('source', 'measured', 'at', now(), 'dataset_id', cal.dataset_id, 'calibration_id', cal.id)
+    || case when auth.uid() is null then '{}'::jsonb else jsonb_build_object('by', auth.uid()) end;
+
+  keys := array(select distinct x from unnest(p_keys) x where x is not null order by x);
+  foreach k in array keys loop
+    select p into prop from jsonb_array_elements(cal.results -> 'proposals') p where p ->> 'key' = k limit 1;
+    if prop is null or coalesce(jsonb_typeof(prop -> 'set'), '') <> 'object' or coalesce(jsonb_typeof(prop -> 'before'), '') <> 'object' then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_proposed'));
+      continue;
+    end if;
+    if k = any (cal.applied_keys) then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'already_applied'));
+      continue;
+    end if;
+    pkind := coalesce(prop ->> 'kind', '');
+    setv := prop -> 'set';
+    beforev := prop -> 'before';
+    begin
+      target_id := (prop -> 'target' ->> 'id')::uuid;
+    exception when others then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_proposed'));
+      continue;
+    end;
+    -- Values that aren't what this kind needs are skipped with why, never cast (and so never abort the call).
+    problem := private.calibration_payload_problem(pkind, setv, beforev);
+    if problem is not null then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'invalid', 'reason', problem));
+      continue;
+    end if;
+
+    -- A lead source's leads a week: live, as a person's edit to demand.
+    if pkind = 'arrivals' and prop -> 'target' ->> 'table' = 'lead_sources' then
+      select * into ls from public.lead_sources l where l.id = target_id and l.workspace_id = cal.workspace_id for update;
+      if ls.id is null then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_found'));
+        continue;
+      end if;
+      if ls.volume_week is distinct from (beforev ->> 'volume_week')::numeric then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'changed'));
+        continue;
+      end if;
+      entry := stamp || jsonb_build_object('n', prop -> 'n');
+      if jsonb_typeof(ls.provenance -> 'volume_week' -> 'evidence') = 'array' then
+        entry := entry || jsonb_build_object('evidence', ls.provenance -> 'volume_week' -> 'evidence');
+      end if;
+      update public.lead_sources l
+      set volume_week = (setv ->> 'volume_week')::numeric,
+          provenance = l.provenance || jsonb_build_object('volume_week', entry)
+      where l.id = ls.id;
+      done := done || k;
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'applied'));
+      continue;
+    end if;
+
+    -- C2 part 2: a client group's normal churn, back-solved from a clients file: live, as a person's edit to the group.
+    -- Provenance is set in the same statement, so the stamp_provenance trigger keeps it `measured` (it stamps `entered` only
+    -- when the column changes and its provenance entry doesn't).
+    if pkind = 'churn' and prop -> 'target' ->> 'table' = 'client_groups' then
+      select * into cg from public.client_groups g where g.id = target_id and g.workspace_id = cal.workspace_id for update;
+      if cg.id is null then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_found'));
+        continue;
+      end if;
+      if cg.churn_monthly is distinct from (beforev ->> 'churn_monthly')::numeric then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'changed'));
+        continue;
+      end if;
+      entry := stamp || jsonb_strip_nulls(jsonb_build_object(
+        'n', prop -> 'n',
+        'leavers', case when jsonb_typeof(prop -> 'leavers') = 'number' then prop -> 'leavers' end,
+        'measured', case when jsonb_typeof(prop -> 'measured') = 'number' then prop -> 'measured' end,
+        'multiplier', case when jsonb_typeof(prop -> 'multiplier') = 'number' then prop -> 'multiplier' end));
+      if jsonb_typeof(cg.provenance -> 'churn_monthly' -> 'evidence') = 'array' then
+        entry := entry || jsonb_build_object('evidence', cg.provenance -> 'churn_monthly' -> 'evidence');
+      end if;
+      update public.client_groups g
+      set churn_monthly = (setv ->> 'churn_monthly')::numeric,
+          provenance = g.provenance || jsonb_build_object('churn_monthly', entry)
+      where g.id = cg.id;
+      done := done || k;
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'applied'));
+      continue;
+    end if;
+
+    if pkind not in ('work', 'wait', 'rework', 'routing') or coalesce(prop -> 'target' ->> 'table', '') <> 'steps' or cal.process_id is null then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_proposed'));
+      continue;
+    end if;
+
+    -- A step's values go into the process's draft, opened from live if there is none.
+    if draft_id is null then
+      opened := public.open_draft(cal.process_id);
+      if opened ->> 'status' <> 'ok' then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_found'));
+        opened := null;
+        continue;
+      end if;
+      draft_id := (opened ->> 'revision_id')::uuid;
+    end if;
+
+    select * into st from public.steps s where s.revision_id = draft_id and s.id = target_id for update;
+    if st.id is null or cardinality(st.replaced_by) > 0 then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_found'));
+      continue;
+    end if;
+    prov := case when jsonb_typeof(st.provenance) = 'object' then st.provenance else '{}'::jsonb end;
+
+    if pkind = 'routing' then
+      -- The ways out must be the ones measured, each still at the odds it had.
+      if coalesce(jsonb_typeof(setv -> 'probabilities'), '') <> 'object' then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'not_proposed'));
+        continue;
+      end if;
+      select array_agg(x::uuid order by x) into edge_ids from jsonb_object_keys(setv -> 'probabilities') x;
+      select coalesce(bool_and(e.probability is not distinct from (beforev -> 'probabilities' ->> e.id::text)::numeric), false)
+        and count(*) = coalesce(cardinality(edge_ids), 0)
+        and coalesce(bool_and(e.id = any (edge_ids)), false)
+        into matches
+      from public.edges e where e.revision_id = draft_id and e.from_step_id = st.id;
+      if not coalesce(matches, false) then
+        results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'changed'));
+        continue;
+      end if;
+      update public.edges e set probability = (setv -> 'probabilities' ->> e.id::text)::numeric
+      where e.revision_id = draft_id and e.from_step_id = st.id;
+      -- Edges carry no provenance: the step records what was measured, so a later edit to the odds shows as no longer measured.
+      -- Odds an upload left out (`branch_odds`) are filled in now.
+      update public.steps s
+      set provenance = (prov - 'branch_odds') || jsonb_build_object('routing', stamp || jsonb_build_object('n', prop -> 'n', 'probabilities', setv -> 'probabilities'))
+      where s.revision_id = draft_id and s.id = st.id;
+      done := done || k;
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'applied'));
+      continue;
+    end if;
+
+    if pkind = 'rework' then
+      matches := st.rework_rate is not distinct from (beforev ->> 'rework_rate')::numeric;
+      cols := array['rework_rate'];
+    elsif pkind = 'work' then
+      matches := st.work_hours is not distinct from (beforev ->> 'work_hours')::numeric
+        and st.work_dist is not distinct from (beforev ->> 'work_dist')
+        and (case when jsonb_typeof(st.work_params -> 'cv') = 'number' then (st.work_params ->> 'cv')::numeric end)
+          is not distinct from (beforev ->> 'work_params_cv')::numeric;
+      cols := array['work_hours', 'work_dist', 'work_params'];
+    else
+      matches := st.wait_hours is not distinct from (beforev ->> 'wait_hours')::numeric
+        and st.wait_dist is not distinct from (beforev ->> 'wait_dist')
+        and (case when jsonb_typeof(st.wait_params -> 'cv') = 'number' then (st.wait_params ->> 'cv')::numeric end)
+          is not distinct from (beforev ->> 'wait_params_cv')::numeric;
+      cols := array['wait_hours', 'wait_dist', 'wait_params'];
+    end if;
+    if not coalesce(matches, false) then
+      results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'changed'));
+      continue;
+    end if;
+
+    -- Each value's entry: measured, keeping the evidence it cited, and a conflict it had marked settled by the measurement.
+    newprov := prov;
+    foreach col in array cols loop
+      entry := stamp || jsonb_build_object('n', prop -> 'n');
+      if jsonb_typeof(prov -> col -> 'evidence') = 'array' then
+        entry := entry || jsonb_build_object('evidence', prov -> col -> 'evidence');
+      end if;
+      if jsonb_typeof(prov -> col -> 'conflict') = 'object' then
+        entry := entry || jsonb_build_object('conflict', case
+          when coalesce(prov -> col -> 'conflict' -> 'resolved', 'null') <> 'null' then prov -> col -> 'conflict'
+          else (prov -> col -> 'conflict') || jsonb_build_object('resolved', jsonb_build_object('at', now(), 'choice', 'measured')) end);
+      end if;
+      newprov := newprov || jsonb_build_object(col, entry);
+    end loop;
+
+    -- The step's flags follow, as when a person types the values: settled here, and none left open elsewhere.
+    had_assumption := exists (select 1 from unnest(cols) c where (prov -> c ->> 'assumption') = 'true' and coalesce(prov -> c ->> 'source', 'estimated') = 'estimated');
+    left_assumption := exists (select 1 from unnest(array['work_hours', 'wait_hours', 'rework_rate', 'current_wip', 'sla_hours']) c
+      where c <> all (cols) and (prov -> c ->> 'assumption') = 'true' and coalesce(prov -> c ->> 'source', 'estimated') = 'estimated');
+    had_conflict := private.has_open_conflict(prov) and not private.has_open_conflict(newprov);
+    left_conflict := private.has_open_conflict(newprov);
+
+    update public.steps s
+    set work_hours = case when pkind = 'work' then (setv ->> 'work_hours')::numeric else s.work_hours end,
+        work_dist = case when pkind = 'work' then setv ->> 'work_dist' else s.work_dist end,
+        work_params = case when pkind = 'work' then s.work_params || (setv -> 'work_params') else s.work_params end,
+        wait_hours = case when pkind = 'wait' then (setv ->> 'wait_hours')::numeric else s.wait_hours end,
+        wait_dist = case when pkind = 'wait' then setv ->> 'wait_dist' else s.wait_dist end,
+        wait_params = case when pkind = 'wait' then s.wait_params || (setv -> 'wait_params') else s.wait_params end,
+        rework_rate = case when pkind = 'rework' then (setv ->> 'rework_rate')::numeric else s.rework_rate end,
+        provenance = newprov,
+        assumption = s.assumption and not (had_assumption and not left_assumption),
+        conflict = s.conflict and not (had_conflict and not left_conflict)
+    where s.revision_id = draft_id and s.id = st.id;
+    done := done || k;
+    results := results || jsonb_build_array(jsonb_build_object('key', k, 'status', 'applied'));
+  end loop;
+
+  if cardinality(done) > 0 then
+    -- The trigger sets applied, applied_at and applied_by, and accepts the keys only while this flag is on.
+    perform set_config('transpera.applying_calibration', 'on', true);
+    update public.calibrations c set applied_keys = c.applied_keys || done where c.id = cal.id;
+    perform set_config('transpera.applying_calibration', 'off', true);
+  end if;
+
+  return jsonb_build_object(
+    'status', 'ok',
+    'draft', case when opened is null then null else jsonb_build_object(
+      'revision_id', opened -> 'revision_id', 'number', opened -> 'number', 'created', opened -> 'created') end,
+    'results', results);
+end;
+$$;
+
+revoke all on function public.apply_calibration(uuid, text[]) from public, anon, authenticated;
+grant execute on function public.apply_calibration(uuid, text[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- record_client_calibration: one or two dataset records, the calibration and the apply, in one transaction
+-- ---------------------------------------------------------------------------
+
+create function public.record_client_calibration(
+  p_workspace uuid,
+  p_clients jsonb,
+  p_log jsonb,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  clients_ds uuid := null;
+  log_ds uuid := null;
+  cal uuid;
+  out jsonb;
+begin
+  -- With no keys apply_calibration isn't called, so the API-token refusal is repeated here.
+  if coalesce(auth.jwt(), '{}') ? 'api_token_id' then
+    raise exception 'Calibration is applied by a person in the app, not over the API' using errcode = '42501';
+  end if;
+  if p_clients is null and p_log is null then
+    raise exception 'Give a clients file or a servicing log' using errcode = '22023';
+  end if;
+  -- Row-level security refuses a viewer's or a stranger's insert, and apply_calibration an API token. Either way the whole
+  -- call rolls back, records included.
+  if p_clients is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count)
+    values (p_workspace, 'clients', null, p_clients ->> 'file_name', coalesce(p_clients -> 'column_map', '{}'), (p_clients ->> 'row_count')::integer)
+    returning id into clients_ds;
+  end if;
+  if p_log is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count)
+    values (p_workspace, 'servicing_log', null, p_log ->> 'file_name', coalesce(p_log -> 'column_map', '{}'), (p_log ->> 'row_count')::integer)
+    returning id into log_ds;
+  end if;
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (
+    p_workspace,
+    coalesce(clients_ds, log_ds),
+    null,
+    p_results || jsonb_build_object('datasets', jsonb_build_object('clients', clients_ds, 'servicing_log', log_ds)))
+  returning id into cal;
+  if coalesce(cardinality(p_keys), 0) > 0 then
+    out := public.apply_calibration(cal, p_keys);
+  else
+    -- The checks are recorded without applying anything.
+    out := jsonb_build_object('status', 'ok', 'draft', null, 'results', '[]'::jsonb);
+  end if;
+  return out || jsonb_build_object('calibration_id', cal, 'datasets', jsonb_build_object('clients', clients_ds, 'servicing_log', log_ds));
+end;
+$$;
+
+revoke all on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261208000000', 'client_calibration', array['-- Calibration from historical data, part 2 (issue #41, C2; PRD §5 `datasets` and `calibrations`, §6.6, D44; docs/plans/c2-2-brief.md).
+--
+-- A person pastes or uploads a CLIENTS FILE (client, service, started, ended) and/or a SERVICING LOG (task, client, due, done) on
+-- Settings → Historical data. The app parses them in the browser and computes, with packages/engine/src/client-calibration.ts:
+--   * each client group''s NORMAL CHURN, back-solved so that today''s simulated churn (normal churn x driver pressure) matches the
+--     churn measured in the clients file (Austin''s answer 1 on #41: otherwise the drivers count today''s late work twice);
+--   * three CHECKS shown beside the simulated values (late or missed share, response time to ad-hoc requests, onboarding speed),
+--     which are never applied.
+-- The person ticks the churn proposals to apply; nothing is applied without that. Client ids, and service and task names that
+-- match nothing, never reach the database: the page sends counts, the proposals (service names and numbers) and the checks
+-- (D27). The raw rows are never stored.
+--
+-- ADDITIVE: it widens one check, replaces two of row 50''s functions with full copies that each add one branch (the same rule as
+-- `save_fields`: the latest definition, copied; the added lines are marked `-- C2 part 2`), and adds one function. No table,
+-- column, policy or grant changes. It does NOT touch `save_fields`, `record_calibration` or the `calibrations` trigger.
+--
+--   * `datasets_kind` also allows `clients` and `servicing_log` (precedent: `sources_kind` in row 48).
+--   * `private.calibration_payload_problem(kind, set, before)` knows the kind `churn`: `churn_monthly` must be a share from 0 to 1
+--     and the earlier one a number or null; otherwise the proposal is skipped as `invalid`, with a reason.
+--   * `public.apply_calibration(p_calibration, p_keys)` applies a `churn` proposal targeting `client_groups` LIVE, as a person''s
+--     edit to the group (like leads a week, D19): `client_groups.churn_monthly` is set and its provenance entry is `measured`
+--     with `at`, `by`, `dataset_id`, `calibration_id`, `n`, `leavers`, `measured` and `multiplier`. The provenance is written in
+--     the same statement, so `stamp_provenance` doesn''t turn it `entered`. A group whose churn changed since the proposal
+--     (`before` no longer matches) is `changed`, another workspace''s or a missing group is `not_found`, a key applied before is
+--     `already_applied`. `audit_company_write` logs the change as for any edit; the API-token refusal at the top applies.
+--   * `public.record_client_calibration(p_workspace, p_clients, p_log, p_results, p_keys)` (SECURITY INVOKER): what the page
+--     calls. `p_clients` and `p_log` are each null or {file_name, column_map, row_count}. It records one dataset per file given
+--     (`kind` `clients` / `servicing_log`, no process), one calibration (`results.datasets` holds both dataset ids) and applies
+--     the ticked keys, in ONE transaction: a failed or refused apply leaves no record behind. With no keys it records the
+--     checks and applies nothing. Refuses an API token (42501) and a call with neither file (22023). Returns apply_calibration''s
+--     answer (or {status: ''ok'', draft: null, results: []}) plus `calibration_id` and `datasets`.
+-- Row-level security and grants are row 50''s: everyone in the workspace reads; owners and editors insert and apply.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Nothing at or past this version. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261208000000'';
+--   1. Row 50 (part 1) is applied. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261202000000'';
+--   2. The two functions this replaces are row 50''s, unchanged. Expect these two md5s (computed on a local database migrated
+--      to 20261205000000; none of the later migrations touches either):
+--        private.calibration_payload_problem | e8583ea0b5b46f08bb0c7f4f79e6f88e
+--        public.apply_calibration            | cee525a1f74c702cb70048abfa716ad6
+--        select n.nspname || ''.'' || p.proname, md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--        where (n.nspname, p.proname) in ((''public'', ''apply_calibration''), (''private'', ''calibration_payload_problem'')) order by 1;
+--   3. Only step logs recorded so far. Expect only step_log (or no rows):
+--        select kind, count(*) from public.datasets group by 1;
+--   4. Nothing created yet. Expect null:
+--        select to_regprocedure(''public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[])'');
+--   5. The columns the new branch writes exist. Expect 2 rows:
+--        select column_name from information_schema.columns where table_schema = ''public'' and table_name = ''client_groups''
+--          and column_name in (''churn_monthly'', ''provenance'');
+--
+-- POST-APPLY CHECK:
+--   * `pg_get_constraintdef` of `datasets_kind` lists the two new kinds:
+--        select pg_get_constraintdef(oid) from pg_constraint where conname = ''datasets_kind'';
+--   * `record_client_calibration` is not SECURITY DEFINER, has an empty search_path, is executable by authenticated and not anon;
+--     `apply_calibration` and `calibration_payload_problem` keep the same:
+--        select proname, prosecdef, proconfig = array[''search_path=""''], has_function_privilege(''authenticated'', p.oid, ''execute''),
+--               has_function_privilege(''anon'', p.oid, ''execute'')
+--        from pg_proc p where proname in (''record_client_calibration'', ''apply_calibration'', ''calibration_payload_problem'') order by 1;
+--     Expect: f, t, t, f for the first two; for `calibration_payload_problem` f, t, t, f too (row 50 grants it to authenticated).
+--
+-- ROLLBACK (one transaction; roll the app back first):
+--
+--   begin;
+--   drop function if exists public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]);
+--   -- Put back row 50''s apply_calibration and calibration_payload_problem: re-run their
+--   -- `create function ... $$;` blocks from 20261202000000_calibration.sql as `create or replace`, with their grants.
+--   delete from public.datasets where kind in (''clients'', ''servicing_log'');  -- cascades to their calibrations
+--   alter table public.datasets drop constraint datasets_kind,
+--     add constraint datasets_kind check (kind in (''step_log'', ''leads'', ''deals'', ''jobs'', ''time_logs'', ''invoices''));
+--   delete from supabase_migrations.schema_migrations where version = ''20261208000000'';
+--   commit;
+--
+-- Rolling back deletes the clients and servicing-log records. Applied churn keeps its number and its `measured` provenance,
+-- whose `dataset_id` then points at nothing (the app shows it as measured without a link).
+--
+-- Production data: none needed.
+
+-- 1. A clients file and a servicing log are recorded as datasets too.
+alter table public.datasets drop constraint datasets_kind,
+  add constraint datasets_kind check (kind in (''step_log'', ''clients'', ''servicing_log'', ''leads'', ''deals'', ''jobs'', ''time_logs'', ''invoices''));
+
+-- ---------------------------------------------------------------------------
+-- 2. What is wrong with a proposal''s values: row 50''s function with one more kind (C2 part 2 lines marked)
+-- ---------------------------------------------------------------------------
+
+create or replace function private.calibration_payload_problem(kind text, setv jsonb, beforev jsonb) returns text
+language plpgsql
+immutable
+set search_path = ''''
+as $$
+declare
+  p text;
+  v jsonb;
+begin
+  -- `before` holds what the value was: a number, or null when it had none.
+  if kind = ''arrivals'' then
+    if (case when jsonb_typeof(setv -> ''volume_week'') = ''number'' then (setv ->> ''volume_week'')::numeric < 0 else true end) then
+      return ''volume_week is not a number of leads'';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> ''volume_week''), ''null'') not in (''number'', ''null'') then
+      return ''the earlier volume_week is not a number'';
+    end if;
+    return null;
+  end if;
+  if kind = ''rework'' then
+    if (case when jsonb_typeof(setv -> ''rework_rate'') = ''number'' then (setv ->> ''rework_rate'')::numeric not between 0 and 1 else true end) then
+      return ''rework_rate is not a share from 0 to 1'';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> ''rework_rate''), ''null'') not in (''number'', ''null'') then
+      return ''the earlier rework_rate is not a number'';
+    end if;
+    return null;
+  end if;
+  if kind in (''work'', ''wait'') then
+    p := kind;
+    if (case when jsonb_typeof(setv -> (p || ''_hours'')) = ''number'' then (setv ->> (p || ''_hours''))::numeric < 0 else true end) then
+      return p || ''_hours is not a number of hours'';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || ''_dist'')), '''') <> ''string'' or setv ->> (p || ''_dist'') not in (''constant'', ''triangular'', ''lognormal'') then
+      return p || ''_dist is not a distribution'';
+    end if;
+    if coalesce(jsonb_typeof(setv -> (p || ''_params'')), '''') <> ''object'' then
+      return p || ''_params is not an object'';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> (p || ''_hours'')), ''null'') not in (''number'', ''null'')
+       or coalesce(jsonb_typeof(beforev -> (p || ''_params_cv'')), ''null'') not in (''number'', ''null'')
+       or coalesce(jsonb_typeof(beforev -> (p || ''_dist'')), ''null'') not in (''string'', ''null'') then
+      return ''the earlier values are not numbers'';
+    end if;
+    return null;
+  end if;
+  if kind = ''routing'' then
+    if coalesce(jsonb_typeof(setv -> ''probabilities''), '''') <> ''object'' then
+      return ''probabilities is not an object'';
+    end if;
+    for p, v in select e.key, e.value from jsonb_each(setv -> ''probabilities'') e loop
+      if p !~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'' then
+        return ''a way out is not an edge id'';
+      end if;
+      if (case when jsonb_typeof(v) = ''number'' then (v #>> ''{}'')::numeric not between 0 and 1 else true end) then
+        return ''odds are not shares from 0 to 1'';
+      end if;
+    end loop;
+    if coalesce(jsonb_typeof(beforev -> ''probabilities''), '''') <> ''object'' then
+      return ''the earlier odds are not an object'';
+    end if;
+    for v in select e.value from jsonb_each(beforev -> ''probabilities'') e loop
+      if jsonb_typeof(v) not in (''number'', ''null'') then
+        return ''the earlier odds are not numbers'';
+      end if;
+    end loop;
+    return null;
+  end if;
+  -- C2 part 2: a client group''s normal churn, back-solved from a clients file.
+  if kind = ''churn'' then
+    if (case when jsonb_typeof(setv -> ''churn_monthly'') = ''number'' then (setv ->> ''churn_monthly'')::numeric not between 0 and 1 else true end) then
+      return ''churn_monthly is not a share from 0 to 1'';
+    end if;
+    if coalesce(jsonb_typeof(beforev -> ''churn_monthly''), ''null'') not in (''number'', ''null'') then
+      return ''the earlier churn_monthly is not a number'';
+    end if;
+    return null;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.calibration_payload_problem(text, jsonb, jsonb) from public, anon;
+-- apply_calibration runs as the caller.
+grant execute on function private.calibration_payload_problem(text, jsonb, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. apply_calibration: row 50''s function with one more branch (C2 part 2 lines marked)
+-- ---------------------------------------------------------------------------
+
+create or replace function public.apply_calibration(p_calibration uuid, p_keys text[]) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  cal public.calibrations;
+  k text;
+  prop jsonb;
+  pkind text;
+  target_id uuid;
+  setv jsonb;
+  beforev jsonb;
+  opened jsonb := null;
+  draft_id uuid := null;
+  st public.steps;
+  ls public.lead_sources;
+  cg public.client_groups; -- C2 part 2
+  cols text[];
+  col text;
+  prov jsonb;
+  entry jsonb;
+  newprov jsonb;
+  stamp jsonb;
+  had_assumption boolean;
+  left_assumption boolean;
+  had_conflict boolean;
+  left_conflict boolean;
+  edge_ids uuid[];
+  matches boolean;
+  keys text[];
+  problem text;
+  done text[] := ''{}'';
+  results jsonb := ''[]'';
+begin
+  if coalesce(auth.jwt(), ''{}'') ? ''api_token_id'' then
+    raise exception ''Calibration is applied by a person in the app, not over the API'' using errcode = ''42501'';
+  end if;
+  if p_keys is null or cardinality(p_keys) = 0 or cardinality(p_keys) > 2000 then
+    raise exception ''Give between 1 and 2000 proposals'' using errcode = ''22023'';
+  end if;
+
+  -- RLS: a calibration the user can''t update (not an editor of its workspace) is not found.
+  select * into cal from public.calibrations c where c.id = p_calibration for update;
+  if cal.id is null then
+    return jsonb_build_object(''status'', ''not_found'');
+  end if;
+
+  stamp := jsonb_build_object(''source'', ''measured'', ''at'', now(), ''dataset_id'', cal.dataset_id, ''calibration_id'', cal.id)
+    || case when auth.uid() is null then ''{}''::jsonb else jsonb_build_object(''by'', auth.uid()) end;
+
+  keys := array(select distinct x from unnest(p_keys) x where x is not null order by x);
+  foreach k in array keys loop
+    select p into prop from jsonb_array_elements(cal.results -> ''proposals'') p where p ->> ''key'' = k limit 1;
+    if prop is null or coalesce(jsonb_typeof(prop -> ''set''), '''') <> ''object'' or coalesce(jsonb_typeof(prop -> ''before''), '''') <> ''object'' then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_proposed''));
+      continue;
+    end if;
+    if k = any (cal.applied_keys) then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''already_applied''));
+      continue;
+    end if;
+    pkind := coalesce(prop ->> ''kind'', '''');
+    setv := prop -> ''set'';
+    beforev := prop -> ''before'';
+    begin
+      target_id := (prop -> ''target'' ->> ''id'')::uuid;
+    exception when others then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_proposed''));
+      continue;
+    end;
+    -- Values that aren''t what this kind needs are skipped with why, never cast (and so never abort the call).
+    problem := private.calibration_payload_problem(pkind, setv, beforev);
+    if problem is not null then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''invalid'', ''reason'', problem));
+      continue;
+    end if;
+
+    -- A lead source''s leads a week: live, as a person''s edit to demand.
+    if pkind = ''arrivals'' and prop -> ''target'' ->> ''table'' = ''lead_sources'' then
+      select * into ls from public.lead_sources l where l.id = target_id and l.workspace_id = cal.workspace_id for update;
+      if ls.id is null then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_found''));
+        continue;
+      end if;
+      if ls.volume_week is distinct from (beforev ->> ''volume_week'')::numeric then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''changed''));
+        continue;
+      end if;
+      entry := stamp || jsonb_build_object(''n'', prop -> ''n'');
+      if jsonb_typeof(ls.provenance -> ''volume_week'' -> ''evidence'') = ''array'' then
+        entry := entry || jsonb_build_object(''evidence'', ls.provenance -> ''volume_week'' -> ''evidence'');
+      end if;
+      update public.lead_sources l
+      set volume_week = (setv ->> ''volume_week'')::numeric,
+          provenance = l.provenance || jsonb_build_object(''volume_week'', entry)
+      where l.id = ls.id;
+      done := done || k;
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''applied''));
+      continue;
+    end if;
+
+    -- C2 part 2: a client group''s normal churn, back-solved from a clients file: live, as a person''s edit to the group.
+    -- Provenance is set in the same statement, so the stamp_provenance trigger keeps it `measured` (it stamps `entered` only
+    -- when the column changes and its provenance entry doesn''t).
+    if pkind = ''churn'' and prop -> ''target'' ->> ''table'' = ''client_groups'' then
+      select * into cg from public.client_groups g where g.id = target_id and g.workspace_id = cal.workspace_id for update;
+      if cg.id is null then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_found''));
+        continue;
+      end if;
+      if cg.churn_monthly is distinct from (beforev ->> ''churn_monthly'')::numeric then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''changed''));
+        continue;
+      end if;
+      entry := stamp || jsonb_strip_nulls(jsonb_build_object(
+        ''n'', prop -> ''n'',
+        ''leavers'', case when jsonb_typeof(prop -> ''leavers'') = ''number'' then prop -> ''leavers'' end,
+        ''measured'', case when jsonb_typeof(prop -> ''measured'') = ''number'' then prop -> ''measured'' end,
+        ''multiplier'', case when jsonb_typeof(prop -> ''multiplier'') = ''number'' then prop -> ''multiplier'' end));
+      if jsonb_typeof(cg.provenance -> ''churn_monthly'' -> ''evidence'') = ''array'' then
+        entry := entry || jsonb_build_object(''evidence'', cg.provenance -> ''churn_monthly'' -> ''evidence'');
+      end if;
+      update public.client_groups g
+      set churn_monthly = (setv ->> ''churn_monthly'')::numeric,
+          provenance = g.provenance || jsonb_build_object(''churn_monthly'', entry)
+      where g.id = cg.id;
+      done := done || k;
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''applied''));
+      continue;
+    end if;
+
+    if pkind not in (''work'', ''wait'', ''rework'', ''routing'') or coalesce(prop -> ''target'' ->> ''table'', '''') <> ''steps'' or cal.process_id is null then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_proposed''));
+      continue;
+    end if;
+
+    -- A step''s values go into the process''s draft, opened from live if there is none.
+    if draft_id is null then
+      opened := public.open_draft(cal.process_id);
+      if opened ->> ''status'' <> ''ok'' then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_found''));
+        opened := null;
+        continue;
+      end if;
+      draft_id := (opened ->> ''revision_id'')::uuid;
+    end if;
+
+    select * into st from public.steps s where s.revision_id = draft_id and s.id = target_id for update;
+    if st.id is null or cardinality(st.replaced_by) > 0 then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_found''));
+      continue;
+    end if;
+    prov := case when jsonb_typeof(st.provenance) = ''object'' then st.provenance else ''{}''::jsonb end;
+
+    if pkind = ''routing'' then
+      -- The ways out must be the ones measured, each still at the odds it had.
+      if coalesce(jsonb_typeof(setv -> ''probabilities''), '''') <> ''object'' then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''not_proposed''));
+        continue;
+      end if;
+      select array_agg(x::uuid order by x) into edge_ids from jsonb_object_keys(setv -> ''probabilities'') x;
+      select coalesce(bool_and(e.probability is not distinct from (beforev -> ''probabilities'' ->> e.id::text)::numeric), false)
+        and count(*) = coalesce(cardinality(edge_ids), 0)
+        and coalesce(bool_and(e.id = any (edge_ids)), false)
+        into matches
+      from public.edges e where e.revision_id = draft_id and e.from_step_id = st.id;
+      if not coalesce(matches, false) then
+        results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''changed''));
+        continue;
+      end if;
+      update public.edges e set probability = (setv -> ''probabilities'' ->> e.id::text)::numeric
+      where e.revision_id = draft_id and e.from_step_id = st.id;
+      -- Edges carry no provenance: the step records what was measured, so a later edit to the odds shows as no longer measured.
+      -- Odds an upload left out (`branch_odds`) are filled in now.
+      update public.steps s
+      set provenance = (prov - ''branch_odds'') || jsonb_build_object(''routing'', stamp || jsonb_build_object(''n'', prop -> ''n'', ''probabilities'', setv -> ''probabilities''))
+      where s.revision_id = draft_id and s.id = st.id;
+      done := done || k;
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''applied''));
+      continue;
+    end if;
+
+    if pkind = ''rework'' then
+      matches := st.rework_rate is not distinct from (beforev ->> ''rework_rate'')::numeric;
+      cols := array[''rework_rate''];
+    elsif pkind = ''work'' then
+      matches := st.work_hours is not distinct from (beforev ->> ''work_hours'')::numeric
+        and st.work_dist is not distinct from (beforev ->> ''work_dist'')
+        and (case when jsonb_typeof(st.work_params -> ''cv'') = ''number'' then (st.work_params ->> ''cv'')::numeric end)
+          is not distinct from (beforev ->> ''work_params_cv'')::numeric;
+      cols := array[''work_hours'', ''work_dist'', ''work_params''];
+    else
+      matches := st.wait_hours is not distinct from (beforev ->> ''wait_hours'')::numeric
+        and st.wait_dist is not distinct from (beforev ->> ''wait_dist'')
+        and (case when jsonb_typeof(st.wait_params -> ''cv'') = ''number'' then (st.wait_params ->> ''cv'')::numeric end)
+          is not distinct from (beforev ->> ''wait_params_cv'')::numeric;
+      cols := array[''wait_hours'', ''wait_dist'', ''wait_params''];
+    end if;
+    if not coalesce(matches, false) then
+      results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''changed''));
+      continue;
+    end if;
+
+    -- Each value''s entry: measured, keeping the evidence it cited, and a conflict it had marked settled by the measurement.
+    newprov := prov;
+    foreach col in array cols loop
+      entry := stamp || jsonb_build_object(''n'', prop -> ''n'');
+      if jsonb_typeof(prov -> col -> ''evidence'') = ''array'' then
+        entry := entry || jsonb_build_object(''evidence'', prov -> col -> ''evidence'');
+      end if;
+      if jsonb_typeof(prov -> col -> ''conflict'') = ''object'' then
+        entry := entry || jsonb_build_object(''conflict'', case
+          when coalesce(prov -> col -> ''conflict'' -> ''resolved'', ''null'') <> ''null'' then prov -> col -> ''conflict''
+          else (prov -> col -> ''conflict'') || jsonb_build_object(''resolved'', jsonb_build_object(''at'', now(), ''choice'', ''measured'')) end);
+      end if;
+      newprov := newprov || jsonb_build_object(col, entry);
+    end loop;
+
+    -- The step''s flags follow, as when a person types the values: settled here, and none left open elsewhere.
+    had_assumption := exists (select 1 from unnest(cols) c where (prov -> c ->> ''assumption'') = ''true'' and coalesce(prov -> c ->> ''source'', ''estimated'') = ''estimated'');
+    left_assumption := exists (select 1 from unnest(array[''work_hours'', ''wait_hours'', ''rework_rate'', ''current_wip'', ''sla_hours'']) c
+      where c <> all (cols) and (prov -> c ->> ''assumption'') = ''true'' and coalesce(prov -> c ->> ''source'', ''estimated'') = ''estimated'');
+    had_conflict := private.has_open_conflict(prov) and not private.has_open_conflict(newprov);
+    left_conflict := private.has_open_conflict(newprov);
+
+    update public.steps s
+    set work_hours = case when pkind = ''work'' then (setv ->> ''work_hours'')::numeric else s.work_hours end,
+        work_dist = case when pkind = ''work'' then setv ->> ''work_dist'' else s.work_dist end,
+        work_params = case when pkind = ''work'' then s.work_params || (setv -> ''work_params'') else s.work_params end,
+        wait_hours = case when pkind = ''wait'' then (setv ->> ''wait_hours'')::numeric else s.wait_hours end,
+        wait_dist = case when pkind = ''wait'' then setv ->> ''wait_dist'' else s.wait_dist end,
+        wait_params = case when pkind = ''wait'' then s.wait_params || (setv -> ''wait_params'') else s.wait_params end,
+        rework_rate = case when pkind = ''rework'' then (setv ->> ''rework_rate'')::numeric else s.rework_rate end,
+        provenance = newprov,
+        assumption = s.assumption and not (had_assumption and not left_assumption),
+        conflict = s.conflict and not (had_conflict and not left_conflict)
+    where s.revision_id = draft_id and s.id = st.id;
+    done := done || k;
+    results := results || jsonb_build_array(jsonb_build_object(''key'', k, ''status'', ''applied''));
+  end loop;
+
+  if cardinality(done) > 0 then
+    -- The trigger sets applied, applied_at and applied_by, and accepts the keys only while this flag is on.
+    perform set_config(''transpera.applying_calibration'', ''on'', true);
+    update public.calibrations c set applied_keys = c.applied_keys || done where c.id = cal.id;
+    perform set_config(''transpera.applying_calibration'', ''off'', true);
+  end if;
+
+  return jsonb_build_object(
+    ''status'', ''ok'',
+    ''draft'', case when opened is null then null else jsonb_build_object(
+      ''revision_id'', opened -> ''revision_id'', ''number'', opened -> ''number'', ''created'', opened -> ''created'') end,
+    ''results'', results);
+end;
+$$;
+
+revoke all on function public.apply_calibration(uuid, text[]) from public, anon, authenticated;
+grant execute on function public.apply_calibration(uuid, text[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- record_client_calibration: one or two dataset records, the calibration and the apply, in one transaction
+-- ---------------------------------------------------------------------------
+
+create function public.record_client_calibration(
+  p_workspace uuid,
+  p_clients jsonb,
+  p_log jsonb,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  clients_ds uuid := null;
+  log_ds uuid := null;
+  cal uuid;
+  out jsonb;
+begin
+  -- With no keys apply_calibration isn''t called, so the API-token refusal is repeated here.
+  if coalesce(auth.jwt(), ''{}'') ? ''api_token_id'' then
+    raise exception ''Calibration is applied by a person in the app, not over the API'' using errcode = ''42501'';
+  end if;
+  if p_clients is null and p_log is null then
+    raise exception ''Give a clients file or a servicing log'' using errcode = ''22023'';
+  end if;
+  -- Row-level security refuses a viewer''s or a stranger''s insert, and apply_calibration an API token. Either way the whole
+  -- call rolls back, records included.
+  if p_clients is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count)
+    values (p_workspace, ''clients'', null, p_clients ->> ''file_name'', coalesce(p_clients -> ''column_map'', ''{}''), (p_clients ->> ''row_count'')::integer)
+    returning id into clients_ds;
+  end if;
+  if p_log is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count)
+    values (p_workspace, ''servicing_log'', null, p_log ->> ''file_name'', coalesce(p_log -> ''column_map'', ''{}''), (p_log ->> ''row_count'')::integer)
+    returning id into log_ds;
+  end if;
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (
+    p_workspace,
+    coalesce(clients_ds, log_ds),
+    null,
+    p_results || jsonb_build_object(''datasets'', jsonb_build_object(''clients'', clients_ds, ''servicing_log'', log_ds)))
+  returning id into cal;
+  if coalesce(cardinality(p_keys), 0) > 0 then
+    out := public.apply_calibration(cal, p_keys);
+  else
+    -- The checks are recorded without applying anything.
+    out := jsonb_build_object(''status'', ''ok'', ''draft'', null, ''results'', ''[]''::jsonb);
+  end if;
+  return out || jsonb_build_object(''calibration_id'', cal, ''datasets'', jsonb_build_object(''clients'', clients_ds, ''servicing_log'', log_ds));
+end;
+$$;
+
+revoke all on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) to authenticated;
+']);
+
 -- 20261209000000_agency_list.sql
 -- Agency workspace list, and editors change the Client health rules (issue #30, B1 part 3 of 3; docs/plans/b1-brief.md).
 --

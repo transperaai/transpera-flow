@@ -7,6 +7,7 @@ import {
   rosterLoads,
   runOnce,
   simulate,
+  WEEKS_PER_MONTH,
   type EngineClient,
   type EngineModel,
   type EnginePerson,
@@ -298,7 +299,10 @@ describe("overtime and the floor (decision D7)", () => {
     expect(ot.title).toBe("Ann works 4 h/wk overtime");
     // 4 of 8 cap hours: Bad on the average; raised to Operational risk because Ann is the bottleneck.
     expect(ot).toMatchObject({ rating: "risk", escalation: { base: "bad", bottleneck: true } });
-    expect(ot.metrics.overtime_cost).toBeCloseTo(4 * 10 * 50, 6);
+    // The money is in the live cost only (4 h/wk × 50 an hour × weeks a month); the saved evidence and metrics hold none.
+    expect(ot.cost.perMonth).toBeCloseTo(4 * 50 * WEEKS_PER_MONTH, 6);
+    expect(ot.metrics).not.toHaveProperty("overtime_cost");
+    expect(ot.evidence).not.toMatch(/costing|£|\$|€/);
 
     const beyond = detectIssues(overloaded(0.05), simulate(overloaded(0.05), 3, 1));
     expect(beyond.find((i) => i.key === "capacity:person:ann")!.title).toBe("Ann: client work alone exceeds capacity even with overtime");

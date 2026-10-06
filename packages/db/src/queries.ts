@@ -4,6 +4,7 @@ import type { Database, Json } from "./database.types";
 import type { CompanyModel, SnapshotProcess } from "./company";
 import type { CitingRow } from "./evidence";
 import { uiStatus, type StoredIssueStatus } from "./issue-status";
+import { hideAiIssueKey } from "./person-labels";
 import { partitionSteps } from "./retired";
 import type { RunRow } from "./runs";
 import type {
@@ -587,6 +588,25 @@ export async function loadIssues(db: Db, workspaceId: string): Promise<IssueRow[
   return assembleIssues(rows(issues) as unknown as IssueTableRow[], rows(links), rows(owners), unionIssueSources(rows(sources), rows(linked).flatMap((l) => (l.issue_id ? [{ issue_id: l.issue_id, source_id: l.source_id }] : []))));
 }
 
+/**
+ * Whether the caller sees every person (`can_see_people`: owners, editors, agency admins). Fails closed: an error reads as
+ * "no", so the caller gets the less revealing view.
+ */
+export async function readerSeesPeople(db: Db, workspaceId: string): Promise<boolean> {
+  const r = await db.rpc("can_see_people", { ws: workspaceId });
+  return !r.error && r.data === true;
+}
+
+/**
+ * `loadIssues` for a page or tool that shows issues to whoever is signed in: a reader who doesn't see everyone gets an
+ * opaque `detected_key` where the stored one is a hash of AI text (see `hideAiIssueKey`). Use `loadIssues` where the
+ * caller needs the stored key (editors' save paths, matching keys server-side).
+ */
+export async function loadIssuesForReader(db: Db, workspaceId: string): Promise<IssueRow[]> {
+  const [issues, sees] = await Promise.all([loadIssues(db, workspaceId), readerSeesPeople(db, workspaceId)]);
+  return sees ? issues : issues.map((i) => hideAiIssueKey(i, false));
+}
+
 /** One issue with its relations, or null if it isn't there (or isn't readable). */
 export async function loadIssue(db: Db, workspaceId: string, issueId: string): Promise<IssueRow | null> {
   const [issues, links, owners, sources, linked] = await Promise.all([
@@ -815,7 +835,8 @@ export async function loadLinkTargets(db: Db, workspaceId: string): Promise<Link
     db.from("solutions").select("id, name").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).order("id"),
   ]);
   const seen = new Set<string>();
-  const live = rows(issues).filter((i) => i.status !== "dismissed");
+  const sees = await readerSeesPeople(db, workspaceId);
+  const live = rows(issues).filter((i) => i.status !== "dismissed").map((i) => hideAiIssueKey(i, sees));
   return {
     processes: processes.map((p) => ({ id: p.id, name: p.name })),
     steps: rows(steps).flatMap((s) => (s.replaced_by.length === 0 && !seen.has(s.id) && seen.add(s.id) ? [{ id: s.id, processId: s.process_id, name: s.name }] : [])),

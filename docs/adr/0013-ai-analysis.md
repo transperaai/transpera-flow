@@ -23,8 +23,14 @@ before the text is shown.
   the shadow prices), the first principles in the team's words, the first-principles **rule checks** (the engine's
   `firstPrinciplesFlags`, e.g. automation proposed for a step still marked to delete), each success measure with the
   share of runs that meet it, and, only when the workspace switches it on, a few short quotes from the sources cited on
-  the steps. People's names become labels ("Team member A") and are mapped back after the check; the workspace name and
-  per-person utilisation are never sent.
+  the steps. People's names become labels ("Team member A"); the workspace name and per-person utilisation are never
+  sent. AI reads a **pay-free** model (the engine's `payHidden`, as a member's browser builds it), so no cost that needs a
+  person's rate reaches it or its text. The text it writes is **saved with the labels** and a `person_labels` map (label to
+  person id, on `ai_analyses` and `findings`, B1 2b); the real names go back **at render**, per reader: owners and editors
+  get the person's current name, a member or viewer gets their own name and "A team member" for anyone else, and a person
+  since deleted reads "A team member" for everyone (`nameAnalysisRow`, `nameFinding`, `packages/db/src/person-labels.ts`;
+  MCP names for the token's owner). The only place a name is put back before saving is the key an insight is stored under,
+  which is hashed on the real name as it always was, so an acknowledged or decided finding stays matched.
 - **The number check** (`lib/ai/analyse.ts`; the checker is narration's, `lib/narration/numbers.ts`). Every number in
   every item (read, each insight's title, evidence and why, each review finding) is matched against the figures the
   engine wrote: the results, the findings' own sentences, the success measures and their pass rates, the rule checks.

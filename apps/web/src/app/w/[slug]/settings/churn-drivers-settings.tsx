@@ -6,7 +6,7 @@
 // move (no new simulation: it works from what the latest run measured).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ModelError, toEngineModel, type ChurnDriverRow, type ProcessBundle } from "@transpera-flow/db";
+import { ModelError, toEngineModel, type ChurnDriverRow, type ProcessBundle, type Viewer } from "@transpera-flow/db";
 import { CHURN_DRIVER_SPECS, CHURN_WEIGHT_MAX, CHURN_WEIGHT_MIN, CUSTOM_DRIVER_VALUE, projectChurn, type ChurnCauses, type EngineModel } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
@@ -29,12 +29,19 @@ import {
   type DriverPatch,
   type DriverState,
 } from "@/lib/churn-drivers";
+import { historyNote } from "@/lib/calibration/client-view";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
 import { addChurnDriver, removeChurnDriver, saveChurnDriver } from "./churn-drivers-actions";
 import { SettingsSection } from "./section";
 
 export type DriversMode = "live" | "readonly" | "demo";
+
+/** What the latest clients-and-servicing calibration saw (the date it was counted up to, and each check). */
+export interface DriverHistory {
+  asOf: number;
+  checks: readonly { id: string; n: number; value: number | null; enough: boolean }[];
+}
 
 type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
 
@@ -45,6 +52,7 @@ export function ChurnDriversSettings({
   workspaceId,
   bundle,
   rows,
+  history = null,
 }: {
   mode: DriversMode;
   workspaceId: string | null;
@@ -52,6 +60,8 @@ export function ChurnDriversSettings({
   bundle: ProcessBundle | null;
   /** The drivers the workspace has set; a built-in with no row is at its default. */
   rows: readonly ChurnDriverRow[];
+  /** The latest clients-and-servicing calibration's checks (Settings → Historical data): shown beside what the simulation measures, never fed to it. */
+  history?: DriverHistory | null;
 }) {
   const canEdit = mode !== "readonly";
   const [states, setStates] = useState<DriverState[]>(() => driverStates(rows));
@@ -234,7 +244,9 @@ export function ChurnDriversSettings({
               key={d.key}
               d={d}
               cause={causeOf(d)}
+              history={history}
               model={model}
+              viewer={bundle?.viewer}
               share={projection ? (projection.shares[engineIdOf(d)] ?? 0) : null}
               canEdit={canEdit}
               onChange={(patch) => change(d.key, patch)}
@@ -273,7 +285,9 @@ function SaveStatus({ state }: { state: SaveState }) {
 function DriverRow({
   d,
   cause,
+  history,
   model,
+  viewer,
   share,
   canEdit,
   onChange,
@@ -281,7 +295,9 @@ function DriverRow({
 }: {
   d: DriverState;
   cause: ChurnCauses["causes"][number] | undefined;
+  history: DriverHistory | null;
   model: EngineModel | null;
+  viewer?: Viewer;
   share: number | null;
   canEdit: boolean;
   onChange: (patch: DriverPatch) => void;
@@ -307,7 +323,8 @@ function DriverRow({
           <CustomFields d={d} canEdit={canEdit} onChange={onChange} onRemove={onRemove} />
         )}
         <span className="text-xs text-muted-foreground">
-          {sourceLabel(d)} · now: {valueNow(d, cause, model)}
+          {sourceLabel(d)} · now: {valueNow(d, cause, model, viewer)}
+          {d.builtin ? historyNote(d.builtin, history) : ""}
         </span>
         {(valueHelp || !d.builtin) && (
           <div className="flex flex-wrap items-end gap-x-4 gap-y-2">

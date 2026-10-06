@@ -7,7 +7,7 @@
 // runs pair up replication by replication.
 
 import { useEffect, useMemo, useState } from "react";
-import type { ScenarioRow } from "@transpera-flow/db";
+import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import { applyPatches, compareHeadline, compareRuns, repointPatch, type EngineModel, type EnginePerson, type ProvenanceRows, type RetiredSteps } from "@transpera-flow/engine";
 import { buildLevers, leverPatches, type LeverValues } from "@/lib/scenarios/levers";
 import { leverKind, visibleLevers } from "@/lib/scenarios/lever-catalogue";
@@ -40,6 +40,7 @@ export function ScenarioPanel({
   retired = NO_RETIRED,
   hiddenLevers = NO_HIDDEN,
   leversHref,
+  viewer,
 }: {
   /** The baseline model (the process as it is now). */
   model: EngineModel;
@@ -60,6 +61,8 @@ export function ScenarioPanel({
   hiddenLevers?: readonly string[];
   /** The Levers settings page, linked from the panel when some are hidden. */
   leversHref?: string;
+  /** Who is looking: a member or viewer gets people rows and levers for their own person only (B1 2b). */
+  viewer?: Viewer;
 }) {
   const canEdit = mode !== "readonly";
   const [store] = useState<ScenarioStore>(() => (mode === "live" ? liveScenarioStore(workspaceId) : new MemoryScenarioStore(workspaceId)));
@@ -79,7 +82,7 @@ export function ScenarioPanel({
 
   // Levers act on the model with the applied scenarios in it.
   const stacked = useMemo(() => applyPatches(model, usable.flatMap((s) => s.patch)).model, [model, usable]);
-  const allLevers = useMemo(() => buildLevers(stacked), [stacked]);
+  const allLevers = useMemo(() => buildLevers(stacked, viewer), [stacked, viewer]);
   // A hidden lever isn't offered, and a slider moved before it was hidden no longer changes the run.
   const levers = useMemo(() => visibleLevers(allLevers, hiddenLevers), [allLevers, hiddenLevers]);
   const hiddenCount = hiddenLevers.filter((id) => leverKind(id)?.control === "slider").length;
@@ -168,6 +171,7 @@ export function ScenarioPanel({
             headline={headline}
             roleNames={roleNames}
             people={people}
+            viewer={viewer}
             currency={currency}
             hoursPerWeek={model.hoursPerWeek}
             horizonWeeks={model.horizonWeeks}
@@ -188,6 +192,7 @@ export function ScenarioPanel({
           <ScenarioLibrary
             scenarios={scenarios}
             model={model}
+            viewer={viewer}
             stack={stackIds.filter((id) => scenarios.some((s) => s.id === id))}
             problems={problems}
             retired={retired}

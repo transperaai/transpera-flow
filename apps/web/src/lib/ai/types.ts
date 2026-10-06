@@ -4,7 +4,7 @@
 // rule's finding, marked `origin: "ai"`, which the insight list already knows how to show, acknowledge and dismiss),
 // and a review of the version's first principles. Everything in it passed the number check before it was stored.
 
-import type { AiAnalysisRow, AiAnalysisStatus, AiAnalysisTrigger } from "@transpera-flow/db";
+import type { AiAnalysisRow, AiAnalysisStatus, AiAnalysisTrigger, PersonLabels } from "@transpera-flow/db";
 import { noCost, type FpFlagLevel, type FpStepKey, type IssueType, type Rating } from "@transpera-flow/engine";
 import type { Detection } from "@/lib/insights/insights";
 import { costOfUsage } from "./cost";
@@ -35,6 +35,11 @@ export interface AiInsight {
   stepId: string | null;
   /** The facts (and quotes) it rests on, as they read when cited (B17). Empty on analyses from before. */
   facts?: { kind: "fact" | "quote"; key: string; text: string }[];
+  /**
+   * The labels its title, evidence, why and facts use ("Team member A") and the person each stands for (B1 2b). Saved with the
+   * finding made from it; `readInsights` ignores it (the analysis row has its own map for the text it shows).
+   */
+  personLabels?: PersonLabels;
 }
 
 export interface AiReviewFinding {

@@ -2,7 +2,7 @@
 // scenarios still apply to the model, stacking them with the levers, and the
 // compare headline's subject. Pure functions; the panel renders the results.
 
-import type { ScenarioRow } from "@transpera-flow/db";
+import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import {
   checkScenario,
   parsePatchPath,
@@ -12,6 +12,7 @@ import {
   type ScenarioPatch,
 } from "@transpera-flow/engine";
 import { formatNumber } from "@/lib/format";
+import { personName, viewerOf } from "@/lib/viewer";
 
 const FIELD_LABELS: Record<string, string> = {
   leads_per_week: "Leads per week",
@@ -38,7 +39,7 @@ const SHARES = new Set(["churn_monthly", "rework_rate", "mix_share"]);
 const HOURS = new Set(["work_hours", "wait_hours", "ongoing_hours"]);
 
 /** A patch in words: "Audit & proposal hands-on time −60%", "Strategist head-count +1". */
-export function describePatch(model: EngineModel, patch: ScenarioPatch, retired: RetiredSteps = {}): string {
+export function describePatch(model: EngineModel, patch: ScenarioPatch, retired: RetiredSteps = {}, viewer?: Viewer): string {
   const target = parsePatchPath(patch.path);
   if (!target) return patch.path;
   const field = target.field;
@@ -56,7 +57,7 @@ export function describePatch(model: EngineModel, patch: ScenarioPatch, retired:
             ? "The heaviest step"
             : (model.steps.find((s) => s.id === id)?.name ?? (retired[id] ? `${retired[id].name} (removed)` : undefined))
           : target.kind === "people"
-            ? model.people?.[id]?.name
+            ? (model.people?.[id] ? personName(viewerOf({ viewer }), id, model.people[id].name) : undefined)
             : model.services?.[id]?.name;
     subject = `${name ?? "A removed item"}'s ${FIELD_LABELS[field]}`;
   }

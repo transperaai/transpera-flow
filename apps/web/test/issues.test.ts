@@ -332,6 +332,26 @@ describe("issue Server Actions", () => {
     // What it touches goes in the link table, with the process it was found on.
     expect(saved()!.p_links).toEqual([{ process_id: NORTHBEAM_PROCESS_ID, step_id: d.stepId }]);
   });
+  const OLD_SENTENCE =
+    "Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap, costing about £1,040 at cost rates over the 26-week run. The cap is used up.";
+  it("promote strips the overtime money an old browser tab still sends (B1 2b)", async () => {
+    db.result = { data: [{ id: "i2" }], error: null };
+    const d = northbeamDetections()[1]!;
+    await promoteIssue(WS, { ...promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios), evidence: OLD_SENTENCE, evidence_metrics: { overtime_hours_week: 4, overtime_cost: 1040 } });
+    const fields = saved()!.p_fields;
+    expect(fields.evidence).toBe("Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap. The cap is used up.");
+    expect(fields.evidence_metrics).toEqual({ overtime_hours_week: 4 });
+  });
+  it("the Acknowledge dialog strips it too, for a new issue and for an edit", async () => {
+    db.result = { data: [{ id: "i1" }], error: null };
+    const d = northbeamDetections()[1]!;
+    await saveIssueFromDialog(WS, dialog({ evidence: OLD_SENTENCE, from: { detected_key: d.key, evidence: OLD_SENTENCE, evidence_metrics: { overtime_cost: 1040, a: 1 }, role_id: null, person_id: null, client_id: null, scenario_id: null } }));
+    expect(saved()!.p_fields.evidence).not.toMatch(/costing/);
+    expect(saved()!.p_fields.evidence_metrics).toEqual({ a: 1 });
+    db.calls.length = 0;
+    await saveIssueFromDialog(WS, dialog({ id: "00000000-0000-4000-8000-0000000000a1", evidence: OLD_SENTENCE }));
+    expect(saved()!.p_fields.evidence).toBe("Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap. The cap is used up.");
+  });
   it("promote can store a dismissed insight in one write, with the revision it was dismissed against, and refuses any other status", async () => {
     db.result = { data: [{ id: "i2" }], error: null };
     const d = northbeamDetections()[1]!;

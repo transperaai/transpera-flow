@@ -4,16 +4,19 @@ import { CalibrationPanel } from "@/components/calibration/calibration-panel";
 import { Page } from "@/components/shell/page";
 import { buttonVariants } from "@/components/ui/button";
 import { canEditWorkspace } from "@/lib/access-data";
+import { ClientCalibrationPanel } from "@/components/calibration/client-calibration-panel";
 import { loadCalibrationPage } from "@/lib/calibration/data";
+import { loadClientCalibration } from "@/lib/calibration/client-data";
 
 /**
- * Settings → Historical data (issue #41, C2 part 1): calibrate a process from a step log. Everyone in the workspace can
- * read a log here and see what it measures; owners and editors apply the changes they tick.
+ * Settings → Historical data (issue #41, C2): calibrate a process from a step log (part 1), and the clients' normal churn
+ * from a clients file with checks against a servicing log (part 2). Everyone in the workspace can read a file here and see
+ * what it measures; owners and editors apply the changes they tick.
  */
 export default async function CalibrationPage(props: PageProps<"/w/[slug]/settings/calibration">) {
   const { slug } = await props.params;
   const { process } = await props.searchParams;
-  const data = await loadCalibrationPage(slug, typeof process === "string" ? process : undefined);
+  const [data, clientData] = await Promise.all([loadCalibrationPage(slug, typeof process === "string" ? process : undefined), loadClientCalibration(slug)]);
   if (!data) notFound();
   const canEdit = await canEditWorkspace(data.workspaceId);
   return (
@@ -37,6 +40,16 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
         stored={data.stored}
         history={data.history}
       />
+      {clientData && (
+        <ClientCalibrationPanel
+          mode={canEdit ? "live" : "readonly"}
+          workspaceId={clientData.workspaceId}
+          base={`/w/${slug}`}
+          rows={clientData.rows}
+          runs={clientData.runs}
+          history={clientData.history}
+        />
+      )}
     </Page>
   );
 }

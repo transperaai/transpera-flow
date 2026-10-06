@@ -11,11 +11,12 @@ import {
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
+  loadTeam,
   loadClients,
   loadMarket,
   type MarketConditionRow,
   type MarketScheduleRow,
-  loadIssues,
+  loadIssuesForReader,
   loadIssueEvents,
   loadLiveRevisionIds,
   loadLiveProcessBySlug,
@@ -170,9 +171,12 @@ export async function loadWorkspaceLiveRevisionIds(workspaceId: string): Promise
   return loadLiveRevisionIds(await createClient(), workspaceId);
 }
 
-/** The workspace's tracked issues, newest first (RLS: everyone in the workspace can read them). */
+/**
+ * The workspace's tracked issues, newest first (RLS: everyone in the workspace can read them). A member or viewer gets an
+ * opaque `detected_key` where it is a hash of AI text (B1 2b).
+ */
 export async function loadWorkspaceIssues(workspaceId: string): Promise<IssueRow[]> {
-  return loadIssues(await createClient(), workspaceId);
+  return loadIssuesForReader(await createClient(), workspaceId);
 }
 
 /** One issue's history, oldest first (RLS: everyone in the workspace can read it). */
@@ -430,7 +434,9 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     loadClientGroups(supabase, ws),
     loadChurnDrivers(supabase, ws),
   ]);
-  const [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, assignments] = await Promise.all([
+  // "Used by 3 people" counts the whole team, which a member's own reads of the per-person tables can't: team_capacity
+  // gives every reader the roles and assignments of everyone (B1 2b).
+  const [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, team] = await Promise.all([
     supabase.rpc("can_edit_workspace", { ws }),
     supabase.rpc("can_manage_workspace", { ws }),
     supabase.from("roles").select("id, name, color, active").eq("workspace_id", ws).order("name"),
@@ -458,10 +464,10 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     supabase.from("edges").select("condition_tag").in("revision_id", revisions).not("condition_tag", "is", null),
     // Every revision, live or not: a role a superseded step names can't be deleted either.
     supabase.from("steps").select("id, role_id").eq("workspace_id", ws).not("role_id", "is", null),
-    supabase.from("client_assignments").select("client_id, role_id").eq("workspace_id", ws),
+    loadTeam(supabase, ws),
   ]);
   const [leadSources, seasonality, demand, servicingLinks, market, clientGroups, churnDrivers] = await demandQueries;
-  for (const r of [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, assignments, leadSources, seasonality, demand, servicingLinks]) {
+  for (const r of [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, leadSources, seasonality, demand, servicingLinks]) {
     if (r.error) throw r.error;
   }
 
@@ -470,7 +476,7 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     canEdit: canEdit.data === true,
     canManage: canManage.data === true,
     roles: roles.data ?? [],
-    roleUsage: roleUsage(roleSteps.data ?? [], personRoles.data ?? [], assignments.data ?? [], (services.data ?? []) as ServiceRow[]),
+    roleUsage: roleUsage(roleSteps.data ?? [], team.personRoles, team.clientAssignments, (services.data ?? []) as ServiceRow[]),
     steps: steps.data ?? [],
     people: people.data ?? [],
     personRoles: personRoles.data ?? [],

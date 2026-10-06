@@ -1,4 +1,5 @@
 import type { Json } from "./database.types";
+import type { PersonLabels } from "./person-labels";
 import type { Db } from "./queries";
 import { FINDING_TYPES, type FindingCitation, type FindingRating, type FindingRow, type FindingStatus, type FindingType } from "./types";
 
@@ -7,7 +8,7 @@ import { FINDING_TYPES, type FindingCitation, type FindingRating, type FindingRo
 // AI finding proposed and one by hand accepted, and refuses an "AI" finding that no analysis of the caller's wrote.
 
 export const FINDING_COLUMNS =
-  "id, workspace_id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, source_ids, ai_key, analysis_id, run_id, edited, created_by, created_at, updated_by, updated_at, decided_by, decided_at";
+  "id, workspace_id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, person_labels, source_ids, ai_key, analysis_id, run_id, edited, created_by, created_at, updated_by, updated_at, decided_by, decided_at";
 
 export const FINDING_LIMITS = { title: 200, evidence: 2000, why: 2000, facts: 30, sources: 20 } as const;
 
@@ -131,6 +132,8 @@ export interface ProposedFinding {
   evidence: string;
   why: string;
   facts: FindingCitation[];
+  /** The labels its title, evidence, why and facts use, and the person each stands for (B1 2b). */
+  personLabels: PersonLabels;
 }
 
 /**
@@ -164,6 +167,7 @@ export async function storeProposedFindings(
     evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
     why: f.why.slice(0, FINDING_LIMITS.why),
     facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
+    person_labels: f.personLabels as unknown as Json,
     analysis_id: input.analysisId,
     run_id: input.runId,
     status: "proposed",

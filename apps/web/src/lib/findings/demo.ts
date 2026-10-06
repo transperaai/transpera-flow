@@ -26,6 +26,7 @@ export function demoFindings(processId: string = NORTHBEAM_PROCESS_ID): FindingR
     evidence: i.evidence,
     why: i.why,
     facts: (i.facts ?? []) as unknown as FindingRow["facts"],
+    person_labels: {},
     source_ids: [],
     ai_key: i.key,
     analysis_id: null,

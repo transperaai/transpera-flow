@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { toEngineModel } from "@transpera-flow/db";
+import { restoreNames } from "@/lib/narration/facts";
 import { absenceTest, shadowPricesFor, simulate } from "@transpera-flow/engine";
 import { screenOutput } from "@/lib/ai/analyse";
 import { DEMO_AI_OUTPUT, demoAiView } from "@/lib/ai/demo";
@@ -44,8 +45,8 @@ describe("the demo's AI text", () => {
     view.insights.forEach((i, n) => {
       const real = out.insights[n]!.item.facts!;
       expect(i.facts!.map((f) => f.key)).toEqual(real.map((f) => f.key));
-      // The demo keeps each fact's first sentence.
-      i.facts!.forEach((f, k) => expect(real[k]!.text.startsWith(f.text)).toBe(true));
+      // The demo keeps each fact's first sentence, with names where the real pipeline saves labels (B1 2b: the demo is the editor's view).
+      i.facts!.forEach((f, k) => expect(restoreNames(real[k]!.text, input.aliases).startsWith(f.text)).toBe(true));
     });
   });
 

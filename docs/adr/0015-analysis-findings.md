@@ -39,6 +39,14 @@ assessment of what is actually wrong, and he wants to add his own findings.
   passes `force` and runs anyway, still through `reserve_ai_run`. The pages load the latest analysis of the process (any
   version) and mark it **out of date** once the base differs (the server) or the facts do (the browser, once its run is
   in). Rows from before have no hash and are compared by version.
+- **Names are not saved (B1 2b, migration `20261207700000`).** An AI finding's text, like the analysis's, is stored as the
+  model wrote it, with labels ("Team member A"), and `findings.person_labels` says which person each label is (`{}` for a
+  finding by hand). The names go back when a page or the connector shows it, for each reader as ADR 0003 says. An editor who
+  edits an AI finding sees names; `editFinding` turns them back into labels before storing, and stores a field exactly as it
+  was when the editor didn't change it, so saving without a change doesn't mark the finding edited. A name an editor types
+  that wasn't in the finding is human-typed text and is stored as typed. AI also reads a pay-free model, so its facts say
+  "—" for a cost that needs a person's rate. The analysis hash (`model_hash`) reads neither names nor pay, so an owner's page
+  and a member's agree on whether an analysis is out of date.
 - **Cost bound** as ADR 0013: every model call first reserves a run (`reserve_ai_run`: 40 a workspace in 24 hours, one a
   minute per process; the company counts as the company map's process). The panel shows the model and an estimated cost
   from the stored token usage at list prices (`lib/ai/cost.ts`), "about $0.06".

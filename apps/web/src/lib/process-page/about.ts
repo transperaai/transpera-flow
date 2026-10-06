@@ -4,6 +4,7 @@ import type { EdgeRow, ProcessBundle, ProvenanceMap, StepRow } from "@transpera-
 import type { FirstPrinciples } from "@transpera-flow/engine";
 import { formatPublished } from "@/lib/history/versions";
 import { processSteps } from "@/lib/process-steps";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export interface About {
   type: "Pipeline" | "Servicing";
@@ -80,7 +81,7 @@ export function aboutProcess(input: {
 }): About {
   const all = processSteps(input.bundle);
   const steps = all.filter((s) => isWorking(s.kind) && !s.child_process_id);
-  const names = new Map(input.bundle.people.map((p) => [p.id, p.name]));
+  const names = new Map(namedForViewer(viewerOf(input.bundle), input.bundle.people).map((p) => [p.id, p.name]));
   const lc = input.lastChange;
   const edges = [...input.bundle.edges, ...(input.bundle.otherProcesses ?? []).flatMap((o) => o.edges)];
   return {
