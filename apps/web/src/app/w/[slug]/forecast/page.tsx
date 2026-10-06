@@ -3,7 +3,7 @@ import { ForecastView } from "@/components/forecast/forecast-view";
 import { Page } from "@/components/shell/page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace } from "@/lib/access-data";
-import { loadLiveProcess, loadWorkspaceIssues, loadWorkspaceSources } from "@/lib/data";
+import { loadLiveProcess, loadWorkspaceForecastPlans, loadWorkspaceIssues, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /** The Forecast (issue #35, B6): who gets too busy, and when, from the live model run forward month by month. */
 export default async function WorkspaceForecastPage(props: PageProps<"/w/[slug]/forecast">) {
@@ -12,6 +12,8 @@ export default async function WorkspaceForecastPage(props: PageProps<"/w/[slug]/
   if (!live) notFound();
   const ws = live.workspace.id;
   const [issues, sources, canEdit] = await Promise.all([loadWorkspaceIssues(ws), loadWorkspaceSources(ws), canEditWorkspace(ws)]);
+  // Plans are for owners, editors and agency admins (B7): everyone else gets the forecast as it was, with no plan UI.
+  const [plans, solutions] = canEdit ? await Promise.all([loadWorkspaceForecastPlans(ws), loadWorkspaceSolutions(ws).then((d) => d.solutions)]) : [[], []];
   const base = `/w/${slug}`;
   return (
     <Page title="Forecast" width="max-w-6xl" hideHeader>
@@ -23,6 +25,8 @@ export default async function WorkspaceForecastPage(props: PageProps<"/w/[slug]/
           mode={canEdit ? "live" : "readonly"}
           issuesHref={`${base}/issues`}
           peopleHref={`${base}/settings`}
+          plans={plans}
+          solutions={solutions}
         />
       </SourceLinkingScope>
     </Page>

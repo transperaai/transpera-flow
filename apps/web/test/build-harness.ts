@@ -11,10 +11,10 @@ const SRC = fileURLToPath(new URL("../src", import.meta.url));
 const STUBS = fileURLToPath(new URL("./build-harness-stubs", import.meta.url));
 
 /** `"use server"` files, and the stand-ins for Next's client modules. */
-const stubs: Plugin = {
+const harnessStubs = (navigation: string): Plugin => ({
   name: "harness-stubs",
   setup(b) {
-    b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: `${STUBS}/navigation.ts` }));
+    b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: `${STUBS}/${navigation}` }));
     b.onResolve({ filter: /^next\/link$/ }, () => ({ path: `${STUBS}/link.tsx` }));
     b.onResolve({ filter: /^next\/dynamic$/ }, () => ({ path: `${STUBS}/dynamic.tsx` }));
     b.onLoad({ filter: /\.tsx?$/ }, (args) => {
@@ -29,13 +29,14 @@ const stubs: Plugin = {
       return { contents: body, loader: "js" };
     });
   },
-};
+});
 
 /**
  * The bundled script of a harness entry, ready to add to a page. `define` replaces expressions as esbuild does (for
- * example `import.meta.url`, which a bundled script has none of).
+ * example `import.meta.url`, which a bundled script has none of). `navigation` names the stand-in for `next/navigation` in
+ * ./build-harness-stubs (default: one where navigation does nothing).
  */
-export async function bundleHarness(entry: URL, define: Record<string, string> = {}): Promise<string> {
+export async function bundleHarness(entry: URL, define: Record<string, string> = {}, options: { navigation?: string } = {}): Promise<string> {
   const out = await build({
     entryPoints: [fileURLToPath(entry)],
     bundle: true,
@@ -45,7 +46,7 @@ export async function bundleHarness(entry: URL, define: Record<string, string> =
     jsx: "automatic",
     define: { "process.env.NODE_ENV": '"production"', ...define },
     alias: { "@": SRC },
-    plugins: [stubs],
+    plugins: [harnessStubs(options.navigation ?? "navigation.ts")],
     logLevel: "silent",
   });
   return out.outputFiles[0]!.text;

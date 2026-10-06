@@ -9,6 +9,7 @@ import { partitionSteps } from "./retired";
 import type { RunRow } from "./runs";
 import type {
   BlockRow,
+  ForecastPlanRow,
   SolutionIssueRow,
   SolutionRow,
   ChurnDriverRow,
@@ -1022,6 +1023,20 @@ export async function loadSolutions(db: Db, workspaceId: string, processId?: str
   const r = await q.order("created_at", { ascending: false }).order("id");
   // The database checks the shapes of steps, changed_step_ids and lever_changes.
   return (rows(r) ?? []) as unknown as SolutionRow[];
+}
+
+/** The `ForecastPlanRow` columns. */
+export const FORECAST_PLAN_COLUMNS = "id, workspace_id, name, markers, created_at, updated_at, created_by" as const;
+
+/** A workspace's forecast plans by name (RLS: only owners, editors and agency admins read them). Empty, with a log line, if they can't be read. */
+export async function loadForecastPlans(db: Db, workspaceId: string): Promise<ForecastPlanRow[]> {
+  const r = await db.from("forecast_plans").select(FORECAST_PLAN_COLUMNS).eq("workspace_id", workspaceId).order("name").order("id");
+  if (r.error) {
+    console.error("Couldn't load the forecast plans; showing none.", r.error.message);
+    return [];
+  }
+  // The database checks the shape of markers.
+  return (r.data ?? []) as unknown as ForecastPlanRow[];
 }
 
 /** The issues each of a workspace's solutions solves, with their verdicts. */

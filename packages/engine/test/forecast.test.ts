@@ -6,7 +6,9 @@ import {
   northbeamModel,
   northbeamWithClientGroups,
   northbeamWithServicing,
+  pooledMonthlyFee,
   ruleOfFinding,
+  withClientGroups,
   simulate,
   type EngineModel,
   type EnginePerson,
@@ -322,6 +324,61 @@ describe("review fixes: calendar months, uncovered roles, the run's own insight,
     // Each measure on its own: a bad month from the start is known, the average crossing later is news.
     const series = [busy(0.7, 0.9), busy(0.8, 0.9), busy(0.9, 0.95)];
     expect(firstCrossing(series, [0.7, 0.85, 0.95], { skipFirst: true })).toEqual({ average: { month: 2, value: 0.9 }, badMonth: null });
+  });
+});
+
+describe("monthly recurring revenue and clients at risk (B7)", () => {
+  const roster = () => ({ ...northbeamWithClientGroups(), horizonWeeks: months(12) });
+
+  it("reports one recurring revenue figure per month, starting near what the roster bills", () => {
+    const m = roster();
+    const mo = simulate(m, 20, 1, { monthly: true }).monthly!;
+    expect(mo.mrr).toHaveLength(12);
+    const starting = Object.values(withClientGroups(m).clients!).reduce((sum, c) => sum + (Number(c.mrr) || 0), 0);
+    // Month 0 is the average of its weekly ticks, so churn and new wins have already moved it a little from what the
+    // roster bills today: -4.8% with no new leads (churn only), +4.6% with them, for the seeded Northbeam. The brief
+    // asked for 2%, which the engine's own first-month churn rules out.
+    const noLeads = simulate({ ...m, leadsPerWeek: 0 }, 20, 1, { monthly: true }).monthly!;
+    for (const month0 of [mo.mrr[0]!.mean, noLeads.mrr[0]!.mean]) expect(Math.abs(month0 - starting) / starting).toBeLessThan(0.06);
+    expect(noLeads.mrr[0]!.mean).toBeLessThan(starting);
+    for (const s of mo.mrr) {
+      expect(s.mean).toBeGreaterThanOrEqual(0);
+      expect(s.p10).toBeLessThanOrEqual(s.mean + 1e-9);
+      expect(s.mean).toBeLessThanOrEqual(s.p90 + 1e-9);
+    }
+  });
+
+  it("counts clients at risk per service, never more than the clients there", () => {
+    const mo = simulate(roster(), 20, 1, { monthly: true }).monthly!;
+    expect(Object.keys(mo.atRisk)).toEqual(Object.keys(mo.clients));
+    for (const key of Object.keys(mo.clients)) {
+      mo.clients[key]!.forEach((c, m) => expect(mo.atRisk[key]![m]!.mean).toBeLessThanOrEqual(c.mean + 1e-9));
+    }
+    expect(Object.values(mo.atRisk).some((row) => row.some((s) => s.mean > 0))).toBe(true);
+  });
+
+  it("pooled models bill the interim count at the pooled fee and have no clients at risk", () => {
+    const m = { ...northbeamModel(), horizonWeeks: months(6) };
+    const mo = simulate(m, 10, 1, { monthly: true }).monthly!;
+    expect(mo.atRisk).toEqual({});
+    expect(mo.mrr[0]!.mean).toBeCloseTo(mo.clients[""]![0]!.mean * pooledMonthlyFee(m), 6);
+  });
+
+  it("pooled models count hourly clients as active but bill them nothing", () => {
+    const svc = (name: string, pricingModel: "retainer" | "hourly", price: number, mixShare: number) => ({ name, pricingModel, price, margin: 0.4, tenureMonths: 12, churnMonthly: 0, mixShare, pathTags: [] as string[] });
+    // Wins are all hourly (retainer mix 0, which only sets the fee), no churn: recurring revenue stays what the interim clients pay.
+    const m = { ...northbeamModel(), horizonWeeks: months(6), churnMonthly: 0, leadsPerWeek: 40, services: { r: svc("Retainer", "retainer", 2000, 0), h: svc("Hourly", "hourly", 90, 1) } };
+    const r = simulate(m, 10, 1, { monthly: true });
+    const fee = pooledMonthlyFee(m);
+    expect(fee).toBe(2000);
+    expect(r.kpi.won.mean).toBeGreaterThan(0);
+    expect(r.monthly!.clients[""]!.at(-1)!.mean).toBeGreaterThan(m.activeClients);
+    for (const month of r.monthly!.mrr) expect(month.mean).toBeCloseTo(m.activeClients * fee, 6);
+  });
+
+  it("is deterministic for a seed", () => {
+    const m = { ...roster(), horizonWeeks: months(6) };
+    expect(simulate(m, 10, 3, { monthly: true }).monthly).toEqual(simulate(m, 10, 3, { monthly: true }).monthly);
   });
 });
 

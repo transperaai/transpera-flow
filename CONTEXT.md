@@ -100,6 +100,10 @@ _Avoid_: Churn factor, churn cause
 The outside climate for demand: a preset (Boom, Stable, Soft, Downturn) or your own, as a 24-month schedule. Example: a Downturn with 30% fewer leads from month 3.
 _Avoid_: Economy, scenario, seasonality (seasonality is a separate monthly demand pattern)
 
+**Plan**:
+A named set of forecast markers: hires, leave and solutions going live from a month. Example: "Hire in March", a PPC specialist from 1 March plus the faster setup from April. It never changes the live model; the forecast re-runs with it, and two plans can be compared.
+_Avoid_: Scenario (a scenario is a set of lever changes, run as a what-if), forecast (the forecast is the live model run forward; a plan is changes laid over it)
+
 ## Relationships
 
 - A **rule** turns a simulation number into a rated **fact**. The AI (on demand) and people write **findings** from the facts.

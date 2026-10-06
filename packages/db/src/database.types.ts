@@ -1045,6 +1045,44 @@ export type Database = {
           },
         ]
       }
+      forecast_plans: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          markers: Json
+          name: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          markers?: Json
+          name: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          markers?: Json
+          name?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forecast_plans_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       issue_events: {
         Row: {
           actor: string | null
