@@ -17,6 +17,7 @@ const migration = migrations(FILE);
 const apply = readFileSync(join(root, "scripts/apply", FILE), "utf8");
 const ledger = readFileSync(join(root, "../../docs/production-migrations.md"), "utf8");
 const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.slice(0, 14)).sort();
+const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 
 describe("play links: row 66 of the production ledger", () => {
@@ -255,6 +256,93 @@ describe("play links: the header's md5s, its rollback and its preflight, run on 
       { conname: "suggestion_proposals_visitor_text", convalidated: true },
     ]);
     expect(await q("select indexname from pg_indexes where indexname = 'suggestion_proposals_share_link_idx'")).toHaveLength(1);
+  });
+
+  /** The header's own queries for post-apply check `n`, exactly as written (the lines after `--   n.` that start `--        select`). */
+  function postApply(n: number): string[] {
+    const head = migration.slice(0, migration.indexOf("-- ROLLBACK ("));
+    const from = head.indexOf("-- POST-APPLY CHECK:");
+    const at = head.indexOf(`--   ${n}. `, from);
+    const next = head.indexOf(`\n--   ${n + 1}. `, at);
+    const lines = head.slice(at, next < 0 ? head.length : next).split("\n");
+    const out: string[] = [];
+    let buf: string[] | null = null;
+    for (const line of lines) {
+      if (/^--\s{8}select/.test(line)) buf = [];
+      if (buf && /^--\s{8,}\S/.test(line)) {
+        buf.push(line.replace(/^--\s+/, ""));
+        if (line.trimEnd().endsWith(";")) {
+          out.push(buf.join(" "));
+          buf = null;
+        }
+      } else if (buf) buf = null;
+    }
+    return out;
+  }
+
+  it("the header's post-apply queries, run verbatim, return what the header says (checks 1 to 4)", async () => {
+    // 1: execute privileges.
+    const [c1] = postApply(1);
+    expect(await qa(c1!)).toEqual([true, true, false, true, false, false, false, false]);
+    // 2: security flags, search_path and volatility, one row per function.
+    const [c2] = postApply(2);
+    const rows = await q(c2!);
+    expect(rows).toHaveLength(10);
+    expect(rows.every((r) => r["?column?"] === true)).toBe(true);
+    // 3: the two constraints, validated.
+    const [c3] = postApply(3);
+    expect((await q(c3!)).map((r) => [r.conname, r.convalidated]).sort()).toEqual([
+      ["suggestion_proposals_issue", true],
+      ["suggestion_proposals_visitor_text", true],
+    ]);
+    // 4: the first query's six rows, as the header states them, and the second's single column.
+    const [first, second] = postApply(4);
+    expect((await q(first!)).map((r) => `${r.table_name} ${r.privilege_type} ${r.count}`)).toEqual([
+      "share_links INSERT 12",
+      "share_links SELECT 18",
+      "share_links UPDATE 4",
+      "suggestion_proposals INSERT 23",
+      "suggestion_proposals SELECT 21",
+      "suggestion_proposals UPDATE 5",
+    ]);
+    expect(migration).toContain("share_links INSERT 12, SELECT 18, UPDATE 4; suggestion_proposals INSERT 23, SELECT 21, UPDATE 5");
+    expect((await q(second!)).map((r) => r.column_name)).toEqual(["share_link_id"]);
+  });
+
+  it("the smoke test (post-apply 6) runs to the end in ONE transaction: the refused insert sits in a savepoint", async () => {
+    const head = migration.slice(0, migration.indexOf("-- ROLLBACK ("));
+    expect(head).toContain("`savepoint s;` ... `rollback to savepoint s;`");
+    const ws = (await q("select id from workspaces where slug = 'northbeam'"))[0]!.id as string;
+    const proc = (await q("select id, live_revision_id from processes where workspace_id = $1 and live_revision_id is not null and not is_company limit 1", [ws]))[0]!;
+    const person = (await q("select name from people where workspace_id = $1 order by created_at, id limit 1", [ws]))[0]!.name as string;
+    const token = "s".repeat(43);
+    const snap = (hidden: unknown) =>
+      JSON.stringify({ v: 1, kind: "process", toggles: { people: false, financials: false }, hiddenLevers: hidden, workspaceName: "Northbeam", bundle: { revision: { id: proc.live_revision_id }, steps: [], roles: [], people: [], services: [] }, issues: [] });
+    const insert = "insert into share_links (workspace_id, token_hash, kind, target_id, mode, snapshot, engine_version) values ($1, $2, 'process', $3, 'play', $4::jsonb, '1.8.0')";
+    const adminId = "00000000-0000-4000-8000-0000000000ad";
+    await q("insert into auth.users (id, email) values ($1, 'smoke-admin@example.com') on conflict do nothing", [adminId]);
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role authenticated");
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: adminId, role: "authenticated", app_metadata: { agency_admin: true } })]);
+      await db.client.query(insert, [ws, sha(token), proc.id, snap(["process.rework"])]);
+      await db.client.query("savepoint s");
+      await expect(db.client.query(insert, [ws, sha("x"), proc.id, snap(["Priya"])])).rejects.toMatchObject({ code: "23514", message: "The snapshot doesn't match the link." });
+      await db.client.query("rollback to savepoint s");
+      await db.client.query("set local role anon");
+      await db.client.query(`select set_config('request.jwt.claims', '{"role":"anon"}', true)`);
+      const call = (title: string) =>
+        db.client.query(`select public.submit_play_proposal($1, $2, null, 'Smoke test', 'smoke@example.com', null, '[{"path":"demand.leads_per_week","op":"set","value":9}]') ->> 'status' as s`, [token, title]);
+      expect((await call("Smoke")).rows[0].s).toBe("ok");
+      await db.client.query("reset role");
+      expect((await q("select created_via, created_by, status, visitor_text from suggestion_proposals where title = 'Smoke'"))[0]).toEqual({ created_via: "play_link", created_by: null, status: "pending", visitor_text: null });
+      await db.client.query("set local role anon");
+      expect((await call(person)).rows[0].s).toBe("ok");
+      await db.client.query("reset role");
+      expect((await q("select title, visitor_text from suggestion_proposals where share_link_id is not null and visitor_text is not null"))[0]).toEqual({ title: "A visitor's idea", visitor_text: { title: person } });
+    } finally {
+      await db.client.query("rollback");
+    }
   });
 
   it("the ROLLBACK block puts every replaced function back (preflight 2's md5s return), drops what was added, and the preflight then reads as written; the migration applies again", async () => {

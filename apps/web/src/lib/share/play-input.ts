@@ -16,8 +16,11 @@ export const MAX_NAME = 100;
 export const MAX_NOTE = 1000;
 export const MAX_EMAIL = 254;
 export const MAX_CHANGES = 50;
+/** The most a lever may be set to from a shared link (the database's caps). The sliders stop at the same numbers, so a real visitor is never refused. */
+export const PLAY_CAPS = { leads: 10000, clients: 100000, price: 10000000, headcount: 500 } as const;
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// Strict: the team's "Reply by email" is a mailto: link, so no `?`, `&`, `%`, `#`, `/`, comma, quote or white space (the database's own pattern).
+const EMAIL = /^[a-z0-9._+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 // Control characters: none in a title or a name; a note may have line breaks and tabs.
 const CONTROL_STRICT = /[\u0001-\u001f\u007f]/;
@@ -79,14 +82,14 @@ interface Family {
 }
 
 const FIXED: Record<string, Family> = {
-  "demand.leads_per_week": { kind: "demand.enquiries", setMax: 10000 },
-  "demand.active_clients": { kind: "clients.count", setMax: 100000, whole: true },
+  "demand.leads_per_week": { kind: "demand.enquiries", setMax: PLAY_CAPS.leads },
+  "demand.active_clients": { kind: "clients.count", setMax: PLAY_CAPS.clients, whole: true },
   "demand.churn_monthly": { kind: "clients.churn", setMax: 1 },
-  "finances.retainer": { kind: "finances.prices", setMax: 10000000 },
+  "finances.retainer": { kind: "finances.prices", setMax: PLAY_CAPS.price },
 };
 const WITH_ID: Record<string, Family> = {
-  "services.price": { kind: "finances.prices", setMax: 10000000 },
-  "roles.headcount": { kind: "people.headcount", setMax: 500, whole: true },
+  "services.price": { kind: "finances.prices", setMax: PLAY_CAPS.price },
+  "roles.headcount": { kind: "people.headcount", setMax: PLAY_CAPS.headcount, whole: true },
   "people.fte": { kind: "people.hours", setMax: 1.5 },
   "steps.work_hours": { kind: "process.time", multiply: true },
   "steps.wait_hours": { kind: "process.wait", multiply: true, setMax: 10000 },

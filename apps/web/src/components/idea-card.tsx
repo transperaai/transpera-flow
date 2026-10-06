@@ -132,7 +132,7 @@ export function IdeaCard({
       {isPlay && canEdit && contact?.email && (
         <p className="text-xs text-fg-2" data-contact>
           Reply by email:{" "}
-          <a href={`mailto:${contact.email}`} className="font-medium underline underline-offset-2">
+          <a href={`mailto:${contact.email.split("@").map(encodeURIComponent).join("@")}`} className="font-medium underline underline-offset-2">
             {contact.email}
           </a>
         </p>

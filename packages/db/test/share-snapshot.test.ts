@@ -1001,6 +1001,15 @@ describe("hiddenLevers on a process snapshot (B4)", () => {
     }
   });
 
+  it("a hiddenLevers nested anywhere but the top is a mismatch (it would skip the name checks)", () => {
+    const w = worlds[0]!;
+    const t = TOGGLES[0]!;
+    const out = redactShareSnapshot(raw("process", w, t), t, w.secrets) as unknown as Record<string, unknown>;
+    for (const nested of [{ x: { hiddenLevers: "a name" } }, { deep: [{ hiddenLevers: ["process.wait"] }] }]) {
+      expect(shareSnapshotLeaks({ ...out, ...nested }, w.secrets, t), JSON.stringify(nested)).toContain("mismatch");
+    }
+  });
+
   it("the checker refuses a hiddenLevers that isn't an array of at most 30 distinct known ids (mismatch)", () => {
     const w = worlds[0]!;
     const t = TOGGLES[0]!;

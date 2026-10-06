@@ -415,11 +415,13 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
       if (name && !name.glue) found.add("person");
     }
   };
-  const walk = (value: unknown, key = "") => {
+  const walk = (value: unknown, key = "", depth = 0) => {
     if (typeof value === "string") return text(value, isFree(key));
-    if (Array.isArray(value)) return void value.forEach((x) => walk(x, key));
+    if (Array.isArray(value)) return void value.forEach((x) => walk(x, key, depth));
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {
+      // `hiddenLevers` is a non-text key wherever it sits, so it may appear only once, at the top: a copy nested elsewhere would skip the name checks.
+      if (k === "hiddenLevers" && depth > 0) found.add("mismatch");
       if (k === "cost_rate" && v !== null && v !== undefined) found.add("pay");
       // Evidence notes of any JSON type: only an empty object (or null) is clean.
       if (k === "provenance" && v !== null && v !== undefined && !(isObj(v) && Object.keys(v).length === 0)) found.add("evidence");
@@ -431,7 +433,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
         if ((k === "overhead_monthly" || k === "target_margin") && v !== undefined) found.add("costs");
         if ((k === "patch" || k === "lever_changes") && Array.isArray(v) && v.some(isRatePatch)) found.add("costs");
       }
-      walk(v, k);
+      walk(v, k, depth + 1);
     }
   };
   walk(snapshot);

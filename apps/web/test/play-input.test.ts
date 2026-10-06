@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { LEVER_KIND_IDS } from "@transpera-flow/db";
-import { MESSAGES, parsePlayIdea, playPatchProblem, playResultMessage, type PlayIdeaInput } from "@/lib/share/play-input";
+import { MESSAGES, PLAY_CAPS, parsePlayIdea, playPatchProblem, playResultMessage, type PlayIdeaInput } from "@/lib/share/play-input";
 import { LEVER_KINDS } from "@/lib/scenarios/lever-catalogue";
+import { buildLevers } from "@/lib/scenarios/levers";
 
 // What a play-link visitor sends (B4): the TypeScript twin of the database's lever check, run against the table of cases the database
 // test also reads, and the text rules the database repeats.
@@ -47,6 +48,25 @@ describe("playPatchProblem agrees with the database's table of cases", () => {
   });
 });
 
+describe("the sliders stop at the database's caps, so a real visitor is never refused", () => {
+  const big = { leadsPerWeek: 9000, activeClients: 90000, retainer: 9_000_000, hoursPerWeek: 40, steps: [], roles: { r: { name: "R", count: 499, cost: 0, ongoing: 0 } }, services: {} } as never;
+  it("on a huge workspace no slider can reach a value the check refuses", () => {
+    const levers = buildLevers(big);
+    const by = (path: string) => levers.find((l) => l.path === path);
+    expect(by("demand.leads_per_week")!.max).toBe(PLAY_CAPS.leads);
+    expect(by("demand.active_clients")!.max).toBe(PLAY_CAPS.clients);
+    expect(by("finances.retainer")!.max).toBe(PLAY_CAPS.price);
+    for (const l of levers.filter((x) => x.op === "set" && x.path !== "demand.churn_monthly")) {
+      expect(playPatchProblem([{ path: l.path, op: "set", value: l.max }], {}), l.path).not.toBe(MESSAGES.range);
+    }
+  });
+  it("a normal workspace's sliders are unchanged", () => {
+    const levers = buildLevers({ ...(big as object), leadsPerWeek: 10, activeClients: 20, retainer: 2000 } as never);
+    expect(levers.find((l) => l.path === "demand.leads_per_week")!.max).toBe(30);
+    expect(levers.find((l) => l.path === "demand.active_clients")!.max).toBe(40);
+  });
+});
+
 describe("the lever kind ids", () => {
   it("the database package's copy equals the catalogue, in order", () => {
     expect([...LEVER_KIND_IDS]).toEqual(LEVER_KINDS.map((k) => k.id));
@@ -70,6 +90,13 @@ describe("parsePlayIdea", () => {
       [{ name: "n".repeat(101) }, "Keep your name under 100 characters."],
       [{ email: "" }, "Add your email address so the team can reply."],
       [{ email: "marta at example" }, "That isn't an email address."],
+      // A mailto: link must not be able to add a header, a body or a second address.
+      [{ email: "a@b.co?cc=evil%40attacker.example&body=hi" }, "That isn't an email address."],
+      [{ email: "a@b.co&bcc=x@y.co" }, "That isn't an email address."],
+      [{ email: "a%40b@c.co" }, "That isn't an email address."],
+      [{ email: "a@b.co,c@d.co" }, "That isn't an email address."],
+      [{ email: "a/b@c.co" }, "That isn't an email address."],
+      [{ email: "a@b" }, "That isn't an email address."],
       [{ email: `${"e".repeat(246)}@x.example` }, "That isn't an email address."],
       [{ note: "n".repeat(1001) }, "Keep the note under 1,000 characters."],
       [{ title: "a\u0001b" }, "Remove the unusual characters and try again."],

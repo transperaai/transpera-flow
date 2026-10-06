@@ -46,7 +46,8 @@ describe("a visitor's idea, read by an owner or editor", { timeout: 60_000 }, ()
     expect(text).toContain("Sent from a link to Lead to live.");
     expect(text).not.toContain("for issue");
     expect(text).not.toMatch(/Proposed steps/);
-    expect(await card(page).locator("[data-contact] a").getAttribute("href")).toBe("mailto:marta@example.com");
+    // Built with encoding: a character that means something in a mailto: (here a plus sign) can't reach it unencoded.
+    expect(await card(page).locator("[data-contact] a").getAttribute("href")).toBe("mailto:marta%2Bplay@example.com");
     const href = (await card(page).getByRole("link", { name: /Build it/ }).getAttribute("href"))!;
     const url = new URL(href, "https://x.test");
     expect(url.pathname).toBe("/w/northbeam/p/00000000-0000-4000-8000-0000000000c1/edit");

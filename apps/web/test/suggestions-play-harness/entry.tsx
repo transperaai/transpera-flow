@@ -62,7 +62,7 @@ window.mountPlayIdea = ({ editor, held = false, issue = false }) => {
     created_by: null,
   };
   const contacts: Record<string, PlayContact> = editor
-    ? { [IDEA]: { email: "marta@example.com", held: held ? { title: "Ask Priya Shah's team", note: "Priya Shah says it costs £4,100", name: "Marta Okoye" } : {} } }
+    ? { [IDEA]: { email: "marta+play@example.com", held: held ? { title: "Ask Priya Shah's team", note: "Priya Shah says it costs £4,100", name: "Marta Okoye" } : {} } }
     : {};
   const review = async (ids: string[], decision: ProposalDecision, note: string | null): Promise<ProposalOutcome> => {
     window.playReviews.push([ids, decision, note]);

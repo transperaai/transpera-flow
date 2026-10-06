@@ -274,6 +274,22 @@ describe("play links: the write trigger, hiddenLevers and open_share_link", () =
     }
   });
 
+  it("hiddenLevers is refused anywhere but the top: a copy nested under another key can't carry a name past the checks (23514)", async () => {
+    await db.client.query("begin");
+    try {
+      const person = (await db.client.query("select name from people where workspace_id = $1 order by created_at, id limit 1", [ws])).rows[0].name as string;
+      for (const nested of [{ x: { hiddenLevers: person } }, { bundle: { revision: { id: ids.liveRevision }, steps: [{ id: ids.step }], roles: [], people: [], services: [], hiddenLevers: [person] } }, { deep: [{ a: { hiddenLevers: ["process.wait"] } }] }]) {
+        const r = await attempt(db.client, () => insertLink(db.client, { tok: "nested", extraSnapshot: nested }));
+        expect(r, JSON.stringify(nested)).toMatchObject({ ok: false, code: "23514", message: "The snapshot doesn't match the link." });
+      }
+      // The same string under an ordinary key is a name, as before; and the top-level key still works.
+      expect(await attempt(db.client, () => insertLink(db.client, { tok: "nested2", extraSnapshot: { notes: person } }))).toMatchObject({ ok: false, code: "23514", message: "The snapshot names a person." });
+      expect((await attempt(db.client, () => insertLink(db.client, { tok: "nested3", snapshot: snapshot({ hidden: ["process.wait"] }) }))).ok).toBe(true);
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
   it("private.lever_kind_ids() equals LEVER_KIND_IDS, and the catalogue's ids", async () => {
     const inDb = (await db.client.query("select unnest(private.lever_kind_ids()) as k")).rows.map((r) => r.k as string);
     expect(inDb).toEqual([...LEVER_KIND_IDS]);
@@ -460,6 +476,14 @@ describe("submit_play_proposal: refusals", () => {
       ["no email", { email: " " }, "Add your email address so the team can reply."],
       ["email 255", { email: `${"e".repeat(246)}@x.example` }, "That isn't an email address."],
       ["bad email", { email: "marta at example" }, "That isn't an email address."],
+      // The owner's "Reply by email" is a mailto: link: nothing that adds a header, a body or a second address.
+      ["mailto header", { email: "a@b.co?cc=evil%40attacker.example&body=hi" }, "That isn't an email address."],
+      ["ampersand", { email: "a@b.co&bcc=x@y.co" }, "That isn't an email address."],
+      ["percent", { email: "a%40b@c.co" }, "That isn't an email address."],
+      ["comma", { email: "a@b.co,c@d.co" }, "That isn't an email address."],
+      ["slash", { email: "a/b@c.co" }, "That isn't an email address."],
+      ["quote", { email: "\"a\"@b.co" }, "That isn't an email address."],
+      ["no tld", { email: "a@b" }, "That isn't an email address."],
       ["note 1001", { note: "n".repeat(1001) }, "Keep the note under 1,000 characters."],
       ["control in title", { title: "a\u0001b" }, "Remove the unusual characters and try again."],
       ["control in name", { name: "a\u007fb" }, "Remove the unusual characters and try again."],
@@ -646,6 +670,45 @@ describe("submit_play_proposal: limits", () => {
         expect(status(await submit(c, token("heldcount"), { email: "h9@visitor.example" }))).toEqual({ status: "rate_limited" });
       },
     );
+  });
+
+  it("the pending cap holds across two links at once: at 199, one submission is ok and the other is busy (a workspace lock, not just the link's)", async () => {
+    const t1 = token("capone");
+    const t2 = token("captwo");
+    await insertLink(db.client, { tok: "capone" });
+    await insertLink(db.client, { tok: "captwo" });
+    await db.client.query("select set_config('transpera.play_submitting', 'on', false)");
+    await db.client.query(
+      `insert into suggestion_proposals (workspace_id, kind, title, payload, issue_id, created_via, proposer_email, created_at)
+       select $1, 'solution_idea', 'Cap ' || g, '{"steps": []}'::jsonb, null, 'play_link', 'cap' || g || '@x.example', now() - interval '2 hours' from generate_series(1, 199) g`,
+      [ws],
+    );
+    await db.client.query("select set_config('transpera.play_submitting', '', false)");
+    const mk = async () => {
+      const c = new pg.Client({ connectionString: db.url });
+      await c.connect();
+      await c.query("begin");
+      await c.query("set local role anon");
+      await c.query("select set_config('request.jwt.claims', '', true)");
+      return c;
+    };
+    const [a, b] = [await mk(), await mk()];
+    try {
+      expect(status(await submit(a, t1, { email: "one@visitor.example" }))).toEqual(OK);
+      // b is on another link, so the link lock doesn't hold it; the workspace lock does, until a ends.
+      const pb = submit(b, t2, { email: "two@visitor.example" });
+      let settled = false;
+      void pb.then(() => (settled = true));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false);
+      await a.query("commit");
+      expect(status(await pb)).toEqual({ status: "busy" });
+      await b.query("commit");
+    } finally {
+      for (const c of [a, b]) await c.end();
+      await db.client.query("delete from suggestion_proposals where workspace_id = $1 and created_via = 'play_link'", [ws]);
+      await db.client.query("delete from share_links where token_hash = any($1)", [[sha(t1), sha(t2)]]);
+    }
   });
 
   it("two connections submitting to one link at once both finish and the counts hold; an open during a submission waits, then returns ok", async () => {

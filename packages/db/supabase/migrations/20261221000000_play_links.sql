@@ -90,13 +90,15 @@
 --        select conname, pg_get_constraintdef(oid), convalidated from pg_constraint where conname in ('suggestion_proposals_issue', 'suggestion_proposals_visitor_text');
 --   4. Columns and grants. `share_link_id` has an authenticated SELECT column grant and `visitor_text` has none (like `proposer_email`);
 --      the partial index exists; `share_links` column grants for authenticated are SELECT 18, INSERT 12 (now with `mode`), UPDATE 4;
---      anon still holds nothing on either table:
+--      anon still holds nothing on either table. `authenticated` holds a table-level INSERT on suggestion_proposals, so every column
+--      lists INSERT there; that is why the second query filters on SELECT:
 --        select table_name, privilege_type, count(*) from information_schema.column_privileges where table_schema = 'public' and table_name in ('share_links', 'suggestion_proposals') and grantee in ('anon', 'authenticated') group by 1, 2 order by 1, 2;
---        select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'suggestion_proposals' and grantee = 'authenticated' and column_name in ('share_link_id', 'visitor_text', 'proposer_email');
---      The second query returns share_link_id only.
+--        select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'suggestion_proposals' and grantee = 'authenticated' and privilege_type = 'SELECT' and column_name in ('share_link_id', 'visitor_text', 'proposer_email');
+--      The first returns exactly six rows: share_links INSERT 12, SELECT 18, UPDATE 4; suggestion_proposals INSERT 23, SELECT 21, UPDATE 5.
+--      The second returns share_link_id only.
 --   5. The six replaced functions' md5s are now the new reviewed ones (they must differ from preflight 2's). Expect exactly:
 --        private | share_links_before_write          | dde01d596ab29cee5e0ebf22500c2e31 | t
---        private | share_snapshot_problem            | efe3876b96194e39f921d74fed0288c5 | f
+--        private | share_snapshot_problem            | 76ac6261c43393b9fb36615d727af8fc | f
 --        private | suggestion_proposals_before_write | baeec857413c73b7ff8c0d6799bc84cf | f
 --        private | suggestions_before_write          | 568a368859ffb77317a97deb6b8036a5 | f
 --        public  | build_proposal                    | d0c1f4cc029835b8f98a9b0dd2e0e6f4 | f
@@ -107,7 +109,8 @@
 --        select set_config('request.jwt.claims', '{"sub":"<uuid>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
 --        insert a `play` link to a published Northbeam process with the token hash of a known 43-character token and a minimal clean snapshot
 --        {"v":1,"kind":"process","toggles":{"people":false,"financials":false},"hiddenLevers":["process.rework"],"workspaceName":"Northbeam","bundle":{"revision":{"id":"<live revision>"},"steps":[],"roles":[],"people":[],"services":[]},"issues":[]}
---        (engine_version '1.8.0') -> succeeds; the same with "hiddenLevers":["Priya"] -> 23514 "The snapshot doesn't match the link.";
+--        (engine_version '1.8.0') -> succeeds; then, inside `savepoint s;` ... `rollback to savepoint s;` (the refusal aborts the
+--        transaction otherwise, and every later step would fail), the same with "hiddenLevers":["Priya"] -> 23514 "The snapshot doesn't match the link.";
 --        set local role anon; select set_config('request.jwt.claims', '{"role":"anon"}', true);
 --        select public.submit_play_proposal('<token>', 'Smoke', null, 'Smoke test', 'smoke@example.com', null, '[{"path":"demand.leads_per_week","op":"set","value":9}]') ->> 'status'; -> ok;
 --        reset role; the row has created_via = 'play_link', created_by null, status = 'pending', visitor_text null;
@@ -891,6 +894,8 @@ begin
      -- B4 begin
      -- The kinds a play link hides. Not free text: only known kind ids (so the key can't smuggle a name).
      -- (CASE, not OR: Postgres doesn't promise to stop before jsonb_array_length on a non-array)
+     -- The key is a non-text key at ANY depth, so it may appear only once, at the top: a copy nested elsewhere would skip the name checks.
+     or jsonb_array_length(jsonb_path_query_array(snap, 'strict $.**.hiddenLevers')) > (case when snap ? 'hiddenLevers' then 1 else 0 end)
      or (snap ? 'hiddenLevers' and case when jsonb_typeof(snap -> 'hiddenLevers') <> 'array' then true else (
          jsonb_array_length(snap -> 'hiddenLevers') > 30
          or exists (select 1 from jsonb_array_elements(snap -> 'hiddenLevers') h
@@ -1228,7 +1233,8 @@ begin
     if v_email = '' then
       raise exception 'Add your email address so the team can reply.' using errcode = '22023';
     end if;
-    if char_length(v_email) > 254 or v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
+    -- Strict on purpose: the team's "Reply by email" is a mailto: link, so no `?`, `&`, `%`, `#`, `/`, comma, quote or white space.
+    if char_length(v_email) > 254 or v_email !~ '^[a-z0-9._+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$' then
       raise exception 'That isn''t an email address.' using errcode = '22023';
     end if;
   end if;
@@ -1257,6 +1263,8 @@ begin
   end if;
 
   -- 5. Rate limits, over the ideas stored from this link (the partial index). Refused calls store nothing and aren't counted.
+  -- The pending cap is per WORKSPACE while the link lock above is per link, so two links could both read 199: serialise on the workspace.
+  perform pg_advisory_xact_lock(hashtextextended('play:' || l.workspace_id::text, 0));
   select count(*) filter (where x.created_at > now() - interval '10 minutes'),
          count(*),
          count(*) filter (where lower(x.proposer_email) = v_email)

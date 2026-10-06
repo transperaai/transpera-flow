@@ -131,6 +131,18 @@ the visitor moves the shown levers in their browser and can send what they tried
   issue check and the visitor-text check. A link at its limit answers `rate_limited` without running the dearer ones. A refused call stores
   nothing and isn't counted (accepted, as for `open_share_link`, which anon also calls without limit). No per-IP limit (the database sees
   Vercel's address; no shared store); the Send dialog has a honeypot. 1 to 50 changes; title 120, name 100, email 254, note 1,000 characters.
+  The pending cap is per workspace, so it is serialised with an advisory lock on the workspace id (the link lock alone would let two links
+  both read 199). An open link's email is checked strictly (letters, digits and `._+-`, no `?`, `&`, `%`, `#`, `/` or white space), because the
+  team's "Reply by email" is a `mailto:` link.
+- **Accepted limits** (reviewed, left as they are):
+  - *Timing.* `share_snapshot_problem` returns at the first hit, so held text and clean text take slightly different times. Every probe is a
+    stored idea the team sees, at 5 per 10 minutes and 50 a day per link, so the signal is weak.
+  - *Current state.* "Pick an issue from this page, or none." and "...points at something that isn't in this page." also fire for an issue
+    resolved, or a step deleted, after the copy was made. The visitor learns that something changed since their page, nothing about what
+    or about anyone else's data. So "reveals nothing the page didn't show" holds for other workspaces and for what the link hides, not for
+    changes since the copy.
+  - *Nested non-text keys.* `hiddenLevers` is refused anywhere but the top (a nested copy would skip the name checks). B3's other non-text keys
+    (`key`, `kind`, `id` ...) keep B3's accepted limit: a name nested under one is not looked for.
 - **Proposals land in Suggestions**, not a separate queue (D37): `suggestion_proposals` gains `share_link_id` (no foreign key: links are
   never deleted) and `visitor_text`; a visitor's idea may be for no issue (the check is widened for `play_link` only; `build_proposal`
   accepts it, for the process the idea names). Owners and editors see the changes in words, the visitor's email (`play_proposal_contacts`,
