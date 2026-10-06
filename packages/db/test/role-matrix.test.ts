@@ -542,7 +542,7 @@ describe("writes", () => {
 
   it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions, clients and headlines are never deleted", async () => {
     await db.as(callers.owner!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });

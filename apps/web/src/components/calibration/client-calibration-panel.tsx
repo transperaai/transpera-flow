@@ -1,30 +1,21 @@
 "use client";
 
-// Settings → Historical data, "Clients and servicing work" (issue #41, C2 part 2): read a clients file and a servicing log, show
+// Settings → Historical data, "Clients and servicing work" (issue #41, C2 part 2; the import wizard is issue #40, C1): read a clients file and a servicing log (or jobs or tickets), show
 // each client group's normal churn as the file measures it (back-solved through today's churn drivers, so late work is not
 // counted twice) beside the churn the model has now, and check the simulation's late work, response time and onboarding
 // speed against what happened. The churn changes a person ticks are applied live, marked measured. The three checks are never
 // applied. Both files are read in the browser; client ids and the rows are never stored. On the demo nothing is saved.
 
-import { useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { ModelError, toEngineModel, type ProcessBundle } from "@transpera-flow/db";
-import { churnProposals, measureChurn, servicingChecks, type BackSolvedChurn, type CalibrationProposal, type ServicingCheckId } from "@transpera-flow/engine";
-import {
-  CLIENTS_TEMPLATE,
-  SERVICING_LOG_TEMPLATE,
-  clientCalibrationServices,
-  decodeLogFile,
-  parseClientsFile,
-  parseServicingLog,
-  servicingLinks,
-  type ClientCalibrationRows,
-  type DateOrder,
-} from "@transpera-flow/db/calibration";
+import { churnProposals, measureChurn, servicingChecks, type BackSolvedChurn, type CalibrationProposal, type ClientRow, type ServicingCheckId, type ServicingRow } from "@transpera-flow/engine";
+import { clientCalibrationServices, servicingLinks, type ClientCalibrationRows } from "@transpera-flow/db/calibration";
+import type { ImportKind } from "@transpera-flow/db/csv-import";
+import { ImportWizard, type ImportReady } from "@/components/calibration/import-wizard";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { progressText, type ChurnJob } from "@/lib/calibration/backsolve";
 import { CHECK_LABELS, CHECK_ORDER, CHURN_HELP, localDateText, applySummary, formatAsOf, formatChurn, formatCheckValue, formatMultiplier, initiallySelected, selectable } from "@/lib/calibration/client-view";
 import { useChurnBackSolve } from "@/lib/calibration/use-churn-backsolve";
@@ -46,17 +37,14 @@ export interface ClientCalibrationPanelProps {
   history: { id: string; createdAt: string; clientsFile: string | null; logFile: string | null; proposals: number; applied: number }[];
   /** The date the clients file is true on to start with: today, or the sample's date on the demo (YYYY-MM-DD). */
   defaultAsOf?: string;
+  /** The latest column map of each kind, offered to the wizards first. */
+  previous: Partial<Record<ImportKind, Record<string, string>>>;
   /** Files to try (the demo's samples). */
-  sample?: { clients: { name: string; text: string }; log: { name: string; text: string } };
+  sample?: Partial<Record<ImportKind, { name: string; text: string }>>;
 }
 
-/** A file that has been given to the page: its text, and which way round slashed dates were said to be. */
-interface Source {
-  fileName: string;
-  text: string;
-  note: string | null;
-  order?: DateOrder;
-}
+const CLIENT_KINDS = ["clients"] as const;
+const LOG_KINDS = ["servicing_log", "jobs"] as const;
 
 type Done = { tone: "ok" | "error"; message: string };
 
@@ -80,8 +68,8 @@ function endOfDay(text: string): number | null {
 export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
   const { mode, rows } = props;
   const canApply = mode !== "readonly";
-  const [clientsSource, setClientsSource] = useState<Source | null>(null);
-  const [logSource, setLogSource] = useState<Source | null>(null);
+  const [clientsReady, setClientsReady] = useState<ImportReady | null>(null);
+  const [logReady, setLogReady] = useState<ImportReady | null>(null);
   // The date picked, or else the default: the sample's, or today by the browser's clock and zone (the server's date can be a day off;
   // it is empty on the server render and filled in by the browser).
   const [picked, setPicked] = useState<string | null>(null);
@@ -101,10 +89,11 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
   const services = useMemo(() => clientCalibrationServices(rows), [rows]);
   const links = useMemo(() => servicingLinks(rows), [rows]);
 
-  const clients = useMemo(() => (clientsSource ? parseClientsFile(clientsSource.text, clientsSource.order ? { dateOrder: clientsSource.order } : {}) : null), [clientsSource]);
-  const log = useMemo(() => (logSource ? parseServicingLog(logSource.text, logSource.order ? { dateOrder: logSource.order } : {}) : null), [logSource]);
-  const clientRows = clients && clients.rows.length ? clients.rows : null;
-  const logRows = log && log.rows.length ? log.rows : null;
+  // The names in each file are matched to the workspace's active services and servicing processes.
+  const clientTargets = useMemo(() => ({ label: "Services", names: rows.services.filter((s) => s.active).map((s) => s.name) }), [rows.services]);
+  const logTargets = useMemo(() => ({ label: "Client work", names: rows.processes.filter((p) => p.kind === "servicing").map((p) => p.name) }), [rows.processes]);
+  const clientRows = clientsReady && clientsReady.rows.length ? (clientsReady.rows as ClientRow[]) : null;
+  const logRows = logReady && logReady.rows.length ? (logReady.rows as ServicingRow[]) : null;
 
   const measure = useMemo(() => (clientRows && asOf !== null ? measureChurn({ rows: clientRows, services, asOf }) : null), [clientRows, services, asOf]);
   const checks = useMemo(
@@ -155,7 +144,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
   const isTicked = (p: CalibrationProposal) => touched.get(p.key) ?? initiallySelected(p);
   const chosen = proposals.filter((p) => selectable(p) && isTicked(p) && !applied.has(p.key));
   const solving = (measure || checks) && solve.status !== "done" && solve.status !== "error" && (jobs?.length ?? 0) > 0;
-  const nothingRead = !clients && !log;
+  const nothingRead = !clientsReady && !logReady;
 
   const save = () => {
     if (nothingRead || asOf === null) return;
@@ -174,8 +163,8 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
     start(async () => {
       const out = await recordClientCalibration({
         workspaceId: props.workspaceId,
-        clients: clientRows && clientsSource && clients ? { fileName: clientsSource.fileName, columnMap: clients.columns, rowCount: clientRows.length } : null,
-        log: logRows && logSource && log ? { fileName: logSource.fileName, columnMap: log.columns, rowCount: logRows.length } : null,
+        clients: clientRows && clientsReady ? { fileName: clientsReady.fileName, columnMap: clientsReady.columnMap, rowCount: clientRows.length, details: clientsReady.details } : null,
+        log: logRows && logReady ? { kind: logReady.kind, fileName: logReady.fileName, columnMap: logReady.columnMap, rowCount: logRows.length, details: logReady.details } : null,
         results: {
           asOf,
           window: measure?.window ?? checks?.window ?? null,
@@ -183,8 +172,9 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
           clients: measure?.clients ?? 0,
           tasks: checks?.tasks ?? 0,
           startsAfterAsOf: measure?.startsAfterAsOf ?? 0,
-          unmatchedServices: measure?.unmatchedServices.length ?? 0,
-          unmatchedTasks: checks?.unmatchedTasks.length ?? 0,
+          // Names the person left out in the wizard count with the ones that matched nothing: counts only, never the names.
+          unmatchedServices: (measure?.unmatchedServices.length ?? 0) + (clientsReady?.leftOut.names ?? 0),
+          unmatchedTasks: (checks?.unmatchedTasks.length ?? 0) + (logReady?.leftOut.names ?? 0),
           noGroup,
           proposals,
           checks: (checks?.checks ?? []).map((c) => ({ id: c.id, n: c.n, value: c.value, simulated: solved?.simulated[c.id] ?? null, enough: c.enough, blocked: c.blocked, note: c.note })),
@@ -217,50 +207,53 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        <div className="grid gap-6 lg:grid-cols-2">
-          <FileSource
-            id="cc-clients"
-            title="Clients file"
-            columns={[
-              ["client", "Any id or name. Only used for counting, never stored."],
-              ["service", "The service's name as in Settings."],
-              ["started", "The date they became a client of it: 2025-01-13."],
-              ["ended", "Optional. The date they left. Blank means still a client."],
-            ]}
-            template={CLIENTS_TEMPLATE}
-            templateName="clients-template.csv"
-            helpLabel="Clients file"
-            helpDescription="One row for each client of each service: who, which service, when they started and, if they left, when. Include the clients who left: a file of current clients only can't show churn."
-            helpExample="C-014, SEO retainer, 2025-02-03, 2026-05-29"
-            sample={props.sample?.clients}
-            onRead={(s) => {
-              setClientsSource(s);
-              setDone(null);
-              setTouched(new Map());
-              setApplied(new Set());
-            }}
-          />
-          <FileSource
-            id="cc-log"
-            title="Servicing log"
-            columns={[
-              ["task", "The servicing process's name, as on its map."],
-              ["client", "The same ids as the clients file."],
-              ["due", "When it was due. A date with no time is due at the end of that day."],
-              ["done", "Optional. When it was done. Blank means not done."],
-              ["requested", "Optional. When an ad-hoc request came in."],
-            ]}
-            template={SERVICING_LOG_TEMPLATE}
-            templateName="servicing-log-template.csv"
-            helpLabel="Servicing log"
-            helpDescription="One row for each servicing task: which process, for which client, when it was due and when it was done. Used for the three checks only."
-            helpExample="Monthly report, C-014, 2026-03-06, 2026-03-05 16:00"
-            sample={props.sample?.log}
-            onRead={(s) => {
-              setLogSource(s);
-              setDone(null);
-            }}
-          />
+        <div className="flex flex-col gap-6">
+          <div className="flex min-w-0 flex-col gap-3">
+            <h3 className="flex items-center text-sm font-semibold">
+              Clients file
+              <Help
+                label="Clients file"
+                description="One row for each client of each service: who, which service, when they started and, if they left, when. Include the clients who left: a file of current clients only can't show churn."
+                example="C-014, SEO retainer, 2025-02-03, 2026-05-29"
+              />
+            </h3>
+            <ImportWizard
+              id="cal-clients"
+              kinds={CLIENT_KINDS}
+              targets={clientTargets}
+              previous={props.previous}
+              sample={props.sample}
+              mode={mode}
+              onReady={(r) => {
+                setClientsReady(r);
+                setDone(null);
+                setTouched(new Map());
+                setApplied(new Set());
+              }}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-3">
+            <h3 className="flex items-center text-sm font-semibold">
+              Servicing log
+              <Help
+                label="Servicing log"
+                description="One row for each servicing task, or jobs or tickets with a due date: which process, for which client, when it was due and when it was done. Used for the three checks only."
+                example="Monthly report, C-014, 2026-03-06, 2026-03-05 16:00"
+              />
+            </h3>
+            <ImportWizard
+              id="cal-servicing"
+              kinds={LOG_KINDS}
+              targets={logTargets}
+              previous={props.previous}
+              sample={props.sample}
+              mode={mode}
+              onReady={(r) => {
+                setLogReady(r);
+                setDone(null);
+              }}
+            />
+          </div>
         </div>
 
         <label className="flex max-w-xs flex-col gap-1">
@@ -269,43 +262,28 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
           {asOf === null && <span className="text-xs text-destructive">Pick a date.</span>}
         </label>
 
-        {clientsSource && clients && (
-          <ReadSummary
-            what="clients file"
-            source={clientsSource}
-            parsed={clients}
-            onOrder={(order) => setClientsSource({ ...clientsSource, order })}
-            groupName="cc-clients-order"
-            extra={
-              measure && (
-                <>
-                  {measure.startsAfterAsOf > 0 && <p className="text-muted-foreground">{measure.startsAfterAsOf} row{measure.startsAfterAsOf === 1 ? "" : "s"} start after {formatAsOf(asOf!)}, so are left out.</p>}
-                  {measure.unmatchedServices.length > 0 && (
-                    <p className="text-muted-foreground">
-                      Not a service in Settings, so left out: {measure.unmatchedServices.map((u) => `${u.name} (${u.rows})`).join(", ")}. Rename them in the file to match.
-                    </p>
-                  )}
-                </>
-              )
-            }
-          />
+        {clientsReady && measure && (measure.startsAfterAsOf > 0 || measure.unmatchedServices.length > 0) && (
+          <section aria-label="What was read from the clients file" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3 text-sm">
+            {measure.startsAfterAsOf > 0 && (
+              <p className="text-muted-foreground">
+                {measure.startsAfterAsOf} row{measure.startsAfterAsOf === 1 ? "" : "s"} start after {formatAsOf(asOf!)}, so are left out.
+              </p>
+            )}
+            {measure.unmatchedServices.length > 0 && (
+              <p className="text-muted-foreground">
+                Not a service in Settings, so left out: {measure.unmatchedServices.map((u) => `${u.name} (${u.rows})`).join(", ")}. Match them to a service in the
+                wizard above.
+              </p>
+            )}
+          </section>
         )}
-        {logSource && log && (
-          <ReadSummary
-            what="servicing log"
-            source={logSource}
-            parsed={log}
-            onOrder={(order) => setLogSource({ ...logSource, order })}
-            groupName="cc-log-order"
-            extra={
-              checks &&
-              checks.unmatchedTasks.length > 0 && (
-                <p className="text-muted-foreground">
-                  Not a servicing process of the workspace, so not used for response times: {checks.unmatchedTasks.map((u) => `${u.name} (${u.rows})`).join(", ")}. They still count for late work.
-                </p>
-              )
-            }
-          />
+        {logReady && checks && checks.unmatchedTasks.length > 0 && (
+          <section aria-label="What was read from the servicing log" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3 text-sm">
+            <p className="text-muted-foreground">
+              Not a servicing process of the workspace, so not used for response times: {checks.unmatchedTasks.map((u) => `${u.name} (${u.rows})`).join(", ")}. They
+              still count for late work.
+            </p>
+          </section>
         )}
 
         {measure && (
@@ -372,7 +350,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
           </section>
         )}
 
-        {(clients || log) && (
+        {(clientsReady || logReady) && (
           <section aria-labelledby="cc-checks" className="flex flex-col gap-2">
             <h3 id="cc-checks" className="text-sm font-semibold">
               Checks
@@ -430,207 +408,6 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function FileSource({
-  id,
-  title,
-  columns,
-  template,
-  templateName,
-  helpLabel,
-  helpDescription,
-  helpExample,
-  sample,
-  onRead,
-}: {
-  id: string;
-  title: string;
-  columns: [string, string][];
-  template: string;
-  templateName: string;
-  helpLabel: string;
-  helpDescription: string;
-  helpExample: string;
-  sample?: { name: string; text: string };
-  onRead: (source: Source) => void;
-}) {
-  const [text, setText] = useState("");
-  const [fileName, setFileName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  const read = (body: string, name: string, note: string | null = null) => onRead({ fileName: name || `Pasted ${title.toLowerCase()}`, text: body, note });
-  const onFile = async (file: File | undefined) => {
-    if (!file) return;
-    if (file.size > 20_000_000) {
-      setError("That file is over 20 MB. Split it by date and read each part.");
-      return;
-    }
-    setError(null);
-    // Excel saves "CSV" as Windows text and "Unicode text" as UTF-16: read either, and say so when it isn't UTF-8.
-    const { text: body, note } = decodeLogFile(new Uint8Array(await file.arrayBuffer()));
-    setFileName(file.name);
-    setText("");
-    read(body, file.name, note);
-  };
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <h3 className="flex items-center text-sm font-semibold">
-        {title}
-        <Help label={helpLabel} description={helpDescription} example={helpExample} />
-      </h3>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-        {columns.map(([name, what]) => (
-          <div key={name} className="contents">
-            <dt className="font-mono text-xs leading-5">{name}</dt>
-            <dd className="text-muted-foreground">{what}</dd>
-          </div>
-        ))}
-      </dl>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" type="button" onClick={() => input.current?.click()}>
-          Choose a CSV file
-        </Button>
-        <input ref={input} type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="sr-only" aria-label={`${title} CSV file`} onChange={(e) => onFile(e.target.files?.[0])} />
-        <a className="text-sm text-accent underline-offset-4 hover:underline" download={templateName} href={`data:text/csv;charset=utf-8,${encodeURIComponent(template)}`}>
-          Download template
-        </a>
-        {sample && (
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            onClick={() => {
-              setText(sample.text);
-              setFileName(sample.name);
-              read(sample.text, sample.name);
-            }}
-          >
-            Use a sample
-          </Button>
-        )}
-      </div>
-      <label htmlFor={`${id}-text`} className="flex flex-col gap-1">
-        <HelpLabel
-          label="Or paste the rows"
-          description="Paste rows copied from a spreadsheet or a CSV, with the column names in the first row. Columns can be in any order; other columns are ignored."
-          example={template.split("\n")[1] ?? ""}
-        />
-        <Textarea
-          id={`${id}-text`}
-          value={text}
-          rows={5}
-          spellCheck={false}
-          className="font-mono text-xs"
-          placeholder={template.split("\n").slice(0, 3).join("\n")}
-          onChange={(e) => {
-            setText(e.target.value);
-            setFileName("");
-          }}
-        />
-      </label>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" disabled={!text.trim()} onClick={() => read(text, fileName)}>
-          Read it
-        </Button>
-        {fileName && <span className="truncate text-sm text-muted-foreground">{fileName}</span>}
-        {error && (
-          <span role="alert" className="text-sm text-destructive">
-            {error}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface ParsedLike {
-  rows: unknown[];
-  missing: string[];
-  errors: { line: number; message: string }[];
-  dateOrder: DateOrder | null;
-  dateProblem: "ambiguous" | "mixed" | null;
-}
-
-function ReadSummary({
-  what,
-  source,
-  parsed,
-  onOrder,
-  groupName,
-  extra,
-}: {
-  what: string;
-  source: Source;
-  parsed: ParsedLike;
-  onOrder: (order: DateOrder) => void;
-  groupName: string;
-  extra?: React.ReactNode;
-}) {
-  if (parsed.missing.length) {
-    return (
-      <div role="alert" className="rounded-lg border border-crit bg-crit-soft p-3 text-sm">
-        The {what} has no {parsed.missing.join(", ")} column. The first row must name the columns.
-      </div>
-    );
-  }
-  if (parsed.dateProblem === "mixed") {
-    return (
-      <div role="alert" className="rounded-lg border border-crit bg-crit-soft p-3 text-sm">
-        Some dates in the {what} can only be day first (like 13/03/2026) and others only month first (like 03/13/2026). Make them all the same way round,
-        or use 2026-03-13, and read it again.
-      </div>
-    );
-  }
-  if (parsed.dateProblem === "ambiguous") {
-    return (
-      <fieldset className="flex flex-col gap-2 rounded-lg border border-warn bg-warn-soft p-3 text-sm">
-        <legend className="sr-only">Day and month order in the {what}</legend>
-        <span className="flex items-center gap-1 font-medium">
-          Is 02/03/2026 in the {what} the 2nd of March or the 3rd of February?
-          <Help
-            label="Day and month order"
-            description="Every date in this file reads both ways round, so say which it is. All the dates are then read the same way."
-            example="Files from Australia and the UK are usually day first: 02/03/2026 is 2 March."
-          />
-        </span>
-        <span className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2">
-            <input type="radio" name={groupName} onChange={() => onOrder("dmy")} /> Day first (2 March)
-            <Help label="Day first" description="Read every date as day, then month, then year." example="02/03/2026 is 2 March 2026." />
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="radio" name={groupName} onChange={() => onOrder("mdy")} /> Month first (3 February)
-            <Help label="Month first" description="Read every date as month, then day, then year, as in the US." example="02/03/2026 is 3 February 2026." />
-          </label>
-        </span>
-      </fieldset>
-    );
-  }
-  return (
-    <section aria-label={`What was read from the ${what}`} className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3 text-sm">
-      <p>
-        Read <strong className="tabular-nums">{formatNumber(parsed.rows.length, 0)}</strong> rows from the {what} ({source.fileName}).
-        {parsed.errors.length > 0 && ` ${parsed.errors.length} row${parsed.errors.length === 1 ? " was" : "s were"} left out.`}
-        {parsed.dateOrder && ` Dates read ${parsed.dateOrder === "dmy" ? "day first" : "month first"}.`}
-      </p>
-      {source.note && <p className="text-muted-foreground">{source.note}</p>}
-      {parsed.errors.length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-muted-foreground">Rows left out</summary>
-          <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-            {parsed.errors.slice(0, 20).map((e) => (
-              <li key={e.line}>
-                Line {e.line}: {e.message}
-              </li>
-            ))}
-            {parsed.errors.length > 20 && <li>and {parsed.errors.length - 20} more.</li>}
-          </ul>
-        </details>
-      )}
-      {extra}
-    </section>
   );
 }
 
