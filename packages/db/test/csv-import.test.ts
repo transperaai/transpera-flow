@@ -797,8 +797,23 @@ describe("parseLogTime extensions", () => {
     expect(parseLogTime("02/03/2026 0:15 AM")).toBeNull();
   });
 
+  it("reads AM and PM after an ISO time", () => {
+    expect(parseLogTime("2026-06-13T12:00:00 AM")).toBe(d(2026, 6, 13));
+    expect(parseLogTime("2026-06-13 12:15 PM")).toBe(d(2026, 6, 13, 12, 15));
+    expect(parseLogTime("2026-06-13T09:30:00pm")).toBe(d(2026, 6, 13, 21, 30));
+    expect(parseLogTime("2026-06-13 13:00 PM")).toBeNull();
+    // Without AM/PM, an ISO time reads as before.
+    expect(parseLogTime("2026-06-13T12:00:00")).toBe(d(2026, 6, 13, 12));
+  });
+
   it("reads two-digit years on slashed dates", () => {
     expect(parseLogTime("02/03/26")).toBe(d(2026, 3, 2));
+    // The pivot: 00 to 69 are the 2000s, 70 to 99 the 1900s.
+    expect(parseLogTime("01/01/69")).toBe(d(2069, 1, 1));
+    expect(parseLogTime("01/01/70")).toBe(d(1970, 1, 1));
+    expect(parseLogTime("01/01/99")).toBe(Date.UTC(1999, 0, 1));
+    expect(parseLogTime("2-Mar-98")).toBe(Date.UTC(1998, 2, 2));
+    expect(parseLogTime("Mar 2, 71")).toBe(Date.UTC(1971, 2, 2));
     expect(parseLogTime("13/03/26 09:00")).toBe(d(2026, 3, 13, 9));
     expect(detectDateOrder(["13/03/26"])).toBe("dmy");
     expect(detectDateOrder(["02/03/26"])).toBe("ambiguous");

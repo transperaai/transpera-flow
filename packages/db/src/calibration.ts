@@ -118,13 +118,15 @@ export function splitCsv(text: string, sep: string = detectDelimiter(text)): str
   return rows;
 }
 
-const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?)?$/i;
+const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?(?:\s*([AP]M))?)?$/i;
 const SLASHED = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4}|\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?)?$/i;
 // Month names (English, full or three letters): `2 Mar 2026`, `02-Mar-2026`, `Mar 2, 2026`. Never ambiguous.
 const TEXTUAL_TIME = String.raw`(?:[ T,]\s*(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?)?`;
 // Two-digit years too (Excel's d-mmm-yy: `2-Mar-26`), and ordinals (`2nd March 2026`).
 const TEXTUAL = new RegExp(String.raw`^(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]{3,9})\.?,?[\s-]+(\d{4}|\d{2})` + TEXTUAL_TIME + "$", "i");
 const TEXTUAL_MDY = new RegExp(String.raw`^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}|\d{2})` + TEXTUAL_TIME + "$", "i");
+/** The century of a two-digit year: 00 to 69 are 2000 to 2069, 70 to 99 are 1970 to 1999 (the usual pivot), so `01/01/99` isn't in 2099. */
+const twoDigitYear = (yy: number): number => (yy >= 70 ? 1900 : 2000);
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 /** A month's number (1-12) from its English name, full or three letters, any case; 0 when it isn't one. */
 const monthNumber = (name: string): number => {
@@ -163,7 +165,7 @@ export function hasTimeOfDay(text: string): boolean {
 /**
  * A date or date-time as epoch milliseconds, or null. Slashed dates are read in `order` (day first unless told). Also read:
  * month names (`2 Mar 2026`, `2-Mar-26`, `2nd March 2026`, `Mar 2, 2026`, `Sept 2 2026`), AM/PM after a time on slashed and month-name dates, and two-digit years on
- * slashed dates (`02/03/26` is 2026).
+ * slashed dates (`02/03/26` is 2026, `02/03/99` is 1999: 70 and over are the 1900s), and AM/PM after an ISO time too.
  */
 export function parseLogTime(text: string, order: DateOrder = "dmy"): number | null {
   const s = text.trim();
@@ -179,9 +181,10 @@ export function parseLogTime(text: string, order: DateOrder = "dmy"): number | n
     mi = Number(iso[5] ?? 0);
     se = Number(iso[6] ?? 0);
     zone = iso[7];
+    ampm = iso[8];
   } else if (df) {
     [d, mo, y] = order === "dmy" ? [Number(df[1]), Number(df[2]), Number(df[3])] : [Number(df[2]), Number(df[1]), Number(df[3])];
-    if (df[3]!.length === 2) y += 2000;
+    if (df[3]!.length === 2) y += twoDigitYear(y);
     h = Number(df[4] ?? 0);
     mi = Number(df[5] ?? 0);
     se = Number(df[6] ?? 0);
@@ -191,7 +194,7 @@ export function parseLogTime(text: string, order: DateOrder = "dmy"): number | n
     d = Number(dayFirst ? tx[1] : tx[2]);
     mo = monthNumber((dayFirst ? tx[2] : tx[1])!);
     y = Number(tx[3]);
-    if (tx[3]!.length === 2) y += 2000;
+    if (tx[3]!.length === 2) y += twoDigitYear(y);
     h = Number(tx[4] ?? 0);
     mi = Number(tx[5] ?? 0);
     se = Number(tx[6] ?? 0);
