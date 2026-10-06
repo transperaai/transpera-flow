@@ -1,7 +1,7 @@
 // Shared, memoised fixture data for the stories: Northbeam (the demo company) and one run of it. Everything is fixed: the seed,
 // the number of runs and the start date, so a story renders the same pixels every time. Never `new Date()` here.
 
-import { simulate, toRatingConfig, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
+import { simulate, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import {
   defaultCompanyPart,
   northbeamBundle,
@@ -61,19 +61,17 @@ export function companyBundle(): ProcessBundle {
   return { ...base, process: company.process, revision: company.revision, steps: company.steps, edges: company.edges, retired: [], otherProcesses: parts };
 }
 
-/** A rating for every step, so the map shows each of the four bands at least once. */
-export function ratingRank(stepId: string, index: number): { rank: number; label: string } {
-  void stepId;
-  const bands: { rank: number; label: string }[] = [
+/** A rating for every step of a bundle, cycling through the four bands, so the map shows each at least once. */
+export function ratingsByStep(bundle: ProcessBundle): (stepId: string) => { rank: number; label: string } | null {
+  const bands = [
     { rank: 0, label: "Great" },
     { rank: 1, label: "Good" },
     { rank: 2, label: "Bad" },
     { rank: 3, label: "Operational risk" },
   ];
-  return bands[index % bands.length]!;
+  const at = new Map(bundle.steps.map((s, i) => [s.id, bands[i % bands.length]!]));
+  return (stepId) => at.get(stepId) ?? null;
 }
-
-export const RATINGS_ALL: readonly Rating[] = ["great", "good", "bad", "risk"];
 
 // Solutions, as the Solutions list holds them.
 const STAMP = "2026-10-05T10:00:00.000Z";
