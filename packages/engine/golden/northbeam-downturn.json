@@ -1,7 +1,7 @@
 {
   "model": "northbeam-downturn",
   "description": "Northbeam as seeded under the Downturn market for the whole run: fewer enquiries that sign less, slower decisions, lower prices, more churn (market.ts).",
-  "engineVersion": "1.6.0",
+  "engineVersion": "1.7.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

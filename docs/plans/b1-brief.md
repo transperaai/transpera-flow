@@ -754,8 +754,10 @@ person with 30 hours, skills and leave):
 ### 2a: done
 
 `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @transpera-flow/web build` green, including PostgREST. Bootstrap
-and types regenerated; the apply file written; preflight in the PR body; the production-migrations row added. No
-`ENGINE_VERSION` bump and no golden changes (editors' numbers can't move: the round-trip proves it). The PR says what a
+and types regenerated; the apply file written; preflight in the PR body; the production-migrations row added. The
+engine gained an optional `payHidden` field on the model and `overtimeCost` became nullable, so `ENGINE_VERSION` is
+bumped to 1.7.0 with `golden:approve --bump` (as market conditions did for 1.2.0). No golden number changed, only the
+version recorded in each baseline (editors' numbers can't move: the round-trip proves it). The PR says what a
 member sees between 2a and 2b ("Team member N" rows on per-person screens).
 
 ### 2b: the screens (no migration)
@@ -1033,7 +1035,8 @@ member, described in text.
 - Redacting names inside free text (issue titles, findings, AI summaries, source text). They're shared team output.
 - Option C (per-workspace "no simulated numbers for members"): a later follow-up.
 - Making the other owner-only settings editable (Q9).
-- Any change to `save_fields`, the engine or golden numbers. No `ENGINE_VERSION` bump in any slice.
+- Any change to `save_fields` or to golden numbers. The engine changes only by the optional `payHidden` field and a nullable
+  `overtimeCost` (slice 2a), approved as `ENGINE_VERSION` 1.7.0 with `--bump` and no golden number moved; no other bump in any slice.
 
 ## Questions for Austin
 

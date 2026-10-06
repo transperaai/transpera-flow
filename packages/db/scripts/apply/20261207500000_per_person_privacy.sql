@@ -184,7 +184,7 @@ create policy "read ai_runs" on public.ai_runs for select to authenticated
 
 -- Who is who. A member who could read every `memberships` row (user_id and person_id) could join it to "Team member N" and
 -- name every person. Owners, editors and agency admins keep reading them all (and owners and agency admins also through
--- "manage memberships"); everyone else reads only their own active membership.
+-- "manage memberships"); everyone else reads only their own membership row (the policy doesn't check `active`).
 drop policy "read memberships" on public.memberships;
 create policy "read memberships" on public.memberships for select to authenticated
   using (public.can_read_workspace(workspace_id)
@@ -486,7 +486,7 @@ create policy "read ai_runs" on public.ai_runs for select to authenticated
 
 -- Who is who. A member who could read every `memberships` row (user_id and person_id) could join it to "Team member N" and
 -- name every person. Owners, editors and agency admins keep reading them all (and owners and agency admins also through
--- "manage memberships"); everyone else reads only their own active membership.
+-- "manage memberships"); everyone else reads only their own membership row (the policy doesn't check `active`).
 drop policy "read memberships" on public.memberships;
 create policy "read memberships" on public.memberships for select to authenticated
   using (public.can_read_workspace(workspace_id)
