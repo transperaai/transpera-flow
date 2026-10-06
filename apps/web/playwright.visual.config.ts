@@ -1,11 +1,13 @@
 import { defineConfig } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 const baselines = process.env.VISUAL_BASELINES === "1";
 
 // Baselines are only ever made in the pinned Playwright image, so they are byte-stable. A Playwright bump without an image bump
 // would give slightly different pixels, so it fails loudly instead.
 if (baselines) {
-  const { version } = require("@playwright/test/package.json") as { version: string };
+  // Read from the working directory (apps/web), where pnpm links the package: `require` and `import.meta` are both off the table in a config Playwright loads.
+  const { version } = JSON.parse(readFileSync("node_modules/@playwright/test/package.json", "utf8")) as { version: string };
   if (process.env.PLAYWRIGHT_IMAGE !== `v${version}-noble`) {
     throw new Error(`VISUAL_BASELINES=1 needs PLAYWRIGHT_IMAGE=v${version}-noble (the image tag must match @playwright/test ${version}); got "${process.env.PLAYWRIGHT_IMAGE ?? ""}".`);
   }
