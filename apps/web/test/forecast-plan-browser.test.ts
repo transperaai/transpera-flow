@@ -39,7 +39,7 @@ async function mount(width: number, mode: "demo" | "readonly" = "demo", url?: st
   await page.addScriptTag({ content: script });
   await page.evaluate((o) => window.mountForecast(o), { mode, url, broken, many });
   try {
-    await page.waitForSelector("[data-forecast-timeline]", { timeout: 90_000 });
+    await page.waitForSelector("[data-forecast-timeline], [data-forecast-compare]", { timeout: 90_000 });
   } catch (e) {
     // Say what the page showed and what it complained about, not just that it timed out.
     throw new Error(`${(e as Error).message}\nErrors: ${errors.join(" | ")}\nPage: ${(await page.locator("#root").innerText()).slice(0, 600)}`);
@@ -299,19 +299,32 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         const before = await simRuns();
         await page.locator("[data-plan-select]").selectOption({ label: "Many runs" });
         await waitRuns(page, 1);
-        // Four go-live months: five runs, one for each.
-        expect((await simRuns()) - before).toBe(5);
+        // Four go-live months: five segments, but the first is the live model, which the page has already run.
+        expect((await simRuns()) - before).toBe(4);
         const m = page.locator("[data-plan-marker]").last();
         await m.focus();
         await page.keyboard.press("ArrowRight");
         await waitRuns(page, 2);
         // The last solution moved a month: every segment's model is the same as before, so nothing runs again.
-        expect((await simRuns()) - before).toBe(5);
+        expect((await simRuns()) - before).toBe(4);
         // Moving the first one changes what the later segments have live: only those whose models changed run.
         await page.locator("[data-plan-marker]").first().focus();
         await page.keyboard.press("ArrowRight");
         await waitRuns(page, 3);
-        expect((await simRuns()) - before).toBeLessThan(10);
+        expect((await simRuns()) - before).toBeLessThan(8);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shares runs between the plans of the compare view: the same two runs are computed once, not twice", async () => {
+        const url = `/demo/forecast?compare=${MARCH_PLAN},${MARCH_PLAN}`;
+        const { page, errors } = await mount(width, "demo", url);
+        await page.waitForSelector("[data-compare-progress]");
+        await page.waitForFunction(() => (window.__simRuns ?? 0) >= 3, undefined, { timeout: 90_000 });
+        await page.waitForTimeout(1000);
+        // The live forecast's run, and the two runs of "Hire in March" (the hire; the hire with the solution): once each,
+        // although plan A and plan B both asked for both of them at the same moment.
+        expect(await page.evaluate(() => window.__simRuns)).toBe(3);
         expect(errors).toEqual([]);
         await page.close();
       });

@@ -13,7 +13,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { partOf, type ForecastPlanMarker, type ForecastPlanRow, type IssueRow, type ProcessBundle, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
@@ -28,6 +28,7 @@ import { laneMarkers } from "@/lib/forecast/lane";
 import { MAX_MARKERS, parsePlanInput, type PlanParseContext } from "@/lib/forecast/plan";
 import { addDays, dateAtPosition, hoursToDate, mondayOnOrBefore, monthBounds } from "@/lib/forecast/positions";
 import { deleteDemoPlan, saveDemoPlan, useDemoPlans } from "@/lib/forecast/plans-demo";
+import { runKey, sharedSimPool } from "@/lib/forecast/sim-pool";
 import { timelineData, timelineMonths } from "@/lib/forecast/timeline";
 import { usePlanForecast } from "@/lib/forecast/use-plan-forecast";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -108,6 +109,11 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
   const built = useMemo(() => forecastModel(live, months, start), [live, months, start]);
   const sim = useSimulation(built.model, 30, 1, { monthly: true, monthStarts: built.monthStarts });
   const result = sim.status === "done" && built.model && sim.run.result.H === built.model.horizonWeeks * built.model.hoursPerWeek ? sim.run.result : null;
+  // The live run is also what a plan with no changes would run (and segment 0 of any plan with no solution at month 0): hand it
+  // to the plans' pool, so nobody runs it twice.
+  useEffect(() => {
+    if (built.model && built.monthStarts && result) sharedSimPool().seed(runKey(built.model, built.monthStarts), result);
+  }, [built.model, built.monthStarts, result]);
   const rules = ANALYSIS_DEFAULTS;
   const cutoffs = useMemo(() => toRatingConfig(rules, live.workspace.settings.hours_per_week).rules.busy.cutoffs, [rules, live.workspace.settings.hours_per_week]);
   const busyLine = cutoffs[1];

@@ -5,6 +5,10 @@ Scoped 6 Oct 2026 (overnight run) against `origin/main` at 01523297 (B1 2b, #205
 to it and wins where they differ. Build strictly from it. Austin is asleep: where this brief is unclear, take the
 default in "Open questions" and say so in the PR. Don't invent beyond it.
 
+> **Superseded (review, 6 Oct):** Q8 and every "no `ENGINE_VERSION` bump" below were overtaken by the 1.7.0 and 1.8.0 rule
+> (an output addition takes `golden:approve --bump` even when no number moves). B7 shipped as **engine 1.9.0**; no golden
+> number moved. The apply order is also stated in the apply file: after C1 and B3, or renumber.
+
 Branch: `claude/b7-forecast-planning` (this brief is its first commit; build on it). Migration version
 **`20261213000000_forecast_plans`**. Commit and push after every step below.
 
@@ -24,7 +28,7 @@ dates and leave that come from Settings → People. B7 makes it a planning tool:
    solutions is run once per go-live month (the model with the solutions live by then, all from month 0, same seed), and
    the monthly series are **spliced**: months before a solution's month come from the run without it; from that month on,
    from the run with it (stock series carried on from where they were, see "Splicing").
-5. **One additive engine output** (no number moves, no `ENGINE_VERSION` bump): month-by-month MRR and clients at risk per
+5. **One additive engine output** (no number moves; shipped as engine 1.9.0, see the note above): month-by-month MRR and clients at risk per
    service in `MonthlyResult`. The compare view needs both and the engine doesn't report them per month today.
 6. **Compare two plans** (`?compare=a,b`; "No changes" counts as a plan): monthly recurring revenue, clients at risk per
    client group, how busy each role gets: both plans' averages and 10–90% ranges, and the difference.

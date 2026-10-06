@@ -1,34 +1,24 @@
 "use client";
 
 // Runs a forecast plan (B7, issue #36): the live model with the plan's hires and leave in it, and, for each month a
-// solution goes live, one more run with the solutions live by then (planSegments). The runs are awaited in order in one
-// worker, with the same seed as the live forecast (so a difference comes from the plan, not from chance), and their
-// month-by-month numbers are spliced (spliceMonthly). A newer input cancels the run in flight and drops its results.
+// solution goes live, one more run with the solutions live by then (planSegments). The runs are spread over a shared pool
+// of up to three workers (shared by every plan on the page, with a map of runs in flight so an identical run is computed
+// once), with the same seed as the live forecast (so a difference comes from the plan, not from chance), and finished runs
+// are kept by what they were run from. Their month-by-month numbers are spliced (spliceMonthly). A newer input cancels
+// the runs in flight and drops their results; a run that fails stops the rest of that plan's runs from starting.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ForecastPlanMarker, ProcessBundle, SolutionRow } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
-import { SimulationCancelled, SimulationClient, type WorkerLike } from "@/lib/sim/client";
+import { SimulationCancelled } from "@/lib/sim/client";
 import { forecastModel } from "./forecast";
 import { planSegments, type MarkerProblem } from "./plan";
 import { monthBounds } from "./positions";
+import { runSegments, sharedSimPool } from "./sim-pool";
 import { spliceMonthly } from "./splice";
 
 /** Re-runs wait this long after the last change, so a key held down or markers moved one after another run once. */
 const DEBOUNCE_MS = 150;
-/** The most workers a plan's runs are spread over. */
-const POOL_SIZE = 3;
-/** Finished segment runs, by what they were run from, kept so a change that leaves a segment's model alone doesn't run it again. */
-const CACHE_LIMIT = 24;
-const segmentCache = new Map<string, SimulationResult>();
-const cacheKey = (model: EngineModel, monthStarts: readonly number[]) => `${JSON.stringify(model)}|${monthStarts.join(",")}|${REPS}|${SEED}`;
-function remember(key: string, result: SimulationResult) {
-  segmentCache.delete(key);
-  segmentCache.set(key, result);
-  while (segmentCache.size > CACHE_LIMIT) segmentCache.delete(segmentCache.keys().next().value!);
-}
-const REPS = 30;
-const SEED = 1;
 
 export interface PlanRun {
   model: EngineModel;
@@ -109,7 +99,6 @@ export function usePlanForecast({
     };
   }, [bundle, markers, solutions, months, startDate]);
 
-  const poolRef = useRef<SimulationClient[]>([]);
   const [state, setState] = useState<{ status: PlanForecast["status"]; run: PlanRun | null; error: string | null; progress: [number, number]; finished: number }>({
     status: "idle",
     run: null,
@@ -119,18 +108,7 @@ export function usePlanForecast({
   });
 
   useEffect(() => {
-    // Workers start when a client first runs something, so a page with no plan costs none.
-    const pool = Array.from(
-      { length: POOL_SIZE },
-      () => new SimulationClient(() => new Worker(new URL("../../workers/simulate.worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike),
-    );
-    poolRef.current = pool;
-    return () => pool.forEach((c) => c.dispose());
-  }, []);
-
-  useEffect(() => {
     if (!prepared) {
-      poolRef.current.forEach((c) => c.cancel());
       setState((s) => (s.status === "idle" && !s.run ? s : { ...s, status: "idle", run: null, error: null, progress: [0, 0] }));
       return;
     }
@@ -139,32 +117,18 @@ export function usePlanForecast({
       return;
     }
     let active = true;
+    let cancelJob: (() => void) | null = null;
     const total = prepared.segments.length;
     const timer = setTimeout(async () => {
       setState((s) => ({ ...s, status: "running", error: null, progress: [0, total] }));
       try {
-        const results: SimulationResult[] = new Array<SimulationResult>(total);
-        let finishedRuns = 0;
-        const one = async (i: number, client: SimulationClient) => {
-          const seg = prepared.segments[i]!;
-          const key = cacheKey(seg.model, prepared.monthStarts);
-          let result = segmentCache.get(key);
-          if (result) remember(key, result);
-          else {
-            result = (await client.run(seg.model, { reps: REPS, seed: SEED, monthly: true, monthStarts: prepared.monthStarts })).result;
-            remember(key, result);
-          }
-          if (!active) return;
-          results[i] = result;
-          setState((s) => ({ ...s, progress: [++finishedRuns, total] }));
-        };
-        // Each worker takes every POOL_SIZE-th segment, one after another; the workers run side by side.
-        const workers = Math.min(POOL_SIZE, total);
-        await Promise.all(
-          Array.from({ length: workers }, async (_, w) => {
-            for (let i = w; i < total && active; i += workers) await one(i, poolRef.current[w]!);
-          }),
-        );
+        // Every segment is asked of the page's shared pool at once: it runs a few at a time, shares runs in flight with the
+        // other plans on the page, and keeps finished ones.
+        const job = runSegments(sharedSimPool(), prepared.segments, prepared.monthStarts, (done, count) => {
+          if (active) setState((s) => ({ ...s, progress: [done, count] }));
+        });
+        cancelJob = job.cancel;
+        const results = await job.results;
         if (!active) return;
         const runs = prepared.segments.map((seg, i) => ({ from: seg.from, result: results[i]! }));
         const first = runs[0]!.result;
@@ -178,8 +142,8 @@ export function usePlanForecast({
     return () => {
       active = false;
       clearTimeout(timer);
-      // A newer input cancels what is running: its results are dropped.
-      poolRef.current.forEach((c) => c.cancel());
+      // A newer input drops what is running: runs nobody else wants are stopped.
+      cancelJob?.();
     };
   }, [prepared]);
 
