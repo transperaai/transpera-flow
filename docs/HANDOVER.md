@@ -188,6 +188,13 @@ password to `postgres`.
 **Overnight run (Austin, 6 Oct): do everything through to merged, then carry on with the next tickets.** First check the
 token: `bash packages/db/scripts/prod-sql.sh -c "select 1"` must return a row, not 401. If it fails, stop and say so.
 
+**#207's CI (as of 6 Oct evening):** after the PostgREST test fix (705a258), one CI run failed in
+`packages/db/test/workspace-import.test.ts` ("a restore is a round trip > Northbeam … within run-to-run variation"):
+`costPerWin` restored 4038.9 vs source 3337.2, tolerance 655.5. #207 doesn't touch restore. A restored workspace gets new
+ids, which feed the random streams, so this check is statistical and can fail by chance (it also failed once locally under
+load). Check the second run on the same commit. If this test fails on any branch, make it robust in its own small PR (e.g.
+more replications or a tolerance derived from the run-to-run spread), never by skipping it, and merge that first.
+
 For each PR in order (#205, then #207, then #206), follow "Applying a migration" below:
 1. Bring `origin/main` into the branch (merge, never rebase). For #207 and #206 that brings the previous migration in:
    regenerate `bootstrap.sql` with `pnpm --filter @transpera-flow/db gen:bootstrap` and fix the
