@@ -33271,12 +33271,14 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 --   3. A new index `audit_log (target_id)`: `log_process_import`'s "already logged?" query grows with the size of the workspace
 --      (every company-model row the restore writes adds an audit row). With the index it is a lookup: 1.07 s down to 0.02 s at
 --      250 processes.
---   4. About four times the limits, sized from the measurements (every limit at once: 1.84 s at today's size, 6.6 to 7.3 s at four
---      times, after both speedups): 200 processes, 2,000 steps, 4,000 edges, 800 sources and 6,000,000 characters of their text,
---      1,200 issues, 2,000 people, 4,000 clients, 1,200 scenarios, 1,200 blocks, 2,000 suggestions, 1,200 proposals, 1,600 role
---      assignments, 4,000 skills, 1,600 client assignments, 4,000 source links, and a plan of 20 MB (the database measures the jsonb
---      text, which has a space after each colon and comma, so it allows 26,214,400 characters of it).
---   5. New caps on sections that had none: 4,000 client services, 2,000 leave entries, and 2,000 rows of the small company-model
+--   4. Three times the limits, sized from the measurements (the brief's audit: every limit at once 1.84 s at today's size, 6.6 to 7.3 s
+--      at four times, after both speedups, for a plan without leave, client services and the small company tables; the builder's
+--      fuller plan, every table filled, took 14.9 to 17.7 s at four times, over the 15 s local budget, so the limits were lowered by
+--      a quarter): 150 processes, 1,500 steps, 3,000 edges, 600 sources and 4,500,000 characters of their text, 900 issues, 1,500
+--      people, 3,000 clients, 900 scenarios, 900 blocks, 1,500 suggestions, 900 proposals, 1,200 role assignments, 3,000 skills,
+--      1,200 client assignments, 3,000 source links, and a plan of 15 MB (the database measures the jsonb text, which has a space
+--      after each colon and comma, so it allows 19,660,800 characters of it).
+--   5. New caps on sections that had none: 3,000 client services, 1,500 leave entries, and 1,500 rows of the small company-model
 --      tables together (lead sources, seasonality, churn drivers, market conditions, market schedule, services, servicing rules,
 --      client groups).
 --   6. A second restore into the same workspace while one runs is refused at once (`55P03`, hint `busy`, "already running") by a
@@ -33307,7 +33309,7 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 --        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and pid <> pg_backend_pid();
 --
 -- POST-APPLY CHECKS:
---   1. Expect false, {search_path="",statement_timeout=40s}, 92c9f2786bba85f8944fb146ba4bfb23:
+--   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:
 --        select prosecdef, proconfig, md5(prosrc) from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure;
 --   2. Only authenticated may execute it (as row 54's post-apply checks 1 and 2). Expect one row, authenticated EXECUTE:
 --        select routine_name, grantee, privilege_type from information_schema.routine_privileges
@@ -33756,7 +33758,7 @@ declare
   one_sections constant text[] := array['settings','demand_settings','lever_settings','analysis_rules'];
   placeholder constant text := '00000000-0000-4000-8000-';
   placeholder_re constant text := '^00000000-0000-4000-8000-[0-9a-f]{12}$';
-  max_plan_chars constant integer := 26214400;
+  max_plan_chars constant integer := 19660800;
 
   pl jsonb;
   txt text;
@@ -33803,7 +33805,7 @@ begin
     raise exception 'import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan' using errcode = '22023';
   end if;
   if char_length(p_plan::text) > max_plan_chars then
-    raise exception 'import_workspace_bundle: the plan is too big (at most 20 MB)' using errcode = '22023';
+    raise exception 'import_workspace_bundle: the plan is too big (at most 15 MB)' using errcode = '22023';
   end if;
   foreach sec in array list_sections loop
     if jsonb_typeof(p_plan -> sec) is distinct from 'array' then
@@ -33831,19 +33833,19 @@ begin
   select coalesce(sum(jsonb_array_length(p.value -> 'steps')), 0), coalesce(sum(jsonb_array_length(p.value -> 'edges')), 0)
     into step_total, edge_total from jsonb_array_elements(p_plan -> 'processes') p;
   select coalesce(sum(char_length(coalesce(s.value ->> 'body', ''))), 0) into chars from jsonb_array_elements(p_plan -> 'sources') s;
-  if jsonb_array_length(p_plan -> 'processes') > 200 or step_total > 2000 or edge_total > 4000
-    or jsonb_array_length(p_plan -> 'sources') > 800 or chars > 6000000
-    or jsonb_array_length(p_plan -> 'issues') > 1200 or jsonb_array_length(p_plan -> 'people') > 2000
-    or jsonb_array_length(p_plan -> 'clients') > 4000 or jsonb_array_length(p_plan -> 'scenarios') > 1200
-    or jsonb_array_length(p_plan -> 'blocks') > 1200 or jsonb_array_length(p_plan -> 'suggestions') > 2000
-    or jsonb_array_length(p_plan -> 'proposals') > 1200
-    or jsonb_array_length(p_plan -> 'person_roles') > 1600 or jsonb_array_length(p_plan -> 'person_skills') > 4000
-    or jsonb_array_length(p_plan -> 'client_assignments') > 1600 or jsonb_array_length(p_plan -> 'source_links') > 4000
-    or jsonb_array_length(p_plan -> 'client_services') > 4000 or jsonb_array_length(p_plan -> 'person_leave') > 2000
+  if jsonb_array_length(p_plan -> 'processes') > 150 or step_total > 1500 or edge_total > 3000
+    or jsonb_array_length(p_plan -> 'sources') > 600 or chars > 4500000
+    or jsonb_array_length(p_plan -> 'issues') > 900 or jsonb_array_length(p_plan -> 'people') > 1500
+    or jsonb_array_length(p_plan -> 'clients') > 3000 or jsonb_array_length(p_plan -> 'scenarios') > 900
+    or jsonb_array_length(p_plan -> 'blocks') > 900 or jsonb_array_length(p_plan -> 'suggestions') > 1500
+    or jsonb_array_length(p_plan -> 'proposals') > 900
+    or jsonb_array_length(p_plan -> 'person_roles') > 1200 or jsonb_array_length(p_plan -> 'person_skills') > 3000
+    or jsonb_array_length(p_plan -> 'client_assignments') > 1200 or jsonb_array_length(p_plan -> 'source_links') > 3000
+    or jsonb_array_length(p_plan -> 'client_services') > 3000 or jsonb_array_length(p_plan -> 'person_leave') > 1500
     or jsonb_array_length(p_plan -> 'lead_sources') + jsonb_array_length(p_plan -> 'seasonality') + jsonb_array_length(p_plan -> 'churn_drivers')
       + jsonb_array_length(p_plan -> 'market_conditions') + jsonb_array_length(p_plan -> 'market_schedule') + jsonb_array_length(p_plan -> 'services')
-      + jsonb_array_length(p_plan -> 'service_servicing') + jsonb_array_length(p_plan -> 'client_groups') > 2000 then
-    raise exception 'import_workspace_bundle: the plan is over a limit (200 processes, 2000 steps, 4000 edges, 800 sources of 6,000,000 characters, 1200 issues, 2000 people, 4000 clients, 1200 scenarios, 1200 blocks, 2000 suggestions, 1200 proposals, 1600 role assignments, 4000 skills, 1600 client assignments, 4000 source links, 4000 client services, 2000 leave entries, 2000 other company settings rows)' using errcode = '22023';
+      + jsonb_array_length(p_plan -> 'service_servicing') + jsonb_array_length(p_plan -> 'client_groups') > 1500 then
+    raise exception 'import_workspace_bundle: the plan is over a limit (150 processes, 1500 steps, 3000 edges, 600 sources of 4,500,000 characters, 900 issues, 1500 people, 3000 clients, 900 scenarios, 900 blocks, 1500 suggestions, 900 proposals, 1200 role assignments, 3000 skills, 1200 client assignments, 3000 source links, 3000 client services, 1500 leave entries, 1500 other company settings rows)' using errcode = '22023';
   end if;
   -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
   if exists (select 1 from jsonb_array_elements(p_plan -> 'scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
@@ -34180,12 +34182,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   3. A new index `audit_log (target_id)`: `log_process_import`''s "already logged?" query grows with the size of the workspace
 --      (every company-model row the restore writes adds an audit row). With the index it is a lookup: 1.07 s down to 0.02 s at
 --      250 processes.
---   4. About four times the limits, sized from the measurements (every limit at once: 1.84 s at today''s size, 6.6 to 7.3 s at four
---      times, after both speedups): 200 processes, 2,000 steps, 4,000 edges, 800 sources and 6,000,000 characters of their text,
---      1,200 issues, 2,000 people, 4,000 clients, 1,200 scenarios, 1,200 blocks, 2,000 suggestions, 1,200 proposals, 1,600 role
---      assignments, 4,000 skills, 1,600 client assignments, 4,000 source links, and a plan of 20 MB (the database measures the jsonb
---      text, which has a space after each colon and comma, so it allows 26,214,400 characters of it).
---   5. New caps on sections that had none: 4,000 client services, 2,000 leave entries, and 2,000 rows of the small company-model
+--   4. Three times the limits, sized from the measurements (the brief''s audit: every limit at once 1.84 s at today''s size, 6.6 to 7.3 s
+--      at four times, after both speedups, for a plan without leave, client services and the small company tables; the builder''s
+--      fuller plan, every table filled, took 14.9 to 17.7 s at four times, over the 15 s local budget, so the limits were lowered by
+--      a quarter): 150 processes, 1,500 steps, 3,000 edges, 600 sources and 4,500,000 characters of their text, 900 issues, 1,500
+--      people, 3,000 clients, 900 scenarios, 900 blocks, 1,500 suggestions, 900 proposals, 1,200 role assignments, 3,000 skills,
+--      1,200 client assignments, 3,000 source links, and a plan of 15 MB (the database measures the jsonb text, which has a space
+--      after each colon and comma, so it allows 19,660,800 characters of it).
+--   5. New caps on sections that had none: 3,000 client services, 1,500 leave entries, and 1,500 rows of the small company-model
 --      tables together (lead sources, seasonality, churn drivers, market conditions, market schedule, services, servicing rules,
 --      client groups).
 --   6. A second restore into the same workspace while one runs is refused at once (`55P03`, hint `busy`, "already running") by a
@@ -34216,7 +34220,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        select count(*) from pg_stat_activity where query ilike ''%import_workspace_bundle%'' and pid <> pg_backend_pid();
 --
 -- POST-APPLY CHECKS:
---   1. Expect false, {search_path="",statement_timeout=40s}, 92c9f2786bba85f8944fb146ba4bfb23:
+--   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:
 --        select prosecdef, proconfig, md5(prosrc) from pg_proc where oid = ''public.import_workspace_bundle(uuid, jsonb, text)''::regprocedure;
 --   2. Only authenticated may execute it (as row 54''s post-apply checks 1 and 2). Expect one row, authenticated EXECUTE:
 --        select routine_name, grantee, privilege_type from information_schema.routine_privileges
@@ -34665,7 +34669,7 @@ declare
   one_sections constant text[] := array[''settings'',''demand_settings'',''lever_settings'',''analysis_rules''];
   placeholder constant text := ''00000000-0000-4000-8000-'';
   placeholder_re constant text := ''^00000000-0000-4000-8000-[0-9a-f]{12}$'';
-  max_plan_chars constant integer := 26214400;
+  max_plan_chars constant integer := 19660800;
 
   pl jsonb;
   txt text;
@@ -34712,7 +34716,7 @@ begin
     raise exception ''import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan'' using errcode = ''22023'';
   end if;
   if char_length(p_plan::text) > max_plan_chars then
-    raise exception ''import_workspace_bundle: the plan is too big (at most 20 MB)'' using errcode = ''22023'';
+    raise exception ''import_workspace_bundle: the plan is too big (at most 15 MB)'' using errcode = ''22023'';
   end if;
   foreach sec in array list_sections loop
     if jsonb_typeof(p_plan -> sec) is distinct from ''array'' then
@@ -34740,19 +34744,19 @@ begin
   select coalesce(sum(jsonb_array_length(p.value -> ''steps'')), 0), coalesce(sum(jsonb_array_length(p.value -> ''edges'')), 0)
     into step_total, edge_total from jsonb_array_elements(p_plan -> ''processes'') p;
   select coalesce(sum(char_length(coalesce(s.value ->> ''body'', ''''))), 0) into chars from jsonb_array_elements(p_plan -> ''sources'') s;
-  if jsonb_array_length(p_plan -> ''processes'') > 200 or step_total > 2000 or edge_total > 4000
-    or jsonb_array_length(p_plan -> ''sources'') > 800 or chars > 6000000
-    or jsonb_array_length(p_plan -> ''issues'') > 1200 or jsonb_array_length(p_plan -> ''people'') > 2000
-    or jsonb_array_length(p_plan -> ''clients'') > 4000 or jsonb_array_length(p_plan -> ''scenarios'') > 1200
-    or jsonb_array_length(p_plan -> ''blocks'') > 1200 or jsonb_array_length(p_plan -> ''suggestions'') > 2000
-    or jsonb_array_length(p_plan -> ''proposals'') > 1200
-    or jsonb_array_length(p_plan -> ''person_roles'') > 1600 or jsonb_array_length(p_plan -> ''person_skills'') > 4000
-    or jsonb_array_length(p_plan -> ''client_assignments'') > 1600 or jsonb_array_length(p_plan -> ''source_links'') > 4000
-    or jsonb_array_length(p_plan -> ''client_services'') > 4000 or jsonb_array_length(p_plan -> ''person_leave'') > 2000
+  if jsonb_array_length(p_plan -> ''processes'') > 150 or step_total > 1500 or edge_total > 3000
+    or jsonb_array_length(p_plan -> ''sources'') > 600 or chars > 4500000
+    or jsonb_array_length(p_plan -> ''issues'') > 900 or jsonb_array_length(p_plan -> ''people'') > 1500
+    or jsonb_array_length(p_plan -> ''clients'') > 3000 or jsonb_array_length(p_plan -> ''scenarios'') > 900
+    or jsonb_array_length(p_plan -> ''blocks'') > 900 or jsonb_array_length(p_plan -> ''suggestions'') > 1500
+    or jsonb_array_length(p_plan -> ''proposals'') > 900
+    or jsonb_array_length(p_plan -> ''person_roles'') > 1200 or jsonb_array_length(p_plan -> ''person_skills'') > 3000
+    or jsonb_array_length(p_plan -> ''client_assignments'') > 1200 or jsonb_array_length(p_plan -> ''source_links'') > 3000
+    or jsonb_array_length(p_plan -> ''client_services'') > 3000 or jsonb_array_length(p_plan -> ''person_leave'') > 1500
     or jsonb_array_length(p_plan -> ''lead_sources'') + jsonb_array_length(p_plan -> ''seasonality'') + jsonb_array_length(p_plan -> ''churn_drivers'')
       + jsonb_array_length(p_plan -> ''market_conditions'') + jsonb_array_length(p_plan -> ''market_schedule'') + jsonb_array_length(p_plan -> ''services'')
-      + jsonb_array_length(p_plan -> ''service_servicing'') + jsonb_array_length(p_plan -> ''client_groups'') > 2000 then
-    raise exception ''import_workspace_bundle: the plan is over a limit (200 processes, 2000 steps, 4000 edges, 800 sources of 6,000,000 characters, 1200 issues, 2000 people, 4000 clients, 1200 scenarios, 1200 blocks, 2000 suggestions, 1200 proposals, 1600 role assignments, 4000 skills, 1600 client assignments, 4000 source links, 4000 client services, 2000 leave entries, 2000 other company settings rows)'' using errcode = ''22023'';
+      + jsonb_array_length(p_plan -> ''service_servicing'') + jsonb_array_length(p_plan -> ''client_groups'') > 1500 then
+    raise exception ''import_workspace_bundle: the plan is over a limit (150 processes, 1500 steps, 3000 edges, 600 sources of 4,500,000 characters, 900 issues, 1500 people, 3000 clients, 900 scenarios, 900 blocks, 1500 suggestions, 900 proposals, 1200 role assignments, 3000 skills, 1200 client assignments, 3000 source links, 3000 client services, 1500 leave entries, 1500 other company settings rows)'' using errcode = ''22023'';
   end if;
   -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
   if exists (select 1 from jsonb_array_elements(p_plan -> ''scenarios'') s where jsonb_typeof(s.value -> ''id'') is distinct from ''string'') then

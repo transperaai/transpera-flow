@@ -20,11 +20,13 @@ export const PLAN_FORMAT = "transpera-workspace-import/1";
 
 /**
  * What a restore will take. B10 2b started at 50 processes, 500 steps and so on (they restored in about 2 s, inside a 3 s budget
- * because Supabase stops a statement by `authenticated` at 8 s). B21 (#203) raised them to about four times that: with the faster id
- * remap and the `audit_log (target_id)` index, every limit at once restores in 6.6 to 7.3 s on the test Postgres (a 16.7 MB plan),
- * against a local budget of 15 s (the performance test in packages/db/test/workspace-import-large.test.ts) and the function's own
- * `statement_timeout` of 40 s. `sourceChars` is only doubled: prose gzips to a third, so more would push a real backup past the 4 MB
- * request limit before any other limit. The SQL function checks the same numbers.
+ * because Supabase stops a statement by `authenticated` at 8 s). B21 (#203) raised them to three times that. The brief sized them at
+ * four times from a plan without leave, client services and the small company tables (6.6 to 7.3 s with the faster id remap and the
+ * `audit_log (target_id)` index); the performance test fills every table (packages/db/test/workspace-import-large.test.ts) and took
+ * 14.9 to 17.7 s at four times on the shared test Postgres, over its 15 s local budget, so every limit was lowered by a quarter
+ * (about 9.6 s of database CPU at three times). The function has its own `statement_timeout` of 40 s. `sourceChars` is only 1.5
+ * times: prose gzips to a third, so more would push a real backup past the 4 MB request limit before any other limit. The SQL
+ * function checks the same numbers.
  */
 export const WORKSPACE_IMPORT_LIMITS = {
   /** The file as read, and decompressed on the server. */
@@ -32,29 +34,29 @@ export const WORKSPACE_IMPORT_LIMITS = {
   /** The request body, gzipped (Vercel's limit is 4.5 MB). */
   compressedBytes: 4 * 1024 * 1024,
   /** The serialised plan. */
-  planBytes: 20 * 1024 * 1024,
-  processes: 200,
-  steps: 2000,
-  edges: 4000,
-  sources: 800,
-  sourceChars: 6_000_000,
-  issues: 1200,
-  people: 2000,
-  clients: 4000,
-  scenarios: 1200,
-  blocks: 1200,
-  suggestions: 2000,
-  proposals: 1200,
+  planBytes: 15 * 1024 * 1024,
+  processes: 150,
+  steps: 1500,
+  edges: 3000,
+  sources: 600,
+  sourceChars: 4_500_000,
+  issues: 900,
+  people: 1500,
+  clients: 3000,
+  scenarios: 900,
+  blocks: 900,
+  suggestions: 1500,
+  proposals: 900,
   /** The link tables, each row about 0.1 ms: sized with the limits above (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, a few links a source). */
-  personRoles: 1600,
-  personSkills: 4000,
-  clientAssignments: 1600,
-  sourceLinks: 4000,
+  personRoles: 1200,
+  personSkills: 3000,
+  clientAssignments: 1200,
+  sourceLinks: 3000,
   /** Sections that had no cap before B21. */
-  clientServices: 4000,
-  personLeave: 2000,
+  clientServices: 3000,
+  personLeave: 1500,
   /** Lead sources, seasonality, churn drivers, market conditions, market schedule, services, servicing rules and client groups, counted together. */
-  companyOther: 2000,
+  companyOther: 1500,
 } as const;
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;

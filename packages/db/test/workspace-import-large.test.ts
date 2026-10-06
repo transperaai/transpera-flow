@@ -293,7 +293,7 @@ describe("every limit at once", () => {
     expect(await count("first_principles", ws)).toBe(L.processes);
     expect(await count("processes", ws, "archived_at is not null")).toBeGreaterThan(0);
     expect(Number((await q("select count(*) from public.steps where workspace_id = $1 and person_id is not null", [ws]))[0]!.count)).toBeGreaterThan(0);
-    expect(Number((await q("select count(*) from public.steps where workspace_id = $1 and child_process_id is not null", [ws]))[0]!.count)).toBe(1);
+    expect(Number((await q("select count(*) from public.steps where workspace_id = $1 and child_process_id is not null and process_id in (select id from public.processes where not is_company)", [ws]))[0]!.count)).toBe(1);
     // `link_cited_sources` ran: steps that cite a source in their evidence are linked to it.
     expect(await count("source_links", ws, "kind = 'step'")).toBeGreaterThan(0);
   }, 120_000);
@@ -341,7 +341,7 @@ describe("the new caps", () => {
     const before = await snapshot(ws);
     const e = await failure(() => restoreAs(admin, ws, copy));
     expect(e.code, label).toBe("22023");
-    expect(e.message).toMatch(/^import_workspace_bundle: the plan is over a limit \(.*4000 client services, 2000 leave entries, 2000 other company settings rows\)$/);
+    expect(e.message).toMatch(/^import_workspace_bundle: the plan is over a limit \(.*3000 client services, 1500 leave entries, 1500 other company settings rows\)$/);
     expect(await snapshot(ws)).toEqual(before);
   });
 });
