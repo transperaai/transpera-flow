@@ -19,12 +19,14 @@ import { formatDateRange, formatNumber, formatPercent } from "@/lib/format";
 import { horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import {
   BUSY_LIMIT,
+  absenceCoverage,
   absenceRows,
   capacityFactorsShown,
   personDetail,
   personRows,
   teamSummary,
-  untestedSoleHolders,
+  weeksLabel,
+  weeksText,
   type AbsenceRow,
   type PersonBusy,
   type PersonDetail,
@@ -100,7 +102,7 @@ export function PeoplePage({
   const [baselineDone, setBaselineDone] = useState(false);
   if (sim.status === "done" && !baselineDone) setBaselineDone(true);
   // Someone who sees everyone tests everyone; a member or viewer tests only their own person, and an unlinked one tests no one (B2 Q3).
-  const testWho = viewer.seesEveryone ? undefined : viewer.ownPersonId ? [viewer.ownPersonId] : null;
+  const testWho = useMemo(() => (viewer.seesEveryone ? undefined : viewer.ownPersonId ? [viewer.ownPersonId] : null), [viewer]);
   const absenceWeeks = resolveMoney(ANALYSIS_DEFAULTS).absenceWeeks;
   const absence = useAbsenceTest(baseModel && baselineDone && testWho !== null ? baseModel : null, run?.result.seed ?? 1, absenceWeeks, testWho ?? undefined);
   // While a newer run goes, the numbers on screen are the previous run's, so they are read with the model that run was made from
@@ -118,11 +120,13 @@ export function PeoplePage({
     if (!baseModel || !absence) return null;
     const config = toRatingConfig(ANALYSIS_DEFAULTS, baseModel.hoursPerWeek);
     // A member sees only their own result, and no count of who else wasn't tested.
+    const { tooShort, untested } = absenceCoverage(baseModel, absence, testWho ?? undefined);
     return {
       rows: ownRowsOnly(viewer, absenceRows(baseModel, absence, config), (r) => r.id),
-      untested: viewer.seesEveryone ? untestedSoleHolders(baseModel, absence).length : 0,
+      tooShort,
+      untested: viewer.seesEveryone ? untested : 0,
     };
-  }, [baseModel, absence, viewer]);
+  }, [baseModel, absence, viewer, testWho]);
 
   const picker = (
     <div className="flex justify-end">
@@ -490,9 +494,6 @@ function PersonDetailBlock({ person, detail, bundle, editHref }: { person: Perso
   );
 }
 
-const weeksLabel = (r: AbsenceRow) =>
-  !r.recovered ? `Not within ${formatNumber(r.weeksWatched, 0)} weeks` : r.weeks <= 0 ? "Under 1 week" : r.weeks === 1 ? "1 week" : `${formatNumber(r.weeks, 0)} weeks`;
-
 /** Rule 8's results: how much work is lost, and for how long, when each person who is the only one for a step is away. Members see only their own. */
 function IfSomeoneIsAway({
   away,
@@ -500,7 +501,7 @@ function IfSomeoneIsAway({
   runWeeks,
   weeksAway,
 }: {
-  away: { rows: AbsenceRow[]; untested: number } | null;
+  away: { rows: AbsenceRow[]; tooShort: boolean; untested: number } | null;
   viewer: Viewer;
   runWeeks: number;
   weeksAway: number;
@@ -518,13 +519,17 @@ function IfSomeoneIsAway({
         />
       </div>
       <p className="px-4 pb-3 text-xs text-muted-foreground">
-        Tested over the workspace&apos;s own {runWeeks}-week run, with each person away for {formatNumber(weeksAway, 0)} {weeksAway === 1 ? "week" : "weeks"}.
+        Tested over the workspace&apos;s own {runWeeks}-week run, with each person away for {weeksText(weeksAway)}.
       </p>
       {unlinked ? (
         <p className="px-4 pb-4 text-sm text-muted-foreground">Nothing to show for you here.</p>
       ) : away === null ? (
         <p role="status" className="px-4 pb-4 text-sm text-muted-foreground">
           Testing what happens when each person is away…
+        </p>
+      ) : away.tooShort ? (
+        <p className="px-4 pb-4 text-sm text-muted-foreground" data-absence-too-short>
+          The workspace&apos;s {runWeeks}-week run is too short to test someone being away for {weeksText(weeksAway)}.
         </p>
       ) : away.rows.length === 0 ? (
         <p className="px-4 pb-4 text-sm text-muted-foreground">

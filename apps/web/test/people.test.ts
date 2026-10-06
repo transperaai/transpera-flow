@@ -14,12 +14,14 @@ import {
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import {
   CAPACITY_FACTOR_MIN_ITEMS,
+  absenceCoverage,
   absenceRows,
   capacityFactorsShown,
   leaveDays,
   personDetail,
   personRows,
   untestedSoleHolders,
+  weeksLabel,
 } from "@/lib/people";
 
 // The People page's numbers (B2, issue #31), worked out from a Larkspur run with the start date pinned so leave is stable.
@@ -229,5 +231,43 @@ describe("personDetail", () => {
     const people = bundle.people.map((p) => (p.id === id.jess ? { ...p, start_date: "2026-01-12", end_date: "2027-03-31" } : p));
     const d = personDetail(model, result, { ...bundle, people }, id.jess, START)!;
     expect([d.startDate, d.endDate]).toEqual(["2026-01-12", "2027-03-31"]);
+  });
+});
+
+describe("weeksLabel", () => {
+  const label = (weeks: number, recovered: boolean, weeksWatched = 0) => weeksLabel({ weeks, recovered, weeksWatched });
+  it("says under 1, 1 and N weeks when the queues recovered", () => {
+    expect(label(0, true)).toBe("Under 1 week");
+    expect(label(1, true)).toBe("1 week");
+    expect(label(3, true)).toBe("3 weeks");
+  });
+  it("says not within N weeks, singular for 1, and never 0 weeks", () => {
+    expect(label(7, false, 6)).toBe("Not within 6 weeks");
+    expect(label(2, false, 1)).toBe("Not within 1 week");
+    expect(label(1, false, 0)).toBe("Not before the run ends");
+  });
+});
+
+describe("a run too short to test", () => {
+  const short = { ...model, horizonWeeks: 1 };
+  it("tests nobody although there are sole holders, and says so rather than 'nobody is tested'", () => {
+    const test = absenceTest(short, { seed: 1, reps: 2 });
+    expect(test.people).toEqual([]);
+    expect(absenceCandidates(short).length).toBeGreaterThan(0);
+    // untestedSoleHolders counts every candidate, which is why the page must not print "N more aren't" next to "nobody".
+    expect(untestedSoleHolders(short, test).length).toBe(absenceCandidates(short).length);
+    expect(absenceCoverage(short, test)).toEqual({ tooShort: true, untested: 0 });
+  });
+  it("is limited to a member's own person", () => {
+    const test = absenceTest(short, { seed: 1, reps: 2, personIds: [id.imogen] });
+    expect(absenceCoverage(short, test, [id.imogen]).tooShort).toBe(true);
+    // Jess is no one's sole holder: nothing to test, so it isn't "too short" for her.
+    expect(absenceCoverage(short, absenceTest(short, { seed: 1, reps: 2, personIds: [id.jess] }), [id.jess])).toEqual({ tooShort: false, untested: 0 });
+  });
+  it("is not too short on a normal run, and counts the sole holders left out", () => {
+    const full = absenceTest(model, { seed: 1, reps: 2 });
+    expect(absenceCoverage(model, full)).toEqual({ tooShort: false, untested: 0 });
+    const fewer = absenceTest(model, { seed: 1, reps: 2, maxPeople: 1 });
+    expect(absenceCoverage(model, fewer)).toEqual({ tooShort: false, untested: absenceCandidates(model).length - 1 });
   });
 });

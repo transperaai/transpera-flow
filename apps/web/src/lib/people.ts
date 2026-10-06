@@ -205,3 +205,30 @@ export function personDetail(model: EngineModel, result: SimulationResult, bundl
       .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.end < b.end ? -1 : a.end > b.end ? 1 : 0)),
   };
 }
+
+/**
+ * What the absence test left out. `tooShort` when it tested nobody although there are people to test: the run is too short
+ * (the engine tests nothing when the run is shorter than the absence plus its start week), so "nobody is tested" would be wrong.
+ * `untested` counts sole holders left out of a test that did run (over ABSENCE_MAX_PEOPLE, or the time budget). Both are limited
+ * to `personIds` when the test was asked for only them (a member's own person).
+ */
+export function absenceCoverage(model: EngineModel, test: AbsenceTest, personIds?: readonly string[]): { tooShort: boolean; untested: number } {
+  const left = untestedSoleHolders(model, test).filter((id) => !personIds || personIds.includes(id));
+  const tooShort = test.people.length === 0 && left.length > 0;
+  return { tooShort, untested: tooShort ? 0 : left.length };
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** "Under 1 week", "1 week", "3 weeks"; when the queues never recovered, "Not within N weeks" (singular for 1, and no "0 weeks"). */
+export function weeksLabel(r: Pick<AbsenceRow, "weeks" | "recovered" | "weeksWatched">): string {
+  if (!r.recovered) {
+    const n = Math.round(r.weeksWatched);
+    return n < 1 ? "Not before the run ends" : `Not within ${plural(n, "week", "weeks")}`;
+  }
+  const n = Math.round(r.weeks);
+  return n < 1 ? "Under 1 week" : plural(n, "week", "weeks");
+}
+
+/** "2 weeks", "1 week". */
+export const weeksText = (n: number) => plural(n, "week", "weeks");
