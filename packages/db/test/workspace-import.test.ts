@@ -247,16 +247,29 @@ describe("a restore is a round trip", () => {
       expect(modelAfter).toEqual(JSON.parse(JSON.stringify(modelBefore)));
       // (2) Headline results. The engine seeds its random streams by hashing step, service and client ids into their labels
       // (packages/engine/src/simulate.ts, `streams.get(labels.join("work", s.id))`), so a restore, whose ids are all new, draws
-      // different random numbers at the same seed. What must hold is that the restored run is within ordinary run-to-run variation
-      // (decision recorded on #39): |restored@42 - source@42| <= 3 x spread, per headline metric the Overview shows, where the
-      // spread is how far the SOURCE moves when only the seed changes. One other seed (43) estimates that from a single pair and
-      // was too noisy (3 x a lucky small gap failed a faithful restore), so the source is run at 43 to 54 (the restore's ids are new at every run, so its draws differ at every run and the check must hold
-      // for any of them) and the spread is the largest |source@seed - source@42|. A small absolute floor (1% of the source's value, or 0.01) stops a zero spread making
-      // the check impossible.
+      // different random numbers at the same seed, and no seed reproduces the source's numbers. What must hold is that the restored
+      // workspace simulates to the same distribution as the source (decision recorded on #39), so this is a two-sample test of
+      // means, per headline metric the Overview shows:
+      //   - Each side is run RUNS times (30 replications each, as the app runs), source at seeds 42.., restored at seeds 1042..
+      //     (disjoint, so the two samples are independent). One run's headline value is a mean of 30 replications, so close to
+      //     normal (measured over 100 runs of each golden workspace: |skew| <= 0.75, excess kurtosis <= 0.9; costPerWin, a ratio
+      //     per replication, is the most skewed).
+      //   - t = (mean restored - mean source) / sqrt(var source / RUNS + var restored / RUNS), the sample variances measured here,
+      //     so the tolerance follows each metric's own run-to-run spread. With equal sizes and equal true variances (a faithful
+      //     restore) t follows Student's t with 2 x RUNS - 2 = 30 degrees of freedom: P(|t| > 6) = 1.4e-6 per metric, so over the
+      //     10 non-constant metrics of both workspaces a faithful restore fails about once in 10^5 CI runs. Resampling 2,000,000
+      //     pairs of 16-run groups from the measured runs gave tails at or below that (costPerWin: P(|t| > 5) = 6.5e-6, theory
+      //     2.3e-5), and 9 separate restores of each workspace showed no shift of the mean between restores (one-way ANOVA, all F < 2).
+      //   - What it still catches: the standard error of the difference is sqrt(2 / RUNS) = 0.35 run-to-run standard deviations,
+      //     so a shift of more than about 2.1 of them fails (Northbeam: cost per win +11%, lead time +5%, labour +7%). The check
+      //     before this one (|restored@42 - source@42| <= 3 x the largest of 12 source seed-to-seed gaps) failed faithful restores
+      //     by chance and needed a shift of about 8 standard deviations to fail reliably. The model comparison above already
+      //     catches a dropped step, a wrong duration or a lost edge exactly; this guards the part it can't see (what the ids alone
+      //     change).
+      // A metric that doesn't vary between runs (no spread on either side) must match exactly.
+      const RUNS = 16;
+      const T_MAX = 6;
       const modelAfterNew = toEngineModel(after, opts);
-      const src42 = simulate(modelBefore, 30, 42);
-      const others = [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54].map((seed) => simulate(modelBefore, 30, seed));
-      const res42 = simulate(modelAfterNew, 30, 42);
       const headline = (m: typeof modelBefore, r: ReturnType<typeof simulate>) => ({
         flowEfficiency: workingShare(timeSplitOf(m, r) ?? { handsOn: 0, waitingForPerson: 0, waitingOnOthers: 0 }) ?? 0,
         throughputDone: r.kpi.done.mean,
@@ -265,14 +278,18 @@ describe("a restore is a round trip", () => {
         costPerWin: r.kpi.costPerWin.mean,
         labour: r.kpi.labour.mean,
       });
-      const a = headline(modelBefore, src42);
-      const others_ = others.map((r) => headline(modelBefore, r));
-      const c = headline(modelAfterNew, res42);
-      for (const k of Object.keys(a) as (keyof typeof a)[]) {
-        const spread = Math.max(...others_.map((o) => Math.abs(a[k] - o[k])));
-        const floor = Math.max(0.01, Math.abs(a[k]) * 0.01);
-        const tolerance = Math.max(3 * spread, floor);
-        expect(Math.abs(c[k] - a[k]), `${k}: restored ${c[k]}, source ${a[k]}, tolerance ${tolerance}`).toBeLessThanOrEqual(tolerance);
+      const runs = (m: typeof modelBefore, firstSeed: number) => Array.from({ length: RUNS }, (_, i) => headline(m, simulate(m, 30, firstSeed + i)));
+      const src = runs(modelBefore, 42);
+      const res = runs(modelAfterNew, 1042);
+      const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+      const variance = (xs: number[], m = mean(xs)) => xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1);
+      for (const k of Object.keys(src[0]!) as (keyof (typeof src)[0])[]) {
+        const s = src.map((o) => o[k]);
+        const r = res.map((o) => o[k]);
+        const se = Math.sqrt(variance(s) / RUNS + variance(r) / RUNS);
+        const label = `${k}: restored mean ${mean(r)}, source mean ${mean(s)}, standard error ${se}`;
+        if (se === 0) expect(mean(r), label).toBe(mean(s));
+        else expect(Math.abs(mean(r) - mean(s)) / se, label).toBeLessThanOrEqual(T_MAX);
       }
     });
   });
