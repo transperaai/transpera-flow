@@ -1,6 +1,17 @@
 // What the People page shows, worked out from a run (issue #120). Pure, so it can be unit tested.
 
-import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
+import type { ProcessBundle } from "@transpera-flow/db";
+import {
+  absenceCandidates,
+  absenceRating,
+  resolvePeople,
+  type AbsenceTest,
+  type EngineModel,
+  type EnginePerson,
+  type Rating,
+  type RatingConfig,
+  type SimulationResult,
+} from "@transpera-flow/engine";
 
 /** A person whose utilisation at or above this in a bad month (the 90th percentile) counts as too busy; as on the rating model's busy rule. */
 export const BUSY_LIMIT = 0.85;
@@ -16,29 +27,58 @@ export interface PersonBusy {
   average: number;
   /** A bad month: the 90th percentile over the runs. */
   p90: number;
+  /** Shares of the person's capacity, averaged over the runs. */
+  clientWork: number;
+  salesWork: number;
+  overtime: number;
+  /** Working days of leave inside the run's period. */
+  leaveDays: number;
+}
+
+/** Working days in a week: the model's working day is `hoursPerWeek / 5` (WORKING_DAYS_PER_WEEK in packages/db/src/model.ts, not exported). */
+const WORKING_DAYS_PER_WEEK = 5;
+
+/** Working days of `person`'s leave inside the first `horizonHours` of the run; leave before the start or after the end doesn't count. */
+export function leaveDays(person: EnginePerson, horizonHours: number, hoursPerWeek: number): number {
+  const hours = (person.leave ?? []).reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, horizonHours) - Math.max(a, 0)), 0);
+  return hours / (hoursPerWeek / WORKING_DAYS_PER_WEEK);
+}
+
+/** First role's place in role order, then name: the one order the page uses for people (D20: never ranked). */
+function byRoleThenName(roleOrder: readonly string[]) {
+  return (a: { roles: readonly string[]; name: string }, b: { roles: readonly string[]; name: string }) =>
+    roleOrder.indexOf(a.roles[0] ?? "") - roleOrder.indexOf(b.roles[0] ?? "") || a.name.localeCompare(b.name);
 }
 
 /** Everyone in the run with their average and P90 utilisation, grouped by their first role in role order, then by name. */
 export function personRows(model: EngineModel, result: SimulationResult, fteById: ReadonlyMap<string, number>): PersonBusy[] {
   const roleOrder = Object.keys(model.roles);
+  const horizonHours = model.horizonWeeks * model.hoursPerWeek;
   return Object.entries(result.resolvedPeople)
     .flatMap(([id, p]) => {
       const band = result.kpi.people[id];
       if (!band) return [];
       return [
         {
-          id,
+          roles: p.roles,
           name: p.name,
-          role: p.roles.map((rid) => model.roles[rid]?.name).filter(Boolean).join(", "),
-          fte: fteById.get(id) ?? null,
-          average: band.util.mean,
-          p90: band.util.p90,
-          first: roleOrder.indexOf(p.roles[0] ?? ""),
+          row: {
+            id,
+            name: p.name,
+            role: p.roles.map((rid) => model.roles[rid]?.name).filter(Boolean).join(", "),
+            fte: fteById.get(id) ?? null,
+            average: band.util.mean,
+            p90: band.util.p90,
+            clientWork: band.ongoing.mean + band.servicing.mean,
+            salesWork: band.pipeline.mean,
+            overtime: band.overtime.mean,
+            leaveDays: leaveDays(p, horizonHours, model.hoursPerWeek),
+          } satisfies PersonBusy,
         },
       ];
     })
-    .sort((a, b) => a.first - b.first || a.name.localeCompare(b.name))
-    .map((r) => ({ id: r.id, name: r.name, role: r.role, fte: r.fte, average: r.average, p90: r.p90 }));
+    .sort(byRoleThenName(roleOrder))
+    .map((r) => r.row);
 }
 
 export interface TeamSummary {
@@ -55,5 +95,113 @@ export function teamSummary(rows: readonly PersonBusy[]): TeamSummary {
     people: rows.length,
     fte: withFte.length ? withFte.reduce((a, r) => a + r.fte!, 0) : null,
     busyInBadMonth: rows.filter((r) => r.p90 > BUSY_LIMIT).length,
+  };
+}
+
+export interface AbsenceRow {
+  id: string;
+  name: string;
+  role: string;
+  /** Names of the steps only they can do, in model step order. */
+  steps: string[];
+  workLost: number;
+  /** Weeks to catch up; when `recovered` is false, "more than" `weeksWatched`. */
+  weeks: number;
+  recovered: boolean;
+  weeksWatched: number;
+  clientDeadlineMissed: boolean;
+  /** Null only if the rule is switched off (never with the documented defaults). */
+  rating: Rating | null;
+}
+
+/**
+ * Rule 8's results, one row per person tested, in the same order as `personRows` (never by work lost: D20). Rated with
+ * `absenceRating`, as the Issues register does. The subject carries the person's first role and the first step; with the
+ * documented defaults there are no overrides, so the subject changes nothing.
+ */
+export function absenceRows(model: EngineModel, test: AbsenceTest, config: RatingConfig): AbsenceRow[] {
+  const people = resolvePeople(model);
+  const roleOrder = Object.keys(model.roles);
+  const stepOrder = model.steps.map((s) => s.id);
+  return test.people
+    .flatMap((f) => {
+      const p = people[f.personId];
+      if (!p) return [];
+      const steps = stepOrder.filter((id) => f.stepIds.includes(id));
+      return [
+        {
+          roles: p.roles,
+          name: p.name,
+          row: {
+            id: f.personId,
+            name: p.name,
+            role: p.roles.map((rid) => model.roles[rid]?.name).filter(Boolean).join(", "),
+            steps: steps.map((id) => model.steps.find((s) => s.id === id)!.name),
+            workLost: f.workLost,
+            weeks: f.recoveryWeeks,
+            recovered: f.recovered,
+            weeksWatched: f.recovered ? f.recoveryWeeks : Math.max(0, f.recoveryWeeks - 1),
+            clientDeadlineMissed: f.clientDeadlineMissed,
+            rating: absenceRating(config, f, { roleId: p.roles[0] ?? null, personId: f.personId, stepId: f.stepIds[0] ?? null }),
+          } satisfies AbsenceRow,
+        },
+      ];
+    })
+    .sort(byRoleThenName(roleOrder))
+    .map((r) => r.row);
+}
+
+/** People who are the only one for a step but weren't tested (over ABSENCE_MAX_PEOPLE, or the time budget ran out). */
+export function untestedSoleHolders(model: EngineModel, test: AbsenceTest): string[] {
+  const tested = new Set(test.people.map((f) => f.personId));
+  return absenceCandidates(model)
+    .map((c) => c.personId)
+    .filter((id) => !tested.has(id));
+}
+
+/** Completed items for a person-step before a capacity factor counts as measured (PRD §6.3.7, D20). */
+export const CAPACITY_FACTOR_MIN_ITEMS = 10;
+
+/**
+ * Whether a person's capacity factors may be shown (PRD §6.3.7, D20; #31). Only when the workspace has switched them on
+ * and the factor is measured (at least 10 completed items for that person-step) or entered. Per-person speed is parked
+ * (C6, #198), so nothing stores a factor yet and the page always passes [].
+ */
+export function capacityFactorsShown<F extends { measuredItems: number; entered: boolean }>(settings: unknown, factors: readonly F[]): F[] {
+  const on = typeof settings === "object" && settings !== null && (settings as { capacity_factor_enabled?: unknown }).capacity_factor_enabled === true;
+  return on ? factors.filter((f) => f.entered || f.measuredItems >= CAPACITY_FACTOR_MIN_ITEMS) : [];
+}
+
+export interface PersonDetail {
+  /** Role names. */
+  roles: string[];
+  hoursPerWeek: number;
+  fte: number | null;
+  /** ISO dates from the person's record. */
+  startDate: string | null;
+  endDate: string | null;
+  /** Step names they can do; null means "every step of their roles" (no skill rows). */
+  skills: string[] | null;
+  /** Leave periods, ISO start and end, oldest first; only those ending today or later. Notes are never read. */
+  leave: { start: string; end: string }[];
+}
+
+/** One person's record for the detail row; null for a person the engine made up from a role's head-count (not in `bundle.people`). */
+export function personDetail(model: EngineModel, result: SimulationResult, bundle: ProcessBundle, id: string, today: string): PersonDetail | null {
+  const row = bundle.people.find((p) => p.id === id);
+  const resolved = result.resolvedPeople[id];
+  if (!row || !resolved) return null;
+  const stepName = new Map(model.steps.map((s) => [s.id, s.name]));
+  return {
+    roles: resolved.roles.map((rid) => model.roles[rid]?.name).filter((n): n is string => Boolean(n)),
+    hoursPerWeek: resolved.capacity,
+    fte: Number.isFinite(Number(row.fte)) ? Number(row.fte) : null,
+    startDate: row.start_date ?? null,
+    endDate: row.end_date ?? null,
+    skills: resolved.skills === undefined ? null : model.steps.filter((s) => resolved.skills!.includes(s.id)).map((s) => stepName.get(s.id)!),
+    leave: bundle.personLeave
+      .filter((l) => l.person_id === id && l.end_date >= today)
+      .map((l) => ({ start: l.start_date, end: l.end_date }))
+      .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.end < b.end ? -1 : a.end > b.end ? 1 : 0)),
   };
 }
