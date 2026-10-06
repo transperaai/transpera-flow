@@ -5,7 +5,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { ProcessBundle, Viewer } from "@transpera-flow/db";
 import { ABSENCE_MAX_PEOPLE, RATING_LABELS, clientHealthSummary, resolveMoney, toRatingConfig, type ClientHealthSummary, type Rating } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
@@ -98,9 +98,7 @@ export function PeoplePage({
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
   // As on the Issues page, the absence test waits for the first run to finish so it never slows it.
   const [baselineDone, setBaselineDone] = useState(false);
-  useEffect(() => {
-    if (sim.status === "done") setBaselineDone(true);
-  }, [sim.status]);
+  if (sim.status === "done" && !baselineDone) setBaselineDone(true);
   // Someone who sees everyone tests everyone; a member or viewer tests only their own person, and an unlinked one tests no one (B2 Q3).
   const testWho = viewer.seesEveryone ? undefined : viewer.ownPersonId ? [viewer.ownPersonId] : null;
   const absenceWeeks = resolveMoney(ANALYSIS_DEFAULTS).absenceWeeks;
