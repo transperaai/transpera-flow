@@ -61,8 +61,9 @@ describe("share links: row 64 of the production ledger", () => {
     expect(apply).toContain("row 63 (20261219000000");
   });
 
-  it("the ledger has row 64 for this version, not applied, and no other row uses 64 or this version", () => {
-    expect(ledger).toMatch(new RegExp(`\\| 64 \\| ${VERSION} \\| share_links \\| NOT applied`));
+  it("the ledger has row 64 for this version, and no other row uses 64 or this version", () => {
+    // Applied or not: the row's status column changes when it is applied to production.
+    expect(ledger).toMatch(new RegExp(`\\| 64 \\| ${VERSION} \\| share_links \\| `));
     expect(ledger.match(/^\| 64 \|/gm)).toHaveLength(1);
     // Row 60 is B5's and 61 to 63 belong to others: this one must not reuse them.
     expect(ledger).not.toMatch(new RegExp(`^\\| (60|61|62|63) \\| ${VERSION}`, "m"));
