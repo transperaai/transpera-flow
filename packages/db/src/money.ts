@@ -21,7 +21,7 @@ export const moneyRegex = (): RegExp => new RegExp(MONEY_SOURCE, "g");
 // A share link's text is normalised first (every space a plain one, lower case), and its money check must refuse at least what the
 // database's does (`private.share_snapshot_problem`), so this is B20's idea widened: any symbol next to a digit, an amount in
 // words, a space before the magnitude, French thousands ("4 512 €"), and no left boundary on an amount that ends in a code.
-const SPACED = String.raw`\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d[\d.,]*`;
+const SPACED = String.raw`\d+(?:\.\d+)?e[+-]?\d+|\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d[\d.,]*`;
 const SIGNS = String.raw`[£$€¥₹]`;
 const MAG = String.raw`(?:\s*(?:bn|[km])\b)?`;
 const ISO = String.raw`(?:gbp|usd|eur|aud|nzd|cad)`;
@@ -30,11 +30,11 @@ const ISO = String.raw`(?:gbp|usd|eur|aud|nzd|cad)`;
 export const shareMoneyRegex = (): RegExp =>
   new RegExp(
     [
-      String.raw`(?<![a-z0-9])(?:[a-z]{1,3}\$|${SIGNS}|${ISO}|rs\.?)\s*(?:${SPACED})${MAG}(?![a-z0-9])`,
+      String.raw`(?<![a-z0-9])(?:[a-z]{1,3}\$|${SIGNS}|${ISO}|rs\.?)[\s\-/]*(?:${SPACED})${MAG}(?![a-z0-9])`,
       String.raw`${SIGNS}\s*\d[\d.,]*`,
       String.raw`(?:${SPACED})${MAG}\s*[£€¥₹]`,
       // A code after the number is a standalone token: not a digit run glued to letters inside something longer.
-      String.raw`(?<![a-z0-9])(?:${SPACED})${MAG}\s*${ISO}(?![a-z0-9])`,
+      String.raw`(?<![a-z0-9])(?:${SPACED})${MAG}[\s\-/]*${ISO}(?![a-z0-9])`,
       String.raw`(?:${SPACED})${MAG}\s*(?:pounds?|dollars?|euros?|quid|sterling)(?![a-z])`,
     ].join("|"),
     "giu",

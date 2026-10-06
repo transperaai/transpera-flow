@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SHARE_FREE_TEXT_KEYS } from "../src/share";
+import { SHARE_NON_TEXT_KEYS } from "../src/share";
 
 describe("share links: the leak check's helpers and lists", () => {
   const migrationText = readFileSync(join(__dirname, "..", "supabase/migrations/20261220000000_share_links.sql"), "utf8");
@@ -21,13 +21,13 @@ describe("share links: the leak check's helpers and lists", () => {
   it("the post-apply smoke test names a person under a free-text key (title), not under a key that is no text", () => {
     const smoke = /the same with "(\w+)":"<a real person's full name>"/.exec(migrationText);
     expect(smoke?.[1]).toBe("title");
-    expect(SHARE_FREE_TEXT_KEYS).toContain(smoke![1]!);
+    expect(SHARE_NON_TEXT_KEYS).not.toContain(smoke![1]!);
   });
 
-  it("the database's list of free-text keys is the app's", () => {
-    const m = /free_keys constant text\[\] := array\[([^\]]*)\]/.exec(migrationText)!;
+  it("the database's list of keys that are no text is the app's", () => {
+    const m = /non_text_keys constant text\[\] := array\[([^\]]*)\]/.exec(migrationText)!;
     const inDb = [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
-    expect([...inDb].sort()).toEqual([...SHARE_FREE_TEXT_KEYS].sort());
+    expect([...inDb].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
   });
 });
 

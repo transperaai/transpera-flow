@@ -547,8 +547,8 @@ describe("the leak check", () => {
     ]) {
       await refused({ ...clean(), note }, {}, msg);
     }
-    // The same shapes in a key that isn't free text are left alone: it is an id, an enum or a selector, never a name.
-    await accepted({ ...clean(), kind2: `${lf}-${ls}`, path: `steps.${lf}.${ls}`, op: lf });
+    // The same shapes under keys that are no text (a path, an op) are left alone: an id, an enum or a selector the engine reads, never a name.
+    await accepted({ ...clean(), path: `steps.${lf}.${ls}`, op: lf });
     await db.client.query("begin");
     try {
       await db.client.query("insert into people (workspace_id, name) values ($1, 'Zed Quill')", [ws]);
@@ -567,7 +567,6 @@ describe("the leak check", () => {
       await db.client.query("insert into people (workspace_id, name) values ($1, 'Tom Price'), ($1, 'Jo Weeks'), ($1, 'Ann Kind'), ($1, 'Lee Retainer'), ($1, 'Sarah Day')", [ws]);
       const shape = (base: object) => ({
         ...base,
-        kind2: "retainer",
         services: [{ price: 3500, pricing_model: "retainer", name: "Standard" }],
         settings: { horizon_weeks: 12, retainer: 900 },
         process: { kind: "process" },
@@ -628,6 +627,44 @@ describe("the leak check", () => {
         expect(await tryNote(note), note).toMatchObject({ ok: false, code: "23514", message: msg });
       }
       expect((await tryNote("Li is here")).ok).toBe(true);
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("6j. the fifth round: default deny - a string under a key nobody classified is free text", async () => {
+    for (const key of ["handoff_note", "x", "auto_verdict_note", "brand_new_field"]) {
+      await refused({ ...clean(), [key]: `Ask ${personName}` }, {}, "The snapshot names a person.");
+      await refused({ ...clean(), [key]: `at ${multiWordClient}` }, {}, "The snapshot names a client.");
+    }
+    // Keys that are no text (a path, an op, an enum) may hold the same words: they are ids and selectors.
+    await accepted({ ...clean(), path: `steps.${personFirst.toLowerCase()}.price`, op: "set" });
+    // A tag is text: a name in a condition tag or a path tag is refused with People off.
+    await refused({ ...clean(), edges: [{ condition_tag: `${personFirst.toLowerCase()}-vip` }] }, {}, "The snapshot names a person.");
+    await refused({ ...clean(), services: [{ path_tags: [`${personFirst}-vip`] }] }, {}, "The snapshot names a person.");
+  });
+
+  it("6k. the fifth round: ids, hex-looking emails, 'and' for '&', CJK clients and unspaced CJK names, umlauts, and money with a hyphen", async () => {
+    const id = "0184c93c-120f-4cad-9a3c-5d3e1b2c199c";
+    await accepted({ ...clean(), ids: [`x${id}x`, `ref:${id}.`, id + id] });
+    for (const email of ["a1b2c3d4e5f6a7b8@client.example", "ask a1b2c3d4e5f6a7b8c9d0@client.example now", "x@a1b2c3d4e5f6a7b8.example"]) {
+      await refused({ ...clean(), note: email }, {}, "The snapshot contains an email address.");
+    }
+    for (const text of ["4100-GBP", "GBP-4100", "GBP/4100", "4100/GBP", "1e6 GBP", "1.5e3 USD"]) await refused({ ...clean(), note: text }, {}, "The snapshot contains costs or margins.");
+    await accepted({ ...clean(), note: "ref4100GBP and CAD3D" });
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into clients (workspace_id, name) values ($1, 'Quince & Sloe Bakery'), ($1, '株式会社山田')", [ws]);
+      await db.client.query("insert into people (workspace_id, name) values ($1, '田中太郎'), ($1, '김민준'), ($1, 'Hans Müller')", [ws]);
+      const tryNote = (note: string) => attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note }, tok: randomUUID() }));
+      for (const note of ["Quince and Sloe Bakery", "quince & sloe bakery", "Quince+Sloe Bakery", "株式会社山田に連絡"]) {
+        expect(await tryNote(note), note).toMatchObject({ ok: false, code: "23514", message: "The snapshot names a client." });
+      }
+      for (const note of ["田中さん", "太郎に", "민준 said", "Hans Mueller", "MUELLER", "Muller", "Müller"]) {
+        expect(await tryNote(note), note).toMatchObject({ ok: false, code: "23514", message: "The snapshot names a person." });
+      }
+      // A single word of a client's name is no client.
+      expect((await tryNote("a quince in the sloe")).ok).toBe(true);
     } finally {
       await db.client.query("rollback");
     }

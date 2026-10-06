@@ -723,30 +723,36 @@ describe("people whose names are also field names (the third review): the engine
   }
 });
 
-describe("every string in every kind of snapshot is classified: free text or explicitly not text", () => {
-  const FREE = new Set(SHARE_FREE_TEXT_KEYS);
+describe("default deny: a string under a key nobody classified is free text", () => {
   const NOT_TEXT = new Set(SHARE_NON_TEXT_KEYS);
+
+  it("an unknown key holding a person's and a client's name is scrubbed, refused raw and clean once redacted, in every toggle combination", () => {
+    const w = worlds[0]!;
+    const [person, , ] = w.personFull;
+    for (const key of ["handoff_note", "x", "auto_verdict_note", "brand_new_field"]) {
+      for (const toggles of TOGGLES) {
+        const input = { ...raw("process", w, toggles), extra: { [key]: `Ask ${person} at ${w.clientNames[0]}` } } as unknown as ShareSnapshot;
+        const out = redactShareSnapshot(input, toggles, w.secrets) as unknown as { extra: Record<string, string> };
+        expect(out.extra[key], `${key} ${label(toggles)}`).toContain("Client 1");
+        if (!toggles.people) expect(out.extra[key], `${key} ${label(toggles)}`).not.toContain(person!.split(" ")[1]!);
+        expect(shareSnapshotLeaks(out, w.secrets, toggles)).toEqual([]);
+        expect(shareSnapshotLeaks(input, w.secrets, toggles)).toContain("client");
+      }
+    }
+    // The same text under a key that is no text is left alone (an id or an enum the engine reads).
+    const input = { ...raw("process", w, TOGGLES[0]!), extra: { path: `steps.${w.clientNames[0]}.price`, kind: "task" } } as unknown as ShareSnapshot;
+    const out = redactShareSnapshot(input, TOGGLES[0]!, w.secrets) as unknown as { extra: Record<string, string> };
+    expect(out.extra.kind).toBe("task");
+  });
 
   it("the two lists don't overlap", () => {
     expect(SHARE_FREE_TEXT_KEYS.filter((k) => NOT_TEXT.has(k))).toEqual([]);
+    // Text that people type is never on the no-text list.
+    for (const k of ["name", "title", "notes", "description", "evidence", "label", "email", "condition_tag", "path_tags", "who", "root", "source"]) expect(NOT_TEXT.has(k), k).toBe(false);
   });
 
   for (const w of worlds) {
-    it(`${w.name}: every string path in the overview, process, issue and solution snapshots (a filled first-principles document included) is on one list; a new field fails here`, () => {
-      const unclassified = new Set<string>();
-      const walk = (v: unknown, key: string, at: string) => {
-        // A map keyed by labels, blanked whole by the redaction: its keys are no field names.
-        if (key === "person_labels") return;
-        if (typeof v === "string") {
-          if (!FREE.has(key) && !NOT_TEXT.has(key)) unclassified.add(`${at}`);
-        } else if (Array.isArray(v)) v.forEach((x) => walk(x, key, at));
-        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k, `${at}.${k}`);
-      };
-      for (const kind of KINDS) walk(raw(kind, w, TOGGLES[0]!), "", kind);
-      expect([...unclassified].sort()).toEqual([]);
-    });
-
-    it(`${w.name}: no person's or client's name survives in any string, in any toggle combination`, () => {
+      it(`${w.name}: no person's or client's name survives in any string, in any toggle combination`, () => {
       const parts = [...new Set(w.secrets.people.flatMap((p) => p.name.toLowerCase().split(/\s+/)).filter((x) => x.length >= 3))];
       for (const toggles of TOGGLES) {
         for (const kind of KINDS) {
@@ -852,6 +858,107 @@ describe("the fourth round: ids, whole client names, accents, scripts and bracke
     expect(redactTitle(`${first.toLowerCase()} [${surname}] said`)).toBe("Team member 1 said");
     expect(redactTitle(`(${first} ${surname})`)).toBe("(Team member 1)");
     expect(redactTitle(`ask ${first} (${surname}), then`)).toBe("ask Team member 1, then");
+  });
+});
+
+describe("the fifth round: tags, ids, names and money", () => {
+  const w = worlds[0]!;
+  const off = TOGGLES[0]!;
+  const bare = (extra: object, toggles: ShareToggles = off) => ({ v: SHARE_SNAPSHOT_VERSION, kind: "overview", toggles, workspaceName: "w", ...extra }) as unknown as ShareSnapshot;
+  const redactTitle = (title: string, secrets: ShareSecrets = w.secrets, toggles: ShareToggles = off) =>
+    (redactShareSnapshot({ ...raw("process", w, toggles), issues: [{ ...w.issue, title, evidence: null }] } as ShareSnapshot, toggles, secrets) as unknown as { issues: IssueRow[] }).issues[0]!.title;
+
+  for (const world of worlds) {
+    it(`${world.name}: a name inside a condition tag or a path tag is hidden on an edge and on a service the same way, so the tags still match and the numbers stay equal`, () => {
+      const first = world.personFull[0]!.split(" ")[0]!.toLowerCase();
+      const tagged: ProcessBundle = {
+        ...world.bundle,
+        edges: world.bundle.edges.map((e) => (e.condition_tag ? { ...e, condition_tag: `${first}-${e.condition_tag}` } : e)),
+        services: world.bundle.services.map((sv) => ({ ...sv, path_tags: (sv.path_tags ?? []).map((t: string) => `${first}-${t}`) })),
+      };
+      expect(tagged.edges.some((e) => e.condition_tag), "the fixture has tagged edges").toBe(true);
+      expect(tagged.services.some((sv) => (sv.path_tags ?? []).length), "the fixture has tagged services").toBe(true);
+      const opts = { startDate: "2026-10-05" };
+      const a = simulate(toEngineModel(tagged, opts), 30, 1);
+      for (const toggles of TOGGLES) {
+        const snap = redactShareSnapshot(raw("process", { ...world, bundle: tagged }, toggles), toggles, world.secrets) as unknown as { bundle: ProcessBundle };
+        if (!toggles.people) {
+          const tags = [...snap.bundle.edges.flatMap((e) => (e.condition_tag ? [e.condition_tag] : [])), ...snap.bundle.services.flatMap((sv) => sv.path_tags ?? [])];
+          expect(tags.length).toBeGreaterThan(0);
+          for (const t of tags) {
+            expect(t.toLowerCase(), label(toggles)).not.toContain(first);
+            expect(t, label(toggles)).toContain("Team member");
+          }
+        }
+        const b = simulate(toEngineModel(snap.bundle, opts), 30, 1);
+        for (const k of ["mrrAdded", "billed", "ltvAdded", "lostRevenue"] as const) expect(b.kpi[k], `${k} ${label(toggles)}`).toEqual(a.kpi[k]);
+        expect(b.bnRole).toEqual(a.bnRole);
+        expect(shareSnapshotLeaks(snap, world.secrets, toggles), label(toggles)).toEqual([]);
+      }
+    });
+  }
+
+  it("ids: one rule in the app and the database; a uuid inside longer text is still an id; an email with a hex local part is still an email", () => {
+    const id = "0184c93c-120f-4cad-9a3c-5d3e1b2c199c";
+    for (const text of [`x${id}x`, `ref:${id}.`, `${id}${id}`]) {
+      expect(redactTitle(text), text).toBe(text);
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).toEqual([]);
+    }
+    expect(redactTitle(`${id}${w.personFull[0]!.split(" ")[1]!.toLowerCase()}`)).toContain("Team member");
+    for (const email of ["a1b2c3d4e5f6a7b8@client.example", "ask a1b2c3d4e5f6a7b8c9d0@client.example now", "x@a1b2c3d4e5f6a7b8.example"]) {
+      expect(redactTitle(email), email).toContain("[email hidden]");
+      expect(shareSnapshotLeaks(bare({ note: email }), w.secrets, off), email).toContain("email");
+    }
+  });
+
+  it("clients: 'and' and '&' are the same, stop words may sit between the words; CJK clients are found inside unspaced text", () => {
+    const clients: ShareSecrets["clients"] = [
+      { id: "00000000-0000-4000-8000-0000000000c1", name: "Quince & Sloe Bakery", label: "Client 90" },
+      { id: "00000000-0000-4000-8000-0000000000c2", name: "Aldous and Pike Solicitors", label: "Client 91" },
+      { id: "00000000-0000-4000-8000-0000000000c3", name: "株式会社山田", label: "Client 92" },
+      { id: "00000000-0000-4000-8000-0000000000c4", name: "The Maple Group Ltd", label: "Client 93" },
+    ];
+    const secrets: ShareSecrets = { ...w.secrets, clients: [...w.secrets.clients, ...clients] };
+    const on = TOGGLES[1]!;
+    for (const [text, expected] of [
+      ["Quince and Sloe Bakery", "Client 90"], ["quince & sloe bakery", "Client 90"], ["Quince+Sloe Bakery", "Client 90"], ["at Quince and Sloe Bakery.", "at Client 90."],
+      ["Aldous & Pike Solicitors", "Client 91"], ["Aldous and Pike Solicitors", "Client 91"], ["Aldous Pike Solicitors", "Client 91"],
+      ["株式会社山田に連絡", "Client 92に連絡"], ["The Maple Group Ltd", "The Client 93 Ltd"], ["Maple Group", "Client 93"],
+    ] as const) {
+      expect(redactTitle(text, secrets, on), text).toBe(expected);
+      expect(shareSnapshotLeaks(bare({ note: text }, on), secrets, on), text).toContain("client");
+    }
+    // A single word of a client's name is still no client.
+    expect(redactTitle("a quince in the sloe", secrets, on)).toBe("a quince in the sloe");
+  });
+
+  it("people: an unspaced CJK name is found by its surname or given name alone; German umlauts are Mueller too", () => {
+    const people = [
+      { id: "00000000-0000-4000-8000-0000000000e1", name: "田中太郎", label: "Team member 80" },
+      { id: "00000000-0000-4000-8000-0000000000e2", name: "김민준", label: "Team member 81" },
+      { id: "00000000-0000-4000-8000-0000000000e3", name: "Hans Müller", label: "Team member 82" },
+      { id: "00000000-0000-4000-8000-0000000000e4", name: "Anna Schroeder", label: "Team member 83" },
+    ];
+    const secrets: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, ...people] };
+    for (const [text, expect_] of [
+      ["田中さん", "Team member 80さん"], ["太郎に", "Team member 80に"], ["田中太郎", "Team member 80"],
+      ["민준 said", "Team member 81 said"], ["김민준", "Team member 81"],
+      ["Hans Mueller", "Team member 82"], ["MUELLER", "Team member 82"], ["Hans Muller", "Team member 82"], ["Müller", "Team member 82"],
+      ["Anna Schröder", "Team member 83"], 
+    ] as const) {
+      expect(redactTitle(text, secrets), text).toBe(expect_);
+      expect(shareSnapshotLeaks(bare({ note: text }), secrets, off), text).toContain("person");
+    }
+  });
+
+  it("money joined with a hyphen or a slash, and scientific notation, is money", () => {
+    for (const text of ["4100-GBP", "GBP-4100", "GBP/4100", "4100/GBP", "1e6 GBP", "1.5e3 USD", "usd-1e6"]) {
+      const out = redactTitle(text);
+      expect(out, text).toBe("[amount hidden]");
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).toContain("money");
+    }
+    // By design no money: the code is glued to letters or digits inside something longer.
+    for (const text of ["ref4100GBP", "CAD3D", "4100GBPx"]) expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
   });
 });
 

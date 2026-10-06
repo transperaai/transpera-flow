@@ -32,7 +32,11 @@ const PERCENT_RUN = /^(?:%[0-9a-fA-F]{2})+/;
 /** Letters that don't decompose, folded to what a keyboard without them types. */
 const FOLD: Record<string, string> = { ł: "l", ø: "o", đ: "d", ð: "d", ı: "i", ß: "ss", æ: "ae", œ: "oe", þ: "th", ς: "σ" };
 /** A uuid, or a hex string of 16+ characters with a letter in it (a hash): an id, never money, an email or a name. */
-const ID = /(?<![0-9a-z])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]*[a-f])[0-9a-f]{16,})(?![0-9a-z])/g;
+// A uuid-shaped run anywhere; a hash only as a whole run, and never one that touches an @ (the local part or domain of an email).
+const ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-z@])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z@])/g;
+/** German umlauts transliterated before anything decomposes them (Müller is Mueller); a name is also tried without (Muller). */
+const UMLAUT: Record<string, string> = { ä: "ae", ö: "oe", ü: "ue", Ä: "Ae", Ö: "Oe", Ü: "Ue" };
+const SPACE_OR_IGNORABLE_FREE = (c: string) => !IGNORABLE.test(c);
 
 /** One character of the text with the span of the original it came from (after percent-decoding, a decoded run shares one span). */
 interface Piece {
@@ -102,20 +106,27 @@ export function normaliseView(s: string): View {
         continue;
       }
     }
-    for (const c of p.ch.normalize("NFKD")) {
-      if (IGNORABLE.test(c)) continue;
-      if (SPACE.test(c)) {
-        space(p.start, p.end);
-        continue;
-      }
-      for (const lower of (QUOTES[c] ?? (HYPHENS.test(c) ? "-" : c)).toLowerCase()) {
-        for (const folded of FOLD[lower] ?? lower) {
-          n.push(folded);
-          starts.push(p.start);
-          ends.push(p.end);
+    // Decompose, drop marks and ignorables, then recompose what has no marks (Hangul syllables come back from their jamo).
+    let run = "";
+    const flush = () => {
+      for (const c of run.normalize("NFC")) {
+        for (const lower of (QUOTES[c] ?? (HYPHENS.test(c) ? "-" : c)).toLowerCase()) {
+          for (const folded of FOLD[lower] ?? lower) {
+            n.push(folded);
+            starts.push(p.start);
+            ends.push(p.end);
+          }
         }
       }
+      run = "";
+    };
+    for (const c of [...(UMLAUT[p.ch] ?? p.ch).normalize("NFKD")].filter(SPACE_OR_IGNORABLE_FREE)) {
+      if (SPACE.test(c)) {
+        flush();
+        space(p.start, p.end);
+      } else run += c;
     }
+    flush();
   }
   // Ids and hashes are no text: masked (same length, so the spans still map back) before anything is matched.
   return { n: n.join("").replace(ID, (m) => "\u0001".repeat(m.length)), starts, ends };
@@ -130,6 +141,12 @@ export interface Token {
 export function tokens(view: View): Token[] {
   return [...view.n.matchAll(/\p{L}+/gu)].map((m) => ({ text: m[0], from: m.index, to: m.index + m[0].length }));
 }
+
+/** A name as typed, and without its umlauts (Müller is "mueller" in the view, and also tried as "muller"). */
+export const nameForms = (name: string): string[] => {
+  const plain = name.replace(/[äöüÄÖÜ]/g, (c) => ({ ä: "a", ö: "o", ü: "u", Ä: "A", Ö: "O", Ü: "U" })[c]!);
+  return plain === name ? [name] : [name, plain];
+};
 
 /** The tokens of a name (any case, any separators), as they would be found in text. */
 export const nameParts = (name: string): string[] => tokens(normaliseView(name)).map((t) => t.text);
@@ -172,11 +189,13 @@ export function nameTokenIndex(groups: readonly { kind: "person" | "client"; ent
   };
   for (const g of groups) {
     for (const e of g.entries) {
-      const parts = nameParts(e.name).filter((p) => !STOP_WORDS.has(p));
-      // A name of one short word ("Li") is no name: nothing to match.
-      if (parts.join("").length < minLen(parts.join(""))) continue;
-      for (let a = 0; a < parts.length; a++) {
-        for (let b = a; b < parts.length; b++) add(parts.slice(a, b + 1).join(""), e.label, g.kind);
+      for (const form of nameForms(e.name)) {
+        const parts = nameParts(form).filter((p) => !STOP_WORDS.has(p));
+        // A name of one short word ("Li") is no name: nothing to match.
+        if (parts.join("").length < minLen(parts.join(""))) continue;
+        for (let a = 0; a < parts.length; a++) {
+          for (let b = a; b < parts.length; b++) add(parts.slice(a, b + 1).join(""), e.label, g.kind);
+        }
       }
     }
   }
@@ -239,10 +258,12 @@ export interface ClientName {
 export function clientNames(entries: readonly { name: string; label: string }[]): ClientName[] {
   const out: ClientName[] = [];
   for (const e of entries) {
-    const parts = nameParts(e.name).filter((p) => !STOP_WORDS.has(p));
-    const joined = parts.join("");
-    if (!parts.length || joined.length < minLen(joined) || LABEL_WORDS.has(joined)) continue;
-    out.push({ parts, joined, label: e.label });
+    for (const form of nameForms(e.name)) {
+      const parts = nameParts(form).filter((p) => !STOP_WORDS.has(p));
+      const joined = parts.join("");
+      if (!parts.length || joined.length < minLen(joined) || LABEL_WORDS.has(joined)) continue;
+      out.push({ parts, joined, label: e.label });
+    }
   }
   return out;
 }
@@ -259,12 +280,21 @@ export function clientSpans(view: View, clients: readonly ClientName[]): Span[] 
         out.push(spanBetween(view, toks[i]!, toks[i]!, c.label));
         continue;
       }
+      // The words in order; "and", "the", "ltd" and the like may sit between them ("Bramble and Oak" is "Bramble & Oak").
+      let at = i;
       let ok = true;
       for (let j = 1; j < c.parts.length && ok; j++) {
-        const next = toks[i + j];
-        ok = !!next && next.text === c.parts[j] && next.from - toks[i + j - 1]!.to <= 3;
+        let next = toks[at + 1];
+        let skipped = 0;
+        while (next && STOP_WORDS.has(next.text) && skipped < 2 && next.from - toks[at]!.to <= 3) {
+          at++;
+          skipped++;
+          next = toks[at + 1];
+        }
+        ok = !!next && next.text === c.parts[j] && next.from - toks[at]!.to <= 3;
+        at++;
       }
-      if (ok) out.push(spanBetween(view, toks[i]!, toks[i + c.parts.length - 1]!, c.label));
+      if (ok) out.push(spanBetween(view, toks[i]!, toks[at]!, c.label));
     }
   }
   return out;
@@ -272,8 +302,14 @@ export function clientSpans(view: View, clients: readonly ClientName[]): Span[] 
 
 const SCRIPT_RUN = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]{2,}$/u;
 /** The parts of names written in Han, Kana or Hangul: found as substrings, since such text has no spaces between words. */
-export function scriptParts(entries: readonly { name: string; label: string }[]): { text: string; label: string }[] {
-  return entries.flatMap((e) => nameParts(e.name).filter((p) => SCRIPT_RUN.test(p)).map((p) => ({ text: p, label: e.label })));
+export function scriptParts(entries: readonly { name: string; label: string }[], whole = false): { text: string; label: string }[] {
+  return entries.flatMap((e) => {
+    const parts = nameParts(e.name);
+    // A client: the whole name, spaces or not. A person: each part, and for an unspaced part its first and last two characters
+    // (田中太郎 is 田中 and 太郎), since the surname or the given name alone is how it is written.
+    const texts = whole ? [parts.join("")] : parts.flatMap((p) => (p.length >= 3 && SCRIPT_RUN.test(p) ? [p, p.slice(0, 2), p.slice(-2)] : [p]));
+    return [...new Set(texts)].filter((p) => SCRIPT_RUN.test(p)).map((p) => ({ text: p, label: e.label }));
+  });
 }
 export function scriptSpans(view: View, parts: readonly { text: string; label: string }[]): Span[] {
   const out: Span[] = [];

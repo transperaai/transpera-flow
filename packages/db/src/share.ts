@@ -171,38 +171,42 @@ const AMOUNT_HIDDEN = "[amount hidden]";
 const MIN_NAME = MIN_TOKEN;
 
 /**
- * The keys whose string values are free text a person wrote or a name: the only places names are looked for (and scrubbed), in
- * the app and in the database (`private.share_free_text`, same list; a test keeps them equal). A string under any other key
- * is an id, a date, an enum, a path or a selector the engine reads, and is never touched: a person called "Tom Price" must not
- * turn the `price` key, a `kind` value or `horizon_weeks` into a label. An array of strings takes its parent's key. Emails and
- * money are looked for in every string value (never in keys).
+ * The keys known to hold free text a person wrote, or a name. DOCUMENTATION and the tests' reference only: the redaction treats any
+ * string under a key that is not on `SHARE_NON_TEXT_KEYS` as free text (default deny), in the app and in the database.
  */
 export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
-  "actor", "agreed_by", "entity_name", "quote", "auto_note", "body", "breaks_if_removed", "chain", "done", "message", "owner_text", "problem", "progress", "root", "situation", "source", "statement", "test", "who", "horizon", "description", "detail", "domain", "evidence", "example", "excerpt", "expect", "job_done",
+  "actor", "entity_name", "quote", "auto_note", "body", "breaks_if_removed", "chain", "done", "message", "owner_text", "problem", "progress", "root", "situation", "source", "statement", "test", "who", "horizon", "description", "detail", "domain", "evidence", "example", "excerpt", "expect", "job_done",
   "job_progress", "job_situation", "job_who", "label", "movedOn", "name", "note", "notes", "proposer_name", "reason", "review_note",
   "resolution_note", "root_cause", "speaker", "speakers", "summary", "target_goal", "target_measure", "target_now", "text", "title", "tool",
   "user_name", "user_notes", "why", "why_problem", "workspaceName",
 ];
 /**
- * The keys that hold a string but no free text: ids, dates, enums, engine tags, selectors and paths. A string under one is never
- * scrubbed for a name. Every string key in every kind of snapshot is on this list or on `SHARE_FREE_TEXT_KEYS` (a test walks
- * them all), so a new field has to be classified before it can ship.
- * `email` is on it because emails are hidden in every string, whatever its key. `condition_tag` and `path_tags` are tags the
- * engine routes work by: a tag is a label for a path, not a name, and rewriting one would change the numbers.
+ * The keys that hold a string but never free text: ids, dates, enums, selectors and paths the engine reads. Every OTHER string is
+ * free text and is scrubbed and checked, so a key nobody classified (a new column, a new field) fails closed: its names are hidden.
+ * A key that is text anywhere (`source` is an enum on an issue and text on a first-principles statement) stays off this list.
+ * A test derives every string column of every table from the database types and fails on one that is not classified.
+ * `condition_tag` and `path_tags` are text: a name in a tag becomes its label on both sides (an edge and the services it
+ * routes to carry the same tag), so the tags still match and the numbers stay equal.
  */
 export const SHARE_NON_TEXT_KEYS: readonly string[] = [
-  "ai_key", "analysis_id", "archived_at", "at", "base_revision_id", "by", "child_process_id", "client_id", "color", "comparator",
-  "condition_id", "condition_tag", "created_at", "created_by", "currency", "dataset_id", "decided_at", "decided_by", "detected_key",
-  "dismissed_revision_id", "email", "end_date", "entry_process_id", "entry_step_id", "every", "file_url", "from_step_id", "id",
-  "import_source", "input_hash", "insight_key", "issue_id", "issueId", "key", "kind", "linked_parameter", "live_revision_id",
-  "market_pending_at", "model", "model_hash", "origin", "outcome", "owner_ids", "owner_person_id", "parent_process_id",
-  "parent_scenario_id", "parent_step_id", "path_tags", "person_id", "pricing_model", "process_id", "rating", "recorded_at",
-  "replaced_by", "replaces_step_ids", "resolved_at", "resolved_solution_id", "reviewed_at", "reviewed_by", "revision_id",
-  "rework_to_step_id", "role_id", "run_id", "scenario_id", "service_id", "severity", "slug", "solution_id", "solutionId", "source_id",
-  "source_ids", "stage", "start_date", "started_at", "status", "step_id", "suggestion_id", "timestamp", "to_step_id", "type",
-  "updated_at", "updated_by", "user_id", "verdict", "wait_dist", "work_dist", "workspace_id",
+  "agreed_by", "kpi",
+  "ai_key", "analysis_id", "archived_at", "archived_by", "at", "auto_verdict", "base_revision_id", "by",
+  "child_process_id", "client_id", "color", "comparator", "condition_id", "created_at", "created_by", "currency",
+  "dataset_id", "decided_at", "decided_by", "detected_key", "dismissed_revision_id", "draft_revision_id", "driver",
+  "end_date", "entry_process_id", "entry_step_id", "every", "file_url", "from_step_id", "id", "import_source",
+  "input_hash", "insight_key", "issueId", "issue_id", "key", "kind", "linked_parameter", "live_revision_id",
+  "market_pending_at", "model", "model_hash", "op", "origin", "outcome", "owner_ids", "owner_person_id",
+  "parent_process_id", "parent_scenario_id", "parent_step_id", "path", "person_id", "plan", "preset", "pricing_model",
+  "process_id", "proposed_via", "published_at", "published_by", "rating", "recorded_at", "replaced_by",
+  "replaces_step_ids", "resolution", "resolved_at", "resolved_how", "resolved_solution_id", "reviewed_at", "reviewed_by",
+  "revision_id", "rework_to_step_id", "role_id", "run_id", "scenario_id", "service_id", "severity", "slug", "solutionId",
+  "solution_id", "source_id", "source_ids", "stage", "start_date", "started_at", "status", "step_id", "suggestion_id",
+  "timestamp", "to_step_id", "type", "updated_at", "updated_by", "user_id", "user_verdict", "verdict", "wait_dist",
+  "work_dist", "workspace_id",
 ];
-const FREE_TEXT = new Set(SHARE_FREE_TEXT_KEYS);
+const NON_TEXT = new Set(SHARE_NON_TEXT_KEYS);
+/** Free text unless the key says otherwise (default deny). */
+const isFree = (key: string): boolean => !NON_TEXT.has(key);
 
 /** Ids, dates and plain numbers hold nothing to hide: skipped, for speed. */
 const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[\d\-:.TZ+ ]*)$/i;
@@ -211,6 +215,7 @@ const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|
 function spansFor(toggles: ShareToggles, secrets: ShareSecrets) {
   const people = nameTokenIndex([{ kind: "person", entries: secrets.people }]);
   const scripts = scriptParts(secrets.people);
+  const clientScripts = scriptParts(secrets.clients, true);
   const clients = clientNames(secrets.clients);
   const email = [{ re: EMAIL, label: EMAIL_HIDDEN }];
   const money = [{ re: shareMoneyRegex(), label: AMOUNT_HIDDEN }];
@@ -218,7 +223,7 @@ function spansFor(toggles: ShareToggles, secrets: ShareSecrets) {
     ...spansOf(view, email),
     ...(toggles.financials ? [] : spansOf(view, money)),
     // A client only by the whole of its name; a person by any part of theirs.
-    ...(free ? clientSpans(view, clients) : []),
+    ...(free ? [...clientSpans(view, clients), ...scriptSpans(view, clientScripts)] : []),
     ...(free && !toggles.people ? [...nameSpans(view, people, () => true), ...scriptSpans(view, scripts)] : []),
   ];
 }
@@ -302,7 +307,7 @@ const BLANKED: Record<string, unknown> = {
 export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
   const scrub = scrubber(toggles, secrets);
   const walk = (value: unknown, key = ""): unknown => {
-    if (typeof value === "string") return scrub.text(value, FREE_TEXT.has(key));
+    if (typeof value === "string") return scrub.text(value, isFree(key));
     if (Array.isArray(value)) return value.map((x) => walk(x, key));
     if (!isObj(value)) return value;
     const src = isBundleLike(value) ? redactBundle(value, toggles, secrets) : value;
@@ -351,6 +356,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
   const money = [{ re: shareMoneyRegex(), label: "" }];
   const people = nameTokenIndex([{ kind: "person", entries: secrets.people }]);
   const scripts = scriptParts(secrets.people);
+  const clientScripts = scriptParts(secrets.clients, true);
   const clients = clientNames(secrets.clients);
   const s = snapshot as Obj;
   if (
@@ -371,7 +377,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     if (spansOf(view, email).length) found.add("email");
     if (!toggles.financials && spansOf(view, money).length) found.add("money");
     if (!free) return;
-    if (clientSpans(view, clients).length) found.add("client");
+    if (clientSpans(view, clients).length || scriptSpans(view, clientScripts).length) found.add("client");
     if (toggles.people) return;
     if (scriptSpans(view, scripts).length) found.add("person");
     for (const t of tokens(view)) {
@@ -380,7 +386,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     }
   };
   const walk = (value: unknown, key = "") => {
-    if (typeof value === "string") return text(value, FREE_TEXT.has(key));
+    if (typeof value === "string") return text(value, isFree(key));
     if (Array.isArray(value)) return void value.forEach((x) => walk(x, key));
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {

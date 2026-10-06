@@ -245,7 +245,7 @@ begin
       x := pg_catalog.regexp_replace(x, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', E'\x01', 'g');
     end if;
     if x ~ '[0-9a-f]{16}' then
-      x := pg_catalog.regexp_replace(x, '(?<![0-9a-z])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z])', E'\x01', 'g');
+      x := pg_catalog.regexp_replace(x, '(?<![0-9a-z@])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z@])', E'\x01', 'g');
     end if;
     if x ~ '[\x09-\x0D]|  |\\[nrtbf]|\\u[0-9a-fA-F]{4}' then
       x := pg_catalog.regexp_replace(x, '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g');
@@ -257,15 +257,16 @@ begin
       pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(
         pg_catalog.translate(
           pg_catalog.lower(pg_catalog.translate(
-            pg_catalog.regexp_replace(
-              normalize(d, nfkd),
+            normalize(pg_catalog.regexp_replace(
+              normalize(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(d,
+                U&'\00E4', 'ae'), U&'\00F6', 'oe'), U&'\00FC', 'ue'), U&'\00C4', 'Ae'), U&'\00D6', 'Oe'), U&'\00DC', 'Ue'), nfkd),
               U&'[\00AD\034F\061C\115F\1160\17B4\17B5\180B-\180F\200B-\200F\202A-\202E\2060-\206F\3164\FE00-\FE0F\FEFF\FFA0\FFF0-\FFF8\+0E0000-\+0E0FFF\+01BCA0-\+01BCA3\+01D173-\+01D17A\0300-\036F\0483-\0489\0591-\05BD\05BF\05C1\05C2\05C4\05C5\05C7\0610-\061A\064B-\065F\0670\06D6-\06DC\06DF-\06E4\06E7\06E8\06EA-\06ED\0711\0730-\074A\0900-\0903\093A-\093C\093E-\094F\0951-\0957\0962\0963\0E31\0E34-\0E3A\0E47-\0E4E\1AB0-\1AFF\1DC0-\1DFF\20D0-\20FF\302A-\302F\3099\309A\FE20-\FE2F]',
-              '', 'g'),
+              '', 'g'), nfc),
             U&'\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212',
             pg_catalog.repeat('''', 6) || '""' || '------')),
           U&'\0142\00F8\0111\00F0\0131\03C2', 'lodd' || 'i' || U&'\03C3'),
         U&'\00DF', 'ss'), U&'\00E6', 'ae'), U&'\0153', 'oe'), U&'\00FE', 'th'),
-      '(?<![0-9a-z])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]*[a-f])[0-9a-f]{16,})(?![0-9a-z])', E'\x01', 'g'),
+      '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-z@])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z@])', E'\x01', 'g'),
     '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g'));
 end;
 $$;
@@ -311,18 +312,27 @@ declare
   b integer;
   tok text;
   latin constant text := U&'[a-z\00C0-\024F\1E00-\1EFF]';
-  script constant text := U&'^[\1100-\11FF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
+  script constant text := U&'^[\1100-\11FF\AC00-\D7AF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
 begin
   if kind not in ('person', 'script') then
     return;
   end if;
-  for nm in select private.share_norm(p.name) as name from public.people p where p.workspace_id = ws loop
+  -- A name as typed and without its umlauts (Müller is "mueller" once normalised, and also "muller").
+  for nm in select private.share_norm(v.name) as name
+            from (select p.name from public.people p where p.workspace_id = ws
+                  union
+                  select pg_catalog.translate(p.name, U&'\00E4\00F6\00FC\00C4\00D6\00DC', 'aouAOU') from public.people p where p.workspace_id = ws) as v loop
     parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
                    where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
     if kind = 'script' then
       foreach tok in array parts loop
         if tok ~ script then
           return next tok;
+          -- An unspaced name is its surname and its given name too (田中太郎: 田中 and 太郎).
+          if char_length(tok) >= 3 then
+            return next left(tok, 2);
+            return next right(tok, 2);
+          end if;
         end if;
       end loop;
       continue;
@@ -348,8 +358,8 @@ revoke execute on function private.share_strings(jsonb) from public;
 revoke execute on function private.share_name_tokens(uuid, text) from public;
 
 -- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
--- email in the message). Names are looked for in the free-text values only (the keys below, the same list as the app's
--- `SHARE_FREE_TEXT_KEYS`): a person by any token of the name, a client only by the whole of its name; emails and money in every
+-- email in the message). Names are looked for in the free-text values (every string not under one of the keys below, the same list as
+-- the app's `SHARE_NON_TEXT_KEYS`): a person by any token of the name, a client only by the whole of its name; emails and money in every
 -- string value (ids masked); JSON keys never.
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
@@ -357,14 +367,21 @@ language plpgsql stable
 set search_path = ''
 as $$
 declare
-  -- The keys whose string values are free text (keep equal to SHARE_FREE_TEXT_KEYS in packages/db/src/share.ts).
-  free_keys constant text[] := array['actor', 'agreed_by', 'entity_name', 'quote', 'auto_note', 'body', 'breaks_if_removed', 'chain', 'done',
-    'message', 'owner_text', 'problem', 'progress', 'root', 'situation', 'source', 'statement', 'test', 'who',
-    'horizon', 'description', 'detail', 'domain', 'evidence', 'example', 'excerpt', 'expect', 'job_done',
-    'job_progress', 'job_situation', 'job_who', 'label', 'movedOn', 'name', 'note', 'notes', 'proposer_name',
-    'reason', 'review_note', 'resolution_note', 'root_cause', 'speaker', 'speakers', 'summary', 'target_goal',
-    'target_measure', 'target_now', 'text', 'title', 'tool', 'user_name', 'user_notes', 'why', 'why_problem',
-    'workspaceName'];
+  -- The keys whose strings are NOT free text: ids, dates, enums and selectors the engine reads (keep equal to SHARE_NON_TEXT_KEYS in
+  -- packages/db/src/share.ts). Any other string is free text, so a key nobody classified is checked, not skipped (default deny).
+  non_text_keys constant text[] := array['agreed_by', 'kpi', 'ai_key', 'analysis_id', 'archived_at', 'archived_by', 'at', 'auto_verdict',
+    'base_revision_id', 'by', 'child_process_id', 'client_id', 'color', 'comparator', 'condition_id', 'created_at',
+    'created_by', 'currency', 'dataset_id', 'decided_at', 'decided_by', 'detected_key', 'dismissed_revision_id',
+    'draft_revision_id', 'driver', 'end_date', 'entry_process_id', 'entry_step_id', 'every', 'file_url',
+    'from_step_id', 'id', 'import_source', 'input_hash', 'insight_key', 'issueId', 'issue_id', 'key', 'kind',
+    'linked_parameter', 'live_revision_id', 'market_pending_at', 'model', 'model_hash', 'op', 'origin', 'outcome',
+    'owner_ids', 'owner_person_id', 'parent_process_id', 'parent_scenario_id', 'parent_step_id', 'path',
+    'person_id', 'plan', 'preset', 'pricing_model', 'process_id', 'proposed_via', 'published_at', 'published_by',
+    'rating', 'recorded_at', 'replaced_by', 'replaces_step_ids', 'resolution', 'resolved_at', 'resolved_how',
+    'resolved_solution_id', 'reviewed_at', 'reviewed_by', 'revision_id', 'rework_to_step_id', 'role_id', 'run_id',
+    'scenario_id', 'service_id', 'severity', 'slug', 'solutionId', 'solution_id', 'source_id', 'source_ids',
+    'stage', 'start_date', 'started_at', 'status', 'step_id', 'suggestion_id', 'timestamp', 'to_step_id', 'type',
+    'updated_at', 'updated_by', 'user_id', 'user_verdict', 'verdict', 'wait_dist', 'work_dist', 'workspace_id'];
   everything text;
   free text;
   ft text[];
@@ -372,6 +389,7 @@ declare
   parts text[];
   joined text;
   latin constant text := U&'[a-z\00C0-\024F\1E00-\1EFF]';
+  script constant text := U&'^[\1100-\11FF\AC00-\D7AF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
 begin
   -- 1. The snapshot is the link's.
   if snap is null or jsonb_typeof(snap) <> 'object'
@@ -384,7 +402,7 @@ begin
   end if;
   -- Every string value, normalised ONCE (the \x01 between them is no space and no letter, so nothing matches across two values),
   -- and the free-text ones on their own. A bare uuid is skipped before it costs a normalisation.
-  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where n.k = any (free_keys))
+  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where n.k is null or n.k <> all (non_text_keys))
     into everything, free
     from (select s.k, private.share_norm(s.v) as v from private.share_strings(snap) as s
           where s.v !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') as n;
@@ -413,17 +431,20 @@ begin
   -- with at most three non-letters between, or run together; never by one word of it ("Group review" is no client).
   select array_agg(distinct t) into ft from regexp_split_to_table(free, '[^[:alpha:]]+') as t where t <> '';
   ft := coalesce(ft, '{}');
-  for nm in select private.share_norm(c.name) as name from public.clients c where c.workspace_id = ws loop
+  for nm in select private.share_norm(v.name) as name
+            from (select c.name from public.clients c where c.workspace_id = ws
+                  union
+                  select pg_catalog.translate(c.name, U&'\00E4\00F6\00FC\00C4\00D6\00DC', 'aouAOU') from public.clients c where c.workspace_id = ws) as v loop
     parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
                    where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
     joined := array_to_string(parts, '');
     continue when cardinality(parts) = 0 or char_length(joined) < (case when joined ~ latin then 3 else 2 end)
                or joined in ('team', 'member', 'client', 'hidden', 'email', 'amount');
-    if joined = any (ft) then
+    if joined = any (ft) or (joined ~ script and strpos(free, joined) > 0) then
       return 'The snapshot names a client.';
     end if;
     if cardinality(parts) > 1 and parts <@ ft
-       and free ~ ('(^|[^[:alpha:]])' || array_to_string(parts, '[^[:alpha:]]{1,3}') || '($|[^[:alpha:]])') then
+       and free ~ ('(^|[^[:alpha:]])' || array_to_string(parts, '(([^[:alpha:]]{1,3}(and|the|for|ltd|inc|llc|plc)){0,2}[^[:alpha:]]{1,3})') || '($|[^[:alpha:]])') then
       return 'The snapshot names a client.';
     end if;
   end loop;
@@ -447,8 +468,8 @@ begin
     or jsonb_path_exists(snap, 'lax $.**.target_margin')
     or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
     or everything ~* ('[£$€¥₹][[:space:]]*[0-9]|[0-9][[:space:]]*[£€¥₹]'
-      || '|(^|[^a-z0-9])(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]]*[0-9][0-9.,]*([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
-      || '|(^|[^a-z0-9])[0-9][0-9.,]*([[:space:]]*(k|m|bn))?[[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'
+      || '|(^|[^a-z0-9])(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]/-]*[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
+      || '|(^|[^a-z0-9])[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?[[:space:]/-]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'
       || '|[0-9]([[:space:]]*(k|m|bn))?[[:space:]]*(pounds?|dollars?|euros?|quid|sterling)([^a-z]|$)')) then
     return 'The snapshot contains costs or margins.';
   end if;
@@ -915,7 +936,7 @@ begin
       x := pg_catalog.regexp_replace(x, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', E'\x01', 'g');
     end if;
     if x ~ '[0-9a-f]{16}' then
-      x := pg_catalog.regexp_replace(x, '(?<![0-9a-z])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z])', E'\x01', 'g');
+      x := pg_catalog.regexp_replace(x, '(?<![0-9a-z@])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z@])', E'\x01', 'g');
     end if;
     if x ~ '[\x09-\x0D]|  |\\[nrtbf]|\\u[0-9a-fA-F]{4}' then
       x := pg_catalog.regexp_replace(x, '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g');
@@ -927,15 +948,16 @@ begin
       pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(
         pg_catalog.translate(
           pg_catalog.lower(pg_catalog.translate(
-            pg_catalog.regexp_replace(
-              normalize(d, nfkd),
+            normalize(pg_catalog.regexp_replace(
+              normalize(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(d,
+                U&'\00E4', 'ae'), U&'\00F6', 'oe'), U&'\00FC', 'ue'), U&'\00C4', 'Ae'), U&'\00D6', 'Oe'), U&'\00DC', 'Ue'), nfkd),
               U&'[\00AD\034F\061C\115F\1160\17B4\17B5\180B-\180F\200B-\200F\202A-\202E\2060-\206F\3164\FE00-\FE0F\FEFF\FFA0\FFF0-\FFF8\+0E0000-\+0E0FFF\+01BCA0-\+01BCA3\+01D173-\+01D17A\0300-\036F\0483-\0489\0591-\05BD\05BF\05C1\05C2\05C4\05C5\05C7\0610-\061A\064B-\065F\0670\06D6-\06DC\06DF-\06E4\06E7\06E8\06EA-\06ED\0711\0730-\074A\0900-\0903\093A-\093C\093E-\094F\0951-\0957\0962\0963\0E31\0E34-\0E3A\0E47-\0E4E\1AB0-\1AFF\1DC0-\1DFF\20D0-\20FF\302A-\302F\3099\309A\FE20-\FE2F]',
-              '', 'g'),
+              '', 'g'), nfc),
             U&'\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212',
             pg_catalog.repeat('''', 6) || '""' || '------')),
           U&'\0142\00F8\0111\00F0\0131\03C2', 'lodd' || 'i' || U&'\03C3'),
         U&'\00DF', 'ss'), U&'\00E6', 'ae'), U&'\0153', 'oe'), U&'\00FE', 'th'),
-      '(?<![0-9a-z])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]*[a-f])[0-9a-f]{16,})(?![0-9a-z])', E'\x01', 'g'),
+      '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-z@])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z@])', E'\x01', 'g'),
     '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g'));
 end;
 $$;
@@ -981,18 +1003,27 @@ declare
   b integer;
   tok text;
   latin constant text := U&'[a-z\00C0-\024F\1E00-\1EFF]';
-  script constant text := U&'^[\1100-\11FF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
+  script constant text := U&'^[\1100-\11FF\AC00-\D7AF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
 begin
   if kind not in ('person', 'script') then
     return;
   end if;
-  for nm in select private.share_norm(p.name) as name from public.people p where p.workspace_id = ws loop
+  -- A name as typed and without its umlauts (Müller is "mueller" once normalised, and also "muller").
+  for nm in select private.share_norm(v.name) as name
+            from (select p.name from public.people p where p.workspace_id = ws
+                  union
+                  select pg_catalog.translate(p.name, U&'\00E4\00F6\00FC\00C4\00D6\00DC', 'aouAOU') from public.people p where p.workspace_id = ws) as v loop
     parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
                    where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
     if kind = 'script' then
       foreach tok in array parts loop
         if tok ~ script then
           return next tok;
+          -- An unspaced name is its surname and its given name too (田中太郎: 田中 and 太郎).
+          if char_length(tok) >= 3 then
+            return next left(tok, 2);
+            return next right(tok, 2);
+          end if;
         end if;
       end loop;
       continue;
@@ -1018,8 +1049,8 @@ revoke execute on function private.share_strings(jsonb) from public;
 revoke execute on function private.share_name_tokens(uuid, text) from public;
 
 -- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
--- email in the message). Names are looked for in the free-text values only (the keys below, the same list as the app's
--- `SHARE_FREE_TEXT_KEYS`): a person by any token of the name, a client only by the whole of its name; emails and money in every
+-- email in the message). Names are looked for in the free-text values (every string not under one of the keys below, the same list as
+-- the app's `SHARE_NON_TEXT_KEYS`): a person by any token of the name, a client only by the whole of its name; emails and money in every
 -- string value (ids masked); JSON keys never.
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
@@ -1027,14 +1058,21 @@ language plpgsql stable
 set search_path = ''
 as $$
 declare
-  -- The keys whose string values are free text (keep equal to SHARE_FREE_TEXT_KEYS in packages/db/src/share.ts).
-  free_keys constant text[] := array['actor', 'agreed_by', 'entity_name', 'quote', 'auto_note', 'body', 'breaks_if_removed', 'chain', 'done',
-    'message', 'owner_text', 'problem', 'progress', 'root', 'situation', 'source', 'statement', 'test', 'who',
-    'horizon', 'description', 'detail', 'domain', 'evidence', 'example', 'excerpt', 'expect', 'job_done',
-    'job_progress', 'job_situation', 'job_who', 'label', 'movedOn', 'name', 'note', 'notes', 'proposer_name',
-    'reason', 'review_note', 'resolution_note', 'root_cause', 'speaker', 'speakers', 'summary', 'target_goal',
-    'target_measure', 'target_now', 'text', 'title', 'tool', 'user_name', 'user_notes', 'why', 'why_problem',
-    'workspaceName'];
+  -- The keys whose strings are NOT free text: ids, dates, enums and selectors the engine reads (keep equal to SHARE_NON_TEXT_KEYS in
+  -- packages/db/src/share.ts). Any other string is free text, so a key nobody classified is checked, not skipped (default deny).
+  non_text_keys constant text[] := array['agreed_by', 'kpi', 'ai_key', 'analysis_id', 'archived_at', 'archived_by', 'at', 'auto_verdict',
+    'base_revision_id', 'by', 'child_process_id', 'client_id', 'color', 'comparator', 'condition_id', 'created_at',
+    'created_by', 'currency', 'dataset_id', 'decided_at', 'decided_by', 'detected_key', 'dismissed_revision_id',
+    'draft_revision_id', 'driver', 'end_date', 'entry_process_id', 'entry_step_id', 'every', 'file_url',
+    'from_step_id', 'id', 'import_source', 'input_hash', 'insight_key', 'issueId', 'issue_id', 'key', 'kind',
+    'linked_parameter', 'live_revision_id', 'market_pending_at', 'model', 'model_hash', 'op', 'origin', 'outcome',
+    'owner_ids', 'owner_person_id', 'parent_process_id', 'parent_scenario_id', 'parent_step_id', 'path',
+    'person_id', 'plan', 'preset', 'pricing_model', 'process_id', 'proposed_via', 'published_at', 'published_by',
+    'rating', 'recorded_at', 'replaced_by', 'replaces_step_ids', 'resolution', 'resolved_at', 'resolved_how',
+    'resolved_solution_id', 'reviewed_at', 'reviewed_by', 'revision_id', 'rework_to_step_id', 'role_id', 'run_id',
+    'scenario_id', 'service_id', 'severity', 'slug', 'solutionId', 'solution_id', 'source_id', 'source_ids',
+    'stage', 'start_date', 'started_at', 'status', 'step_id', 'suggestion_id', 'timestamp', 'to_step_id', 'type',
+    'updated_at', 'updated_by', 'user_id', 'user_verdict', 'verdict', 'wait_dist', 'work_dist', 'workspace_id'];
   everything text;
   free text;
   ft text[];
@@ -1042,6 +1080,7 @@ declare
   parts text[];
   joined text;
   latin constant text := U&'[a-z\00C0-\024F\1E00-\1EFF]';
+  script constant text := U&'^[\1100-\11FF\AC00-\D7AF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
 begin
   -- 1. The snapshot is the link's.
   if snap is null or jsonb_typeof(snap) <> 'object'
@@ -1054,7 +1093,7 @@ begin
   end if;
   -- Every string value, normalised ONCE (the \x01 between them is no space and no letter, so nothing matches across two values),
   -- and the free-text ones on their own. A bare uuid is skipped before it costs a normalisation.
-  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where n.k = any (free_keys))
+  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where n.k is null or n.k <> all (non_text_keys))
     into everything, free
     from (select s.k, private.share_norm(s.v) as v from private.share_strings(snap) as s
           where s.v !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') as n;
@@ -1083,17 +1122,20 @@ begin
   -- with at most three non-letters between, or run together; never by one word of it ("Group review" is no client).
   select array_agg(distinct t) into ft from regexp_split_to_table(free, '[^[:alpha:]]+') as t where t <> '';
   ft := coalesce(ft, '{}');
-  for nm in select private.share_norm(c.name) as name from public.clients c where c.workspace_id = ws loop
+  for nm in select private.share_norm(v.name) as name
+            from (select c.name from public.clients c where c.workspace_id = ws
+                  union
+                  select pg_catalog.translate(c.name, U&'\00E4\00F6\00FC\00C4\00D6\00DC', 'aouAOU') from public.clients c where c.workspace_id = ws) as v loop
     parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
                    where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
     joined := array_to_string(parts, '');
     continue when cardinality(parts) = 0 or char_length(joined) < (case when joined ~ latin then 3 else 2 end)
                or joined in ('team', 'member', 'client', 'hidden', 'email', 'amount');
-    if joined = any (ft) then
+    if joined = any (ft) or (joined ~ script and strpos(free, joined) > 0) then
       return 'The snapshot names a client.';
     end if;
     if cardinality(parts) > 1 and parts <@ ft
-       and free ~ ('(^|[^[:alpha:]])' || array_to_string(parts, '[^[:alpha:]]{1,3}') || '($|[^[:alpha:]])') then
+       and free ~ ('(^|[^[:alpha:]])' || array_to_string(parts, '(([^[:alpha:]]{1,3}(and|the|for|ltd|inc|llc|plc)){0,2}[^[:alpha:]]{1,3})') || '($|[^[:alpha:]])') then
       return 'The snapshot names a client.';
     end if;
   end loop;
@@ -1117,8 +1159,8 @@ begin
     or jsonb_path_exists(snap, 'lax $.**.target_margin')
     or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
     or everything ~* ('[£$€¥₹][[:space:]]*[0-9]|[0-9][[:space:]]*[£€¥₹]'
-      || '|(^|[^a-z0-9])(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]]*[0-9][0-9.,]*([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
-      || '|(^|[^a-z0-9])[0-9][0-9.,]*([[:space:]]*(k|m|bn))?[[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'
+      || '|(^|[^a-z0-9])(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]/-]*[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
+      || '|(^|[^a-z0-9])[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?[[:space:]/-]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'
       || '|[0-9]([[:space:]]*(k|m|bn))?[[:space:]]*(pounds?|dollars?|euros?|quid|sterling)([^a-z]|$)')) then
     return 'The snapshot contains costs or margins.';
   end if;

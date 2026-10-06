@@ -78,23 +78,23 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
 - B4 (play links) replaces the write trigger, adds `mode` to the insert grant and a rate-limited submission function. It
   needs `lever_settings` in the snapshot.
 
-- Names are looked for only in free text: an explicit list of keys (`SHARE_FREE_TEXT_KEYS`, the same list in
-  `private.share_snapshot_problem`). JSON keys, ids, enums, paths and numbers are never scrubbed or checked for names, so a
-  person called Tom Price, Jo Weeks or Ann Kind cannot turn `price`, `horizon_weeks` or `kind` into a label and change the
-  engine's input. Emails and money are looked for in every string value.
+- Default deny: a string is free text, and is scrubbed and checked, unless its key is on `SHARE_NON_TEXT_KEYS` (ids, dates,
+  enums, selectors and paths the engine reads; `private.share_snapshot_problem` has the same list). A new column or field nobody
+  classified therefore fails closed. JSON keys are never touched, so a person called Tom Price, Jo Weeks or Ann Kind cannot turn
+  `price`, `horizon_weeks` or `kind` into a label and change the engine's input. A key that is text anywhere (`source`) stays
+  off the list. A type-level map of every string column of every table (from `database.types.ts`) fails to compile when a column
+  or table is added until it is classified. Emails and money are looked for in every string value.
 - Matching is by letter tokens of a normalised view (percent-decoded, NFKD with combining marks dropped and the letters that
   don't decompose folded, default-ignorable code points and variation selectors removed, lower-cased, uuids and hex hashes masked).
   A person: any token that equals a part (3+ characters, 2 for a part with no Latin letter in it) of the name is replaced, a run
   of tokens of one name with whatever sat between them (hyphen, dot, space) as one span mapped back to the original text, brackets
-  kept balanced; names in Han, Kana or Hangul are also found as substrings of an unspaced run. A client: only the whole of its
-  name, as a run of tokens (or run together), never one of its words, so "Group review" is no client; if Austin wants partial
+  kept balanced; names in Han, Kana or Hangul are also found as substrings of an unspaced run, and an unspaced name by its first and last two characters (田中太郎 is 田中 and 太郎). German umlauts are folded to ae, oe, ue (Müller is Mueller), and a name is also tried without them (Muller). A client: only the whole of its
+  name, as a run of tokens (or run together; "and", "the", "ltd" and "&" may sit between its words, and a Han, Kana or Hangul client is also found inside unspaced text), never one of its words, so "Group review" is no client; if Austin wants partial
   client names hidden too, that is his decision and a change here. A name token can't survive next to a label. The check
   tokenises the output the same way, in the app and in the database (`private.share_norm`, `share_name_tokens`). The price on the
   people side: a word that is also part of a name ("Will", "Grant", "Kind") is hidden in free text; the numbers don't move
-  because free text is not engine input. Not looked at, on purpose: `condition_tag` and `path_tags` (tags the engine routes by:
-  rewriting one would change the numbers, and a tag is a label for a path), and a name split across two fields ("Pri" / "ya").
-- Every string in a snapshot is classified: free text (`SHARE_FREE_TEXT_KEYS`) or not text (`SHARE_NON_TEXT_KEYS`); a test walks
-  every string path of every kind of snapshot, a first-principles document included, and fails on a new field nobody classified.
+  because free text is not engine input. A tag (`condition_tag` on an edge, `path_tags` on a service) is text: a name in it becomes the same label on both sides, so
+  the tags still match and the numbers stay equal. Not looked at: a name split across two fields ("Pri" / "ya").
 - One money pattern (`money.ts`) serves B20's `propose_finding` check and the share link's redaction, and the database applies
   the same forms to the normalised text. A step's `cost_override` is nulled with Financials off and refused by both checks.
 - A Google identity counts only when its own email equals the account's confirmed email (any case) and that address is listed.
