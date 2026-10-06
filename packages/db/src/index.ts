@@ -328,3 +328,4 @@ export {
   type SimulationGap,
 } from "./simulation-gaps";
 export * from "./workspace-bundle";
+export * from "./workspace-import";

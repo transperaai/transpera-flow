@@ -2,10 +2,10 @@ import { BundleTooLargeError, bundleJsonChunks, exportWorkspaceBundle, supabaseR
 import { supabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
-// GET /w/<slug>/export/bundle (issue #39, B10 part 1): the whole workspace as one JSON file (`transpera-workspace/1`), the
-// backup and migration format. Read as the signed-in user, so row-level security decides what they may read: a member
-// gets what they can read, anyone else gets a 404 (the same answer as for a workspace that doesn't exist). A viewer gets
-// what is published (no drafts, no pending suggestions); an editor or owner gets everything. The tables are read one
+// GET /w/<slug>/export/bundle (issue #39, B10): the whole workspace as one JSON file (`transpera-workspace/1`), the backup
+// and migration format. Only agency admins, owners and editors may export it (`can_edit_workspace`; Austin's decision 4 on
+// #39): a member or viewer gets 403 and nothing else is read. Read as the signed-in user, so row-level security decides what
+// can be read: a non-member gets a 404 (the same answer as for a workspace that doesn't exist). The tables are read one
 // after another, so a bundle taken during edits can mix moments (`exported_at` says when reading began). The file is sent
 // in pieces without indentation. Nothing is cached, and it is a download, never rendered.
 
@@ -24,10 +24,11 @@ export async function GET(_request: Request, ctx: RouteContext<"/w/[slug]/export
   if (error) return Response.json({ message: "The workspace could not be read." }, { status: 500 });
   if (!workspace) return Response.json({ message: "No such workspace." }, { status: 404 });
   const { data: canEdit } = await supabase.rpc("can_edit_workspace", { ws: workspace.id });
+  if (canEdit !== true) return Response.json({ message: "Only owners, editors and agency admins can export the workspace." }, { status: 403 });
 
   const now = new Date();
   try {
-    const bundle = await exportWorkspaceBundle(workspace.id, supabaseWorkspaceReader(supabase), supabaseReader(supabase), { canEdit: canEdit === true, now });
+    const bundle = await exportWorkspaceBundle(workspace.id, supabaseWorkspaceReader(supabase), supabaseReader(supabase), { canEdit: true, now });
     if (!bundle) return Response.json({ message: "No such workspace." }, { status: 404 });
     const chunks = bundleJsonChunks(bundle);
     const encoder = new TextEncoder();

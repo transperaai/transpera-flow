@@ -67,7 +67,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       processesHref={`${base}/processes`}
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
-      bundleHref={`${base}/export/bundle`}
+      bundleHref={canEdit ? `${base}/export/bundle` : undefined}
       issuesHref={`${base}/issues`}
       forecastHref={`${base}/forecast`}
       ai={{ view: aiView, stale, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: null }}
