@@ -9,8 +9,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** The most a stored `details` may hold (the database allows 20,000 bytes). */
-export const MAX_DETAILS_BYTES = 20_000;
+/**
+ * The most a stored `details` may hold. The database allows 20,000 bytes of jsonb text, which adds spaces to what JSON.stringify
+ * writes, so this stays well under it and the two can't disagree near the cap.
+ */
+export const MAX_DETAILS_BYTES = 12_000;
 
 export const isImportKind = (v: unknown): v is ImportKind => typeof v === "string" && Object.hasOwn(IMPORT_KINDS, v);
 

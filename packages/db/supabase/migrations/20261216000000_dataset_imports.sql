@@ -17,6 +17,9 @@
 --     date order, lines, rows kept and left out, how many rows matched a name in the model, the window, and for leads and
 --     invoices a summary (lead source ids and numbers; counts). No string from the file. Table grants are table-level
 --     (select, insert), so the column is covered; it is insert-only like the rest of the row (no update grant).
+--   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (numbers, the delimiter,
+--     encoding and date-order enums, uuid lead source ids). So a client's name, a person's or an amount can't be stored even by a
+--     caller that skips the app. The app's own rebuild (`storedImportDetails`) is the first line; this is the second.
 --   * `datasets.column_map` values are short labels: `private.column_map_ok(jsonb)` allows only text of up to 60 characters. The page stores
 --     a position (`Column 4`) for client, person, id and amount columns, never the header text, because a file with no header row
 --     makes its first data row the "headers". Added NOT VALID: records made before it are not checked.
@@ -60,6 +63,7 @@
 --     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --     where n.nspname = 'public' and p.proname in ('record_dataset', 'record_calibration_import', 'record_client_calibration') order by 1;
 --     -- each: f, {search_path=""}, f, t
+--   select conname from pg_constraint where conname in ('datasets_details_known', 'datasets_column_map_labels') order by 1;  -- 2 rows
 --   select version from supabase_migrations.schema_migrations where version = '20261216000000';  -- 1 row
 --
 -- ROLLBACK (one transaction; roll the app back first):
@@ -68,7 +72,10 @@
 --   drop function if exists public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]);
 --   -- Put back row 57's record_client_calibration: re-run its `create function ... $$;` block from
 --   -- 20261208000000_client_calibration.sql as `create or replace`, with its revoke and grant.
+--   alter table public.datasets drop constraint if exists datasets_details_known;
 --   alter table public.datasets drop constraint if exists datasets_column_map_labels;
+--   drop function if exists private.import_details_ok(jsonb);
+--   drop function if exists private.import_numbers_ok(jsonb, text[]);
 --   drop function if exists private.column_map_ok(jsonb);
 --   alter table public.datasets drop column if exists details;
 --   delete from supabase_migrations.schema_migrations where version = '20261216000000';
@@ -81,6 +88,77 @@
 -- 1. What an import holds: counts and model ids only.
 alter table public.datasets add column details jsonb not null default '{}'
   constraint datasets_details check (jsonb_typeof(details) = 'object' and octet_length(details::text) <= 20000);
+
+-- Counts only: an object whose keys are among `allowed` and whose values are all numbers.
+create function private.import_numbers_ok(o jsonb, allowed text[]) returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select jsonb_typeof(o) = 'object' and not exists (
+    select 1 from jsonb_each(o) e where e.key <> all (allowed) or jsonb_typeof(e.value) <> 'number');
+$$;
+
+-- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields).
+create function private.import_details_ok(d jsonb) returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  k text;
+  v jsonb;
+  s jsonb;
+  src jsonb;
+begin
+  if jsonb_typeof(d) <> 'object' then
+    return false;
+  end if;
+  for k, v in select e.key, e.value from jsonb_each(d) e loop
+    if k in ('headerRow', 'lines', 'rows', 'leftOut') then
+      if jsonb_typeof(v) <> 'number' then return false; end if;
+    elsif k = 'delimiter' then
+      if jsonb_typeof(v) <> 'string' or (v #>> '{}') not in (',', ';', E'\t', '|') then return false; end if;
+    elsif k = 'encoding' then
+      if jsonb_typeof(v) <> 'string' or (v #>> '{}') not in ('utf-8', 'utf-16', 'windows-1252') then return false; end if;
+    elsif k = 'dateOrder' then
+      if jsonb_typeof(v) <> 'null' and (jsonb_typeof(v) <> 'string' or (v #>> '{}') not in ('dmy', 'mdy')) then return false; end if;
+    elsif k = 'nameMatches' then
+      if not private.import_numbers_ok(v, array['matched', 'leftOut']) then return false; end if;
+    elsif k = 'window' then
+      if jsonb_typeof(v) <> 'null' and not private.import_numbers_ok(v, array['from', 'to']) then return false; end if;
+    elsif k = 'summary' then
+      if jsonb_typeof(v) = 'null' then continue; end if;
+      if jsonb_typeof(v) <> 'object' then return false; end if;
+      s := v - 'sources' - 'blocked' - 'paidLate' - 'kind';
+      if not private.import_numbers_ok(s, array['weeks', 'leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount']) then return false; end if;
+      if coalesce(v ->> 'kind', '') not in ('leads', 'invoices') then return false; end if;
+      if v ? 'blocked' and jsonb_typeof(v -> 'blocked') <> 'boolean' then return false; end if;
+      if v ? 'paidLate' and jsonb_typeof(v -> 'paidLate') not in ('number', 'null') then return false; end if;
+      if v ? 'sources' then
+        if jsonb_typeof(v -> 'sources') <> 'array' or jsonb_array_length(v -> 'sources') > 500 then return false; end if;
+        for src in select x from jsonb_array_elements(v -> 'sources') x loop
+          if not private.import_numbers_ok(src - 'leadSourceId', array['leads', 'perWeek', 'current'])
+             or jsonb_typeof(src -> 'leadSourceId') <> 'string'
+             or (src ->> 'leadSourceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+            return false;
+          end if;
+        end loop;
+      end if;
+    else
+      return false;
+    end if;
+  end loop;
+  return true;
+end;
+$$;
+
+revoke all on function private.import_numbers_ok(jsonb, text[]) from public, anon;
+grant execute on function private.import_numbers_ok(jsonb, text[]) to authenticated;
+revoke all on function private.import_details_ok(jsonb) from public, anon;
+grant execute on function private.import_details_ok(jsonb) to authenticated;
+
+alter table public.datasets add constraint datasets_details_known check (private.import_details_ok(details));
 
 -- A column map holds short labels (a header name, or a position such as `Column 4`), never a long value from a file.
 create function private.column_map_ok(m jsonb) returns boolean

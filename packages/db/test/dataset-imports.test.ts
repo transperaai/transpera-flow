@@ -146,6 +146,40 @@ describe("datasets.details", () => {
   });
 });
 
+describe("datasets.details", () => {
+  const insert = (details: unknown) =>
+    commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', '{}', 1, $2)", [ws, JSON.stringify(details)]));
+  const SRC = "33333333-3333-4333-8333-333333333333";
+
+  it("accepts the known keys in the known types", async () => {
+    await insert({ ...DETAILS, dateOrder: null, window: null });
+    await insert({ ...DETAILS, summary: { kind: "leads", weeks: 5.5, leads: 30, unmatched: 2, blocked: false, sources: [{ leadSourceId: SRC, leads: 3, perWeek: 0.5, current: 2 }] } });
+    await insert({ ...DETAILS, summary: { kind: "invoices", invoices: 4, clients: 3, withDue: 4, paidLate: null, unpaidPastDue: 1, withAmount: 3 } });
+    await insert({});
+  });
+
+  it("refuses an unknown key, a name, an amount, a bad enum or a bad id, at any depth", async () => {
+    const start = await count();
+    const bad: Record<string, unknown> = {
+      "an extra key": { ...DETAILS, client: "ACME-SECRET-CLIENT" },
+      "a name in nameMatches": { ...DETAILS, nameMatches: { matched: 1, leftOut: 0, who: "Jane Secretperson" } },
+      "a string in a count": { ...DETAILS, lines: "£9,999" },
+      "a bad delimiter": { ...DETAILS, delimiter: "x" },
+      "a bad encoding": { ...DETAILS, encoding: "ebcdic" },
+      "a bad date order": { ...DETAILS, dateOrder: "ymd" },
+      "a name in the window": { ...DETAILS, window: { from: 1, to: 2, who: "Jane" } },
+      "an unknown summary": { ...DETAILS, summary: { kind: "payroll", leads: 1 } },
+      "a name in a summary": { ...DETAILS, summary: { kind: "invoices", invoices: 1, topClient: "ACME" } },
+      "a name for a lead source": { ...DETAILS, summary: { kind: "leads", weeks: 1, leads: 1, sources: [{ leadSourceId: "Website enquiries", leads: 1 }] } },
+      "a name beside a lead source": { ...DETAILS, summary: { kind: "leads", weeks: 1, leads: 1, sources: [{ leadSourceId: SRC, leads: 1, name: "Website" }] } },
+    };
+    for (const [what, details] of Object.entries(bad)) {
+      await expect(insert(details), what).rejects.toMatchObject({ code: "23514" });
+    }
+    expect(await count()).toBe(start);
+  });
+});
+
 describe("datasets.column_map", () => {
   it("holds short labels: a long value from a file is refused, a position is fine", async () => {
     const start = await count();
