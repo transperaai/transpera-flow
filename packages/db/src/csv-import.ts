@@ -554,7 +554,13 @@ type KindRow = StepLogRow | DealRow | TimeLogRow | ClientRow | ServicingRow | Le
 const EXCEL_SERIAL = /^\d{5}(?:\.\d+)?$/;
 
 /** Reads a row of one of the new kinds from its columns: the row, or why it can't be read. */
-function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: DateOrder): KindRow | string {
+/** What a read counts as it goes, beside the rows. */
+interface ReadCtx {
+  /** Amounts that couldn't be read: the row is kept with the amount left blank. */
+  badAmounts: number;
+}
+
+function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: DateOrder, ctx: ReadCtx): KindRow | string {
   const missing = spec.columns.filter((c) => c.required && !cell(c.id)).map((c) => c.id);
   if (missing.length) return `Missing ${missing.join(", ")}.`;
   const out: Record<string, string | number | null> = {};
@@ -589,9 +595,10 @@ function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: Da
         break;
       }
       case "amount": {
+        // Nothing is calibrated from an amount, so a row with one that can't be read (TBD, 4.5k) is kept and the amount left blank,
+        // and the read says how many. The value is never put in a message: amounts are shown to owners and editors only.
         const a = parseAmount(text);
-        // The value is left out of the message: amounts are shown only to owners and editors.
-        if (a === null) return `The ${c.label.toLowerCase()} can't be read as a number.`;
+        if (a === null) ctx.badAmounts++;
         out[c.id] = a;
         break;
       }
@@ -611,7 +618,7 @@ function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: Da
   return out as unknown as KindRow;
 }
 
-function readerFor(kind: ImportKind): (cell: (c: string) => string, order: DateOrder) => KindRow | string {
+function readerFor(kind: ImportKind, ctx: ReadCtx): (cell: (c: string) => string, order: DateOrder) => KindRow | string {
   switch (kind) {
     case "step_log":
       return (cell, order) => readStepLogRow(cell as Parameters<typeof readStepLogRow>[0], order);
@@ -621,7 +628,7 @@ function readerFor(kind: ImportKind): (cell: (c: string) => string, order: DateO
       return (cell, order) => readServicingRow(cell as Parameters<typeof readServicingRow>[0], order);
     default: {
       const spec = IMPORT_KINDS[kind];
-      return (cell, order) => readNewRow(spec, cell, order);
+      return (cell, order) => readNewRow(spec, cell, order, ctx);
     }
   }
 }
@@ -817,6 +824,8 @@ export interface ImportRead {
   names: { value: string; rows: number }[];
   /** A warning for this kind of file. */
   note: string | null;
+  /** Amounts that couldn't be read. Their rows are kept, with the amount blank. */
+  amountsUnreadable: number;
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -857,6 +866,7 @@ export function readImport(
     const i = index[id];
     if (i !== null && i !== undefined) at[id] = i;
   }
+  const ctx: ReadCtx = { badAmounts: 0 };
   const res = readMappedRows<string, KindRow>(
     table,
     at,
@@ -864,7 +874,7 @@ export function readImport(
       columns: ids,
       required: spec.columns.filter((c) => c.required).map((c) => c.id),
       dateColumns: spec.columns.filter((c) => c.type === "date").map((c) => c.id),
-      readRow: readerFor(kind),
+      readRow: readerFor(kind, ctx),
     },
     options,
   );
@@ -909,6 +919,7 @@ export function readImport(
     missing: res.missing,
     names,
     note,
+    amountsUnreadable: ctx.badAmounts,
   };
 }
 

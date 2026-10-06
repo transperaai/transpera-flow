@@ -493,6 +493,11 @@ function RowsStep(props: {
           {leftByName > 0 && ` ${formatNumber(leftByName, 0)} more left out because their name isn't matched.`}
         </p>
         {read.note && <p className="text-sm text-muted-foreground">{read.note}</p>}
+        {read.amountsUnreadable > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {formatNumber(read.amountsUnreadable, 0)} amount{read.amountsUnreadable === 1 ? "" : "s"} couldn&apos;t be read, so {read.amountsUnreadable === 1 ? "is" : "are"} left blank. The rows are kept.
+          </p>
+        )}
         {props.loaded.note && <p className="text-sm text-muted-foreground">{props.loaded.note}</p>}
         {table.rows.length > 0 && (
           <div className="overflow-x-auto rounded-lg border border-line">

@@ -277,16 +277,26 @@ describe("readImport", () => {
       "D8,Qualify,2026-03-02,,,£12,", // line 10: fine
     ].join("\n");
     const r = read(text, "deals");
-    expect(r.rows).toHaveLength(2);
-    expect(r.errorCount).toBe(6);
-    expect(r.errors.map((e) => e.line)).toEqual([4, 5, 6, 7, 8, 9]);
+    expect(r.rows).toHaveLength(3);
+    expect(r.errorCount).toBe(5);
+    expect(r.errors.map((e) => e.line)).toEqual([4, 5, 6, 7, 9]);
     expect(r.errors[0]!.message).toBe("Missing deal.");
     expect(r.errors[1]!.message).toMatch(/^Can't read the date entered "someday"/);
     expect(r.errors[2]!.message).toBe("It left the stage before it entered it.");
     expect(r.errors[3]!.message).toMatch(/over 200 characters/);
-    expect(r.errors[4]!.message).toBe("The amount can't be read as a number.");
-    expect(r.errors[5]!.message).toBe('Can\'t read the date "45352". Format the column as a date in Excel before saving.');
+    // An amount that can't be read keeps its row (line 8), with the amount blank, and is counted.
+    expect(r.amountsUnreadable).toBe(1);
+    expect(r.errors[4]!.message).toBe('Can\'t read the date "45352". Format the column as a date in Excel before saving.');
     expect(r.lines).toBe(8);
+  });
+
+  it("keeps a deal whose amount can't be read, and counts it", () => {
+    const r = read("deal,stage,entered,amount\nD1,Qualify,2026-03-02,TBD\nD1,Won,2026-03-03,4.5k\nD2,Won,2026-03-03,£100", "deals");
+    expect(r.errors).toEqual([]);
+    expect(r.rows).toHaveLength(3);
+    expect(r.amountsUnreadable).toBe(2);
+    expect(r.preview[0]!.amount).toBe("");
+    expect(JSON.stringify(r.errors)).not.toContain("TBD");
   });
 
   it("reads time-log hours in every form and refuses the rest", () => {
