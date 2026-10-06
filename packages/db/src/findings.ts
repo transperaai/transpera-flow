@@ -6,9 +6,12 @@ import { FINDING_TYPES, type FindingCitation, type FindingRating, type FindingRo
 // Findings storage (issue #175, B17; decision D40; migration 20261205000000). Reads and writes run as the signed-in user,
 // so RLS decides: every member reads, owners and editors write, nobody deletes. The trigger stamps who and when, starts an
 // AI finding proposed and one by hand accepted, and refuses an "AI" finding that no analysis of the caller's wrote.
+// Connector proposals (B20, #197, migration 20261212000000): Claude connected over MCP proposes an AI finding with no
+// analysis; the trigger stamps `proposed_via = 'connector'` from the API token's claims and the key, and refuses anything
+// else over a token (no accepted finding, no update). `proposeConnectorFinding` is the one write.
 
 export const FINDING_COLUMNS =
-  "id, workspace_id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, person_labels, source_ids, ai_key, analysis_id, run_id, edited, created_by, created_at, updated_by, updated_at, decided_by, decided_at";
+  "id, workspace_id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, person_labels, source_ids, ai_key, analysis_id, run_id, edited, proposed_via, created_by, created_at, updated_by, updated_at, decided_by, decided_at";
 
 export const FINDING_LIMITS = { title: 200, evidence: 2000, why: 2000, facts: 30, sources: 20 } as const;
 
@@ -200,4 +203,58 @@ export async function storeProposedFindings(
     if (error) return { error: error.message };
   }
   return { added: fresh.length, renewed: again.length, superseded: stale.length };
+}
+
+/** What Claude proposes over the connector (B20): a finding with its place, words, the facts and sources it cites, and the labels it uses. */
+export interface ConnectorFindingInput {
+  workspaceId: string;
+  processId: string | null;
+  stepId: string | null;
+  rating: FindingRating;
+  type: FindingType;
+  title: string;
+  evidence: string;
+  why: string;
+  facts: FindingCitation[];
+  sourceIds: string[];
+  /** The labels its title, evidence, why and facts use, and the person each stands for (B1 2b). */
+  personLabels: PersonLabels;
+}
+
+export type ConnectorFindingWrite = FindingWrite | { status: "duplicate" } | { status: "limit"; message: string };
+
+/**
+ * Propose a finding over the connector (B20, #197): an AI finding that starts proposed with no analysis. Call it with the
+ * API token's client: the database stamps `proposed_via` and the key from the token, and refuses anything but a proposal.
+ * The same place and title twice is `duplicate` (the unique key, even if a person has since accepted or dismissed it);
+ * the workspace's caps are `limit`.
+ */
+export async function proposeConnectorFinding(db: Db, input: ConnectorFindingInput): Promise<ConnectorFindingWrite> {
+  const problem = findingDraftProblem({ ...input, sourceIds: input.sourceIds });
+  if (problem) return { status: "invalid", message: problem };
+  const { data, error } = await db
+    .from("findings")
+    .insert({
+      workspace_id: input.workspaceId,
+      process_id: input.processId,
+      step_id: input.stepId,
+      origin: "ai",
+      status: "proposed",
+      rating: input.rating,
+      type: input.type,
+      title: input.title.trim(),
+      evidence: input.evidence.trim(),
+      why: input.why.trim(),
+      facts: input.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
+      source_ids: input.sourceIds,
+      person_labels: input.personLabels as unknown as Json,
+    })
+    .select(FINDING_COLUMNS)
+    .single();
+  if (error) {
+    if (error.code === "23505") return { status: "duplicate" };
+    if (error.code === "54000") return { status: "limit", message: (error.message ?? "").replace(/^findings: /, "") };
+    return failed(error);
+  }
+  return { status: "saved", finding: data as unknown as FindingRow };
 }
