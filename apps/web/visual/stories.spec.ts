@@ -10,7 +10,7 @@ for (const shot of shots) {
     const whole = shot.tags.includes("visual-page");
     await page.setViewportSize(shot.phone ? { width: 400, height: 900 } : { width: 1280, height: 800 });
     // prefers-color-scheme agrees with data-theme, so tokens, `dark:` variants and native controls all follow the theme.
-    await page.emulateMedia({ colorScheme: shot.theme, reducedMotion: "reduce" });
+    await page.emulateMedia({ colorScheme: shot.theme as "light" | "dark", reducedMotion: "reduce" });
     // Relative dates ("3 days ago") stay put; timers still run.
     await page.clock.setFixedTime(new Date("2026-10-05T09:00:00Z"));
 
