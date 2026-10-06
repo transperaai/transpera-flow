@@ -285,15 +285,24 @@ describe.skipIf(!POSTGREST_URL)("extraction dry run (Tidewater Digital) over Pos
     expect(await call(client, "upsert_person", { workspace: "copperleaf-qa", name: "Ellie Marsh", fte: 0.8, note: "Reset check" })).toMatchObject({ ok: true });
     await client.close();
 
-    // Other test files run in parallel on the same database and may add workspaces of their own meanwhile, so compare the
-    // workspaces that existed before by id: the reset must leave every one of them in place (and remove only copperleaf-qa).
-    const others = async () =>
-      new Set(((await admin.query("select id from workspaces where slug <> 'copperleaf-qa'")).rows as { id: string }[]).map((r) => r.id));
-    const before = await others();
+    // Other test files run in parallel on the same database and add and delete workspaces of their own meanwhile, so the
+    // reset is checked against workspaces nobody else touches: a sentinel made here, and the seeded samples if loaded. The
+    // reset must leave them in place (and remove only copperleaf-qa).
+    const sentinel = randomUUID();
+    await admin.query("insert into workspaces (id, name, slug) values ($1, 'Reset sentinel', $2)", [sentinel, `reset-sentinel-${sentinel.slice(0, 8)}`]);
+    const kept = async () =>
+      new Set(
+        ((await admin.query("select id from workspaces where id = $1 or slug in ('northbeam', 'larkspur')", [sentinel])).rows as { id: string }[]).map(
+          (r) => r.id,
+        ),
+      );
+    const before = await kept();
+    expect(before.has(sentinel)).toBe(true);
     await admin.query(sql("reset-workspace.sql"));
     expect(await qa()).toHaveLength(0);
-    const after = await others();
+    const after = await kept();
     expect([...before].filter((id) => !after.has(id))).toEqual([]);
+    await admin.query("delete from workspaces where id = $1", [sentinel]);
     // ...and it creates none: anything new since `before` came from another test file, never from the QA scripts.
     expect((await admin.query("select count(*)::int as n from workspaces where slug like 'copperleaf%'")).rows[0].n).toBe(0);
     expect((await admin.query("select 1 from people where name = 'Grace Adeyemi'")).rowCount).toBe(0);
