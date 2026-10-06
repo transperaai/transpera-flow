@@ -33,6 +33,7 @@ export function findingDetection(f: FindingRow): Detection {
     findingProcessId: f.process_id,
     facts: readCitations(f.facts),
     ...(f.edited ? { edited: true } : {}),
+    ...(f.proposed_via === "connector" ? { via: "connector" as const } : {}),
   };
 }
 

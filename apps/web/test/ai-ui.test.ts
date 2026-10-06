@@ -59,6 +59,7 @@ const proposal = (over: Partial<FindingRow> = {}): FindingRow => ({
   analysis_id: "a",
   run_id: "run-1",
   edited: false,
+  proposed_via: null,
   created_by: null,
   created_at: "2026-10-01T09:00:00.000Z",
   updated_by: null,
