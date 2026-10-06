@@ -280,7 +280,7 @@ describe("saved AI text", () => {
     const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
     const lines = header.split("--   7. No key is derived from a name any more.")[1]!.split("\n").slice(1);
     const sql = lines.slice(0, lines.findIndex((l) => !l.startsWith("--        "))).map((l) => l.replace(/^--        /, "")).join("\n");
-    const counts = async () => (await client.query({ text: sql, rowMode: "array" })).rows[0].map(Number);
+    const counts = async () => (await client.query({ text: sql, rowMode: "array" })).rows[0]!.map(Number);
     expect(await counts()).toEqual([0, 0, 0, 0]);
     await client.query("begin");
     await client.query("set local session_replication_role = replica");
