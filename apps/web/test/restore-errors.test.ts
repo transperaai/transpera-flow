@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FAILED_MESSAGE, NOT_EMPTY_MESSAGE, ROLE_MESSAGE, TOO_BIG_MESSAGE, restoreFailure, sectionInWords } from "@/lib/restore/errors";
+import { BUSY_MESSAGE, FAILED_MESSAGE, GATEWAY_TOO_BIG_MESSAGE, NOT_EMPTY_MESSAGE, ROLE_MESSAGE, SLOW_START_MESSAGE, TOO_BIG_MESSAGE, restoreFailure, sectionInWords } from "@/lib/restore/errors";
 import { noticeCookieValue, parseRestoreNotice, restoredMessage } from "@/lib/restore/notice";
 
 // The restore route's error mapper and the notice it leaves (issue #39, B10 2b).
@@ -28,6 +28,26 @@ describe("restoreFailure", () => {
       const f = restoreFailure({ code: "23514", hint: "section:blocks", message });
       expect(f.message).toMatch(/^Couldn't restore the (blocks|roles|clients): a row didn't fit this workspace's rules\. Nothing was restored\.$/);
     }
+  });
+
+  // B21 (#203).
+  it("maps the busy hint (a restore already running) to 409 and its message, before any other hint", () => {
+    expect(restoreFailure({ code: "55P03", hint: "busy", message: "A restore into this workspace is already running." })).toEqual({ status: 409, message: BUSY_MESSAGE });
+    expect(BUSY_MESSAGE).toBe("A restore into this workspace is already running. Wait a minute, then reload this page.");
+    // Whatever else the error says.
+    expect(restoreFailure({ code: "57014", hint: "busy", message: "canceling statement due to statement timeout" }, 413)).toEqual({ status: 409, message: BUSY_MESSAGE });
+  });
+
+  it("maps an HTTP 413 from the database call (the gateway refused the size) to the 'send to the database' message", () => {
+    expect(restoreFailure({ code: null, message: "Request Entity Too Large" }, 413)).toEqual({ status: 413, message: "This backup is too big to send to the database in one go. Nothing was restored." });
+    expect(restoreFailure({}, 413).message).toBe(GATEWAY_TOO_BIG_MESSAGE);
+    // Any other status leaves the mapping as it was.
+    expect(restoreFailure({ code: "57014", message: "canceling statement due to statement timeout" }, 500)).toEqual({ status: 504, message: TOO_BIG_MESSAGE });
+    expect(restoreFailure({ code: "XX000", message: "x" }, null)).toEqual({ status: 500, message: FAILED_MESSAGE });
+  });
+
+  it("has the words for a restore the route didn't start", () => {
+    expect(SLOW_START_MESSAGE).toBe("The server took too long to read the backup, so it didn't start the restore. Nothing was restored. Try again.");
   });
 
   it("maps a statement timeout (57014) to the too-big message", () => {
