@@ -64,8 +64,8 @@ set local lock_timeout = '5s';
 --               has_function_privilege('anon', 'public.save_health_rules(uuid, jsonb, jsonb)', 'execute'),
 --               has_function_privilege('authenticated', 'public.agency_workspace_list()', 'execute'),
 --               has_function_privilege('authenticated', 'public.save_health_rules(uuid, jsonb, jsonb)', 'execute');
---   3. `save_health_rules` is SECURITY DEFINER with an empty search_path; `agency_workspace_list` is not. Expect
---      (agency_workspace_list, f, null), (save_health_rules, t, {search_path=""}):
+--   3. `save_health_rules` is SECURITY DEFINER with an empty search_path; `agency_workspace_list` is not (both have an empty search_path). Expect
+--      (agency_workspace_list, f, {search_path=""}), (save_health_rules, t, {search_path=""}):
 --        select proname, prosecdef, proconfig from pg_proc where proname in ('save_health_rules', 'agency_workspace_list')
 --          and pronamespace = 'public'::regnamespace order by 1;
 --   4. Then, on the real project: as an editor, change "Task on time" on Settings -> Client health, and check the change shows
@@ -224,7 +224,7 @@ begin
   end loop;
 
   -- The same answer save_fields gives under RLS to a caller who can't write.
-  if ws is null or not public.can_edit_workspace(ws) then
+  if ws is null or not coalesce(public.can_edit_workspace(ws), false) then
     return jsonb_build_object('status', 'not_found');
   end if;
 
@@ -319,8 +319,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --               has_function_privilege('anon', 'public.save_health_rules(uuid, jsonb, jsonb)', 'execute'),
 --               has_function_privilege('authenticated', 'public.agency_workspace_list()', 'execute'),
 --               has_function_privilege('authenticated', 'public.save_health_rules(uuid, jsonb, jsonb)', 'execute');
---   3. `save_health_rules` is SECURITY DEFINER with an empty search_path; `agency_workspace_list` is not. Expect
---      (agency_workspace_list, f, null), (save_health_rules, t, {search_path=""}):
+--   3. `save_health_rules` is SECURITY DEFINER with an empty search_path; `agency_workspace_list` is not (both have an empty search_path). Expect
+--      (agency_workspace_list, f, {search_path=""}), (save_health_rules, t, {search_path=""}):
 --        select proname, prosecdef, proconfig from pg_proc where proname in ('save_health_rules', 'agency_workspace_list')
 --          and pronamespace = 'public'::regnamespace order by 1;
 --   4. Then, on the real project: as an editor, change "Task on time" on Settings -> Client health, and check the change shows
@@ -479,7 +479,7 @@ begin
   end loop;
 
   -- The same answer save_fields gives under RLS to a caller who can't write.
-  if ws is null or not public.can_edit_workspace(ws) then
+  if ws is null or not coalesce(public.can_edit_workspace(ws), false) then
     return jsonb_build_object('status', 'not_found');
   end if;
 

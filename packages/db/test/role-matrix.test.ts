@@ -42,6 +42,9 @@ const person = {
 /** Rows each table holds in the workspace, and each linked person's rows in it, counted as the superuser once seeded. */
 const totals: Record<string, number> = {};
 const owns: Record<string, Record<string, number>> = {};
+/** `settings.health_recover` as stored when the matrix starts (Northbeam: absent, so null), the base a save is made against. */
+let healthRecover = "null";
+const headlineNumbers = JSON.stringify({ flow_efficiency: 0.4, processes_attention: 1, processes_total: 4, client_groups_at_risk: 0, client_groups_total: 2 });
 const ids = { suggestion: "", proposal: "", client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "" };
 
 /** A SQL statement and its parameters. */
@@ -268,6 +271,16 @@ const TABLES: TableCase[] = [
     update: null,
     delete: null,
   },
+  // The agency list's headline numbers (B1 3/3): every reader reads, owners and editors write, nobody deletes.
+  {
+    table: "workspace_headlines",
+    insert: () => [
+      "insert into workspace_headlines (workspace_id, engine_version, revision_ids, horizon_weeks, numbers) values ($1, '1.7.0', '{}', 52, $2::jsonb) on conflict (workspace_id) do update set horizon_weeks = excluded.horizon_weeks",
+      [ws, headlineNumbers],
+    ],
+    update: ["update workspace_headlines set horizon_weeks = horizon_weeks where workspace_id = $1", [ws]],
+    delete: null,
+  },
   {
     table: "calibrations",
     insert: (tag) => [
@@ -370,6 +383,7 @@ beforeAll(async () => {
       }
     }
   }
+  healthRecover = JSON.stringify((await db.client.query("select settings -> 'health_recover' as v from workspaces where id = $1", [ws])).rows[0].v ?? null);
   ids.suggestion = (await db.client.query("select id from suggestions where workspace_id = $1 and note = 'x seed'", [ws])).rows[0].id;
   ids.proposal = (await db.client.query("select id from suggestion_proposals where workspace_id = $1 and title = 'x seed'", [ws])).rows[0].id;
 }, 120_000);
@@ -494,9 +508,9 @@ describe("writes", () => {
     });
   }
 
-  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions and clients are never deleted", async () => {
+  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions, clients and headlines are never deleted", async () => {
     await db.as(callers.owner!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });
@@ -566,6 +580,11 @@ describe("functions", () => {
       call: (c) => c.query("select public.save_fields('services', $1::jsonb, $2::jsonb, $3::jsonb) as r", [JSON.stringify({ id: ids.svcSeed }), JSON.stringify({ name: "Matrix seed service" }), JSON.stringify({ name: "Renamed" })]),
       refusal: { status: "not_found" },
     },
+    {
+      name: "save_health_rules",
+      call: (c) => c.query("select public.save_health_rules($1, $2::jsonb, '{\"health_recover\": 7}') as r", [ws, `{"health_recover": ${healthRecover}}`]),
+      refusal: { status: "not_found" },
+    },
   ];
 
   const outcome = async (c: pg.Client, rpc: RpcCase): Promise<{ status?: string; error?: string }> => {
@@ -608,6 +627,247 @@ describe("functions", () => {
         await expect(rpc.call(db.client), rpc.name).rejects.toThrow(/permission denied/);
         await db.client.query("rollback to savepoint a");
       }
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+});
+
+describe("client health rules (B1 3/3)", () => {
+  const save = (c: pg.Client, base: string, changes: string, w: string = ws) =>
+    c.query("select public.save_health_rules($1, $2::jsonb, $3::jsonb) as r", [w, base, changes]);
+  const run = async (role: RoleName, base: string, changes: string) =>
+    (await db.as(callers[role]!.claims, (c) => save(c, base, changes))).rows[0].r as {
+      status: string;
+      row?: { settings: Record<string, unknown> };
+      conflicts?: Record<string, unknown>;
+    };
+  const baseNow = `{"health_recover": ${healthRecover}}`;
+  const raises = async (c: pg.Client, code: string, base: string, changes: string) => {
+    await c.query("savepoint s");
+    await expect(save(c, base, changes), changes).rejects.toMatchObject({ code });
+    await c.query("rollback to savepoint s");
+  };
+
+  it("an editor saves a rule: saved, stored, stamped as entered by them, and logged with them as the actor", async () => {
+    await db.as(callers.editor!.claims, async (c) => {
+      const r = (await save(c, baseNow, '{"health_recover": 7}')).rows[0].r;
+      expect(r).toMatchObject({ status: "saved", row: { settings: { health_recover: 7 } }, conflicts: {} });
+      await c.query("reset role");
+      const w = (
+        await c.query(
+          "select settings -> 'health_recover' as v, provenance -> 'settings.health_recover' ->> 'source' as source, provenance -> 'settings.health_recover' ->> 'by' as by from workspaces where id = $1",
+          [ws],
+        )
+      ).rows[0];
+      expect(w).toEqual({ v: 7, source: "entered", by: callers.editor!.id });
+      const log = (await c.query("select actor_id, actor_kind, diff from audit_log where workspace_id = $1 and target_table = 'workspaces' and actor_id = $2", [ws, callers.editor!.id])).rows;
+      expect(log).toHaveLength(1);
+      expect(log[0].actor_kind).toBe("user");
+      expect(JSON.stringify(log[0].diff)).toContain("health_recover");
+    });
+  });
+
+  it("an owner and an agency admin save too; a member, a viewer and a stranger get not_found and change nothing", async () => {
+    for (const role of ["owner", "agency admin (JWT flag)", "agency_admin membership"] as const) {
+      expect((await run(role, baseNow, '{"health_recover": 8}')).status, role).toBe("saved");
+    }
+    for (const role of ["member", "viewer", "member, no person", "signed in, no membership"] as const) {
+      expect(await run(role, baseNow, '{"health_recover": 9}'), role).toEqual({ status: "not_found" });
+    }
+    const stored = (await db.client.query("select settings -> 'health_recover' as v from workspaces where id = $1", [ws])).rows[0].v ?? null;
+    expect(JSON.stringify(stored)).toBe(healthRecover);
+  });
+
+  it("an unknown workspace is not_found", async () => {
+    const r = (await db.as(callers.editor!.claims, (c) => save(c, baseNow, '{"health_recover": 7}', "00000000-0000-4000-8000-0000000000bb"))).rows[0].r;
+    expect(r).toEqual({ status: "not_found" });
+  });
+
+  it("null restores the default: the stored value becomes JSON null", async () => {
+    await db.as(callers.editor!.claims, async (c) => {
+      expect((await save(c, baseNow, '{"health_recover": 7}')).rows[0].r.status).toBe("saved");
+      const r = (await save(c, '{"health_recover": 7}', '{"health_recover": null}')).rows[0].r;
+      expect(r).toMatchObject({ status: "saved", row: { settings: { health_recover: null } } });
+      await c.query("reset role");
+      const w = (await c.query("select jsonb_typeof(settings -> 'health_recover') as t, settings ? 'health_recover' as present from workspaces where id = $1", [ws])).rows[0];
+      expect(w).toEqual({ t: "null", present: true });
+    });
+  });
+
+  it("a stale base gives a conflict with the stored value and writes nothing for that key; each key is checked against its own base", async () => {
+    await db.as(callers.editor!.claims, async (c) => {
+      await save(c, baseNow, '{"health_recover": 7}');
+      const r = (await save(c, '{"health_recover": 3, "health_initial": null}', '{"health_recover": 9, "health_initial": 60}')).rows[0].r;
+      expect(r).toMatchObject({ status: "conflict", conflicts: { health_recover: 7 }, row: { settings: { health_recover: 7, health_initial: 60 } } });
+      // A value already stored counts as saved, whatever the base was.
+      expect((await save(c, '{"health_recover": 3}', '{"health_recover": 7}')).rows[0].r.status).toBe("saved");
+    });
+  });
+
+  it("a value above 100, below 0 or not a number is refused (23514); a bad changes or base, or a key with no base, is 22023", async () => {
+    await db.as(callers.editor!.claims, async (c) => {
+      for (const changes of ['{"health_recover": 101}', '{"health_recover": -1}', '{"health_recover": "7"}', '{"health_recover": true}', '{"health_recover": [7]}']) {
+        await raises(c, "23514", baseNow, changes);
+      }
+      for (const [base, changes] of [[baseNow, "{}"], [baseNow, "[]"], ["[]", '{"health_recover": 7}'], ["{}", '{"health_recover": 7}']] as const) {
+        await raises(c, "22023", base, changes);
+      }
+    });
+    // 0 and 100 are allowed.
+    for (const v of [0, 100]) expect((await run("editor", baseNow, `{"health_recover": ${v}}`)).status).toBe("saved");
+  });
+
+  it("no other key can be saved, by an editor or an owner (42501): name, currency, hours_per_week, availability_floor, and the rest", async () => {
+    for (const role of ["editor", "owner"] as const) {
+      await db.as(callers[role]!.claims, async (c) => {
+        for (const key of ["name", "currency", "hours_per_week", "availability_floor", "overtime_cap", "provenance"]) {
+          await raises(c, "42501", `{"${key}": null}`, `{"${key}": 5}`);
+        }
+      });
+    }
+    // Mixed with an allowed key, nothing is written.
+    await db.as(callers.editor!.claims, async (c) => {
+      await raises(c, "42501", `{"health_recover": ${healthRecover}, "currency": "GBP"}`, '{"health_recover": 7, "currency": "USD"}');
+      await c.query("reset role");
+      expect((await c.query("select settings ->> 'currency' as c from workspaces where id = $1", [ws])).rows[0].c).toBe("GBP");
+    });
+  });
+
+  it("the editor still can't rename the workspace or write its settings directly (the update policy is unchanged)", async () => {
+    await db.as(callers.editor!.claims, async (c) => {
+      expect(await refused(c, () => c.query("update workspaces set name = name || '!' where id = $1", [ws]))).toMatch(/refused|no rows/);
+      expect(await refused(c, () => c.query("update workspaces set settings = jsonb_set(settings, '{health_recover}', '5') where id = $1", [ws]))).toMatch(/refused|no rows/);
+    });
+  });
+
+  it("anon holds no execute right on it or on the agency list", async () => {
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      for (const [sql, params] of [
+        ["select public.save_health_rules($1, '{\"health_recover\": null}', '{\"health_recover\": 7}')", [ws]],
+        ["select * from public.agency_workspace_list()", []],
+      ] as const) {
+        await db.client.query("savepoint a");
+        await expect(db.client.query(sql, [...params]), sql).rejects.toThrow(/permission denied/);
+        await db.client.query("rollback to savepoint a");
+      }
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("save_health_rules is SECURITY DEFINER with an empty search_path; the list is SECURITY INVOKER", async () => {
+    const r = (
+      await db.client.query(
+        "select proname, prosecdef, proconfig from pg_proc where pronamespace = 'public'::regnamespace and proname in ('save_health_rules', 'agency_workspace_list') order by 1",
+      )
+    ).rows;
+    expect(r).toEqual([
+      { proname: "agency_workspace_list", prosecdef: false, proconfig: ["search_path=\"\""] },
+      { proname: "save_health_rules", prosecdef: true, proconfig: ["search_path=\"\""] },
+    ]);
+  });
+});
+
+describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
+  const upsert = (c: pg.Client, numbers: string) =>
+    c.query(
+      "insert into workspace_headlines (workspace_id, engine_version, revision_ids, horizon_weeks, numbers) values ($1, '1.7.0', '{}', 52, $2::jsonb) on conflict (workspace_id) do update set numbers = excluded.numbers",
+      [ws, numbers],
+    );
+
+  it("the numbers must have the right shape (23514)", async () => {
+    const good = JSON.parse(headlineNumbers) as Record<string, unknown>;
+    const bad: Record<string, unknown>[] = [
+      { ...good, flow_efficiency: 1.5 },
+      { ...good, flow_efficiency: -0.1 },
+      { ...good, flow_efficiency: "0.4" },
+      { ...good, processes_attention: -1 },
+      { ...good, processes_total: 1.5 },
+      { ...good, client_groups_at_risk: "1" },
+      { ...good, client_groups_total: null },
+      Object.fromEntries(Object.entries(good).filter(([k]) => k !== "processes_total")),
+    ];
+    await db.as(callers.editor!.claims, async (c) => {
+      for (const numbers of bad) {
+        await c.query("savepoint s");
+        await expect(upsert(c, JSON.stringify(numbers)), JSON.stringify(numbers)).rejects.toMatchObject({ code: "23514" });
+        await c.query("rollback to savepoint s");
+      }
+      // A null flow efficiency (nothing to measure yet) is fine.
+      await expect(upsert(c, JSON.stringify({ ...good, flow_efficiency: null }))).resolves.toBeTruthy();
+    });
+  });
+
+  it("a member and a viewer can't insert or update; every reader reads", async () => {
+    for (const role of ["member", "viewer", "member, no person", "signed in, no membership"] as const) {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect(await refused(c, () => upsert(c, headlineNumbers)), role).toBe("refused");
+        expect(await refused(c, () => c.query("update workspace_headlines set horizon_weeks = 1 where workspace_id = $1", [ws])), role).toMatch(/refused|no rows/);
+      });
+    }
+    for (const role of ["owner", "editor", "member", "viewer", "member, no person"] as const) {
+      await db.as(callers[role]!.claims, async (c) => expect(await rowsIn(c, "workspace_headlines"), role).toBe(1));
+    }
+    await db.as(callers["signed in, no membership"]!.claims, async (c) => expect(await rowsIn(c, "workspace_headlines")).toBe(0));
+  });
+
+  it("agency_workspace_list counts critical open and in-progress issues, last activity and the stored numbers, for each workspace the caller reads", async () => {
+    const stats = async () =>
+      db.as(callers["agency admin (JWT flag)"]!.claims, async (c) => (await c.query("select id, name, slug, open_risk_issues::int as open_risk_issues, last_activity, numbers, computed_at from public.agency_workspace_list()")).rows);
+    const before = (await stats()).find((r) => r.id === ws);
+    expect(before).toMatchObject({ name: "Northbeam Digital", slug: "northbeam", open_risk_issues: 0 });
+    expect(before.last_activity).toBeInstanceOf(Date);
+
+    await db.client.query("begin");
+    try {
+      for (const [title, severity, status] of [
+        ["x risk open", "critical", "open"],
+        ["x risk in progress", "critical", "in_progress"],
+        ["x risk done", "critical", "done"],
+        ["x risk dismissed", "critical", "dismissed"],
+        ["x bad open", "serious", "open"],
+      ] as const) {
+        await db.client.query("insert into issues (workspace_id, type, title, severity, status) values ($1, 'delay', $2, $3, $4)", [ws, title, severity, status]);
+      }
+      await upsert(db.client, headlineNumbers);
+      await db.client.query("set local role authenticated");
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers["agency admin (JWT flag)"]!.claims)]);
+      const rows = (await db.client.query("select id, open_risk_issues::int as open_risk_issues, last_activity, numbers, computed_at from public.agency_workspace_list()")).rows;
+      const nb = rows.find((r) => r.id === ws);
+      expect(nb.open_risk_issues).toBe(2);
+      expect(nb.numbers).toEqual(JSON.parse(headlineNumbers));
+      expect(nb.computed_at).toBeInstanceOf(Date);
+      expect(nb.last_activity.getTime()).toBeGreaterThanOrEqual(before.last_activity.getTime());
+      // Larkspur has no headline yet.
+      const lark = rows.find((r) => r.id !== ws);
+      expect(lark.numbers).toBeNull();
+      expect(lark.computed_at).toBeNull();
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("agency_workspace_list: a member of Northbeam sees only Northbeam, a stranger nothing; the audit log counts toward last activity only for those who manage", async () => {
+    for (const role of ["owner", "editor", "member", "viewer"] as const) {
+      const rows = await db.as(callers[role]!.claims, async (c) => (await c.query("select id from public.agency_workspace_list()")).rows);
+      expect(rows.map((r) => r.id), role).toEqual([ws]);
+    }
+    expect(await db.as(callers["signed in, no membership"]!.claims, async (c) => (await c.query("select id from public.agency_workspace_list()")).rows)).toEqual([]);
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into audit_log (workspace_id, actor_id, actor_kind, action, target_table) values ($1, $2, 'user', 'update', 'workspaces')", [ws, callers.owner!.id]);
+      await db.client.query("update audit_log set created_at = now() + interval '1 day' where workspace_id = $1 and actor_id = $2", [ws, callers.owner!.id]);
+      const latest = async (role: RoleName) => {
+        await db.client.query("set local role authenticated");
+        await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers[role]!.claims)]);
+        const t = (await db.client.query("select last_activity from public.agency_workspace_list()")).rows[0].last_activity as Date;
+        await db.client.query("reset role");
+        return t;
+      };
+      expect((await latest("owner")).getTime()).toBeGreaterThan((await latest("editor")).getTime());
     } finally {
       await db.client.query("rollback");
     }
