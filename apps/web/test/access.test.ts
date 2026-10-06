@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessErrorMessage, emailDomain, isAssignableRole, normalizeDomain, normalizeEmail } from "@/lib/access";
+import { accessErrorMessage, emailDomain, inviteMessage, isAssignableRole, normalizeDomain, normalizeEmail, personLinkProblem, selectablePeople } from "@/lib/access";
 
 describe("access helpers", () => {
   it("normalises what people paste as a domain", () => {
@@ -30,5 +30,41 @@ describe("access helpers", () => {
     ).toMatch(/already used/);
     expect(accessErrorMessage({ code: "42501", message: "new row violates row-level security policy" })).toMatch(/permission/);
     expect(accessErrorMessage({ message: "boom" })).toMatch(/Something went wrong/);
+  });
+
+  it("refuses linking a person who is already linked to another active membership or a list row", () => {
+    const rows = [
+      { id: "m1", person_id: "p1", active: true },
+      { id: "m2", person_id: "p2", active: false },
+    ];
+    expect(personLinkProblem("m9", "p1", rows, [])).toMatch(/already linked/);
+    expect(personLinkProblem("m9", "p3", rows, [{ person_id: "p3" }])).toMatch(/already linked/);
+    // Their own row, an inactive membership and a free person are fine.
+    expect(personLinkProblem("m1", "p1", rows, [])).toBeNull();
+    expect(personLinkProblem("m9", "p2", rows, [])).toBeNull();
+    expect(personLinkProblem("m9", "p4", rows, [])).toBeNull();
+  });
+
+  it("explains the last-owner guard, whatever else the message carries", () => {
+    const guard = { code: "23514", message: "workspace_keeps_an_owner: a workspace needs at least one owner" };
+    expect(accessErrorMessage(guard)).toBe("A workspace needs at least one owner. Make someone else an owner first.");
+    expect(accessErrorMessage({ message: `ERROR: ${guard.message} (CONTEXT: trigger)` })).toMatch(/needs at least one owner/);
+  });
+
+  it("writes the invite message for the owner to send", () => {
+    expect(inviteMessage("Northbeam", "maya@northbeam.example", "https://flow.example.com/")).toBe(
+      "You've been given access to Northbeam in Transpera Flow. Sign in with Google as maya@northbeam.example at https://flow.example.com/login.",
+    );
+  });
+
+  it("offers only people nobody else is linked to, keeping the row's own", () => {
+    const people = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    const links = new Map([
+      ["a", new Set(["m:1"])],
+      ["b", new Set(["e:2"])],
+    ]);
+    expect(selectablePeople(people, links).map((p) => p.id)).toEqual(["c"]);
+    expect(selectablePeople(people, links, "m:1").map((p) => p.id)).toEqual(["a", "c"]);
+    expect(selectablePeople(people, links, "e:2").map((p) => p.id)).toEqual(["b", "c"]);
   });
 });

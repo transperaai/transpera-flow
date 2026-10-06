@@ -3246,6 +3246,7 @@ export type Database = {
         Args: { import_source: string; target_process: string }
         Returns: undefined
       }
+      my_person_id: { Args: { ws: string }; Returns: string }
       open_draft: { Args: { target_process: string }; Returns: Json }
       publish_process: {
         Args: { accept_estimates?: boolean; target_process: string }
