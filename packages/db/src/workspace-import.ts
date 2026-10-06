@@ -203,7 +203,9 @@ const NOT_A_BACKUP = "This isn't a Transpera Flow workspace backup. Choose the .
 const num = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const isObj = (v: unknown): v is Row => !!v && typeof v === "object" && !Array.isArray(v);
 const rowsOf = (v: unknown): Row[] => (Array.isArray(v) ? (v as Row[]) : []);
-const lc = (v: unknown): string => String(v).toLowerCase();
+/** Lower-case text of a string; anything else (an object with its own `toString`, say) gives "", which no id equals. */
+const lc = (v: unknown): string => (typeof v === "string" ? v.toLowerCase() : "");
+const text = (v: unknown): string => (typeof v === "string" ? v : "");
 const idOf = (r: Row): string | null => (typeof r.id === "string" ? lc(r.id) : null);
 const pick = (row: Row, columns: readonly string[]): Row => {
   const out: Row = {};
@@ -278,12 +280,19 @@ function shapeProblem(v: Row): string | null {
       if (ver.first_principles != null && !isObj(ver.first_principles)) return "a version's first principles aren't an object";
     }
   }
+  // Loops in the nesting: one walk with colours (0 new, 1 on the current path, 2 done), so a deep chain costs one pass.
+  const colour = new Map<string, 1 | 2>();
   for (const start of parents.keys()) {
-    const seen = new Set<string>();
-    for (let at: string | null | undefined = start; at; at = parents.get(at)) {
-      if (seen.has(at)) return "processes are nested in a loop";
-      seen.add(at);
+    if (colour.has(start)) continue;
+    const path: string[] = [];
+    let at: string | null | undefined = start;
+    while (at && !colour.has(at)) {
+      colour.set(at, 1);
+      path.push(at);
+      at = parents.get(at);
     }
+    if (at && colour.get(at) === 1) return "processes are nested in a loop";
+    for (const x of path) colour.set(x, 2);
   }
   for (const i of v.issues as Row[]) if (i.events !== undefined && !Array.isArray(i.events)) return "an issue's history isn't a list";
   return null;
@@ -305,6 +314,8 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
   for (const i of b.issues) yield* rowsOf(i.events);
 }
 
+const L_ = WORKSPACE_IMPORT_LIMITS;
+
 export function checkWorkspaceBundle(value: unknown): BundleCheck {
   const empty: ImportSummary = {
     restored: [],
@@ -322,6 +333,29 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
   }
   if (format !== WORKSPACE_BUNDLE_FORMAT) return stop(NOT_A_BACKUP);
 
+  // Before any walk over the rows: a list far past what a restore takes is refused at once. The cap is twice the limit, because
+  // the lists also hold what isn't restored (detections, the company map, processes with no version).
+  const WORK_CAP: [string, number, string][] = [
+    ["processes", L_.processes, "processes"],
+    ["issues", L_.issues, "issues"],
+    ["sources", L_.sources, "sources"],
+    ["scenarios", L_.scenarios, "scenarios"],
+    ["blocks", L_.blocks, "blocks"],
+    ["suggestions", L_.suggestions, "suggestions"],
+    ["suggestion_proposals", L_.proposals, "proposals"],
+  ];
+  for (const [k, max, what] of WORK_CAP) {
+    const list = value[k];
+    if (Array.isArray(list) && list.length > max * 2) return stop(`The backup has ${num(list.length)} ${what}; a restore takes at most ${num(max)}.`);
+  }
+  const model = value.company_model;
+  if (isObj(model)) {
+    for (const [k, max] of [["people", L_.people], ["clients", L_.clients]] as const) {
+      const list = model[k];
+      if (Array.isArray(list) && list.length > max * 2) return stop(`The backup has ${num(list.length)} ${k}; a restore takes at most ${num(max)}.`);
+    }
+  }
+
   const problem = shapeProblem(value);
   if (problem) return stop(`The backup is damaged: ${problem}, so nothing was restored.`);
   const bundle = value as unknown as WorkspaceBundle;
@@ -330,7 +364,7 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
 
   const wsId = lc(bundle.workspace.id);
   for (const r of allRows(bundle)) {
-    if (r.workspace_id !== undefined && lc(r.workspace_id) !== wsId) {
+    if (r.workspace_id !== undefined && (typeof r.workspace_id !== "string" || lc(r.workspace_id) !== wsId)) {
       errors.push("The backup mixes rows from more than one workspace.");
       break;
     }
@@ -372,7 +406,7 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
   over(m.proposals, L.proposals, "pending proposals");
   if (m.planBytes > L.planBytes) errors.push(`The backup is too big to restore in one go: it comes to ${num(m.planBytes)} bytes once prepared, and a restore takes at most ${num(L.planBytes)}.`);
 
-  if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${String(bundle.engine_version)}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
+  if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${typeof bundle.engine_version === "string" ? bundle.engine_version : "unknown"}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
   if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts and no pending suggestions.");
   for (const line of summary.leftOut) if (line.count > 0 && !QUIET_LEFT_OUT.has(line.key)) warnings.push(`Stays in the file: ${num(line.count)} ${line.label}.`);
   warnings.push(...planned.warnings);
@@ -387,7 +421,7 @@ const QUIET_LEFT_OUT = new Set(["older_versions", "company_map"]);
 // The planner
 
 type Mode = "null" | "drop" | "require";
-interface Ref {
+export interface Ref {
   col: string;
   to: string;
   mode: Mode;
@@ -395,7 +429,7 @@ interface Ref {
 const R = (col: string, to: string, mode: Mode): Ref => ({ col, to, mode });
 
 /** The id and reference columns of each flat plan section: after remapping, every one holds a placeholder or null. */
-const REFS: Record<string, Ref[]> = {
+export const IMPORT_REFS: Record<string, Ref[]> = {
   person_roles: [R("person_id", "people", "require"), R("role_id", "roles", "require")],
   person_leave: [R("person_id", "people", "require")],
   services: [R("entry_process_id", "processes", "null")],
@@ -412,7 +446,7 @@ const REFS: Record<string, Ref[]> = {
   source_links: [R("source_id", "sources", "require"), R("issue_id", "issues", "drop"), R("process_id", "processes", "drop"), R("step_id", "steps", "drop")],
   proposals: [R("issue_id", "issues", "drop")],
 };
-const STEP_REFS = [R("parent_step_id", "version", "null"), R("entry_step_id", "version", "null"), R("rework_to_step_id", "version", "null"), R("person_id", "people", "null"), R("role_id", "roles", "null"), R("child_process_id", "processes", "null")];
+export const IMPORT_STEP_REFS = [R("parent_step_id", "version", "null"), R("entry_step_id", "version", "null"), R("rework_to_step_id", "version", "null"), R("person_id", "people", "null"), R("role_id", "roles", "null"), R("child_process_id", "processes", "null")];
 
 const LABELS: Record<string, string> = {
   roles: "roles", people: "people", person_roles: "role assignments", person_leave: "leave entries", lead_sources: "lead sources", seasonality: "seasonality months",
@@ -449,28 +483,27 @@ function resolveRefs(section: string, rows: Row[], sets: Record<string, Set<stri
   return out;
 }
 
-const byCreated = (a: Row, b: Row) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || String(a.id ?? "").localeCompare(String(b.id ?? ""));
+const byCreated = (a: Row, b: Row) => text(a.created_at).localeCompare(text(b.created_at)) || text(a.id).localeCompare(text(b.id));
 
-/** Parents before children, otherwise in the order given. */
+/** Parents before children, otherwise in the order given. One pass: each row places its unplaced ancestors first (a loop, which the checker refuses, is cut where it closes). */
 function parentsFirst<T extends Row>(rows: T[], parentKey: string): T[] {
-  const ids = new Set(rows.map((r) => lc(r.id)));
-  const done = new Set<string>();
+  const byId = new Map<string, T>();
+  for (const r of rows) byId.set(lc(r.id), r);
+  const placed = new Set<string>();
   const out: T[] = [];
-  let rest = rows;
-  while (rest.length) {
-    const next: T[] = [];
-    for (const r of rest) {
-      const parent = r[parentKey] == null ? null : lc(r[parentKey]);
-      if (parent === null || !ids.has(parent) || done.has(parent)) {
-        out.push(r);
-        done.add(lc(r.id));
-      } else next.push(r);
+  for (const r of rows) {
+    const chain: T[] = [];
+    const climbing = new Set<string>();
+    let at: T | undefined = r;
+    while (at && !placed.has(lc(at.id)) && !climbing.has(lc(at.id))) {
+      climbing.add(lc(at.id));
+      chain.push(at);
+      at = at[parentKey] == null ? undefined : byId.get(lc(at[parentKey]));
     }
-    if (next.length === rest.length) {
-      out.push(...next); // a loop (the checker refuses those): keep the rest as they are
-      break;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      placed.add(lc(chain[i]!.id));
+      out.push(chain[i]!);
     }
-    rest = next;
   }
   return out;
 }
@@ -539,7 +572,7 @@ export function planWorkspaceImport(
   });
   const processRows: Row[] = pre.map(({ process, version, stepRows }) => {
     sets.version = new Set(stepRows.map((s) => lc(s.id)));
-    const steps = resolveRefs("steps", stepRows, sets, STEP_REFS, note).map((s) => pick(s, IMPORT_COLUMNS.steps));
+    const steps = resolveRefs("steps", stepRows, sets, IMPORT_STEP_REFS, note).map((s) => pick(s, IMPORT_COLUMNS.steps));
     const edges = rowsOf(version.edges).filter((e) => sets.version!.has(lc(e.from_step_id)) && sets.version!.has(lc(e.to_step_id)));
     for (let i = rowsOf(version.edges).length - edges.length; i > 0; i--) note("edges", "dropped");
     const parent = process.parent_process_id == null ? null : lc(process.parent_process_id);
@@ -566,7 +599,7 @@ export function planWorkspaceImport(
     return r ? pick(r, IMPORT_COLUMNS[section]) : null;
   };
   const customConditions = company("market_conditions").filter((c) => c.preset == null);
-  const presetKey = new Map(company("market_conditions").filter((c) => c.preset != null).map((c) => [lc(c.id), String(c.preset)]));
+  const presetKey = new Map(company("market_conditions").filter((c) => c.preset != null).map((c) => [lc(c.id), text(c.preset)]));
   const customIds = new Set(customConditions.map((c) => lc(c.id)));
   const schedule: Row[] = [];
   for (const row of company("market_schedule")) {
@@ -587,7 +620,7 @@ export function planWorkspaceImport(
     return an === bn ? byCreated(a, b) : an < bn ? -1 : 1;
   });
   for (const i of keptIssues) sets.issues!.add(lc(i.id));
-  const issueRows = resolveRefs("issues", keptIssues, sets, REFS.issues!, note).map((i) => {
+  const issueRows = resolveRefs("issues", keptIssues, sets, IMPORT_REFS.issues!, note).map((i) => {
     const links = rowsOf(i.links)
       .filter((l) => l.process_id != null && sets.processes!.has(lc(l.process_id)) && (l.step_id == null || stepProcess.get(lc(l.step_id)) === lc(l.process_id)))
       .map((l) => ({ process_id: l.process_id, step_id: l.step_id ?? null }));
@@ -613,8 +646,8 @@ export function planWorkspaceImport(
   });
 
   const restoredIds = new Set<string>([lc(bundle.workspace.id)]);
-  const personSkills = flat("person_skills", company("person_skills"), REFS.person_skills);
-  const sourceLinks = flat("source_links", linkRows, REFS.source_links);
+  const personSkills = flat("person_skills", company("person_skills"), IMPORT_REFS.person_skills);
+  const sourceLinks = flat("source_links", linkRows, IMPORT_REFS.source_links);
 
   const pendingSuggestions = bundle.suggestions.filter((s) => s.status === "pending");
   const pendingProposals = bundle.suggestion_proposals.filter((s) => s.status === "pending");
@@ -625,8 +658,8 @@ export function planWorkspaceImport(
     settings: null,
     roles: flat("roles", company("roles")),
     people: flat("people", company("people")),
-    person_roles: flat("person_roles", company("person_roles"), REFS.person_roles),
-    person_leave: flat("person_leave", company("person_leave"), REFS.person_leave),
+    person_roles: flat("person_roles", company("person_roles"), IMPORT_REFS.person_roles),
+    person_leave: flat("person_leave", company("person_leave"), IMPORT_REFS.person_leave),
     lead_sources: flat("lead_sources", company("lead_sources")),
     seasonality: flat("seasonality", company("seasonality")),
     demand_settings: one("demand_settings"),
@@ -638,14 +671,14 @@ export function planWorkspaceImport(
     clients: flat("clients", company("clients")),
     sources,
     processes,
-    scenarios: parentsFirst(flat("scenarios", bundle.scenarios, REFS.scenarios), "parent_scenario_id"),
+    scenarios: parentsFirst(flat("scenarios", bundle.scenarios, IMPORT_REFS.scenarios), "parent_scenario_id"),
     blocks: flat("blocks", bundle.blocks).sort(byCreated),
     issues: issueRows,
-    services: flat("services", company("services"), REFS.services),
-    service_servicing: flat("service_servicing", company("service_servicing"), REFS.service_servicing),
-    client_groups: flat("client_groups", company("client_groups"), REFS.client_groups).sort(byCreated),
-    client_services: flat("client_services", company("client_services"), REFS.client_services),
-    client_assignments: flat("client_assignments", company("client_assignments"), REFS.client_assignments),
+    services: flat("services", company("services"), IMPORT_REFS.services),
+    service_servicing: flat("service_servicing", company("service_servicing"), IMPORT_REFS.service_servicing),
+    client_groups: flat("client_groups", company("client_groups"), IMPORT_REFS.client_groups).sort(byCreated),
+    client_services: flat("client_services", company("client_services"), IMPORT_REFS.client_services),
+    client_assignments: flat("client_assignments", company("client_assignments"), IMPORT_REFS.client_assignments),
     person_skills: personSkills,
     source_links: sourceLinks,
     suggestions: [],
@@ -657,10 +690,10 @@ export function planWorkspaceImport(
   const known: Record<string, unknown> = {};
   const unknown: string[] = [];
   for (const [k, v] of Object.entries(settingsIn)) {
-    if (k in SETTING_KEYS) known[k] = v;
+    if (Object.hasOwn(SETTING_KEYS, k)) known[k] = v;
     else unknown.push(k);
   }
-  if (unknown.length) warnings.push(`${num(unknown.length)} workspace settings this version doesn't know were left out (${unknown.sort().join(", ")}).`);
+  for (const k of unknown.sort()) warnings.push(`The workspace setting "${k}" isn't one this version knows and was left out.`);
   plan.settings = Object.keys(known).length ? known : null;
 
   // Pending suggestions and proposals, last: they point at what is restored.
@@ -675,7 +708,7 @@ export function planWorkspaceImport(
     })
     .map((s) => pick(s, IMPORT_COLUMNS.suggestions))
     .sort(byCreated);
-  plan.proposals = flat("proposals", pendingProposals, REFS.proposals).sort(byCreated);
+  plan.proposals = flat("proposals", pendingProposals, IMPORT_REFS.proposals).sort(byCreated);
 
   // A pending suggestion only counted as dropped above if it pointed at nothing restored; the lists are final now.
   for (const [section, e] of dropped) {
@@ -685,12 +718,14 @@ export function planWorkspaceImport(
   }
 
   // Ids: new placeholders that keep the order of the old ones.
-  const all = new Set<string>([lc(bundle.workspace.id)]);
+  // Rank 0 is the workspace itself (the restore swaps it for the target workspace); the other ids take 1, 2, 3 ... in their order.
+  const workspaceKey = lc(bundle.workspace.id);
+  const all = new Set<string>();
   for (const r of allRows(bundle)) {
     const id = idOf(r);
-    if (id) all.add(id);
+    if (id && id !== workspaceKey) all.add(id);
   }
-  const placeholderOf = new Map<string, string>();
+  const placeholderOf = new Map<string, string>([[workspaceKey, PLACEHOLDER_PREFIX + "0".repeat(12)]]);
   [...all].sort().forEach((id, n) => placeholderOf.set(id, PLACEHOLDER_PREFIX + (n + 1).toString(16).padStart(12, "0")));
   const remapped = JSON.parse(JSON.stringify(plan).replace(UUID_ANY, (m) => placeholderOf.get(m.toLowerCase()) ?? m)) as ImportPlan;
   assertOnlyPlaceholders(remapped);
@@ -745,7 +780,7 @@ function assertOnlyPlaceholders(plan: ImportPlan): void {
     if (typeof v !== "string" || !PLACEHOLDER.test(v)) throw new Error(`planWorkspaceImport: ${where} holds ${JSON.stringify(v)}, not a placeholder id`);
   };
   const flatFields = (section: string, rows: Row[], extra: string[] = []) => {
-    const fields = ["id", ...(REFS[section] ?? []).map((r) => r.col), ...extra];
+    const fields = ["id", ...(IMPORT_REFS[section] ?? []).map((r) => r.col), ...extra];
     for (const r of rows) for (const f of fields) bad(`${section}.${f}`, r[f]);
   };
   for (const section of Object.keys(plan) as (keyof ImportPlan)[]) {
@@ -760,7 +795,7 @@ function assertOnlyPlaceholders(plan: ImportPlan): void {
   for (const p of plan.processes) {
     bad("processes.id", p.id);
     bad("processes.parent_process_id", p.parent_process_id);
-    for (const s of p.steps) for (const f of ["id", ...STEP_REFS.map((r) => r.col)]) bad(`steps.${f}`, s[f]);
+    for (const s of p.steps) for (const f of ["id", ...IMPORT_STEP_REFS.map((r) => r.col)]) bad(`steps.${f}`, s[f]);
     for (const e of p.edges) for (const f of ["id", "from_step_id", "to_step_id"]) bad(`edges.${f}`, e[f]);
   }
 }

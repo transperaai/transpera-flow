@@ -60,9 +60,10 @@ describe.each([
     const found = JSON.stringify(plan).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
     expect(found.filter((u) => !u.startsWith(PLACEHOLDER_PREFIX))).toEqual([]);
     expect(JSON.stringify(plan)).not.toMatch(/"(created_by|email|workspace_id|hidden)"/);
-    const old = [...placeholderOf.keys()].sort();
+    const old = [...placeholderOf.keys()].filter((k) => k !== bundle.workspace.id).sort();
     const mapped = old.map((k) => placeholderOf.get(k)!);
     expect(mapped).toEqual([...mapped].sort());
+    expect(placeholderOf.get(bundle.workspace.id)).toBe(`${PLACEHOLDER_PREFIX}000000000000`);
     expect(plan.processes.length).toBeGreaterThan(0);
     expect(plan.people.map((p) => p.id)).toEqual(expect.arrayContaining(bundle.company_model.people!.map((p) => placeholderOf.get(String(p.id)))));
   });

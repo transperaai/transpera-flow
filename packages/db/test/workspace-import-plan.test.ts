@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { ENGINE_VERSION } from "@transpera-flow/engine";
-import { IMPORT_COLUMNS, PLACEHOLDER_PREFIX, WORKSPACE_IMPORT_LIMITS, checkWorkspaceBundle, planWorkspaceImport, type Row, type WorkspaceBundle } from "../src";
+import { IMPORT_COLUMNS, IMPORT_REFS, IMPORT_STEP_REFS, PLACEHOLDER_PREFIX, WORKSPACE_IMPORT_LIMITS, checkWorkspaceBundle, planWorkspaceImport, type Row, type WorkspaceBundle } from "../src";
 import { ACCOUNT_KEY } from "../src/workspace-bundle";
 
 // Checking and planning a workspace restore (issue #39, B10 2a): pure, no database. A real export is checked in
@@ -234,6 +234,28 @@ describe("checkWorkspaceBundle: what is refused, in order", () => {
     expect(c.warnings).toContain("Stays in the file: 1 source file originals (the text is restored).");
   });
 
+  it("answers with an error, never a throw, when values have a toString of their own", () => {
+    const b = clone(makeBundle().bundle) as unknown as Row;
+    (b.sources as Row[])[0]!.workspace_id = { toString: 1 };
+    b.engine_version = { toString: 1 };
+    let c!: ReturnType<typeof checkWorkspaceBundle>;
+    expect(() => (c = checkWorkspaceBundle(b))).not.toThrow();
+    expect(c.ok).toBe(false);
+    expect(c.errors).toContain("The backup mixes rows from more than one workspace.");
+    expect(c.warnings.join(" ")).toContain("made with engine unknown");
+
+    const odd = clone(makeBundle().bundle) as unknown as Row;
+    odd.engine_version = { toString: 1 };
+    (odd.scenarios as Row[])[0]!.created_at = { toString: 1 };
+    (odd.company_model as Row).market_conditions = ((odd.company_model as Row).market_conditions as Row[]).map((m) => ({ ...m, preset: { toString: 1 } }));
+    expect(() => checkWorkspaceBundle(odd)).not.toThrow();
+    const r = checkWorkspaceBundle(odd);
+    expect(r.errors.length + r.warnings.length).toBeGreaterThan(0);
+    // The same for a version number, and ids that aren't text.
+    expect(() => checkWorkspaceBundle({ format: { toString: 1 } })).not.toThrow();
+    expect(() => checkWorkspaceBundle({ ...clone(makeBundle().bundle), workspace: { id: { toString: 1 } } })).not.toThrow();
+  });
+
   it("accepts a viewer's backup (scope published)", () => {
     const b = clone(makeBundle().bundle);
     b.scope = "published";
@@ -312,13 +334,75 @@ describe("checkWorkspaceBundle: limits", () => {
   });
 });
 
+describe("checkWorkspaceBundle: deep nesting and oversized lists", () => {
+  const chain = (n: number): WorkspaceBundle => {
+    const b = clone(makeBundle().bundle);
+    const ws = b.workspace.id;
+    let parent: string | null = null;
+    for (let i = 0; i < n; i++) {
+      const pid = id();
+      b.processes.push({ id: pid, name: `p${i}`, is_company: false, workspace_id: ws, parent_process_id: parent, versions: [{ id: id(), live: true, draft: false, steps: [], edges: [], workspace_id: ws }] } as Row);
+      parent = pid;
+    }
+    return recount(b);
+  };
+
+  it("checks a deep chain within limits quickly, in linear time", () => {
+    const b = chain(WORKSPACE_IMPORT_LIMITS.processes - 3);
+    const t = Date.now();
+    expect(checkWorkspaceBundle(b).errors).toEqual([]);
+    expect(Date.now() - t).toBeLessThan(1000);
+    // The loop check and parent ordering themselves, far deeper than a restore allows: 5,000 raw processes stay under the 2x cap.
+    const deep = chain(WORKSPACE_IMPORT_LIMITS.processes * 2 - 3);
+    const t2 = Date.now();
+    const c = checkWorkspaceBundle(deep);
+    expect(Date.now() - t2).toBeLessThan(1000);
+    expect(c.errors.join(" ")).toContain("a restore takes at most 200");
+  });
+
+  it("plans a 5,000-deep chain, parents first, in under a second", () => {
+    const b = chain(5000);
+    const t = Date.now();
+    const { plan } = planOf(b);
+    expect(Date.now() - t).toBeLessThan(1000);
+    const index = new Map(plan.processes.map((p, i) => [p.id, i]));
+    for (const p of plan.processes) if (p.parent_process_id) expect(index.get(p.parent_process_id)!).toBeLessThan(index.get(p.id)!);
+  });
+
+  it("still finds a loop in a long chain, in linear time", () => {
+    // Deeper than a restore takes would stop at the size cap first; the loop is found within it.
+    const b = chain(390);
+    (b.processes[4]!.parent_process_id as unknown) = b.processes[b.processes.length - 1]!.id;
+    const t = Date.now();
+    expect(checkWorkspaceBundle(b).errors.join(" ")).toMatch(/nested in a loop/);
+    expect(Date.now() - t).toBeLessThan(1000);
+  });
+
+  it("refuses lists far past the limits before any planning", () => {
+    const L = WORKSPACE_IMPORT_LIMITS;
+    const b = clone(makeBundle().bundle);
+    b.issues = Array.from({ length: L.issues * 2 + 1 }, () => ({ id: id(), workspace_id: b.workspace.id })) as Row[];
+    const t = Date.now();
+    const c = checkWorkspaceBundle(b);
+    expect(c.errors).toEqual(["The backup has 4,001 issues; a restore takes at most 2,000."]);
+    expect(Date.now() - t).toBeLessThan(200);
+    // Not even a shape check: rows of the wrong kind in an oversized list are not read.
+    const sloppy = clone(makeBundle().bundle);
+    sloppy.sources = Array.from({ length: L.sources * 2 + 1 }, () => 5) as unknown as Row[];
+    expect(checkWorkspaceBundle(sloppy).errors).toEqual(["The backup has 601 sources; a restore takes at most 300."]);
+    const people = clone(makeBundle().bundle);
+    people.company_model.people = Array.from({ length: L.people * 2 + 1 }, () => 5) as unknown as Row[];
+    expect(checkWorkspaceBundle(people).errors).toEqual(["The backup has 2,001 people; a restore takes at most 1,000."]);
+  });
+});
+
 describe("planWorkspaceImport", () => {
   it("keeps the order of ids: placeholders sort as the old ids did", () => {
     const { bundle } = makeBundle();
     const { plan, placeholderOf } = planOf(bundle);
     expect(placeholderOf.size).toBeGreaterThan(30);
     expect(new Set(placeholderOf.values()).size).toBe(placeholderOf.size);
-    const old = [...placeholderOf.keys()].sort();
+    const old = [...placeholderOf.keys()].filter((k) => k !== bundle.workspace.id).sort();
     const mapped = old.map((k) => placeholderOf.get(k)!);
     expect(mapped).toEqual([...mapped].sort());
     // Per table: the old ids in the bundle, sorted and mapped, equal the plan's ids sorted.
@@ -439,6 +523,16 @@ describe("planWorkspaceImport", () => {
     expect(plan.person_skills).toHaveLength(1);
   });
 
+  it("settings: inherited names (constructor, toString, __proto__) are dropped, each with a warning", () => {
+    const b = clone(makeBundle().bundle);
+    b.workspace.settings = JSON.parse('{"constructor":{"a":1},"toString":5,"__proto__":{"polluted":true},"currency":"GBP"}');
+    const { plan, warnings } = planOf(b);
+    expect(plan.settings).toEqual({ currency: "GBP" });
+    expect(Object.getPrototypeOf(plan.settings)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    for (const k of ["constructor", "toString", "__proto__"]) expect(warnings.some((w) => w.includes(`"${k}"`))).toBe(true);
+  });
+
   it("settings: known keys only, and who writes them", () => {
     const { bundle } = makeBundle();
     const owner = planOf(bundle, true);
@@ -455,6 +549,23 @@ describe("planWorkspaceImport", () => {
     expect(plan.market_schedule.find((r) => r.from_month === 1)).toMatchObject({ condition_preset: "boom" });
     expect(plan.market_schedule.find((r) => r.from_month === 1)).not.toHaveProperty("condition_id");
     expect(plan.market_schedule.find((r) => r.from_month === 3)!.condition_id).toBe(placeholderOf.get(ids.cond!));
+  });
+
+  it("gives the workspace's own id rank 0, so the restore can swap in the target workspace", () => {
+    const { bundle, ids } = makeBundle();
+    bundle.suggestions.push({ id: id(), workspace_id: ids.ws, status: "pending", target_table: "workspaces", target_id: ids.ws, patch: { set: { currency: "EUR" } }, created_at: "2026-01-03" } as Row);
+    const { plan, placeholderOf } = planOf(recount(bundle));
+    const zero = `${PLACEHOLDER_PREFIX}000000000000`;
+    expect(placeholderOf.get(ids.ws!)).toBe(zero);
+    expect([...placeholderOf.values()].filter((v) => v === zero)).toHaveLength(1);
+    expect(plan.suggestions.find((s) => s.target_table === "workspaces")!.target_id).toBe(zero);
+    expect(placeholderOf.get([...placeholderOf.keys()].filter((k) => k !== ids.ws).sort()[0]!)).toBe(`${PLACEHOLDER_PREFIX}000000000001`);
+  });
+
+  it("exports the id and reference columns the restore function is tested against", () => {
+    expect(IMPORT_REFS.issues!.map((r) => r.col)).toContain("step_id");
+    expect(IMPORT_REFS.person_skills!.map((r) => r.col)).toEqual(["person_id", "step_id"]);
+    expect(IMPORT_STEP_REFS.map((r) => r.col)).toContain("child_process_id");
   });
 
   it("does not change the bundle", () => {
