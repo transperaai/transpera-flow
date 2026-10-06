@@ -44,6 +44,8 @@ export async function WorkspaceEditorPage({
   const canEdit = await canEditWorkspace(live.workspace.id);
   // An archived process (issue #182) is read only until it is restored: its page says so.
   if (!canEdit || live.process.archived_at) redirect(base);
+  // Only callers who see people's names are named in presence (B1 2/3); this page is for editors, who do.
+  const canSeeNames = canEdit;
   const [scenarios, blocks, sources, viewer, fpChanged, tours] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
@@ -79,7 +81,7 @@ export async function WorkspaceEditorPage({
       userId={viewer?.userId ?? null}
       tourDismissed={tourDismissed}
       historyHref={`/w/${slug}/p/${processId}/history`}
-      viewer={viewer}
+      viewer={viewer && { ...viewer, email: null, name: canSeeNames ? viewer.name : "A team member" }}
       sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exitHref(searchParams.from, base)}
