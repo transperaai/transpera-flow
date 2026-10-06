@@ -12,7 +12,7 @@ declare global {
   interface Window {
     workerScripts: Record<string, string>;
     /** `own`: whose row the member may see (a Larkspur key such as "jess"), or null for a member linked to no one. */
-    mountPeople: (options: { viewer: "everyone" | "own" | "unlinked"; own?: string }) => void;
+    mountPeople: (options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean }) => void;
   }
 }
 
@@ -32,8 +32,12 @@ function asMember(bundle: ProcessBundle, ownPersonId: string | null): ProcessBun
   return { ...bundle, people, viewer: { seesEveryone: false, ownPersonId } };
 }
 
-window.mountPeople = ({ viewer, own }) => {
-  const base = larkspurBundle();
+window.mountPeople = ({ viewer, own, capacityFactorEnabled }) => {
+  const larkspur = larkspurBundle();
+  // The workspace setting that C6 (#198, parked) would use. Nothing stores a factor, so turning it on must still show nothing.
+  const base = capacityFactorEnabled
+    ? { ...larkspur, workspace: { ...larkspur.workspace, settings: { ...larkspur.workspace.settings, capacity_factor_enabled: true } } }
+    : larkspur;
   const ownId = viewer === "own" ? (larkspurPersonIds[own ?? "jess"] ?? null) : null;
   const bundle = viewer === "everyone" ? base : asMember(base, ownId);
   createRoot(document.getElementById("root")!).render(
