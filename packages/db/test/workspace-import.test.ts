@@ -55,7 +55,7 @@ async function as<T>(claims: Record<string, unknown>, fn: (c: pg.Client) => Prom
 }
 
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows as Row[];
-const count = async (table: string, ws: string, where = "true") => Number((await q(`select count(*) from public.${table} where workspace_id = $1 and ${where}`, [ws]))[0]!.count);
+const count = async (table: string, ws: string, where = "true") => Number((await q(`select count(*) from public.${table} where workspace_id = $1 and (${where})`, [ws]))[0]!.count);
 
 /** An agency admin creates a new, empty workspace. */
 async function newWorkspace(name = "Restored Co"): Promise<string> {
@@ -193,11 +193,11 @@ function backToOld(value: unknown, restored: Restored, ws: string, placeholderOf
 
 describe("a restore is a round trip", () => {
   beforeAll(async () => {
-    // A custom market condition (older than any preset a new workspace is seeded with) and a schedule using it and a preset, in both
+    // A custom market condition (made now, so after the presets it was seeded with and before the presets any later workspace is seeded with) and a schedule using it and a preset, in both
     // golden workspaces, so the market comes back too.
     for (const ws of [NORTHBEAM_WORKSPACE_ID, LARKSPUR_WORKSPACE_ID]) {
       const [c] = await q(
-        "insert into market_conditions (workspace_id, name, leads, conv, cycle, price, churn, hire, pay, created_at) values ($1, 'Supplier squeeze', 90, 95, 110, 105, 120, 100, 100, '2026-01-02T00:00:00Z') returning id",
+        "insert into market_conditions (workspace_id, name, leads, conv, cycle, price, churn, hire, pay) values ($1, 'Supplier squeeze', 90, 95, 110, 105, 120, 100, 100) returning id",
         [ws],
       );
       const [boom] = await q("select id from market_conditions where workspace_id = $1 and preset = 'boom'", [ws]);
@@ -274,5 +274,252 @@ describe("a restore is a round trip", () => {
         expect(Math.abs(c[k] - a[k]), `${k}: restored ${c[k]}, source ${a[k]}, tolerance ${tolerance}`).toBeLessThanOrEqual(tolerance);
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// A small source workspace with the awkward cases: a process held by a link, an archived one, one never published, one with a newer
+// draft than its live version, a perception gap, a scenario family, a suggestion that targets the workspace.
+
+const U = (n: number) => `${n.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
+interface Mini {
+  ws: string;
+  main: string;
+  held: string;
+  archived: string;
+  neverPublished: string;
+  newerDraft: string;
+  conflictStep: string;
+  library: { downturn: string };
+  custom: string;
+}
+let miniCache: Mini | null = null;
+
+async function mini(): Promise<Mini> {
+  if (miniCache) return miniCache;
+  const ws = await newWorkspace("Mini Source");
+  await q("update workspaces set settings = settings || '{\"hours_per_week\": 37, \"currency\": \"USD\"}' where id = $1", [ws]);
+  const ids = { main: U(0x10), held: U(0x11), archived: U(0x12), neverPublished: U(0x13), newerDraft: U(0x14), conflictStep: U(0x20) };
+  const [role] = await q("insert into roles (workspace_id, name, color) values ($1, 'Analyst', '#336699') returning id", [ws]);
+  const [person] = await q("insert into people (workspace_id, name) values ($1, 'Ada') returning id", [ws]);
+  const [source] = await q("insert into sources (workspace_id, kind, title, body) values ($1, 'notes', 'Call notes', 'Ada said: about 2 hours or 10, depending.') returning id", [ws]);
+  const stepSql = `insert into steps (id, revision_id, workspace_id, process_id, name, kind, outcome, work_hours, child_process_id, role_id, conflict, provenance, x, y)
+    values ($1, $2, $3, $4, $5, $6, $7, case when $6 = 'subprocess' then 0 else 1 end, $8, case when $6 = 'subprocess' then null else $9::uuid end, $10, $11, 0, 0)`;
+  const edgeSql = "insert into edges (revision_id, workspace_id, process_id, from_step_id, to_step_id, probability) values ($1, $2, $3, $4, $5, 1)";
+  async function process(c: pg.Client, id: string, name: string, kind: string, steps: { id?: string; name: string; kind: string; child?: string; conflict?: boolean }[]) {
+    await c.query("insert into processes (id, workspace_id, name, kind, entity_name) values ($1, $2, $3, $4, 'item')", [id, ws, name, kind]);
+    await c.query("select public.open_draft($1)", [id]);
+    const revision = (await c.query("select id from process_revisions where process_id = $1 and status = 'draft'", [id])).rows[0].id as string;
+    const made: string[] = [];
+    for (const [i, s] of steps.entries()) {
+      const sid = s.id ?? `${(0x100 + i).toString(16).padStart(8, "0")}-${id.slice(0, 4)}-4000-8000-000000000000`;
+      const provenance = s.conflict
+        ? { work_hours: { conflict: { resolved: null, values: [{ value: 2, speaker: "Ada", source_id: source!.id }, { value: 10, speaker: "Ben", source_id: source!.id }] }, evidence: [{ source_id: source!.id }] } }
+        : {};
+      await c.query(stepSql, [sid, revision, ws, id, s.name, s.kind, s.kind === "end" ? "done" : null, s.child ?? null, role!.id, s.conflict ?? false, JSON.stringify(provenance)]);
+      made.push(sid);
+    }
+    for (let i = 0; i + 1 < made.length; i++) await c.query(edgeSql, [revision, ws, id, made[i], made[i + 1]]);
+    return revision;
+  }
+  await as(admin.claims, async (c) => {
+    await process(c, ids.held, "Held child", "servicing", [{ name: "Start", kind: "start" }, { name: "Work", kind: "task" }, { name: "Done", kind: "end" }]);
+    await c.query("select public.publish_process($1, true)", [ids.held]);
+    await process(c, ids.main, "Main", "pipeline", [
+      { name: "Start", kind: "start" },
+      { name: "Hand over", kind: "subprocess", child: ids.held },
+      { id: ids.conflictStep, name: "Quote", kind: "task", conflict: true },
+      { name: "Done", kind: "end" },
+    ]);
+    await c.query("select public.publish_process($1, true)", [ids.main]);
+    await process(c, ids.archived, "Old process", "pipeline", [{ name: "Start", kind: "start" }, { name: "Done", kind: "end" }]);
+    await c.query("select public.publish_process($1, true)", [ids.archived]);
+    await process(c, ids.neverPublished, "Idea only", "pipeline", [{ name: "Start", kind: "start" }, { name: "Done", kind: "end" }]);
+    await process(c, ids.newerDraft, "Has a newer draft", "pipeline", [{ name: "Start", kind: "start" }, { name: "Done", kind: "end" }]);
+    await c.query("select public.publish_process($1, true)", [ids.newerDraft]);
+    await c.query("select public.open_draft($1)", [ids.newerDraft]);
+    const draft = (await c.query("select id from process_revisions where process_id = $1 and status = 'draft'", [ids.newerDraft])).rows[0].id;
+    await c.query(stepSql, [U(0x30), draft, ws, ids.newerDraft, "Only in the newer draft", "task", null, null, null, false, "{}"]);
+    await c.query("update processes set archived_at = now() where id = $1", [ids.archived]);
+  });
+  // Scenarios: the seeded library, a custom one that descends from "More leads", and an issue that uses "Downturn".
+  const lib = await q("select id, name from scenarios where workspace_id = $1", [ws]);
+  const moreLeads = lib.find((s) => s.name === "More leads")!.id;
+  const downturn = lib.find((s) => s.name === "Downturn")!.id as string;
+  const [custom] = await q(
+    "insert into scenarios (workspace_id, name, patch, parent_scenario_id) values ($1, 'More leads and a hire', '[{\"path\": \"demand.leads_per_week\", \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
+    [ws, moreLeads],
+  );
+  await q("insert into issues (workspace_id, type, title, scenario_id, owner_person_id, status) values ($1, 'idea', 'Try the downturn', $2, $3, 'in_progress')", [ws, downturn, person!.id]);
+  await q("insert into issues (workspace_id, type, title, source, status, resolution) values ($1, 'delay', 'Quotes are slow', 'manual', 'done', 'wont_fix')", [ws]);
+  await q("insert into suggestions (workspace_id, target_table, target_id, patch) values ($1, 'workspaces', $1, '{\"set\": {\"hours_per_week\": 35}}')", [ws]);
+  await q("insert into suggestion_proposals (workspace_id, kind, title, detail) values ($1, 'issue', 'Proposed issue', 'Looks slow')", [ws]);
+  miniCache = { ws, ...ids, library: { downturn }, custom: custom!.id as string };
+  return miniCache;
+}
+
+describe("a small workspace with the awkward cases", () => {
+  it("builds", async () => {
+    const m = await mini();
+    const b = await bundleOf(m.ws);
+    const check = checkWorkspaceBundle(b);
+    expect(check.errors).toEqual([]);
+    expect(b.processes.length).toBe(6);
+  });
+});
+
+const miniPlan = async (canManage = true) => planWorkspaceImport(await bundleOf((await mini()).ws), { canManage });
+const byName = async (ws: string, table: string, name: string) => (await q(`select * from public.${table} where workspace_id = $1 and name = $2`, [ws, name]))[0]!;
+
+describe("the awkward cases", () => {
+  it("restores the live version, a never-published draft, an archived process, and drops a newer draft", async () => {
+    const m = await mini();
+    const bundle = await bundleOf(m.ws);
+    const { ws, user, result } = await restoreInto(bundle);
+    expect(result.processes.map((p) => p.name).sort()).toEqual(["Has a newer draft", "Held child", "Idea only", "Main", "Old process"]);
+    const stepsOf = async (name: string) => (await q("select s.name from steps s join processes p on p.id = s.process_id where p.workspace_id = $1 and p.name = $2 order by s.name", [ws, name])).map((r) => r.name);
+    expect(await stepsOf("Has a newer draft")).toEqual(["Done", "Start"]);
+    expect(await stepsOf("Idea only")).toEqual(["Done", "Start"]);
+    const old = await byName(ws, "processes", "Old process");
+    expect(old.archived_at).not.toBeNull();
+    expect(result.processes.find((p) => p.name === "Old process")!.archived).toBe(true);
+    expect((await byName(ws, "processes", "Main")).archived_at).toBeNull();
+    expect((await byName(ws, "processes", "Main")).source).toBe("import");
+    // Each draft is the only revision, number 1; nothing is published.
+    expect((await q("select distinct status, number from process_revisions r join processes p on p.id = r.process_id where r.workspace_id = $1 and not p.is_company", [ws]))).toEqual([{ status: "draft", number: 1 }]);
+    // Each import is logged once.
+    expect(Number((await q("select count(*) from audit_log where workspace_id = $1 and action = 'import'", [ws]))[0]!.count)).toBe(5);
+    expect(user.id).toBeTruthy();
+  });
+
+  it("makes the company map's cards in one system version, and the bundle's map rows are nowhere", async () => {
+    const m = await mini();
+    const bundle = await bundleOf(m.ws);
+    const ws = await newWorkspace();
+    const [map] = await q("select id from processes where workspace_id = $1 and is_company", [ws]);
+    const before = Number((await q("select count(*) from process_revisions where process_id = $1", [map!.id]))[0]!.count);
+    const owner = await member(ws, "owner");
+    const planned = planWorkspaceImport(bundle, { canManage: true });
+    await restoreAs(owner, ws, planned.plan);
+    const revisions = await q("select id, status, number from process_revisions where process_id = $1 order by number", [map!.id]);
+    // At most one new version for the whole restore (ADR 0014, "Bulk is one version"), whatever the number of processes.
+    expect(revisions.length - before).toBeLessThanOrEqual(1);
+    expect(JSON.stringify(await q("select * from steps where process_id = $1", [map!.id]))).not.toContain("Held child".toLowerCase() + "-never");
+    // Nothing of the source map came along: no step of the new map carries a source id.
+    const sourceMapRev = (await q("select r.id from process_revisions r join processes p on p.id = r.process_id where p.workspace_id = $1 and p.is_company", [m.ws])).map((r) => r.id);
+    const copied = await q("select count(*) from steps where process_id = $1 and id = any ($2)", [map!.id, (await q("select id from steps where revision_id = any ($1)", [sourceMapRev])).map((r) => r.id)]);
+    expect(Number(copied[0]!.count)).toBe(0);
+  });
+
+  it("puts a held process on the map only through its holder once both are published (B12, #188)", async () => {
+    const m = await mini();
+    const { ws, user, result } = await restoreInto(await bundleOf(m.ws));
+    const id = (name: string) => result.processes.find((p) => p.name === name)!.id;
+    for (const name of ["Held child", "Main", "Idea only", "Has a newer draft"]) {
+      const reply = await as(user.claims, async (c) => (await c.query("select public.publish_process($1, true) as r", [id(name)])).rows[0].r);
+      expect(reply.status, name).toBe("published");
+    }
+    const [map] = await q("select live_revision_id from processes where workspace_id = $1 and is_company", [ws]);
+    const cards = await q("select child_process_id from steps where revision_id = $1 and child_process_id is not null", [map!.live_revision_id]);
+    const onMap = cards.map((r) => r.child_process_id);
+    expect(onMap).toContain(id("Main"));
+    expect(onMap).not.toContain(id("Held child"));
+    expect(onMap).not.toContain(id("Old process"));
+    // The archived process is off the map and out of the lists.
+    const placements = await q("select count(*) from steps s join processes p on p.id = s.process_id where s.child_process_id = $1 and p.workspace_id = $2", [id("Old process"), ws]);
+    expect(Number(placements[0]!.count)).toBe(0);
+  });
+
+  it("gives a restored perception gap one issue, not two", async () => {
+    const m = await mini();
+    const bundle = await bundleOf(m.ws);
+    expect(bundle.issues.filter((i) => String(i.detected_key ?? "").startsWith("perception_gap:")).length).toBe(1);
+    const { ws } = await restoreInto(bundle);
+    const gaps = await q("select id, detected_key, step_id from issues where workspace_id = $1 and detected_key like 'perception_gap:%'", [ws]);
+    expect(gaps.length).toBe(1);
+    expect(String(gaps[0]!.detected_key)).toContain(String(gaps[0]!.step_id));
+  });
+
+  it("doesn't duplicate the scenario library, and re-points children and issues at the existing rows", async () => {
+    const m = await mini();
+    const { ws, result } = await restoreInto(await bundleOf(m.ws));
+    expect(Number((await q("select count(*) from scenarios where workspace_id = $1", [ws]))[0]!.count)).toBe(5);
+    expect(result.skipped.scenarios).toBe(4);
+    const moreLeads = await byName(ws, "scenarios", "More leads");
+    const custom = await byName(ws, "scenarios", "More leads and a hire");
+    expect(custom.parent_scenario_id).toBe(moreLeads.id);
+    const downturn = await byName(ws, "scenarios", "Downturn");
+    const [issue] = await q("select scenario_id from issues where workspace_id = $1 and title = 'Try the downturn'", [ws]);
+    expect(issue!.scenario_id).toBe(downturn.id);
+  });
+
+  it("points a suggestion that targets the workspace at the new workspace (rank 0), and applies the settings for an owner", async () => {
+    const m = await mini();
+    const { ws, result } = await restoreInto(await bundleOf(m.ws));
+    expect(result.settings).toBe("applied");
+    const [row] = await q("select settings from workspaces where id = $1", [ws]);
+    expect(row!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
+    const s = await q("select target_id, status, created_via, import_source from suggestions where workspace_id = $1 and target_table = 'workspaces'", [ws]);
+    expect(s).toEqual([{ target_id: ws, status: "pending", created_via: "upload", import_source: "backup.json" }]);
+    expect(await q("select title, status, created_via, import_source from suggestion_proposals where workspace_id = $1", [ws])).toEqual([{ title: "Proposed issue", status: "pending", created_via: "upload", import_source: "backup.json" }]);
+  });
+
+  it("keeps the order of market conditions: restored custom ones keep their old date, so they list before the new presets", async () => {
+    const bundle = await bundleOf(NORTHBEAM_WORKSPACE_ID);
+    const { ws, result, placeholderOf } = await restoreInto(bundle);
+    const sourceOrder = (await q("select name, preset from market_conditions where workspace_id = $1 order by created_at, id", [NORTHBEAM_WORKSPACE_ID])).map((r) => r.name);
+    const restoredOrder = (await q("select name, preset from market_conditions where workspace_id = $1 order by created_at, id", [ws])).map((r) => r.name);
+    // Same conditions, no preset twice.
+    expect([...restoredOrder].sort()).toEqual([...sourceOrder].sort());
+    // The intended order: a restored custom condition keeps its own date, so it lists before the presets the new workspace was seeded
+    // with later (the source lists it after its presets). Nothing depends on it: the engine and the screens find conditions by id,
+    // and the settings page orders presets first (`orderConditions`). The engine models are compared in the round trip above.
+    expect(restoredOrder[0]).toBe("Supplier squeeze");
+    expect(sourceOrder[sourceOrder.length - 1]).toBe("Supplier squeeze");
+    expect(Number((await q("select count(*) from market_conditions where workspace_id = $1 and preset is not null", [ws]))[0]!.count)).toBe(4);
+    expect(result.id_prefix).toBeTruthy();
+    expect(placeholderOf.size).toBeGreaterThan(0);
+  });
+});
+
+describe("what is left out stays out", () => {
+  it("writes drafts, no solutions or history, no files, only pending suggestions, and the counts of the source minus the left-outs", async () => {
+    const source = NORTHBEAM_WORKSPACE_ID;
+    const bundle = await bundleOf(source);
+    const { ws, result } = await restoreInto(bundle, "owner", { label: "northbeam.json" });
+    const n = (table: string, w: string, where = "true") => count(table, w, where);
+    expect(await n("solutions", ws)).toBe(0);
+    expect(await n("solution_issues", ws)).toBe(0);
+    for (const t of ["roles", "people", "person_roles", "person_leave", "person_skills", "services", "service_servicing", "client_groups", "clients", "client_services", "client_assignments", "lead_sources", "seasonality", "churn_drivers", "market_schedule", "blocks", "sources"]) {
+      expect(await n(t, ws), t).toBe(await n(t, source));
+    }
+    expect(await n("scenarios", ws)).toBe((await n("scenarios", source)) - result.skipped.scenarios! + 4);
+    expect(await n("market_conditions", ws)).toBe(await n("market_conditions", source));
+    expect(await n("issues", ws)).toBe(await n("issues", source, "source <> 'detected'"));
+    expect(await n("issue_links", ws)).toBeGreaterThanOrEqual(0);
+    expect(await n("suggestions", ws)).toBe(await n("suggestions", source, "status = 'pending'"));
+    expect(await n("suggestion_proposals", ws)).toBe(await n("suggestion_proposals", source, "status = 'pending'"));
+    expect(await n("suggestions", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
+    expect(await n("suggestion_proposals", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
+    expect(await n("sources", ws, "file_path is not null or file_name is not null or file_type is not null or file_size is not null")).toBe(0);
+    // Steps and edges: those of the live versions of the source's processes.
+    const live = "revision_id in (select live_revision_id from processes where workspace_id = $1 and not is_company and live_revision_id is not null)";
+    const drafts = "revision_id in (select draft_revision_id from processes where workspace_id = $1 and not is_company and draft_revision_id is not null)";
+    for (const t of ["steps", "edges"]) {
+      expect(Number((await q(`select count(*) from ${t} where ${live}`, [source]))[0]!.count), t).toBe(Number((await q(`select count(*) from ${t} where ${drafts}`, [ws]))[0]!.count));
+    }
+    // Only drafts, from number 1, and no published version of a restored process.
+    expect(await n("process_revisions", ws, "status <> 'draft' and process_id in (select id from processes where not is_company)")).toBe(0);
+    expect(await n("process_revisions", ws, "number <> 1 and process_id in (select id from processes where not is_company)")).toBe(0);
+    // Issue history: each issue starts with one `created` entry; the triggers add `resolved` or `solution_tested` where they apply.
+    const events = await q("select issue_id, kind, count(*)::int n from issue_events where workspace_id = $1 group by 1, 2", [ws]);
+    for (const e of events) expect(["created", "resolved", "solution_tested", "edited"]).toContain(e.kind);
+    expect(events.filter((e) => e.kind === "created").every((e) => e.n === 1)).toBe(true);
+    expect(events.filter((e) => e.kind === "created").length).toBe(await n("issues", ws));
+    // Source links: the source's, minus solution links and step links to steps that aren't in a restored draft.
+    expect(await n("source_links", ws, "kind = 'solution'")).toBe(0);
+    // Fresh ids: no id of the source's survives.
+    expect(Number((await q("select count(*) from roles a join roles b on a.id = b.id and a.workspace_id <> b.workspace_id", []))[0]!.count)).toBe(0);
+    expect(result.processes.length).toBe(await n("processes", ws, "not is_company"));
   });
 });
