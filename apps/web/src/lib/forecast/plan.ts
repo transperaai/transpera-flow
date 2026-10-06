@@ -110,8 +110,28 @@ export function parsePlanInput(
 /** The last day of leave of `weeks` whole weeks from the Monday `date`: the Friday of the last week. */
 export const leaveEnd = (date: string, weeks: number): string => addDays(date, 7 * weeks - 3);
 
-/** A hire's name: the one typed, or "New <role>". */
-const hireName = (marker: Extract<ForecastPlanMarker, { kind: "hire" }>, roleName: string) => marker.name?.trim() || `New ${roleName}`;
+/**
+ * The name each hire marker shows: the one typed, or "New <role name>", numbered "New PPC specialist 2" when several
+ * hires share the default (in the order of the markers). A hire whose role is gone is "New hire" (unless named).
+ */
+export function hireNames(bundle: Pick<ProcessBundle, "roles">, markers: readonly ForecastPlanMarker[]): Map<string, string> {
+  const roleName = new Map(bundle.roles.map((r) => [r.id, r.name]));
+  const used = new Map<string, number>();
+  const out = new Map<string, string>();
+  for (const m of markers) {
+    if (m.kind !== "hire") continue;
+    const typed = m.name?.trim();
+    if (typed) {
+      out.set(m.id, typed);
+      continue;
+    }
+    const base = `New ${roleName.get(m.role_id) ?? "hire"}`;
+    const count = (used.get(base) ?? 0) + 1;
+    used.set(base, count);
+    out.set(m.id, count > 1 ? `${base} ${count}` : base);
+  }
+  return out;
+}
 
 /**
  * The bundle with the plan's hires and leave in it: a hire is a person row (`name` or "New <role name>", numbered
@@ -130,20 +150,14 @@ export function applyPlanPeople(bundle: ProcessBundle, markers: readonly Forecas
   const roleName = new Map(bundle.roles.map((r) => [r.id, r.name]));
   const people: PersonRow[] = [];
   const personRoles: PersonRoleRow[] = [];
-  const used = new Map<string, number>();
+  const names = hireNames(bundle, markers);
   for (const m of markers) {
     if (m.kind !== "hire") continue;
-    const role = roleName.get(m.role_id);
-    if (role === undefined) {
+    if (!roleName.has(m.role_id)) {
       problems.push({ markerId: m.id, message: `The role of “${m.name?.trim() || "a new hire"}” isn't there any more` });
       continue;
     }
-    let name = hireName(m, role);
-    if (!m.name?.trim()) {
-      const count = (used.get(name) ?? 0) + 1;
-      used.set(name, count);
-      if (count > 1) name = `${name} ${count}`;
-    }
+    const name = names.get(m.id)!;
     people.push({ id: m.id, workspace_id, name, fte: m.fte, capacity_hours_week: null, cost_rate: null, active: true, start_date: m.date, end_date: null });
     personRoles.push({ person_id: m.id, role_id: m.role_id, workspace_id });
   }

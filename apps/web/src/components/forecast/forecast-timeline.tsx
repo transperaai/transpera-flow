@@ -14,6 +14,8 @@ import { RATING_RULES, bandOf, isTooBusy, type MonthBusy, type Stat } from "@tra
 import { formatNumber, formatPercent } from "@/lib/format";
 import { labelIndexes } from "@/lib/overview/axis";
 import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/timeline";
+import { longDate, shortDate, type PlanLaneMarker } from "@/lib/forecast/lane";
+import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@/lib/forecast/positions";
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T>(null);
@@ -34,6 +36,9 @@ const ROW_GAP = 12;
 const TOP = 22;
 const AXIS = 22;
 const CLIENT_HEADER = 26;
+/** The plan lane: its height, and the gap under it. */
+const LANE = 32;
+const LANE_GAP = 10;
 
 type Cutoffs = readonly [number, number, number];
 
@@ -85,11 +90,35 @@ function peakOf(row: TimelineRow, months: TimelineData["months"]): string {
   return best < 0 ? "Not there" : `Peaks at ${formatPercent(row.series[best]!.mean)} in ${months[best]!.short}`;
 }
 
+/** The "Your plan" lane (B7, issue #36): a plan's markers, which can be dragged along the months or moved by keyboard. */
+export interface PlanLane {
+  /** The markers to draw (those inside the span), in the plan's order. */
+  markers: PlanLaneMarker[];
+  /** The months' edges in working hours, and where the forecast starts. */
+  bounds: number[];
+  startDate: string;
+  hoursPerWeek: number;
+  /** False: markers are drawn and focusable, not movable or removable. */
+  editable: boolean;
+  /** For the container's `data-plan-status` and `data-plan-run` (the browser tests wait on them). */
+  status: "idle" | "running" | "done" | "error";
+  runs: number;
+  onMove: (id: string, date: string) => void;
+  onEdit: (id: string) => void;
+  onRemove: (id: string) => void;
+}
+
+/** What each marker kind snaps to when it is dragged or stepped: hires and solutions by month, leave by week. */
+const snapOf = (kind: PlanLaneMarker["kind"]): "month" | "week" => (kind === "leave" ? "week" : "month");
+const KIND_WORD = { hire: "Hire", leave: "Leave", solution: "Solution" } as const;
+const LABEL_TAIL = / (starts|on leave|goes live)( \(already started\))?$/;
+
 export function ForecastTimeline({
   data,
   rows,
   cutoffs,
   label,
+  plan,
 }: {
   data: TimelineData;
   /** Which busy rows to draw: by role, or by person. */
@@ -98,10 +127,30 @@ export function ForecastTimeline({
   cutoffs: Cutoffs;
   /** What the chart shows, for a screen reader. */
   label: string;
+  /** The plan lane, with its markers (B7). Absent: the timeline is as it was. */
+  plan?: PlanLane;
 }) {
   const busyLine = cutoffs[1];
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  /** A marker being dragged: where its anchor is in the chart (px), and whether the pointer has moved far enough to be a drag. */
+  const [drag, setDragState] = useState<{ id: string; x: number; moved: boolean } | null>(null);
+  const dragRef = useRef(drag);
+  const setDrag = (d: { id: string; x: number; moved: boolean } | null) => {
+    dragRef.current = d;
+    setDragState(d);
+  };
+  const grab = useRef<{ x0: number; offset: number } | null>(null);
+  const [announce, setAnnounce] = useState("");
+  const dragging = drag !== null;
+  // Escape cancels a drag: nothing is moved and nothing re-runs.
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrag(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dragging]);
   const hatch = `forecast-market-hatch-${useId().replace(/:/g, "")}`;
   const width = measured || 640;
   const compact = width < 520;
@@ -115,16 +164,111 @@ export function ForecastTimeline({
   const col = plotW / n;
   const x = (i: number) => m.l + (i + 0.5) * col;
   const top = useMemo(() => Math.max(1.1, busyLine + 0.15, ...busy.flatMap((r) => r.series.map((s) => (s ? s.p90 * 1.05 : 0)))), [busy, busyLine]);
-  const rowTop = (r: number) => TOP + r * (rowH + ROW_GAP);
+  const laneBlock = plan ? head + LANE + LANE_GAP : 0;
+  const laneTop = TOP + head;
+  const rowTop = (r: number) => TOP + laneBlock + r * (rowH + ROW_GAP);
   /** The baseline of row r's plot. */
   const rowBase = (r: number) => rowTop(r) + rowH;
   const busyY = (r: number, v: number) => rowBase(r) - (Math.min(v, top) / top) * ROW;
-  const clientsTop = TOP + busy.length * (rowH + ROW_GAP) + (data.clients.length ? CLIENT_HEADER : 0);
+  const clientsTop = TOP + laneBlock + busy.length * (rowH + ROW_GAP) + (data.clients.length ? CLIENT_HEADER : 0);
   const clientBase = (r: number) => clientsTop + r * (rowH + ROW_GAP) + rowH;
   const clientMax = Math.max(1, ...data.clients.flatMap((c) => c.series.map((s) => s.p90)));
   const clientY = (r: number, v: number) => clientBase(r) - (v / (clientMax * 1.1)) * ROW;
   const height = clientsTop + data.clients.length * (rowH + ROW_GAP) + AXIS;
   const labelled = new Set(labelIndexes(n, Math.max(2, Math.floor(plotW / (compact ? 64 : 60)) + 1)));
+
+  // The plan lane: where each marker sits, and what a drag or a key press does to it.
+  const laneMid = laneTop + LANE / 2;
+  const markerX = (mk: PlanLaneMarker) => m.l + positionOfDate(mk.date, plan!.startDate, plan!.bounds, plan!.hoursPerWeek) * col;
+  const markerEndX = (mk: PlanLaneMarker) => (mk.endDate ? m.l + positionOfDate(addDays(mk.endDate, 1), plan!.startDate, plan!.bounds, plan!.hoursPerWeek) * col : markerX(mk));
+  const dateAt = (kind: PlanLaneMarker["kind"], x: number) => dateAtPosition((x - m.l) / col, snapOf(kind), plan!.startDate, plan!.bounds, plan!.hoursPerWeek);
+  const edgeDates = (kind: PlanLaneMarker["kind"]) => {
+    const snap = snapOf(kind);
+    return { first: dateAtPosition(0, snap, plan!.startDate, plan!.bounds, plan!.hoursPerWeek), last: dateAtPosition(n, snap, plan!.startDate, plan!.bounds, plan!.hoursPerWeek) };
+  };
+  const moved = (mk: PlanLaneMarker, date: string) => {
+    plan!.onMove(mk.id, date);
+    setAnnounce(`${mk.label.replace(" (already started)", "")} moved to ${longDate(date)}. Updating the forecast…`);
+  };
+  const markerKey = (e: React.KeyboardEvent, mk: PlanLaneMarker) => {
+    if (!plan || !plan.editable) return;
+    const snap = snapOf(mk.kind);
+    const { first, last } = edgeDates(mk.kind);
+    const steps = (dir: 1 | -1, k: number) => {
+      let d = mk.date;
+      for (let i = 0; i < k; i++) d = stepDate(d, snap, dir);
+      return d;
+    };
+    const go = (target: string) => {
+      const t = target < first ? first : target > last ? last : target;
+      if (t !== mk.date) moved(mk, t);
+    };
+    const jump = snap === "month" ? 3 : 4;
+    switch (e.key) {
+      case "ArrowLeft":
+        return (e.preventDefault(), go(steps(-1, 1)));
+      case "ArrowRight":
+        return (e.preventDefault(), go(steps(1, 1)));
+      case "PageUp":
+        return (e.preventDefault(), go(steps(-1, jump)));
+      case "PageDown":
+        return (e.preventDefault(), go(steps(1, jump)));
+      case "Home":
+        return (e.preventDefault(), go(first));
+      case "End":
+        return (e.preventDefault(), go(last));
+      case "Enter":
+      case " ":
+        return (e.preventDefault(), plan.onEdit(mk.id));
+      case "Delete":
+      case "Backspace":
+        return (e.preventDefault(), plan.onRemove(mk.id));
+    }
+  };
+  const cancelDrag = () => {
+    grab.current = null;
+    setDrag(null);
+  };
+  const svgLeft = () =>svgRef.current?.getBoundingClientRect().left ?? 0;
+  const markerDown = (e: React.PointerEvent<SVGGElement>, mk: PlanLaneMarker) => {
+    if (!plan?.editable || e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const x = markerX(mk);
+    grab.current = { x0: e.clientX, offset: e.clientX - svgLeft() - x };
+    setDrag({ id: mk.id, x, moved: false });
+  };
+  const markerMove = (e: React.PointerEvent<SVGGElement>, mk: PlanLaneMarker) => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== mk.id || !grab.current) return;
+    const far = drag.moved || Math.abs(e.clientX - grab.current.x0) >= 4;
+    setDrag({ id: mk.id, x: e.clientX - svgLeft() - grab.current.offset, moved: far });
+  };
+  const markerUp = (e: React.PointerEvent<SVGGElement>, mk: PlanLaneMarker) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    const d = dragRef.current;
+    grab.current = null;
+    setDrag(null);
+    if (!d || d.id !== mk.id || !plan) return;
+    if (!d.moved) return plan.onEdit(mk.id);
+    const date = dateAt(mk.kind, d.x);
+    if (date !== mk.date) moved(mk, date);
+  };
+  /** A marker's shape at `x`: a triangle with a plus (hire), a bar (leave), a diamond (solution). Hollow when something is wrong with it. */
+  const glyph = (kind: PlanLaneMarker["kind"], x: number, x2: number, hollow: boolean) => {
+    const fill = hollow ? "var(--panel)" : "var(--edit)";
+    const stroke = hollow ? { stroke: "var(--edit)", strokeWidth: 1.5 } : { stroke: "var(--panel)", strokeWidth: 1 };
+    if (kind === "leave") return <rect x={x} y={laneMid - 6} width={Math.max(8, x2 - x)} height={12} rx={3} fill={fill} {...stroke} />;
+    if (kind === "hire")
+      return (
+        <>
+          <path d={`M${x - 7},${laneMid + 6} L${x + 7},${laneMid + 6} L${x},${laneMid - 7} Z`} fill={fill} {...stroke} />
+          <text x={x + 10} y={laneMid + 4} className="fill-fg text-[11px] font-semibold" aria-hidden>
+            +
+          </text>
+        </>
+      );
+    return <path d={`M${x},${laneMid - 8} L${x + 7},${laneMid} L${x},${laneMid + 8} L${x - 7},${laneMid} Z`} fill={fill} {...stroke} />;
+  };
   /** A row's name and what it adds, on two lines (wide) or one (narrow). */
   const rowLabel = (r: number, top0: number, name: string, sub: string) =>
     compact ? (
@@ -206,8 +350,9 @@ export function ForecastTimeline({
   };
 
   return (
-    <div ref={ref} className="relative" data-forecast-timeline>
+    <div ref={ref} className="relative" data-forecast-timeline {...(plan ? { "data-plan-status": plan.status, "data-plan-run": plan.runs } : {})}>
       <svg
+        ref={svgRef}
         width={width}
         height={height}
         role="img"
@@ -248,6 +393,11 @@ export function ForecastTimeline({
             </g>
           ) : null,
         )}
+
+        {plan?.markers.map((mk) => {
+          const x0 = markerX(mk);
+          return <line key={`guide-${mk.id}`} x1={x0} x2={x0} y1={laneTop} y2={height - AXIS} stroke="var(--edit)" strokeOpacity={0.45} strokeDasharray="2 4" pointerEvents="none" data-plan-guide={mk.id} />;
+        })}
 
         {busy.map((row, r) => {
           const y = (v: number) => busyY(r, v);
@@ -309,6 +459,68 @@ export function ForecastTimeline({
           );
         })}
 
+        {plan && (
+          <g data-plan-lane>
+            <text x={0} y={compact ? TOP + 13 : laneMid + 4} className="fill-fg text-[12px] font-medium">
+              Your plan
+            </text>
+            <line x1={m.l} x2={m.l + plotW} y1={laneTop + LANE} y2={laneTop + LANE} stroke="var(--line-2)" strokeWidth={1} />
+            {plan.markers.map((mk) => {
+              const x0 = markerX(mk);
+              const x1 = markerEndX(mk);
+              const wide = mk.kind === "leave";
+              const hitX = wide ? x0 - 4 : x0 - 14;
+              const hitW = wide ? Math.max(28, x1 - x0 + 8) : 28;
+              const active = drag?.id === mk.id && drag.moved;
+              const name = mk.label.replace(LABEL_TAIL, "");
+              return (
+                <g
+                  key={mk.id}
+                  role="slider"
+                  tabIndex={0}
+                  className="group cursor-grab outline-none"
+                  data-plan-marker={mk.id}
+                  data-kind={mk.kind}
+                  aria-label={`${KIND_WORD[mk.kind]}: ${name}`}
+                  aria-valuemin={0}
+                  aria-valuemax={n - 1}
+                  aria-valuenow={monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek)}
+                  aria-valuetext={`${mk.label}, ${longDate(mk.date)}`}
+                  aria-description={mk.problem}
+                  opacity={active ? 0.4 : 1}
+                  style={{ touchAction: "none", cursor: plan.editable ? (active ? "grabbing" : "grab") : "default" }}
+                  onPointerDown={(e) => markerDown(e, mk)}
+                  onPointerMove={(e) => markerMove(e, mk)}
+                  onPointerUp={(e) => markerUp(e, mk)}
+                  onPointerCancel={() => cancelDrag()}
+                  onKeyDown={(e) => markerKey(e, mk)}
+                >
+                  <title>{mk.problem ? `${mk.label}, ${mk.when}. ${mk.problem}` : `${mk.label}: ${mk.when}`}</title>
+                  <rect x={hitX} y={laneTop} width={hitW} height={LANE} fill="transparent" style={{ touchAction: "none" }} />
+                  {glyph(mk.kind, x0, x1, !!mk.problem)}
+                  <rect x={hitX} y={laneTop + 1} width={hitW} height={LANE - 2} rx={4} fill="none" stroke="var(--ring)" strokeWidth={2} className="opacity-0 group-focus-visible:opacity-100" />
+                </g>
+              );
+            })}
+            {drag?.moved
+              ? (() => {
+                  const mk = plan.markers.find((x) => x.id === drag.id);
+                  if (!mk) return null;
+                  const width = markerEndX(mk) - markerX(mk);
+                  const date = dateAt(mk.kind, drag.x);
+                  return (
+                    <g pointerEvents="none" data-plan-ghost opacity={0.7}>
+                      {glyph(mk.kind, drag.x, drag.x + width, false)}
+                      <text x={Math.min(drag.x + 14, m.l + plotW - 80)} y={laneTop + 10} className="fill-fg text-[11px] font-semibold">
+                        {shortDate(date)}
+                      </text>
+                    </g>
+                  );
+                })()
+              : null}
+          </g>
+        )}
+
         {hover !== null && (
           <line x1={x(hover)} x2={x(hover)} y1={TOP - 4} y2={height - AXIS} stroke="var(--fg-3)" strokeDasharray="3 3" pointerEvents="none" />
         )}
@@ -362,13 +574,20 @@ export function ForecastTimeline({
           ))}
         </div>
       )}
-      <TimelineTable data={data} busy={busy} cutoffs={cutoffs} />
+      {plan ? (
+        <div aria-live="polite" className="sr-only" data-plan-announce>
+          {announce}
+        </div>
+      ) : null}
+      <TimelineTable data={data} busy={busy} cutoffs={cutoffs} plan={plan} />
     </div>
   );
 }
 
 /** The same numbers as a table, for a screen reader. */
-function TimelineTable({ data, busy, cutoffs }: { data: TimelineData; busy: TimelineRow[]; cutoffs: Cutoffs }) {
+function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy: TimelineRow[]; cutoffs: Cutoffs; plan?: PlanLane }) {
+  // Which month each plan marker falls in, for its "Your plan" column.
+  const planMonth = (mk: PlanLaneMarker) => monthIndexOfDate(mk.date, plan!.startDate, plan!.bounds, plan!.hoursPerWeek);
   const cell = (s: MonthBusy | null, undone: number | null) =>
     s
       ? `${formatPercent(s.mean)} (${formatPercent(s.p10)} to ${formatPercent(s.p90)})${isTooBusy(s.mean, cutoffs) ? ", too busy" : ""}${undone !== null ? `, ${formatNumber(undone, 0)} hours a week with no one to do them` : ""}`
@@ -394,6 +613,7 @@ function TimelineTable({ data, busy, cutoffs }: { data: TimelineData; busy: Time
           ))}
           <th scope="col">Market</th>
           <th scope="col">Planned</th>
+          {plan ? <th scope="col">Your plan</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -413,6 +633,14 @@ function TimelineTable({ data, busy, cutoffs }: { data: TimelineData; busy: Time
                 .map((mk) => `${mk.label}, ${mk.when}`)
                 .join("; ")}
             </td>
+            {plan ? (
+              <td>
+                {plan.markers
+                  .filter((mk) => planMonth(mk) === i)
+                  .map((mk) => `${mk.label}, ${mk.when}`)
+                  .join("; ")}
+              </td>
+            ) : null}
           </tr>
         ))}
       </tbody>
