@@ -83,3 +83,49 @@ describe("the Issues register and absenceRating agree", () => {
     });
   }
 });
+
+describe("detectIssues rates hand-built absence findings as absenceRating does", () => {
+  // Real steps and people from Northbeam (its sole holders have work), with the numbers replaced so each cut-off is reached alone.
+  const model = northbeamWithServicing();
+  const result = simulate(model, 30, 1);
+  const real = absenceTest(model, { seed: 1 });
+
+  it("the real run raises at least one spof issue (so the loop above isn't empty for Northbeam)", () => {
+    expect(real.people.length).toBeGreaterThan(0);
+    expect(detectIssues(model, result, {}, { absence: real }).filter((i) => i.type === "spof").length).toBeGreaterThan(0);
+  });
+
+  const ratingOf = (over: Partial<AbsenceFinding>) => {
+    const f: AbsenceFinding = { ...real.people[0]!, workLost: 0, recoveryWeeks: 0, recovered: true, clientDeadlineMissed: false, extraMissed: 0, ...over };
+    const issues = detectIssues(model, result, {}, { absence: { ...real, people: [f] } }).filter((i) => i.type === "spof");
+    const person = result.resolvedPeople[f.personId]!;
+    const expected = absenceRating(config, f, { stepId: f.stepIds[0], roleId: person.roles[0] ?? null, personId: f.personId });
+    return { issues, expected };
+  };
+
+  it("Bad on work lost alone", () => {
+    const { issues, expected } = ratingOf({ workLost: 0.1 });
+    expect(expected).toBe("bad");
+    expect(issues.length).toBeGreaterThan(0);
+    for (const i of issues) expect(i.rating).toBe("bad");
+  });
+
+  it("Bad on weeks to recover alone", () => {
+    const { issues, expected } = ratingOf({ recoveryWeeks: 3 });
+    expect(expected).toBe("bad");
+    expect(issues.length).toBeGreaterThan(0);
+    for (const i of issues) expect(i.rating).toBe("bad");
+  });
+
+  it("Operational risk when the queues never recovered", () => {
+    const { issues, expected } = ratingOf({ recovered: false, recoveryWeeks: 3 });
+    expect(expected).toBe("risk");
+    for (const i of issues) expect(i.rating).toBe("risk");
+  });
+
+  it("raises nothing for a Great", () => {
+    const { issues, expected } = ratingOf({ workLost: 0.01, recoveryWeeks: 1 });
+    expect(expected).toBe("great");
+    expect(issues).toEqual([]);
+  });
+});
