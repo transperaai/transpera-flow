@@ -380,6 +380,40 @@ export async function loadLiveCompanyPart(db: Db, workspaceId: string): Promise<
 }
 
 /**
+ * Every process of the workspace at its live revision, for the Overview's company map (issue #100): the pipelines, the
+ * servicing processes and the child processes, in creation order. Processes never published aren't on the map. As the
+ * caller of `db` (RLS decides what is visible); a share link's snapshot (B3) builds it with the same function.
+ */
+export async function loadLiveParts(db: Db, workspaceId: string): Promise<ProcessPart[]> {
+  const live = (await listProcesses(db, workspaceId)).filter((p) => p.live_revision_id);
+  const ids = live.map((p) => p.live_revision_id!);
+  if (!ids.length) return [];
+  const [revisions, steps, edges] = await Promise.all([
+    db.from("process_revisions").select("id, workspace_id, process_id, number, status").in("id", ids),
+    db.from("steps").select("*").in("revision_id", ids),
+    db.from("edges").select("*").in("revision_id", ids),
+  ]);
+  if (revisions.error) throw revisions.error;
+  if (steps.error) throw steps.error;
+  if (edges.error) throw edges.error;
+  const parts: ProcessPart[] = [];
+  for (const p of live) {
+    const revision = (revisions.data as ProcessRevisionRow[]).find((r) => r.id === p.live_revision_id);
+    if (!revision) continue;
+    const { draft_revision_id, ...process } = p;
+    void draft_revision_id;
+    parts.push({
+      process,
+      revision,
+      // Split or replaced steps are never drawn or simulated.
+      steps: partitionSteps((steps.data as unknown as StepRow[]).filter((s) => s.revision_id === revision.id)).steps,
+      edges: (edges.data as unknown as EdgeRow[]).filter((e) => e.revision_id === revision.id),
+    });
+  }
+  return parts;
+}
+
+/**
  * The company map as it was at published version `number` (live or earlier), for viewing it read only. Null when the workspace
  * has no company map, it isn't visible, or `number` is not a published version of it: a draft, a number only another process
  * has, or one from another workspace all read as not found.

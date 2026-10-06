@@ -1,0 +1,414 @@
+import { detectIssues, simulate, type DetectedIssue, type SimulationResult } from "@transpera-flow/engine";
+import { describe, expect, it, vi } from "vitest";
+import {
+  SHARE_SNAPSHOT_VERSION,
+  larkspurBundle,
+  northbeamBundle,
+  northbeamIssues,
+  redactShareSnapshot,
+  shareReaderDb,
+  shareSnapshotLeaks,
+  toEngineModel,
+  type Db,
+  type IssueRow,
+  type ProcessBundle,
+  type ShareKind,
+  type ShareSecrets,
+  type ShareSnapshot,
+  type ShareToggles,
+  type SolutionRow,
+} from "../src";
+
+// Share links, the pure half (issue #32, B3): the Db a snapshot is read through, the redaction of every kind of snapshot under
+// every toggle combination, its checker, and the proof that a redacted view's numbers are the unredacted run's.
+
+// ---------------------------------------------------------------------------
+// shareReaderDb
+// ---------------------------------------------------------------------------
+
+describe("shareReaderDb", () => {
+  const fake = () => {
+    const rpc = vi.fn(async (fn: string, args: unknown) => ({ data: { fn, args }, error: null }));
+    const from = vi.fn(function (this: unknown, table: string) {
+      return { table, self: this };
+    });
+    return { rpc, from, auth: { x: 1 } } as unknown as Db & { rpc: typeof rpc; from: typeof from };
+  };
+
+  it("sends team_capacity to share_team_capacity with the People toggle", async () => {
+    for (const people of [false, true]) {
+      const db = fake();
+      const wrapped = shareReaderDb(db, { people, financials: false });
+      const r = await wrapped.rpc("team_capacity", { ws: "w1" });
+      expect(db.rpc).toHaveBeenCalledTimes(1);
+      expect(db.rpc).toHaveBeenCalledWith("share_team_capacity", { ws: "w1", show_people: people }, undefined);
+      expect(r.data).toEqual({ fn: "share_team_capacity", args: { ws: "w1", show_people: people } });
+    }
+  });
+
+  it("answers can_see_people with the People toggle, without calling the database", async () => {
+    for (const people of [false, true]) {
+      const db = fake();
+      const r = await shareReaderDb(db, { people, financials: true }).rpc("can_see_people", { ws: "w1" });
+      expect(r).toEqual({ data: people, error: null });
+      expect(db.rpc).not.toHaveBeenCalled();
+    }
+  });
+
+  it("passes every other rpc and every other member through unchanged", async () => {
+    const db = fake();
+    const wrapped = shareReaderDb(db, { people: true, financials: true });
+    await wrapped.rpc("can_edit_workspace", { ws: "w1" });
+    expect(db.rpc).toHaveBeenCalledWith("can_edit_workspace", { ws: "w1" }, undefined);
+    // `from` keeps working with the original client as `this`.
+    const q = wrapped.from("people") as unknown as { table: string; self: unknown };
+    expect(q.table).toBe("people");
+    expect(q.self).toBe(db);
+    expect((wrapped as unknown as { auth: unknown }).auth).toBe(db.auth);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixtures: Northbeam and Larkspur, with something to leak
+// ---------------------------------------------------------------------------
+
+const MONEY_TEXT = "costing about £4,100 a month, or 3,200 GBP, or $2.5k";
+type Anyish = Record<string, unknown>;
+
+interface World {
+  name: string;
+  bundle: ProcessBundle;
+  secrets: ShareSecrets;
+  personFull: string[];
+  personFirst: string[];
+  clientNames: string[];
+  issue: IssueRow;
+  solution: SolutionRow;
+}
+
+function world(name: string, base: ProcessBundle): World {
+  // The editor's real bundle, with a rate, an email and a note on every person, and notes and provenance on every client.
+  const bundle = structuredClone(base) as ProcessBundle;
+  bundle.people = bundle.people.map((p, i) => ({ ...p, cost_rate: 40 + i, email: `${p.name.split(" ")[0]!.toLowerCase()}@${name}.example`, notes: `Prefers mornings, ${p.name}`, provenance: { cost_rate: { source: "entered", at: "2026-09-29T00:00:00Z", note: `from ${p.name}'s contract` } } }) as never);
+  bundle.clients = (bundle.clients ?? []).map((c) => ({ ...c, notes: `Renewal talk with ${c.name}`, provenance: { name: { source: "entered", at: "2026-09-29T00:00:00Z", note: "interview" } } }) as never);
+  bundle.workspace = { ...bundle.workspace, settings: { ...bundle.workspace.settings, overhead_monthly: 9000, target_margin: 0.25 } as never, provenance: { "settings.retainer": { source: "entered", at: "2026-09-29T00:00:00Z", note: "invoice" } } as never };
+  bundle.services = bundle.services.map((s) => ({ ...s, margin: 0.3 }));
+  bundle.roles = bundle.roles.map((r) => ({ ...r, default_cost_rate: r.default_cost_rate || 55 }));
+  const people = bundle.people.map((p, i) => ({ id: p.id, name: p.name, label: `Team member ${i + 1}` }));
+  const clients = (bundle.clients ?? []).map((c, i) => ({ id: c.id, name: c.name, label: `Client ${i + 1}` }));
+  const person = bundle.people[0]!;
+  const shared = bundle.people[1]!;
+  const baseIssue = northbeamIssues()[0]!;
+  const issue: IssueRow = {
+    ...baseIssue,
+    title: `Ask ${person.name} about ${clients[0]!.name}`,
+    evidence: `${person.name.split(" ")[0]} mentioned ${MONEY_TEXT}. Write to ${person.name.split(" ")[0]!.toLowerCase()}@${name}.example. ${shared.name} agrees.`,
+    target_measure: `Wait at ${clients[1]!.name}`,
+    detected_key: null,
+  };
+  const solution: SolutionRow = {
+    id: "00000000-0000-4000-8000-0000000000aa",
+    workspace_id: bundle.workspace.id,
+    process_id: bundle.process.id,
+    base_revision_id: bundle.revision.id,
+    name: `Fix for ${clients[0]!.name}`,
+    notes: `${person.name} will own it; budget ${MONEY_TEXT}`,
+    steps: { steps: [], edges: [], entry_step_id: null },
+    changed_step_ids: [],
+    lever_changes: [],
+    created_at: "2026-10-01T00:00:00Z",
+    updated_at: "2026-10-01T00:00:00Z",
+    created_by: "00000000-0000-4000-8000-0000000000bb",
+  };
+  return {
+    name,
+    bundle,
+    secrets: { people, clients },
+    personFull: bundle.people.map((p) => p.name),
+    personFirst: [...new Set(bundle.people.map((p) => p.name.split(" ")[0]!))].filter((f) => f.length >= 3),
+    clientNames: clients.map((c) => c.name),
+    issue,
+    solution,
+  };
+}
+
+const worlds = [world("northbeam", northbeamBundle()), world("larkspur", larkspurBundle())];
+
+/** What `loadShareData` builds before redacting: the editor's bundle (as a People-on read), and everything around it, with names. */
+function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
+  const base = { v: SHARE_SNAPSHOT_VERSION, toggles, workspaceName: `${w.name} (${w.clientNames[0]})` } as const;
+  const solutions = { solutions: [w.solution], links: [] };
+  const finding = {
+    id: "00000000-0000-4000-8000-0000000000cc",
+    workspace_id: w.bundle.workspace.id,
+    process_id: null,
+    step_id: null,
+    origin: "manual",
+    status: "accepted",
+    rating: "bad",
+    type: "manual",
+    title: `${w.personFull[0]} is the bottleneck`,
+    evidence: `Said so ${MONEY_TEXT}`,
+    why: "Because.",
+    facts: [{ kind: "quote", key: "q1", text: `"${w.personFull[0]} told ${w.clientNames[0]} to wait"` }],
+    person_labels: { "Team member A": w.secrets.people[0]!.id },
+    source_ids: ["00000000-0000-4000-8000-0000000000dd"],
+    ai_key: null,
+    analysis_id: null,
+    run_id: null,
+    edited: false,
+    created_by: "00000000-0000-4000-8000-0000000000bb",
+    created_at: "2026-10-01T00:00:00Z",
+    updated_by: null,
+    updated_at: "2026-10-01T00:00:00Z",
+    decided_by: null,
+    decided_at: null,
+  };
+  const common = { issues: [w.issue] };
+  switch (kind) {
+    case "overview":
+      return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, findings: [finding as never], firstPrinciples: null };
+    case "process":
+      return { ...base, kind, bundle: w.bundle, processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: null };
+    case "issue":
+      return { ...base, kind, issueId: w.issue.id, bundle: w.bundle, issues: common.issues, processes: [], liveRevisions: {}, solutions };
+    case "solution":
+      return { ...base, kind, solutionId: w.solution.id, bundle: w.bundle, solutions, issues: common.issues, processes: [], compareBase: { revision: w.bundle.revision, steps: w.bundle.steps, edges: w.bundle.edges }, movedOn: null };
+  }
+}
+
+const KINDS: ShareKind[] = ["overview", "process", "issue", "solution"];
+const TOGGLES: ShareToggles[] = [
+  { people: false, financials: false },
+  { people: true, financials: false },
+  { people: false, financials: true },
+  { people: true, financials: true },
+];
+const label = (t: ShareToggles) => `People ${t.people ? "on" : "off"}, Financials ${t.financials ? "on" : "off"}`;
+
+const MONEY_FORMS = [/£\s?\d/, /\$\s?\d/, /€\s?\d/, /\d\s?(GBP|USD|EUR|AUD|NZD|CAD)\b/];
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+
+/** Every provenance anywhere in the JSON that is not empty. */
+function nonEmptyProvenance(value: unknown): number {
+  if (Array.isArray(value)) return value.reduce((n: number, v) => n + nonEmptyProvenance(v), 0);
+  if (!value || typeof value !== "object") return 0;
+  let n = 0;
+  for (const [k, v] of Object.entries(value as Anyish)) {
+    if (k === "provenance" && v && typeof v === "object" && Object.keys(v).length) n++;
+    n += nonEmptyProvenance(v);
+  }
+  return n;
+}
+/** Every value under a key anywhere in the JSON. */
+function valuesOf(value: unknown, key: string, out: unknown[] = []): unknown[] {
+  if (Array.isArray(value)) value.forEach((v) => valuesOf(v, key, out));
+  else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Anyish)) {
+      if (k === key) out.push(v);
+      valuesOf(v, key, out);
+    }
+  }
+  return out;
+}
+
+describe("redactShareSnapshot: no hidden field in the raw payload, for every kind and toggle combination", () => {
+  for (const w of worlds) {
+    for (const kind of KINDS) {
+      for (const toggles of TOGGLES) {
+        it(`${w.name} ${kind}, ${label(toggles)}`, () => {
+          const input = raw(kind, w, toggles);
+          // The input really holds what must go: the test proves something.
+          const before = JSON.stringify(input);
+          expect(before).toMatch(EMAIL_RE);
+          expect(before).toContain(w.personFull[0]);
+          const snap = redactShareSnapshot(input, toggles, w.secrets);
+          const text = JSON.stringify(snap);
+
+          // Always: no email, no client name, no pay, no evidence notes.
+          expect(text).not.toMatch(EMAIL_RE);
+          for (const c of w.clientNames) expect(text, `client ${c}`).not.toContain(c);
+          expect(text).not.toMatch(/"cost_rate":\s*[0-9-]/);
+          expect(valuesOf(snap, "cost_rate").every((v) => v === null)).toBe(true);
+          expect(nonEmptyProvenance(snap)).toBe(0);
+          expect(text).not.toContain("00000000-0000-4000-8000-0000000000bb");
+          // The header.
+          expect(snap).toMatchObject({ v: 1, kind, toggles });
+
+          // The bundle: viewer, payHidden, labels or names.
+          const bundle = (kind === "overview" ? (snap as { live: ProcessBundle }).live : (snap as { bundle: ProcessBundle }).bundle);
+          expect(bundle.payHidden).toBe(true);
+          expect(bundle.viewer).toEqual({ seesEveryone: toggles.people, ownPersonId: null });
+          expect(bundle.workspace.slug).toBe("");
+          expect(bundle.people.map((p) => p.id)).toEqual(w.bundle.people.map((p) => p.id));
+          expect((bundle.clients ?? []).every((c) => /^Client \d+$/.test(c.name) && c.notes === null)).toBe(true);
+
+          if (toggles.people) {
+            expect(bundle.people.map((p) => p.name)).toEqual(w.personFull);
+            expect(text).toContain(w.personFull[0]);
+          } else {
+            for (const full of w.personFull) expect(text, `person ${full}`).not.toContain(full);
+            for (const first of w.personFirst) expect(text, `first name ${first}`).not.toMatch(new RegExp(`(?<![A-Za-z0-9])${first}(?![A-Za-z0-9])`));
+            expect(bundle.people.every((p, i) => p.name === `Team member ${i + 1}`)).toBe(true);
+            // Free text got the labels back in where names were.
+            expect(text).toContain("Team member 1");
+          }
+
+          if (toggles.financials) {
+            // Role rates, margins and overhead are there (the toggle shows them), but never one person's pay.
+            expect(bundle.roles.some((r) => r.default_cost_rate > 0)).toBe(true);
+            expect(bundle.services.some((s) => s.margin > 0)).toBe(true);
+            expect(bundle.workspace.settings).toMatchObject({ overhead_monthly: 9000, target_margin: 0.25 });
+            expect(MONEY_FORMS.some((re) => re.test(text))).toBe(true);
+          } else {
+            expect(text).not.toMatch(/overhead_monthly|target_margin/);
+            expect(valuesOf(snap, "default_cost_rate").every((v) => v === 0)).toBe(true);
+            expect(valuesOf(snap, "margin").every((v) => v === 0)).toBe(true);
+            for (const re of MONEY_FORMS) expect(text, String(re)).not.toMatch(re);
+            expect(text).toContain("[amount hidden]");
+          }
+
+          // The checker agrees: nothing left to report.
+          expect(shareSnapshotLeaks(snap, w.secrets, toggles)).toEqual([]);
+          // And the input (a raw, unredacted copy) is what it reports.
+          expect(shareSnapshotLeaks(input, w.secrets, toggles).length).toBeGreaterThan(0);
+        });
+      }
+    }
+  }
+
+  it("a stored value that was already a label stays one (the database numbered it)", () => {
+    const w = worlds[1]!;
+    const snap = redactShareSnapshot(raw("process", { ...w, bundle: { ...w.bundle, people: w.bundle.people.map((p, i) => ({ ...p, name: `Team member ${i + 1}` })) } }, TOGGLES[0]!), TOGGLES[0]!, w.secrets);
+    expect((snap as { bundle: ProcessBundle }).bundle.people.map((p) => p.name)).toEqual(w.bundle.people.map((_, i) => `Team member ${i + 1}`));
+  });
+
+  it("a first name two people share becomes \"a team member\" in text (Q11)", () => {
+    const w = worlds[0]!;
+    const secrets: ShareSecrets = { ...w.secrets, people: w.secrets.people.map((p, i) => (i < 2 ? { ...p, name: `Sam ${i === 0 ? "Rivera" : "Jones"}` } : p)) };
+    const input = raw("issue", w, TOGGLES[0]!);
+    const issues = [{ ...w.issue, title: "Sam is away, Sam Rivera and Sam Jones too" }];
+    const snap = redactShareSnapshot({ ...input, issues } as ShareSnapshot, TOGGLES[0]!, secrets) as { issues: IssueRow[] };
+    expect(snap.issues[0]!.title).toBe("a team member is away, Team member 1 and Team member 2 too");
+    expect(shareSnapshotLeaks(snap, secrets, TOGGLES[0]!)).toEqual([]);
+    expect(shareSnapshotLeaks({ ...snap, note: "Sam" }, secrets, TOGGLES[0]!)).toContain("person");
+  });
+
+  it("money forms: symbols, magnitudes and ISO codes, but not words or ids", () => {
+    const w = worlds[0]!;
+    const texts = ["£12.4k", "US$3,000", "A$ 40", "€1.2m", "$5bn", "4,100 GBP", "300 usd", "£4 million"];
+    const input = raw("process", w, TOGGLES[0]!);
+    const snap = redactShareSnapshot({ ...input, issues: texts.map((t) => ({ ...w.issue, title: `x ${t} y`, evidence: "Ids 20261211000000 and 12 hours" })) } as ShareSnapshot, TOGGLES[0]!, w.secrets) as { issues: IssueRow[] };
+    for (const i of snap.issues) {
+      expect(i.title).toBe("x [amount hidden] y");
+      expect(i.evidence).toBe("Ids 20261211000000 and 12 hours");
+    }
+  });
+});
+
+describe("shareSnapshotLeaks on a hand-made leaky copy", () => {
+  const w = worlds[1]!;
+  const off = TOGGLES[0]!;
+  const clean = redactShareSnapshot(raw("process", w, off), off, w.secrets) as unknown as Anyish;
+  const leaky = (patch: Anyish) => ({ ...clean, ...patch });
+
+  it("names each kind of problem and never the value", () => {
+    expect(shareSnapshotLeaks(clean, w.secrets, off)).toEqual([]);
+    const cases: [Anyish, string][] = [
+      [{ x: { cost_rate: 40 } }, "pay"],
+      [{ x: [{ provenance: { source: "interview" } }] }, "evidence"],
+      [{ x: `mail ${w.personFirst[0]!.toLowerCase()}@${w.name}.example` }, "email"],
+      [{ x: `at ${w.clientNames[0]}` }, "client"],
+      [{ x: `ask ${w.personFull[0]}` }, "person"],
+      [{ x: `ask ${w.personFirst[0]}` }, "person"],
+      [{ x: { default_cost_rate: 50 } }, "costs"],
+      [{ x: { margin: 0.2 } }, "costs"],
+      [{ x: { overhead_monthly: 1 } }, "costs"],
+      [{ x: { target_margin: 0.1 } }, "costs"],
+      [{ x: "about £4,100" }, "money"],
+      [{ toggles: { people: true, financials: false } }, "mismatch"],
+      [{ v: 2 }, "mismatch"],
+    ];
+    for (const [patch, kind] of cases) expect(shareSnapshotLeaks(leaky(patch), w.secrets, off), JSON.stringify(patch)).toContain(kind);
+  });
+
+  it("with the toggles on, names, rates and money are not problems; pay, emails, clients and evidence still are", () => {
+    const on = TOGGLES[3]!;
+    const snap = (patch: Anyish) => ({ ...clean, toggles: on, ...patch });
+    expect(shareSnapshotLeaks(snap({ x: `ask ${w.personFull[0]}`, y: "£4,100", z: { default_cost_rate: 50, margin: 0.2, overhead_monthly: 1 } }), w.secrets, on)).toEqual([]);
+    expect(shareSnapshotLeaks(snap({ x: { cost_rate: 1 } }), w.secrets, on)).toEqual(["pay"]);
+    expect(shareSnapshotLeaks(snap({ x: "a@b.example" }), w.secrets, on)).toEqual(["email"]);
+    expect(shareSnapshotLeaks(snap({ x: w.clientNames[0] }), w.secrets, on)).toEqual(["client"]);
+    expect(shareSnapshotLeaks(snap({ x: { provenance: { a: 1 } } }), w.secrets, on)).toEqual(["evidence"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The numbers match
+// ---------------------------------------------------------------------------
+
+describe("a redacted view's numbers are the unredacted run's", () => {
+  const opts = { startDate: "2026-10-05" };
+  type Run = SimulationResult;
+
+  /** Replace each person's real name with the label the redacted run used (names also appear in the engine's own text). */
+  const relabel = <T,>(value: T, from: Run, to: Run): T => {
+    let text = JSON.stringify(value);
+    for (const [id, p] of Object.entries(from.resolvedPeople)) {
+      const target = to.resolvedPeople[id]?.name;
+      if (!target) continue;
+      text = text.split(p.name).join(target);
+    }
+    return JSON.parse(text) as T;
+  };
+
+  for (const w of worlds) {
+    for (const toggles of TOGGLES) {
+      it(`${w.name}, ${label(toggles)}: bottleneck, revenue figures, clients, ratings and issue keys are equal`, () => {
+        const snap = redactShareSnapshot(raw("process", w, toggles), toggles, w.secrets) as { bundle: ProcessBundle };
+        // The editor's run: a bundle with every real value. The share's: redacted, pay hidden.
+        const editorModel = toEngineModel(w.bundle, opts);
+        const shareModel = toEngineModel(snap.bundle, opts);
+        expect(editorModel.payHidden).toBeUndefined();
+        expect(shareModel.payHidden).toBe(true);
+        for (const p of Object.values(shareModel.people ?? {})) expect(p.cost).toBeUndefined();
+
+        const a = simulate(editorModel, 30, 1);
+        const b = simulate(shareModel, 30, 1);
+        expect(a.bnRole).toBeTruthy();
+        expect(a.kpi.billed.mean).toBeGreaterThan(0);
+        expect(b.bnRole).toEqual(a.bnRole);
+        for (const k of ["mrrAdded", "billed", "ltvAdded", "lostRevenue"] as const) expect(b.kpi[k], k).toEqual(a.kpi[k]);
+        expect(b.kpi.clientsAtRisk).toEqual(a.kpi.clientsAtRisk);
+        expect(b.kpi.clientsChurned).toEqual(a.kpi.clientsChurned);
+        // Pay: the editor has an overtime cost (when anyone works overtime), the share never does.
+        expect(b.kpi.overtimeCost).toBeNull();
+
+        const keyed = (list: DetectedIssue[]) => new Map(list.map((i) => [i.key, i]));
+        const mine = keyed(detectIssues(shareModel, b));
+        const theirs = keyed(relabel(detectIssues(editorModel, a), a, b));
+        expect([...mine.keys()].sort()).toEqual([...theirs.keys()].sort());
+        for (const [key, m] of mine) {
+          const e = theirs.get(key)!;
+          expect(m.rating, key).toEqual(e.rating);
+          if (m.cost.payHidden) expect(m.cost, key).toMatchObject({ perMonth: null, hoursPerMonth: null, payHidden: true });
+        }
+      });
+    }
+  }
+});
+
+describe("payHidden on a bundle", () => {
+  it("a viewer who sees everyone, with payHidden, gets a model with no person cost and payHidden", () => {
+    const w = worlds[1]!;
+    const sees = { ...w.bundle, viewer: { seesEveryone: true, ownPersonId: null } };
+    const plain = toEngineModel(sees, { startDate: "2026-10-05" });
+    expect(plain.payHidden).toBeUndefined();
+    expect(Object.values(plain.people ?? {}).some((p) => p.cost != null)).toBe(true);
+    const hidden = toEngineModel({ ...sees, payHidden: true }, { startDate: "2026-10-05" });
+    expect(hidden.payHidden).toBe(true);
+    for (const p of Object.values(hidden.people ?? {})) expect(p.cost).toBeUndefined();
+    // Names still come through for a viewer who sees everyone.
+    expect(Object.values(hidden.people ?? {}).map((p) => p.name)).toEqual(Object.values(plain.people ?? {}).map((p) => p.name));
+  });
+});

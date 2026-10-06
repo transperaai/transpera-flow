@@ -2,16 +2,11 @@
 // functions: the type, who built it, the steps it changes, the verdict on each issue it solves, and where its page is.
 // The components render the results.
 
-import type { IssueRow, SolutionIssueRow, SolutionRow, SolutionVerdict } from "@transpera-flow/db";
+import type { IssueRow, SolutionIssueRow, SolutionRow, SolutionsData, SolutionVerdict } from "@transpera-flow/db";
 import { shortDate, type SolutionSummary, type SolutionTest } from "@/lib/issues/pages";
 
-/** A workspace's solutions and which issues each solves, as loaded with the page (the demo keeps its own in memory). */
-export interface SolutionsData {
-  solutions: SolutionRow[];
-  links: SolutionIssueRow[];
-  /** Ids of solutions that were built from an AI idea (a built proposal names them). Left out when that isn't known: they read "By hand". */
-  aiIds?: string[];
-}
+// The type lives in `packages/db` (a share link's snapshot holds it, B3); re-exported so nothing else changes.
+export type { SolutionsData };
 
 export const NO_SOLUTIONS_DATA: SolutionsData = { solutions: [], links: [] };
 
