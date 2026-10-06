@@ -1096,6 +1096,11 @@ export type SolutionIdeaPayload = {
   replaces_step_ids?: string[];
   /** What the AI expects, in plain words. Not simulated. */
   expect?: string;
+  /** Lever changes (scenario patches) the idea brings (B4: a play-link visitor's moves). Read through `parsePatches`: anything invalid is dropped. */
+  levers?: ScenarioPatch[];
+  /** A visitor's idea: the process their link shared, and the version the link was made from. */
+  process_id?: string;
+  base_revision_id?: string;
 };
 
 /** What a decision did: accepting a proposed issue made `issue_id` (and its number); building a solution idea made `solution_id`. */
@@ -1116,8 +1121,10 @@ export interface ProposalRow {
   status: ProposalStatus;
   created_via: "mcp" | "play_link" | "upload";
   import_source: string | null;
-  /** A play-link visitor's name (B4). Their email is stored but not readable by the app's users; B4 decides who sees it. */
+  /** A play-link visitor's name (B4), or "A visitor" when what they typed names someone, gives an email or an amount. Their email and the held original are not readable by the app's users: owners and editors get them through `play_proposal_contacts`. */
   proposer_name: string | null;
+  /** The play link a visitor's idea came from (B4). */
+  share_link_id: string | null;
   applied: ProposalApplied | null;
   review_note: string | null;
   reviewed_by: string | null;

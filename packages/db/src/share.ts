@@ -12,6 +12,7 @@ import { compareRatingsDesc, type FirstPrinciples, type Rating } from "@transper
 import { loadFindings } from "./findings";
 import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
+import { loadLeverSettings } from "./lever-settings";
 import { nameFinding } from "./person-labels";
 import { EMAIL, MIN_TOKEN, clientNames, clientSpans, nameSpans, nameTokenIndex, normaliseView, pickSpans, replaceSpans, scriptParts, scriptSpans, spansOf, tokens, type Span, type View } from "./share-text";
 import {
@@ -44,6 +45,31 @@ import type {
 } from "./types";
 
 export const SHARE_SNAPSHOT_VERSION = 1;
+
+/**
+ * The lever kinds of `apps/web/src/lib/scenarios/lever-catalogue.ts` (LEVER_KINDS), in its order. A copy, because this package
+ * imports nothing from the app: a web test asserts it equals the catalogue's ids and a database test asserts it equals
+ * `private.lever_kind_ids()`. A play link's `hiddenLevers` holds only these.
+ */
+export const LEVER_KIND_IDS: readonly string[] = [
+  "demand.enquiries", "demand.conversion", "demand.seasonal", "demand.growth", "people.headcount", "people.hours",
+  "people.starters", "people.leave", "process.time", "process.wait", "process.rework", "process.routing", "clients.count",
+  "clients.fee", "clients.churn", "clients.causes", "finances.prices", "finances.roleCost", "finances.fixed",
+  "market.conditions", "market.schedule",
+];
+
+/** Only known kind ids, in catalogue order, no repeats (the app's `cleanHidden`). */
+export function cleanHiddenLevers(ids: readonly unknown[]): string[] {
+  const set = new Set(ids.filter((x): x is string => typeof x === "string"));
+  return LEVER_KIND_IDS.filter((id) => set.has(id));
+}
+
+/** A snapshot's `hiddenLevers` is valid when absent, or an array of at most 30 distinct known kind ids (the database's rule). */
+export function validHiddenLevers(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (!Array.isArray(v) || v.length > 30) return false;
+  return v.every((x) => typeof x === "string" && LEVER_KIND_IDS.includes(x)) && new Set(v).size === v.length;
+}
 
 export type ShareKind = "overview" | "process" | "issue" | "solution";
 export const SHARE_KINDS: readonly ShareKind[] = ["overview", "process", "issue", "solution"];
@@ -81,6 +107,8 @@ export interface OverviewShare extends ShareSnapshotBase {
 export interface ProcessShare extends ShareSnapshotBase {
   kind: "process";
   bundle: ProcessBundle;
+  /** The lever kinds the workspace hides (Settings → Levers), frozen with the copy. A play link's visitor is offered the others. */
+  hiddenLevers: string[];
   processes: { id: string; name: string; parentId: string | null; kind: "pipeline" | "servicing" }[];
   scenarios: ScenarioRow[];
   issues: IssueRow[];
@@ -193,7 +221,7 @@ export const SHARE_NON_TEXT_KEYS: readonly string[] = [
   "ai_key", "analysis_id", "archived_at", "archived_by", "at", "auto_verdict", "base_revision_id", "by",
   "child_process_id", "client_id", "color", "comparator", "condition_id", "created_at", "created_by", "currency",
   "dataset_id", "decided_at", "decided_by", "detected_key", "dismissed_revision_id", "draft_revision_id", "driver",
-  "end_date", "entry_process_id", "entry_step_id", "every", "file_url", "from_step_id", "id", "import_source",
+  "end_date", "entry_process_id", "entry_step_id", "every", "file_url", "from_step_id", "hiddenLevers", "id", "import_source",
   "input_hash", "insight_key", "issueId", "issue_id", "key", "kind", "linked_parameter", "live_revision_id",
   "market_pending_at", "model", "model_hash", "op", "origin", "outcome", "owner_ids", "owner_person_id",
   "parent_process_id", "parent_scenario_id", "parent_step_id", "path", "person_id", "plan", "preset", "pricing_model",
@@ -365,7 +393,9 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     !isObj(s.toggles) ||
     s.toggles.people !== toggles.people ||
     s.toggles.financials !== toggles.financials ||
-    !SHARE_KINDS.includes(s.kind as ShareKind)
+    !SHARE_KINDS.includes(s.kind as ShareKind) ||
+    // B4: the kinds a play link hides are known kind ids, so the key can't carry text.
+    !validHiddenLevers(s.hiddenLevers)
   ) {
     found.add("mismatch");
   }
@@ -502,18 +532,20 @@ export async function loadShareData(
     const loaded = await loadProcessBySlug(rdb, workspace.slug, { draft: false, processId: row.data.id });
     if (!loaded || isUnpublished(loaded.live)) throw new ShareBuildError("That process isn't here any more.");
     const live = loaded.live;
-    const [scenarios, issues, liveRevisions, solutions, firstPrinciples] = await Promise.all([
+    const [scenarios, issues, liveRevisions, solutions, firstPrinciples, leverSettings] = await Promise.all([
       loadScenarios(rdb, ws),
       loadIssuesForReader(rdb, ws),
       loadLiveRevisionIds(rdb, ws),
       loadSolutionsData(rdb, ws, live.process.id),
       firstPrinciplesOf(rdb, live.process.id, live.revision.id),
+      loadLeverSettings(rdb, ws),
     ]);
     const findings = await acceptedFindings(rdb, ws, live);
     raw = {
       ...base,
       kind: "process",
       bundle: live,
+      hiddenLevers: cleanHiddenLevers(leverSettings.hidden),
       processes: loaded.processes.map((p) => ({ id: p.id, name: p.name, parentId: p.parentId ?? null, kind: p.kind })),
       scenarios,
       issues,

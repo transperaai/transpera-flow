@@ -20,7 +20,7 @@ import {
   type ShareToggles,
   type SolutionRow,
 } from "../src";
-import { SHARE_FREE_TEXT_KEYS, SHARE_NON_TEXT_KEYS } from "../src/share";
+import { LEVER_KIND_IDS, SHARE_FREE_TEXT_KEYS, SHARE_NON_TEXT_KEYS, cleanHiddenLevers, validHiddenLevers } from "../src/share";
 
 // Share links, the pure half (issue #32, B3): the Db a snapshot is read through, the redaction of every kind of snapshot under
 // every toggle combination, its checker, and the proof that a redacted view's numbers are the unredacted run's.
@@ -188,7 +188,7 @@ function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
     case "overview":
       return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, findings: [finding as never], firstPrinciples: filledFp(w) };
     case "process":
-      return { ...base, kind, bundle: w.bundle, processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: filledFp(w) };
+      return { ...base, kind, bundle: w.bundle, hiddenLevers: ["process.rework", "people.leave"], processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: filledFp(w) };
     case "issue":
       return { ...base, kind, issueId: w.issue.id, bundle: w.bundle, issues: common.issues, processes: [], liveRevisions: {}, solutions };
     case "solution":
@@ -974,5 +974,43 @@ describe("payHidden on a bundle", () => {
     for (const p of Object.values(hidden.people ?? {})) expect(p.cost).toBeUndefined();
     // Names still come through for a viewer who sees everyone.
     expect(Object.values(hidden.people ?? {}).map((p) => p.name)).toEqual(Object.values(plain.people ?? {}).map((p) => p.name));
+  });
+});
+
+describe("hiddenLevers on a process snapshot (B4)", () => {
+  const people = (names: string[]) => names.map((name, i) => ({ id: `00000000-0000-4000-8000-00000000fe${i}0`.slice(0, 36), name, label: `Team member ${80 + i}` }));
+
+  it("is on the no-text list, and holds only known kind ids in catalogue order", () => {
+    expect(SHARE_NON_TEXT_KEYS).toContain("hiddenLevers");
+    expect(SHARE_FREE_TEXT_KEYS).not.toContain("hiddenLevers");
+    expect(cleanHiddenLevers(["process.wait", "nope", 3, "demand.enquiries", "process.wait"])).toEqual(["demand.enquiries", "process.wait"]);
+    expect(LEVER_KIND_IDS).toHaveLength(21);
+    expect(new Set(LEVER_KIND_IDS).size).toBe(21);
+  });
+
+  it("a person called Wait, Leave or Hours doesn't change it with People off, and the leak check passes, in every toggle combination", () => {
+    for (const w of worlds) {
+      for (const toggles of TOGGLES) {
+        const secrets: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, ...people(["Wait Leave", "Ann Hours", "Process Time", "Sam People"])] };
+        const input = raw("process", w, toggles) as unknown as { hiddenLevers: string[] };
+        expect(input.hiddenLevers).toEqual(["process.rework", "people.leave"]);
+        const out = redactShareSnapshot(input as unknown as ShareSnapshot, toggles, secrets) as unknown as { hiddenLevers: string[] };
+        expect(out.hiddenLevers, `${w.name} ${label(toggles)}`).toEqual(["process.rework", "people.leave"]);
+        expect(shareSnapshotLeaks(out, secrets, toggles)).toEqual([]);
+      }
+    }
+  });
+
+  it("the checker refuses a hiddenLevers that isn't an array of at most 30 distinct known ids (mismatch)", () => {
+    const w = worlds[0]!;
+    const t = TOGGLES[0]!;
+    const out = redactShareSnapshot(raw("process", w, t), t, w.secrets) as unknown as Record<string, unknown>;
+    for (const bad of ["process.wait", { a: 1 }, [1], ["Priya"], ["process.wait", "process.wait"], LEVER_KIND_IDS.concat(LEVER_KIND_IDS).slice(0, 31)]) {
+      expect(shareSnapshotLeaks({ ...out, hiddenLevers: bad }, w.secrets, t), JSON.stringify(bad)).toContain("mismatch");
+    }
+    expect(shareSnapshotLeaks({ ...out, hiddenLevers: [] }, w.secrets, t)).toEqual([]);
+    const { hiddenLevers: _x, ...bare } = out;
+    expect(shareSnapshotLeaks(bare, w.secrets, t)).toEqual([]);
+    expect(validHiddenLevers(undefined)).toBe(true);
   });
 });
