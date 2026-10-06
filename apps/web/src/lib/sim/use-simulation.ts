@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import type { EngineModel } from "@transpera-flow/engine";
 import { SimulationCancelled, SimulationClient, type SimRun, type WorkerLike } from "./client";
 
+/** `model` is the model `run` was made from (null before the first run): it can differ from the current one while a newer run goes. */
 export type SimulationState =
-  | { status: "running"; run: SimRun | null }
-  | { status: "done"; run: SimRun }
-  | { status: "error"; error: string; run: SimRun | null };
+  | { status: "running"; run: SimRun | null; model: EngineModel | null }
+  | { status: "done"; run: SimRun; model: EngineModel }
+  | { status: "error"; error: string; run: SimRun | null; model: EngineModel | null };
 
 const DEBOUNCE_MS = 40;
 
@@ -24,7 +25,7 @@ export function useSimulation(
   // The months' edges by value, so a new array with the same edges doesn't run the model again.
   const starts = monthStarts ? monthStarts.join(",") : "";
   const clientRef = useRef<SimulationClient | null>(null);
-  const [state, setState] = useState<SimulationState>({ status: "running", run: null });
+  const [state, setState] = useState<SimulationState>({ status: "running", run: null, model: null });
 
   useEffect(() => {
     const client = new SimulationClient(
@@ -38,12 +39,12 @@ export function useSimulation(
     if (!model) return;
     let active = true;
     const timer = setTimeout(() => {
-      setState((s) => ({ status: "running", run: s.run }));
+      setState((s) => ({ status: "running", run: s.run, model: s.model }));
       clientRef.current
         ?.run(model, { reps, seed, monthly, ...(starts ? { monthStarts: starts.split(",").map(Number) } : {}) })
-        .then((run) => active && setState({ status: "done", run }))
+        .then((run) => active && setState({ status: "done", run, model }))
         .catch((err: Error) => {
-          if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ status: "error", error: err.message, run: s.run }));
+          if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ status: "error", error: err.message, run: s.run, model: s.model }));
         });
     }, DEBOUNCE_MS);
     return () => {

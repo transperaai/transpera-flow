@@ -18,6 +18,18 @@ export function formatDays(hours: number, hoursPerWeek: number): string {
   return `${formatNumber(days, days < 10 ? 1 : 0)} d`;
 }
 
+const DATE_PARTS = { day: "numeric", month: "short", timeZone: "UTC" } as const;
+
+/** "19 Oct – 30 Oct 2026" from two ISO dates; the year is on the first date too when the years differ, and a single day is one date. */
+export function formatDateRange(start: string, end: string): string {
+  const withYear = new Intl.DateTimeFormat(LOCALE, { ...DATE_PARTS, year: "numeric" });
+  const noYear = new Intl.DateTimeFormat(LOCALE, DATE_PARTS);
+  const a = new Date(`${start}T00:00:00Z`);
+  const b = new Date(`${end}T00:00:00Z`);
+  if (start === end) return withYear.format(a);
+  return `${a.getUTCFullYear() === b.getUTCFullYear() ? noYear.format(a) : withYear.format(a)} – ${withYear.format(b)}`;
+}
+
 export function formatHours(hours: number): string {
   return `${formatNumber(hours, 1)} h`;
 }

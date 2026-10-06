@@ -217,6 +217,7 @@ export { compareHeadline, compareRuns, type Comparison, type Delta, type Headlin
 export {
   DETECTORS,
   ISSUE_TYPES,
+  absenceRating,
   detectIssues,
   type DetectedIssue,
   type Detector,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCurrency, formatDays, formatNumber, formatPercent, formatRange } from "@/lib/format";
+import { formatCurrency, formatDateRange, formatDays, formatNumber, formatPercent, formatRange } from "@/lib/format";
 
 describe("format", () => {
   it("rounds numbers to the requested precision", () => {
@@ -27,5 +27,11 @@ describe("format", () => {
   it("formats a range, collapsing when both ends round the same", () => {
     expect(formatRange({ mean: 7.2, p10: 5, p90: 10 }, (v) => formatNumber(v, 0))).toBe("range 5–10");
     expect(formatRange({ mean: 3, p10: 3, p90: 3 }, (v) => formatNumber(v, 0))).toBe("range 3");
+  });
+
+  it("formats a date range, with the year once when both dates share it", () => {
+    expect(formatDateRange("2026-10-19", "2026-10-30")).toBe("19 Oct – 30 Oct 2026");
+    expect(formatDateRange("2026-12-21", "2027-01-01")).toBe("21 Dec 2026 – 1 Jan 2027");
+    expect(formatDateRange("2026-10-06", "2026-10-06")).toBe("6 Oct 2026");
   });
 });

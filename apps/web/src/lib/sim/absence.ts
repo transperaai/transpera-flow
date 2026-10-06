@@ -15,6 +15,8 @@ export interface AbsenceRequest {
   model: EngineModel;
   seed: number;
   weeks: number;
+  /** Test only these people (default: every candidate). */
+  personIds?: readonly string[];
 }
 
 export type AbsenceResponse = { id: number; ok: true; value: AbsenceTest } | { id: number; ok: false; error: string };
@@ -22,13 +24,15 @@ export type AbsenceResponse = { id: number; ok: true; value: AbsenceTest } | { i
 const DEBOUNCE_MS = 250;
 
 /** The absence test of `model`, computed in a worker; null while it runs, or when `model` is missing or the worker failed. */
-export function useAbsenceTest(model: EngineModel | null, seed = 1, weeks = 2): AbsenceTest | null {
-  const [state, setState] = useState<{ model: EngineModel | null; seed: number; weeks: number; value: AbsenceTest | null }>({ model: null, seed, weeks, value: null });
+export function useAbsenceTest(model: EngineModel | null, seed = 1, weeks = 2, personIds?: readonly string[]): AbsenceTest | null {
+  // Compared by content, not array identity, so a caller can pass a fresh array each render.
+  const who = personIds?.join(",");
+  const [state, setState] = useState<{ model: EngineModel | null; seed: number; weeks: number; who: string | undefined; value: AbsenceTest | null }>({ model: null, seed, weeks, who, value: null });
 
   useEffect(() => {
     if (!model) return;
     let worker: Worker | null = null;
-    const settle = (value: AbsenceTest | null) => setState({ model, seed, weeks, value });
+    const settle = (value: AbsenceTest | null) => setState({ model, seed, weeks, who, value });
     const timer = setTimeout(() => {
       worker = new Worker(new URL("../../workers/absence.worker.ts", import.meta.url), { type: "module" });
       worker.onmessage = (event: MessageEvent<AbsenceResponse>) => {
@@ -36,14 +40,14 @@ export function useAbsenceTest(model: EngineModel | null, seed = 1, weeks = 2): 
         worker?.terminate();
       };
       worker.onerror = () => settle(null);
-      worker.postMessage({ id: 1, model, seed, weeks } satisfies AbsenceRequest);
+      worker.postMessage({ id: 1, model, seed, weeks, personIds: who === undefined ? undefined : who === "" ? [] : who.split(",") } satisfies AbsenceRequest);
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       worker?.terminate();
     };
-  }, [model, seed, weeks]);
+  }, [model, seed, weeks, who]);
 
   // A result for an older model isn't shown against a newer one.
-  return model && state.model === model && state.seed === seed && state.weeks === weeks ? state.value : null;
+  return model && state.model === model && state.seed === seed && state.weeks === weeks && state.who === who ? state.value : null;
 }
