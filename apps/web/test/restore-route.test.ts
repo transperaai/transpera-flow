@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GATEWAY_TOO_BIG_MESSAGE, LOST_CONNECTION_MESSAGE, SLOW_START_MESSAGE } from "@/lib/restore/errors";
 
 // POST /w/<slug>/restore/bundle (issue #39, B10 2b): the order of the refusals (env, session, origin, workspace, role, size,
 // unzip, JSON, checker, then the database), what each answers, that the role is read from the database and the RPC is never
 // called for someone who can't edit, that `canManage` is passed on, and that no SQL text reaches any body.
 
-type RpcAnswer = { data?: unknown; error?: { code?: string; message?: string; hint?: string } | null };
+type RpcAnswer = { data?: unknown; error?: { code?: string; message?: string; hint?: string } | null; status?: number };
 const state = {
   env: true,
   claims: { claims: { sub: "u1" } } as { claims?: { sub?: string } } | null,
@@ -17,6 +18,8 @@ const state = {
   restore: { data: { processes: [{ id: "p1", name: "Intake", revision_id: "r1" }], counts: { roles: 2 }, settings: "applied" }, error: null } as RpcAnswer,
   rpcCalls: [] as { name: string; args: Record<string, unknown> }[],
   planOptions: [] as unknown[],
+  /** Runs when the route asks `can_manage_workspace`, which it does once the body is read and checked: a test moves the clock here. */
+  afterBody: null as (() => void) | null,
 };
 
 vi.mock("@/lib/supabase/env", () => ({ supabaseEnv: () => (state.env ? { url: "x", key: "y" } : null) }));
@@ -26,7 +29,10 @@ vi.mock("@/lib/supabase/server", () => ({
     rpc: async (name: string, args: Record<string, unknown>) => {
       state.rpcCalls.push({ name, args });
       if (name === "can_edit_workspace") return { data: state.canEdit };
-      if (name === "can_manage_workspace") return { data: state.canManage };
+      if (name === "can_manage_workspace") {
+        state.afterBody?.();
+        return { data: state.canManage };
+      }
       return state.restore;
     },
     from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: state.workspace, error: null }) }) }) }),
@@ -65,6 +71,11 @@ beforeEach(() => {
   state.restore = { data: { processes: [{ id: "p1", name: "Intake", revision_id: "r1" }], counts: { roles: 2 }, settings: "applied" }, error: null };
   state.rpcCalls = [];
   state.planOptions = [];
+  state.afterBody = null;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("restore route", () => {
@@ -170,5 +181,63 @@ describe("restore route", () => {
       expect(JSON.parse(text).message).toMatch(message);
       expect(text).not.toMatch(/secret_table|violates|relation|constraint|select \*|\$1/);
     }
+  });
+
+  // B21 (#203): one restore call may run for 40 s, so the route doesn't start it once more than 15 s have gone since the request arrived
+  // (15 s + 40 s stays inside its 60 s). The clock is moved after the body is read, as a slow read would.
+  describe("the 15 s rule", () => {
+    const slowRead = (ms: number) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(1_000_000);
+      state.afterBody = () => vi.setSystemTime(1_000_000 + ms);
+    };
+
+    it("answers 503 with the slow-start message and never calls the database when reading took over 15 s", async () => {
+      state.forceOk = true;
+      slowRead(15_001);
+      const r = await call(zipped({ format: "transpera-workspace/1" }));
+      expect(r.status).toBe(503);
+      expect(r.headers.get("cache-control")).toBe("private, no-store");
+      expect((await r.json()).message).toBe(SLOW_START_MESSAGE);
+      expect(restoreCalls()).toEqual([]);
+    });
+
+    it.each([0, 14_999, 15_000])("starts the database call when reading took %i ms (the rule is more than 15 s)", async (ms) => {
+      state.forceOk = true;
+      slowRead(ms);
+      const r = await call(zipped({ format: "transpera-workspace/1" }));
+      expect(r.status).toBe(200);
+      expect(restoreCalls()).toHaveLength(1);
+    });
+
+    it("keeps the earlier refusals as they were (a bad body is refused at once, whatever the clock)", async () => {
+      slowRead(60_000);
+      const r = await call(zipped("{ not json"));
+      expect(r.status).toBe(400);
+    });
+  });
+
+  it("maps the database call's HTTP 413 (the gateway refused the size) to its own message", async () => {
+    state.forceOk = true;
+    state.restore = { data: null, error: { message: "Request Entity Too Large" }, status: 413 };
+    const r = await call(zipped({ format: "transpera-workspace/1" }));
+    expect(r.status).toBe(413);
+    expect((await r.json()).message).toBe(GATEWAY_TOO_BIG_MESSAGE);
+  });
+
+  it("answers the lost-connection message, not 'Nothing was restored', when the database call got no answer (status 0)", async () => {
+    state.forceOk = true;
+    state.restore = { data: null, error: { message: "fetch failed" }, status: 0 };
+    const r = await call(zipped({ format: "transpera-workspace/1" }));
+    expect(r.status).toBe(502);
+    expect((await r.json()).message).toBe(LOST_CONNECTION_MESSAGE);
+  });
+
+  it("maps a restore already running (hint busy) to 409 and its message", async () => {
+    state.forceOk = true;
+    state.restore = { data: null, error: { code: "55P03", message: "A restore into this workspace is already running.", hint: "busy" }, status: 400 };
+    const r = await call(zipped({ format: "transpera-workspace/1" }));
+    expect(r.status).toBe(409);
+    expect((await r.json()).message).toBe("A restore into this workspace is already running. Wait a minute, then reload this page.");
   });
 });

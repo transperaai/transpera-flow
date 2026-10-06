@@ -588,6 +588,26 @@ describe("workspace name and currency", () => {
   });
 });
 
+describe("branding", () => {
+  // Client branding (#34, B5): the same rule as the name and currency, in a jsonb column of its own.
+  const rebrand = (c: pg.Client) => c.query("update workspaces set branding = jsonb_set(branding, '{accent}', '\"#0b6e8a\"') where id = $1", [ws]);
+
+  for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner"] as const) {
+    it(`${role} changes it`, async () => {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect(await refused(c, () => rebrand(c))).toBe(1);
+      });
+    });
+  }
+  for (const role of ["editor", "member", "viewer", "signed in, no membership"] as const) {
+    it(`${role} does not`, async () => {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect(await refused(c, () => rebrand(c))).toMatch(/refused|no rows/);
+      });
+    });
+  }
+});
+
 describe("functions", () => {
   // The result of calling each function as a role that may not edit: the function raises, or answers `not_found`.
   interface RpcCase {

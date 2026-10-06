@@ -1,8 +1,9 @@
 -- Production apply file for 20261219000000_forecast_plans (B7, issue #36). One new table, `public.forecast_plans`, with its
--- trigger function, two triggers, four policies and grants; strictly additive; applies after row 59 (20261212000000,
--- B1 2b); this is row 64 (renumber if another migration merges first). Preflight, post-apply checks and rollback are in
--- the migration's own header, repeated below. Apply BEFORE deploying the app (the Forecast page reads the table for
--- owners, editors and agency admins). Sets `lock_timeout` to 5 s.
+-- trigger function, two triggers, four policies and grants; strictly additive. It applies after row 61 (20261215000000,
+-- B21 bigger_restores) and has no schema dependency on row 62 (C1, 20261216000000) or row 63 (B3, 20261218000000); this
+-- is row 64. APPLY IT AFTER C1 AND B3: their preflights expect no later version, so if this goes first, renumber it above
+-- them instead. Preflight, post-apply checks and rollback are in the migration's own header, repeated below. Apply BEFORE
+-- deploying the app (the Forecast page reads the table for owners, editors and agency admins). Sets `lock_timeout` to 5 s.
 
 begin;
 set local lock_timeout = '5s';
