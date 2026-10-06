@@ -2,8 +2,16 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { generateApiToken } from "../src";
-import { signJwt } from "./helpers";
+import {
+  NORTHBEAM_PROCESS_ID,
+  NORTHBEAM_REVISION_ID,
+  NORTHBEAM_WORKSPACE_ID,
+  loadProcessBundle,
+  northbeamPersonIds,
+  type Db,
+} from "@transpera-flow/db";
+import { generateApiToken, type McpHandlerOptions } from "../src";
+import { call, connect, signJwt } from "./helpers";
 
 // Keeping an owner (issue #30, B1 part 1; migration 20261206000000), as an API token reaches it: the request carries `x-api-token`
 // on an anonymous JWT, the pre-request hook switches the transaction to `authenticated` with the token owner's claims, and the guard
@@ -113,5 +121,104 @@ describe.skipIf(!POSTGREST_URL)("keeping an owner over PostgREST", () => {
     expect(gone.error).toBeNull();
     expect(gone.data).toHaveLength(1);
     expect(await role(users.second)).toBeUndefined();
+  });
+});
+
+// Per-person privacy (issue #30, B1 part 2a; migration 20261207500000) as the web app and the connector reach it: a linked
+// member's session loads a process bundle whose people are labels, an editor's loads the real names, and a member's API token sees
+// only its own person in the summary.
+describe.skipIf(!POSTGREST_URL)("per-person privacy over PostgREST", () => {
+  const SUPABASE_URL = "https://project.supabase.test";
+  let db: pg.Client;
+  const pid = { member: "", editor: "", memberPerson: "" };
+  let memberSession: SupabaseClient;
+  let editorSession: SupabaseClient;
+  let memberToken = "";
+  let options: McpHandlerOptions;
+  /** A signed-in session's client: the user's JWT as the bearer, as the web app sends it. */
+  const session = (token: string): SupabaseClient =>
+    createClient("http://postgrest.invalid", token, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { authorization: `Bearer ${token}` },
+        fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
+      },
+    });
+  const NORTHBEAM_PERSON = northbeamPersonIds["Leah Brooks"]!;
+  const toPostgrest: typeof fetch = (input, init) => {
+    if (input instanceof Request) throw new Error("expected supabase-js to pass a URL string");
+    return fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
+  };
+
+  beforeAll(async () => {
+    const url = new URL(ADMIN_URL);
+    url.pathname = `/${DATABASE_NAME}`;
+    db = new pg.Client({ connectionString: url.toString() });
+    await db.connect();
+    const tag = randomUUID().slice(0, 8);
+    for (const k of ["member", "editor"] as const) {
+      pid[k] = randomUUID();
+      await db.query("insert into auth.users (id, email) values ($1, $2)", [pid[k], `priv-${k}-${tag}@example.com`]);
+    }
+    pid.memberPerson = NORTHBEAM_PERSON;
+    await db.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'member', $3), ($1, $4, 'editor', null)", [
+      NORTHBEAM_WORKSPACE_ID,
+      pid.member,
+      pid.memberPerson,
+      pid.editor,
+    ]);
+    const jwt = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
+    memberSession = session(jwt(pid.member));
+    editorSession = session(jwt(pid.editor));
+    const { token, hash } = generateApiToken();
+    await db.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'privacy')", [pid.member, hash]);
+    memberToken = token;
+    options = { supabaseUrl: SUPABASE_URL, supabaseKey: signJwt({ role: "anon", iss: "test" }, JWT_SECRET), fetch: toPostgrest };
+    const deadline = Date.now() + 60_000;
+    while ((await memberSession.from("workspaces").select("id")).data?.length !== 1) {
+      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  });
+
+  afterAll(async () => {
+    if (db) {
+      await db.query("delete from memberships where user_id = any($1)", [[pid.member, pid.editor]]);
+      await db.query("delete from api_tokens where user_id = $1", [pid.member]);
+      await db.query("delete from auth.users where id = any($1)", [[pid.member, pid.editor]]);
+    }
+    await db?.end();
+  });
+
+  const bundle = async (c: SupabaseClient) => {
+    const workspace = (await c.from("workspaces").select("id, name, slug, settings").eq("id", NORTHBEAM_WORKSPACE_ID).single()).data!;
+    const process = (await c.from("processes").select("*").eq("id", NORTHBEAM_PROCESS_ID).single()).data!;
+    return loadProcessBundle(c as unknown as Db, workspace, process as never, NORTHBEAM_REVISION_ID);
+  };
+
+  it("loadProcessBundle as a linked member: labels for everyone else, the editor's ids", async () => {
+    const asMember = await bundle(memberSession);
+    const asEditor = await bundle(editorSession);
+    expect(asMember.viewer).toEqual({ seesEveryone: false, ownPersonId: pid.memberPerson });
+    expect(asEditor.viewer).toEqual({ seesEveryone: true, ownPersonId: null });
+    expect(asMember.people.map((p) => p.id).sort()).toEqual(asEditor.people.map((p) => p.id).sort());
+    expect(asMember.personRoles).toHaveLength(asEditor.personRoles.length);
+    const own = asMember.people.find((p) => p.id === pid.memberPerson)!;
+    expect(own.name).toBe(asEditor.people.find((p) => p.id === pid.memberPerson)!.name);
+    for (const p of asMember.people.filter((x) => x.id !== pid.memberPerson)) expect(p.name).toMatch(/^Team member \d+$/);
+    // The editor's names are real.
+    expect(asEditor.people.every((p) => !/^Team member/.test(p.name))).toBe(true);
+    // The client roster's assignments come from the same call.
+    expect(asMember.clientAssignments).toHaveLength(asEditor.clientAssignments?.length ?? 0);
+  });
+
+  it("a member's tables hold only their own person; their API token's get_workspace_summary lists exactly one", async () => {
+    const rows = await memberSession.from("people").select("id").eq("workspace_id", NORTHBEAM_WORKSPACE_ID);
+    expect(rows.data).toEqual([{ id: pid.memberPerson }]);
+    const mcp = await connect(memberToken, options);
+    const summary = await call<{ people: { id: string }[] }>(mcp, "get_workspace_summary");
+    expect(summary.ok).toBe(true);
+    expect(summary.data.people).toEqual([expect.objectContaining({ id: pid.memberPerson })]);
+    await mcp.close();
   });
 });
