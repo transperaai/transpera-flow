@@ -42,6 +42,7 @@ self.onmessage = (event: MessageEvent<ImportRequest>) => {
     }
     const read = readImport(table.table, req.kind, req.index, {
       dateOrder: req.dateOrder,
+      durationUnit: req.durationUnit,
       headerRow,
       onProgress: (done, total) => post({ id: req.id, kind: "progress", done, total }),
     });

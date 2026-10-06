@@ -6,7 +6,7 @@
 // is read again from the same source when needed. Nothing runs without a call, and nothing leaves the browser.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ImportKind, ImportRead } from "@transpera-flow/db/csv-import";
+import type { DurationUnit, ImportKind, ImportRead } from "@transpera-flow/db/csv-import";
 import type { DateOrder } from "@transpera-flow/db/calibration";
 import type { DelimiterChoice, ImportMessage, ImportRequest, LoadedFile } from "./import-worker-types";
 
@@ -33,7 +33,7 @@ export interface UseCsvImport {
   loaded: LoadedFile | null;
   /** A file or pasted text; null loads the same source again with other options. */
   load: (source: File | string | null, options: LoadOptions) => void;
-  read: (kind: ImportKind, index: Record<string, number | null>, dateOrder?: DateOrder) => void;
+  read: (kind: ImportKind, index: Record<string, number | null>, dateOrder?: DateOrder, durationUnit?: DurationUnit) => void;
   stop: () => void;
   reset: () => void;
 }
@@ -154,7 +154,7 @@ export function useCsvImport(): UseCsvImport {
   );
 
   const read = useCallback(
-    (kind: ImportKind, index: Record<string, number | null>, dateOrder?: DateOrder) => {
+    (kind: ImportKind, index: Record<string, number | null>, dateOrder?: DateOrder, durationUnit?: DurationUnit) => {
       const id = ++current.current;
       reading.current = true;
       setState({ phase: "reading", done: 0, total: 0 });
@@ -166,7 +166,7 @@ export function useCsvImport(): UseCsvImport {
           if (!(await postLoad(id))) return;
         }
         if (id !== current.current) return;
-        worker.current?.postMessage({ id, op: "read", kind, index, dateOrder } satisfies ImportRequest);
+        worker.current?.postMessage({ id, op: "read", kind, index, dateOrder, durationUnit } satisfies ImportRequest);
       })().catch(() => {
         if (id === current.current) setState({ phase: "error", error: "The file couldn't be read.", during: "read" });
       });

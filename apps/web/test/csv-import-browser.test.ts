@@ -220,6 +220,22 @@ describe("the import wizard", () => {
     await page.close();
   }, 120_000);
 
+  it("asks for the unit of a plain number in the hours column, and warns when seconds were read as hours", async () => {
+    const { page, errors } = await mount();
+    const seconds = ["Job,Task,Date,Hours", ...Array.from({ length: 12 }, (_, i) => `J${i},Qualify lead,2026-04-${String(i + 1).padStart(2, "0")},${1800 + i * 300}`)].join("\n");
+    await choose(page, "cal-log", "Time logs", csv(seconds));
+    await readIt(page, "cal-log");
+    expect(await step(page, "cal-log", "rows").innerText()).toMatch(/middle entry is [\d,]+ hours long/);
+    await page.locator("#cal-log-unit").selectOption({ label: "Seconds" });
+    // The old answer is hidden until it is read again.
+    expect(await step(page, "cal-log", "rows").count()).toBe(0);
+    await readIt(page, "cal-log");
+    expect(await step(page, "cal-log", "rows").innerText()).not.toContain("middle entry");
+    expect(await step(page, "cal-log", "rows").locator("[data-import-preview] tbody").innerText()).toContain("0.5");
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+
   it("reads 50,000 rows in the worker, showing progress before the preview", async () => {
     const { page, errors } = await mount();
     const lines = ["Record ID,Deal Name,Deal Stage,Date entered stage"];

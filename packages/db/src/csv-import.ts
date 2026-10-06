@@ -421,16 +421,23 @@ export function suggestMapping(
 // Durations and amounts
 // ---------------------------------------------------------------------------
 
+/** What a plain number in a duration column counts: hours (the default), minutes or seconds (Jira exports seconds). */
+export type DurationUnit = "hours" | "minutes" | "seconds";
+
+const UNIT_HOURS: Record<DurationUnit, number> = { hours: 1, minutes: 60, seconds: 3600 };
+
 /**
  * A length of time as hours: decimal hours with a dot or a comma (1.5, 1,5), h:mm or hh:mm:ss (1:30, 01:30:00), and 1h 30m,
- * 1h, 90m, 90 min, 90 mins. Not negative, and at most 10,000; anything else is null.
+ * 1h30, 1h, 90m, 90 min, 90 mins. A plain number (no unit) is in `bare` (hours unless the person says otherwise), so a column
+ * of seconds is never read as hours. Not negative, and at most 10,000 hours; anything else is null.
  */
-export function parseDuration(text: string): number | null {
+export function parseDuration(text: string, bare: DurationUnit = "hours"): number | null {
   const s = text.trim().toLowerCase();
   if (!s) return null;
   let hours: number | null = null;
   let m: RegExpExecArray | null;
-  if ((m = /^(\d+(?:[.,]\d+)?|[.,]\d+)$/.exec(s))) hours = Number(m[1]!.replace(",", "."));
+  if ((m = /^(\d+(?:[.,]\d+)?|[.,]\d+)$/.exec(s))) hours = Number(m[1]!.replace(",", ".")) / UNIT_HOURS[bare];
+  else if ((m = /^(\d+)\s*h\s*([0-5]?\d)$/.exec(s))) hours = Number(m[1]) + Number(m[2]) / 60;
   else if ((m = /^(\d+):([0-5]\d)(?::([0-5]\d))?$/.exec(s))) hours = Number(m[1]) + Number(m[2]) / 60 + Number(m[3] ?? 0) / 3600;
   else if ((m = /^(?:(\d+(?:[.,]\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+(?:[.,]\d+)?)\s*m(?:ins?|inutes?)?)?$/.exec(s)) && (m[1] !== undefined || m[2] !== undefined)) {
     hours = Number((m[1] ?? "0").replace(",", ".")) + Number((m[2] ?? "0").replace(",", ".")) / 60;
@@ -558,6 +565,8 @@ const EXCEL_SERIAL = /^\d{5}(?:\.\d+)?$/;
 interface ReadCtx {
   /** Amounts that couldn't be read: the row is kept with the amount left blank. */
   badAmounts: number;
+  /** What a plain number in a duration column counts. */
+  durationUnit: DurationUnit;
 }
 
 function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: DateOrder, ctx: ReadCtx): KindRow | string {
@@ -589,7 +598,7 @@ function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: Da
         break;
       }
       case "duration": {
-        const h = parseDuration(text);
+        const h = parseDuration(text, ctx.durationUnit);
         if (h === null) return `${c.label} "${text.slice(0, 20)}" isn't a number of hours.`;
         out[c.id] = h;
         break;
@@ -857,7 +866,7 @@ export function readImport(
   table: readonly string[][],
   kind: ImportKind,
   index: Record<string, number | null>,
-  options: { dateOrder?: DateOrder; headerRow?: number; onProgress?: MappedOptions["onProgress"] } = {},
+  options: { dateOrder?: DateOrder; headerRow?: number; durationUnit?: DurationUnit; onProgress?: MappedOptions["onProgress"] } = {},
 ): ImportRead {
   const spec = IMPORT_KINDS[kind];
   const ids = spec.columns.map((c) => c.id);
@@ -866,7 +875,7 @@ export function readImport(
     const i = index[id];
     if (i !== null && i !== undefined) at[id] = i;
   }
-  const ctx: ReadCtx = { badAmounts: 0 };
+  const ctx: ReadCtx = { badAmounts: 0, durationUnit: options.durationUnit ?? "hours" };
   const res = readMappedRows<string, KindRow>(
     table,
     at,
@@ -886,9 +895,16 @@ export function readImport(
       rows = dealsToStepLog(kindRows as DealRow[]);
       note = dealsNote(kindRows as DealRow[]);
       break;
-    case "time_logs":
+    case "time_logs": {
       rows = timeLogToStepLog(kindRows as TimeLogRow[]);
+      // A column of minutes or seconds read as hours gives entries of days: say so, so it isn't silently wrong.
+      const sorted = (kindRows as TimeLogRow[]).map((r) => r.hours).sort((a, b) => a - b);
+      const median = sorted.length ? sorted[Math.floor(sorted.length / 2)]! : 0;
+      if (median > 24) {
+        note = `The middle entry is ${Math.round(median).toLocaleString("en-GB")} hours long. If the hours column is in minutes or seconds, choose that under "Plain numbers are in" and continue again.`;
+      }
       break;
+    }
     case "jobs":
       rows = jobsToServicing(kindRows as JobRow[]);
       break;

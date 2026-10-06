@@ -13,6 +13,7 @@ import {
   importDetails,
   suggestMapping,
   suggestNameMap,
+  type DurationUnit,
   type ImportDetails,
   type ImportKind,
   type ImportRead,
@@ -92,6 +93,8 @@ export function ImportWizard(props: ImportWizardProps) {
   const [fileName, setFileName] = useState("");
   // The rows shown are of an earlier choice of columns, kind or file: hidden until the file is read again.
   const [stale, setStale] = useState(false);
+  // What a plain number in a duration column counts (time logs). Hours unless said otherwise.
+  const [durationUnit, setDurationUnit] = useState<DurationUnit>("hours");
   const [used, setUsed] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const spec = IMPORT_KINDS[kind];
@@ -163,7 +166,7 @@ export function ImportWizard(props: ImportWizardProps) {
     if (!mapping) return;
     unuse();
     setStale(false);
-    hook.read(kind, mapping.index, dateOrder);
+    hook.read(kind, mapping.index, dateOrder, kind === "time_logs" ? durationUnit : undefined);
   };
 
   const useRows = () => {
@@ -369,6 +372,28 @@ export function ImportWizard(props: ImportWizardProps) {
               );
             })}
           </ul>
+          {kind === "time_logs" && (
+            <label className="flex max-w-xs flex-col gap-1">
+              <HelpLabel
+                label="Plain numbers are in"
+                description="What a number with no unit in the hours column counts: hours, minutes or seconds. 1:30 and 1h 30m are always read as they say. Jira exports seconds."
+                example="With minutes, 90 is an hour and a half; with seconds, 5400 is."
+              />
+              <NativeSelect
+                id={`${id}-unit`}
+                value={durationUnit}
+                onChange={(e) => {
+                  unuse();
+                  setStale(true);
+                  setDurationUnit(e.target.value as DurationUnit);
+                }}
+              >
+                <option value="hours">Hours</option>
+                <option value="minutes">Minutes</option>
+                <option value="seconds">Seconds</option>
+              </NativeSelect>
+            </label>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             {reading ? (
               <>

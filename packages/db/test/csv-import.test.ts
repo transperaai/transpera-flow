@@ -579,14 +579,39 @@ describe("parseDuration", () => {
       ["90m", 1.5],
       ["90 min", 1.5],
       ["90 mins", 1.5],
-      ["1h30", 1],
+      ["1h30", 1.5],
+      ["2 h 5", 2 + 5 / 60],
       ["10000", 10_000],
     ];
     for (const [text, hours] of cases) {
-      if (text === "1h30") expect(parseDuration(text), text).toBeNull();
-      else expect(parseDuration(text), text).toBeCloseTo(hours, 6);
+      expect(parseDuration(text), text).toBeCloseTo(hours, 6);
     }
   });
+  it("reads a plain number in the unit chosen, and never seconds as hours", () => {
+    expect(parseDuration("90", "minutes")).toBe(1.5);
+    expect(parseDuration("3600", "seconds")).toBe(1);
+    expect(parseDuration("1800", "seconds")).toBe(0.5);
+    expect(parseDuration("1.5")).toBe(1.5);
+    // Forms with a unit don't depend on the choice.
+    expect(parseDuration("1:30", "seconds")).toBe(1.5);
+    expect(parseDuration("90m", "seconds")).toBe(1.5);
+    // 3600 read as hours is over the cap, not 3,600 hours of work.
+    expect(parseDuration("36000")).toBeNull();
+    expect(readImport(splitCsv("job,task,date,hours\nJ1,A,2026-03-02,5400"), "time_logs", { job: 0, task: 1, date: 2, hours: 3 }, { durationUnit: "seconds" }).rows[0]).toMatchObject({ hours: 1.5 });
+    expect(readImport(splitCsv("job,task,date,hours\nJ1,A,2026-03-02,45"), "time_logs", { job: 0, task: 1, date: 2, hours: 3 }, { durationUnit: "minutes" }).rows[0]).toMatchObject({ hours: 0.75 });
+  });
+
+  it("says so when the middle entry is over 24 hours, as a seconds column read as hours is", () => {
+    const rows = Array.from({ length: 9 }, (_, i) => `J${i},A,2026-03-02,${1800 + i * 600}`).join("\n");
+    const text = `job,task,date,hours\n${rows}`;
+    const index = { job: 0, task: 1, date: 2, hours: 3 };
+    const wrong = readImport(splitCsv(text), "time_logs", index);
+    expect(wrong.note).toMatch(/middle entry is \d,?\d{3} hours long.*minutes or seconds/);
+    const right = readImport(splitCsv(text), "time_logs", index, { durationUnit: "seconds" });
+    expect(right.note).toBeNull();
+    expect(right.entries![0]!.hours).toBe(0.5);
+  });
+
   it("refuses what isn't a length of time", () => {
     for (const s of ["", "abc", "-1h", "-2", "1.2.3", "1:75", "10001", "h", "1h 90x"]) expect(parseDuration(s), s).toBeNull();
   });

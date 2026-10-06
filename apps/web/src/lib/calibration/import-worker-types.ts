@@ -1,6 +1,6 @@
 // The messages between the import wizard's hook and its Web Worker (issue #40). Types only, so the worker and the hook share them.
 
-import type { ImportEncoding, ImportKind, ImportRead } from "@transpera-flow/db/csv-import";
+import type { DurationUnit, ImportEncoding, ImportKind, ImportRead } from "@transpera-flow/db/csv-import";
 import type { DateOrder } from "@transpera-flow/db/calibration";
 
 export type DelimiterChoice = "auto" | "," | ";" | "\t" | "|";
@@ -16,7 +16,7 @@ export type ImportRequest =
       delimiter: DelimiterChoice;
       headerRow: number;
     }
-  | { id: number; op: "read"; kind: ImportKind; index: Record<string, number | null>; dateOrder?: DateOrder };
+  | { id: number; op: "read"; kind: ImportKind; index: Record<string, number | null>; dateOrder?: DateOrder; durationUnit?: DurationUnit };
 
 export type ImportMessage =
   | {
