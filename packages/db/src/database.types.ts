@@ -3212,6 +3212,8 @@ export type Database = {
       can_edit_workspace: { Args: { ws: string }; Returns: boolean }
       can_manage_workspace: { Args: { ws: string }; Returns: boolean }
       can_read_workspace: { Args: { ws: string }; Returns: boolean }
+      can_see_people: { Args: { ws: string }; Returns: boolean }
+      can_see_person: { Args: { person: string; ws: string }; Returns: boolean }
       create_library_process: {
         Args: {
           p_description?: string
@@ -3240,12 +3242,17 @@ export type Database = {
         Args: { p_adopt?: Json; p_extras?: Json; p_nodes: Json; p_workspace: string }
         Returns: Json
       }
+      import_workspace_bundle: {
+        Args: { p_label?: string; p_plan: Json; p_workspace: string }
+        Returns: Json
+      }
       is_agency_admin: { Args: never; Returns: boolean }
       is_free_mail_domain: { Args: { domain: string }; Returns: boolean }
       log_process_import: {
         Args: { import_source: string; target_process: string }
         Returns: undefined
       }
+      my_person_id: { Args: { ws: string }; Returns: string }
       open_draft: { Args: { target_process: string }; Returns: Json }
       publish_process: {
         Args: { accept_estimates?: boolean; target_process: string }
@@ -3407,6 +3414,7 @@ export type Database = {
         }[]
       }
       take_link_fetch: { Args: never; Returns: number }
+      team_capacity: { Args: { ws: string }; Returns: Json }
       unlinked_source_count: {
         Args: { p_workspace: string }
         Returns: number

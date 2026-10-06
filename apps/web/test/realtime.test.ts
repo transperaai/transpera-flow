@@ -333,6 +333,17 @@ function twoEditors() {
 }
 
 describe("presence and live changes between two editors", () => {
+  it("sends the name but never the email, in presence or in notes (B1 2/3)", async () => {
+    const { anaSync, tomSync, settle } = twoEditors();
+    await settle();
+    for (const sync of [anaSync, tomSync]) for (const other of sync.getState().others) expect(other.email).toBeNull();
+    expect(JSON.stringify(anaSync.getState())).not.toMatch(/@example\.com/);
+    expect(JSON.stringify(tomSync.getState())).not.toMatch(/@example\.com/);
+  });
+  it("never reads an email out of someone else's presence", () => {
+    expect(presentFrom({ a: [{ userId: "u", name: "N", email: "n@example.com", view: "live" }] })[0]!.email).toBeNull();
+  });
+
   it("lists the other people on the process and what they are looking at", async () => {
     const { anaSync, tomSync, settle } = twoEditors();
     await settle();
@@ -538,12 +549,12 @@ describe("the Supabase adapter", () => {
 
     c!.state = { "tab-2": [{ ...ANA, view: "live", since: "x", presence_ref: "r" }], junk: [{ name: 3 }] };
     c!.emit("presence", "sync", {});
-    expect(presence).toHaveBeenLastCalledWith([{ ...ANA, key: "tab-2", view: "live", since: "x" }]);
+    expect(presence).toHaveBeenLastCalledWith([{ ...ANA, email: null, key: "tab-2", view: "live", since: "x" }]);
 
     c!.emit("broadcast", "note", { payload: { kind: "saved", by: ANA, table: "steps", id: "s1", values: { work_hours: 4, bad: {} } } });
     c!.emit("broadcast", "note", { payload: { kind: "saved", by: { name: "no id" }, table: "steps", id: "s1", values: {} } });
     expect(notes).toHaveBeenCalledTimes(1);
-    expect(notes).toHaveBeenCalledWith({ kind: "saved", by: ANA, table: "steps", id: "s1", values: { work_hours: 4 } });
+    expect(notes).toHaveBeenCalledWith({ kind: "saved", by: { ...ANA, email: null }, table: "steps", id: "s1", values: { work_hours: 4 } });
 
     ch.send({ kind: "draft", by: TOM, event: "opened", revisionId: "r2" });
     expect(c!.sent).toEqual([{ type: "broadcast", event: "note", payload: { kind: "draft", by: TOM, event: "opened", revisionId: "r2" } }]);

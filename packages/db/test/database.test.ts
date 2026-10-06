@@ -107,6 +107,28 @@ describe("seed", () => {
     expect(toEngineModel(bundle, opts)).toEqual(toEngineModel(northbeamBundle(), opts));
   });
 
+  it("round-trips through team_capacity: an admin's bundle built from it resolves to the same engine model (B1 2a)", async () => {
+    const admin = await createUser(db, "admin-team@example.com", { agency_admin: true });
+    const opts = { startDate: "2026-10-05" };
+    for (const [wsId, expected] of [
+      [NORTHBEAM_WORKSPACE_ID, northbeamBundle()],
+      [LARKSPUR_WORKSPACE_ID, larkspurBundle()],
+    ] as const) {
+      const bundle = await loadSeeded(admin.claims, wsId);
+      const t = (await db.as(admin.claims, async (c) => (await c.query("select public.team_capacity($1) as t", [wsId])).rows[0].t)) as Record<string, never>;
+      expect(t.sees_everyone).toBe(true);
+      const fromTeam = {
+        ...bundle,
+        people: t.people,
+        personRoles: t.person_roles,
+        personSkills: t.person_skills,
+        personLeave: t.person_leave,
+        clientAssignments: t.client_assignments,
+      } as unknown as ProcessBundle;
+      expect(toEngineModel(fromTeam, opts)).toEqual(toEngineModel(expected, opts));
+    }
+  });
+
   it("loads Larkspur Creative, the second golden agency, which round-trips to the same engine model (issue #22)", async () => {
     const admin = await createUser(db, "admin-larkspur@example.com", { agency_admin: true });
     const bundle = await loadSeeded(admin.claims, LARKSPUR_WORKSPACE_ID);

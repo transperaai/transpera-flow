@@ -101,7 +101,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
           title: d.title,
           evidence: trim(d.evidence, MAX_FACT_TEXT),
           step: d.stepId ? { id: d.stepId, name: steps.get(d.stepId) ?? null } : null,
-          cost: { per_month: d.cost.perMonth, hours_per_month: d.cost.hoursPerMonth, how: trim(d.cost.method, 300), currency, estimate: true },
+          cost: { per_month: d.cost.perMonth, hours_per_month: d.cost.hoursPerMonth, how: trim(d.cost.method, 300), currency, estimate: true, ...(d.cost.payHidden ? { pay_hidden: true } : {}) },
         }));
         if (all.length > facts.length) assumptions.push(`Showing the worst ${facts.length} of ${all.length} facts; pass a larger limit for more.`);
         return {

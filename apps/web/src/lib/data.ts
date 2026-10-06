@@ -195,7 +195,10 @@ export async function loadPendingIdeaCount(workspaceId: string): Promise<number>
 
 /**
  * Who the workspace's members are, by user id: the name of the person linked to each membership (Settings > Access). A member with
- * no person linked is left out, so pages say "A team member" for them. (RLS: everyone in the workspace can read both tables.)
+ * no person linked is left out, so pages say "A team member" for them. (RLS, B1 2/3a: `memberships` and `people` are both read in
+ * full only by owners, editors and agency admins (`can_see_people`); anyone else reads only their own membership row, and
+ * their own person (`can_see_person`). So a member or viewer gets only their own name, and every other author falls back to
+ * "A team member": that is the rule, not a gap.)
  */
 export async function loadMemberNames(workspaceId: string): Promise<Record<string, string>> {
   try {

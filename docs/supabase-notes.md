@@ -300,3 +300,35 @@ Verified only against plain Postgres (`packages/db/test/process-archive.test.ts`
 - [ ] **Index.** `sources_workspace_file_path` (partial, `file_path is not null`) serves the storage policies' look-ups; created with a plain `create index` inside the apply transaction (production's `sources` is small).
 - `private.storage_workspace(name)` reads the workspace id from the object's first folder; `authenticated` has EXECUTE on it (the policies call it) and USAGE on `private` (granted by 20260930040000). The policies also read `public.sources` as the caller (members read it).
 - The archive triggers (`process_archive_guard`, `process_archive_map`, `refuse_archived_placements`, `refuse_archived_revision`, `refuse_archived_publish`) run for every caller; the guard and the map's are SECURITY DEFINER with an empty `search_path`, as the company map's other triggers; tested with the map's sync, publish, restore, open_draft and the placement checks.
+
+## Keeping an owner (issue #30, migration 20261206000000)
+
+Verified only against plain Postgres 16 (`packages/db/test/access.test.ts`, "keeping an owner") and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-roles.test.ts`), not against a Supabase project. The owner guard on `memberships` relies on `current_user` being `authenticated` for Data API requests (PostgREST's `set local role` after the pre-request hook) and being the function owner inside SECURITY DEFINER functions (`reconcile_access`, `reconcile_after_access_change`). Check on the real project:
+
+- [ ] **Preflight 2** shows the three reconcile functions are SECURITY DEFINER and owned by `postgres` (not `authenticated`, `supabase_auth_admin` or `service_role`).
+- [ ] **Demote the only owner** of a throwaway workspace from the app: refused with "A workspace needs at least one owner."; with a second owner, allowed.
+- [ ] **Delete an auth user** (Dashboard) who is the last owner of a workspace: allowed (the cascade runs as `supabase_auth_admin` or `postgres`, not `authenticated`).
+- [ ] **Remove the last owner's pre-assigned email** from Settings → Access: refused; remove a workspace that has one: allowed.
+
+## Per-person privacy (issue #30, migration 20261207500000)
+
+Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`, `team-capacity.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-roles.test.ts`), not against a Supabase project. The select policies, `can_see_person`, `team_capacity` and `revision_history` rely on `auth.uid()` and `auth.jwt()` reading the request's claims, including inside the SECURITY DEFINER functions (the same as `workspace_role`). Check on the real project:
+
+- [ ] **As a linked member** (Settings → Access links the membership to a person), Settings → People shows exactly one person, and the Overview's numbers match an editor's, except the overtime cost, which shows "—" with an (i).
+- [ ] **As an editor**, People and Settings → People show everyone with real names and rates.
+- [ ] **As a member**, no cost rate of anyone else's appears anywhere (People, the network tab's `team_capacity` response, MCP): only their own.
+- [ ] **Smoke test** (post-apply check in the migration header) as an agency admin: `team_capacity` returns `sees_everyone` true and Northbeam's head count.
+- [ ] **A member's version history** shows "A team member" for other people's versions and their own name for their own.
+
+## Restoring a backup (issue #39, B10 2b, migration 20261207000000)
+
+`public.import_workspace_bundle(p_workspace, p_plan, p_label)` restores a `transpera-workspace/1` backup into a new, empty workspace in one call: SECURITY INVOKER, drafts only, nothing published, no history, all or nothing. It also grants EXECUTE on `private.scenario_library()` to `authenticated` (the "empty" check compares scenarios with the seeded library). **Verified on plain Postgres 16 and PostgREST 14.18 only** (`packages/db/test/workspace-import.test.ts`, `packages/mcp/test/postgrest-restore.test.ts`), not on Supabase.
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Time | The restore takes about 2 s on the test Postgres at every limit at once (50 processes, 500 steps, 1,000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1,000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals; a 4 MB plan). The brief's starting limits (200 processes, 2,000 issues, ...) took 6 s, so they were lowered. `authenticated` has an 8 s `statement_timeout` and one restore is one statement. | On a preview deploy, restore a Northbeam backup into a new workspace and time it. Then a plan near the 10 MB limit (many sources): check the API gateway's request size limit doesn't refuse it and the call finishes inside the 8 s timeout. If it times out, the route answers "too big to restore in one go" (57014). |
+| Request size | The browser sends the backup gzipped, at most 4 MB (Vercel allows 4.5 MB), to a Route Handler that unpacks at most 25 MB. | A real 3 to 4 MB upload through Vercel. |
+| API tokens | The function refuses a JWT with `api_token_id` (42501, "Backups are restored in the app."). PostgREST may answer that as 401, as for the suggestions guard. | An MCP token calling `/rest/v1/rpc/import_workspace_bundle` is refused. |
+| Companion rows | The company map's sync adds each new top-level process's card in one system version (cards show once a process is published); `link_cited_sources`, `issue_seed_links` and `log_perception_gaps` run as for any write. | Restore, publish every process: the map shows each top-level process once; a process held by a link is not also on the map; no duplicate perception-gap issue. |
+| Notice | A cookie set in the browser (`tf-restore-notice`) carries the sentence to the Overview. | The notice shows once after a restore, and the drafts list shows every process. |
+

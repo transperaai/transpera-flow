@@ -29103,6 +29103,1968 @@ revoke all on public.findings from anon, authenticated;
 grant select, insert, update on public.findings to authenticated;
 ']);
 
+-- 20261206000000_membership_guards.sql
+-- Keep an owner, and link a member to their person (issue #30, B1 part 1 of 3; docs/plans/b1-brief.md).
+--
+-- Today an owner can demote or remove the only owner of a workspace, themselves included, and leave it with nobody who can
+-- manage access. This migration stops that, and adds the helper the per-person privacy slice (B1 2/3) and the Access page
+-- need to know which person the signed-in user is.
+--
+-- STRICTLY ADDITIVE: two helpers, two trigger functions and two triggers. No table, policy, grant or existing function is
+-- changed (`save_fields` and `reconcile_access` are untouched).
+--
+--   * `public.my_person_id(ws)`: the person record linked to the caller's active membership in `ws`, or null. SECURITY
+--     DEFINER with an empty search_path, for the same reason as `workspace_role`: policies can call it without recursing
+--     into `memberships`. Executable by `authenticated`, not by `anon`.
+--   * `private.memberships_keep_owner()` (trigger `keep_an_owner`, before update or delete on `memberships`, SECURITY
+--     INVOKER): refuses to demote, deactivate or delete a workspace's last active owner, or to change that row's `source`
+--     or `workspace_id` (an owner could otherwise change their own `source` and let `resolve_my_access` drop them). It applies only to people: it
+--     returns at once unless `current_user = 'authenticated'` (a signed-in session or an API token, after the Data API's
+--     `set local role authenticated`) and the caller is not an agency admin. Reconciliation (`reconcile_access` and
+--     `reconcile_after_access_change` are SECURITY DEFINER, so they run as their owner), foreign-key cascades (deleting a
+--     workspace or an auth user) and SQL run as another role pass. Agency admins may leave a workspace with no owner
+--     (offboarding). Both guards take a per-workspace advisory lock (transaction level) before counting owners, so two owners
+--     demoting each other at the same moment can't leave none. A workspace with no owner at all (agency-created, owner not yet added) is fine: the rule only stops
+--     going from one owner to none. Refusal: errcode 23514, message `workspace_keeps_an_owner: ...`.
+--   * `private.access_emails_keep_owner()` (trigger `keep_an_owner`, before update or delete on `workspace_access_emails`,
+--     SECURITY INVOKER): removing or changing an owner's pre-assigned email reconciles at trigger depth 2 as the function
+--     owner, which the first guard lets through, so this guards the list row itself. Like the first guard it returns at
+--     once unless `current_user = 'authenticated'` (so support SQL as another role passes), and also when
+--     `pg_trigger_depth() > 1` (a workspace delete cascading) or for an agency admin. It refuses (same exception) when the
+--     row is an owner row, the change removes it (delete, a role other than owner, a different email or a different
+--     workspace), a signed-in owner with source 'access_list' holds it, and no other active owner exists. It reads
+--     `auth.users` through `private.list_owner_is_last(ws, email)`, SECURITY DEFINER, executable by `authenticated`.
+--
+-- KNOWN GAPS (follow-ups): an owner who joined by DOMAIN and was then promoted loses their membership when the domain is
+-- removed, and an owner who deletes the domain they joined by does the same. Both reconciliations run as the function owner,
+-- so they are not guarded. That is rare, and an agency admin can fix it.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`):
+--   0. Row 52 applied, nothing later. Expect exactly one row, 20261205000000:
+--        select version from supabase_migrations.schema_migrations where version >= '20261205000000' order by 1;
+--   1. Nothing created yet. Expect all four null:
+--        select to_regprocedure('public.my_person_id(uuid)'), to_regprocedure('private.memberships_keep_owner()'),
+--               to_regprocedure('private.access_emails_keep_owner()'),
+--               to_regprocedure('private.list_owner_is_last(uuid, text)');
+--   2. The reconcile functions run as a role other than authenticated (guard 2 relies on it). Expect prosecdef true and
+--      owner postgres on all three rows:
+--        select proname, prosecdef, proowner::regrole from pg_proc
+--        where proname in ('reconcile_access', 'reconcile_after_access_change', 'resolve_my_access');
+--   3. Owners per workspace today (for the log; zero owners is allowed):
+--        select w.slug, count(m.id) filter (where m.role = 'owner' and m.active) as owners
+--        from public.workspaces w left join public.memberships m on m.workspace_id = w.id group by 1 order by 1;
+--
+-- POST-APPLY CHECK:
+--   - both triggers exist and are enabled. Expect two rows, keep_an_owner with 'O':
+--        select tgrelid::regclass, tgname, tgenabled::text from pg_trigger where tgname = 'keep_an_owner' and not tgisinternal;
+--   - all four functions have an empty search_path. Expect four rows of {search_path=""}:
+--        select proname, proconfig from pg_proc where proname in ('my_person_id', 'memberships_keep_owner', 'access_emails_keep_owner', 'list_owner_is_last');
+--   - my_person_id is executable by authenticated and not by anon. Expect t, f:
+--        select has_function_privilege('authenticated', 'public.my_person_id(uuid)', 'execute'),
+--               has_function_privilege('anon', 'public.my_person_id(uuid)', 'execute');
+--
+-- Rollback:
+--   drop trigger if exists keep_an_owner on public.memberships;
+--   drop trigger if exists keep_an_owner on public.workspace_access_emails;
+--   drop function if exists private.memberships_keep_owner();
+--   drop function if exists private.access_emails_keep_owner();
+--   drop function if exists private.list_owner_is_last(uuid, text);
+--   drop function if exists public.my_person_id(uuid);
+--   delete from supabase_migrations.schema_migrations where version = '20261206000000';
+
+create function public.my_person_id(ws uuid) returns uuid
+language sql stable security definer
+set search_path = ''
+as $$
+  select m.person_id from public.memberships m where m.workspace_id = ws and m.user_id = auth.uid() and m.active;
+$$;
+
+revoke execute on function public.my_person_id(uuid) from public, anon;
+grant execute on function public.my_person_id(uuid) to authenticated;
+
+create function private.list_owner_is_last(ws uuid, address text) returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.memberships m join auth.users u on u.id = m.user_id
+    where m.workspace_id = ws and m.role = 'owner' and m.active and m.source = 'access_list'
+      and u.email_confirmed_at is not null and lower(u.email) = address)
+  and not exists (
+    select 1 from public.memberships m join auth.users u on u.id = m.user_id
+    where m.workspace_id = ws and m.role = 'owner' and m.active and lower(u.email) <> address);
+$$;
+
+create function private.memberships_keep_owner() returns trigger
+language plpgsql security invoker
+set search_path = ''
+as $$
+begin
+  -- Only people: reconciliation, cascades and other roles pass, and so do agency admins.
+  if current_user <> 'authenticated' or public.is_agency_admin() then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  -- One owner check at a time per workspace, so two owners can't demote each other at the same moment.
+  perform pg_advisory_xact_lock(hashtextextended(old.workspace_id::text, 0));
+
+  if old.role = 'owner' and old.active
+     and (tg_op = 'DELETE' or new.role <> 'owner' or not new.active
+          or new.source <> old.source or new.workspace_id <> old.workspace_id)
+     and not exists (
+       select 1 from public.memberships m
+       where m.workspace_id = old.workspace_id and m.role = 'owner' and m.active and m.id <> old.id)
+  then
+    raise exception 'workspace_keeps_an_owner: a workspace needs at least one owner' using errcode = '23514';
+  end if;
+
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+create function private.access_emails_keep_owner() returns trigger
+language plpgsql security invoker
+set search_path = ''
+as $$
+begin
+  -- Only people (as the membership guard), and not a workspace delete cascading, nor an agency admin.
+  if current_user <> 'authenticated' or pg_trigger_depth() > 1 or public.is_agency_admin() then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(old.workspace_id::text, 0));
+
+  if old.role = 'owner'
+     and (tg_op = 'DELETE' or new.role <> 'owner' or new.email <> old.email or new.workspace_id <> old.workspace_id)
+     and private.list_owner_is_last(old.workspace_id, old.email)
+  then
+    raise exception 'workspace_keeps_an_owner: a workspace needs at least one owner' using errcode = '23514';
+  end if;
+
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+revoke all on function private.memberships_keep_owner(), private.access_emails_keep_owner(), private.list_owner_is_last(uuid, text) from public, anon, authenticated;
+-- The list guard runs as the caller and asks this (it reads auth.users) on their behalf.
+grant execute on function private.list_owner_is_last(uuid, text) to authenticated;
+
+create trigger keep_an_owner before update or delete on public.memberships
+  for each row execute function private.memberships_keep_owner();
+create trigger keep_an_owner before update or delete on public.workspace_access_emails
+  for each row execute function private.access_emails_keep_owner();
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261206000000', 'membership_guards', array['-- Keep an owner, and link a member to their person (issue #30, B1 part 1 of 3; docs/plans/b1-brief.md).
+--
+-- Today an owner can demote or remove the only owner of a workspace, themselves included, and leave it with nobody who can
+-- manage access. This migration stops that, and adds the helper the per-person privacy slice (B1 2/3) and the Access page
+-- need to know which person the signed-in user is.
+--
+-- STRICTLY ADDITIVE: two helpers, two trigger functions and two triggers. No table, policy, grant or existing function is
+-- changed (`save_fields` and `reconcile_access` are untouched).
+--
+--   * `public.my_person_id(ws)`: the person record linked to the caller''s active membership in `ws`, or null. SECURITY
+--     DEFINER with an empty search_path, for the same reason as `workspace_role`: policies can call it without recursing
+--     into `memberships`. Executable by `authenticated`, not by `anon`.
+--   * `private.memberships_keep_owner()` (trigger `keep_an_owner`, before update or delete on `memberships`, SECURITY
+--     INVOKER): refuses to demote, deactivate or delete a workspace''s last active owner, or to change that row''s `source`
+--     or `workspace_id` (an owner could otherwise change their own `source` and let `resolve_my_access` drop them). It applies only to people: it
+--     returns at once unless `current_user = ''authenticated''` (a signed-in session or an API token, after the Data API''s
+--     `set local role authenticated`) and the caller is not an agency admin. Reconciliation (`reconcile_access` and
+--     `reconcile_after_access_change` are SECURITY DEFINER, so they run as their owner), foreign-key cascades (deleting a
+--     workspace or an auth user) and SQL run as another role pass. Agency admins may leave a workspace with no owner
+--     (offboarding). Both guards take a per-workspace advisory lock (transaction level) before counting owners, so two owners
+--     demoting each other at the same moment can''t leave none. A workspace with no owner at all (agency-created, owner not yet added) is fine: the rule only stops
+--     going from one owner to none. Refusal: errcode 23514, message `workspace_keeps_an_owner: ...`.
+--   * `private.access_emails_keep_owner()` (trigger `keep_an_owner`, before update or delete on `workspace_access_emails`,
+--     SECURITY INVOKER): removing or changing an owner''s pre-assigned email reconciles at trigger depth 2 as the function
+--     owner, which the first guard lets through, so this guards the list row itself. Like the first guard it returns at
+--     once unless `current_user = ''authenticated''` (so support SQL as another role passes), and also when
+--     `pg_trigger_depth() > 1` (a workspace delete cascading) or for an agency admin. It refuses (same exception) when the
+--     row is an owner row, the change removes it (delete, a role other than owner, a different email or a different
+--     workspace), a signed-in owner with source ''access_list'' holds it, and no other active owner exists. It reads
+--     `auth.users` through `private.list_owner_is_last(ws, email)`, SECURITY DEFINER, executable by `authenticated`.
+--
+-- KNOWN GAPS (follow-ups): an owner who joined by DOMAIN and was then promoted loses their membership when the domain is
+-- removed, and an owner who deletes the domain they joined by does the same. Both reconciliations run as the function owner,
+-- so they are not guarded. That is rare, and an agency admin can fix it.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`):
+--   0. Row 52 applied, nothing later. Expect exactly one row, 20261205000000:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261205000000'' order by 1;
+--   1. Nothing created yet. Expect all four null:
+--        select to_regprocedure(''public.my_person_id(uuid)''), to_regprocedure(''private.memberships_keep_owner()''),
+--               to_regprocedure(''private.access_emails_keep_owner()''),
+--               to_regprocedure(''private.list_owner_is_last(uuid, text)'');
+--   2. The reconcile functions run as a role other than authenticated (guard 2 relies on it). Expect prosecdef true and
+--      owner postgres on all three rows:
+--        select proname, prosecdef, proowner::regrole from pg_proc
+--        where proname in (''reconcile_access'', ''reconcile_after_access_change'', ''resolve_my_access'');
+--   3. Owners per workspace today (for the log; zero owners is allowed):
+--        select w.slug, count(m.id) filter (where m.role = ''owner'' and m.active) as owners
+--        from public.workspaces w left join public.memberships m on m.workspace_id = w.id group by 1 order by 1;
+--
+-- POST-APPLY CHECK:
+--   - both triggers exist and are enabled. Expect two rows, keep_an_owner with ''O'':
+--        select tgrelid::regclass, tgname, tgenabled::text from pg_trigger where tgname = ''keep_an_owner'' and not tgisinternal;
+--   - all four functions have an empty search_path. Expect four rows of {search_path=""}:
+--        select proname, proconfig from pg_proc where proname in (''my_person_id'', ''memberships_keep_owner'', ''access_emails_keep_owner'', ''list_owner_is_last'');
+--   - my_person_id is executable by authenticated and not by anon. Expect t, f:
+--        select has_function_privilege(''authenticated'', ''public.my_person_id(uuid)'', ''execute''),
+--               has_function_privilege(''anon'', ''public.my_person_id(uuid)'', ''execute'');
+--
+-- Rollback:
+--   drop trigger if exists keep_an_owner on public.memberships;
+--   drop trigger if exists keep_an_owner on public.workspace_access_emails;
+--   drop function if exists private.memberships_keep_owner();
+--   drop function if exists private.access_emails_keep_owner();
+--   drop function if exists private.list_owner_is_last(uuid, text);
+--   drop function if exists public.my_person_id(uuid);
+--   delete from supabase_migrations.schema_migrations where version = ''20261206000000'';
+
+create function public.my_person_id(ws uuid) returns uuid
+language sql stable security definer
+set search_path = ''''
+as $$
+  select m.person_id from public.memberships m where m.workspace_id = ws and m.user_id = auth.uid() and m.active;
+$$;
+
+revoke execute on function public.my_person_id(uuid) from public, anon;
+grant execute on function public.my_person_id(uuid) to authenticated;
+
+create function private.list_owner_is_last(ws uuid, address text) returns boolean
+language sql stable security definer
+set search_path = ''''
+as $$
+  select exists (
+    select 1 from public.memberships m join auth.users u on u.id = m.user_id
+    where m.workspace_id = ws and m.role = ''owner'' and m.active and m.source = ''access_list''
+      and u.email_confirmed_at is not null and lower(u.email) = address)
+  and not exists (
+    select 1 from public.memberships m join auth.users u on u.id = m.user_id
+    where m.workspace_id = ws and m.role = ''owner'' and m.active and lower(u.email) <> address);
+$$;
+
+create function private.memberships_keep_owner() returns trigger
+language plpgsql security invoker
+set search_path = ''''
+as $$
+begin
+  -- Only people: reconciliation, cascades and other roles pass, and so do agency admins.
+  if current_user <> ''authenticated'' or public.is_agency_admin() then
+    return case when tg_op = ''DELETE'' then old else new end;
+  end if;
+
+  -- One owner check at a time per workspace, so two owners can''t demote each other at the same moment.
+  perform pg_advisory_xact_lock(hashtextextended(old.workspace_id::text, 0));
+
+  if old.role = ''owner'' and old.active
+     and (tg_op = ''DELETE'' or new.role <> ''owner'' or not new.active
+          or new.source <> old.source or new.workspace_id <> old.workspace_id)
+     and not exists (
+       select 1 from public.memberships m
+       where m.workspace_id = old.workspace_id and m.role = ''owner'' and m.active and m.id <> old.id)
+  then
+    raise exception ''workspace_keeps_an_owner: a workspace needs at least one owner'' using errcode = ''23514'';
+  end if;
+
+  return case when tg_op = ''DELETE'' then old else new end;
+end;
+$$;
+
+create function private.access_emails_keep_owner() returns trigger
+language plpgsql security invoker
+set search_path = ''''
+as $$
+begin
+  -- Only people (as the membership guard), and not a workspace delete cascading, nor an agency admin.
+  if current_user <> ''authenticated'' or pg_trigger_depth() > 1 or public.is_agency_admin() then
+    return case when tg_op = ''DELETE'' then old else new end;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(old.workspace_id::text, 0));
+
+  if old.role = ''owner''
+     and (tg_op = ''DELETE'' or new.role <> ''owner'' or new.email <> old.email or new.workspace_id <> old.workspace_id)
+     and private.list_owner_is_last(old.workspace_id, old.email)
+  then
+    raise exception ''workspace_keeps_an_owner: a workspace needs at least one owner'' using errcode = ''23514'';
+  end if;
+
+  return case when tg_op = ''DELETE'' then old else new end;
+end;
+$$;
+
+revoke all on function private.memberships_keep_owner(), private.access_emails_keep_owner(), private.list_owner_is_last(uuid, text) from public, anon, authenticated;
+-- The list guard runs as the caller and asks this (it reads auth.users) on their behalf.
+grant execute on function private.list_owner_is_last(uuid, text) to authenticated;
+
+create trigger keep_an_owner before update or delete on public.memberships
+  for each row execute function private.memberships_keep_owner();
+create trigger keep_an_owner before update or delete on public.workspace_access_emails
+  for each row execute function private.access_emails_keep_owner();
+']);
+
+-- 20261207000000_import_workspace_bundle.sql
+-- B10 part 2b (issue #39): restore a workspace backup into a new, empty workspace, all or nothing.
+--
+-- Part 1 (PR #189) exports a `transpera-workspace/1` JSON backup; part 2a (PR #200) restricts export to agency admins, owners
+-- and editors and checks and plans a restore in TypeScript (`packages/db/src/workspace-import.ts`). This migration adds the
+-- one database function the restore needs.
+--
+-- Austin's decisions (6 Oct 2026, quoted on #39 and in docs/plans/b10-2-brief.md):
+--   1. Every process arrives as a draft of its live version. History is not restored, and no privileged restore is added.
+--   2. The new workspace keeps its own company map, laid out by default from the imported processes.
+--   3. Hidden clients are included in the backup (emails and tokens stay out).
+--   4. Only agency admins, owners and editors may export or import (`public.can_edit_workspace`).
+--   5. One SECURITY INVOKER function, so the restore is all or nothing.
+--   6. Saved solutions are not restored (`solutions_before_write` needs a published base version, and every restored process is
+--      a draft). They stay in the file and the restore page lists them.
+--
+-- 1. `public.import_workspace_bundle(p_workspace, p_plan, p_label)`: SECURITY INVOKER, `search_path = ''`. It runs as the signed-in
+--    user, so row-level security and every trigger still decide (drafts only, the company map's guards, the `needs_review` token
+--    guard, issue numbering and history, `edit_drafts_only`). It creates DRAFTS ONLY, PUBLISHES NOTHING and WRITES NO HISTORY
+--    (no version but a first draft per process, no issue events but the `created` entry each issue gets now). One call is one
+--    statement and one transaction: a failure anywhere leaves nothing behind (a half-filled workspace could only be deleted by an
+--    agency admin).
+--    `p_plan` is what `planWorkspaceImport` makes (`transpera-workspace-import/1`): one entry per process (its live version's
+--    steps, edges, layout and first principles), the company model, scenarios, blocks, sources, issues with their links, and
+--    pending suggestions and proposals, each row cut down to the columns of `IMPORT_COLUMNS` (the allow-list below is the same
+--    list, and a test compares them). `p_label` is the file name, shown as "Upload (<name>)" on what waits for review.
+--    Refusals, in this order: an API token (42501, backups are restored in the app); anyone who can't `can_edit_workspace`
+--    (42501); a plan of the wrong shape or over a limit (22023); a workspace that isn't empty (23514, hint `not_empty`); a
+--    value in an id or reference column that isn't a placeholder id (22023). A failure while writing says which section
+--    (`hint = 'section:<name>'`).
+--    "Empty" means: no process but the company map (archived included), role, person, service, client group, client, lead
+--    source, churn driver, market-schedule row, issue, source, block, solution, suggestion or proposal, no custom market
+--    condition, and no scenario but the seeded library. Demand, lever and analysis-rule settings and the workspace settings may
+--    already exist and are overwritten.
+--    Lock: `pg_advisory_xact_lock` on `import_workspace_bundle:<workspace>` and on the key `import_new_process` takes, so two
+--    restores take turns (the second finds the workspace not empty) and a process upload can't run alongside.
+--    Ids: the plan holds placeholder ids `00000000-0000-4000-8000-<12 hex>`, whose last 12 digits are the rank of the old id
+--    (rank 0 is the old workspace). The database makes the real ids: one random 20-hex prefix per restore replaces the
+--    placeholder prefix throughout the plan text, once, and rank 0 becomes `p_workspace` (so a suggestion that targets the
+--    workspace points at the real one). The engine sorts by id in many places, and the new ids sort exactly as the old ones did
+--    (Postgres compares uuids bytewise). A caller can't choose a real id, so a refused insert can't reveal whether some id
+--    exists elsewhere. The prefix is returned (`id_prefix`) so a test can map results back.
+--    Writes, in this order (one `begin ... exception` block per section; the section named in the error): workspace settings
+--    (an owner or agency admin writes them; an editor leaves one pending suggestion for an owner), the company model, sources
+--    (BEFORE steps: the `link_cited_sources` trigger links a step to the sources it cites as the step is written), processes
+--    (parents first, each opened as a draft with `open_draft`; archived ones are inserted unarchived for now), scenarios (one
+--    equal to a row the workspace already has, by name and patch, is skipped and its children and issues are re-pointed at the
+--    existing row), blocks, issues with links, owners and sources (BEFORE steps: `log_perception_gaps` inserts its issue `on
+--    conflict do nothing`, so a restored perception-gap issue gets no duplicate), the steps, edges and first principles of every
+--    draft (all processes exist first, so holder steps resolve whichever process they point at), services and everything that
+--    points at processes, source links, pending suggestions and proposals (recorded as uploads while `transpera.importing` is
+--    on), then the archived processes are archived and each process's import is logged (`log_process_import`).
+--    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 50 processes, 500 steps, 1,000 edges, 200 sources and
+--    3,000,000 characters of their text, 300 issues, 500 people, 1,000 clients, 300 scenarios, 300 blocks, 500
+--    suggestions, 300 proposals, 400 role assignments, 1,000 skills, 400 client assignments, 400 source links, and a plan of 10 MB (lower than the brief's starting values, which took 6 s at every limit at
+--    once, over the 3 s budget; see the comment on WORKSPACE_IMPORT_LIMITS) (measured as the compact JSON the app sends; the database measures the
+--    jsonb text, which carries a space after each colon and comma, so it allows 13,107,200 characters of it). Supabase gives
+--    `authenticated` an 8 s `statement_timeout`: one restore is one statement, and the performance test in
+--    packages/db/test/workspace-import.test.ts keeps every limit well inside it.
+--    Returns `{id_prefix, processes: [{id, name, revision_id, archived}], counts: {<section>: n}, skipped: {<reason>: n},
+--    settings: 'applied' | 'suggested' | 'none'}`.
+--
+-- 2. `grant execute on function private.scenario_library() to authenticated`: the "is the workspace empty" check compares its
+--    scenarios with the seeded library, and an invoker function can't call a private function its caller may not execute (it
+--    gives "permission denied", seen in the tests). The function is immutable and returns four fixed rows of text (the same ones
+--    every workspace is seeded with), so the grant reveals nothing. (Its sibling private.cited_source_ids and others are granted
+--    the same way.)
+--
+-- STRICTLY ADDITIVE: one function and one grant. It doesn't redefine `save_fields` or any existing function or trigger.
+--
+-- ORDER: apply after 20261206000000 (B1 slice 1, row 53, applied to production on 6 Oct 2026). Nothing later may be applied,
+-- except possibly 20261207500000 (B1 2/3a, built in parallel, independent of this).
+--
+-- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. B1 (1/3) (row 53, 20261206000000) is applied, and nothing is later (but possibly 20261207500000). Expect 1, then 0 rows
+--      or only 20261207500000:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261206000000';
+--        select version from supabase_migrations.schema_migrations where version > '20261206000000' order by 1;
+--   1. Not created yet. Expect null:
+--        select to_regprocedure('public.import_workspace_bundle(uuid, jsonb, text)');
+--   2. What it calls exists. Expect 7 rows:
+--        select proname from pg_proc where pronamespace = 'public'::regnamespace
+--          and proname in ('open_draft', 'log_process_import', 'can_edit_workspace', 'can_manage_workspace', 'import_new_process', 'import_process_bundle', 'create_workspace');
+--   3. The upload marker is honoured by both insert triggers. Expect two rows, both true:
+--        select proname, prosrc like '%transpera.importing%' from pg_proc where pronamespace = 'private'::regnamespace
+--          and proname in ('suggestions_before_write', 'suggestion_proposals_before_write');
+--   4. 'upload' is an allowed created_via. Expect 2 rows mentioning 'upload':
+--        select conname, pg_get_constraintdef(oid) from pg_constraint where conname in ('suggestions_created_via', 'suggestion_proposals_created_via');
+--   5. The library and presets it compares against. Expect 4 and 4:
+--        select count(*) from private.scenario_library();
+--        select count(*) from private.market_presets();
+--   6. Authenticated can't execute the library yet. Expect false (this migration grants it). If it is TRUE, production already had
+--      that grant: do NOT revoke it in the rollback below (leave that line out).
+--        select has_function_privilege('authenticated', 'private.scenario_library()', 'execute');
+--
+-- POST-APPLY CHECK (authenticated may execute it; anon and PUBLIC may not; it is not SECURITY DEFINER and has an empty search_path):
+--   1. Expect one row, authenticated EXECUTE:
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name = 'import_workspace_bundle' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 2;
+--   2. Expect an ACL with an `authenticated=X/...` entry and no `anon=` and no `=X/...` (an empty grantee is PUBLIC):
+--        select proname, proacl from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_workspace_bundle';
+--   3. Expect false, {search_path=""}:
+--        select prosecdef, proconfig from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_workspace_bundle';
+--   4. Authenticated may execute the library (and anon may not). Expect true, false:
+--        select has_function_privilege('authenticated', 'private.scenario_library()', 'execute'), has_function_privilege('anon', 'private.scenario_library()', 'execute');
+--
+-- Rollback (nothing existing was changed):
+--   begin;
+--   drop function if exists public.import_workspace_bundle(uuid, jsonb, text);
+--   revoke execute on function private.scenario_library() from authenticated;   -- only if preflight 6 said false
+--   delete from supabase_migrations.schema_migrations where version = '20261207000000';
+--   commit;
+-- Roll the app back first (it calls the function). Workspaces already restored stay as they are.
+--
+-- Production data: none needed.
+
+create function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text default null) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
+  -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
+  allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"scenarios":["id","parent_scenario_id","name","description","patch","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"],"suggestions":["id","target_table","target_id","patch","evidence","note","created_at"],"proposals":["id","kind","title","detail","payload","evidence","note","issue_id","created_at"]}'::jsonb;
+  -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
+  -- column in `allow` is checked on `id` too.
+  ref_cols constant text[] := array['person_roles.person_id','person_roles.role_id','person_leave.person_id','services.entry_process_id','service_servicing.service_id','service_servicing.process_id','client_groups.service_id','client_services.client_id','client_services.service_id','client_assignments.client_id','client_assignments.role_id','client_assignments.person_id','person_skills.person_id','person_skills.step_id','scenarios.parent_scenario_id','issues.client_id','issues.owner_person_id','issues.person_id','issues.process_id','issues.role_id','issues.scenario_id','issues.step_id','source_links.source_id','source_links.issue_id','source_links.process_id','source_links.step_id','proposals.issue_id','market_schedule.condition_id','suggestions.target_id'];
+  step_ref_cols constant text[] := array['parent_step_id','entry_step_id','rework_to_step_id','person_id','role_id','child_process_id'];
+  -- The order the sections are written in.
+  sections constant text[] := array['settings','roles','people','person_roles','person_leave','lead_sources','seasonality','demand_settings','churn_drivers','market_conditions','market_schedule','lever_settings','analysis_rules','clients','sources','processes','scenarios','blocks','issues','steps','services','service_servicing','client_groups','client_services','client_assignments','person_skills','source_links','suggestions','proposals','archive','log'];
+  list_sections constant text[] := array['roles','people','person_roles','person_leave','lead_sources','seasonality','churn_drivers','market_conditions','market_schedule','clients','sources','processes','scenarios','blocks','issues','services','service_servicing','client_groups','client_services','client_assignments','person_skills','source_links','suggestions','proposals'];
+  one_sections constant text[] := array['settings','demand_settings','lever_settings','analysis_rules'];
+  placeholder constant text := '00000000-0000-4000-8000-';
+  placeholder_re constant text := '^00000000-0000-4000-8000-[0-9a-f]{12}$';
+  max_plan_chars constant integer := 13107200;
+
+  pl jsonb;
+  txt text;
+  prefix text;
+  label text := left(nullif(btrim(coalesce(p_label, '')), ''), 300);
+  sec text;
+  col text;
+  tbl text;
+  rows jsonb;
+  node jsonb;
+  sc jsonb;
+  cols text;
+  sets text;
+  n integer;
+  total integer;
+  existing uuid;
+  skip_ids uuid[] := '{}';
+  skipped jsonb := '{}';
+  counts jsonb := '{}';
+  proc uuid;
+  rev uuid;
+  draft jsonb;
+  revs jsonb := '{}';
+  made jsonb := '[]';
+  arch uuid[] := '{}';
+  step_total integer := 0;
+  edge_total integer := 0;
+  settings_result text := 'none';
+  what text;
+  has_rows boolean;
+  bad integer;
+  chars bigint;
+begin
+  -- 1. Who. Before the plan is read, so a refusal says nothing about it.
+  if coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id' then
+    raise exception 'Backups are restored in the app.' using errcode = '42501';
+  end if;
+  if p_workspace is null or not coalesce(public.can_edit_workspace(p_workspace), false) then
+    raise exception 'Only owners, editors and agency admins can restore a backup.' using errcode = '42501';
+  end if;
+
+  -- 2. Shape and limits.
+  if p_plan is null or jsonb_typeof(p_plan) is distinct from 'object' or p_plan ->> 'format' is distinct from 'transpera-workspace-import/1' then
+    raise exception 'import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan' using errcode = '22023';
+  end if;
+  if char_length(p_plan::text) > max_plan_chars then
+    raise exception 'import_workspace_bundle: the plan is too big (at most 10 MB)' using errcode = '22023';
+  end if;
+  foreach sec in array list_sections loop
+    if jsonb_typeof(p_plan -> sec) is distinct from 'array' then
+      raise exception 'import_workspace_bundle: % must be a list', sec using errcode = '22023';
+    end if;
+    if exists (select 1 from jsonb_array_elements(p_plan -> sec) e where jsonb_typeof(e.value) is distinct from 'object') then
+      raise exception 'import_workspace_bundle: every row of % must be an object', sec using errcode = '22023';
+    end if;
+  end loop;
+  foreach sec in array one_sections loop
+    if p_plan -> sec is not null and jsonb_typeof(p_plan -> sec) not in ('object', 'null') then
+      raise exception 'import_workspace_bundle: % must be an object or null', sec using errcode = '22023';
+    end if;
+  end loop;
+  if exists (
+    select 1 from jsonb_array_elements(p_plan -> 'processes') p
+    where jsonb_typeof(p.value -> 'steps') is distinct from 'array' or jsonb_typeof(p.value -> 'edges') is distinct from 'array'
+      or exists (select 1 from jsonb_array_elements(p.value -> 'steps') e where jsonb_typeof(e.value) is distinct from 'object')
+      or exists (select 1 from jsonb_array_elements(p.value -> 'edges') e where jsonb_typeof(e.value) is distinct from 'object')
+      or (p.value -> 'first_principles' is not null and jsonb_typeof(p.value -> 'first_principles') not in ('object', 'null'))
+      or (p.value -> 'layout' is not null and jsonb_typeof(p.value -> 'layout') not in ('object', 'null'))
+  ) then
+    raise exception 'import_workspace_bundle: every process needs lists of steps and edges' using errcode = '22023';
+  end if;
+  select coalesce(sum(jsonb_array_length(p.value -> 'steps')), 0), coalesce(sum(jsonb_array_length(p.value -> 'edges')), 0)
+    into step_total, edge_total from jsonb_array_elements(p_plan -> 'processes') p;
+  select coalesce(sum(char_length(coalesce(s.value ->> 'body', ''))), 0) into chars from jsonb_array_elements(p_plan -> 'sources') s;
+  if jsonb_array_length(p_plan -> 'processes') > 50 or step_total > 500 or edge_total > 1000
+    or jsonb_array_length(p_plan -> 'sources') > 200 or chars > 3000000
+    or jsonb_array_length(p_plan -> 'issues') > 300 or jsonb_array_length(p_plan -> 'people') > 500
+    or jsonb_array_length(p_plan -> 'clients') > 1000 or jsonb_array_length(p_plan -> 'scenarios') > 300
+    or jsonb_array_length(p_plan -> 'blocks') > 300 or jsonb_array_length(p_plan -> 'suggestions') > 500
+    or jsonb_array_length(p_plan -> 'proposals') > 300
+    or jsonb_array_length(p_plan -> 'person_roles') > 400 or jsonb_array_length(p_plan -> 'person_skills') > 1000
+    or jsonb_array_length(p_plan -> 'client_assignments') > 400 or jsonb_array_length(p_plan -> 'source_links') > 400 then
+    raise exception 'import_workspace_bundle: the plan is over a limit (50 processes, 500 steps, 1000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 400 role assignments, 1000 skills, 400 client assignments, 400 source links)' using errcode = '22023';
+  end if;
+  -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+  if exists (select 1 from jsonb_array_elements(p_plan -> 'scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
+    raise exception 'import_workspace_bundle: every scenario needs an id' using errcode = '22023';
+  end if;
+
+  -- 3. Lock: one restore (or upload) at a time per workspace.
+  perform pg_advisory_xact_lock(hashtextextended('import_workspace_bundle:' || p_workspace::text, 0));
+  perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || p_workspace::text, 0));
+
+  -- 4. Empty.
+  for tbl, col in
+    select t.a, t.b from (values
+      ('processes', 'not is_company'), ('roles', 'true'), ('people', 'true'), ('services', 'true'), ('client_groups', 'true'),
+      ('clients', 'true'), ('lead_sources', 'true'), ('churn_drivers', 'true'), ('market_schedule', 'true'), ('issues', 'true'),
+      ('sources', 'true'), ('blocks', 'true'), ('solutions', 'true'), ('suggestions', 'true'), ('suggestion_proposals', 'true'),
+      ('market_conditions', 'preset is null')
+    ) as t(a, b)
+  loop
+    execute format('select exists (select 1 from public.%I where workspace_id = $1 and %s)', tbl, col) into has_rows using p_workspace;
+    if has_rows then
+      what := replace(tbl, '_', ' ');
+      exit;
+    end if;
+  end loop;
+  if what is null and exists (
+    select 1 from public.scenarios s where s.workspace_id = p_workspace
+      and not exists (select 1 from private.scenario_library() l where l.name = s.name and l.patch = s.patch)
+  ) then
+    what := 'scenarios of its own';
+  end if;
+  if what is not null then
+    raise exception 'This workspace isn''t empty: it already has %. Backups restore only into a new, empty workspace.', what
+      using errcode = '23514', hint = 'not_empty';
+  end if;
+
+  -- 5. Ids: every id and reference column of the plan holds a placeholder (or null) before anything is replaced.
+  foreach sec in array list_sections loop
+    if sec = 'processes' then continue; end if;
+    for col in
+      select c from (
+        select 'id' as c where allow -> sec ? 'id'
+        union all select split_part(r, '.', 2) from unnest(ref_cols) r where split_part(r, '.', 1) = sec
+      ) q
+    loop
+      select count(*) into bad from jsonb_array_elements(p_plan -> sec) r
+      where r.value -> col is not null and jsonb_typeof(r.value -> col) <> 'null'
+        and (jsonb_typeof(r.value -> col) <> 'string' or (r.value ->> col) !~ placeholder_re);
+      if bad > 0 then
+        raise exception 'import_workspace_bundle: % holds an id that is not a placeholder in %', col, sec using errcode = '22023';
+      end if;
+    end loop;
+  end loop;
+  select count(*) into bad from jsonb_array_elements(p_plan -> 'issues') i
+  where exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'owner_ids') = 'array' then i.value -> 'owner_ids' else '[]'::jsonb end) x
+      where jsonb_typeof(x.value) <> 'string' or (x.value #>> '{}') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'source_ids') = 'array' then i.value -> 'source_ids' else '[]'::jsonb end) x
+      where jsonb_typeof(x.value) <> 'string' or (x.value #>> '{}') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'links') = 'array' then i.value -> 'links' else '[]'::jsonb end) l
+      where jsonb_typeof(l.value) <> 'object'
+        or (l.value ->> 'process_id') !~ placeholder_re
+        or (jsonb_typeof(l.value -> 'step_id') <> 'null' and l.value ->> 'step_id' is not null and (l.value ->> 'step_id') !~ placeholder_re));
+  if bad > 0 then
+    raise exception 'import_workspace_bundle: an issue link, owner or source holds an id that is not a placeholder' using errcode = '22023';
+  end if;
+  select count(*) into bad from jsonb_array_elements(p_plan -> 'processes') p
+  where (p.value ->> 'id') is null or (p.value ->> 'id') !~ placeholder_re
+    or (jsonb_typeof(p.value -> 'parent_process_id') <> 'null' and p.value ->> 'parent_process_id' is not null and (p.value ->> 'parent_process_id') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> 'steps') s, unnest(array['id'] || step_ref_cols) c
+      where s.value -> c is not null and jsonb_typeof(s.value -> c) <> 'null' and (jsonb_typeof(s.value -> c) <> 'string' or (s.value ->> c) !~ placeholder_re))
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> 'edges') e, unnest(array['id', 'from_step_id', 'to_step_id']) c
+      where e.value -> c is not null and jsonb_typeof(e.value -> c) <> 'null' and (jsonb_typeof(e.value -> c) <> 'string' or (e.value ->> c) !~ placeholder_re));
+  if bad > 0 then
+    raise exception 'import_workspace_bundle: a process, step or edge holds an id that is not a placeholder' using errcode = '22023';
+  end if;
+
+  -- The real ids: one random prefix per restore replaces the placeholder prefix (rank 0, the old workspace, is left for the next
+  -- replace so a workspace id that happens to look like a placeholder can't be hit twice).
+  loop
+    prefix := substr(md5(gen_random_uuid()::text), 1, 20);
+    exit when prefix <> '00000000000000000000';
+  end loop;
+  prefix := substr(prefix, 1, 8) || '-' || substr(prefix, 9, 4) || '-' || substr(prefix, 13, 4) || '-' || substr(prefix, 17, 4) || '-';
+  txt := regexp_replace(p_plan::text, '00000000-0000-4000-8000-(?!000000000000)([0-9a-f]{12})', prefix || '\1', 'g');
+  txt := replace(txt, placeholder || '000000000000', p_workspace::text);
+
+  -- A scenario equal (name and patch) to one the workspace already has (the seeded library) is skipped: its children and the
+  -- issues that use it are re-pointed at the existing row.
+  for sc in select value from jsonb_array_elements((txt::jsonb) -> 'scenarios') loop
+    select s.id into existing from public.scenarios s
+    where s.workspace_id = p_workspace and s.name = sc ->> 'name' and s.patch = sc -> 'patch'
+    order by s.id limit 1;
+    if found then
+      txt := replace(txt, sc ->> 'id', existing::text);
+      skip_ids := skip_ids || existing;
+    end if;
+  end loop;
+  pl := txt::jsonb;
+  txt := null;
+  skipped := jsonb_build_object('scenarios', cardinality(skip_ids));
+
+  -- 6. Write.
+  foreach sec in array sections loop
+    begin
+      n := 0;
+      if sec = 'settings' then
+        if jsonb_typeof(pl -> 'settings') = 'object' and pl -> 'settings' <> '{}'::jsonb then
+          if public.can_manage_workspace(p_workspace) then
+            update public.workspaces set settings = settings || (pl -> 'settings') where id = p_workspace;
+            settings_result := 'applied';
+          else
+            -- An editor can't write workspace-wide settings: one pending suggestion for an owner (the shape packages/mcp/src/suggesting.ts makes).
+            perform set_config('transpera.importing', 'on', true);
+            insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, import_source)
+            values (p_workspace, 'workspaces', null, jsonb_build_object('set', pl -> 'settings'), '[]'::jsonb, 'Workspace settings from a backup.', label);
+            perform set_config('transpera.importing', '', true);
+            settings_result := 'suggested';
+          end if;
+        end if;
+        continue;
+      end if;
+
+      if sec in ('demand_settings', 'lever_settings', 'analysis_rules') then
+        -- One row per workspace: written over any row the workspace already has.
+        if jsonb_typeof(pl -> sec) = 'object' then
+          select string_agg(quote_ident(c), ', '), string_agg(format('%1$I = excluded.%1$I', c), ', ') into cols, sets
+          from jsonb_array_elements_text(allow -> sec) c where (pl -> sec) ? c;
+          if cols is not null then
+            execute format('insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_record(null::public.%1$I, $1) on conflict (workspace_id) do update set %3$s', sec, cols, sets)
+              using pl -> sec, p_workspace;
+            n := 1;
+          end if;
+        end if;
+
+      elsif sec = 'market_schedule' then
+        -- A row that points at one of the backup's presets points at this workspace's preset with the same key.
+        insert into public.market_schedule (workspace_id, id, condition_id, from_month, to_month, created_at)
+        select p_workspace, coalesce(x.id, gen_random_uuid()),
+          coalesce(x.condition_id, (select m.id from public.market_conditions m where m.workspace_id = p_workspace and m.preset = r.value ->> 'condition_preset')),
+          x.from_month, x.to_month, coalesce(x.created_at, now())
+        from jsonb_array_elements(pl -> 'market_schedule') with ordinality r(value, ord)
+        cross join lateral jsonb_populate_record(null::public.market_schedule, r.value) x
+        order by r.ord;
+        get diagnostics n = row_count;
+
+      elsif sec = 'processes' then
+        -- Every process first (parents first, as the plan is ordered), each opened as a draft, so a holder step can point at any of them.
+        for node in select value from jsonb_array_elements(pl -> 'processes') loop
+          proc := (node ->> 'id')::uuid;
+          insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+          values (proc, p_workspace, node ->> 'name', node ->> 'kind', node ->> 'entity_name', node ->> 'description', 'import', (node ->> 'parent_process_id')::uuid);
+          draft := public.open_draft(proc);
+          if draft ->> 'status' is distinct from 'ok' then
+            raise exception 'could not open a draft of %', node ->> 'name' using errcode = '42501';
+          end if;
+          rev := (draft ->> 'revision_id')::uuid;
+          revs := revs || jsonb_build_object(proc::text, rev);
+          if jsonb_typeof(node -> 'layout') = 'object' then
+            update public.process_revisions set layout = node -> 'layout' where id = rev;
+          end if;
+          if coalesce((node ->> 'archived')::boolean, false) then
+            arch := arch || proc;
+          end if;
+          made := made || jsonb_build_object('id', proc, 'name', node ->> 'name', 'revision_id', rev, 'archived', coalesce((node ->> 'archived')::boolean, false));
+          n := n + 1;
+        end loop;
+
+      elsif sec = 'scenarios' then
+        select coalesce(jsonb_agg(r.value order by r.ord), '[]'::jsonb) into rows
+        from jsonb_array_elements(pl -> 'scenarios') with ordinality r(value, ord)
+        where not ((r.value ->> 'id')::uuid = any (skip_ids));
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          execute format('insert into public.scenarios (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.scenarios, $1)', cols) using rows, p_workspace;
+        end if;
+
+      elsif sec = 'issues' then
+        rows := pl -> 'issues';
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          -- In plan order: the trigger numbers them 1, 2, 3 ... in the old order.
+          execute format('insert into public.issues (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.issues, $1)', cols) using rows, p_workspace;
+          -- `issue_seed_links` and `link_issue_source` may have added some already.
+          insert into public.issue_links (issue_id, workspace_id, process_id, step_id)
+          select (i.value ->> 'id')::uuid, p_workspace, (l.value ->> 'process_id')::uuid, (l.value ->> 'step_id')::uuid
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'links') = 'array' then i.value -> 'links' else '[]'::jsonb end) l
+          on conflict do nothing;
+          insert into public.issue_owners (issue_id, person_id, workspace_id)
+          select (i.value ->> 'id')::uuid, (o.value #>> '{}')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'owner_ids') = 'array' then i.value -> 'owner_ids' else '[]'::jsonb end) o
+          on conflict do nothing;
+          insert into public.issue_sources (issue_id, source_id, workspace_id)
+          select (i.value ->> 'id')::uuid, (o.value #>> '{}')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'source_ids') = 'array' then i.value -> 'source_ids' else '[]'::jsonb end) o
+          on conflict do nothing;
+        end if;
+
+      elsif sec = 'steps' then
+        -- The steps and edges of each draft (an entry step is set once all the steps are in), then its first principles.
+        for node in select value from jsonb_array_elements(pl -> 'processes') loop
+          proc := (node ->> 'id')::uuid;
+          rev := (revs ->> proc::text)::uuid;
+          select coalesce(jsonb_agg(s.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'entry_step_id', null, 'created_by', auth.uid())), '[]'::jsonb)
+            into rows from jsonb_array_elements(node -> 'steps') s;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), ', ') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'steps') ? k
+            ) q;
+            execute format('insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)', cols) using rows;
+            update public.steps st set entry_step_id = (s.value ->> 'entry_step_id')::uuid
+            from jsonb_array_elements(node -> 'steps') s
+            where st.revision_id = rev and st.id = (s.value ->> 'id')::uuid and s.value ->> 'entry_step_id' is not null;
+            n := n + jsonb_array_length(rows);
+          end if;
+          select coalesce(jsonb_agg(e.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'created_by', auth.uid())), '[]'::jsonb)
+            into rows from jsonb_array_elements(node -> 'edges') e;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), ', ') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'edges') ? k
+            ) q;
+            execute format('insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)', cols) using rows;
+          end if;
+          if jsonb_typeof(node -> 'first_principles') = 'object' then
+            select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> 'first_principles') c where (node -> 'first_principles') ? c;
+            if cols is not null then
+              execute format('insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)', cols)
+                using node -> 'first_principles', p_workspace, proc, rev;
+            end if;
+          end if;
+        end loop;
+        counts := counts || jsonb_build_object('edges', edge_total);
+
+      elsif sec = 'archive' then
+        if cardinality(arch) > 0 then
+          update public.processes set archived_at = now() where id = any (arch);
+          get diagnostics n = row_count;
+        end if;
+
+      elsif sec = 'log' then
+        for node in select value from jsonb_array_elements(made) loop
+          perform public.log_process_import((node ->> 'id')::uuid, 'Restored from a workspace backup' || coalesce(' (' || label || ')', ''));
+          n := n + 1;
+        end loop;
+
+      else
+        -- A flat section: one insert, the plan's order, only the columns of the allow-list that the rows carry.
+        tbl := case sec when 'proposals' then 'suggestion_proposals' else sec end;
+        rows := pl -> sec;
+        if sec = 'market_conditions' then
+          -- The presets are read-only and the workspace has them already: the plan carries custom conditions only, and no `preset`.
+          null;
+        elsif sec = 'source_links' then
+          -- A step link needs its step in the process's restored draft (the trigger refuses it otherwise).
+          select coalesce(jsonb_agg(r.value order by r.ord), '[]'::jsonb) into rows
+          from jsonb_array_elements(rows) with ordinality r(value, ord)
+          where r.value ->> 'kind' is distinct from 'step' or exists (
+            select 1 from public.steps s where s.workspace_id = p_workspace and s.process_id = (r.value ->> 'process_id')::uuid and s.id = (r.value ->> 'step_id')::uuid);
+          skipped := skipped || jsonb_build_object('step_links', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
+        end if;
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          -- A source link's id can't be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
+          -- and `created_at` out): the database makes it.
+          select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c) and not (sec = 'source_links' and c = 'id');
+          if cols is null then
+            raise exception 'the rows have none of the columns a restore accepts' using errcode = '22023';
+          end if;
+          if sec in ('suggestions', 'proposals') then
+            perform set_config('transpera.importing', 'on', true);
+            execute format('insert into public.%1$I (workspace_id, %2$s, import_source) select $2, %2$s, $3 from jsonb_populate_recordset(null::public.%1$I, $1)', tbl, cols)
+              using rows, p_workspace, label;
+            perform set_config('transpera.importing', '', true);
+          else
+            execute format('insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_recordset(null::public.%1$I, $1)%3$s', tbl, cols,
+              case when sec = 'source_links' then ' on conflict do nothing' else '' end)
+              using rows, p_workspace;
+          end if;
+        end if;
+      end if;
+      counts := counts || jsonb_build_object(sec, n);
+    exception when others then
+      raise exception 'import_workspace_bundle: % could not be restored: %', sec, sqlerrm using errcode = sqlstate, hint = 'section:' || sec;
+    end;
+  end loop;
+
+  return jsonb_build_object('id_prefix', prefix, 'processes', made, 'counts', counts, 'skipped', skipped, 'settings', settings_result);
+end;
+$$;
+
+revoke all on function public.import_workspace_bundle(uuid, jsonb, text) from public, anon, authenticated;
+grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to authenticated;
+
+grant execute on function private.scenario_library() to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261207000000', 'import_workspace_bundle', array['-- B10 part 2b (issue #39): restore a workspace backup into a new, empty workspace, all or nothing.
+--
+-- Part 1 (PR #189) exports a `transpera-workspace/1` JSON backup; part 2a (PR #200) restricts export to agency admins, owners
+-- and editors and checks and plans a restore in TypeScript (`packages/db/src/workspace-import.ts`). This migration adds the
+-- one database function the restore needs.
+--
+-- Austin''s decisions (6 Oct 2026, quoted on #39 and in docs/plans/b10-2-brief.md):
+--   1. Every process arrives as a draft of its live version. History is not restored, and no privileged restore is added.
+--   2. The new workspace keeps its own company map, laid out by default from the imported processes.
+--   3. Hidden clients are included in the backup (emails and tokens stay out).
+--   4. Only agency admins, owners and editors may export or import (`public.can_edit_workspace`).
+--   5. One SECURITY INVOKER function, so the restore is all or nothing.
+--   6. Saved solutions are not restored (`solutions_before_write` needs a published base version, and every restored process is
+--      a draft). They stay in the file and the restore page lists them.
+--
+-- 1. `public.import_workspace_bundle(p_workspace, p_plan, p_label)`: SECURITY INVOKER, `search_path = ''''`. It runs as the signed-in
+--    user, so row-level security and every trigger still decide (drafts only, the company map''s guards, the `needs_review` token
+--    guard, issue numbering and history, `edit_drafts_only`). It creates DRAFTS ONLY, PUBLISHES NOTHING and WRITES NO HISTORY
+--    (no version but a first draft per process, no issue events but the `created` entry each issue gets now). One call is one
+--    statement and one transaction: a failure anywhere leaves nothing behind (a half-filled workspace could only be deleted by an
+--    agency admin).
+--    `p_plan` is what `planWorkspaceImport` makes (`transpera-workspace-import/1`): one entry per process (its live version''s
+--    steps, edges, layout and first principles), the company model, scenarios, blocks, sources, issues with their links, and
+--    pending suggestions and proposals, each row cut down to the columns of `IMPORT_COLUMNS` (the allow-list below is the same
+--    list, and a test compares them). `p_label` is the file name, shown as "Upload (<name>)" on what waits for review.
+--    Refusals, in this order: an API token (42501, backups are restored in the app); anyone who can''t `can_edit_workspace`
+--    (42501); a plan of the wrong shape or over a limit (22023); a workspace that isn''t empty (23514, hint `not_empty`); a
+--    value in an id or reference column that isn''t a placeholder id (22023). A failure while writing says which section
+--    (`hint = ''section:<name>''`).
+--    "Empty" means: no process but the company map (archived included), role, person, service, client group, client, lead
+--    source, churn driver, market-schedule row, issue, source, block, solution, suggestion or proposal, no custom market
+--    condition, and no scenario but the seeded library. Demand, lever and analysis-rule settings and the workspace settings may
+--    already exist and are overwritten.
+--    Lock: `pg_advisory_xact_lock` on `import_workspace_bundle:<workspace>` and on the key `import_new_process` takes, so two
+--    restores take turns (the second finds the workspace not empty) and a process upload can''t run alongside.
+--    Ids: the plan holds placeholder ids `00000000-0000-4000-8000-<12 hex>`, whose last 12 digits are the rank of the old id
+--    (rank 0 is the old workspace). The database makes the real ids: one random 20-hex prefix per restore replaces the
+--    placeholder prefix throughout the plan text, once, and rank 0 becomes `p_workspace` (so a suggestion that targets the
+--    workspace points at the real one). The engine sorts by id in many places, and the new ids sort exactly as the old ones did
+--    (Postgres compares uuids bytewise). A caller can''t choose a real id, so a refused insert can''t reveal whether some id
+--    exists elsewhere. The prefix is returned (`id_prefix`) so a test can map results back.
+--    Writes, in this order (one `begin ... exception` block per section; the section named in the error): workspace settings
+--    (an owner or agency admin writes them; an editor leaves one pending suggestion for an owner), the company model, sources
+--    (BEFORE steps: the `link_cited_sources` trigger links a step to the sources it cites as the step is written), processes
+--    (parents first, each opened as a draft with `open_draft`; archived ones are inserted unarchived for now), scenarios (one
+--    equal to a row the workspace already has, by name and patch, is skipped and its children and issues are re-pointed at the
+--    existing row), blocks, issues with links, owners and sources (BEFORE steps: `log_perception_gaps` inserts its issue `on
+--    conflict do nothing`, so a restored perception-gap issue gets no duplicate), the steps, edges and first principles of every
+--    draft (all processes exist first, so holder steps resolve whichever process they point at), services and everything that
+--    points at processes, source links, pending suggestions and proposals (recorded as uploads while `transpera.importing` is
+--    on), then the archived processes are archived and each process''s import is logged (`log_process_import`).
+--    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 50 processes, 500 steps, 1,000 edges, 200 sources and
+--    3,000,000 characters of their text, 300 issues, 500 people, 1,000 clients, 300 scenarios, 300 blocks, 500
+--    suggestions, 300 proposals, 400 role assignments, 1,000 skills, 400 client assignments, 400 source links, and a plan of 10 MB (lower than the brief''s starting values, which took 6 s at every limit at
+--    once, over the 3 s budget; see the comment on WORKSPACE_IMPORT_LIMITS) (measured as the compact JSON the app sends; the database measures the
+--    jsonb text, which carries a space after each colon and comma, so it allows 13,107,200 characters of it). Supabase gives
+--    `authenticated` an 8 s `statement_timeout`: one restore is one statement, and the performance test in
+--    packages/db/test/workspace-import.test.ts keeps every limit well inside it.
+--    Returns `{id_prefix, processes: [{id, name, revision_id, archived}], counts: {<section>: n}, skipped: {<reason>: n},
+--    settings: ''applied'' | ''suggested'' | ''none''}`.
+--
+-- 2. `grant execute on function private.scenario_library() to authenticated`: the "is the workspace empty" check compares its
+--    scenarios with the seeded library, and an invoker function can''t call a private function its caller may not execute (it
+--    gives "permission denied", seen in the tests). The function is immutable and returns four fixed rows of text (the same ones
+--    every workspace is seeded with), so the grant reveals nothing. (Its sibling private.cited_source_ids and others are granted
+--    the same way.)
+--
+-- STRICTLY ADDITIVE: one function and one grant. It doesn''t redefine `save_fields` or any existing function or trigger.
+--
+-- ORDER: apply after 20261206000000 (B1 slice 1, row 53, applied to production on 6 Oct 2026). Nothing later may be applied,
+-- except possibly 20261207500000 (B1 2/3a, built in parallel, independent of this).
+--
+-- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. B1 (1/3) (row 53, 20261206000000) is applied, and nothing is later (but possibly 20261207500000). Expect 1, then 0 rows
+--      or only 20261207500000:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261206000000'';
+--        select version from supabase_migrations.schema_migrations where version > ''20261206000000'' order by 1;
+--   1. Not created yet. Expect null:
+--        select to_regprocedure(''public.import_workspace_bundle(uuid, jsonb, text)'');
+--   2. What it calls exists. Expect 7 rows:
+--        select proname from pg_proc where pronamespace = ''public''::regnamespace
+--          and proname in (''open_draft'', ''log_process_import'', ''can_edit_workspace'', ''can_manage_workspace'', ''import_new_process'', ''import_process_bundle'', ''create_workspace'');
+--   3. The upload marker is honoured by both insert triggers. Expect two rows, both true:
+--        select proname, prosrc like ''%transpera.importing%'' from pg_proc where pronamespace = ''private''::regnamespace
+--          and proname in (''suggestions_before_write'', ''suggestion_proposals_before_write'');
+--   4. ''upload'' is an allowed created_via. Expect 2 rows mentioning ''upload'':
+--        select conname, pg_get_constraintdef(oid) from pg_constraint where conname in (''suggestions_created_via'', ''suggestion_proposals_created_via'');
+--   5. The library and presets it compares against. Expect 4 and 4:
+--        select count(*) from private.scenario_library();
+--        select count(*) from private.market_presets();
+--   6. Authenticated can''t execute the library yet. Expect false (this migration grants it). If it is TRUE, production already had
+--      that grant: do NOT revoke it in the rollback below (leave that line out).
+--        select has_function_privilege(''authenticated'', ''private.scenario_library()'', ''execute'');
+--
+-- POST-APPLY CHECK (authenticated may execute it; anon and PUBLIC may not; it is not SECURITY DEFINER and has an empty search_path):
+--   1. Expect one row, authenticated EXECUTE:
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges where routine_schema = ''public'' and routine_name = ''import_workspace_bundle'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'') order by 2;
+--   2. Expect an ACL with an `authenticated=X/...` entry and no `anon=` and no `=X/...` (an empty grantee is PUBLIC):
+--        select proname, proacl from pg_proc where pronamespace = ''public''::regnamespace and proname = ''import_workspace_bundle'';
+--   3. Expect false, {search_path=""}:
+--        select prosecdef, proconfig from pg_proc where pronamespace = ''public''::regnamespace and proname = ''import_workspace_bundle'';
+--   4. Authenticated may execute the library (and anon may not). Expect true, false:
+--        select has_function_privilege(''authenticated'', ''private.scenario_library()'', ''execute''), has_function_privilege(''anon'', ''private.scenario_library()'', ''execute'');
+--
+-- Rollback (nothing existing was changed):
+--   begin;
+--   drop function if exists public.import_workspace_bundle(uuid, jsonb, text);
+--   revoke execute on function private.scenario_library() from authenticated;   -- only if preflight 6 said false
+--   delete from supabase_migrations.schema_migrations where version = ''20261207000000'';
+--   commit;
+-- Roll the app back first (it calls the function). Workspaces already restored stay as they are.
+--
+-- Production data: none needed.
+
+create function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text default null) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
+  -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
+  allow constant jsonb := ''{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"scenarios":["id","parent_scenario_id","name","description","patch","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"],"suggestions":["id","target_table","target_id","patch","evidence","note","created_at"],"proposals":["id","kind","title","detail","payload","evidence","note","issue_id","created_at"]}''::jsonb;
+  -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
+  -- column in `allow` is checked on `id` too.
+  ref_cols constant text[] := array[''person_roles.person_id'',''person_roles.role_id'',''person_leave.person_id'',''services.entry_process_id'',''service_servicing.service_id'',''service_servicing.process_id'',''client_groups.service_id'',''client_services.client_id'',''client_services.service_id'',''client_assignments.client_id'',''client_assignments.role_id'',''client_assignments.person_id'',''person_skills.person_id'',''person_skills.step_id'',''scenarios.parent_scenario_id'',''issues.client_id'',''issues.owner_person_id'',''issues.person_id'',''issues.process_id'',''issues.role_id'',''issues.scenario_id'',''issues.step_id'',''source_links.source_id'',''source_links.issue_id'',''source_links.process_id'',''source_links.step_id'',''proposals.issue_id'',''market_schedule.condition_id'',''suggestions.target_id''];
+  step_ref_cols constant text[] := array[''parent_step_id'',''entry_step_id'',''rework_to_step_id'',''person_id'',''role_id'',''child_process_id''];
+  -- The order the sections are written in.
+  sections constant text[] := array[''settings'',''roles'',''people'',''person_roles'',''person_leave'',''lead_sources'',''seasonality'',''demand_settings'',''churn_drivers'',''market_conditions'',''market_schedule'',''lever_settings'',''analysis_rules'',''clients'',''sources'',''processes'',''scenarios'',''blocks'',''issues'',''steps'',''services'',''service_servicing'',''client_groups'',''client_services'',''client_assignments'',''person_skills'',''source_links'',''suggestions'',''proposals'',''archive'',''log''];
+  list_sections constant text[] := array[''roles'',''people'',''person_roles'',''person_leave'',''lead_sources'',''seasonality'',''churn_drivers'',''market_conditions'',''market_schedule'',''clients'',''sources'',''processes'',''scenarios'',''blocks'',''issues'',''services'',''service_servicing'',''client_groups'',''client_services'',''client_assignments'',''person_skills'',''source_links'',''suggestions'',''proposals''];
+  one_sections constant text[] := array[''settings'',''demand_settings'',''lever_settings'',''analysis_rules''];
+  placeholder constant text := ''00000000-0000-4000-8000-'';
+  placeholder_re constant text := ''^00000000-0000-4000-8000-[0-9a-f]{12}$'';
+  max_plan_chars constant integer := 13107200;
+
+  pl jsonb;
+  txt text;
+  prefix text;
+  label text := left(nullif(btrim(coalesce(p_label, '''')), ''''), 300);
+  sec text;
+  col text;
+  tbl text;
+  rows jsonb;
+  node jsonb;
+  sc jsonb;
+  cols text;
+  sets text;
+  n integer;
+  total integer;
+  existing uuid;
+  skip_ids uuid[] := ''{}'';
+  skipped jsonb := ''{}'';
+  counts jsonb := ''{}'';
+  proc uuid;
+  rev uuid;
+  draft jsonb;
+  revs jsonb := ''{}'';
+  made jsonb := ''[]'';
+  arch uuid[] := ''{}'';
+  step_total integer := 0;
+  edge_total integer := 0;
+  settings_result text := ''none'';
+  what text;
+  has_rows boolean;
+  bad integer;
+  chars bigint;
+begin
+  -- 1. Who. Before the plan is read, so a refusal says nothing about it.
+  if coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'' then
+    raise exception ''Backups are restored in the app.'' using errcode = ''42501'';
+  end if;
+  if p_workspace is null or not coalesce(public.can_edit_workspace(p_workspace), false) then
+    raise exception ''Only owners, editors and agency admins can restore a backup.'' using errcode = ''42501'';
+  end if;
+
+  -- 2. Shape and limits.
+  if p_plan is null or jsonb_typeof(p_plan) is distinct from ''object'' or p_plan ->> ''format'' is distinct from ''transpera-workspace-import/1'' then
+    raise exception ''import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan'' using errcode = ''22023'';
+  end if;
+  if char_length(p_plan::text) > max_plan_chars then
+    raise exception ''import_workspace_bundle: the plan is too big (at most 10 MB)'' using errcode = ''22023'';
+  end if;
+  foreach sec in array list_sections loop
+    if jsonb_typeof(p_plan -> sec) is distinct from ''array'' then
+      raise exception ''import_workspace_bundle: % must be a list'', sec using errcode = ''22023'';
+    end if;
+    if exists (select 1 from jsonb_array_elements(p_plan -> sec) e where jsonb_typeof(e.value) is distinct from ''object'') then
+      raise exception ''import_workspace_bundle: every row of % must be an object'', sec using errcode = ''22023'';
+    end if;
+  end loop;
+  foreach sec in array one_sections loop
+    if p_plan -> sec is not null and jsonb_typeof(p_plan -> sec) not in (''object'', ''null'') then
+      raise exception ''import_workspace_bundle: % must be an object or null'', sec using errcode = ''22023'';
+    end if;
+  end loop;
+  if exists (
+    select 1 from jsonb_array_elements(p_plan -> ''processes'') p
+    where jsonb_typeof(p.value -> ''steps'') is distinct from ''array'' or jsonb_typeof(p.value -> ''edges'') is distinct from ''array''
+      or exists (select 1 from jsonb_array_elements(p.value -> ''steps'') e where jsonb_typeof(e.value) is distinct from ''object'')
+      or exists (select 1 from jsonb_array_elements(p.value -> ''edges'') e where jsonb_typeof(e.value) is distinct from ''object'')
+      or (p.value -> ''first_principles'' is not null and jsonb_typeof(p.value -> ''first_principles'') not in (''object'', ''null''))
+      or (p.value -> ''layout'' is not null and jsonb_typeof(p.value -> ''layout'') not in (''object'', ''null''))
+  ) then
+    raise exception ''import_workspace_bundle: every process needs lists of steps and edges'' using errcode = ''22023'';
+  end if;
+  select coalesce(sum(jsonb_array_length(p.value -> ''steps'')), 0), coalesce(sum(jsonb_array_length(p.value -> ''edges'')), 0)
+    into step_total, edge_total from jsonb_array_elements(p_plan -> ''processes'') p;
+  select coalesce(sum(char_length(coalesce(s.value ->> ''body'', ''''))), 0) into chars from jsonb_array_elements(p_plan -> ''sources'') s;
+  if jsonb_array_length(p_plan -> ''processes'') > 50 or step_total > 500 or edge_total > 1000
+    or jsonb_array_length(p_plan -> ''sources'') > 200 or chars > 3000000
+    or jsonb_array_length(p_plan -> ''issues'') > 300 or jsonb_array_length(p_plan -> ''people'') > 500
+    or jsonb_array_length(p_plan -> ''clients'') > 1000 or jsonb_array_length(p_plan -> ''scenarios'') > 300
+    or jsonb_array_length(p_plan -> ''blocks'') > 300 or jsonb_array_length(p_plan -> ''suggestions'') > 500
+    or jsonb_array_length(p_plan -> ''proposals'') > 300
+    or jsonb_array_length(p_plan -> ''person_roles'') > 400 or jsonb_array_length(p_plan -> ''person_skills'') > 1000
+    or jsonb_array_length(p_plan -> ''client_assignments'') > 400 or jsonb_array_length(p_plan -> ''source_links'') > 400 then
+    raise exception ''import_workspace_bundle: the plan is over a limit (50 processes, 500 steps, 1000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 400 role assignments, 1000 skills, 400 client assignments, 400 source links)'' using errcode = ''22023'';
+  end if;
+  -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+  if exists (select 1 from jsonb_array_elements(p_plan -> ''scenarios'') s where jsonb_typeof(s.value -> ''id'') is distinct from ''string'') then
+    raise exception ''import_workspace_bundle: every scenario needs an id'' using errcode = ''22023'';
+  end if;
+
+  -- 3. Lock: one restore (or upload) at a time per workspace.
+  perform pg_advisory_xact_lock(hashtextextended(''import_workspace_bundle:'' || p_workspace::text, 0));
+  perform pg_advisory_xact_lock(hashtextextended(''import_new_process:'' || p_workspace::text, 0));
+
+  -- 4. Empty.
+  for tbl, col in
+    select t.a, t.b from (values
+      (''processes'', ''not is_company''), (''roles'', ''true''), (''people'', ''true''), (''services'', ''true''), (''client_groups'', ''true''),
+      (''clients'', ''true''), (''lead_sources'', ''true''), (''churn_drivers'', ''true''), (''market_schedule'', ''true''), (''issues'', ''true''),
+      (''sources'', ''true''), (''blocks'', ''true''), (''solutions'', ''true''), (''suggestions'', ''true''), (''suggestion_proposals'', ''true''),
+      (''market_conditions'', ''preset is null'')
+    ) as t(a, b)
+  loop
+    execute format(''select exists (select 1 from public.%I where workspace_id = $1 and %s)'', tbl, col) into has_rows using p_workspace;
+    if has_rows then
+      what := replace(tbl, ''_'', '' '');
+      exit;
+    end if;
+  end loop;
+  if what is null and exists (
+    select 1 from public.scenarios s where s.workspace_id = p_workspace
+      and not exists (select 1 from private.scenario_library() l where l.name = s.name and l.patch = s.patch)
+  ) then
+    what := ''scenarios of its own'';
+  end if;
+  if what is not null then
+    raise exception ''This workspace isn''''t empty: it already has %. Backups restore only into a new, empty workspace.'', what
+      using errcode = ''23514'', hint = ''not_empty'';
+  end if;
+
+  -- 5. Ids: every id and reference column of the plan holds a placeholder (or null) before anything is replaced.
+  foreach sec in array list_sections loop
+    if sec = ''processes'' then continue; end if;
+    for col in
+      select c from (
+        select ''id'' as c where allow -> sec ? ''id''
+        union all select split_part(r, ''.'', 2) from unnest(ref_cols) r where split_part(r, ''.'', 1) = sec
+      ) q
+    loop
+      select count(*) into bad from jsonb_array_elements(p_plan -> sec) r
+      where r.value -> col is not null and jsonb_typeof(r.value -> col) <> ''null''
+        and (jsonb_typeof(r.value -> col) <> ''string'' or (r.value ->> col) !~ placeholder_re);
+      if bad > 0 then
+        raise exception ''import_workspace_bundle: % holds an id that is not a placeholder in %'', col, sec using errcode = ''22023'';
+      end if;
+    end loop;
+  end loop;
+  select count(*) into bad from jsonb_array_elements(p_plan -> ''issues'') i
+  where exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''owner_ids'') = ''array'' then i.value -> ''owner_ids'' else ''[]''::jsonb end) x
+      where jsonb_typeof(x.value) <> ''string'' or (x.value #>> ''{}'') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''source_ids'') = ''array'' then i.value -> ''source_ids'' else ''[]''::jsonb end) x
+      where jsonb_typeof(x.value) <> ''string'' or (x.value #>> ''{}'') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''links'') = ''array'' then i.value -> ''links'' else ''[]''::jsonb end) l
+      where jsonb_typeof(l.value) <> ''object''
+        or (l.value ->> ''process_id'') !~ placeholder_re
+        or (jsonb_typeof(l.value -> ''step_id'') <> ''null'' and l.value ->> ''step_id'' is not null and (l.value ->> ''step_id'') !~ placeholder_re));
+  if bad > 0 then
+    raise exception ''import_workspace_bundle: an issue link, owner or source holds an id that is not a placeholder'' using errcode = ''22023'';
+  end if;
+  select count(*) into bad from jsonb_array_elements(p_plan -> ''processes'') p
+  where (p.value ->> ''id'') is null or (p.value ->> ''id'') !~ placeholder_re
+    or (jsonb_typeof(p.value -> ''parent_process_id'') <> ''null'' and p.value ->> ''parent_process_id'' is not null and (p.value ->> ''parent_process_id'') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> ''steps'') s, unnest(array[''id''] || step_ref_cols) c
+      where s.value -> c is not null and jsonb_typeof(s.value -> c) <> ''null'' and (jsonb_typeof(s.value -> c) <> ''string'' or (s.value ->> c) !~ placeholder_re))
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> ''edges'') e, unnest(array[''id'', ''from_step_id'', ''to_step_id'']) c
+      where e.value -> c is not null and jsonb_typeof(e.value -> c) <> ''null'' and (jsonb_typeof(e.value -> c) <> ''string'' or (e.value ->> c) !~ placeholder_re));
+  if bad > 0 then
+    raise exception ''import_workspace_bundle: a process, step or edge holds an id that is not a placeholder'' using errcode = ''22023'';
+  end if;
+
+  -- The real ids: one random prefix per restore replaces the placeholder prefix (rank 0, the old workspace, is left for the next
+  -- replace so a workspace id that happens to look like a placeholder can''t be hit twice).
+  loop
+    prefix := substr(md5(gen_random_uuid()::text), 1, 20);
+    exit when prefix <> ''00000000000000000000'';
+  end loop;
+  prefix := substr(prefix, 1, 8) || ''-'' || substr(prefix, 9, 4) || ''-'' || substr(prefix, 13, 4) || ''-'' || substr(prefix, 17, 4) || ''-'';
+  txt := regexp_replace(p_plan::text, ''00000000-0000-4000-8000-(?!000000000000)([0-9a-f]{12})'', prefix || ''\1'', ''g'');
+  txt := replace(txt, placeholder || ''000000000000'', p_workspace::text);
+
+  -- A scenario equal (name and patch) to one the workspace already has (the seeded library) is skipped: its children and the
+  -- issues that use it are re-pointed at the existing row.
+  for sc in select value from jsonb_array_elements((txt::jsonb) -> ''scenarios'') loop
+    select s.id into existing from public.scenarios s
+    where s.workspace_id = p_workspace and s.name = sc ->> ''name'' and s.patch = sc -> ''patch''
+    order by s.id limit 1;
+    if found then
+      txt := replace(txt, sc ->> ''id'', existing::text);
+      skip_ids := skip_ids || existing;
+    end if;
+  end loop;
+  pl := txt::jsonb;
+  txt := null;
+  skipped := jsonb_build_object(''scenarios'', cardinality(skip_ids));
+
+  -- 6. Write.
+  foreach sec in array sections loop
+    begin
+      n := 0;
+      if sec = ''settings'' then
+        if jsonb_typeof(pl -> ''settings'') = ''object'' and pl -> ''settings'' <> ''{}''::jsonb then
+          if public.can_manage_workspace(p_workspace) then
+            update public.workspaces set settings = settings || (pl -> ''settings'') where id = p_workspace;
+            settings_result := ''applied'';
+          else
+            -- An editor can''t write workspace-wide settings: one pending suggestion for an owner (the shape packages/mcp/src/suggesting.ts makes).
+            perform set_config(''transpera.importing'', ''on'', true);
+            insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, import_source)
+            values (p_workspace, ''workspaces'', null, jsonb_build_object(''set'', pl -> ''settings''), ''[]''::jsonb, ''Workspace settings from a backup.'', label);
+            perform set_config(''transpera.importing'', '''', true);
+            settings_result := ''suggested'';
+          end if;
+        end if;
+        continue;
+      end if;
+
+      if sec in (''demand_settings'', ''lever_settings'', ''analysis_rules'') then
+        -- One row per workspace: written over any row the workspace already has.
+        if jsonb_typeof(pl -> sec) = ''object'' then
+          select string_agg(quote_ident(c), '', ''), string_agg(format(''%1$I = excluded.%1$I'', c), '', '') into cols, sets
+          from jsonb_array_elements_text(allow -> sec) c where (pl -> sec) ? c;
+          if cols is not null then
+            execute format(''insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_record(null::public.%1$I, $1) on conflict (workspace_id) do update set %3$s'', sec, cols, sets)
+              using pl -> sec, p_workspace;
+            n := 1;
+          end if;
+        end if;
+
+      elsif sec = ''market_schedule'' then
+        -- A row that points at one of the backup''s presets points at this workspace''s preset with the same key.
+        insert into public.market_schedule (workspace_id, id, condition_id, from_month, to_month, created_at)
+        select p_workspace, coalesce(x.id, gen_random_uuid()),
+          coalesce(x.condition_id, (select m.id from public.market_conditions m where m.workspace_id = p_workspace and m.preset = r.value ->> ''condition_preset'')),
+          x.from_month, x.to_month, coalesce(x.created_at, now())
+        from jsonb_array_elements(pl -> ''market_schedule'') with ordinality r(value, ord)
+        cross join lateral jsonb_populate_record(null::public.market_schedule, r.value) x
+        order by r.ord;
+        get diagnostics n = row_count;
+
+      elsif sec = ''processes'' then
+        -- Every process first (parents first, as the plan is ordered), each opened as a draft, so a holder step can point at any of them.
+        for node in select value from jsonb_array_elements(pl -> ''processes'') loop
+          proc := (node ->> ''id'')::uuid;
+          insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+          values (proc, p_workspace, node ->> ''name'', node ->> ''kind'', node ->> ''entity_name'', node ->> ''description'', ''import'', (node ->> ''parent_process_id'')::uuid);
+          draft := public.open_draft(proc);
+          if draft ->> ''status'' is distinct from ''ok'' then
+            raise exception ''could not open a draft of %'', node ->> ''name'' using errcode = ''42501'';
+          end if;
+          rev := (draft ->> ''revision_id'')::uuid;
+          revs := revs || jsonb_build_object(proc::text, rev);
+          if jsonb_typeof(node -> ''layout'') = ''object'' then
+            update public.process_revisions set layout = node -> ''layout'' where id = rev;
+          end if;
+          if coalesce((node ->> ''archived'')::boolean, false) then
+            arch := arch || proc;
+          end if;
+          made := made || jsonb_build_object(''id'', proc, ''name'', node ->> ''name'', ''revision_id'', rev, ''archived'', coalesce((node ->> ''archived'')::boolean, false));
+          n := n + 1;
+        end loop;
+
+      elsif sec = ''scenarios'' then
+        select coalesce(jsonb_agg(r.value order by r.ord), ''[]''::jsonb) into rows
+        from jsonb_array_elements(pl -> ''scenarios'') with ordinality r(value, ord)
+        where not ((r.value ->> ''id'')::uuid = any (skip_ids));
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          execute format(''insert into public.scenarios (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.scenarios, $1)'', cols) using rows, p_workspace;
+        end if;
+
+      elsif sec = ''issues'' then
+        rows := pl -> ''issues'';
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          -- In plan order: the trigger numbers them 1, 2, 3 ... in the old order.
+          execute format(''insert into public.issues (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.issues, $1)'', cols) using rows, p_workspace;
+          -- `issue_seed_links` and `link_issue_source` may have added some already.
+          insert into public.issue_links (issue_id, workspace_id, process_id, step_id)
+          select (i.value ->> ''id'')::uuid, p_workspace, (l.value ->> ''process_id'')::uuid, (l.value ->> ''step_id'')::uuid
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''links'') = ''array'' then i.value -> ''links'' else ''[]''::jsonb end) l
+          on conflict do nothing;
+          insert into public.issue_owners (issue_id, person_id, workspace_id)
+          select (i.value ->> ''id'')::uuid, (o.value #>> ''{}'')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''owner_ids'') = ''array'' then i.value -> ''owner_ids'' else ''[]''::jsonb end) o
+          on conflict do nothing;
+          insert into public.issue_sources (issue_id, source_id, workspace_id)
+          select (i.value ->> ''id'')::uuid, (o.value #>> ''{}'')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''source_ids'') = ''array'' then i.value -> ''source_ids'' else ''[]''::jsonb end) o
+          on conflict do nothing;
+        end if;
+
+      elsif sec = ''steps'' then
+        -- The steps and edges of each draft (an entry step is set once all the steps are in), then its first principles.
+        for node in select value from jsonb_array_elements(pl -> ''processes'') loop
+          proc := (node ->> ''id'')::uuid;
+          rev := (revs ->> proc::text)::uuid;
+          select coalesce(jsonb_agg(s.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''entry_step_id'', null, ''created_by'', auth.uid())), ''[]''::jsonb)
+            into rows from jsonb_array_elements(node -> ''steps'') s;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), '', '') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in (''revision_id'', ''workspace_id'', ''process_id'', ''created_by'') or (allow -> ''steps'') ? k
+            ) q;
+            execute format(''insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)'', cols) using rows;
+            update public.steps st set entry_step_id = (s.value ->> ''entry_step_id'')::uuid
+            from jsonb_array_elements(node -> ''steps'') s
+            where st.revision_id = rev and st.id = (s.value ->> ''id'')::uuid and s.value ->> ''entry_step_id'' is not null;
+            n := n + jsonb_array_length(rows);
+          end if;
+          select coalesce(jsonb_agg(e.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''created_by'', auth.uid())), ''[]''::jsonb)
+            into rows from jsonb_array_elements(node -> ''edges'') e;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), '', '') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in (''revision_id'', ''workspace_id'', ''process_id'', ''created_by'') or (allow -> ''edges'') ? k
+            ) q;
+            execute format(''insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)'', cols) using rows;
+          end if;
+          if jsonb_typeof(node -> ''first_principles'') = ''object'' then
+            select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> ''first_principles'') c where (node -> ''first_principles'') ? c;
+            if cols is not null then
+              execute format(''insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)'', cols)
+                using node -> ''first_principles'', p_workspace, proc, rev;
+            end if;
+          end if;
+        end loop;
+        counts := counts || jsonb_build_object(''edges'', edge_total);
+
+      elsif sec = ''archive'' then
+        if cardinality(arch) > 0 then
+          update public.processes set archived_at = now() where id = any (arch);
+          get diagnostics n = row_count;
+        end if;
+
+      elsif sec = ''log'' then
+        for node in select value from jsonb_array_elements(made) loop
+          perform public.log_process_import((node ->> ''id'')::uuid, ''Restored from a workspace backup'' || coalesce('' ('' || label || '')'', ''''));
+          n := n + 1;
+        end loop;
+
+      else
+        -- A flat section: one insert, the plan''s order, only the columns of the allow-list that the rows carry.
+        tbl := case sec when ''proposals'' then ''suggestion_proposals'' else sec end;
+        rows := pl -> sec;
+        if sec = ''market_conditions'' then
+          -- The presets are read-only and the workspace has them already: the plan carries custom conditions only, and no `preset`.
+          null;
+        elsif sec = ''source_links'' then
+          -- A step link needs its step in the process''s restored draft (the trigger refuses it otherwise).
+          select coalesce(jsonb_agg(r.value order by r.ord), ''[]''::jsonb) into rows
+          from jsonb_array_elements(rows) with ordinality r(value, ord)
+          where r.value ->> ''kind'' is distinct from ''step'' or exists (
+            select 1 from public.steps s where s.workspace_id = p_workspace and s.process_id = (r.value ->> ''process_id'')::uuid and s.id = (r.value ->> ''step_id'')::uuid);
+          skipped := skipped || jsonb_build_object(''step_links'', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
+        end if;
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          -- A source link''s id can''t be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
+          -- and `created_at` out): the database makes it.
+          select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c) and not (sec = ''source_links'' and c = ''id'');
+          if cols is null then
+            raise exception ''the rows have none of the columns a restore accepts'' using errcode = ''22023'';
+          end if;
+          if sec in (''suggestions'', ''proposals'') then
+            perform set_config(''transpera.importing'', ''on'', true);
+            execute format(''insert into public.%1$I (workspace_id, %2$s, import_source) select $2, %2$s, $3 from jsonb_populate_recordset(null::public.%1$I, $1)'', tbl, cols)
+              using rows, p_workspace, label;
+            perform set_config(''transpera.importing'', '''', true);
+          else
+            execute format(''insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_recordset(null::public.%1$I, $1)%3$s'', tbl, cols,
+              case when sec = ''source_links'' then '' on conflict do nothing'' else '''' end)
+              using rows, p_workspace;
+          end if;
+        end if;
+      end if;
+      counts := counts || jsonb_build_object(sec, n);
+    exception when others then
+      raise exception ''import_workspace_bundle: % could not be restored: %'', sec, sqlerrm using errcode = sqlstate, hint = ''section:'' || sec;
+    end;
+  end loop;
+
+  return jsonb_build_object(''id_prefix'', prefix, ''processes'', made, ''counts'', counts, ''skipped'', skipped, ''settings'', settings_result);
+end;
+$$;
+
+revoke all on function public.import_workspace_bundle(uuid, jsonb, text) from public, anon, authenticated;
+grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to authenticated;
+
+grant execute on function private.scenario_library() to authenticated;
+']);
+
+-- 20261207500000_per_person_privacy.sql
+-- Per-person privacy in the database (issue #30, B1 part 2 of 3, slice 2a; docs/plans/b1-brief.md).
+--
+-- Until now every reader of a workspace reads every person: names, emails, notes, pay, leave, skills and client
+-- assignments. Austin's decision of 6 Oct (option A'): agency admins, `agency_admin` members, owners and editors see every
+-- person as before. Members and viewers see their OWN person's rows (when their membership is linked to a person), and get
+-- the whole team's simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") and with NO
+-- pay: every cost rate is null except the caller's own. (Austin, 6 Oct, replacing the role-average rule: overlapping averages
+-- leak an exact rate by subtraction, and any average gives one away as people join or leave.) The figures that depend on
+-- individual pay are marked unavailable in the engine and the app; their other simulated numbers equal an editor's.
+--
+-- Additive, except that ten select policies are dropped and re-created under the same names, and `public.revision_history`
+-- is replaced (same signature, result columns and grants). It does NOT touch `save_fields`, any insert, update or delete
+-- policy, or any grant on a table.
+--
+--   * `public.can_see_people(ws)` (SECURITY INVOKER): `can_edit_workspace(ws)`.
+--   * `public.can_see_person(ws, person)` (SECURITY INVOKER): `can_see_people(ws)`, or `person` is the caller's own person
+--     (`my_person_id(ws)`, from 20261206000000). Reused later by C2 for its per-person factors table: keep name and signature.
+--   * Select policies (same names): `people`, `person_roles`, `person_skills`, `person_leave`, `client_assignments` use
+--     `can_see_person`; `runs` and `robustness_results` use `can_see_people` (only owners and editors read saved runs);
+--     `suggestions` hides a suggestion about a person (`target_table = 'people'`) from those who can't see that person;
+--     `ai_runs` (which stores the name of whoever ran an analysis) is read by those who see people, or by the runner;
+--     `memberships` (whose user_id and person_id would tie a label to a person) is read by those who see people, and by
+--     anyone else only for their own row.
+--   * `public.team_capacity(ws) returns jsonb` (SECURITY DEFINER, empty search_path): the one way a caller gets the whole
+--     team's simulation inputs. It raises 42501 unless the caller can read `ws`. Callers who see everyone get the stored
+--     values. Everyone else gets: the caller's own person under their real name and every other person as
+--     'Team member N' (N = rank by (created_at, id) over ALL people, active or not, so labels are stable); `provenance` {};
+--     and `cost_rate` null for everyone except the caller's own person (no averages, nothing derived from rates). Never returned: email, notes, a leave note,
+--     person_skills.efficiency and person_skills.provenance. Ids are the real ids.
+--     Shape: { sees_everyone, own_person_id,
+--              people: [{id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date, provenance}],
+--              person_roles: [{person_id, role_id, workspace_id}], person_skills: [{person_id, step_id, workspace_id}],
+--              person_leave: [{id, person_id, workspace_id, start_date, end_date}],
+--              client_assignments: [{client_id, role_id, person_id, workspace_id}] }
+--   * `public.revision_history`: a full copy of 20261127500000's, with one change (marked B1 (2/3)): the author's person name
+--     shows only to those who can see that person, so a member sees null (the app says "A team member") for others' versions.
+--
+-- KNOWN LIMIT, accepted by Austin: a member using browser dev tools can still read anonymous hours and leave dates (that is
+-- what simulating in the browser needs). A per-workspace "no simulated numbers for members" setting (option C) is a
+-- possible follow-up.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`):
+--   0. Rows 53 and 54 applied, nothing at or after this version. Expect exactly 20261206000000, 20261207000000, and
+--      nothing >= 20261207500000:
+--        select version from supabase_migrations.schema_migrations where version >= '20261206000000' order by 1;
+--   1. my_person_id exists; nothing of this migration does. Expect not null, null, null, null:
+--        select to_regprocedure('public.my_person_id(uuid)'), to_regprocedure('public.can_see_people(uuid)'),
+--               to_regprocedure('public.can_see_person(uuid, uuid)'), to_regprocedure('public.team_capacity(uuid)');
+--   2. revision_history is 20261127500000's. Expect one row: true, true
+--        select pg_get_function_result(oid) like '%note text%', prosrc not like '%can_see_person%'
+--        from pg_proc where pronamespace = 'public'::regnamespace and proname = 'revision_history';
+--   3. The ten select policies are as this migration expects. Expect 10 rows, each qual public.can_read_workspace(workspace_id) / can_read_workspace(workspace_id):
+--        select tablename, policyname, qual from pg_policies
+--        where schemaname = 'public' and cmd = 'SELECT' and (tablename, policyname) in (
+--          ('people', 'read people'), ('person_roles', 'read person_roles'), ('person_skills', 'read person_skills'),
+--          ('person_leave', 'read person_leave'), ('client_assignments', 'read client_assignments'), ('runs', 'read runs'),
+--          ('robustness_results', 'read robustness results'), ('suggestions', 'read suggestions'), ('ai_runs', 'read ai_runs'), ('memberships', 'read memberships'))
+--        order by 1;
+--   4. No person is linked to two active memberships (1/3 enforces it in setMemberPerson, not the database). Expect no rows;
+--      if any, two people would see the same record: unlink one on Settings -> Access before applying.
+--        select workspace_id, person_id, count(*) from public.memberships
+--        where person_id is not null and active group by 1, 2 having count(*) > 1;
+--   5. For the log: members and viewers who will see their own record, per workspace.
+--        select w.slug, count(*) filter (where m.person_id is not null) as linked, count(*) as members_and_viewers
+--        from public.workspaces w join public.memberships m on m.workspace_id = w.id
+--        where m.active and m.role in ('member', 'viewer') group by 1 order by 1;
+--
+-- POST-APPLY CHECK:
+--   - Re-run preflight 3: the five per-person tables and `suggestions` now mention can_see_person; `runs`,
+--     `robustness_results`, `ai_runs` and `memberships` mention can_see_people.
+--   - select proname, prosecdef, proconfig from pg_proc where proname in ('can_see_people', 'can_see_person',
+--     'team_capacity', 'revision_history');  -- prosecdef false, false, true, true; {search_path=""} on all four.
+--   - has_function_privilege('authenticated', f, 'execute') true and has_function_privilege('anon', f, 'execute') false for
+--     public.can_see_people(uuid), public.can_see_person(uuid, uuid) and public.team_capacity(uuid).
+--   - select prosrc like '%can_see_person%' from pg_proc where proname = 'revision_history';  -- true
+--   - Smoke test, rolled back. Production Northbeam has no owner, so act as an agency admin (any user id; the flag is in
+--     the claims):
+--       begin; set local role authenticated;
+--       select set_config('request.jwt.claims', '{"sub":"<user id>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
+--       select (public.team_capacity('<northbeam id>') ->> 'sees_everyone'), jsonb_array_length(public.team_capacity('<northbeam id>') -> 'people');
+--       rollback;
+--     Expect true and Northbeam's head count.
+--
+-- Rollback (run as one transaction):
+--   begin;
+--     drop policy "read people" on public.people;
+--     create policy "read people" on public.people for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read person_roles" on public.person_roles;
+--     create policy "read person_roles" on public.person_roles for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read person_skills" on public.person_skills;
+--     create policy "read person_skills" on public.person_skills for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read person_leave" on public.person_leave;
+--     create policy "read person_leave" on public.person_leave for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read client_assignments" on public.client_assignments;
+--     create policy "read client_assignments" on public.client_assignments for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read runs" on public.runs;
+--     create policy "read runs" on public.runs for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read robustness results" on public.robustness_results;
+--     create policy "read robustness results" on public.robustness_results for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read suggestions" on public.suggestions;
+--     create policy "read suggestions" on public.suggestions for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read ai_runs" on public.ai_runs;
+--     create policy "read ai_runs" on public.ai_runs for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read memberships" on public.memberships;
+--     create policy "read memberships" on public.memberships for select to authenticated using (public.can_read_workspace(workspace_id));
+--     -- revision_history: re-run the `create function public.revision_history ... $$;` block from
+--     -- 20261127500000_company_map_editing.sql with `create` changed to `create or replace` (same signature, grants kept)
+--     drop function public.team_capacity(uuid);
+--     drop function public.can_see_person(uuid, uuid);
+--     drop function public.can_see_people(uuid);
+--     delete from supabase_migrations.schema_migrations where version = '20261207500000';
+--   commit;
+
+-- 1. Helpers
+
+create function public.can_see_people(ws uuid) returns boolean
+language sql stable security invoker
+set search_path = ''
+as $$
+  select public.can_edit_workspace(ws);
+$$;
+
+create function public.can_see_person(ws uuid, person uuid) returns boolean
+language sql stable security invoker
+set search_path = ''
+as $$
+  select public.can_see_people(ws) or (person is not null and person = public.my_person_id(ws));
+$$;
+
+revoke execute on function public.can_see_people(uuid), public.can_see_person(uuid, uuid) from public, anon;
+grant execute on function public.can_see_people(uuid), public.can_see_person(uuid, uuid) to authenticated;
+
+-- 2. Select policies
+
+drop policy "read people" on public.people;
+create policy "read people" on public.people for select to authenticated
+  using (public.can_see_person(workspace_id, id));
+
+drop policy "read person_roles" on public.person_roles;
+create policy "read person_roles" on public.person_roles for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read person_skills" on public.person_skills;
+create policy "read person_skills" on public.person_skills for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read person_leave" on public.person_leave;
+create policy "read person_leave" on public.person_leave for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read client_assignments" on public.client_assignments;
+create policy "read client_assignments" on public.client_assignments for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read runs" on public.runs;
+create policy "read runs" on public.runs for select to authenticated
+  using (public.can_see_people(workspace_id));
+
+drop policy "read robustness results" on public.robustness_results;
+create policy "read robustness results" on public.robustness_results for select to authenticated
+  using (public.can_see_people(workspace_id));
+
+-- A suggestion about a person is a change to one person (a new person has a null target_id, which only editors see).
+drop policy "read suggestions" on public.suggestions;
+create policy "read suggestions" on public.suggestions for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (target_table <> 'people' or public.can_see_person(workspace_id, target_id)));
+
+-- user_name is a stored copy of the name of whoever ran an analysis.
+drop policy "read ai_runs" on public.ai_runs;
+create policy "read ai_runs" on public.ai_runs for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (public.can_see_people(workspace_id) or user_id = auth.uid()));
+
+-- Who is who. A member who could read every `memberships` row (user_id and person_id) could join it to "Team member N" and
+-- name every person. Owners, editors and agency admins keep reading them all (and owners and agency admins also through
+-- "manage memberships"); everyone else reads only their own membership row (the policy doesn't check `active`).
+drop policy "read memberships" on public.memberships;
+create policy "read memberships" on public.memberships for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (public.can_see_people(workspace_id) or user_id = auth.uid()));
+
+-- 3. team_capacity
+
+create function public.team_capacity(ws uuid) returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  everyone boolean;
+  own uuid;
+  result jsonb;
+begin
+  if ws is null or not public.can_read_workspace(ws) then
+    raise exception 'team_capacity: you cannot read this workspace' using errcode = '42501';
+  end if;
+  everyone := public.can_see_people(ws);
+  own := public.my_person_id(ws);
+
+  with p as (
+    select pe.id, pe.workspace_id, pe.name, pe.fte, pe.capacity_hours_week, pe.cost_rate, pe.active, pe.start_date,
+           pe.end_date, pe.provenance,
+           row_number() over (order by pe.created_at, pe.id) as n
+    from public.people pe where pe.workspace_id = ws
+  ),
+  shown as (
+    select p.*,
+      case when everyone or p.id = own then p.name else 'Team member ' || p.n end as shown_name,
+      -- No pay for anyone but the caller's own person (and those who see everyone).
+      case when everyone or p.id = own then p.cost_rate end as shown_rate
+    from p
+  )
+  select jsonb_build_object(
+    'sees_everyone', everyone,
+    'own_person_id', own,
+    'people', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', s.id, 'workspace_id', s.workspace_id, 'name', s.shown_name, 'fte', s.fte,
+        'capacity_hours_week', s.capacity_hours_week, 'cost_rate', s.shown_rate, 'active', s.active,
+        'start_date', s.start_date, 'end_date', s.end_date,
+        'provenance', case when everyone then s.provenance else '{}'::jsonb end)
+      order by case when everyone then s.name end, s.n) from shown s), '[]'::jsonb),
+    'person_roles', coalesce((select jsonb_agg(jsonb_build_object('person_id', r.person_id, 'role_id', r.role_id,
+        'workspace_id', r.workspace_id) order by r.person_id, r.role_id)
+      from public.person_roles r where r.workspace_id = ws), '[]'::jsonb),
+    'person_skills', coalesce((select jsonb_agg(jsonb_build_object('person_id', k.person_id, 'step_id', k.step_id,
+        'workspace_id', k.workspace_id) order by k.person_id, k.step_id)
+      from public.person_skills k where k.workspace_id = ws), '[]'::jsonb),
+    'person_leave', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'person_id', l.person_id,
+        'workspace_id', l.workspace_id, 'start_date', l.start_date, 'end_date', l.end_date)
+        order by l.person_id, l.start_date, l.id)
+      from public.person_leave l where l.workspace_id = ws), '[]'::jsonb),
+    'client_assignments', coalesce((select jsonb_agg(jsonb_build_object('client_id', a.client_id, 'role_id', a.role_id,
+        'person_id', a.person_id, 'workspace_id', a.workspace_id) order by a.client_id, a.role_id)
+      from public.client_assignments a where a.workspace_id = ws), '[]'::jsonb)
+  ) into result;
+  return result;
+end;
+$$;
+
+revoke execute on function public.team_capacity(uuid) from public, anon;
+grant execute on function public.team_capacity(uuid) to authenticated;
+
+-- 4. revision_history
+
+-- A full copy of 20261127500000's, changed on the author line only (B1 (2/3)). Dropped and re-created as that migration did,
+-- so the same signature, result columns and grants hold.
+drop function public.revision_history(uuid);
+
+create function public.revision_history(target_process uuid)
+returns table (
+  revision_id uuid,
+  number integer,
+  status text,
+  published_at timestamptz,
+  author_kind text,
+  author_name text,
+  changes jsonb,
+  note text
+)
+language sql stable security definer
+set search_path = ''
+as $$
+  select
+    r.id,
+    r.number,
+    r.status,
+    r.published_at,
+    a.actor_kind,
+    -- B1 (2/3): a person's name only to those who can see that person.
+    coalesce(case when public.can_see_person(r.workspace_id, per.id) then per.name end,
+             case when public.can_manage_workspace(r.workspace_id) then u.email end),
+    -- Against the published version before it; none for the first.
+    case when prev.id is not null then private.revision_change_counts(prev.id, r.id) end,
+    a.note
+  from public.processes p
+  join public.process_revisions r on r.process_id = p.id
+  left join auth.users u on u.id = r.published_by
+  left join public.memberships m on m.user_id = r.published_by and m.workspace_id = r.workspace_id
+  left join public.people per on per.id = m.person_id and per.workspace_id = r.workspace_id
+  left join lateral (
+    select l.actor_kind, l.diff ->> 'note' as note
+    from public.audit_log l
+    where l.workspace_id = r.workspace_id
+      and l.target_table = 'processes' and l.target_id = p.id and l.action = 'publish' and l.diff ->> 'revision_id' = r.id::text
+    order by l.created_at desc
+    limit 1
+  ) a on true
+  left join lateral (
+    select q.id from public.process_revisions q
+    where q.process_id = p.id and q.status in ('published', 'superseded') and q.number < r.number
+    order by q.number desc
+    limit 1
+  ) prev on true
+  where p.id = target_process
+    and public.can_read_workspace(p.workspace_id)
+    and r.status in ('published', 'superseded')
+  order by r.number desc;
+$$;
+
+revoke execute on function public.revision_history(uuid) from public, anon;
+grant execute on function public.revision_history(uuid) to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261207500000', 'per_person_privacy', array['-- Per-person privacy in the database (issue #30, B1 part 2 of 3, slice 2a; docs/plans/b1-brief.md).
+--
+-- Until now every reader of a workspace reads every person: names, emails, notes, pay, leave, skills and client
+-- assignments. Austin''s decision of 6 Oct (option A''): agency admins, `agency_admin` members, owners and editors see every
+-- person as before. Members and viewers see their OWN person''s rows (when their membership is linked to a person), and get
+-- the whole team''s simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") and with NO
+-- pay: every cost rate is null except the caller''s own. (Austin, 6 Oct, replacing the role-average rule: overlapping averages
+-- leak an exact rate by subtraction, and any average gives one away as people join or leave.) The figures that depend on
+-- individual pay are marked unavailable in the engine and the app; their other simulated numbers equal an editor''s.
+--
+-- Additive, except that ten select policies are dropped and re-created under the same names, and `public.revision_history`
+-- is replaced (same signature, result columns and grants). It does NOT touch `save_fields`, any insert, update or delete
+-- policy, or any grant on a table.
+--
+--   * `public.can_see_people(ws)` (SECURITY INVOKER): `can_edit_workspace(ws)`.
+--   * `public.can_see_person(ws, person)` (SECURITY INVOKER): `can_see_people(ws)`, or `person` is the caller''s own person
+--     (`my_person_id(ws)`, from 20261206000000). Reused later by C2 for its per-person factors table: keep name and signature.
+--   * Select policies (same names): `people`, `person_roles`, `person_skills`, `person_leave`, `client_assignments` use
+--     `can_see_person`; `runs` and `robustness_results` use `can_see_people` (only owners and editors read saved runs);
+--     `suggestions` hides a suggestion about a person (`target_table = ''people''`) from those who can''t see that person;
+--     `ai_runs` (which stores the name of whoever ran an analysis) is read by those who see people, or by the runner;
+--     `memberships` (whose user_id and person_id would tie a label to a person) is read by those who see people, and by
+--     anyone else only for their own row.
+--   * `public.team_capacity(ws) returns jsonb` (SECURITY DEFINER, empty search_path): the one way a caller gets the whole
+--     team''s simulation inputs. It raises 42501 unless the caller can read `ws`. Callers who see everyone get the stored
+--     values. Everyone else gets: the caller''s own person under their real name and every other person as
+--     ''Team member N'' (N = rank by (created_at, id) over ALL people, active or not, so labels are stable); `provenance` {};
+--     and `cost_rate` null for everyone except the caller''s own person (no averages, nothing derived from rates). Never returned: email, notes, a leave note,
+--     person_skills.efficiency and person_skills.provenance. Ids are the real ids.
+--     Shape: { sees_everyone, own_person_id,
+--              people: [{id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date, provenance}],
+--              person_roles: [{person_id, role_id, workspace_id}], person_skills: [{person_id, step_id, workspace_id}],
+--              person_leave: [{id, person_id, workspace_id, start_date, end_date}],
+--              client_assignments: [{client_id, role_id, person_id, workspace_id}] }
+--   * `public.revision_history`: a full copy of 20261127500000''s, with one change (marked B1 (2/3)): the author''s person name
+--     shows only to those who can see that person, so a member sees null (the app says "A team member") for others'' versions.
+--
+-- KNOWN LIMIT, accepted by Austin: a member using browser dev tools can still read anonymous hours and leave dates (that is
+-- what simulating in the browser needs). A per-workspace "no simulated numbers for members" setting (option C) is a
+-- possible follow-up.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`):
+--   0. Rows 53 and 54 applied, nothing at or after this version. Expect exactly 20261206000000, 20261207000000, and
+--      nothing >= 20261207500000:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261206000000'' order by 1;
+--   1. my_person_id exists; nothing of this migration does. Expect not null, null, null, null:
+--        select to_regprocedure(''public.my_person_id(uuid)''), to_regprocedure(''public.can_see_people(uuid)''),
+--               to_regprocedure(''public.can_see_person(uuid, uuid)''), to_regprocedure(''public.team_capacity(uuid)'');
+--   2. revision_history is 20261127500000''s. Expect one row: true, true
+--        select pg_get_function_result(oid) like ''%note text%'', prosrc not like ''%can_see_person%''
+--        from pg_proc where pronamespace = ''public''::regnamespace and proname = ''revision_history'';
+--   3. The ten select policies are as this migration expects. Expect 10 rows, each qual public.can_read_workspace(workspace_id) / can_read_workspace(workspace_id):
+--        select tablename, policyname, qual from pg_policies
+--        where schemaname = ''public'' and cmd = ''SELECT'' and (tablename, policyname) in (
+--          (''people'', ''read people''), (''person_roles'', ''read person_roles''), (''person_skills'', ''read person_skills''),
+--          (''person_leave'', ''read person_leave''), (''client_assignments'', ''read client_assignments''), (''runs'', ''read runs''),
+--          (''robustness_results'', ''read robustness results''), (''suggestions'', ''read suggestions''), (''ai_runs'', ''read ai_runs''), (''memberships'', ''read memberships''))
+--        order by 1;
+--   4. No person is linked to two active memberships (1/3 enforces it in setMemberPerson, not the database). Expect no rows;
+--      if any, two people would see the same record: unlink one on Settings -> Access before applying.
+--        select workspace_id, person_id, count(*) from public.memberships
+--        where person_id is not null and active group by 1, 2 having count(*) > 1;
+--   5. For the log: members and viewers who will see their own record, per workspace.
+--        select w.slug, count(*) filter (where m.person_id is not null) as linked, count(*) as members_and_viewers
+--        from public.workspaces w join public.memberships m on m.workspace_id = w.id
+--        where m.active and m.role in (''member'', ''viewer'') group by 1 order by 1;
+--
+-- POST-APPLY CHECK:
+--   - Re-run preflight 3: the five per-person tables and `suggestions` now mention can_see_person; `runs`,
+--     `robustness_results`, `ai_runs` and `memberships` mention can_see_people.
+--   - select proname, prosecdef, proconfig from pg_proc where proname in (''can_see_people'', ''can_see_person'',
+--     ''team_capacity'', ''revision_history'');  -- prosecdef false, false, true, true; {search_path=""} on all four.
+--   - has_function_privilege(''authenticated'', f, ''execute'') true and has_function_privilege(''anon'', f, ''execute'') false for
+--     public.can_see_people(uuid), public.can_see_person(uuid, uuid) and public.team_capacity(uuid).
+--   - select prosrc like ''%can_see_person%'' from pg_proc where proname = ''revision_history'';  -- true
+--   - Smoke test, rolled back. Production Northbeam has no owner, so act as an agency admin (any user id; the flag is in
+--     the claims):
+--       begin; set local role authenticated;
+--       select set_config(''request.jwt.claims'', ''{"sub":"<user id>","role":"authenticated","app_metadata":{"agency_admin":true}}'', true);
+--       select (public.team_capacity(''<northbeam id>'') ->> ''sees_everyone''), jsonb_array_length(public.team_capacity(''<northbeam id>'') -> ''people'');
+--       rollback;
+--     Expect true and Northbeam''s head count.
+--
+-- Rollback (run as one transaction):
+--   begin;
+--     drop policy "read people" on public.people;
+--     create policy "read people" on public.people for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read person_roles" on public.person_roles;
+--     create policy "read person_roles" on public.person_roles for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read person_skills" on public.person_skills;
+--     create policy "read person_skills" on public.person_skills for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read person_leave" on public.person_leave;
+--     create policy "read person_leave" on public.person_leave for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read client_assignments" on public.client_assignments;
+--     create policy "read client_assignments" on public.client_assignments for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read runs" on public.runs;
+--     create policy "read runs" on public.runs for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read robustness results" on public.robustness_results;
+--     create policy "read robustness results" on public.robustness_results for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read suggestions" on public.suggestions;
+--     create policy "read suggestions" on public.suggestions for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read ai_runs" on public.ai_runs;
+--     create policy "read ai_runs" on public.ai_runs for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read memberships" on public.memberships;
+--     create policy "read memberships" on public.memberships for select to authenticated using (public.can_read_workspace(workspace_id));
+--     -- revision_history: re-run the `create function public.revision_history ... $$;` block from
+--     -- 20261127500000_company_map_editing.sql with `create` changed to `create or replace` (same signature, grants kept)
+--     drop function public.team_capacity(uuid);
+--     drop function public.can_see_person(uuid, uuid);
+--     drop function public.can_see_people(uuid);
+--     delete from supabase_migrations.schema_migrations where version = ''20261207500000'';
+--   commit;
+
+-- 1. Helpers
+
+create function public.can_see_people(ws uuid) returns boolean
+language sql stable security invoker
+set search_path = ''''
+as $$
+  select public.can_edit_workspace(ws);
+$$;
+
+create function public.can_see_person(ws uuid, person uuid) returns boolean
+language sql stable security invoker
+set search_path = ''''
+as $$
+  select public.can_see_people(ws) or (person is not null and person = public.my_person_id(ws));
+$$;
+
+revoke execute on function public.can_see_people(uuid), public.can_see_person(uuid, uuid) from public, anon;
+grant execute on function public.can_see_people(uuid), public.can_see_person(uuid, uuid) to authenticated;
+
+-- 2. Select policies
+
+drop policy "read people" on public.people;
+create policy "read people" on public.people for select to authenticated
+  using (public.can_see_person(workspace_id, id));
+
+drop policy "read person_roles" on public.person_roles;
+create policy "read person_roles" on public.person_roles for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read person_skills" on public.person_skills;
+create policy "read person_skills" on public.person_skills for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read person_leave" on public.person_leave;
+create policy "read person_leave" on public.person_leave for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read client_assignments" on public.client_assignments;
+create policy "read client_assignments" on public.client_assignments for select to authenticated
+  using (public.can_see_person(workspace_id, person_id));
+
+drop policy "read runs" on public.runs;
+create policy "read runs" on public.runs for select to authenticated
+  using (public.can_see_people(workspace_id));
+
+drop policy "read robustness results" on public.robustness_results;
+create policy "read robustness results" on public.robustness_results for select to authenticated
+  using (public.can_see_people(workspace_id));
+
+-- A suggestion about a person is a change to one person (a new person has a null target_id, which only editors see).
+drop policy "read suggestions" on public.suggestions;
+create policy "read suggestions" on public.suggestions for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (target_table <> ''people'' or public.can_see_person(workspace_id, target_id)));
+
+-- user_name is a stored copy of the name of whoever ran an analysis.
+drop policy "read ai_runs" on public.ai_runs;
+create policy "read ai_runs" on public.ai_runs for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (public.can_see_people(workspace_id) or user_id = auth.uid()));
+
+-- Who is who. A member who could read every `memberships` row (user_id and person_id) could join it to "Team member N" and
+-- name every person. Owners, editors and agency admins keep reading them all (and owners and agency admins also through
+-- "manage memberships"); everyone else reads only their own membership row (the policy doesn''t check `active`).
+drop policy "read memberships" on public.memberships;
+create policy "read memberships" on public.memberships for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (public.can_see_people(workspace_id) or user_id = auth.uid()));
+
+-- 3. team_capacity
+
+create function public.team_capacity(ws uuid) returns jsonb
+language plpgsql stable security definer
+set search_path = ''''
+as $$
+declare
+  everyone boolean;
+  own uuid;
+  result jsonb;
+begin
+  if ws is null or not public.can_read_workspace(ws) then
+    raise exception ''team_capacity: you cannot read this workspace'' using errcode = ''42501'';
+  end if;
+  everyone := public.can_see_people(ws);
+  own := public.my_person_id(ws);
+
+  with p as (
+    select pe.id, pe.workspace_id, pe.name, pe.fte, pe.capacity_hours_week, pe.cost_rate, pe.active, pe.start_date,
+           pe.end_date, pe.provenance,
+           row_number() over (order by pe.created_at, pe.id) as n
+    from public.people pe where pe.workspace_id = ws
+  ),
+  shown as (
+    select p.*,
+      case when everyone or p.id = own then p.name else ''Team member '' || p.n end as shown_name,
+      -- No pay for anyone but the caller''s own person (and those who see everyone).
+      case when everyone or p.id = own then p.cost_rate end as shown_rate
+    from p
+  )
+  select jsonb_build_object(
+    ''sees_everyone'', everyone,
+    ''own_person_id'', own,
+    ''people'', coalesce((select jsonb_agg(jsonb_build_object(
+        ''id'', s.id, ''workspace_id'', s.workspace_id, ''name'', s.shown_name, ''fte'', s.fte,
+        ''capacity_hours_week'', s.capacity_hours_week, ''cost_rate'', s.shown_rate, ''active'', s.active,
+        ''start_date'', s.start_date, ''end_date'', s.end_date,
+        ''provenance'', case when everyone then s.provenance else ''{}''::jsonb end)
+      order by case when everyone then s.name end, s.n) from shown s), ''[]''::jsonb),
+    ''person_roles'', coalesce((select jsonb_agg(jsonb_build_object(''person_id'', r.person_id, ''role_id'', r.role_id,
+        ''workspace_id'', r.workspace_id) order by r.person_id, r.role_id)
+      from public.person_roles r where r.workspace_id = ws), ''[]''::jsonb),
+    ''person_skills'', coalesce((select jsonb_agg(jsonb_build_object(''person_id'', k.person_id, ''step_id'', k.step_id,
+        ''workspace_id'', k.workspace_id) order by k.person_id, k.step_id)
+      from public.person_skills k where k.workspace_id = ws), ''[]''::jsonb),
+    ''person_leave'', coalesce((select jsonb_agg(jsonb_build_object(''id'', l.id, ''person_id'', l.person_id,
+        ''workspace_id'', l.workspace_id, ''start_date'', l.start_date, ''end_date'', l.end_date)
+        order by l.person_id, l.start_date, l.id)
+      from public.person_leave l where l.workspace_id = ws), ''[]''::jsonb),
+    ''client_assignments'', coalesce((select jsonb_agg(jsonb_build_object(''client_id'', a.client_id, ''role_id'', a.role_id,
+        ''person_id'', a.person_id, ''workspace_id'', a.workspace_id) order by a.client_id, a.role_id)
+      from public.client_assignments a where a.workspace_id = ws), ''[]''::jsonb)
+  ) into result;
+  return result;
+end;
+$$;
+
+revoke execute on function public.team_capacity(uuid) from public, anon;
+grant execute on function public.team_capacity(uuid) to authenticated;
+
+-- 4. revision_history
+
+-- A full copy of 20261127500000''s, changed on the author line only (B1 (2/3)). Dropped and re-created as that migration did,
+-- so the same signature, result columns and grants hold.
+drop function public.revision_history(uuid);
+
+create function public.revision_history(target_process uuid)
+returns table (
+  revision_id uuid,
+  number integer,
+  status text,
+  published_at timestamptz,
+  author_kind text,
+  author_name text,
+  changes jsonb,
+  note text
+)
+language sql stable security definer
+set search_path = ''''
+as $$
+  select
+    r.id,
+    r.number,
+    r.status,
+    r.published_at,
+    a.actor_kind,
+    -- B1 (2/3): a person''s name only to those who can see that person.
+    coalesce(case when public.can_see_person(r.workspace_id, per.id) then per.name end,
+             case when public.can_manage_workspace(r.workspace_id) then u.email end),
+    -- Against the published version before it; none for the first.
+    case when prev.id is not null then private.revision_change_counts(prev.id, r.id) end,
+    a.note
+  from public.processes p
+  join public.process_revisions r on r.process_id = p.id
+  left join auth.users u on u.id = r.published_by
+  left join public.memberships m on m.user_id = r.published_by and m.workspace_id = r.workspace_id
+  left join public.people per on per.id = m.person_id and per.workspace_id = r.workspace_id
+  left join lateral (
+    select l.actor_kind, l.diff ->> ''note'' as note
+    from public.audit_log l
+    where l.workspace_id = r.workspace_id
+      and l.target_table = ''processes'' and l.target_id = p.id and l.action = ''publish'' and l.diff ->> ''revision_id'' = r.id::text
+    order by l.created_at desc
+    limit 1
+  ) a on true
+  left join lateral (
+    select q.id from public.process_revisions q
+    where q.process_id = p.id and q.status in (''published'', ''superseded'') and q.number < r.number
+    order by q.number desc
+    limit 1
+  ) prev on true
+  where p.id = target_process
+    and public.can_read_workspace(p.workspace_id)
+    and r.status in (''published'', ''superseded'')
+  order by r.number desc;
+$$;
+
+revoke execute on function public.revision_history(uuid) from public, anon;
+grant execute on function public.revision_history(uuid) to authenticated;
+']);
+
 -- seed.sql
 -- Generated by `pnpm --filter @transpera-flow/db gen:seed`. Do not edit by hand.
 

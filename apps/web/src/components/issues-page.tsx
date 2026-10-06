@@ -327,7 +327,7 @@ function useIssueCosts(
     if (model && !found) return null;
     const detected = visibleFindings(rules, found ? [...broken, ...found, ...gaps] : gaps);
     // Still waiting for a role's shadow price: the cost of a "too busy" issue is missing until it is in.
-    if (detected.some((d) => d.key.startsWith("capacity:") && d.roleId && d.cost.perMonth == null && d.cost.hoursPerMonth == null)) return null;
+    if (detected.some((d) => d.key.startsWith("capacity:") && d.roleId && d.cost.perMonth == null && d.cost.hoursPerMonth == null && !d.cost.payHidden)) return null;
     return new Map(detected.map((d) => [d.key, d.cost as IssueCost]));
   }, [model, found, broken, gaps, rules]);
 }

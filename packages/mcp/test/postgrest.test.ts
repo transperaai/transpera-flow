@@ -223,7 +223,8 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
     expect(run.data).not.toHaveProperty("trace");
     // The browser: toEngineModel(bundle) in ProcessView, then simulate(model, 30, 1) in the worker.
     const browser = simulate(toEngineModel(northbeamBundle(), { startDate }), 30, 1);
-    expect(run.data.kpi).toEqual(JSON.parse(JSON.stringify(browser.kpi)));
+    // This token is a viewer's: the same numbers as the browser, except the overtime cost, which depends on pay and is unavailable (null, not 0).
+    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
     expect(run.data).toMatchObject({ reps: 30, seed: 1, engine_version: ENGINE_VERSION });
   });
 
@@ -239,7 +240,8 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
     await client.close();
     const browser = simulate(applyPatches(toEngineModel(northbeamBundle(), { startDate }), overrides).model, 30, 1);
     expect(run.ok).toBe(true);
-    expect(run.data.kpi).toEqual(JSON.parse(JSON.stringify(browser.kpi)));
+    // This token is a viewer's: the same numbers as the browser, except the overtime cost, which depends on pay and is unavailable (null, not 0).
+    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
     expect(run.data.overrides).toEqual(overrides);
     expect(bad).toMatchObject({ ok: false, error: { code: "invalid_overrides" } });
   });
@@ -260,7 +262,7 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
       await client.close();
       const browser = simulate(toEngineModel(northbeamBundle(), { startDate }), 5, 1);
       expect(live.data.revision.status).toBe("published");
-      expect(live.data.kpi).toEqual(JSON.parse(JSON.stringify(browser.kpi)));
+      expect(live.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
       expect(draft.data.revision.status).toBe("draft");
       expect(draft.data.kpi).not.toEqual(live.data.kpi);
       expect(process.data.steps.some((s) => Number(s.work_hours) === 30)).toBe(false);
@@ -441,18 +443,21 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
       source: "manual",
     });
 
-    // list_issues shows it to the viewer, with names, and filters.
-    const list = await call<{ issues: { id: string; step: { name: string }; person: { name: string }; owner: { name: string } }[] }>(viewer, "list_issues", {
+    // list_issues shows it to the viewer, with the step and ids; the viewer is linked to no person, so (B1 2a, Q2) the names of
+    // the person and owner are hidden, and the editor sees them.
+    const list = await call<{ issues: { id: string; step: { name: string }; person: { id: string; name: string | null }; owner: { name: string | null } }[] }>(viewer, "list_issues", {
       type: "bottleneck",
       status: "open",
     });
     expect(list.ok).toBe(true);
     expect(list.data.issues.find((i) => i.id === logged.data.issue.id)).toMatchObject({
       step: { name: "Audit & proposal" },
-      person: { name: "Maya Collins" },
+      person: { id: northbeamPersonIds["Maya Collins"], name: null },
       client: null,
-      owner: { name: "Arjun Mehta" },
+      owner: { name: null },
     });
+    const asEditor = await call<{ issues: { id: string; person: { name: string }; owner: { name: string } }[] }>(editor, "list_issues", { type: "bottleneck", status: "open" });
+    expect(asEditor.data.issues.find((i) => i.id === logged.data.issue.id)).toMatchObject({ person: { name: "Maya Collins" }, owner: { name: "Arjun Mehta" } });
     const ideas = await call<{ issues: { type: string }[] }>(viewer, "list_issues", { type: "idea" });
     expect(ideas.data.issues.every((i) => i.type === "idea")).toBe(true);
     const withDetected = await call<{ detected: { key: string }[] }>(viewer, "list_issues", { include_detected: true });

@@ -101,11 +101,14 @@ describe("the seeded roster", () => {
 });
 
 describe("row-level security", () => {
-  it("every member reads the roster; strangers see none of it", async () => {
+  it("every member reads the roster, but who looks after which client only owners and editors (B1 2/3); strangers see none of it", async () => {
     for (const role of ["owner", "editor", "member", "viewer"]) {
       await db.as(users[role]!.claims, async (c) => {
+        const seesAssignments = role === "owner" || role === "editor";
         for (const t of ["clients", "client_services", "client_assignments"]) {
-          expect((await c.query(`select count(*)::int as n from ${t} where workspace_id = $1`, [ws])).rows[0].n, `${role} ${t}`).toBeGreaterThan(0);
+          const n = (await c.query(`select count(*)::int as n from ${t} where workspace_id = $1`, [ws])).rows[0].n;
+          if (t === "client_assignments" && !seesAssignments) expect(n, `${role} ${t}`).toBe(0);
+          else expect(n, `${role} ${t}`).toBeGreaterThan(0);
         }
       });
     }

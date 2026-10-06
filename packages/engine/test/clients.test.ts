@@ -196,7 +196,7 @@ describe("overtime and the floor (decision D7)", () => {
     expect(r.people.ann!.util).toBeCloseTo(1.1, 8);
     expect(r.people.ann!.overtimeHours).toBe(0);
     expect(r.kpi.overtimeHours.mean).toBe(0);
-    expect(r.kpi.overtimeCost.mean).toBe(0);
+    expect(r.kpi.overtimeCost!.mean).toBe(0);
   });
 
   it("within the cap, the overflow becomes overtime hours and cost, and utilisation stays at 100%", () => {
@@ -209,13 +209,43 @@ describe("overtime and the floor (decision D7)", () => {
     expect(r.roles.r!.overtimeHours).toBeCloseTo(4, 8);
     expect(r.kpi.overtimeHours.mean).toBeCloseTo(4 * m.horizonWeeks, 8);
     // Ann's cost rate is her role's: 50 an hour.
-    expect(r.kpi.overtimeCost.mean).toBeCloseTo(4 * m.horizonWeeks * 50, 6);
-    expect(r.kpi.overtimeCost.p10).toBeLessThanOrEqual(r.kpi.overtimeCost.mean);
+    expect(r.kpi.overtimeCost!.mean).toBeCloseTo(4 * m.horizonWeeks * 50, 6);
+    expect(r.kpi.overtimeCost!.p10).toBeLessThanOrEqual(r.kpi.overtimeCost!.mean);
   });
 
   it("a person's own cost rate prices their overtime", () => {
     const m = overloaded(0.2, { people: { ann: person("Ann", ["r"], { cost: 80 }), bob: person("Bob", ["r"]) } });
-    expect(simulate(m, 1, 1).kpi.overtimeCost.mean).toBeCloseTo(4 * m.horizonWeeks * 80, 6);
+    expect(simulate(m, 1, 1).kpi.overtimeCost!.mean).toBeCloseTo(4 * m.horizonWeeks * 80, 6);
+  });
+
+  it("with payHidden, everything but the pay-dependent figures is the same, and those are unavailable, not 0", () => {
+    const full = overloaded(0.2, { people: { ann: person("Ann", ["r"], { cost: 80 }), bob: person("Bob", ["r"]) } });
+    const hidden: EngineModel = {
+      ...full,
+      payHidden: true,
+      people: { ann: person("Ann", ["r"]), bob: person("Bob", ["r"]) },
+    };
+    const rf = simulate(full, 3, 1);
+    const rh = simulate(hidden, 3, 1);
+    expect(rf.kpi.overtimeCost).not.toBeNull();
+    expect(rh.kpi.overtimeCost).toBeNull();
+    expect(rh.kpi.overtimeHours).toEqual(rf.kpi.overtimeHours);
+    expect(rh.kpi.won).toEqual(rf.kpi.won);
+    expect(rh.kpi.labour).toEqual(rf.kpi.labour);
+    expect(rh.people).toEqual(rf.people);
+
+    const issuesFull = detectIssues(full, rf);
+    const issuesHidden = detectIssues(hidden, rh);
+    const ot = issuesHidden.find((i) => i.key === "overtime:person:ann")!;
+    expect(ot.cost).toMatchObject({ perMonth: null, hoursPerMonth: null, payHidden: true });
+    expect(ot.metrics).not.toHaveProperty("overtime_cost");
+    expect(ot.evidence).not.toMatch(/cost|[£$]/i);
+    const otFull = issuesFull.find((i) => i.key === "overtime:person:ann")!;
+    expect(ot.rating).toBe(otFull.rating);
+    expect(ot.title).toBe(otFull.title);
+    // No issue shows a money figure built from a person's pay.
+    for (const i of issuesHidden) if (i.cost.payHidden) expect(i.cost.perMonth).toBeNull();
+    expect(issuesHidden.map((i) => i.key).sort()).toEqual(issuesFull.map((i) => i.key).sort());
   });
 
   it("beyond the cap, overtime stops at the cap and utilisation shows above 100%", () => {
@@ -305,7 +335,7 @@ describe("compatibility and determinism", () => {
     expect(a.people.nina!.ongoingHours).toBeGreaterThan(35);
     expect(a.people.nina!.clients).toBeGreaterThan(8);
     expect(a.kpi.overtimeHours.p90).toBeGreaterThan(0);
-    expect(a.kpi.overtimeCost.mean).toBeGreaterThan(0);
+    expect(a.kpi.overtimeCost!.mean).toBeGreaterThan(0);
     // Per-role totals stay near the prototype's pooled 26 clients' load.
     expect(a.roles.seo!.ongoingHours).toBeGreaterThan(55);
     expect(a.roles.seo!.ongoingHours).toBeLessThan(75);

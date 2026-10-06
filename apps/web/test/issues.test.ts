@@ -171,6 +171,8 @@ describe("cost per month (issue #108)", () => {
     expect(formatIssueCost(timeOnly.cost, "AUD")).toBe("About 12 h a month (estimate, time only)");
     expect(formatIssueCost(none.cost, "AUD")).toBe("Cost per month: n/a");
     expect(formatIssueCost(null, "AUD")).toBe("Cost per month: n/a");
+    // A cost that needs people's pay, hidden from this viewer: a dash (the screens add the (i)), never 0 or a role's rate.
+    expect(formatIssueCost({ perMonth: null, hoursPerMonth: null, method: "", payHidden: true }, "AUD")).toBe("—");
   });
 
   it("costs a tracked issue by what the latest run detects for it", () => {

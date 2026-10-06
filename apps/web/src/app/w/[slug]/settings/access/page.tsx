@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { CopyInviteButton } from "@/components/access/copy-invite-button";
 import { Help } from "@/components/help";
 import { Page } from "@/components/shell/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -7,15 +8,15 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ASSIGNABLE_ROLES } from "@/lib/access";
-import { loadAccessSettings, type WorkspaceMember } from "@/lib/access-data";
-import { createClient } from "@/lib/supabase/server";
+import { ASSIGNABLE_ROLES, selectablePeople } from "@/lib/access";
+import { currentUserId, loadAccessSettings, type WorkspaceMember } from "@/lib/access-data";
 import {
   addDomain,
   addEmail,
   removeDomain,
   removeEmail,
   setMemberActive,
+  setMemberPerson,
   setMemberRole,
   updateEmail,
 } from "./actions";
@@ -79,10 +80,24 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   const settings = await loadAccessSettings(slug);
   if (!settings) notFound();
   const { workspace, domains, emails, members, people, isAgencyAdmin } = settings;
-  const {
-    data: { user },
-  } = await (await createClient()).auth.getUser();
+  const userId = await currentUserId();
   const listed = new Map(emails.map((e) => [e.email, e]));
+  const personName = new Map(people.map((p) => [p.id, p.name]));
+
+  // Who is linked to which person, so each picker offers only people nobody else is linked to. A list row and the membership it
+  // made carry the same person and count as one.
+  const links = new Map<string, Set<string>>();
+  const link = (personId: string | null, key: string) => {
+    if (!personId) return;
+    const keys = links.get(personId) ?? new Set<string>();
+    links.set(personId, keys.add(key));
+  };
+  const memberKey = (m: WorkspaceMember) => {
+    const row = m.source === "access_list" ? listed.get(m.email.toLowerCase()) : undefined;
+    return row ? `e:${row.id}` : `m:${m.membershipId}`;
+  };
+  for (const e of emails) link(e.person_id, `e:${e.id}`);
+  for (const m of members) link(m.personId, memberKey(m));
 
   return (
     <Page
@@ -181,19 +196,22 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
                     <form action={updateEmail.bind(null, slug)} className="flex flex-wrap gap-2">
                       <input type="hidden" name="id" value={e.id} />
                       <RoleSelect value={e.role} />
-                      <PersonSelect people={people} value={e.person_id} />
+                      <PersonSelect people={selectablePeople(people, links, `e:${e.id}`)} value={e.person_id} />
                       <Button type="submit" variant="outline">
                         Save
                       </Button>
                     </form>
                   </TableCell>
                   <TableCell>
-                    <form action={removeEmail.bind(null, slug)}>
-                      <input type="hidden" name="id" value={e.id} />
-                      <Button type="submit" variant="ghost" size="sm" className="text-destructive">
-                        Remove
-                      </Button>
-                    </form>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CopyInviteButton workspaceName={workspace.name} email={e.email} />
+                      <form action={removeEmail.bind(null, slug)}>
+                        <input type="hidden" name="id" value={e.id} />
+                        <Button type="submit" variant="ghost" size="sm" className="text-destructive">
+                          Remove
+                        </Button>
+                      </form>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -203,7 +221,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
             <Input name="email" type="email" required placeholder="name@company.com" aria-label="Email" className="w-full sm:w-64" />
             <Help label="Email" description="The email address of one person you want to let in. When they sign in with it, they join with the role you pick." example="maya@northbeam.example, as an editor." className="self-center" />
             <RoleSelect />
-            <PersonSelect people={people} />
+            <PersonSelect people={selectablePeople(people, links)} />
             <Button type="submit">Add email</Button>
           </form>
         </CardContent>
@@ -215,7 +233,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
             Members
           </h2>
           <CardDescription>
-            Everyone who has signed in to this workspace. Change a pre-assigned person&apos;s role in the list above.
+            Everyone who has signed in to this workspace. Change a pre-assigned person&apos;s role and person in the list above.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -224,6 +242,16 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
               <TableRow>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>
+                  <span className="flex items-center">
+                    Person
+                    <Help
+                      label="Person"
+                      description="The person record this sign-in belongs to, so the app knows who is looking. For people on the pre-assigned list it is set in the list above. Leave it empty for someone who isn't on the team."
+                      example="Link a new starter who joined through your domain to their person record, Maya Collins."
+                    />
+                  </span>
+                </TableHead>
                 <TableHead>How they got in</TableHead>
                 <TableHead>Last sign-in</TableHead>
                 <TableHead />
@@ -232,17 +260,23 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
             <TableBody>
               {members.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground">
+                  <TableCell colSpan={6} className="text-muted-foreground">
                     Nobody has signed in yet.
                   </TableCell>
                 </TableRow>
               )}
               {members.map((m) => {
-                const locked = m.userId === user?.id || (m.role === "agency_admin" && !isAgencyAdmin);
+                const you = m.userId === userId;
+                const adminRow = m.role === "agency_admin" && !isAgencyAdmin;
+                const locked = you || adminRow;
                 const onList = m.source === "access_list" && listed.has(m.email.toLowerCase());
+                const linkable = !adminRow && !onList && (m.source === "domain" || m.source === "manual");
                 return (
                   <TableRow key={m.membershipId} className={m.active ? undefined : "text-muted-foreground"}>
-                    <TableCell className="font-mono">{m.email}</TableCell>
+                    <TableCell className="font-mono">
+                      {m.email}
+                      {you && <span className="ml-2 font-sans text-muted-foreground">(you)</span>}
+                    </TableCell>
                     <TableCell>
                       {locked || onList || !m.active ? (
                         m.role
@@ -254,6 +288,19 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
                             Save
                           </Button>
                         </form>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {linkable ? (
+                        <form action={setMemberPerson.bind(null, slug)} className="flex flex-wrap gap-2">
+                          <input type="hidden" name="id" value={m.membershipId} />
+                          <PersonSelect people={selectablePeople(people, links, memberKey(m))} value={m.personId} />
+                          <Button type="submit" variant="outline">
+                            Save
+                          </Button>
+                        </form>
+                      ) : (
+                        (m.personId && personName.get(m.personId)) || <span className="text-muted-foreground">None</span>
                       )}
                     </TableCell>
                     <TableCell>{SOURCE_LABEL[m.source]}</TableCell>

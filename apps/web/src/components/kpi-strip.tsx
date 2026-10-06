@@ -1,5 +1,6 @@
 import { Info } from "lucide-react";
 import { withClientGroups, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { PayHidden } from "@/components/pay-hidden";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCurrency, formatDays, formatInitialState, formatNumber, formatPercent, formatRange } from "@/lib/format";
@@ -19,6 +20,8 @@ interface Tile {
   /** What the figure means (docs/PRD.md §13), shown in a tooltip. */
   definition?: string;
   tone?: "crit";
+  /** The figure needs people's pay, which this viewer may not see: "—" and an (i), not a number. */
+  payHidden?: boolean;
 }
 
 export function KpiStrip({ model, currency, result, status, durationMs }: KpiStripProps) {
@@ -89,6 +92,7 @@ export function KpiStrip({ model, currency, result, status, durationMs }: KpiStr
       label: "Overtime cost",
       value: overtimeCost ? money(overtimeCost.mean) : "–",
       detail: overtimeCost ? formatRange(overtimeCost, money) : "",
+      payHidden: Boolean(k && model.payHidden),
       definition: "Overtime hours × each person's cost rate (their role's when they have none).",
     },
   ];
@@ -142,7 +146,7 @@ export function KpiStrip({ model, currency, result, status, durationMs }: KpiStr
                 </Tooltip>
               )}
             </p>
-            <p className={`truncate font-display text-xl font-bold tabular-nums ${t.tone === "crit" ? "text-crit" : ""}`}>{t.value}</p>
+            <p className={`truncate font-display text-xl font-bold tabular-nums ${t.tone === "crit" ? "text-crit" : ""}`}>{t.payHidden ? <PayHidden /> : t.value}</p>
             <p className="text-xs text-muted-foreground tabular-nums">{t.detail}&nbsp;</p>
           </Card>
         ))}

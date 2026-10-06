@@ -40,5 +40,11 @@
     "date": "2026-10-01",
     "note": "Churn drivers (A56): each driver's share of churn, pressure and measured value is now reported and locked (churnCauses), rule 10 raises issues with a cost, and a northbeam-drivers golden model runs all ten drivers. No existing simulated number moved: with the default drivers the churn maths is bit-for-bit the old one. Per-client churnMonthly now includes the switched-on drivers and the market's churn factor, so A43's churn-risk costs rise under a market schedule or once a driver is on (northbeam-downturn ratings/costs); load reads only finished work, and onboarding only counts clients with servicing.",
     "digest": "sha256:8ebb2e033f8c654ea90369a9817f5d7aab8e7dc56bd53ff4c1df809a256bd6d4"
+  },
+  {
+    "version": "1.7.0",
+    "date": "2026-10-06",
+    "note": "Optional payHidden on the engine model and a nullable overtimeCost (B1 per-person privacy, 2/3a): pay-dependent figures can be withheld. No simulated number moved.",
+    "digest": "sha256:8ebb2e033f8c654ea90369a9817f5d7aab8e7dc56bd53ff4c1df809a256bd6d4"
   }
 ]

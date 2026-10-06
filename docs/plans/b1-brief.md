@@ -13,7 +13,7 @@ sign-in, the workspace switcher and the read-only UI for members and viewers hav
 | Slice | What | Migration | Status |
 |---|---|---|---|
 | **B1 (1/3)** | Keep an owner; link any member to a person; role-matrix RLS tests; read-only UI audit; copyable invite message | `20261206000000_membership_guards` | **Built** (PR #199; row 53 applied 6 Oct) |
-| **B1 (2a)** | Per-person privacy in the database: select policies, `team_capacity` (neutral labels, role-average rates), every `packages/db` loader switched to it | `20261207500000_per_person_privacy` | **Build after #199 merges** |
+| **B1 (2a)** | Per-person privacy in the database: select policies, `team_capacity` (neutral labels, no pay), every `packages/db` loader switched to it | `20261207500000_per_person_privacy` | **Build after #199 merges** |
 | **B1 (2b)** | Per-person privacy on screen: members see only their own row, "A team member" for others | none | Build after 2a merges |
 | **B1 (3/3)** | Agency workspace list with headline numbers; editors change Client health rules | `20261209000000_agency_list` | Build after #199 merges (independent of 2/3) |
 
@@ -39,6 +39,25 @@ Each slice is its own branch and PR. 1/3 and 2a close nothing; the last of 2b an
 > Known limit, accepted: a member using browser dev tools can still read anonymous hours and leave dates. A
 > per-workspace "no simulated numbers for members" setting (option C) is a possible later follow-up, not part of this
 > ticket.
+
+**Austin, 6 Oct, later the same day, posted on #30: members and viewers get no pay data.** It **replaces the "Cost rates"
+bullet above** (role averages) and Q8 (the k = 3 pool and the company-wide fallback). The rest of A' stands.
+> Austin's decision on 6 Oct: **members and viewers get no pay data.** This replaces the cost part of A' and the brief's
+> Q8 (role averages with a company-wide fallback).
+>
+> **Why.** The Opus review of #202 showed that overlapping averages let a member recover one person's exact rate by
+> subtraction. One example: a role average plus a fallback company-wide average. Any average also gives a rate away over
+> time when people join or leave.
+>
+> - `team_capacity` returns no cost rate for members and viewers, and nothing derived from rates.
+> - Figures that depend on individual pay show "—" for them, with a short (i): "Only owners and editors see costs that
+>   depend on people's pay." That's overtime cost and the cost attached to detected issues.
+> - Everything else matches an editor's numbers exactly.
+> - Owners, editors and agency admins see everything, as before.
+
+The worked example from the review: with a role average of 76.3625 over four people and 60.6667 over three of them, the
+fourth person's rate is `4 × 76.3625 − 3 × 60.6667 = 123.45`. Any scheme that shows averages over groups that overlap
+lets a member subtract one from the other.
 
 **Austin, 30 Sep (HANDOVER, "Decisions from Austin"):**
 > **Google sign-in only** stays (the #4 ticket said magic link; the app has "Continue with Google").
@@ -325,14 +344,14 @@ Austin answered Q1 (**A'**) and Q2 on 6 Oct (quoted under Decisions). This secti
 | **2a** | Database (helpers, select policies, `team_capacity`, `revision_history` author names) and every loader in `packages/db` switched to `team_capacity`. DB, PostgREST and engine-equality tests. | `20261207500000_per_person_privacy` |
 | **2b** | Web: the viewer helper, own-row-only per-person displays, "A team member" naming, Settings for members, a browser test. | none |
 
-2a is safe to ship alone: after it, a member's browser gets only neutral labels and averaged rates, and pages list
+2a is safe to ship alone: after it, a member's browser gets only neutral labels and no pay, and pages list
 "Team member 3" rows where they listed names. 2b then trims the screens to the member's own row. Branch 2a as
 `claude/b1-2a-privacy` from `main` (after PR #199 has merged); branch 2b as `claude/b1-2b-privacy-ui` from `main` after 2a
 merges.
 
 **Who sees what, in one line:** agency admins, `agency_admin` members, owners and editors see every person as today.
 Members and viewers see their own person's rows (when their membership is linked to a person, Q3), and get everyone's
-simulation inputs only through `team_capacity`: neutral labels and role-average cost rates.
+simulation inputs only through `team_capacity`: neutral labels and no cost rates (only their own).
 
 ### 2a: migration `packages/db/supabase/migrations/20261207500000_per_person_privacy.sql`
 
@@ -408,34 +427,30 @@ to authenticated;`. SECURITY DEFINER because it must read rows the caller's RLS 
     person's rank in the workspace by `(created_at, id)` over **all** people, active or not. So the number never changes
     between loads, adding a person appends a number, and deactivating someone doesn't renumber anyone. Only deleting a
     person renumbers the people created after them (people are normally deactivated, not deleted; accepted).
-  - **Cost rate**: the role-average rate below, for everyone including the caller's own person. A person with no rate
-    stays null.
+  - **Cost rate**: null for everyone except the caller's own person, who sees their own (the people policy already lets
+    them read their own row). No averages and nothing derived from rates (6 Oct, "no pay"; see below).
   - **Provenance**: `{}`.
 - Never returns `email`, `notes`, a leave `note`, `person_skills.efficiency` or `person_skills.provenance`.
 
-**The role-average rate, exactly:**
-- A person's **hours** = `coalesce(capacity_hours_week, fte × hours_per_week)`, with `hours_per_week` from
-  `workspaces.settings` (40 if missing or not a number). This is how `resolvePeopleRows` (`packages/db/src/model.ts`)
-  sizes a person.
-- The **pool** of role R = the **active** people with a **non-null** `cost_rate` who hold R in `person_roles`. Someone in
-  k roles counts in each with weight `hours / k`, the same split the engine uses for role capacity.
-- `role_rate(R)` = `sum(cost_rate × weight) / sum(weight)` over R's pool, defined only when the pool holds **at least 3
-  distinct people** (Q8). If the weights sum to 0 (only possible if `hours_per_week` is 0), use the plain average of the
-  rates instead.
-- `workspace_rate` = the same over all active people with a rate (weight = hours), also only with at least 3 of them.
-- A person's **shown rate**:
-  - null when their own `cost_rate` is null. The engine then uses the mean of their roles' `default_cost_rate`, exactly
-    as it does for an editor.
-  - otherwise the plain average of `role_rate` over their roles that have one;
-  - otherwise (no role, or none of their roles has 3 rated people) `workspace_rate`;
-  - otherwise null.
-  - Rounded to 4 decimal places.
-- Inactive people get a shown rate by the same rule but are never in a pool (the engine doesn't simulate them).
-- **What this keeps:** for a role whose pool has 3 or more people, the sum of `rate × weight` over its pool is unchanged
-  for people who hold only that role (the test checks it). That sum drives the role's overtime cost. Person cost rates
-  feed **only** overtime cost (`simulate.ts` `overtimeCost`) and the cost figures on detected issues (`issues.ts`). Labour
-  cost uses `roles.default_cost_rate`, which every member already reads. **Every other simulated number is identical to
-  an editor's.**
+**No pay for members and viewers, exactly** (this replaces the role-average rule of Q8):
+- `team_capacity` returns `cost_rate` as stored for callers who see everyone, and as **null for everyone else except the
+  caller's own person**. There is no averaging, no pool, no fallback and no `hours_per_week` lookup in the function.
+- **What depends on a person's rate** (grep the engine for `person.cost` / `p.cost` / `people[...].cost`):
+  - `simulate.ts`: `overtimeCost`, each person's overtime hours × their rate (the KPI "Overtime cost");
+  - `issues.ts`: the cost of a person's "too busy" issue when overtime is added, the cost of rework at a step held by a
+    named person, and the cost of spare capacity of a named person;
+  - `overtime-issues.ts`: the cost, evidence sentence and `overtime_cost` metric of a named person's overtime issue.
+  Labour cost uses `roles.default_cost_rate`, which every member already reads, so it is unchanged.
+- **How the engine marks them unavailable.** `EngineModel.payHidden` (set by `toEngineModel` when the bundle's `viewer`
+  does not see everyone). With it, `kpi.overtimeCost` is **null** (not 0), and the issue costs above are
+  `{ perMonth: null, hoursPerMonth: null, payHidden: true }`; the overtime issue leaves out its cost sentence and
+  `overtime_cost`. No person's rate is ever used, and a missing one is never swapped for a role's default. Without the
+  flag (every caller who sees everyone, demo, goldens) nothing changes: the golden baselines don't move.
+- **On screen**: "—" with an (i) ("Only owners and editors see costs that depend on people's pay.") where a figure is
+  `payHidden`: the Overtime cost tile, an issue's cost in the insight list, the register and the facts list. MCP marks
+  `cost.pay_hidden: true` and returns `per_month` null.
+- **Every other simulated number is identical to an editor's.** (The one ordering effect: issues are ordered by rating
+  first and cost second, so two issues of the same rating can swap places when one of their costs is unavailable.)
 
 Write it as one statement, along these lines (keep the names, the order and the rules; tidy the SQL as you like):
 
@@ -447,7 +462,6 @@ as $$
 declare
   everyone boolean;
   own uuid;
-  week numeric;
   result jsonb;
 begin
   if ws is null or not public.can_read_workspace(ws) then
@@ -455,47 +469,18 @@ begin
   end if;
   everyone := public.can_see_people(ws);
   own := public.my_person_id(ws);
-  select case when jsonb_typeof(w.settings -> 'hours_per_week') = 'number' then (w.settings ->> 'hours_per_week')::numeric end
-    into week from public.workspaces w where w.id = ws;
-  week := coalesce(week, 40);
 
   with p as (
     select pe.id, pe.workspace_id, pe.name, pe.fte, pe.capacity_hours_week, pe.cost_rate, pe.active, pe.start_date,
            pe.end_date, pe.provenance,
-           coalesce(pe.capacity_hours_week, pe.fte * week) as hours,
            row_number() over (order by pe.created_at, pe.id) as n
     from public.people pe where pe.workspace_id = ws
-  ),
-  held as (
-    select r.person_id, r.role_id, count(*) over (partition by r.person_id) as roles_held
-    from public.person_roles r where r.workspace_id = ws
-  ),
-  pool as (
-    select h.role_id, p.id, p.cost_rate, p.hours / h.roles_held as weight
-    from p join held h on h.person_id = p.id
-    where p.active and p.cost_rate is not null
-  ),
-  role_rate as (
-    select pool.role_id,
-           coalesce(sum(pool.cost_rate * pool.weight) / nullif(sum(pool.weight), 0), avg(pool.cost_rate)) as rate
-    from pool group by pool.role_id
-    having count(distinct pool.id) >= 3
-  ),
-  ws_rate as (
-    select coalesce(sum(p.cost_rate * p.hours) / nullif(sum(p.hours), 0), avg(p.cost_rate)) as rate
-    from p where p.active and p.cost_rate is not null
-    having count(*) >= 3
   ),
   shown as (
     select p.*,
       case when everyone or p.id = own then p.name else 'Team member ' || p.n end as shown_name,
-      case
-        when everyone then p.cost_rate
-        when p.cost_rate is null then null
-        else round(coalesce(
-          (select avg(rr.rate) from held h join role_rate rr on rr.role_id = h.role_id where h.person_id = p.id),
-          (select ws_rate.rate from ws_rate)), 4)
-      end as shown_rate
+      -- No pay for anyone but the caller's own person (and those who see everyone).
+      case when everyone or p.id = own then p.cost_rate end as shown_rate
     from p
   )
   select jsonb_build_object(
@@ -646,7 +631,7 @@ Grep for every table: `grep -rnE 'from\("(people|person_roles|person_skills|pers
      clientAssignments: ClientAssignmentRow[];
    }
 
-   /** The whole team's simulation inputs, as `public.team_capacity` gives them to the caller (labels and averaged rates for members). */
+   /** The whole team's simulation inputs, as `public.team_capacity` gives them to the caller (labels and no pay for members). */
    export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs>
    ```
 
@@ -691,7 +676,7 @@ those files needs an edit for 2a.
 
 **MCP for member and viewer tokens:** no code change. Reads of the per-person tables shrink to the token owner's own
 rows. Simulations (`run_scenario`, `get_process` KPIs, the analysis tools) go through `loadProcessBundle`, so they use
-`team_capacity`: the same numbers as an editor except overtime cost, with per-person results under "Team member N". That
+`team_capacity`: the same numbers as an editor except the costs that depend on pay (unavailable), with per-person results under "Team member N". That
 is the same data A' already gives the browser (the accepted limit). Write tools are refused as before.
 
 ### 2a: tests
@@ -730,32 +715,29 @@ is the same data A' already gives the browser (the accepted limit). Write tools 
 
 **New `packages/db/test/team-capacity.test.ts`** (its own `createTestDb`; Larkspur, which has a person in two roles, a
 person with 30 hours, skills and leave):
-- **Setup** as the superuser: give cost rates so that the `am` pool has 3 rated people (Hana, who also holds `strat`;
-  Jess; Callum), `design` has 2 (Ruby, Theo), Priti has none, and one more rated person is set inactive. Link a member
-  to Jess.
-- **Rates.** In the test, write an independent TypeScript version of the rule above from the raw rows, and check the
-  member's `cost_rate` for every person against it:
-  - Priti is null;
-  - the `am` people get `role_rate(am)`; Hana's is the same, since `strat` has fewer than 3;
-  - the designers get `workspace_rate`;
-  - the inactive person isn't in any pool.
-- **Role totals.** For `am`, `sum(rate × hours / roles held)` over its pool is equal (to 0.01) from the raw rows and
-  from the member's rows.
-- **Zero hours.** In a rolled-back transaction, set `settings.hours_per_week` to 0 and every `capacity_hours_week` to
-  null. The rates become plain averages and nothing divides by zero.
+- **Setup** as the superuser: give cost rates to several people (including Hana, who holds two roles) and set one more
+  rated person inactive. Link a member to Jess.
+- **Rates.** A member's `team_capacity` has `cost_rate` null for everyone but Jess (her own); an editor and an agency admin
+  get the stored rates. A member with no linked person gets no rate at all, and the function's source holds no averaging
+  code.
 - **Simulation numbers equal an editor's.** Build two `ProcessBundle`s for Larkspur's pipeline: the editor's (rows read
   as the editor, as `database.test.ts` `loadSeeded` does) and the member's (the same, with `people`, `personRoles`,
   `personSkills`, `personLeave` and `clientAssignments` replaced by the member's `team_capacity` output). Run
   `toEngineModel(…, { startDate: "2026-10-05" })` and then `simulate(model, 30, 1)` (`@transpera-flow/engine`).
-  - The two results are deep-equal after you delete `overtimeCost` from `kpi` and from every replication, and `name` and
-    `cost` from every `resolvedPeople` entry.
-  - Also assert that the two `kpi.overtimeCost.mean` values are finite and within 25% of each other.
+  - The two results are deep-equal after you delete `overtimeCost` from `kpi` and `cost` from every `resolvedPeople`
+    entry, and relabel the names. The member's `kpi.overtimeCost` is **null** (the editor's is a number above 0).
+  - Detected issues: the same keys, ratings, titles and everything else, apart from the issues whose cost needs pay,
+    which are `payHidden` with a null cost (Larkspur's overtime issue is one).
   - Run it once more with Northbeam (no person rates), where the results are deep-equal with only the names removed.
 - **Round trip.** Add a case to `database.test.ts` "round-trips": the admin's bundle built from `team_capacity`
   resolves to the same engine model as `northbeamBundle()` (and `larkspurBundle()`).
 
 **PostgREST** (extend `packages/mcp/test/postgrest-roles.test.ts`; session JWTs as in `postgrest-findings.test.ts`
 `jwt(sub)`):
+- **No response a member can get contains any cost rate**: give every other person a rate, then check `team_capacity`,
+  `people` (all columns, and filtered by rate), `loadProcessBundle` and the MCP tools a member's token can call
+  (`get_workspace_summary`, `get_bottlenecks`, `get_facts`, `list_findings`, `list_issues`, `get_process`) for any of
+  those numbers or any non-null `cost_rate`.
 - `loadProcessBundle` through supabase-js as a linked member returns `viewer: { seesEveryone: false, ownPersonId }`, the
   editor's people ids, and labels.
 - A member's API token: `get_workspace_summary` lists exactly one person (their own). Call the handler as
@@ -763,7 +745,7 @@ person with 30 hours, skills and leave):
 
 **Docs (2a):**
 - An addendum in `docs/adr/0003-workspace-access.md`, "Per-person privacy (migration 20261207500000)". It covers the
-  rule, `team_capacity`, the k = 3 pool, labels, the accepted limit, and option C as a possible follow-up.
+  rule, `team_capacity`, why members get no pay, labels, the accepted limit, and option C as a possible follow-up.
 - An entry in `docs/supabase-notes.md`. `team_capacity` and the policies rely on `auth.uid()` and `auth.jwt()` inside
   SECURITY DEFINER functions under the Data API (the same as `workspace_role`). Verified on plain Postgres and PostgREST
   only. Checks on the real project: as a linked member, Settings → People shows one person, and the Overview's numbers
@@ -772,8 +754,10 @@ person with 30 hours, skills and leave):
 ### 2a: done
 
 `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @transpera-flow/web build` green, including PostgREST. Bootstrap
-and types regenerated; the apply file written; preflight in the PR body; the production-migrations row added. No
-`ENGINE_VERSION` bump and no golden changes (editors' numbers can't move: the round-trip proves it). The PR says what a
+and types regenerated; the apply file written; preflight in the PR body; the production-migrations row added. The
+engine gained an optional `payHidden` field on the model and `overtimeCost` became nullable, so `ENGINE_VERSION` is
+bumped to 1.7.0 with `golden:approve --bump` (as market conditions did for 1.2.0). No golden number changed, only the
+version recorded in each baseline (editors' numbers can't move: the round-trip proves it). The PR says what a
 member sees between 2a and 2b ("Team member N" rows on per-person screens).
 
 ### 2b: the screens (no migration)
@@ -1033,7 +1017,7 @@ member, described in text.
 - **Deactivated membership**: `workspace_role` and `my_person_id` ignore it, so the user sees nothing.
 - **Agency admin by JWT flag with no membership**: `my_person_id` is null; `can_see_people` is true.
 - **Inactive person**: still labelled (labels count every person), never in a rate pool.
-- **A role with fewer than 3 rated people**: falls back to the workspace average, else null (Q8).
+- **A role with few rated people**: nothing special any more: members get no rates at all (Q8 is replaced, 6 Oct).
 - **Demo mode**: no change. `/demo` is the full editor view (Q5); its bundles have no `viewer`.
 - **MCP tokens**: run as their owner under RLS (ADR 0002). See 2a's MCP paragraph. Health rules can't be changed through
   MCP (`needs_review`), as before.
@@ -1051,15 +1035,18 @@ member, described in text.
 - Redacting names inside free text (issue titles, findings, AI summaries, source text). They're shared team output.
 - Option C (per-workspace "no simulated numbers for members"): a later follow-up.
 - Making the other owner-only settings editable (Q9).
-- Any change to `save_fields`, the engine or golden numbers. No `ENGINE_VERSION` bump in any slice.
+- Any change to `save_fields` or to golden numbers. The engine changes only by the optional `payHidden` field and a nullable
+  `overtimeCost` (slice 2a), approved as `ENGINE_VERSION` 1.7.0 with `--bump` and no golden number moved; no other bump in any slice.
 
 ## Questions for Austin
 
 **Answered:**
 
 - **Q1 → A'** (6 Oct, #30). Members and viewers get the per-person simulation inputs under neutral labels, with names,
-  emails and notes left out, and each cost rate replaced by the role's hours-weighted average. Their numbers otherwise
-  match an editor's, and the screens show them only their own row. Quoted in full under Decisions. Spec: 2a and 2b.
+  emails and notes left out. **Cost rates: first the role's hours-weighted average, then, the same day, none at all**
+  (see Decisions: no pay for members and viewers). Their numbers otherwise match an editor's, except the costs that
+  depend on pay, which show "—". The screens show them only their own row. Quoted in full under Decisions. Spec: 2a and
+  2b.
 - **Q2 → their own name, "A team member" for anyone else** (6 Oct). Spec: 2a (`revision_history`, `ai_runs`,
   `loadMemberNames` through RLS) and 2b.
 - **Q3–Q7 → the defaults** (6 Oct):
@@ -1081,11 +1068,9 @@ The originals, for the record:
 
 **Open (not blocking; the builder uses the default unless Austin says otherwise):**
 
-- **Q8. Small roles would show pay.** If a role has one rated person, its "average" is their rate. If it has two, either
-  of them can work out the other's from their own. So 2a averages a role only when at least 3 people with a rate hold
-  it; otherwise it uses the workspace-wide average (again only with at least 3), otherwise no rate (the engine then
-  uses the role's default rate, which members already see). Role cost totals stay exact for roles of 3 or more, and are
-  close otherwise. *Default: a minimum of 3.*
+- **Q8. Small roles would show pay. Replaced (6 Oct): members and viewers get no pay at all.** The k = 3 pool and the
+  company-wide fallback proposed here were not enough: overlapping averages leak an exact rate by subtraction (see
+  Decisions), and any average gives a rate away over time as people join or leave.
 - **Q9. Other owner-only settings.** Besides the name and currency, four more settings save through the same owner-only
   path today:
   - the availability floor and the overtime cap (Settings → People);

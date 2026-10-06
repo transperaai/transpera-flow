@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// GET /w/<slug>/export/bundle (issue #39, B10): signed-in members only, as a download, nothing cached, and no detail in errors.
+// GET /w/<slug>/export/bundle (issue #39, B10): only agency admins, owners and editors (403 for anyone else, nothing read), as a download, nothing cached, and no detail in errors.
 
 const state = { env: true, claims: { claims: { sub: "u1" } } as { claims?: { sub?: string } } | null, workspace: { id: "w1" } as { id: string } | null, bundle: { format: "transpera-workspace/1", workspace: { id: "w1" } } as unknown, boom: false, big: false, canEdit: true, seen: [] as unknown[] };
 
@@ -75,15 +75,29 @@ describe("bundle route", () => {
     expect(JSON.stringify(await r.json())).not.toContain("secret_table");
   });
 
-  it("tells an editor from a viewer, and says so when a workspace is too large", async () => {
-    await call();
+  it("refuses anyone who can't edit with 403 and reads nothing", async () => {
     state.canEdit = false;
-    await call();
-    expect(state.seen.map((o) => (o as { canEdit: boolean }).canEdit)).toEqual([true, false]);
-    state.big = true;
     const r = await call();
-    expect(r.status).toBe(413);
-    expect((await r.json()).message).toMatch(/too large/);
+    expect(r.status).toBe(403);
+    expect((await r.json()).message).toBe("Only owners, editors and agency admins can export the workspace.");
+    expect(state.seen).toEqual([]);
+  });
+
+  it("exports everything for someone who can edit, and says so when a workspace is too large", async () => {
+    const r = await call();
+    expect(r.status).toBe(200);
+    expect(state.seen).toEqual([expect.objectContaining({ canEdit: true })]);
+    state.big = true;
+    const big = await call();
+    expect(big.status).toBe(413);
+    expect((await big.json()).message).toMatch(/too large/);
+  });
+
+  it("answers a non-member 404 before any role check", async () => {
+    state.workspace = null;
+    state.canEdit = false;
+    expect((await call()).status).toBe(404);
+    expect(state.seen).toEqual([]);
   });
 
   it("has nothing to export in the demo", async () => {

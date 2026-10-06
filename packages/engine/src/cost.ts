@@ -60,10 +60,20 @@ export interface IssueCost {
   hoursPerMonth: number | null;
   /** How it was worked out, in a sentence. */
   method: string;
+  /** True when the figure needs people's pay and the model hides it (`model.payHidden`); the screens say so instead of "n/a". */
+  payHidden?: true;
 }
 
 /** An insight with no cost: "n/a". */
 export const noCost = (method: string): IssueCost => ({ perMonth: null, hoursPerMonth: null, method });
+
+/** An insight whose cost depends on individual pay, which this caller may not see. */
+export const payHiddenCost = (): IssueCost => ({
+  perMonth: null,
+  hoursPerMonth: null,
+  method: "This cost depends on people's pay, which isn't shown to you.",
+  payHidden: true,
+});
 
 /** Orders costs highest first: money, then time, then none. */
 export function compareCostsDesc(a: IssueCost, b: IssueCost): number {

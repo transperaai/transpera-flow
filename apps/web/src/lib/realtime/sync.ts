@@ -78,9 +78,11 @@ export class RealtimeSync {
   constructor(
     private readonly session: DraftSession,
     private readonly transport: RealtimeTransport,
-    private readonly me: Viewer,
+    me: Viewer,
     options: SyncOptions = {},
   ) {
+    // Presence and notes name a person, never their email (B1 2/3: other tabs' viewers get no email address).
+    this.me = { ...me, email: null };
     this.now = options.now ?? Date.now;
     this.view = options.view ?? "draft";
     this.key = options.key ?? randomKey();
@@ -88,6 +90,7 @@ export class RealtimeSync {
     this.since = new Date(this.now()).toISOString();
   }
 
+  private readonly me: Viewer;
   private readonly now: () => number;
   private readonly noteWaitMs: number;
   private timers = new Set<ReturnType<typeof setTimeout>>();

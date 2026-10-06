@@ -1,5 +1,6 @@
 // The JSON workspace bundle (issue #39, B10 part 1: export only; PRD §9): everything one workspace holds, as the backup and
-// migration format `transpera-workspace/1`. A future import reads this; nothing here writes.
+// migration format `transpera-workspace/1`. A future import
+// reads this; nothing here writes.
 //
 // What it holds: the workspace and its settings; the company model (roles, people, services, client groups, named clients
 // flagged hidden, demand, market, churn drivers, levers, analysis rules); every process with ALL its versions (published,
@@ -13,6 +14,7 @@
 // checks, the old reports). Every read is as the signed-in user (RLS decides what a viewer may read) and filtered to the
 // one workspace as well, so a policy mistake could not leak another workspace's rows into the file.
 
+import { restoreSizeWarning } from "./workspace-import";
 import { ENGINE_VERSION } from "@transpera-flow/engine";
 import type { Db } from "./queries";
 
@@ -180,6 +182,8 @@ export interface WorkspaceBundle {
   scope: "everything" | "published";
   /** What the file is, for a person opening it. */
   about: string;
+  /** Present only when the workspace is bigger than a restore takes: the same sentence as the end of `about`. */
+  restore_warning?: string;
   workspace: { id: string; name: string; slug: string; plan: string | null; settings: unknown; provenance: unknown };
   company_model: Record<string, Row[]>;
   /** Every process, the company map included, each with all of its versions. */
@@ -207,7 +211,11 @@ const group = (rows: Row[], key: string): Map<string, Row[]> => {
 };
 
 export interface ExportOptions {
-  /** Whether the user may edit the workspace. Editors and owners get everything; a viewer gets what is published: no draft versions, no pending suggestions or proposals. */
+  /**
+   * Whether the user may edit the workspace. Editors and owners get everything; `false` gives what is published (no draft
+   * versions, no pending suggestions or proposals). The export route no longer calls this for viewers (only agency admins,
+   * owners and editors may export, issue #39), but bundles made that way exist, and the import checker accepts them.
+   */
   canEdit: boolean;
   now?: Date;
 }
@@ -298,13 +306,13 @@ export async function exportWorkspaceBundle(
   counts.edges = data.edges.length;
   for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) counts[k] = data[k].length;
 
-  return {
+  const bundle: WorkspaceBundle = {
     format: WORKSPACE_BUNDLE_FORMAT,
     exported_at: now.toISOString(),
     engine_version: ENGINE_VERSION,
     scope: options.canEdit ? "everything" : "published",
     about:
-      "A Transpera Flow workspace backup (export only; importing a bundle is not available yet). Rows keep their ids and column names. Named clients are hidden in the product and kept here, flagged hidden. People's emails, members, tokens and who made or changed anything are never included. The tables are read one after another while people may be editing, so a bundle taken during edits can mix moments: exported_at is when the reading began. A viewer's bundle leaves out draft versions and pending suggestions.",
+      "A Transpera Flow workspace backup. Restore it into a new, empty workspace from that workspace's Overview: each process comes back as a draft of its latest published version. Rows keep their ids and column names. Named clients are hidden in the product and kept here, flagged hidden. People's emails, members, tokens and who made or changed anything are never included. The tables are read one after another while people may be editing, so a bundle taken during edits can mix moments: exported_at is when the reading began.",
     workspace: {
       id: String(ws.id),
       name: String(ws.name),
@@ -326,6 +334,14 @@ export async function exportWorkspaceBundle(
     suggestion_proposals: data.suggestion_proposals,
     counts,
   };
+  // Export allows far more than a restore takes (MAX_TABLE_ROWS against WORKSPACE_IMPORT_LIMITS). A workspace over a restore limit is
+  // still exported, and the file says so in plain words, so it is kept knowing it can't be restored in one go yet.
+  const warning = restoreSizeWarning(bundle);
+  if (warning) {
+    bundle.about = `${bundle.about} ${warning}`;
+    bundle.restore_warning = warning;
+  }
+  return bundle;
 }
 
 /** The reader of the `workspaces` row, as the signed-in user. */

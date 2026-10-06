@@ -13,6 +13,9 @@ import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
+import { Help } from "@/components/help";
+import { workspaceIsEmpty } from "@/lib/restore/empty";
+import { createClient } from "@/lib/supabase/server";
 
 /** The Overview of a workspace (issue #100): the landing page, at `/w/[slug]` and `/w/[slug]/overview`. */
 export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
@@ -21,7 +24,9 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     const head = await loadWorkspaceHead(slug);
     if (!head) notFound();
     const overview = await loadWorkspaceOverview(slug);
-    return <EmptyOverview slug={slug} name={head.name} unpublished={overview?.processes ?? []} />;
+    // The card to restore a backup: only for someone who can, and only while the workspace is empty (drafts count as not empty).
+    const canRestore = (await canEditWorkspace(head.id)) && (await workspaceIsEmpty(await createClient(), head.id));
+    return <EmptyOverview slug={slug} name={head.name} unpublished={overview?.processes ?? []} canRestore={canRestore} />;
   }
   const ws = live.workspace.id;
   const [parts, company, issues, sources, canEdit, firstPrinciples, solutions, findings, aiSettings] = await Promise.all([
@@ -67,7 +72,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       processesHref={`${base}/processes`}
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
-      bundleHref={`${base}/export/bundle`}
+      bundleHref={canEdit ? `${base}/export/bundle` : undefined}
       issuesHref={`${base}/issues`}
       forecastHref={`${base}/forecast`}
       ai={{ view: aiView, stale, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: null }}
@@ -78,7 +83,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
 }
 
 /** A workspace with no published process (a new one): what to do next, where the Overview will be. */
-function EmptyOverview({ slug, name, unpublished }: { slug: string; name: string; unpublished: { id: string; name: string; draft: boolean }[] }) {
+export function EmptyOverview({ slug, name, unpublished, canRestore = false }: { slug: string; name: string; unpublished: { id: string; name: string; draft: boolean }[]; canRestore?: boolean }) {
   const base = `/w/${slug}`;
   return (
     <div>
@@ -113,6 +118,24 @@ function EmptyOverview({ slug, name, unpublished }: { slug: string; name: string
           to connect it.
         </p>
       </section>
+      {canRestore && (
+        <section data-restore-card className="mx-auto mt-4 w-full max-w-3xl rounded-token border border-line p-6">
+          <h2 className="text-base font-bold">
+            Restore a backup
+            <Help
+              label="Restore a backup"
+              description="Every process comes back as a draft of its latest published version. Publish each to see its numbers. Older versions, history and solutions stay in the file."
+              example="Restore northbeam-workspace-2026-10-05.json into a new workspace made for Northbeam."
+            />
+          </h2>
+          <p className="mt-2 text-fg-2">Fill this new workspace from a JSON backup another workspace exported.</p>
+          <p className="mt-3">
+            <Link href={`${base}/restore`} className="font-semibold underline">
+              Choose a backup file
+            </Link>
+          </p>
+        </section>
+      )}
     </div>
   );
 }
