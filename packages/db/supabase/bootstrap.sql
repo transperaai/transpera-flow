@@ -33269,8 +33269,10 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 --         finding by hand (born accepted), can't write an analysis-backed AI finding and can't UPDATE any finding (no
 --         accept, dismiss or edit over the API). The check uses pg_trigger_depth() = 1, as `suggestions` does, so foreign-key
 --         actions (created_by set to null when a user is deleted) still pass;
---       - the key is computed here: 'ai:connector:' + sha256 of the place and the lower-cased, space-squeezed title, so the
---         unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its status (a dismissal stands);
+--       - the key is computed here: 'ai:connector:' + sha256 of the place and the normalised title (Unicode NFKC, curly
+--         quotes straightened, lower case, any run of white space (a no-break space too) one space, trailing punctuation
+--         and spaces dropped), so the unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its
+--         status: a dismissal stands, and a trailing full stop, a no-break space or a curly apostrophe doesn't beat it;
 --       - at most 100 connector proposals per workspace in 24 hours and 50 waiting for review (54000), counted under an
 --         advisory lock (as `reserve_ai_run`);
 --       - the 15-minute "analysis you ran" rule is skipped for a connector insert; a connector finding is never "proposed
@@ -33287,12 +33289,14 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 -- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -f <file>`, one query per file):
---   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, the
---      highest being the previous row of docs/production-migrations.md (20261207700000 unless something else has been applied):
+--   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, and
+--      the highest to be 20261209000000 (row 58, the previous row of docs/production-migrations.md) unless something later
+--      than it has been applied and logged since:
 --        select version from supabase_migrations.schema_migrations where version >= '20261205000000' order by 1;
 --   2. The column doesn't exist yet. Expect 0:
 --        select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'findings' and column_name = 'proposed_via';
---   3. The function body is the one this migration copied. Expect 8f5d4dc6a13d64841a9c2611a9889241, f, {search_path=""}:
+--   3. The function body is the one this migration copied. Expect (psql prints proconfig this way)
+--      8f5d4dc6a13d64841a9c2611a9889241|f|{"search_path=\"\""}:
 --        select md5(prosrc), prosecdef, proconfig from pg_proc where proname = 'findings_before_write';
 --   4. No key uses the new prefix. Expect 0:
 --        select count(*) from public.findings where ai_key like 'ai:connector:%';
@@ -33450,6 +33454,8 @@ declare
   via_token boolean := coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id';
   -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
   again boolean := false;
+  -- The title as the key reads it (connector proposals).
+  norm text;
 begin
   -- Over the API a person reviews findings in the app: no accept, dismiss or edit. (Depth 1 lets foreign-key actions through.)
   if tg_op = 'UPDATE' and via_token and pg_catalog.pg_trigger_depth() = 1 then
@@ -33463,9 +33469,15 @@ begin
       if new.origin <> 'ai' or new.status <> 'proposed' or new.analysis_id is not null or new.run_id is not null then
         raise exception 'findings: over the connector a finding can only be proposed; a person accepts it in the app' using errcode = '42501';
       end if;
-      -- One proposal per place and title: the unique index findings_ai_key refuses it again. Labels, never names (B1 2b).
+      -- One proposal per place and title: the unique index findings_ai_key refuses it again, whatever its status. The title is
+      -- normalised so punctuation, a no-break space or curly quotes can't make a new key: NFKC (a no-break space becomes a
+      -- space), curly quotes straight, lower case, white space to one space, trailing punctuation and spaces dropped. Labels,
+      -- never names (B1 2b). The tool's own check (titleKey in packages/mcp/src/finding-proposal.ts) does the same.
+      norm := pg_catalog.btrim(pg_catalog.lower(pg_catalog.translate(normalize(new.title, NFKC), '‘’“”', '''''""')));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, '[[:space:]]+', ' ', 'g'));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, '[]).!?,;:''"–—-]+$', ''));
       new.ai_key := 'ai:connector:' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(new.process_id::text, 'company') || '|' || pg_catalog.lower(pg_catalog.regexp_replace(pg_catalog.btrim(new.title), '\s+', ' ', 'g')),
+        coalesce(new.process_id::text, 'company') || '|' || norm,
         'UTF8')), 'hex');
       perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('findings_connector:' || new.workspace_id::text, 0));
       if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = 'connector'
@@ -33606,8 +33618,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --         finding by hand (born accepted), can''t write an analysis-backed AI finding and can''t UPDATE any finding (no
 --         accept, dismiss or edit over the API). The check uses pg_trigger_depth() = 1, as `suggestions` does, so foreign-key
 --         actions (created_by set to null when a user is deleted) still pass;
---       - the key is computed here: ''ai:connector:'' + sha256 of the place and the lower-cased, space-squeezed title, so the
---         unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its status (a dismissal stands);
+--       - the key is computed here: ''ai:connector:'' + sha256 of the place and the normalised title (Unicode NFKC, curly
+--         quotes straightened, lower case, any run of white space (a no-break space too) one space, trailing punctuation
+--         and spaces dropped), so the unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its
+--         status: a dismissal stands, and a trailing full stop, a no-break space or a curly apostrophe doesn''t beat it;
 --       - at most 100 connector proposals per workspace in 24 hours and 50 waiting for review (54000), counted under an
 --         advisory lock (as `reserve_ai_run`);
 --       - the 15-minute "analysis you ran" rule is skipped for a connector insert; a connector finding is never "proposed
@@ -33624,12 +33638,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -f <file>`, one query per file):
---   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, the
---      highest being the previous row of docs/production-migrations.md (20261207700000 unless something else has been applied):
+--   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, and
+--      the highest to be 20261209000000 (row 58, the previous row of docs/production-migrations.md) unless something later
+--      than it has been applied and logged since:
 --        select version from supabase_migrations.schema_migrations where version >= ''20261205000000'' order by 1;
 --   2. The column doesn''t exist yet. Expect 0:
 --        select count(*) from information_schema.columns where table_schema = ''public'' and table_name = ''findings'' and column_name = ''proposed_via'';
---   3. The function body is the one this migration copied. Expect 8f5d4dc6a13d64841a9c2611a9889241, f, {search_path=""}:
+--   3. The function body is the one this migration copied. Expect (psql prints proconfig this way)
+--      8f5d4dc6a13d64841a9c2611a9889241|f|{"search_path=\"\""}:
 --        select md5(prosrc), prosecdef, proconfig from pg_proc where proname = ''findings_before_write'';
 --   4. No key uses the new prefix. Expect 0:
 --        select count(*) from public.findings where ai_key like ''ai:connector:%'';
@@ -33787,6 +33803,8 @@ declare
   via_token boolean := coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'';
   -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
   again boolean := false;
+  -- The title as the key reads it (connector proposals).
+  norm text;
 begin
   -- Over the API a person reviews findings in the app: no accept, dismiss or edit. (Depth 1 lets foreign-key actions through.)
   if tg_op = ''UPDATE'' and via_token and pg_catalog.pg_trigger_depth() = 1 then
@@ -33800,9 +33818,15 @@ begin
       if new.origin <> ''ai'' or new.status <> ''proposed'' or new.analysis_id is not null or new.run_id is not null then
         raise exception ''findings: over the connector a finding can only be proposed; a person accepts it in the app'' using errcode = ''42501'';
       end if;
-      -- One proposal per place and title: the unique index findings_ai_key refuses it again. Labels, never names (B1 2b).
+      -- One proposal per place and title: the unique index findings_ai_key refuses it again, whatever its status. The title is
+      -- normalised so punctuation, a no-break space or curly quotes can''t make a new key: NFKC (a no-break space becomes a
+      -- space), curly quotes straight, lower case, white space to one space, trailing punctuation and spaces dropped. Labels,
+      -- never names (B1 2b). The tool''s own check (titleKey in packages/mcp/src/finding-proposal.ts) does the same.
+      norm := pg_catalog.btrim(pg_catalog.lower(pg_catalog.translate(normalize(new.title, NFKC), ''‘’“”'', ''''''''''""'')));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, ''[[:space:]]+'', '' '', ''g''));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, ''[]).!?,;:''''"–—-]+$'', ''''));
       new.ai_key := ''ai:connector:'' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
-        coalesce(new.process_id::text, ''company'') || ''|'' || pg_catalog.lower(pg_catalog.regexp_replace(pg_catalog.btrim(new.title), ''\s+'', '' '', ''g'')),
+        coalesce(new.process_id::text, ''company'') || ''|'' || norm,
         ''UTF8'')), ''hex'');
       perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''findings_connector:'' || new.workspace_id::text, 0));
       if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = ''connector''

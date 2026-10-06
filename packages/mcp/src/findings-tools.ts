@@ -29,7 +29,7 @@ import {
 import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig, type DetectedIssue } from "@transpera-flow/engine";
 import { loadLiveModel, processSteps } from "./analysis-tools";
 import { matchNamed } from "./analysis";
-import { hasLabel, quoteIn, squeeze, unsupportedMoney } from "./finding-proposal";
+import { hasLabel, quoteIn, titleKey, unsupportedMoney } from "./finding-proposal";
 import { resolveProcess, resolveWorkspace, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool, ToolError } from "./result";
 
@@ -260,6 +260,9 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         // Shape.
         if (args.company && (args.process || args.step)) throw new ToolError("invalid_input", "A company-wide finding sits on no process or step; drop process and step, or company.");
         if (args.facts_from && !args.company) throw new ToolError("invalid_input", "facts_from is for company-wide findings; a process finding cites its own process's facts");
+        if (factKeys.length + quotes.length > FINDING_LIMITS.facts) {
+          throw new ToolError("invalid_input", `A finding can rest on at most ${FINDING_LIMITS.facts} facts and quotes together; you gave ${factKeys.length} facts and ${quotes.length} quotes.`);
+        }
         if (hasLabel([args.title, evidence, why, ...quotes.map((q) => q.text)])) {
           throw new ToolError("invalid_input", "Write people's names as get_process shows them, not \"Team member\" labels: the app labels names itself.");
         }
@@ -349,9 +352,10 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
 
         // A finding with these words already waits or was accepted here, whoever wrote it (the database's key refuses a connector one for good).
         const processId = proc?.id ?? null;
-        const base = ctx.db.from("findings").select("id, title, status, origin, proposed_via").eq("workspace_id", ws.id).in("status", ["proposed", "accepted"]);
-        const twin = check(await (processId ? base.eq("process_id", processId) : base.is("process_id", null))).find((f) => squeeze(lab(f.title)) === squeeze(title));
-        if (twin) throw new ToolError("duplicate", `There's already a finding with that title here (${twin.status}).`, [{ id: twin.id, status: twin.status }]);
+        // Any proposed or accepted finding, and any connector proposal whatever its status: a person's dismissal stands (D38).
+        const base = ctx.db.from("findings").select("id, title, status, origin, proposed_via").eq("workspace_id", ws.id).or("status.in.(proposed,accepted),proposed_via.eq.connector");
+        const twin = check(await (processId ? base.eq("process_id", processId) : base.is("process_id", null))).find((f) => titleKey(lab(f.title)) === titleKey(title));
+        if (twin) throw new ToolError("duplicate", `There's already a finding with that title here (${twin.status}${twin.status === "dismissed" ? "; a person dismissed it, and that stands" : ""}).`, [{ id: twin.id, status: twin.status }]);
 
         const written = await proposeConnectorFinding(ctx.db, {
           workspaceId: ws.id,

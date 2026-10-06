@@ -171,6 +171,16 @@ describe("duplicates", () => {
     await expect(commitAs(token("editor"), (c) => insert(c, { title: "Proposals wait" }))).rejects.toMatchObject({ code: "23505" });
   });
 
+  it("treats near-identical titles as the same, so a dismissal can't be beaten by punctuation, a no-break space or curly quotes (23505)", async () => {
+    const id = (await commitAs(token("editor"), (c) => insert(c, { title: "Proposals don't wait too long" }))).rows[0].id as string;
+    await commitAs(session("editor"), (c) => c.query("update findings set status = 'dismissed' where id = $1", [id]));
+    for (const again of ["Proposals don't wait too long.", "Proposals don't\u00a0wait too long", "Proposals don\u2019t wait too long!", "  PROPOSALS DON\u2019T WAIT  TOO LONG\u2026 ", "Proposals don't wait too long?!"]) {
+      await expect(commitAs(token("editor"), (c) => insert(c, { title: again })), again).rejects.toMatchObject({ code: "23505" });
+    }
+    // Different words are still a different finding.
+    await expect(commitAs(token("editor"), (c) => insert(c, { title: "Proposals wait too long" }))).resolves.toBeDefined();
+  });
+
   it("allows the same title on another process and across the company", async () => {
     await commitAs(token("editor"), (c) => insert(c, { title: "Same words" }));
     await commitAs(token("editor"), (c) => insert(c, { title: "Same words", process_id: secondProc }));

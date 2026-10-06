@@ -8,13 +8,16 @@ const LABEL_IN_TEXT = /\bTeam member (?:[A-Z]|\d{1,4})\b/;
 /** True when any of the texts already holds a "Team member X" label (it would be read as whoever holds that letter). */
 export const hasLabel = (texts: readonly string[]): boolean => texts.some((t) => LABEL_IN_TEXT.test(t));
 
-const NUMBER = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`;
+// English ("1,234.50") and European ("1.234,50") digit grouping.
+const NUMBER = String.raw`\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?`;
 const SUFFIX = String.raw`(?:bn\b|[kKmM]\b)?`;
-const SYMBOL = String.raw`(?:A\$|NZ\$|C\$|[£$€])`;
+// £ $ €, or up to three capitals before a dollar sign (A$, NZ$, US$, HK$, AU$...).
+const SYMBOL = String.raw`(?:[A-Z]{1,3}\$|[£$€])`;
+const SIGN = String.raw`[£$€]`;
 const CODE = String.raw`(?:GBP|USD|EUR|AUD|NZD|CAD)`;
-// A symbol or code before the number ("£1,234", "$12.5k", "EUR 40"), or a code after it ("1,200 GBP").
+// A symbol or code before the number ("£1,234", "US$12.5k", "EUR 40"), or a symbol or code after it ("4,512€", "1,200 GBP").
 const MONEY = new RegExp(
-  String.raw`(?<![A-Za-z0-9])(?:${SYMBOL}|${CODE})\s?(?:${NUMBER})${SUFFIX}|(?<![\d,.A-Za-z$£€])(?:${NUMBER})${SUFFIX}\s?${CODE}(?![A-Za-z])`,
+  String.raw`(?<![A-Za-z0-9])(?:${SYMBOL}|${CODE})\s?(?:${NUMBER})${SUFFIX}|(?<![\d,.A-Za-z$£€])(?:${NUMBER})${SUFFIX}\s?(?:${CODE}(?![A-Za-z])|${SIGN})`,
   "g",
 );
 
@@ -46,4 +49,21 @@ export const squeeze = (s: string): string =>
 export function quoteIn(body: string, quote: string): boolean {
   const q = squeeze(quote);
   return q.length >= 10 && squeeze(body).includes(q);
+}
+
+/**
+ * A title as the database's key reads it (`private.findings_before_write`, migration 20261212000000): Unicode NFKC (a
+ * no-break space becomes a space), curly quotes straightened, lower case, white space to one space, trailing punctuation and
+ * spaces dropped. Two titles with the same key are the same proposal.
+ */
+export function titleKey(title: string): string {
+  return title
+    .normalize("NFKC")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\]).!?,;:'"–—-]+$/, "")
+    .trim();
 }

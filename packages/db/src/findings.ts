@@ -232,6 +232,8 @@ export type ConnectorFindingWrite = FindingWrite | { status: "duplicate" } | { s
 export async function proposeConnectorFinding(db: Db, input: ConnectorFindingInput): Promise<ConnectorFindingWrite> {
   const problem = findingDraftProblem({ ...input, sourceIds: input.sourceIds });
   if (problem) return { status: "invalid", message: problem };
+  // Never drop a citation silently: a finding rests on what it says it rests on.
+  if (input.facts.length > FINDING_LIMITS.facts) return { status: "invalid", message: `A finding can rest on at most ${FINDING_LIMITS.facts} facts and quotes together.` };
   const { data, error } = await db
     .from("findings")
     .insert({
@@ -245,7 +247,7 @@ export async function proposeConnectorFinding(db: Db, input: ConnectorFindingInp
       title: input.title.trim(),
       evidence: input.evidence.trim(),
       why: input.why.trim(),
-      facts: input.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
+      facts: input.facts as unknown as Json,
       source_ids: input.sourceIds,
       person_labels: input.personLabels as unknown as Json,
     })
