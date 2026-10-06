@@ -448,6 +448,14 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
 
     beforeAll(async () => {
       mcpEditor = await connect(tokens.editor, options);
+      // A step pinned to Maya that sends work back: its rework fact costs her hours at her cost rate, so the editor's figure
+      // depends on her pay and a member's doesn't exist (the no-pay test below needs one).
+      const maya = (await one("select id from people where workspace_id = $1 and name = 'Maya Collins'", [ids.ws])).id as string;
+      await admin.query("update people set cost_rate = 913.37 where id = $1", [maya]);
+      const review = await call(mcpEditor, "add_step", { process: "Sales", name: "Review proposal", role: "Strategist", person: "Maya Collins", work_hours: 1, rework_rate: 0.4, rework_to: "Write proposal", after: "Write proposal", before: "Won" });
+      expect(review.ok, JSON.stringify(review)).toBe(true);
+      const republished = await call(mcpEditor, "publish_process", { process: "Sales", accept_estimates: true });
+      expect(republished.ok, JSON.stringify(republished)).toBe(true);
       const got = await call<{ facts: Fact[] }>(mcpEditor, "get_facts", { process: "Sales" });
       expect(got.ok, JSON.stringify(got)).toBe(true);
       facts = got.data.facts;
@@ -549,6 +557,14 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       expect(Number((await one("select count(*) from findings where title in ('No evidence', 'Overtime costs £9,999 a month')")).count)).toBe(0);
     }, 120_000);
 
+    it("refuses more than 30 facts and quotes together instead of dropping some", async () => {
+      const keys = Array.from({ length: 30 }, (_, i) => `capacity:role:not-a-real-fact-${i}`);
+      const r = await call(mcpEditor, "propose_finding", proposal({ title: "Too many citations", facts: keys, quotes: [{ source: "Proposal interview", text: "we write every proposal by hand" }] }));
+      expect(r).toMatchObject({ ok: false, error: { code: "invalid_input" } });
+      expect(r.error!.message).toContain("at most 30");
+      expect(Number((await one("select count(*) from findings where title = 'Too many citations'")).count)).toBe(0);
+    }, 60_000);
+
     it("refuses the same proposal twice, but allows the same words on another place", async () => {
       const first = await call(mcpEditor, "propose_finding", proposal({ title: "Everything waits on one desk" }));
       expect(first.ok, JSON.stringify(first)).toBe(true);
@@ -556,30 +572,31 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       // A person dismissed it: Claude can't propose it again (the database's key remembers it).
       await admin.query("update findings set status = 'dismissed' where workspace_id = $1 and title = 'Everything waits on one desk'", [ids.ws]);
       expect(await call(mcpEditor, "propose_finding", proposal({ title: "Everything waits on one desk" }))).toMatchObject({ ok: false, error: { code: "duplicate" } });
+      // Not even with a trailing full stop, a no-break space or a different case: the dismissal stands.
+      for (const title of ["Everything waits on one desk.", "Everything waits\u00a0on one desk", "EVERYTHING WAITS ON ONE DESK!"]) {
+        expect(await call(mcpEditor, "propose_finding", proposal({ title })), title).toMatchObject({ ok: false, error: { code: "duplicate" } });
+      }
       const company = await call(mcpEditor, "propose_finding", { company: true, title: "Everything waits on one desk", rating: "bad", type: "delay", facts: [facts[0]!.key] });
       expect(company.ok, JSON.stringify(company)).toBe(true);
     }, 120_000);
 
-    it("states no pay: a proposal citing an overtime or overload fact stores neither the person's rate nor the editor's cost figure", async () => {
+    it("states no pay: a proposal citing a fact whose cost depends on a person's pay stores neither the rate nor the editor's figure", async () => {
       const maya = (await one("select id from people where workspace_id = $1 and name = 'Maya Collins'", [ids.ws])).id as string;
-      const before = (await one("select cost_rate from people where id = $1", [maya])).cost_rate;
-      await admin.query("update people set cost_rate = 913.37 where id = $1", [maya]);
-      try {
-        const editorsView = await call<{ facts: Fact[] }>(mcpEditor, "get_facts", { process: "Sales" });
-        const pick = editorsView.data.facts.find((f) => f.cost.per_month !== null && /^(overtime|capacity)/.test(f.key)) ?? editorsView.data.facts.find((f) => /^(overtime|capacity)/.test(f.key)) ?? editorsView.data.facts[0]!;
-        const r = await call<Proposed>(mcpEditor, "propose_finding", { process: "Sales", title: "Overload is costing us", rating: "bad", type: "capacity", evidence: `See ${pick.title}.`, facts: [pick.key] });
-        expect(r.ok, JSON.stringify(r)).toBe(true);
-        const stored = (await one("select (title, evidence, why, facts, person_labels)::text as t from findings where id = $1", [r.data.finding.id])).t as string;
-        expect(stored).not.toContain("913");
-        expect(JSON.stringify(r)).not.toContain("913");
-        if (pick.cost.per_month !== null && pick.cost.per_month >= 100) {
-          const figure = String(Math.round(pick.cost.per_month));
-          expect(stored).not.toContain(figure);
-          expect(stored).not.toContain(Math.round(pick.cost.per_month).toLocaleString("en-GB"));
-        }
-      } finally {
-        await admin.query("update people set cost_rate = $2 where id = $1", [maya, before]);
+      const editorsView = await call<{ facts: Fact[] }>(mcpEditor, "get_facts", { process: "Sales" });
+      // The editor sees a cost for a rework, overtime or person-level fact (hours at a person's rate); the fixture must make one.
+      const pick = editorsView.data.facts.find((f) => f.cost.per_month !== null && /^(rework:step|overtime:person|capacity:person|spare)/.test(f.key));
+      expect(pick, `no pay-dependent fact with a cost in ${JSON.stringify(editorsView.data.facts.map((f) => [f.key, f.cost.per_month]))}`).toBeDefined();
+      expect(pick!.cost.per_month!).toBeGreaterThan(0);
+      const r = await call<Proposed>(mcpEditor, "propose_finding", { process: "Sales", title: "Rework is costing us", rating: "bad", type: "failure", evidence: `See ${pick!.title}.`, facts: [pick!.key] });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.data.finding.rests_on.map((c) => c.key)).toEqual([pick!.key]);
+      const stored = (await one("select (title, evidence, why, facts, person_labels)::text as t from findings where id = $1", [r.data.finding.id])).t as string;
+      const per = pick!.cost.per_month!;
+      for (const figure of [String(per), String(Math.round(per)), Math.round(per).toLocaleString("en-GB"), "913"]) {
+        expect(stored, `stored text holds ${figure}`).not.toContain(figure);
+        expect(JSON.stringify(r), `response holds ${figure}`).not.toContain(figure);
       }
+      expect(maya).toBeTruthy();
     }, 120_000);
 
     it("proposes a company-wide finding that sits on no process", async () => {
