@@ -741,6 +741,15 @@ describe("client health rules (B1 3/3)", () => {
     });
   });
 
+  it("an API token (the claims carry api_token_id) is refused by needs_review, even inside the SECURITY DEFINER function", async () => {
+    const token = { ...callers.editor!.claims, api_token_id: "00000000-0000-4000-8000-0000000000cc" };
+    await db.as(token, async (c) => {
+      await c.query("savepoint s");
+      await expect(save(c, baseNow, '{"health_recover": 7}')).rejects.toMatchObject({ code: "42501", message: expect.stringMatching(/changes only by review/) });
+      await c.query("rollback to savepoint s");
+    });
+  });
+
   it("anon holds no execute right on it or on the agency list", async () => {
     await db.client.query("begin");
     try {
