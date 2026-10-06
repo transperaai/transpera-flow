@@ -106,7 +106,7 @@ export interface CalibrationInput {
   minSample?: number;
 }
 
-export type CalibrationKind = "work" | "wait" | "rework" | "routing" | "arrivals";
+export type CalibrationKind = "work" | "wait" | "rework" | "routing" | "arrivals" | "churn";
 
 /** A way out of a step, for a routing proposal. */
 export interface CalibrationBranch {
@@ -120,10 +120,10 @@ export interface CalibrationBranch {
 }
 
 export interface CalibrationProposal {
-  /** Stable per process and kind: `work:<stepId>`, `routing:<stepId>`, `arrivals:<leadSourceId>`. */
+  /** Stable per process and kind: `work:<stepId>`, `routing:<stepId>`, `arrivals:<leadSourceId>`, `churn:<clientGroupId>`. */
   key: string;
   kind: CalibrationKind;
-  target: { table: "steps" | "lead_sources"; id: string };
+  target: { table: "steps" | "lead_sources" | "client_groups"; id: string };
   /** The step or lead source, by name. */
   subject: string;
   /** Observations the proposal rests on. */
@@ -132,7 +132,7 @@ export interface CalibrationProposal {
   enough: boolean;
   /** Where the current value came from. */
   currentSource: CalibrationValueSource;
-  /** The current value: hours (work, wait), a share (rework), leads a week (arrivals); null for routing. */
+  /** The current value: hours (work, wait), a share (rework, churn), leads a week (arrivals); null for routing. */
   current: number | null;
   /** The proposed value in the same unit, or null when not proposed. */
   proposed: number | null;
@@ -141,6 +141,10 @@ export interface CalibrationProposal {
   proposedCv?: number | null;
   /** Routing only: each way out, now and proposed. */
   branches?: CalibrationBranch[];
+  /** Churn only: the monthly churn measured in the clients file, today's driver multiplier on it, and how many clients left. */
+  measured?: number | null;
+  multiplier?: number | null;
+  leavers?: number;
   /** Whether applying would change anything. */
   changed: boolean;
   /** Why nothing is proposed, when nothing is (too few, a branch that can't be seen). */

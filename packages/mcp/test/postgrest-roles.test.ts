@@ -269,3 +269,92 @@ describe.skipIf(!POSTGREST_URL)("per-person privacy over PostgREST", () => {
     }
   });
 });
+
+// Editors change the Client health rules (issue #30, B1 part 3; migration 20261209000000): `save_health_rules` is SECURITY DEFINER, so
+// it must still know who the caller is (`auth.uid()` from the request's claims), stamp and log that person, and leave the company
+// model to review for an API token (the `needs_review` trigger reads the claims at trigger depth 1).
+describe.skipIf(!POSTGREST_URL)("client health rules over PostgREST", () => {
+  let db: pg.Client;
+  let hws = "";
+  const hu = { editor: "", member: "" };
+  let editorSession: SupabaseClient;
+  let memberSession: SupabaseClient;
+  let editorToken: SupabaseClient;
+  const session = (token: string): SupabaseClient =>
+    createClient("http://postgrest.invalid", token, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { authorization: `Bearer ${token}` },
+        fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
+      },
+    });
+  const save = (c: SupabaseClient, base: number | null, value: number | null) =>
+    c.rpc("save_health_rules", { ws: hws, base: { health_recover: base }, changes: { health_recover: value } });
+
+  beforeAll(async () => {
+    const url = new URL(ADMIN_URL);
+    url.pathname = `/${DATABASE_NAME}`;
+    db = new pg.Client({ connectionString: url.toString() });
+    await db.connect();
+    const tag = randomUUID().slice(0, 8);
+    hws = (await db.query("insert into workspaces (name, slug) values ('Health Co', $1) returning id", [`health-${tag}`])).rows[0].id as string;
+    for (const k of ["editor", "member"] as const) {
+      hu[k] = randomUUID();
+      await db.query("insert into auth.users (id, email) values ($1, $2)", [hu[k], `health-${k}-${tag}@example.com`]);
+    }
+    await db.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [hws, hu.editor, hu.member]);
+    const jwt = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
+    editorSession = session(jwt(hu.editor));
+    memberSession = session(jwt(hu.member));
+    const { token, hash } = generateApiToken();
+    await db.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'health')", [hu.editor, hash]);
+    const anon = signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
+    editorToken = createClient("http://postgrest.invalid", anon, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { authorization: `Bearer ${anon}`, "x-api-token": token },
+        fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
+      },
+    });
+    const deadline = Date.now() + 60_000;
+    while ((await editorSession.from("workspaces").select("id").eq("id", hws)).data?.length !== 1) {
+      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  });
+
+  afterAll(async () => {
+    if (hws) {
+      await db.query("delete from workspaces where id = $1", [hws]);
+      await db.query("delete from audit_log where workspace_id = $1", [hws]);
+    }
+    if (db) {
+      await db.query("delete from api_tokens where user_id = $1", [hu.editor]);
+      await db.query("delete from auth.users where id = any($1)", [[hu.editor, hu.member]]);
+    }
+    await db?.end();
+  });
+
+  it("an editor's session saves a rule, stamped and logged as them", async () => {
+    const res = await save(editorSession, null, 7);
+    expect(res.error).toBeNull();
+    expect(res.data).toMatchObject({ status: "saved", row: { settings: { health_recover: 7 } } });
+    const w = (await db.query("select settings -> 'health_recover' as v, provenance -> 'settings.health_recover' ->> 'by' as by from workspaces where id = $1", [hws])).rows[0];
+    expect(w).toEqual({ v: 7, by: hu.editor });
+    const log = (await db.query("select actor_id, actor_kind from audit_log where workspace_id = $1 and target_table = 'workspaces'", [hws])).rows;
+    expect(log).toEqual([{ actor_id: hu.editor, actor_kind: "user" }]);
+  });
+
+  it("a member's session gets not_found and changes nothing", async () => {
+    const res = await save(memberSession, 7, 9);
+    expect(res.error).toBeNull();
+    expect(res.data).toEqual({ status: "not_found" });
+    expect((await db.query("select settings -> 'health_recover' as v from workspaces where id = $1", [hws])).rows[0].v).toBe(7);
+  });
+
+  it("an editor's API token is refused: the company model changes only by review", async () => {
+    const res = await save(editorToken, 7, 9);
+    expect(res.error?.message).toMatch(/changes only by review/);
+    expect((await db.query("select settings -> 'health_recover' as v from workspaces where id = $1", [hws])).rows[0].v).toBe(7);
+  });
+});

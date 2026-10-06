@@ -26,7 +26,7 @@
 -- Preflight (run one file at a time with `prod-sql.sh -f`):
 --
 --     -- 0. Nothing at or past this version. Expect 0:
---     select count(*) from supabase_migrations.schema_migrations where version >= '20261213000000';
+--     select count(*) from supabase_migrations.schema_migrations where version >= '20261219000000';
 --     -- 1. The table doesn't exist. Expect null:
 --     select pg_catalog.to_regclass('public.forecast_plans');
 --     -- 2. The trigger function doesn't exist. Expect 0:
@@ -54,14 +54,14 @@
 --            has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
 --       from pg_proc p where p.proname = 'forecast_plans_before_write';
 --     -- The version row. Expect 1:
---     select count(*) from supabase_migrations.schema_migrations where version = '20261213000000';
+--     select count(*) from supabase_migrations.schema_migrations where version = '20261219000000';
 --
 -- Rollback (one transaction; roll the app back first). Rolling back loses every saved plan. Production data: none needed.
 --
 --     begin;
 --     drop table if exists public.forecast_plans;   -- its triggers, policies and indexes go with it
 --     drop function if exists private.forecast_plans_before_write();
---     delete from supabase_migrations.schema_migrations where version = '20261213000000';
+--     delete from supabase_migrations.schema_migrations where version = '20261219000000';
 --     commit;
 
 create table public.forecast_plans (

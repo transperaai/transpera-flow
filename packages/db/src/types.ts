@@ -529,6 +529,8 @@ export interface FindingRow {
   analysis_id: string | null;
   /** The run that last proposed it (analyses are kept one per version; each run has its own id). */
   run_id: string | null;
+  /** 'connector' when Claude proposed it over the MCP connector (B20); null otherwise. Set by the database. */
+  proposed_via: "connector" | null;
   /** An AI finding a person has changed (set by the database only): its words are no longer only AI's. */
   edited: boolean;
   created_by: string | null;
@@ -1172,8 +1174,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<FirstPrinciplesRow, "first_principles">>,
   Assert<Matches<AiSettingsRow, "ai_settings">>,
   Assert<Matches<AiAnalysisRow, "ai_analyses">>,
-  // origin, status, rating and type are check-constrained.
-  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type">, "findings">>,
+  // origin, status, rating, type and proposed_via are check-constrained.
+  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type" | "proposed_via">, "findings">>,
   // trigger is check-constrained to the three triggers.
   Assert<Matches<Omit<AiRunRow, "trigger">, "ai_runs">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.

@@ -11,6 +11,7 @@ import { call, connect, signJwt } from "./helpers";
 // dismiss them; a viewer creates and changes none; anon reads nothing; nobody reaches another workspace's; nobody deletes
 // one; an "AI" finding needs an analysis its writer ran. And the connector's coverage: every fact, finding and issue an
 // analysis needs is readable over MCP (get_facts, list_findings, list_issues, get_analysis, list_sources, list_solutions).
+// And B20 (#197): Claude proposes findings over the connector (propose_finding), which an editor accepts in the app.
 // Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
 
 const POSTGREST_URL = process.env.POSTGREST_URL;
@@ -427,4 +428,186 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     expect(row.evidence_metrics).toEqual({ overtime_hours_week: 4 });
     expect(JSON.stringify(listed)).not.toMatch(/overtime_cost|costing about/);
   }, 120_000);
+
+  // Claude outside the app proposes findings (issue #197, B20; migration 20261212000000).
+  describe("propose_finding over the connector", () => {
+    type Fact = { key: string; title: string; evidence: string; cost: { per_month: number | null } };
+    type Proposed = { finding: { id: string; status: string; origin: string; proposed_via: string; title: string; process: { name: string } | null; across_the_company: boolean; step: { name: string } | null; rests_on: { kind: string; key: string; text: string }[]; source_ids: string[] }; review: string };
+    let mcpEditor: Awaited<ReturnType<typeof connect>>;
+    let facts: Fact[];
+    let sourceId: string;
+    let memberToken: string;
+    let strangerWsToken: string;
+    const proposal = (extra: Record<string, unknown> = {}) => ({ process: "Sales", title: "Proposals wait for one strategist", rating: "bad", type: "delay", facts: [facts[0]!.key], ...extra });
+    const raw = (method: string, path: string, token: string, body?: unknown) =>
+      fetch(`${POSTGREST_URL}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${options.supabaseKey}`, "x-api-token": token, "content-type": "application/json", prefer: "return=representation" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+
+    beforeAll(async () => {
+      mcpEditor = await connect(tokens.editor, options);
+      // A step pinned to Maya that sends work back: its rework fact costs her hours at her cost rate, so the editor's figure
+      // depends on her pay and a member's doesn't exist (the no-pay test below needs one).
+      const maya = (await one("select id from people where workspace_id = $1 and name = 'Maya Collins'", [ids.ws])).id as string;
+      await admin.query("update people set cost_rate = 913.37 where id = $1", [maya]);
+      const review = await call(mcpEditor, "add_step", { process: "Sales", name: "Review proposal", role: "Strategist", person: "Maya Collins", work_hours: 1, rework_rate: 0.4, rework_to: "Write proposal", after: "Write proposal", before: "Won" });
+      expect(review.ok, JSON.stringify(review)).toBe(true);
+      const republished = await call(mcpEditor, "publish_process", { process: "Sales", accept_estimates: true });
+      expect(republished.ok, JSON.stringify(republished)).toBe(true);
+      const got = await call<{ facts: Fact[] }>(mcpEditor, "get_facts", { process: "Sales" });
+      expect(got.ok, JSON.stringify(got)).toBe(true);
+      facts = got.data.facts;
+      expect(facts.length).toBeGreaterThan(0);
+      sourceId = (await one("insert into sources (workspace_id, title, body) values ($1, 'Proposal interview', $2) returning id", [ids.ws, "Maya Collins: We write every proposal by hand, and it takes most of the week."])).id as string;
+      const member = randomUUID();
+      await admin.query("insert into auth.users (id, email) values ($1, $2)", [member, `f-propose-member-${randomUUID().slice(0, 8)}@example.com`]);
+      await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ids.ws, member]);
+      memberToken = await apiToken(member);
+      strangerWsToken = tokens.stranger;
+    }, 120_000);
+
+    it("proposes a finding that waits for review, stored with labels and read with names; then a person accepts it in the app", async () => {
+      const r = await call<Proposed>(
+        mcpEditor,
+        "propose_finding",
+        proposal({
+          title: "Maya Collins is the only one who writes proposals",
+          evidence: "Maya Collins writes each one by hand.",
+          why: "Proposals queue when Maya Collins is busy.",
+          step: "Write proposal",
+          type: "spof",
+          rating: "risk",
+          quotes: [{ source: "Proposal interview", text: "we write every proposal by hand" }],
+        }),
+      );
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.data.finding).toMatchObject({ status: "proposed", origin: "ai", proposed_via: "connector", title: "Maya Collins is the only one who writes proposals", process: { name: "Sales" }, across_the_company: false, step: { name: "Write proposal" } });
+      expect(r.data.finding.rests_on.map((c) => c.kind)).toEqual(["fact", "quote"]);
+      expect(r.data.review).toContain("Sales");
+      const id = r.data.finding.id;
+
+      const row = await one("select * from findings where id = $1", [id]);
+      const maya = (await one("select id from people where workspace_id = $1 and name = 'Maya Collins'", [ids.ws])).id;
+      expect(row).toMatchObject({ status: "proposed", origin: "ai", proposed_via: "connector", analysis_id: null, run_id: null, created_by: ids.editor, edited: false, source_ids: [sourceId], person_labels: { "Team member A": maya } });
+      expect(row.ai_key).toMatch(/^ai:connector:[0-9a-f]{64}$/);
+      expect(row.title).toBe("Team member A is the only one who writes proposals");
+      expect(JSON.stringify([row.title, row.evidence, row.why, row.facts])).not.toContain("Maya");
+
+      // The editor reads names, marked as from the connector; a viewer reads "A team member".
+      const listed = await call<{ findings: { id: string; title: string; evidence: string; proposed_via: string; status: string }[] }>(mcpEditor, "list_findings", { status: ["proposed", "accepted"] });
+      expect(listed.data.findings.find((f) => f.id === id)).toMatchObject({ title: "Maya Collins is the only one who writes proposals", evidence: "Maya Collins writes each one by hand.", proposed_via: "connector", status: "proposed" });
+      const asViewer = await call<{ findings: { id: string; title: string; why: string }[] }>(await connect(tokens.viewer, options), "list_findings", { status: ["proposed", "accepted"] });
+      const seen = asViewer.data.findings.find((f) => f.id === id)!;
+      expect(seen).toMatchObject({ title: "A team member is the only one who writes proposals", why: "Proposals queue when a team member is busy." });
+      expect(JSON.stringify(asViewer)).not.toContain("Maya");
+
+      // A person accepts it in the app (the editor's session); the connector then lists it as accepted.
+      expect(await setFindingStatus(editor as never, id, "accepted")).toMatchObject({ status: "saved", finding: { status: "accepted", proposed_via: "connector", decided_by: ids.editor } });
+      const after = await call<{ findings: { id: string; status: string; proposed_via: string }[] }>(mcpEditor, "list_findings", { status: ["accepted"] });
+      expect(after.data.findings.find((f) => f.id === id)).toMatchObject({ status: "accepted", proposed_via: "connector" });
+    }, 120_000);
+
+    it("can't be used to skip review: a token straight against PostgREST can neither accept a proposal nor add an accepted finding", async () => {
+      const made = await call<Proposed>(mcpEditor, "propose_finding", proposal({ title: "Review can't be skipped" }));
+      expect(made.ok, JSON.stringify(made)).toBe(true);
+      const id = made.data.finding.id;
+      const patch = await raw("PATCH", `/findings?id=eq.${id}`, tokens.editor, { status: "accepted" });
+      // PostgREST answers 42501 with 401 for a request whose JWT role is anon (the token's identity is set by the pre-request hook).
+      expect([401, 403]).toContain(patch.status);
+      expect(await patch.text()).toContain("not over the API");
+      const hand = await raw("POST", "/findings", tokens.editor, manual("Added over the API"));
+      expect([401, 403]).toContain(hand.status);
+      const accepted = await raw("POST", "/findings", tokens.editor, manual("Born accepted", { origin: "ai", status: "accepted", ai_key: "ai:insight:zzzzzzzzzzzz" }));
+      expect([401, 403]).toContain(accepted.status);
+      expect((await one("select status from findings where id = $1", [id])).status).toBe("proposed");
+      expect(Number((await one("select count(*) from findings where workspace_id = $1 and title in ('Added over the API', 'Born accepted')", [ids.ws])).count)).toBe(0);
+    }, 60_000);
+
+    it("refuses a viewer, a member and a stranger", async () => {
+      const viewer = await call(await connect(tokens.viewer, options), "propose_finding", proposal({ title: "Viewer's idea" }));
+      expect(viewer).toMatchObject({ ok: false, error: { code: "forbidden" } });
+      const member = await call(await connect(memberToken, options), "propose_finding", proposal({ title: "Member's idea" }));
+      expect(member).toMatchObject({ ok: false, error: { code: "forbidden" } });
+      const stranger = await call(await connect(strangerWsToken, options), "propose_finding", proposal({ title: "Stranger's idea", workspace: ids.ws }));
+      expect(stranger).toMatchObject({ ok: false, error: { code: "not_found" } });
+      expect(Number((await one("select count(*) from findings where title in ('Viewer''s idea', 'Member''s idea', 'Stranger''s idea')")).count)).toBe(0);
+    }, 60_000);
+
+    it("gives clear errors for bad input", async () => {
+      const refused = async (args: Record<string, unknown>, code: string) => {
+        const r = await call(mcpEditor, "propose_finding", args);
+        expect(r, JSON.stringify(args)).toMatchObject({ ok: false, error: { code } });
+        return r;
+      };
+      await refused(proposal({ process: "Nowhere" }), "not_found");
+      const unknown = await refused(proposal({ facts: ["capacity:role:no-such-fact"] }), "unknown_fact");
+      expect(unknown.error!.message).toContain("capacity:role:no-such-fact");
+      // A source of another workspace is no source of this one.
+      const theirs = (await one("insert into sources (workspace_id, title) values ($1, 'Theirs') returning id", [ids.other])).id as string;
+      await refused(proposal({ sources: [theirs] }), "not_found");
+      await refused(proposal({ quotes: [{ source: "Proposal interview", text: "we never write proposals by hand" }] }), "quote_not_found");
+      await refused(proposal({ company: true, step: "Write proposal" }), "invalid_input");
+      await refused({ process: "Sales", title: "No evidence", rating: "bad", type: "delay" }, "invalid_input");
+      await refused(proposal({ title: "Team member B is slow" }), "invalid_input");
+      await refused(proposal({ facts_from: "Sales" }), "invalid_input");
+      const money = await refused(proposal({ title: "Overtime costs £9,999 a month" }), "money_not_in_facts");
+      expect(money.error!.message).toContain("£9,999");
+      expect(Number((await one("select count(*) from findings where title in ('No evidence', 'Overtime costs £9,999 a month')")).count)).toBe(0);
+    }, 120_000);
+
+    it("refuses more than 30 facts and quotes together instead of dropping some", async () => {
+      const keys = Array.from({ length: 30 }, (_, i) => `capacity:role:not-a-real-fact-${i}`);
+      const r = await call(mcpEditor, "propose_finding", proposal({ title: "Too many citations", facts: keys, quotes: [{ source: "Proposal interview", text: "we write every proposal by hand" }] }));
+      expect(r).toMatchObject({ ok: false, error: { code: "invalid_input" } });
+      expect(r.error!.message).toContain("at most 30");
+      expect(Number((await one("select count(*) from findings where title = 'Too many citations'")).count)).toBe(0);
+    }, 60_000);
+
+    it("refuses the same proposal twice, but allows the same words on another place", async () => {
+      const first = await call(mcpEditor, "propose_finding", proposal({ title: "Everything waits on one desk" }));
+      expect(first.ok, JSON.stringify(first)).toBe(true);
+      expect(await call(mcpEditor, "propose_finding", proposal({ title: "  everything WAITS on one desk " }))).toMatchObject({ ok: false, error: { code: "duplicate" } });
+      // A person dismissed it: Claude can't propose it again (the database's key remembers it).
+      await admin.query("update findings set status = 'dismissed' where workspace_id = $1 and title = 'Everything waits on one desk'", [ids.ws]);
+      expect(await call(mcpEditor, "propose_finding", proposal({ title: "Everything waits on one desk" }))).toMatchObject({ ok: false, error: { code: "duplicate" } });
+      // Not even with a trailing full stop, a no-break space or a different case: the dismissal stands.
+      for (const title of ["Everything waits on one desk.", "Everything waits\u00a0on one desk", "EVERYTHING WAITS ON ONE DESK!"]) {
+        expect(await call(mcpEditor, "propose_finding", proposal({ title })), title).toMatchObject({ ok: false, error: { code: "duplicate" } });
+      }
+      const company = await call(mcpEditor, "propose_finding", { company: true, title: "Everything waits on one desk", rating: "bad", type: "delay", facts: [facts[0]!.key] });
+      expect(company.ok, JSON.stringify(company)).toBe(true);
+    }, 120_000);
+
+    it("states no pay: a proposal citing a fact whose cost depends on a person's pay stores neither the rate nor the editor's figure", async () => {
+      const maya = (await one("select id from people where workspace_id = $1 and name = 'Maya Collins'", [ids.ws])).id as string;
+      const editorsView = await call<{ facts: Fact[] }>(mcpEditor, "get_facts", { process: "Sales" });
+      // The editor sees a cost for a rework, overtime or person-level fact (hours at a person's rate); the fixture must make one.
+      const pick = editorsView.data.facts.find((f) => f.cost.per_month !== null && /^(rework:step|overtime:person|capacity:person|spare)/.test(f.key));
+      expect(pick, `no pay-dependent fact with a cost in ${JSON.stringify(editorsView.data.facts.map((f) => [f.key, f.cost.per_month]))}`).toBeDefined();
+      expect(pick!.cost.per_month!).toBeGreaterThan(0);
+      const r = await call<Proposed>(mcpEditor, "propose_finding", { process: "Sales", title: "Rework is costing us", rating: "bad", type: "failure", evidence: `See ${pick!.title}.`, facts: [pick!.key] });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.data.finding.rests_on.map((c) => c.key)).toEqual([pick!.key]);
+      const stored = (await one("select (title, evidence, why, facts, person_labels)::text as t from findings where id = $1", [r.data.finding.id])).t as string;
+      const per = pick!.cost.per_month!;
+      for (const figure of [String(per), String(Math.round(per)), Math.round(per).toLocaleString("en-GB"), "913"]) {
+        expect(stored, `stored text holds ${figure}`).not.toContain(figure);
+        expect(JSON.stringify(r), `response holds ${figure}`).not.toContain(figure);
+      }
+      expect(maya).toBeTruthy();
+    }, 120_000);
+
+    it("proposes a company-wide finding that sits on no process", async () => {
+      const r = await call<Proposed>(mcpEditor, "propose_finding", { company: true, title: "The whole company leans on proposals", rating: "risk", type: "idea", facts: [facts[0]!.key] });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.data.finding).toMatchObject({ process: null, across_the_company: true, step: null });
+      expect(r.data.review).toContain("Overview");
+      expect(await one("select process_id, step_id, proposed_via from findings where id = $1", [r.data.finding.id])).toEqual({ process_id: null, step_id: null, proposed_via: "connector" });
+      // Cited only by a source, with no facts, on a process.
+      const bySource = await call(mcpEditor, "propose_finding", { process: "Sales", title: "Proposals are written by hand", rating: "bad", type: "manual", sources: ["Proposal interview"] });
+      expect(bySource.ok, JSON.stringify(bySource)).toBe(true);
+    }, 120_000);
+  });
 });

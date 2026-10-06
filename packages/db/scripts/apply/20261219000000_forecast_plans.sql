@@ -1,6 +1,6 @@
--- Production apply file for 20261213000000_forecast_plans (B7, issue #36). One new table, `public.forecast_plans`, with its
--- trigger function, two triggers, four policies and grants; strictly additive; applies after row 56 (20261207700000,
--- B1 2b); this is row 57 (renumber if another migration merges first). Preflight, post-apply checks and rollback are in
+-- Production apply file for 20261219000000_forecast_plans (B7, issue #36). One new table, `public.forecast_plans`, with its
+-- trigger function, two triggers, four policies and grants; strictly additive; applies after row 59 (20261212000000,
+-- B1 2b); this is row 64 (renumber if another migration merges first). Preflight, post-apply checks and rollback are in
 -- the migration's own header, repeated below. Apply BEFORE deploying the app (the Forecast page reads the table for
 -- owners, editors and agency admins). Sets `lock_timeout` to 5 s.
 
@@ -35,7 +35,7 @@ set local lock_timeout = '5s';
 -- Preflight (run one file at a time with `prod-sql.sh -f`):
 --
 --     -- 0. Nothing at or past this version. Expect 0:
---     select count(*) from supabase_migrations.schema_migrations where version >= '20261213000000';
+--     select count(*) from supabase_migrations.schema_migrations where version >= '20261219000000';
 --     -- 1. The table doesn't exist. Expect null:
 --     select pg_catalog.to_regclass('public.forecast_plans');
 --     -- 2. The trigger function doesn't exist. Expect 0:
@@ -63,14 +63,14 @@ set local lock_timeout = '5s';
 --            has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
 --       from pg_proc p where p.proname = 'forecast_plans_before_write';
 --     -- The version row. Expect 1:
---     select count(*) from supabase_migrations.schema_migrations where version = '20261213000000';
+--     select count(*) from supabase_migrations.schema_migrations where version = '20261219000000';
 --
 -- Rollback (one transaction; roll the app back first). Rolling back loses every saved plan. Production data: none needed.
 --
 --     begin;
 --     drop table if exists public.forecast_plans;   -- its triggers, policies and indexes go with it
 --     drop function if exists private.forecast_plans_before_write();
---     delete from supabase_migrations.schema_migrations where version = '20261213000000';
+--     delete from supabase_migrations.schema_migrations where version = '20261219000000';
 --     commit;
 
 create table public.forecast_plans (
@@ -219,7 +219,7 @@ create policy "update forecast_plans" on public.forecast_plans for update to aut
   using (public.can_edit_workspace(workspace_id)) with check (public.can_edit_workspace(workspace_id));
 create policy "delete forecast_plans" on public.forecast_plans for delete to authenticated
   using (public.can_edit_workspace(workspace_id));
-insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261213000000', 'forecast_plans', array[$mig$-- Forecast plans (issue #36, ticket B7; docs/plans/b7-brief.md).
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261219000000', 'forecast_plans', array[$mig$-- Forecast plans (issue #36, ticket B7; docs/plans/b7-brief.md).
 --
 -- A plan is a named set of forecast markers: hires, leave and solutions going live from a month. It never changes the live
 -- model; the forecast re-runs with the markers in it. This adds ONE table, `public.forecast_plans`, with its indexes (the
@@ -247,7 +247,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- Preflight (run one file at a time with `prod-sql.sh -f`):
 --
 --     -- 0. Nothing at or past this version. Expect 0:
---     select count(*) from supabase_migrations.schema_migrations where version >= '20261213000000';
+--     select count(*) from supabase_migrations.schema_migrations where version >= '20261219000000';
 --     -- 1. The table doesn't exist. Expect null:
 --     select pg_catalog.to_regclass('public.forecast_plans');
 --     -- 2. The trigger function doesn't exist. Expect 0:
@@ -275,14 +275,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --            has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
 --       from pg_proc p where p.proname = 'forecast_plans_before_write';
 --     -- The version row. Expect 1:
---     select count(*) from supabase_migrations.schema_migrations where version = '20261213000000';
+--     select count(*) from supabase_migrations.schema_migrations where version = '20261219000000';
 --
 -- Rollback (one transaction; roll the app back first). Rolling back loses every saved plan. Production data: none needed.
 --
 --     begin;
 --     drop table if exists public.forecast_plans;   -- its triggers, policies and indexes go with it
 --     drop function if exists private.forecast_plans_before_write();
---     delete from supabase_migrations.schema_migrations where version = '20261213000000';
+--     delete from supabase_migrations.schema_migrations where version = '20261219000000';
 --     commit;
 
 create table public.forecast_plans (
