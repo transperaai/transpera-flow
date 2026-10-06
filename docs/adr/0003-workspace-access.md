@@ -100,3 +100,29 @@ Austin's decision of 6 Oct 2026 (issue #30, option A').
 - **Accepted limit.** A member using browser dev tools can still read anonymous hours and leave dates, because the browser
   simulates. Option C, a per-workspace "no simulated numbers for members" setting, is a possible follow-up, not part of this.
 - An unlinked member or viewer sees no person rows and all labels. MCP needs no code: tokens run as their owner under RLS.
+
+## Addendum: saved text (migration 20261207700000)
+
+The review of the per-person privacy slice found two leaks in rows every member reads, which no screen can fix. **Saved
+overtime issues held pay**: the engine's evidence said "...h/wk overtime on average within the 10% cap, costing about £1,234
+at cost rates over the 26-week run." and the issue saved the same money as the `overtime_cost` metric, from which a member
+divides one by the other and gets a person's rate. **Saved AI text held real names**: the model is sent labels, but the app put
+the names back before saving. Both are text **we** generate and alias ourselves, so they are in scope; text a person types
+(issue titles, findings added or edited by hand, MCP `log_issue` evidence, sources) stays out of scope, and so does the real
+name an issue gets when an editor acknowledges an insight or a finding (it is a title a person confirms).
+
+- **Overtime evidence states hours only** (engine 1.8.0; no golden number moved). The money stays in the issue's live `cost`,
+  which is never saved, and the Overview, register and facts show it to those who see pay. The server also strips the old
+  sentence and the `overtime_cost` metric before saving (`payFreeIssueFields`: Acknowledge, promote, edit, and a restored
+  backup), for a browser tab that still runs the old engine.
+- **AI text is saved with labels and a `person_labels` map**, and named at render per reader (ADR 0013 and 0015): the person's
+  name for those who see everyone, the member's own name for them, "A team member" for anyone else or anyone deleted.
+- **Existing rows** are cleaned by the migration: the money clause and metric come out of old overtime issues (history and
+  `updated_at` unchanged); in AI analyses and AI findings every full name of a person in the workspace becomes
+  "Team member N" (the `team_capacity` numbering) with the labels written to `person_labels`. Accepted limits: a first
+  name, nickname or misspelling in an old row stays; old AI text may quote a pay-dependent cost the model was given, which
+  free text can't be cleaned of (production has no members or viewers yet: re-run Analyse after applying and dismiss or edit
+  any accepted finding that quotes overtime money).
+- **Order.** A member's issues are ordered by rating, then cost, with a pay-hidden cost sorting as no cost, so nothing in a
+  member's order is pay. It may differ from an editor's order, which is required: if members saw the editor's order, the
+  order itself would rank people's pay.

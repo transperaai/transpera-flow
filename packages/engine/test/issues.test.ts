@@ -495,4 +495,35 @@ describe("saved issues hold no pay (B1 2b)", () => {
       }
     });
   }
+
+  // Detected issues sort by rating, then cost, then the detector, then the key. A member's costs that need pay are payHidden
+  // and sort as no cost, so nothing in a member's order is pay: it differs from an editor's where an editor's pay-based cost
+  // puts an issue higher, and that difference is required (members must not be able to rank people's pay by the order).
+  it("with pay hidden, the order of issues doesn't depend on anyone's rate", () => {
+    const base = larkspurModel();
+    const rated = (factor: (i: number) => number): EngineModel => ({
+      ...base,
+      payHidden: true,
+      people: Object.fromEntries(Object.entries(base.people ?? {}).map(([id, p], i) => [id, { ...p, cost: (p.cost ?? 40) * factor(i) }])),
+    });
+    const order = (m: EngineModel) => {
+      const found = detectIssues(m, simulate(m, 12, 1));
+      return found.map((i) => `${i.key}|${i.rating}|${i.cost.payHidden ? "hidden" : "shown"}`);
+    };
+    const reference = order(rated(() => 1));
+    expect(reference.length).toBeGreaterThan(3);
+    expect(reference.some((k) => k.endsWith("|hidden"))).toBe(true);
+    expect(order(rated(() => 3))).toEqual(reference);
+    expect(order(rated((i) => (i === 1 ? 0.1 : 3)))).toEqual(reference);
+    expect(order(rated((i) => 10 - i))).toEqual(reference);
+  });
+
+  it("without payHidden, an editor's costs may order issues of one rating differently (no assertion on what they are)", () => {
+    const m = larkspurModel();
+    const shown = detectIssues(m, simulate(m, 12, 1));
+    const hidden = detectIssues({ ...m, payHidden: true }, simulate({ ...m, payHidden: true }, 12, 1));
+    // The same issues either way; only the order within a rating may differ.
+    expect(shown.map((i) => i.key).sort()).toEqual(hidden.map((i) => i.key).sort());
+    expect(shown.map((i) => i.rating)).toEqual(hidden.map((i) => i.rating));
+  });
 });

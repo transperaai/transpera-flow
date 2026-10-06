@@ -16,6 +16,7 @@ import {
   withClientGroups,
   northbeamWithServices,
   northbeamWithServicing,
+  noCost,
   remainingTenure,
   shadowPrice,
   shadowPricesFor,
@@ -25,6 +26,7 @@ import {
   type EngineStep,
 } from "../src";
 import { clientChurnMonthly, groupServiceOf } from "../src/clients";
+import { payHiddenCost } from "../src/cost";
 import { servicingStepIds } from "../src/servicing";
 
 // Cost per month (issue #108; docs/analysis-rules.md "Cost per month"): what a
@@ -407,5 +409,20 @@ describe("order", () => {
     const time = { perMonth: null, hoursPerMonth: 9, method: "" };
     const none = { perMonth: null, hoursPerMonth: null, method: "" };
     expect([none, time, money].sort(compareCostsDesc)).toEqual([money, time, none]);
+  });
+
+  it("a pay-hidden cost sorts as no cost: level with it, and below any money or time cost (B1 2b)", () => {
+    const money = { perMonth: 5, hoursPerMonth: null, method: "" };
+    const time = { perMonth: null, hoursPerMonth: 9, method: "" };
+    const none = noCost("n/a");
+    const hidden = payHiddenCost();
+    expect(compareCostsDesc(hidden, none)).toBe(0);
+    expect(compareCostsDesc(none, hidden)).toBe(0);
+    expect(compareCostsDesc(hidden, time)).toBeGreaterThan(0);
+    expect(compareCostsDesc(hidden, money)).toBeGreaterThan(0);
+    expect(compareCostsDesc(money, hidden)).toBeLessThan(0);
+    // Whatever order they arrive in, a stable sort keeps hidden and none in the order given.
+    expect([hidden, money, none, time].sort(compareCostsDesc)).toEqual([money, time, hidden, none]);
+    expect([none, hidden, time, money].sort(compareCostsDesc)).toEqual([money, time, none, hidden]);
   });
 });

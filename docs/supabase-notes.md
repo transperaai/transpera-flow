@@ -320,6 +320,18 @@ Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`,
 - [ ] **Smoke test** (post-apply check in the migration header) as an agency admin: `team_capacity` returns `sees_everyone` true and Northbeam's head count.
 - [ ] **A member's version history** shows "A team member" for other people's versions and their own name for their own.
 
+## Saved text: no pay, no real names (issue #30, B1 2b, migration 20261207700000)
+
+Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.test.ts`, which runs the migration over seeded leaks and its header's rollback) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-findings.test.ts`), not against a Supabase project. The clean-up relies on Postgres regular-expression features: a lookbehind (`(?<![[:alnum:]_])`), `[[:alnum:]]` classes, a lazy quantifier (`.+?`, which makes the whole match the shortest) and `regexp_replace(..., 'g')` with a `\1` replacement, and on `alter table ... disable trigger` for the six triggers it switches off and back on (needs table ownership, which the migration role has). Check on the real project:
+
+- [ ] **Preflight 3** returns `x T y.` and `a.` (the regex features work on Supabase's Postgres).
+- [ ] **Preflight 2** shows the six triggers enabled; after applying, still six rows, all `O` (post-apply check 1).
+- [ ] **Post-apply check 4** returns 0, 0: no saved AI text still holds a full name of its workspace.
+- [ ] **Post-apply check 3**: the `issue_events` count and both `max(updated_at)` are unchanged (the clean-up is not an edit).
+- [ ] **As a linked member**, the Overview's AI analysis and the process page's findings read "A team member" for other people and the member's own name for theirs; an issue about overtime shows hours and no money.
+- [ ] **As an editor**, the same text shows real names; edit an AI finding without changing it and save: it is not marked "AI, edited".
+- [ ] After applying, **re-run Analyse** on each analysed process and the whole company, and dismiss or edit any accepted AI finding that quotes overtime money (old AI text may have quoted a cost the model was given).
+
 ## Restoring a backup (issue #39, B10 2b, migration 20261207000000)
 
 `public.import_workspace_bundle(p_workspace, p_plan, p_label)` restores a `transpera-workspace/1` backup into a new, empty workspace in one call: SECURITY INVOKER, drafts only, nothing published, no history, all or nothing. It also grants EXECUTE on `private.scenario_library()` to `authenticated` (the "empty" check compares scenarios with the seeded library). **Verified on plain Postgres 16 and PostgREST 14.18 only** (`packages/db/test/workspace-import.test.ts`, `packages/mcp/test/postgrest-restore.test.ts`), not on Supabase.
