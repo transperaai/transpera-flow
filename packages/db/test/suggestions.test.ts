@@ -540,7 +540,7 @@ describe("saved runs", () => {
       [ws, NORTHBEAM_PROCESS_ID, [], JSON.stringify({ version: 1 })],
     );
 
-  it("editors save runs; everyone in the workspace reads them; members, viewers and strangers can't save", async () => {
+  it("editors save runs; owners and editors read them (B1 2/3: results hold per-person utilisation); members, viewers and strangers can't save", async () => {
     await db.as(users.editor!.claims, async (c) => {
       expect((await insertRun(c)).rowCount).toBe(1);
     });
@@ -548,7 +548,8 @@ describe("saved runs", () => {
       await expect(db.as(users[role]!.claims, (c) => insertRun(c)), role).rejects.toThrow(/row-level security/);
     }
     await db.client.query("insert into runs (workspace_id, name, reps, seed, params_snapshot) values ($1, 'Committed', 30, 1, '{}')", [ws]);
-    expect(await db.as(users.viewer!.claims, async (c) => (await one(c, "select count(*)::int as n from runs")).n)).toBe(1);
+    expect(await db.as(users.editor!.claims, async (c) => (await one(c, "select count(*)::int as n from runs")).n)).toBe(1);
+    expect(await db.as(users.viewer!.claims, async (c) => (await one(c, "select count(*)::int as n from runs")).n)).toBe(0);
     expect(await db.as(users.stranger!.claims, async (c) => (await one(c, "select count(*)::int as n from runs")).n)).toBe(0);
     await db.client.query("delete from runs");
   });

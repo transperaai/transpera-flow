@@ -481,11 +481,18 @@ describe("ai_analyses: who can write, and as whom", () => {
     await db.client.query("delete from processes where id = $1", [other]);
   });
 
-  it("lets every member read it, and the name of whoever ran it", async () => {
+  it("lets every member read it, and the name of whoever ran it only to those who see people (B1 2/3)", async () => {
     await seedAnalysis('["Visible"]');
-    for (const role of ["owner", "editor", "member", "viewer"]) {
+    for (const role of ["owner", "editor"]) {
       const rows = await db.as(users[role]!.claims, async (c) => (await c.query("select a.summary, r.user_name from ai_analyses a join ai_runs r on r.id = a.run_id")).rows);
       expect(rows, role).toEqual([{ summary: ["Visible"], user_name: "Ed Itor" }]);
+    }
+    for (const role of ["member", "viewer"]) {
+      await db.as(users[role]!.claims, async (c) => {
+        expect((await c.query("select summary from ai_analyses")).rows, role).toEqual([{ summary: ["Visible"] }]);
+        // The run holds the runner's name, so a member who didn't run it reads none.
+        expect((await c.query("select user_name from ai_runs")).rows, role).toEqual([]);
+      });
     }
   });
 

@@ -6,13 +6,16 @@ import {
   NORTHBEAM_WORKSPACE_ID,
   northbeamIssues,
   northbeamLeadSourceIds,
+  northbeamPersonIds,
+  northbeamRoleIds,
   northbeamServicingProcessIds,
+  northbeamStepIds,
 } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
-// The role matrix (issue #30, B1 part 1): what each of the seven kinds of caller can read, write and call in a workspace,
-// as RLS and the SECURITY INVOKER functions enforce it. The matrix is data (`TABLES`, `RPCS`) so a later slice (B1 part 2,
-// per-person privacy) changes the `people` expectations in one place. Rolled-back transactions throughout (`db.as`), so
+// The role matrix (issue #30, B1 parts 1 and 2a): what each kind of caller can read, write and call in a workspace,
+// as RLS and the SECURITY INVOKER functions enforce it. The matrix is data (`TABLES`, `ROLES`, `RPCS`). Per-person privacy
+// (2a) is the `reads` field of a table and the `sees` field of a caller. Rolled-back transactions throughout (`db.as`), so
 // every probe starts from the same rows.
 
 const ws = NORTHBEAM_WORKSPACE_ID;
@@ -27,6 +30,17 @@ interface Caller {
 
 let db: TestDb;
 const callers: Record<string, Caller> = {};
+// The people the callers are linked to (B1 2a): the member, the viewer and the editor each look at a different person; `spare`
+// is nobody's, and holds the rows the write cases use.
+const person = {
+  member: northbeamPersonIds["Leah Brooks"]!,
+  viewer: northbeamPersonIds["Dan Okafor"]!,
+  editor: northbeamPersonIds["Maya Collins"]!,
+  spare: northbeamPersonIds["Rosa Diaz"]!,
+};
+/** Rows each table holds in the workspace, and each linked person's rows in it, counted as the superuser once seeded. */
+const totals: Record<string, number> = {};
+const owns: Record<string, Record<string, number>> = {};
 const ids = { suggestion: "", proposal: "", client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "" };
 
 /** A SQL statement and its parameters. */
@@ -40,6 +54,13 @@ interface TableCase {
   update: Q | null;
   /** Deletes the seed row. Null: nobody holds DELETE on the table. */
   delete: Q | null;
+  /**
+   * Who reads which rows. "everyone": every reader (the default). "per-person": callers who see everyone read every row; a
+   * member or viewer reads only their own person's rows. "editors": only callers who see everyone.
+   */
+  reads?: "everyone" | "per-person" | "editors";
+  /** The column that names the person a "per-person" row is about. */
+  personColumn?: string;
 }
 
 const named = (table: string, column = "name"): TableCase => ({
@@ -59,7 +80,76 @@ const singleton = (table: string, deletable = true): TableCase => ({
 
 /** Every table the audit lists as read by every member and written by editors and above, apart from the per-person ones (B1 part 2). */
 const TABLES: TableCase[] = [
-  named("people"),
+  { ...named("people"), reads: "per-person", personColumn: "id" },
+  // The spare person (Rosa) holds no skills or leave and only her own role, so these rows are free to insert, change and delete.
+  {
+    table: "person_roles",
+    insert: (tag) => [
+      "insert into person_roles (person_id, role_id, workspace_id) values ($1, $2, $3)",
+      [person.spare, tag === "seed" ? northbeamRoleIds.ppc : northbeamRoleIds.seo, ws],
+    ],
+    update: [`update person_roles set role_id = role_id where person_id = $1 and role_id = '${northbeamRoleIds.ppc}'`, [person.spare]],
+    delete: [`delete from person_roles where person_id = $1 and role_id = '${northbeamRoleIds.ppc}'`, [person.spare]],
+    reads: "per-person",
+    personColumn: "person_id",
+  },
+  {
+    table: "person_skills",
+    insert: (tag) => [
+      "insert into person_skills (person_id, step_id, workspace_id) values ($1, $2, $3)",
+      [person.spare, tag === "seed" ? northbeamStepIds.qualify : northbeamStepIds.discovery, ws],
+    ],
+    update: [`update person_skills set efficiency = efficiency where person_id = $1 and step_id = '${northbeamStepIds.qualify}'`, [person.spare]],
+    delete: [`delete from person_skills where person_id = $1 and step_id = '${northbeamStepIds.qualify}'`, [person.spare]],
+    reads: "per-person",
+    personColumn: "person_id",
+  },
+  {
+    table: "person_leave",
+    insert: (tag) => [
+      "insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, $3, $3)",
+      [person.spare, ws, tag === "seed" ? "2027-01-04" : "2027-02-01"],
+    ],
+    update: ["update person_leave set note = note where person_id = $1 and start_date = '2027-01-04'", [person.spare]],
+    delete: ["delete from person_leave where person_id = $1 and start_date = '2027-01-04'", [person.spare]],
+    reads: "per-person",
+    personColumn: "person_id",
+  },
+  {
+    table: "client_assignments",
+    insert: (tag) => [
+      "insert into client_assignments (client_id, role_id, person_id, workspace_id) values ($1, $2, $3, $4)",
+      [ids.client, tag === "seed" ? northbeamRoleIds.sales : northbeamRoleIds.fin, person.spare, ws],
+    ],
+    update: [
+      `update client_assignments set person_id = person_id where role_id = '${northbeamRoleIds.sales}' and client_id = (select id from clients where workspace_id = $1 and name = 'x seed')`,
+      [ws],
+    ],
+    delete: [
+      `delete from client_assignments where role_id = '${northbeamRoleIds.sales}' and client_id = (select id from clients where workspace_id = $1 and name = 'x seed')`,
+      [ws],
+    ],
+    reads: "per-person",
+    personColumn: "person_id",
+  },
+  // Saved runs and their cached robustness results hold per-person utilisation: only callers who see everyone read them (Q4).
+  {
+    table: "runs",
+    insert: (tag) => ["insert into runs (workspace_id, name, reps, seed, params_snapshot) values ($1, $2, 30, 1, '{}')", [ws, `x ${tag}`]],
+    update: ["update runs set name = name where workspace_id = $1 and name = 'x seed'", [ws]],
+    delete: ["delete from runs where workspace_id = $1 and name = 'x seed'", [ws]],
+    reads: "editors",
+  },
+  {
+    table: "robustness_results",
+    insert: (tag) => [
+      "insert into robustness_results (workspace_id, check_key, cache_key, results) values ($1, $2, $3, '{}')",
+      [ws, `v1|${tag}`, `v1|${tag}|k`],
+    ],
+    update: null,
+    delete: ["delete from robustness_results where workspace_id = $1 and check_key = 'v1|seed'", [ws]],
+    reads: "editors",
+  },
   {
     table: "issues",
     insert: (tag) => ["insert into issues (workspace_id, type, title) values ($1, 'delay', $2)", [ws, `x ${tag}`]],
@@ -194,14 +284,16 @@ const resolve = ([sql, params]: Q): Q => [
   params.map((p) => (p === "seed" && /service_id = \$2/.test(sql) ? ids.svcSeed : p)),
 ];
 
+/** `sees`: every person ("all"), only the caller's linked person ("own"), or no person ("none"). */
 const ROLES = {
-  "agency admin (JWT flag)": { writes: true, reads: true },
-  "agency_admin membership": { writes: true, reads: true },
-  owner: { writes: true, reads: true },
-  editor: { writes: true, reads: true },
-  member: { writes: false, reads: true },
-  viewer: { writes: false, reads: true },
-  "signed in, no membership": { writes: false, reads: false },
+  "agency admin (JWT flag)": { writes: true, reads: true, sees: "all" },
+  "agency_admin membership": { writes: true, reads: true, sees: "all" },
+  owner: { writes: true, reads: true, sees: "all" },
+  editor: { writes: true, reads: true, sees: "all" },
+  member: { writes: false, reads: true, sees: "own" },
+  viewer: { writes: false, reads: true, sees: "own" },
+  "member, no person": { writes: false, reads: true, sees: "none" },
+  "signed in, no membership": { writes: false, reads: false, sees: "none" },
 } as const;
 type RoleName = keyof typeof ROLES;
 
@@ -224,7 +316,12 @@ beforeAll(async () => {
   callers.editor = await member("editor@matrix.example", "editor");
   callers.member = await member("member@matrix.example", "member");
   callers.viewer = await member("viewer@matrix.example", "viewer");
+  callers["member, no person"] = await member("member-unlinked@matrix.example", "member");
   callers["signed in, no membership"] = await createUser(db, "stranger@matrix.example");
+  // Link the member, the viewer and the editor to three different people (B1 2a).
+  for (const role of ["member", "viewer", "editor"] as const) {
+    await db.client.query("update memberships set person_id = $1 where workspace_id = $2 and user_id = $3", [person[role], ws, callers[role]!.id]);
+  }
 
   const svc = async (name: string) =>
     (await db.client.query("insert into services (workspace_id, name) values ($1, $2) returning id", [ws, name])).rows[0].id as string;
@@ -243,6 +340,34 @@ beforeAll(async () => {
     if (t.table === "clients") continue;
     const [sql, params] = t.insert("seed");
     await db.client.query(sql.includes("on conflict") ? sql : `${sql} on conflict do nothing`, params);
+  }
+  // Each linked person holds a skill and a leave entry (the spare person's come from the table cases above).
+  for (const role of ["member", "viewer", "editor"] as const) {
+    await db.client.query("insert into person_skills (person_id, step_id, workspace_id) values ($1, $2, $3)", [person[role], northbeamStepIds.audit, ws]);
+    await db.client.query("insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, '2027-03-01', '2027-03-05')", [person[role], ws]);
+  }
+  // A suggestion about the member's person, one about another person (the spare), and the non-people one the table case seeds.
+  for (const [who, tag] of [[person.member, "x person own"], [person.spare, "x person other"]] as const) {
+    await db.client.query(
+      "insert into suggestions (workspace_id, target_table, target_id, patch, evidence, note) values ($1, 'people', $2, $3::jsonb, '[]', $4)",
+      [ws, who, JSON.stringify({ set: { fte: 0.8 } }), tag],
+    );
+  }
+  // Two analysis runs: one started by the editor, one by the member (ai_runs keeps the runner's name).
+  for (const [role, name] of [["editor", "Ed Itor"], ["member", "Mem Ber"]] as const) {
+    await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, $3)", [ws, callers[role]!.id, name]);
+  }
+  // What each table holds now, and each linked person's share of it.
+  for (const t of TABLES) {
+    totals[t.table] = await rowsIn(db.client, t.table);
+    if (t.reads === "per-person") {
+      owns[t.table] = {};
+      for (const role of ["member", "viewer"] as const) {
+        owns[t.table]![role] = Number(
+          (await db.client.query(`select count(*) from ${t.table} where workspace_id = $1 and ${t.personColumn} = $2`, [ws, person[role]])).rows[0].count,
+        );
+      }
+    }
   }
   ids.suggestion = (await db.client.query("select id from suggestions where workspace_id = $1 and note = 'x seed'", [ws])).rows[0].id;
   ids.proposal = (await db.client.query("select id from suggestion_proposals where workspace_id = $1 and title = 'x seed'", [ws])).rows[0].id;
@@ -268,17 +393,51 @@ async function refused(c: pg.Client, run: () => Promise<{ rowCount: number | nul
 }
 
 describe("reads", () => {
-  for (const [role, { reads }] of Object.entries(ROLES) as [RoleName, (typeof ROLES)[RoleName]][]) {
-    it(`${role}: ${reads ? "reads" : "does not read"} every table`, async () => {
+  for (const [role, { reads, sees }] of Object.entries(ROLES) as [RoleName, (typeof ROLES)[RoleName]][]) {
+    it(`${role}: ${reads ? "reads" : "does not read"} every table${sees === "own" ? ", and of the per-person ones only their own person's rows" : ""}`, async () => {
       await db.as(callers[role]!.claims, async (c) => {
         for (const t of TABLES) {
           const n = await rowsIn(c, t.table);
-          if (reads) expect(n, t.table).toBeGreaterThan(0);
-          else expect(n, t.table).toBe(0);
+          const kind = t.reads ?? "everyone";
+          if (kind === "everyone") {
+            if (reads) expect(n, t.table).toBeGreaterThan(0);
+            else expect(n, t.table).toBe(0);
+          } else if (kind === "editors") {
+            if (sees === "all") expect(n, t.table).toBeGreaterThan(0);
+            else expect(n, t.table).toBe(0);
+          } else if (sees === "all") {
+            expect(n, t.table).toBe(totals[t.table]);
+          } else if (sees === "own") {
+            // At least one row each (seeded above), and exactly the linked person's.
+            expect(owns[t.table]![role], `${t.table} seeded for ${role}`).toBeGreaterThan(0);
+            expect(n, t.table).toBe(owns[t.table]![role]);
+          } else {
+            expect(n, t.table).toBe(0);
+          }
         }
       });
     });
   }
+
+  it("suggestions: a member reads the suggestion about their own person and the non-people one, not the one about another person; an editor reads all three", async () => {
+    const notes = async (role: RoleName) =>
+      (await db.as(callers[role]!.claims, async (c) => (await c.query("select note from suggestions where workspace_id = $1 order by note", [ws])).rows)).map((r) => r.note as string);
+    expect(await notes("member")).toEqual(["x person own", "x seed"]);
+    expect(await notes("viewer")).toEqual(["x seed"]);
+    expect(await notes("member, no person")).toEqual(["x seed"]);
+    expect(await notes("editor")).toEqual(["x person other", "x person own", "x seed"]);
+    expect(await notes("owner")).toEqual(["x person other", "x person own", "x seed"]);
+  });
+
+  it("ai_runs: editors and owners read both runs, a member only their own, a viewer none", async () => {
+    const names = async (role: RoleName) =>
+      (await db.as(callers[role]!.claims, async (c) => (await c.query("select user_name from ai_runs where workspace_id = $1 order by user_name", [ws])).rows)).map((r) => r.user_name as string);
+    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) expect(await names(role), role).toEqual(["Ed Itor", "Mem Ber"]);
+    expect(await names("member")).toEqual(["Mem Ber"]);
+    expect(await names("viewer")).toEqual([]);
+    expect(await names("member, no person")).toEqual([]);
+    expect(await names("signed in, no membership")).toEqual([]);
+  });
 
   it("scopes the readers to their own workspace: nothing of Larkspur's shows in Northbeam's view", async () => {
     await db.as(callers.member!.claims, async (c) => {
@@ -429,5 +588,163 @@ describe("functions", () => {
     } finally {
       await db.client.query("rollback");
     }
+  });
+});
+
+describe("team_capacity (B1 2a)", () => {
+  type Team = {
+    sees_everyone: boolean;
+    own_person_id: string | null;
+    people: { id: string; name: string; cost_rate: number | null; provenance: object; [k: string]: unknown }[];
+    person_roles: Record<string, unknown>[];
+    person_skills: Record<string, unknown>[];
+    person_leave: Record<string, unknown>[];
+    client_assignments: Record<string, unknown>[];
+  };
+  const team = async (c: pg.Client) => (await c.query("select public.team_capacity($1) as t", [ws])).rows[0].t as Team;
+  const READERS = ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor", "member", "viewer", "member, no person"] as const;
+
+  /** Run `fn` as `role`, after `setup` ran as the superuser in the same rolled-back transaction. */
+  async function after<T>(setup: string | null, role: RoleName, fn: (c: pg.Client) => Promise<T>): Promise<T> {
+    await db.client.query("begin");
+    try {
+      if (setup) await db.client.query(setup);
+      await db.client.query("set local role authenticated");
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers[role]!.claims)]);
+      return await fn(db.client);
+    } finally {
+      await db.client.query("rollback");
+    }
+  }
+
+  const strip = (rows: Record<string, unknown>[], omit: string[]) => rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !omit.includes(k))));
+
+  it("every reader gets the same people ids, roles, skills, leave and assignments as the tables hold", async () => {
+    const q = async (sql: string) => (await db.client.query(sql, [ws])).rows;
+    const expected = {
+      ids: (await q("select id from people where workspace_id = $1")).map((r) => r.id).sort(),
+      roles: await q("select person_id, role_id from person_roles where workspace_id = $1 order by 1, 2"),
+      skills: await q("select person_id, step_id from person_skills where workspace_id = $1 order by 1, 2"),
+      leave: await q(
+        "select id, person_id, to_char(start_date, 'YYYY-MM-DD') as start_date, to_char(end_date, 'YYYY-MM-DD') as end_date from person_leave where workspace_id = $1 order by person_id, start_date, id",
+      ),
+      assignments: await q("select client_id, role_id, person_id from client_assignments where workspace_id = $1 order by 1, 2"),
+    };
+    expect(expected.skills.length).toBeGreaterThan(0);
+    expect(expected.leave.length).toBeGreaterThan(0);
+    for (const role of READERS) {
+      const t = await db.as(callers[role]!.claims, team);
+      expect(t.people.map((p) => p.id).sort(), role).toEqual(expected.ids);
+      expect(strip(t.person_roles, ["workspace_id"]), role).toEqual(expected.roles);
+      expect(strip(t.person_skills, ["workspace_id"]), role).toEqual(expected.skills);
+      expect(strip(t.person_leave, ["workspace_id"]), role).toEqual(expected.leave);
+      expect(strip(t.client_assignments, ["workspace_id"]), role).toEqual(expected.assignments);
+    }
+  });
+
+  it("callers who see everyone get the real names and rates", async () => {
+    const real = (await db.client.query("select id, name, cost_rate::float8 as cost_rate from people where workspace_id = $1 order by name", [ws])).rows;
+    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) {
+      const t = await db.as(callers[role]!.claims, team);
+      expect(t.sees_everyone, role).toBe(true);
+      expect(t.people.map((p) => ({ id: p.id, name: p.name, cost_rate: p.cost_rate })), role).toEqual(real);
+    }
+    expect((await db.as(callers.editor!.claims, team)).own_person_id).toBe(person.editor);
+    expect((await db.as(callers.owner!.claims, team)).own_person_id).toBeNull();
+  });
+
+  it("a member gets their own name and 'Team member N' for everyone else; no email, notes, note or efficiency; provenance {}", async () => {
+    await db.client.query("update people set provenance = '{\"fte\": {\"source\": \"entered\"}}', email = 'x@y.example', notes = 'private' where workspace_id = $1", [ws]);
+    await db.client.query("update person_leave set note = 'private' where workspace_id = $1", [ws]);
+    await db.client.query("update person_skills set efficiency = 1.5 where workspace_id = $1", [ws]);
+    try {
+      for (const role of ["member", "viewer", "member, no person"] as const) {
+        const raw = await db.as(callers[role]!.claims, async (c) => (await c.query("select public.team_capacity($1)::text as t", [ws])).rows[0].t as string);
+        const t = JSON.parse(raw) as Team;
+        expect(t.sees_everyone, role).toBe(false);
+        const own = role === "member" ? person.member : role === "viewer" ? person.viewer : null;
+        expect(t.own_person_id, role).toBe(own);
+        for (const p of t.people) {
+          if (p.id === own) expect(p.name, role).toBe(role === "member" ? "Leah Brooks" : "Dan Okafor");
+          else expect(p.name, role).toMatch(/^Team member \d+$/);
+          expect(p.provenance, role).toEqual({});
+        }
+        expect(raw, role).not.toMatch(/x@y\.example|private|"email"|"notes"|"note"|efficiency/);
+      }
+    } finally {
+      await db.client.query("update people set provenance = '{}', email = null, notes = null where workspace_id = $1", [ws]);
+      await db.client.query("update person_leave set note = null where workspace_id = $1", [ws]);
+      await db.client.query("update person_skills set efficiency = 1 where workspace_id = $1", [ws]);
+    }
+  });
+
+  it("labels are stable: unchanged on a second call, after a person is added (who gets the highest number) and after someone is deactivated", async () => {
+    const labels = (t: Team) => Object.fromEntries(t.people.map((p) => [p.id, p.name]));
+    const before = labels(await db.as(callers.member!.claims, team));
+    expect(labels(await db.as(callers.member!.claims, team))).toEqual(before);
+    const newId = "00000000-0000-4000-8000-0000000000aa";
+    const added = await after(`insert into people (id, workspace_id, name) values ('${newId}', '${ws}', 'Newcomer')`, "member", async (c) => labels(await team(c)));
+    for (const [id, name] of Object.entries(before)) expect(added[id], id).toBe(name);
+    const highest = Math.max(...Object.values(before).flatMap((n) => (/^Team member (\d+)$/.test(n) ? [Number(/(\d+)$/.exec(n)![1])] : [])));
+    expect(added[newId]).toBe(`Team member ${highest + 1}`);
+    const deactivated = await after(`update people set active = false where id = '${person.spare}'`, "member", async (c) => labels(await team(c)));
+    expect(deactivated).toEqual(before);
+  });
+
+  it("the no-membership user is refused (42501), and anon holds no execute right on it or on the helpers", async () => {
+    await db.as(callers["signed in, no membership"]!.claims, async (c) => {
+      await c.query("savepoint s");
+      await expect(team(c)).rejects.toMatchObject({ code: "42501", message: expect.stringMatching(/you cannot read this workspace/) });
+      await c.query("rollback to savepoint s");
+    });
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      for (const sql of ["select public.team_capacity($1)", "select public.can_see_people($1)", "select public.can_see_person($1, null)"]) {
+        await db.client.query("savepoint a");
+        await expect(db.client.query(sql, [ws]), sql).rejects.toThrow(/permission denied/);
+        await db.client.query("rollback to savepoint a");
+      }
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("can_see_person: callers who see everyone see anyone; a member only their own person; null only for those who see everyone", async () => {
+    const see = async (role: RoleName, who: string | null) =>
+      db.as(callers[role]!.claims, async (c) => (await c.query("select public.can_see_person($1, $2) as v", [ws, who])).rows[0].v as boolean);
+    expect(await see("editor", person.spare)).toBe(true);
+    expect(await see("agency admin (JWT flag)", person.spare)).toBe(true);
+    expect(await see("member", person.member)).toBe(true);
+    expect(await see("member", person.spare)).toBe(false);
+    expect(await see("member", null)).toBe(false);
+    // An unlinked member: my_person_id is null, so the comparison is null (not false). A policy treats null as no.
+    expect(await see("member, no person", person.member)).not.toBe(true);
+    expect(await see("editor", null)).toBe(true);
+  });
+});
+
+describe("revision_history author names (B1 2a)", () => {
+  it("a member sees no name for another person's version and their own name for their own; editors see names", async () => {
+    // Make the seeded version the work of one user, in a transaction that is rolled back.
+    const names = async (role: RoleName, publisher: string) => {
+      await db.client.query("begin");
+      try {
+        await db.client.query("update process_revisions set published_by = $1 where id = $2", [publisher, NORTHBEAM_REVISION_ID]);
+        await db.client.query("set local role authenticated");
+        await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers[role]!.claims)]);
+        const r = await db.client.query("select author_name from public.revision_history($1) where revision_id = $2", [NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID]);
+        return r.rows[0].author_name as string | null;
+      } finally {
+        await db.client.query("rollback");
+      }
+    };
+    const editor = callers.editor!.id;
+    expect(await names("member", editor)).toBeNull();
+    expect(await names("viewer", editor)).toBeNull();
+    expect(await names("editor", editor)).toBe("Maya Collins");
+    expect(await names("owner", editor)).toBe("Maya Collins");
+    // Their own version keeps the member's name.
+    expect(await names("member", callers.member!.id)).toBe("Leah Brooks");
   });
 });
