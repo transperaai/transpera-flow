@@ -245,7 +245,7 @@ export const SERVICING_LOG_TEMPLATE = [
 
 export interface ClientCalibrationRows {
   /** The workspace's services. */
-  services: readonly Pick<ServiceRow, "id" | "name" | "pricing_model" | "active">[];
+  services: readonly Pick<ServiceRow, "id" | "name" | "pricing_model" | "active" | "entry_process_id">[];
   clientGroups: readonly Pick<ClientGroupRow, "id" | "service_id" | "client_count" | "churn_monthly" | "provenance">[];
   /** Servicing links, with SLA and recurrence. */
   servicing: readonly Pick<ServiceServicingRow, "service_id" | "process_id" | "sla_hours" | "recurrence">[];
