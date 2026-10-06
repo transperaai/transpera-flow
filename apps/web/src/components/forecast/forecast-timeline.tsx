@@ -59,7 +59,20 @@ export function TimelineLegendItem({ children, swatch }: { children: ReactNode; 
 }
 
 /** The legend: what every mark on the timeline means. */
-export function TimelineLegend({ busyLine, hasMarkers, hasMarket, hasUncovered = false }: { busyLine: number; hasMarkers: boolean; hasMarket: boolean; hasUncovered?: boolean }) {
+export function TimelineLegend({
+  busyLine,
+  hasMarkers,
+  hasMarket,
+  hasUncovered = false,
+  hasPlan = false,
+}: {
+  busyLine: number;
+  hasMarkers: boolean;
+  hasMarket: boolean;
+  hasUncovered?: boolean;
+  /** The plan lane is drawn (B7): what its markers mean. */
+  hasPlan?: boolean;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" data-timeline-legend>
       <TimelineLegendItem swatch={<i aria-hidden className="h-0.5 w-4 rounded bg-accent" />}>Average</TimelineLegendItem>
@@ -75,6 +88,13 @@ export function TimelineLegend({ busyLine, hasMarkers, hasMarket, hasUncovered =
       )}
       {hasUncovered && (
         <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-rate-risk bg-rate-risk-soft" />}>No one to do the work</TimelineLegendItem>
+      )}
+      {hasPlan && (
+        <>
+          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">▲</span>}>Hire in your plan</TimelineLegendItem>
+          <TimelineLegendItem swatch={<i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />}>Leave in your plan</TimelineLegendItem>
+          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">◆</span>}>Solution goes live</TimelineLegendItem>
+        </>
       )}
       {hasMarket && <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-line-2 bg-[repeating-linear-gradient(135deg,var(--line-2)_0_2px,transparent_2px_5px)]" />}>Market condition</TimelineLegendItem>}
     </div>
@@ -485,8 +505,7 @@ export function ForecastTimeline({
                   aria-valuemin={0}
                   aria-valuemax={n - 1}
                   aria-valuenow={monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek)}
-                  aria-valuetext={`${mk.label}, ${longDate(mk.date)}`}
-                  aria-description={mk.problem}
+                  aria-valuetext={`${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`}
                   opacity={active ? 0.4 : 1}
                   style={{ touchAction: "none", cursor: plan.editable ? (active ? "grabbing" : "grab") : "default" }}
                   onPointerDown={(e) => markerDown(e, mk)}
