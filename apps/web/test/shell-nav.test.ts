@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { createElement, type ComponentProps } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import { WorkspaceShell } from "@/components/shell/workspace-shell";
 import { countLabel, demoNav, flatItems, workspaceNav, type NavGroup, type NavItem } from "@/lib/shell/nav";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }), usePathname: () => "/w/s", useSearchParams: () => new URLSearchParams() }));
 
 // The sidebar's groups, items and which one is active (issues #93, #98), after the prototype's `sidebar()`.
 
@@ -170,5 +175,35 @@ describe("demoNav", () => {
     expect(active(d("/demo/larkspur"))).toEqual(["processes"]);
     expect(items.map((i) => i.href)).toEqual(["/demo/larkspur", "/demo/larkspur?panel=issues"]);
     expect(items[1]?.panel).toBe("issues");
+  });
+});
+
+describe("the live shell's workspace tile (client branding, issue #34)", () => {
+  const shell = (logoUrl: string | null) => {
+    const props: ComponentProps<typeof WorkspaceShell> = {
+      mode: "live",
+      defaultOpen: true,
+      slug: "s",
+      workspaceName: "Northbeam Digital",
+      logoUrl,
+      workspaces: [{ name: "Northbeam Digital", href: "/w/s" }],
+      canManage: true,
+      counts: {},
+      viewer: null,
+      children: null,
+    };
+    return renderToStaticMarkup(createElement(WorkspaceShell, props));
+  };
+  it("passes the logo through to the tile: an <img> on the white tile, decorative, no monogram", () => {
+    const html = shell("https://abc.supabase.co/storage/v1/object/public/branding/x.png");
+    expect(html).toContain('<img src="https://abc.supabase.co/storage/v1/object/public/branding/x.png" alt=""');
+    expect(html).toContain("bg-logo-tile");
+    expect(html).not.toMatch(/>N<\/span>/);
+  });
+  it("keeps the monogram with no logo", () => {
+    const html = shell(null);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("bg-logo-tile");
+    expect(html).toMatch(/>N<\/span>/);
   });
 });
