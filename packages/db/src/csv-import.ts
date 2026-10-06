@@ -700,7 +700,7 @@ export function jobsToServicing(rows: readonly JobRow[]): ServicingRow[] {
 const WEEK_MS = 7 * 86_400_000;
 
 export interface LeadsSummary {
-  /** The window the weeks are counted over, epoch ms: the earliest lead to `asOf` (at least the latest lead). */
+  /** The window the weeks are counted over, epoch ms: the earliest lead to the latest (no later than `asOf`). */
   from: number;
   to: number;
   weeks: number;
@@ -725,7 +725,8 @@ export function leadsSummary(
     if (r.created > latest) latest = r.created;
   }
   if (!rows.length) from = asOf;
-  const to = Math.max(asOf, rows.length ? latest : asOf);
+  // The window ends at the last lead (not today): a January to March export imported in October is 13 weeks, not 40. `asOf` only caps a date in the future.
+  const to = rows.length ? Math.min(latest, Math.max(asOf, from)) : asOf;
   const weeks = (to - from) / WEEK_MS;
   const byName = new Map<string, string>();
   const dupes = new Set<string>();

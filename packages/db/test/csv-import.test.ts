@@ -476,7 +476,9 @@ describe("conversions", () => {
       const s = leadsSummary(rows, sources, asOf);
       expect(s.blocked).toBeNull();
       expect(s.from).toBe(d(2026, 3, 2));
-      expect(s.weeks).toBeCloseTo((asOf - d(2026, 3, 2)) / (7 * 86_400_000), 6);
+      // The window ends at the last lead, not at asOf.
+      expect(s.to).toBe(d(2026, 3, 2) + 39 * 86_400_000);
+      expect(s.weeks).toBeCloseTo((s.to - d(2026, 3, 2)) / (7 * 86_400_000), 6);
       expect(s.unmatched).toBe(3);
       expect(s.leads).toBe(52);
       expect(s.sources[0]).toMatchObject({ leadSourceId: "s1", leads: 40, current: 8, enough: true });
@@ -485,9 +487,22 @@ describe("conversions", () => {
     });
 
     it("needs at least four weeks", () => {
-      const s = leadsSummary([lead("Google Ads", d(2026, 5, 20))], sources, asOf);
+      const s = leadsSummary([lead("Google Ads", d(2026, 5, 20)), lead("Google Ads", d(2026, 6, 1))], sources, asOf);
       expect(s.blocked).toBe("The file covers 1.7 weeks; at least 4 are needed.");
       expect(s.sources.every((x) => !x.enough && x.perWeek === 0)).toBe(true);
+    });
+
+    it("ends the window at the last lead: a January to March export read in October is about 13 weeks", () => {
+      const rows: LeadRow[] = [];
+      for (let i = 0; i < 90; i++) rows.push(lead("Google Ads", d(2026, 1, 1) + i * 86_400_000));
+      const s = leadsSummary(rows, sources, d(2026, 10, 6));
+      expect(s.weeks).toBeCloseTo(89 / 7, 6);
+      expect(s.weeks).toBeGreaterThan(12.5);
+      expect(s.weeks).toBeLessThan(13.5);
+      // 90 leads over 12.7 weeks is 7 a week, not 2.
+      expect(s.sources[1]!.perWeek).toBeCloseTo(90 / s.weeks, 1);
+      // A lead dated after asOf doesn't stretch the window past it.
+      expect(leadsSummary([lead("Google Ads", d(2026, 1, 1)), lead("Google Ads", d(2027, 1, 1))], sources, d(2026, 10, 6)).to).toBe(d(2026, 10, 6));
     });
 
     it("matches no source when two share a name", () => {
