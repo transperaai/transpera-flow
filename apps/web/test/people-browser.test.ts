@@ -162,6 +162,23 @@ describe("Person detail", { timeout: 120_000 }, () => {
 });
 
 describe("Horizon picker", { timeout: 120_000 }, () => {
+  it("keeps the previous run's numbers whole while the new run goes, and marks How busy as busy", async () => {
+    const { page, errors } = await mount({ viewer: "everyone" });
+    await page.waitForSelector(".grid[aria-busy='false']");
+    const kai = () => busyRows(page).filter({ hasText: "Kai Robinson" }).locator("td").last().innerText();
+    const before = await kai();
+    // Kai's December leave is inside the 26-week run and outside a 1-month one.
+    expect(before).not.toBe("—");
+    await page.getByRole("button", { name: "1 month" }).click();
+    await page.waitForSelector("[data-how-busy][aria-busy='true']", { timeout: 90_000 });
+    // Still the old run's numbers: the new (shorter) model's leave isn't counted against them.
+    expect(await kai()).toBe(before);
+    await page.waitForSelector("[data-how-busy][aria-busy='false']", { timeout: 90_000 });
+    expect(await kai()).toBe("—");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
   it("re-runs How busy at the picked length", async () => {
     const { page, errors } = await mount({ viewer: "everyone" });
     await absenceDone(page);

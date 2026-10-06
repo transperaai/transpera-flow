@@ -103,14 +103,17 @@ export function PeoplePage({
   const testWho = viewer.seesEveryone ? undefined : viewer.ownPersonId ? [viewer.ownPersonId] : null;
   const absenceWeeks = resolveMoney(ANALYSIS_DEFAULTS).absenceWeeks;
   const absence = useAbsenceTest(baseModel && baselineDone && testWho !== null ? baseModel : null, run?.result.seed ?? 1, absenceWeeks, testWho ?? undefined);
+  // While a newer run goes, the numbers on screen are the previous run's, so they are read with the model that run was made from
+  // (a longer horizon would otherwise count more leave against the old utilisation).
+  const ranModel = sim.model;
   const view = useMemo(() => {
-    if (!model || !run) return null;
+    if (!ranModel || !run) return null;
     const fte = new Map(bundle.people.map((p) => [p.id, Number(p.fte)]));
-    const rows = personRows(model, run.result, fte);
+    const rows = personRows(ranModel, run.result, fte);
     // The team card counts the whole team; a member sees only their own row in the table (B1 2b).
-    return { health: clientHealthSummary(model, run.result), rows: ownRowsOnly(viewer, rows, (r) => r.id), team: teamSummary(rows) };
-  }, [model, run, bundle.people, viewer]);
-  const detailOf = useMemo(() => (id: string) => (model && run ? personDetail(model, run.result, bundle, id, today) : null), [model, run, bundle, today]);
+    return { health: clientHealthSummary(ranModel, run.result), rows: ownRowsOnly(viewer, rows, (r) => r.id), team: teamSummary(rows) };
+  }, [ranModel, run, bundle.people, viewer]);
+  const detailOf = useMemo(() => (id: string) => (ranModel && run ? personDetail(ranModel, run.result, bundle, id, today) : null), [ranModel, run, bundle, today]);
   const away = useMemo(() => {
     if (!baseModel || !absence) return null;
     const config = toRatingConfig(ANALYSIS_DEFAULTS, baseModel.hoursPerWeek);
@@ -150,7 +153,7 @@ export function PeoplePage({
         <TeamCard team={team} />
       </div>
       {health.groups.length > 0 && <ClientGroupsTable health={health} />}
-      <HowBusy rows={rows} viewer={viewer} notInRun={notInRun} detailOf={detailOf} bundle={bundle} settingsHref={settingsHref} />
+      <HowBusy busy={sim.status === "running"} rows={rows} viewer={viewer} notInRun={notInRun} detailOf={detailOf} bundle={bundle} settingsHref={settingsHref} />
       <IfSomeoneIsAway away={away} viewer={viewer} runWeeks={baseModel?.horizonWeeks ?? 0} weeksAway={absenceWeeks} />
       {forecast && <ForecastPanel bundle={forecast.bundle ?? bundle} forecastHref={forecast.href} startDate={forecast.startDate} />}
     </>
@@ -314,6 +317,7 @@ const formatLeave = (days: number) => {
 };
 
 function HowBusy({
+  busy,
   rows,
   viewer,
   notInRun,
@@ -321,6 +325,8 @@ function HowBusy({
   bundle,
   settingsHref,
 }: {
+  /** A newer run is going: the numbers shown are the previous run's. */
+  busy: boolean;
   rows: PersonBusy[];
   viewer: Viewer;
   notInRun: boolean;
@@ -332,7 +338,7 @@ function HowBusy({
   // One person's detail is open at a time.
   const [openId, setOpenId] = useState<string | null>(null);
   return (
-    <Card className="gap-0 py-0" data-how-busy>
+    <Card className="gap-0 py-0" data-how-busy aria-busy={busy}>
       <div className="flex items-center px-4 pt-4 pb-2">
         <h2 className="font-heading text-base font-medium">How busy</h2>
         <Help
