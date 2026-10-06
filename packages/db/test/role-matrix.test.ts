@@ -25,6 +25,7 @@ const [openIssue] = northbeamIssues().map((i) => i.id) as [string, string, strin
 
 type Claims = Record<string, unknown>;
 interface Caller {
+  id: string;
   claims: Claims;
 }
 

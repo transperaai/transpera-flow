@@ -14,6 +14,8 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 // hours-weighted average. Larkspur has a person in two roles (Hana: strat and am), a person with 30 hours (Theo), skills
 // (Freya) and leave (Ruby, Kai).
 
+type Json = { kpi: Record<string, unknown>; samples: Record<string, unknown>; resolvedPeople: Record<string, Record<string, unknown>> };
+
 const ws = LARKSPUR_WORKSPACE_ID;
 const P = larkspurPersonIds;
 
@@ -224,8 +226,8 @@ describe("a member's simulation equals an editor's", () => {
     }
     return strip(JSON.parse(text), dropRates);
   };
-  const strip = (r: Record<string, any>, dropRates: boolean) => {
-    const copy = JSON.parse(JSON.stringify(r)) as Record<string, any>;
+  const strip = (r: Json, dropRates: boolean) => {
+    const copy = JSON.parse(JSON.stringify(r)) as Json;
     if (dropRates) {
       delete copy.kpi.overtimeCost;
       delete copy.samples.overtimeCost;
@@ -245,7 +247,7 @@ describe("a member's simulation equals an editor's", () => {
     expect(Number.isFinite(a) && Number.isFinite(b)).toBe(true);
     expect(a).toBeGreaterThan(0);
     expect(Math.abs(a - b)).toBeLessThanOrEqual(0.25 * Math.abs(a));
-    expect(strip(viaTeam as unknown as Record<string, any>, true)).toEqual(relabelled(viaTables, viaTeam, true));
+    expect(strip(viaTeam as unknown as Json, true)).toEqual(relabelled(viaTables, viaTeam, true));
   });
 
   it("Northbeam (no person rates): deep-equal with only the names removed", async () => {
@@ -256,6 +258,6 @@ describe("a member's simulation equals an editor's", () => {
     await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, nbEditor.id]);
     const viaTables = simulate(toEngineModel(await bundleFor(nbEditor, NORTHBEAM_WORKSPACE_ID, false), opts), 30, 1);
     const viaTeam = simulate(toEngineModel(await bundleFor(nbMember, NORTHBEAM_WORKSPACE_ID, true), opts), 30, 1);
-    expect(strip(viaTeam as unknown as Record<string, any>, false)).toEqual(relabelled(viaTables, viaTeam, false));
+    expect(strip(viaTeam as unknown as Json, false)).toEqual(relabelled(viaTables, viaTeam, false));
   });
 });
