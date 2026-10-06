@@ -1,3 +1,4 @@
+import { Client } from "pg";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NORTHBEAM_DOMAIN, NORTHBEAM_WORKSPACE_ID, northbeamPersonIds } from "../src";
@@ -313,5 +314,321 @@ describe("removal and audit", () => {
     await expect(
       db.as(editor.claims, (c) => c.query("insert into audit_log (action, target_table) values ('x', 'y')")),
     ).rejects.toThrow(/permission denied/);
+  });
+});
+
+// Keeping an owner and linking members to people (issue #30, B1 part 1; migration 20261206000000). Each test makes its own
+// workspace, so the rule is exercised on workspaces with exactly the owners the test gives them.
+
+describe("keeping an owner", () => {
+  let n = 0;
+  const guard = /workspace_keeps_an_owner/;
+
+  /** A workspace with the given owners (manual memberships), and the user ids. */
+  async function workspaceWith(owners: number) {
+    n += 1;
+    const wsId = (await db.client.query("insert into workspaces (name, slug) values ($1, $2) returning id", [`Guard ${n}`, `guard-${n}`])).rows[0]
+      .id as string;
+    const users = [];
+    for (let i = 0; i < owners; i++) {
+      const u = await createUser(db, `owner${i}-guard${n}@guard.example`);
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [wsId, u.id]);
+      users.push(u);
+    }
+    return { wsId, users };
+  }
+
+  /** Runs `run` as the claims in a rolled-back transaction, inside a savepoint, and returns the error or the row count. */
+  const attempt = (claims: Claims, run: (c: pg.Client) => Promise<{ rowCount: number | null }>) =>
+    db.as(claims, async (c) => {
+      await c.query("savepoint attempt");
+      try {
+        return { rows: (await run(c)).rowCount, error: null as { message: string; code?: string } | null };
+      } catch (e) {
+        return { rows: null, error: e as { message: string; code?: string } };
+      }
+    });
+
+  const change = (wsId: string, userId: string, set: string | null) => (c: pg.Client) =>
+    set
+      ? c.query(`update memberships set ${set} where workspace_id = $1 and user_id = $2`, [wsId, userId])
+      : c.query("delete from memberships where workspace_id = $1 and user_id = $2", [wsId, userId]);
+
+  it.each([
+    ["demote", "role = 'editor'"],
+    ["deactivate", "active = false"],
+    ["delete", null],
+  ])("the last active owner can't %s themselves", async (_, set) => {
+    const { wsId, users } = await workspaceWith(1);
+    const res = await attempt(users[0]!.claims, change(wsId, users[0]!.id, set));
+    expect(res.error?.message).toMatch(guard);
+    expect(res.error?.code).toBe("23514");
+  });
+
+  it("stops one owner demoting another when that leaves none (only inactive owners remain)", async () => {
+    const { wsId, users } = await workspaceWith(2);
+    await db.client.query("update memberships set active = false where workspace_id = $1 and user_id = $2", [wsId, users[1]!.id]);
+    const res = await attempt(users[0]!.claims, change(wsId, users[0]!.id, "role = 'viewer'"));
+    expect(res.error?.message).toMatch(guard);
+  });
+
+  it.each([
+    ["demote", "role = 'editor'"],
+    ["deactivate", "active = false"],
+    ["delete", null],
+  ])("with a second owner, an owner can %s themselves", async (_, set) => {
+    const { wsId, users } = await workspaceWith(2);
+    expect(await attempt(users[0]!.claims, change(wsId, users[0]!.id, set))).toEqual({ rows: 1, error: null });
+  });
+
+  it("lets an owner change anything else about the last owner row, such as the person link", async () => {
+    const { wsId, users } = await workspaceWith(1);
+    const person = (await db.client.query("insert into people (workspace_id, name) values ($1, 'Pat') returning id", [wsId])).rows[0].id;
+    expect(await attempt(users[0]!.claims, change(wsId, users[0]!.id, `person_id = '${person}'`))).toEqual({ rows: 1, error: null });
+  });
+
+  it("lets an agency admin remove the last owner (offboarding)", async () => {
+    const { wsId, users } = await workspaceWith(1);
+    const agency = await createUser(db, `agency-guard${n}@transpera.example`, { agency_admin: true });
+    expect(await attempt(agency.claims, change(wsId, users[0]!.id, null))).toEqual({ rows: 1, error: null });
+  });
+
+  it("allows a workspace that has no owner at all, and adding the first; the guard bites from then on", async () => {
+    const { wsId } = await workspaceWith(0);
+    // A manager who isn't an agency admin by JWT flag (an agency_admin membership), so the guard applies to them.
+    const manager = await createUser(db, `manager-guard${n}@transpera.example`);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'agency_admin')", [wsId, manager.id]);
+    const first = await createUser(db, `first-guard${n}@guard.example`);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [wsId, first.id]);
+    await db.as(manager.claims, async (c) => {
+      expect((await c.query("update memberships set role = 'owner' where user_id = $1 and workspace_id = $2", [first.id, wsId])).rowCount).toBe(1);
+      await c.query("savepoint s");
+      await expect(c.query("update memberships set role = 'editor' where user_id = $1 and workspace_id = $2", [first.id, wsId])).rejects.toThrow(guard);
+      await c.query("rollback to savepoint s");
+    });
+  });
+
+  it.each([
+    ["source", "source = 'manual'"],
+    ["workspace", null],
+  ])("refuses the last owner changing their %s", async (what, set) => {
+    const { wsId, users } = await workspaceWith(1);
+    await db.client.query("update memberships set source = 'domain' where workspace_id = $1", [wsId]);
+    const other = (await workspaceWith(1)).wsId;
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [other, users[0]!.id]);
+    const sql = set ?? `workspace_id = '${other}'`;
+    const res = await attempt(users[0]!.claims, change(wsId, users[0]!.id, what === "source" ? set : sql));
+    // (They own the other workspace too, so row-level security would let the move through: the guard is what stops it.)
+    expect(res.error?.message ?? res.error).toMatch(guard);
+  });
+
+  it("refuses changing the last owner's source then letting resolve_my_access drop them", async () => {
+    const { wsId } = await workspaceWith(0);
+    const owner = await createUser(db, `listsrc-guard${n}@guard.example`, {}, { google: {} });
+    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, $2, 'owner')", [wsId, `listsrc-guard${n}@guard.example`]);
+    const res = await attempt(owner.claims, (c) =>
+      c.query("update memberships set source = 'domain' where workspace_id = $1 and user_id = $2", [wsId, owner.id]),
+    );
+    expect(res.error?.message).toMatch(guard);
+    expect(await membership(owner.id, wsId)).toMatchObject({ role: "owner", source: "access_list" });
+  });
+
+  it("serialises two owners demoting each other at the same moment, so one owner is left", async () => {
+    const { wsId, users } = await workspaceWith(2);
+    const open = async (claims: Claims) => {
+      const c = new Client({ connectionString: db.url });
+      await c.connect();
+      await c.query("begin");
+      await c.query("set local role authenticated");
+      await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(claims)]);
+      return c;
+    };
+    const demote = (c: Client, userId: string) =>
+      c.query("update memberships set role = 'editor' where workspace_id = $1 and user_id = $2", [wsId, userId]);
+    const [one, two] = [await open(users[0]!.claims), await open(users[1]!.claims)];
+    try {
+      await demote(one, users[1]!.id);
+      let settled = false;
+      const second = demote(two, users[0]!.id).then(
+        () => ({ error: null as Error | null }),
+        (e: Error) => ({ error: e }),
+      ).finally(() => (settled = true));
+      await new Promise((r) => setTimeout(r, 400));
+      expect(settled, "the second demotion waits for the first").toBe(false);
+      await one.query("commit");
+      expect((await second).error?.message).toMatch(guard);
+    } finally {
+      await two.query("rollback").catch(() => undefined);
+      await one.query("rollback").catch(() => undefined);
+      await one.end();
+      await two.end();
+    }
+    const owners = (await db.client.query("select count(*) from memberships where workspace_id = $1 and role = 'owner'", [wsId])).rows[0].count;
+    expect(owners).toBe("1");
+  });
+
+  describe("on the pre-assigned list", () => {
+    /** A workspace whose one owner got in by a pre-assigned email, so the list row and the membership are linked. */
+    async function listedOwner() {
+      const { wsId } = await workspaceWith(0);
+      const owner = await createUser(db, `listed-guard${n}@guard.example`, {}, { google: {} });
+      await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, $2, 'owner')", [
+        wsId,
+        `listed-guard${n}@guard.example`,
+      ]);
+      expect(await membership(owner.id, wsId)).toMatchObject({ role: "owner", source: "access_list" });
+      return { wsId, owner, email: `listed-guard${n}@guard.example` };
+    }
+    const listRow = (wsId: string, email: string, set: string | null) => (c: pg.Client) =>
+      set
+        ? c.query(`update workspace_access_emails set ${set} where workspace_id = $1 and email = $2`, [wsId, email])
+        : c.query("delete from workspace_access_emails where workspace_id = $1 and email = $2", [wsId, email]);
+
+    it.each([
+      ["remove", null],
+      ["demote", "role = 'editor'"],
+      ["re-address", "email = 'someone.else@guard.example'"],
+    ])("refuses to %s the last owner's row", async (_, set) => {
+      const { wsId, owner, email } = await listedOwner();
+      const res = await attempt(owner.claims, listRow(wsId, email, set));
+      expect(res.error?.message).toMatch(guard);
+      expect(res.error?.code).toBe("23514");
+    });
+
+    it("refuses pointing the last list owner's row at another workspace they own", async () => {
+      const { wsId, owner, email } = await listedOwner();
+      const other = (await workspaceWith(0)).wsId;
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [other, owner.id]);
+      const res = await attempt(owner.claims, listRow(wsId, email, `workspace_id = '${other}'`));
+      expect(res.error?.message).toMatch(guard);
+      expect(await membership(owner.id, wsId)).toMatchObject({ role: "owner" });
+    });
+
+    it("does not apply to SQL run as another role (support work as the superuser)", async () => {
+      const { wsId, owner, email } = await listedOwner();
+      await db.client.query("delete from workspace_access_emails where workspace_id = $1 and email = $2", [wsId, email]);
+      expect(await membership(owner.id, wsId)).toBeUndefined();
+    });
+
+    it("works with a second owner", async () => {
+      const { wsId, owner, email } = await listedOwner();
+      const second = await createUser(db, `second-guard${n}@guard.example`);
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [wsId, second.id]);
+      expect(await attempt(owner.claims, listRow(wsId, email, null))).toEqual({ rows: 1, error: null });
+    });
+
+    it("lets an owner change the person on the last owner's row", async () => {
+      const { wsId, owner, email } = await listedOwner();
+      const person = (await db.client.query("insert into people (workspace_id, name) values ($1, 'Pat') returning id", [wsId])).rows[0].id;
+      expect(await attempt(owner.claims, listRow(wsId, email, `person_id = '${person}'`))).toEqual({ rows: 1, error: null });
+    });
+
+    it("lets an agency admin remove the last owner's row, which removes their access", async () => {
+      const { wsId, owner, email } = await listedOwner();
+      const agency = await createUser(db, `agency-listed${n}@transpera.example`, { agency_admin: true });
+      await commitAs(agency.claims, (c) => listRow(wsId, email, null)(c));
+      expect(await membership(owner.id, wsId)).toBeUndefined();
+    });
+
+    it("lets resolve_my_access remove an access-list member whose row is gone, and does not guard it", async () => {
+      const { wsId, owner, email } = await listedOwner();
+      // Take the row away as the superuser (no trigger of the caller's), then let the owner's next sign-in reconcile.
+      await db.client.query("alter table workspace_access_emails disable trigger user");
+      await db.client.query("delete from workspace_access_emails where workspace_id = $1 and email = $2", [wsId, email]);
+      await db.client.query("alter table workspace_access_emails enable trigger user");
+      expect(await membership(owner.id, wsId)).toMatchObject({ role: "owner" });
+      await commitAs(owner.claims, (c) => c.query("select resolve_my_access()"));
+      expect(await membership(owner.id, wsId)).toBeUndefined();
+    });
+
+    it("does not stop a workspace delete from cascading through the list", async () => {
+      const { wsId, owner } = await listedOwner();
+      await db.client.query("delete from workspaces where id = $1", [wsId]);
+      expect(await membership(owner.id, wsId)).toBeUndefined();
+      expect((await db.client.query("select count(*) from workspace_access_emails where workspace_id = $1", [wsId])).rows[0].count).toBe("0");
+    });
+  });
+
+  it("does not stop a workspace with an owner being deleted", async () => {
+    const { wsId, users } = await workspaceWith(1);
+    await db.client.query("delete from workspaces where id = $1", [wsId]);
+    expect(await membership(users[0]!.id, wsId)).toBeUndefined();
+  });
+
+  it("does not stop the auth user of the last owner being deleted", async () => {
+    const { wsId, users } = await workspaceWith(1);
+    await db.client.query("delete from auth.users where id = $1", [users[0]!.id]);
+    expect(await membership(users[0]!.id, wsId)).toBeUndefined();
+  });
+
+  it("known gap: an owner who joined by domain, promoted, loses the membership when they delete the domain (reconciliation isn't guarded)", async () => {
+    const { wsId } = await workspaceWith(0);
+    await db.client.query("insert into workspace_domains (workspace_id, domain) values ($1, 'gap-guard.example')", [wsId]);
+    const user = await createUser(db, "gap@gap-guard.example", {}, { google: { hd: "gap-guard.example" } });
+    await commitAs(user.claims, (c) => c.query("select resolve_my_access()"));
+    await db.client.query("update memberships set role = 'owner' where user_id = $1 and workspace_id = $2", [user.id, wsId]);
+    await commitAs(user.claims, (c) => c.query("delete from workspace_domains where workspace_id = $1", [wsId]));
+    expect(await membership(user.id, wsId)).toBeUndefined();
+  });
+});
+
+describe("linking members to people", () => {
+  const person = async (wsId: string, name: string) =>
+    (await db.client.query("insert into people (workspace_id, name) values ($1, $2) returning id", [wsId, name])).rows[0].id as string;
+  const myPerson = (claims: Claims, wsId: string) =>
+    db.as(claims, async (c) => (await c.query("select public.my_person_id($1) as id", [wsId])).rows[0].id as string | null);
+
+  it("lets an owner link a domain member to a person, and my_person_id then names that person", async () => {
+    const owner = await withRole("owner-link@northbeam.example", "owner");
+    const member = await createUser(db, "link.me@northbeam.example", {}, { google: { hd: NORTHBEAM_DOMAIN } });
+    await commitAs(member.claims, (c) => c.query("select resolve_my_access()"));
+    expect(await membership(member.id)).toMatchObject({ source: "domain", person_id: null });
+    expect(await myPerson(member.claims, ws)).toBeNull();
+
+    const target = northbeamPersonIds["Rosa Diaz"]!;
+    const updated = await commitAs(owner.claims, async (c) =>
+      (await c.query("update memberships set person_id = $1 where user_id = $2 and workspace_id = $3", [target, member.id, ws])).rowCount,
+    );
+    expect(updated).toBe(1);
+    expect(await membership(member.id)).toMatchObject({ source: "domain", person_id: target });
+    expect(await myPerson(member.claims, ws)).toBe(target);
+    // Signing in again keeps the link.
+    await commitAs(member.claims, (c) => c.query("select resolve_my_access()"));
+    expect(await myPerson(member.claims, ws)).toBe(target);
+  });
+
+  it("stops an editor linking anyone", async () => {
+    const editor = await withRole("editor-link@northbeam.example", "editor");
+    const victim = await withRole("victim-link@northbeam.example", "member");
+    const updated = await db.as(editor.claims, async (c) =>
+      (await c.query("update memberships set person_id = $1 where user_id = $2", [northbeamPersonIds["Rosa Diaz"], victim.id])).rowCount,
+    );
+    expect(updated).toBe(0);
+  });
+
+  it("returns null for an inactive membership, for another workspace and for someone with no membership", async () => {
+    const user = await withRole("inactive-link@northbeam.example", "member");
+    const mine = await person(ws, "Linked Lee");
+    await db.client.query("update memberships set person_id = $1 where user_id = $2", [mine, user.id]);
+    expect(await myPerson(user.claims, ws)).toBe(mine);
+    await db.client.query("update memberships set active = false where user_id = $1", [user.id]);
+    expect(await myPerson(user.claims, ws)).toBeNull();
+    await db.client.query("update memberships set active = true where user_id = $1", [user.id]);
+    const other = (await db.client.query("insert into workspaces (name, slug) values ('Link other', 'link-other') returning id")).rows[0].id;
+    expect(await myPerson(user.claims, other)).toBeNull();
+    const stranger = await createUser(db, "stranger-link@example.com");
+    expect(await myPerson(stranger.claims, ws)).toBeNull();
+  });
+
+  it("is null for an agency admin with no membership, and not executable by anon", async () => {
+    const agency = await createUser(db, "agency-link@transpera.example", { agency_admin: true });
+    expect(await myPerson(agency.claims, ws)).toBeNull();
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      await expect(db.client.query("select public.my_person_id($1)", [ws])).rejects.toThrow(/permission denied/);
+    } finally {
+      await db.client.query("rollback");
+    }
   });
 });

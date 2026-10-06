@@ -300,3 +300,12 @@ Verified only against plain Postgres (`packages/db/test/process-archive.test.ts`
 - [ ] **Index.** `sources_workspace_file_path` (partial, `file_path is not null`) serves the storage policies' look-ups; created with a plain `create index` inside the apply transaction (production's `sources` is small).
 - `private.storage_workspace(name)` reads the workspace id from the object's first folder; `authenticated` has EXECUTE on it (the policies call it) and USAGE on `private` (granted by 20260930040000). The policies also read `public.sources` as the caller (members read it).
 - The archive triggers (`process_archive_guard`, `process_archive_map`, `refuse_archived_placements`, `refuse_archived_revision`, `refuse_archived_publish`) run for every caller; the guard and the map's are SECURITY DEFINER with an empty `search_path`, as the company map's other triggers; tested with the map's sync, publish, restore, open_draft and the placement checks.
+
+## Keeping an owner (issue #30, migration 20261206000000)
+
+Verified only against plain Postgres 16 (`packages/db/test/access.test.ts`, "keeping an owner") and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-roles.test.ts`), not against a Supabase project. The owner guard on `memberships` relies on `current_user` being `authenticated` for Data API requests (PostgREST's `set local role` after the pre-request hook) and being the function owner inside SECURITY DEFINER functions (`reconcile_access`, `reconcile_after_access_change`). Check on the real project:
+
+- [ ] **Preflight 2** shows the three reconcile functions are SECURITY DEFINER and owned by `postgres` (not `authenticated`, `supabase_auth_admin` or `service_role`).
+- [ ] **Demote the only owner** of a throwaway workspace from the app: refused with "A workspace needs at least one owner."; with a second owner, allowed.
+- [ ] **Delete an auth user** (Dashboard) who is the last owner of a workspace: allowed (the cascade runs as `supabase_auth_admin` or `postgres`, not `authenticated`).
+- [ ] **Remove the last owner's pre-assigned email** from Settings → Access: refused; remove a workspace that has one: allowed.

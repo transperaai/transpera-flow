@@ -34,6 +34,9 @@ interface DbError {
 /** A sentence for an error returned by Supabase when changing access settings. */
 export function accessErrorMessage(error: DbError): string {
   const m = error.message ?? "";
+  if (m.includes("workspace_keeps_an_owner")) {
+    return "A workspace needs at least one owner. Make someone else an owner first.";
+  }
   if (m.includes("workspace_domains_not_free_mail")) {
     return "Free email providers (like gmail.com) can't be allowed domains. Add those people by email instead.";
   }
@@ -44,4 +47,37 @@ export function accessErrorMessage(error: DbError): string {
   if (m.includes("workspace_access_emails_role_check")) return "Agency admins are set by Transpera, not the access list.";
   if (error.code === "42501" || m.includes("row-level security")) return "You don't have permission to change access here.";
   return "Something went wrong saving that change. Please try again.";
+}
+
+/** What an owner sends to someone they have given access to. Transpera Flow sends no emails: signing in with Google is accepting. */
+export function inviteMessage(workspaceName: string, email: string, origin: string): string {
+  return `You've been given access to ${workspaceName} in Transpera Flow. Sign in with Google as ${email} at ${origin.replace(/\/+$/, "")}/login.`;
+}
+
+/**
+ * The people an access-page picker should offer: everyone not already linked to another membership or list row. `links` says who is
+ * linked to what (a list row and the membership it made count as one: they carry the same person); `own` is the row being edited,
+ * whose current person stays on offer. Pass no `own` for a new row.
+ */
+export function selectablePeople<P extends { id: string }>(people: P[], links: ReadonlyMap<string, ReadonlySet<string>>, own?: string): P[] {
+  return people.filter((p) => {
+    const taken = links.get(p.id);
+    return !taken || [...taken].every((k) => k === own);
+  });
+}
+
+/**
+ * Why a person can't be linked to a membership, or null when they can: another active membership, or a pre-assigned list row,
+ * in the workspace already holds them. The page hides such people; the action checks again, since a form can send anything.
+ * The database has no unique constraint on purpose (it would make `resolve_my_access` fail at sign-in on existing duplicates).
+ */
+export function personLinkProblem(
+  membershipId: string,
+  personId: string,
+  memberships: readonly { id: string; person_id: string | null; active: boolean }[],
+  listRows: readonly { person_id: string | null }[],
+): string | null {
+  const taken =
+    memberships.some((m) => m.id !== membershipId && m.active && m.person_id === personId) || listRows.some((e) => e.person_id === personId);
+  return taken ? "That person is already linked to someone else in this workspace. Unlink them first." : null;
 }
