@@ -2,7 +2,8 @@
 // date"). Pure. Two parts, joined by a dot (`joinAnalysisHash`):
 //
 //   * the base, worked out here on the server: the engine model built at a fixed start date (so it doesn't change with
-//     the calendar, only with what someone entered: steps, times, people, demand, services, clients), the first principles
+//     the calendar, only with what someone entered: steps, times, people, demand, services, clients; without anyone's name
+//     or pay, so an owner's page and a member's hash the same: `neutralBundle`), the first principles
 //     the analysis judges it against, the scope, the prompt version, the Anthropic model that writes it, whether the
 //     workspace lets AI read sources and, when it does, every source citation on the model's steps (source id and quote);
 //   * the facts (`factsDigest`): the run's facts by key and rating, which the pages work out in the browser from the run.
@@ -14,6 +15,7 @@ import { ModelError, toEngineModel, type ProcessBundle } from "@transpera-flow/d
 import type { FirstPrinciples } from "@transpera-flow/engine";
 import { processSteps } from "@/lib/process-steps";
 import { AI_PROMPT_VERSION } from "./facts";
+import { neutralBundle } from "./neutral";
 
 export { factsDigest, isStale, joinAnalysisHash } from "./facts-digest";
 
@@ -51,7 +53,7 @@ export function sourceCitations(bundle: ProcessBundle, scope: "process" | "compa
 export function analysisBaseHash(bundle: ProcessBundle, firstPrinciples: FirstPrinciples | null, scope: "process" | "company", reads: AnalysisReads): string | null {
   let model;
   try {
-    model = toEngineModel(bundle, { startDate: FIXED_START });
+    model = toEngineModel(neutralBundle(bundle), { startDate: FIXED_START });
   } catch (err) {
     if (err instanceof ModelError) return null;
     throw err;

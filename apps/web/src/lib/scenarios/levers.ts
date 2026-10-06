@@ -6,7 +6,9 @@
 // wait or rework rate that is 0 today gets an absolute lever instead.
 // No React here: the panel renders these, and tests check them directly.
 
+import type { Viewer } from "@transpera-flow/db";
 import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
+import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances" | "market";
 export type LeverUnit = "per_week" | "clients" | "share" | "money" | "people" | "fte" | "hours";
@@ -42,7 +44,7 @@ const FACTOR = { min: 0.1, max: 2, step: 0.05 } as const;
 
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 
-export function buildLevers(model: EngineModel): Lever[] {
+export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const levers: Lever[] = [];
   const add = (l: Lever) => levers.push(l);
 
@@ -89,7 +91,9 @@ export function buildLevers(model: EngineModel): Lever[] {
     const count = headcount(model, id);
     add({ path: `roles.${id}.headcount`, group: "people", section: "Roles", label: role.name, op: "set", base: count, unit: "people", min: 0, max: count + 5, step: 1 });
   }
-  for (const [id, person] of Object.entries(model.people ?? {})) {
+  // A member or viewer gets a lever for their own person only (B1 2b).
+  const seen = viewerOf({ viewer });
+  for (const [id, person] of ownRowsOnly(seen, Object.entries(model.people ?? {}), ([pid]) => pid)) {
     add({
       path: `people.${id}.fte`,
       group: "people",

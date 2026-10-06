@@ -15,8 +15,9 @@ import {
   type EngineChurnDriver,
   type EngineModel,
 } from "@transpera-flow/engine";
-import type { ChurnDriverKey, ChurnDriverRow } from "@transpera-flow/db";
+import type { ChurnDriverKey, ChurnDriverRow, Viewer } from "@transpera-flow/db";
 import { isId } from "./services";
+import { personName, viewerOf } from "./viewer";
 
 /** The most drivers of your own a workspace can have (the database's limit). */
 export const MAX_CUSTOM_DRIVERS = 25;
@@ -201,7 +202,7 @@ const num = (v: number, digits = 1) => v.toLocaleString("en-GB", { maximumFracti
 export const sourceLabel = (d: Pick<DriverState, "builtin">): string => CHURN_SOURCE_LABELS[d.builtin ? CHURN_DRIVER_SPECS[d.builtin].source : "entered"];
 
 /** "14% of reports late": the cause's value in the latest run, or why there isn't one. */
-export function valueNow(d: DriverState, cause: ChurnCause | undefined, model: Pick<EngineModel, "people"> | null): string {
+export function valueNow(d: DriverState, cause: ChurnCause | undefined, model: Pick<EngineModel, "people"> | null, viewer?: Viewer): string {
   const v = cause?.value ?? null;
   switch (d.builtin) {
     case "late":
@@ -214,7 +215,8 @@ export function valueNow(d: DriverState, cause: ChurnCause | undefined, model: P
       return v === null ? "no servicing work in the run" : `${pct(v)} of servicing work redone`;
     case "load": {
       if (v === null) return "no people to measure";
-      const who = cause?.valuePerson ? model?.people?.[cause.valuePerson]?.name : undefined;
+      const named = cause?.valuePerson ? model?.people?.[cause.valuePerson] : undefined;
+      const who = named && cause?.valuePerson ? personName(viewerOf({ viewer }), cause.valuePerson, named.name) : undefined;
       return `${who ? `${who}, ` : "busiest person "}${pct(v)} busy`;
     }
     case "handoff":

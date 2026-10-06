@@ -27,7 +27,7 @@ export async function WorkspaceFirstPrinciplesPage({ slug, processId }: { slug: 
   const fps = await loadProcessFirstPrinciples(live.process.id, [...new Set([bundle.revision.id, live.revision.id])]);
   const stored = fps[bundle.revision.id]!;
   // What AI wrote about the live version (A46): it reviews the published answers, not the draft being typed.
-  const aiViews = unpublished ? {} : await loadAiViews([live.revision.id]);
+  const aiViews = unpublished ? {} : await loadAiViews([live.revision.id], { viewer: live.viewer, people: live.people });
   const liveFp = fps[live.revision.id]!.doc;
   const hasDraft = bundle === draft;
 

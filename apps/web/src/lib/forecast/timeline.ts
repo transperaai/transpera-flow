@@ -5,6 +5,7 @@
 
 import { monthOfHour, type EngineModel, type MonthBusy, type MonthlyResult, type SimulationResult, type Stat } from "@transpera-flow/engine";
 import { workingDaysBetween, type ProcessBundle } from "@transpera-flow/db";
+import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -206,7 +207,7 @@ const busyRows = (
 export function timelineData(
   model: EngineModel,
   result: SimulationResult,
-  bundle: Pick<ProcessBundle, "marketSchedule" | "marketConditions" | "services">,
+  bundle: Pick<ProcessBundle, "marketSchedule" | "marketConditions" | "services" | "viewer">,
   startDate: string,
 ): TimelineData | null {
   const monthly = result.monthly;
@@ -214,7 +215,8 @@ export function timelineData(
   const months = timelineMonths(startDate, monthly.months, model.hoursPerWeek);
   const markers = plannedMarkers(model, monthly, startDate);
   const roleNames = Object.entries(model.roles).map(([id, r]): [string, string] => [id, r.name]);
-  const people = Object.entries(result.resolvedPeople)
+  // A member or viewer sees their own person's row only (B1 2b); the roles and the clients stay.
+  const people = ownRowsOnly(viewerOf(bundle), Object.entries(result.resolvedPeople), ([id]) => id)
     .map(([id, p]): [string, string] => [id, p.name])
     .sort((a, b) => a[1].localeCompare(b[1]));
   const serviceName = new Map(bundle.services.map((s) => [s.id, s.name]));

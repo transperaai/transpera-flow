@@ -1,5 +1,5 @@
 import "server-only";
-import { listProcesses, loadIssues, loadProcessBySlug, type IssueRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
+import { listProcesses, loadIssuesForReader, loadProcessBySlug, type IssueRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { createClient } from "@/lib/supabase/server";
 import type { ArchivedProcess } from "./admin";
 import { isOnProcess, processRows, type LiveVersion, type ProcessRowData } from "./rows";
@@ -18,7 +18,7 @@ export async function loadProcessesPage(workspaceId: string): Promise<ProcessRow
 /** The Processes page's rows, and the archived processes for its Archived filter (issue #182), newest archived first. */
 export async function loadProcessesAndArchived(workspaceId: string): Promise<{ rows: ProcessRowData[]; archived: ArchivedProcess[] }> {
   const db = await createClient();
-  const [everything, issues] = await Promise.all([listProcesses(db, workspaceId, { includeArchived: true }), loadIssues(db, workspaceId)]);
+  const [everything, issues] = await Promise.all([listProcesses(db, workspaceId, { includeArchived: true }), loadIssuesForReader(db, workspaceId)]);
   const processes = everything.filter((p) => !p.archived_at);
   const archived = everything
     .flatMap((p) => (p.archived_at ? [{ id: p.id, name: p.name, kind: p.kind, archivedAt: p.archived_at }] : []))
@@ -67,6 +67,6 @@ export async function loadProcessCard(slug: string, processId: string): Promise<
   const found = await loadProcessBySlug(db, slug, { draft: false, processId });
   if (!found || found.live.revision.status !== "published" || found.live.steps.length === 0) return null;
   const stepIds = new Set(found.live.steps.map((s) => s.id));
-  const issues = (await loadIssues(db, found.live.workspace.id)).filter((i) => isOnProcess(i, processId, stepIds));
+  const issues = (await loadIssuesForReader(db, found.live.workspace.id)).filter((i) => isOnProcess(i, processId, stepIds));
   return { bundle: found.live, issues };
 }

@@ -20,7 +20,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function open(mode: "demo" | "readonly" = "demo", width = 1280): Promise<{ page: Page; errors: string[] }> {
+async function open(mode: "demo" | "readonly" = "demo", width = 1280, member = false): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -28,7 +28,7 @@ async function open(mode: "demo" | "readonly" = "demo", width = 1280): Promise<{
   await page.route("https://findings.test/", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><div id="root"></div>` }));
   await page.goto("https://findings.test/");
   await page.addScriptTag({ content: script });
-  await page.evaluate((m) => window.mountFindings({ mode: m }), mode);
+  await page.evaluate(([m, who]) => window.mountFindings({ mode: m as "demo" | "readonly", member: who as boolean }), [mode, member] as const);
   await page.waitForSelector("[data-analysis]");
   return { page, errors };
 }
@@ -36,6 +36,26 @@ async function open(mode: "demo" | "readonly" = "demo", width = 1280): Promise<{
 const proposed = (page: Page) => page.locator("[data-proposed] b").allInnerTexts();
 const listed = (page: Page) => page.locator("[data-insight] button b").allInnerTexts();
 const row = (page: Page, title: string) => page.locator("[data-proposed]", { hasText: title });
+
+describe("AI text saved with labels, read by a member (B1 2b)", { timeout: 60_000 }, () => {
+  it("shows 'A team member', never a label's letters or a real name, in the read and in a finding awaiting review", async () => {
+    const { page, errors } = await open("readonly", 1280, true);
+    const panel = await page.locator("[data-analysis]").innerText();
+    expect(panel).toContain("A team member is overloaded, and a team member covers for a team member.");
+    expect(panel).not.toMatch(/Team member [A-Z]/);
+    expect(panel).not.toMatch(/Maya Collins|Rosa Diaz/);
+    // A viewer sees only that something is waiting; an editor sees the finding, named the same way.
+    const editor = await open("demo", 1280, true);
+    expect(await proposed(editor.page)).toEqual(["A team member carries the whole line"]);
+    const row = await editor.page.locator("[data-proposed]").innerText();
+    expect(row).toContain("A team member only reviews what a team member writes.");
+    expect(row).not.toMatch(/Team member [A-Z]/);
+    expect(errors).toEqual([]);
+    expect(editor.errors).toEqual([]);
+    await page.close();
+    await editor.page.close();
+  });
+});
 
 describe("on a phone (400px)", { timeout: 60_000 }, () => {
   it("wraps a finding's title, tags and buttons instead of cutting them off", async () => {

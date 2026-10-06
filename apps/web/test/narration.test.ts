@@ -71,6 +71,11 @@ describe("what the model is sent", () => {
     expect(runNarrationInput({ id: "r", name: "Audit baseline", created_at: START, results: { ...runResults(), reps: 40 } }, "Lead to live").hash).not.toBe(run.hash);
   });
 
+  it("holds no person's name and so aliases no one: a narration's saved text has nothing to put names back into (B1 2b)", () => {
+    expect(run.aliases).toEqual([]);
+    expect(JSON.stringify(run.payload)).not.toMatch(/Team member/);
+  });
+
   it("maps labels back to names without touching other words", () => {
     const aliases = [
       { name: "Sam", label: "Team member A" },

@@ -15,7 +15,7 @@ import {
   saveIssue,
   listProcesses,
   loadFirstPrinciples,
-  loadIssues,
+  loadIssuesForReader,
   loadProcessBundle,
   loadScenarios,
   ModelError,
@@ -474,7 +474,7 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = args.process || args.include_detected ? await resolveProcess(ctx, ws, args.process, assumptions) : null;
         const [issues, scenarios, people, roles, processes, clients] = await Promise.all([
-          loadIssues(ctx.db, ws.id),
+          loadIssuesForReader(ctx.db, ws.id),
           loadScenarios(ctx.db, ws.id),
           ctx.db.from("people").select("id, name").eq("workspace_id", ws.id),
           ctx.db.from("roles").select("id, name").eq("workspace_id", ws.id),

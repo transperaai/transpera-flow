@@ -1,6 +1,6 @@
 "use server";
 
-import { ISSUE_STATUSES, loadIssue, loadIssueEvents, resolveIssue, saveIssue, storedStatus, uiStatus, type IssueEventRow, type IssueLinkRef, type IssueStatus, type Json, type StoredIssueStatus } from "@transpera-flow/db";
+import { ISSUE_STATUSES, loadIssue, loadIssueEvents, payFreeIssueFields, resolveIssue, saveIssue, storedStatus, uiStatus, type IssueEventRow, type IssueLinkRef, type IssueStatus, type Json, type StoredIssueStatus } from "@transpera-flow/db";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField, saveFields } from "@/lib/fields/server";
 import { ALREADY_RESOLVED, ALREADY_TRACKED, type RemoveIssueResult, type SaveIssueResult } from "@/lib/issues/store";
@@ -89,8 +89,9 @@ export async function promoteIssue(workspaceId: unknown, input: unknown): Promis
   if (!parsed.ok) return { status: "error", message: parsed.error };
   const { process_id, step_id, owner_person_id, evidence_metrics, ...rest } = parsed.value;
   // `dismissed_revision_id` is in `rest`: a dismissal is written with the revision it was made against.
+  // What a browser tab that still runs the old engine sends carries the overtime money: the server strips it (B1 2b).
   return write(workspaceId, {
-    fields: { ...rest, evidence_metrics: evidence_metrics as Json, source: "promoted", status: rest.status ?? "open" },
+    fields: payFreeIssueFields({ ...rest, evidence_metrics: evidence_metrics as Json, source: "promoted", status: rest.status ?? "open" }),
     links: linksOf({ process_id, step_id }),
     owners: owner_person_id ? [owner_person_id] : [],
   });
@@ -124,7 +125,8 @@ export async function saveIssueFromDialog(workspaceId: unknown, input: unknown):
       fields.source = "manual";
     }
   }
-  return write(workspaceId, { id: v.id, fields, links: v.links, owners: v.owner_ids, sources: v.source_ids });
+  // An edit saves the evidence again, so it goes through the same strip (B1 2b).
+  return write(workspaceId, { id: v.id, fields: payFreeIssueFields(fields), links: v.links, owners: v.owner_ids, sources: v.source_ids });
 }
 
 /** Dismiss an insight again: its row stays dismissed, against the process's current live revision. */

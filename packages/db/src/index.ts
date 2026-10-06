@@ -195,6 +195,8 @@ export {
   MARKET_CONDITION_COLUMNS,
   MARKET_SCHEDULE_COLUMNS,
   loadIssues,
+  loadIssuesForReader,
+  readerSeesPeople,
   loadLiveProcessBySlug,
   loadProcessBundle,
   loadProcessBySlug,
@@ -332,3 +334,17 @@ export {
 } from "./simulation-gaps";
 export * from "./workspace-bundle";
 export * from "./workspace-import";
+export {
+  A_TEAM_MEMBER,
+  canSeePerson,
+  labelNames,
+  labelsUsed,
+  hideAiIssueKey,
+  nameAnalysisRow,
+  nameFinding,
+  nameLabels,
+  readPersonLabels,
+  type NameSource,
+  type PersonLabels,
+} from "./person-labels";
+export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";

@@ -75,7 +75,10 @@ export const payHiddenCost = (): IssueCost => ({
   payHidden: true,
 });
 
-/** Orders costs highest first: money, then time, then none. */
+/**
+ * Orders costs highest first: money, then time, then none. A payHidden cost sorts as no cost. Members' order must never
+ * depend on pay: it may differ from an editor's (B1 2b), where a cost that needs a person's rate puts an issue higher.
+ */
 export function compareCostsDesc(a: IssueCost, b: IssueCost): number {
   const m = (b.perMonth ?? -1) - (a.perMonth ?? -1);
   if (m !== 0) return m;

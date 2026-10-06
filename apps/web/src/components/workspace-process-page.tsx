@@ -38,7 +38,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     loadWorkspaceSolutions(live.workspace.id, live.process.id),
     currentUserId(),
     loadMemberNames(live.workspace.id),
-    loadWorkspaceFindings(live.workspace.id),
+    loadWorkspaceFindings(live.workspace.id, { viewer: live.viewer, people: live.people }),
     loadWorkspaceAiSettings(live.workspace.id),
   ]);
   // Who last published the live version, and which of this process's issues an AI idea is waiting for.
@@ -59,8 +59,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const aiView = isUnpublished(live)
     ? null
     : earlier
-      ? ((await loadAiViews([shown.revision.id]))[shown.revision.id] ?? null)
-      : ((await loadLatestAiViews([live.process.id]))[live.process.id] ?? null);
+      ? ((await loadAiViews([shown.revision.id], { viewer: live.viewer, people: live.people }))[shown.revision.id] ?? null)
+      : ((await loadLatestAiViews([live.process.id], { viewer: live.viewer, people: live.people }))[live.process.id] ?? null);
   // Out of date once what it read changed (model, first principles, Anthropic model, sources); the page adds the facts.
   const baseHash = aiView && !earlier ? analysisBaseHash(live, fpShown.doc, "process", { readSources: aiSettings.read_sources, model: NARRATION_MODEL }) : null;
   const stale = !earlier && isStale(aiView, { base: baseHash, revisionId: live.revision.id });

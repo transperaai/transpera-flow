@@ -37,6 +37,7 @@ const finding = (over: Partial<FindingRow> = {}): FindingRow => ({
   evidence: "Work waits 6.2 working days for Audit & proposal.",
   why: "Founders go elsewhere.",
   facts: [{ kind: "fact", key: facts[0]!.key, text: facts[0]!.title }],
+  person_labels: {},
   source_ids: [],
   ai_key: "ai:insight:aaaaaaaaaaaa",
   analysis_id: null,

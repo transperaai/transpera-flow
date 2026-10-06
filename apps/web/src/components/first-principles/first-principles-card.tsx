@@ -22,6 +22,7 @@ import {
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 const tone = (pct: number) => (pct >= 80 ? "text-good" : pct >= 50 ? "text-warn" : "text-crit");
 
@@ -57,7 +58,7 @@ export function FirstPrinciplesCard({
     return countFlags(
       firstPrinciplesFlags(doc, {
         steps: bundle.steps.map((s) => ({ id: s.id, name: s.name })),
-        people: bundle.people.map((p) => ({ id: p.id, name: p.name })),
+        people: namedForViewer(viewerOf(bundle), bundle.people).map((p) => ({ id: p.id, name: p.name })),
         roles: bundle.roles.map((r) => ({ name: r.name })),
         checks,
       }),

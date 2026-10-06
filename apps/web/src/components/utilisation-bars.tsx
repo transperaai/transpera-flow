@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import type { Viewer } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult, Stat } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { formatNumber, formatPercent, formatRange } from "@/lib/format";
+import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const THRESHOLD = 0.85;
 const pctWidth = (share: number) => `${Math.max(0, Math.min(100, share * 100))}%`;
@@ -58,7 +60,8 @@ function Bar({ row, stacked }: { row: Row; stacked: boolean }) {
   );
 }
 
-export function UtilisationBars({ model, result }: { model: EngineModel; result: SimulationResult | null }) {
+export function UtilisationBars({ model, result, viewer }: { model: EngineModel; result: SimulationResult | null; viewer?: Viewer }) {
+  const seen = viewerOf({ viewer });
   const [view, setView] = useState<"roles" | "people">("roles");
 
   const roleRows: Row[] = Object.entries(model.roles).map(([id, role]) => {
@@ -68,7 +71,7 @@ export function UtilisationBars({ model, result }: { model: EngineModel; result:
   // People grouped by their first role, in role order.
   const roleOrder = Object.keys(model.roles);
   const personRows: Row[] = result
-    ? Object.entries(result.resolvedPeople)
+    ? ownRowsOnly(seen, Object.entries(result.resolvedPeople), ([id]) => id)
         .sort(([, a], [, b]) => roleOrder.indexOf(a.roles[0] ?? "") - roleOrder.indexOf(b.roles[0] ?? "") || a.name.localeCompare(b.name))
         .map(([id, p]) => {
           const r = result.people[id];
