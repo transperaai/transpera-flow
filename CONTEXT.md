@@ -68,6 +68,10 @@ _Avoid_: Bug, ticket, risk
 A separate copy of a process with changed steps, plus optional lever changes, built to fix one or more issues. Example: a copy of "Lead to cash" where proposals are drafted by a template. A process can have many.
 _Avoid_: Scenario, fix, what-if
 
+**Backup**:
+A JSON file of a whole workspace, made by Export → JSON backup and restored into a new, empty workspace. Each process comes back as a draft of its latest published version; history, older versions and solutions stay in the file. Example: restore `northbeam-workspace-2026-10-05.json` into a workspace made for Northbeam, then publish each process.
+_Avoid_: bundle (in the UI), snapshot
+
 **AI idea**:
 A solution or issue the AI proposes, built from blocks. You Build it or Dismiss it. Example: "Swap manual proposal writing for the Proposal template block."
 _Avoid_: AI suggestion (a suggestion is any pending change awaiting review)
