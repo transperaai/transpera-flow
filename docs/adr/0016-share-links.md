@@ -108,3 +108,52 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
   frozen to check.
 - **Role-average blended rates:** overlapping averages leak one person's pay by subtraction (Austin, 6 Oct).
 - **Redacted ids:** would move every number.
+
+## Play links (B4, D48)
+
+Issue #33. A share link made in `play` mode (a process only) shows the same redacted snapshot plus the lever kinds the workspace hides;
+the visitor moves the shown levers in their browser and can send what they tried. Decisions D48 (Claude's defaults, for Austin to confirm).
+
+- **The one anon write.** `anon` gains exactly one EXECUTE, `public.submit_play_proposal`, and still holds no table privilege (a test
+  compares the set of public functions anon can execute with the one before B4 plus this). It is SECURITY DEFINER and volatile, and
+  writes one pending `solution_idea` into `suggestion_proposals` with `created_via = 'play_link'` and `created_by` null; nothing else
+  changes, and nothing is ever applied: only a person's Build it or Dismiss acts on it. A definer insert bypasses RLS (as `open_share_link`
+  does), so every check is in the function. Only that function can make a `play_link` row: it sets the transaction-local
+  `transpera.play_submitting` for its own statement (as `import_process_bundle` does with `transpera.importing`) and the trigger honours
+  it; any other insert is `mcp` or `upload` with no link and no visitor details.
+- **Real ids are checked, not mapped.** The ticket says redacted ids are mapped back to real ones; B3 kept real ids (ADR above: they seed the
+  engine's random streams), so nothing is translated. Every id a visitor sends must be in the link's frozen snapshot FIRST, then in the
+  workspace; every miss reads the same sentence, so the answer reveals nothing the page didn't show (an id of another workspace, a real
+  id of this one that the link doesn't show, a retired step and an invented one are indistinguishable). Build it checks each change again
+  against today's live process (`mapPlayChanges`) and drops those whose step, role, person or service has gone, with a note.
+- **Limits and their order.** Format checks (cheap, no workspace data), then the rate limits under `for update` on the link row (5 per
+  10 minutes and 50 per day per link, 10 per email per link per day, 200 pending visitor ideas per workspace), then the lever check, the
+  issue check and the visitor-text check. A link at its limit answers `rate_limited` without running the dearer ones. A refused call stores
+  nothing and isn't counted (accepted, as for `open_share_link`, which anon also calls without limit). No per-IP limit (the database sees
+  Vercel's address; no shared store); the Send dialog has a honeypot. 1 to 50 changes; title 120, name 100, email 254, note 1,000 characters.
+- **Proposals land in Suggestions**, not a separate queue (D37): `suggestion_proposals` gains `share_link_id` (no foreign key: links are
+  never deleted) and `visitor_text`; a visitor's idea may be for no issue (the check is widened for `play_link` only; `build_proposal`
+  accepts it, for the process the idea names). Owners and editors see the changes in words, the visitor's email (`play_proposal_contacts`,
+  neither column is granted to `authenticated`) and Build it or Dismiss with a reply (kept as the review note; nobody is emailed: no SMTP).
+- **The visitor-text rule.** Text a visitor writes is read by the workspace's members and viewers, so it must meet the rules those readers
+  live under (#30, as B3's checks encode them for a People-off, Financials-off link): no team member's name, no client's name, no email
+  address, no money amount. The link's own toggles don't loosen this: they set what the visitor may read, not what members may. The
+  title, note and name are each checked with `private.share_snapshot_problem` as for such a link. A field that fails is **held, never
+  refused** (a refusal would tell an outsider which words are the team's or a client's names) and not rewritten (the database has no
+  scrubber and the app can't read the names for an anonymous visitor): members and viewers read "A visitor's idea", no note or "A visitor";
+  owners, editors and agency admins read the original. The visitor is told only `ok`. Austin's #30 Q10 (typed titles keep names) is about
+  the workspace's own editors, not outsiders.
+- **`hiddenLevers` is a non-text key of known ids.** The snapshot carries the workspace's list of hidden lever kinds. B3's default deny would
+  have treated it as free text (a person called "Wait" or "Leave" would have turned `process.wait` into a label), so it is on
+  `SHARE_NON_TEXT_KEYS` and `non_text_keys`, and `share_snapshot_problem` refuses one that isn't an array of at most 30 distinct known
+  kind ids (`private.lever_kind_ids()`, kept equal to the catalogue and to `LEVER_KIND_IDS` by tests). Old view links lack it (read as none); a
+  play link without it is refused. A link keeps its frozen list until Update copy.
+- **Lever changes in a solution are now simulated** (amends D46): `solutions.lever_changes` were stored and never used; a visitor's idea can
+  be levers only, so they are applied wherever a solution is simulated: the Editor's solution run, the server verdict, the Solution page,
+  the Overview's impact, the demo link check and the Forecast's plans. No stored solution had any (preflight 4), so nothing moved; no engine
+  change.
+- **Also in this migration:** the `suggestions` delete-user bug (the foreign key's set-null tripped `suggestions_before_write`) is fixed as
+  `suggestion_proposals` was.
+- **Rejected:** a per-visitor account (the point is to ask outsiders); emailing replies (needs SMTP, a paid service); translating ids (would move
+  every number); refusing a visitor whose text names someone (an oracle for the team's and clients' names); accepting a visitor's idea as a
+  saved scenario (the PRD's old `scenario_submissions`, superseded by D37).

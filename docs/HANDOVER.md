@@ -3,7 +3,7 @@
 Updated 6 Oct 2026 (overnight run, 20:30 UTC). All agents hit the usage limit at about 13:50 UTC and the container
 restarted; work resumed at 19:18 UTC from what was pushed. Merged tonight: #205, #207, #206, #209, #212 (B20), #214, #211
 (B2), #213 (B5), #216 (B21), #220 (C4), #221, #218 (C1), #222, #217 (B7). Production is at row 63 (`20261219000000`).
-Open: B3 (#215, fourth review round), then B4. Status table under "Next steps". Start a new session with:
+Open: B4 (#33, draft PR `claude/b4-play-links`; migration row 65 not applied). Status table under "Next steps". Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -76,6 +76,13 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
   insight costs; figures that need one person's pay show "—"). Links are frozen copies with Update copy; the server builds
   the snapshot and Postgres refuses a leaky one (ADR 0016, PRD D47). A visitor without a Google account for the listed
   address can't open a restricted link.
+- B4 (#33, PRD D48): only a **process** link can let people try changes; a visitor's idea may be for no issue; a solution's
+  lever changes now count wherever a solution is simulated (amends D46: forecast plans too); ids in a snapshot are real, so
+  they are checked (in the copy first, then the workspace) rather than mapped; Dismiss with a reply stores the reply and
+  emails nobody (no SMTP); and **what a visitor types is checked as for a People-off, Financials-off link whatever the
+  link's toggles, and a field that fails is held from members and viewers** (they read "A visitor's idea", no note or "A
+  visitor"; owners and editors read the original and the visitor's email), never refused and never reported to the visitor.
+  The same migration fixes the `suggestions` delete-user bug.
 
 **Waiting on Austin:**
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
@@ -201,7 +208,7 @@ at merge time if the order changes.
 | C4 Storybook (#43) | #220 | **merged** (new `visual` CI job; `[visual-update]` approves baselines) | none |
 | B7 Forecast planning (#36) | #217 | **merged**, applied; ENGINE 1.9.0 | `20261219000000` (63) |
 | B3 Share links (#32) | #215 `claude/b3-share-links` | fourth review round: redaction redesigned (free-text keys, token matching); fixing uuid-vs-currency false positives, first-principles keys, client whole-name matching; PRD D47 | `20261220000000` (64) |
-| B4 Play links (#33) | `claude/b4-play-links` (brief only) | build after B3 merges; renumber to follow B3 | `20261221000000` (65) |
+| B4 Play links (#33) | `claude/b4-play-links` (draft PR) | built; B3 has merged; to review, apply row 65 BEFORE deploying, then merge | `20261221000000` (65, NOT applied) |
 
 B3 must stay security-reviewed until a verification round finds nothing blocking: it is the only public, unauthenticated surface. Each review comment and fix list is on its PR.
 
@@ -334,11 +341,6 @@ simulation, waits for Austin's end-of-build review.
   register the skill as an MCP prompt so Claude desktop needs no install; add clients, services and lead sources to
   `get_workspace_summary`; a `list_sources` tool; range citations (`value_min`/`value_max`).
 - The extraction fixture lint doesn't check new steps inside a `target` import (the e2e test does).
-- The `suggestions` table (20261015000000) has the same bug A52 fixed for `suggestion_proposals`: deleting an auth user
-  who created or reviewed a suggestion fails, because the foreign key's `ON DELETE SET NULL` trips the
-  `suggestions_before_write` guard ("Suggestions are accepted or rejected with review_suggestions"). Fix it with a new
-  migration that lets a depth > 1 change of only `created_by` or `reviewed_by` to null through (see
-  `private.suggestion_proposals_before_write`).
 - Source links (A53, #118), follow-ups:
   - Taking an issue's removed sources' links away is done in the app's `write()` (issue-actions.ts) after `save_issue`, so it
     isn't atomic with it. Move it into `save_issue` with a migration (delete the issue links of the sources it removes from
