@@ -65,3 +65,19 @@ export function selectablePeople<P extends { id: string }>(people: P[], links: R
     return !taken || [...taken].every((k) => k === own);
   });
 }
+
+/**
+ * Why a person can't be linked to a membership, or null when they can: another active membership, or a pre-assigned list row,
+ * in the workspace already holds them. The page hides such people; the action checks again, since a form can send anything.
+ * The database has no unique constraint on purpose (it would make `resolve_my_access` fail at sign-in on existing duplicates).
+ */
+export function personLinkProblem(
+  membershipId: string,
+  personId: string,
+  memberships: readonly { id: string; person_id: string | null; active: boolean }[],
+  listRows: readonly { person_id: string | null }[],
+): string | null {
+  const taken =
+    memberships.some((m) => m.id !== membershipId && m.active && m.person_id === personId) || listRows.some((e) => e.person_id === personId);
+  return taken ? "That person is already linked to someone else in this workspace. Unlink them first." : null;
+}

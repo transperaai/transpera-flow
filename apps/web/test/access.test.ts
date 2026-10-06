@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessErrorMessage, emailDomain, inviteMessage, isAssignableRole, normalizeDomain, normalizeEmail, selectablePeople } from "@/lib/access";
+import { accessErrorMessage, emailDomain, inviteMessage, isAssignableRole, normalizeDomain, normalizeEmail, personLinkProblem, selectablePeople } from "@/lib/access";
 
 describe("access helpers", () => {
   it("normalises what people paste as a domain", () => {
@@ -30,6 +30,19 @@ describe("access helpers", () => {
     ).toMatch(/already used/);
     expect(accessErrorMessage({ code: "42501", message: "new row violates row-level security policy" })).toMatch(/permission/);
     expect(accessErrorMessage({ message: "boom" })).toMatch(/Something went wrong/);
+  });
+
+  it("refuses linking a person who is already linked to another active membership or a list row", () => {
+    const rows = [
+      { id: "m1", person_id: "p1", active: true },
+      { id: "m2", person_id: "p2", active: false },
+    ];
+    expect(personLinkProblem("m9", "p1", rows, [])).toMatch(/already linked/);
+    expect(personLinkProblem("m9", "p3", rows, [{ person_id: "p3" }])).toMatch(/already linked/);
+    // Their own row, an inactive membership and a free person are fine.
+    expect(personLinkProblem("m1", "p1", rows, [])).toBeNull();
+    expect(personLinkProblem("m9", "p2", rows, [])).toBeNull();
+    expect(personLinkProblem("m9", "p4", rows, [])).toBeNull();
   });
 
   it("explains the last-owner guard, whatever else the message carries", () => {

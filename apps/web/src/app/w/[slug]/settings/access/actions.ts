@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { accessErrorMessage, isAssignableRole, normalizeDomain, normalizeEmail } from "@/lib/access";
+import { accessErrorMessage, isAssignableRole, normalizeDomain, normalizeEmail, personLinkProblem } from "@/lib/access";
 import { createClient } from "@/lib/supabase/server";
 
 // Every action runs as the signed-in user; RLS (owner or agency admin only)
@@ -92,7 +92,20 @@ export async function setMemberRole(slug: string, form: FormData) {
 export async function setMemberPerson(slug: string, form: FormData) {
   const supabase = await signedInClient();
   const personId = text(form, "person_id") || null;
-  const result = await supabase.from("memberships").update({ person_id: personId }).eq("id", text(form, "id")).select("id");
+  const id = text(form, "id");
+  if (personId) {
+    // One membership per person, enforced here rather than in the database (see personLinkProblem).
+    const { data: mine } = await supabase.from("memberships").select("workspace_id").eq("id", id).maybeSingle();
+    if (mine) {
+      const [others, list] = await Promise.all([
+        supabase.from("memberships").select("id, person_id, active").eq("workspace_id", mine.workspace_id).eq("person_id", personId),
+        supabase.from("workspace_access_emails").select("person_id").eq("workspace_id", mine.workspace_id).eq("person_id", personId),
+      ]);
+      const problem = personLinkProblem(id, personId, others.data ?? [], list.data ?? []);
+      if (problem) redirect(`/w/${encodeURIComponent(slug)}/settings/access?${new URLSearchParams({ error: problem })}`);
+    }
+  }
+  const result = await supabase.from("memberships").update({ person_id: personId }).eq("id", id).select("id");
   done(slug, outcome(result), personId ? "Linked to the person." : "Unlinked from the person.");
 }
 

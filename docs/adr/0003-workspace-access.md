@@ -57,8 +57,12 @@ giving the app the service-role key.
   owner at all is allowed; the rule only stops going from one owner to none.
 - The membership guard applies only when `current_user = 'authenticated'`. Reconciliation (SECURITY DEFINER), foreign-key
   cascades and SQL run as other roles pass.
-- **Known gap:** an owner who joined by *domain* and was then promoted loses their membership when the domain is removed,
-  because that reconciliation runs as the function owner and isn't guarded. That is rare, and an agency admin can fix it.
+- The guard also refuses changing the last owner's `source` or `workspace_id` (otherwise they could change their own source
+  and let `resolve_my_access` drop them), takes a per-workspace advisory lock so two owners can't demote each other at the
+  same moment, and (list guard) applies only to people (`current_user = 'authenticated'`), so support SQL as another role passes.
+- **Known gaps (follow-ups):** an owner who joined by *domain* and was then promoted loses their membership when the domain
+  is removed, and an owner who deletes the domain they joined by does the same, because that reconciliation runs as the
+  function owner and isn't guarded. That is rare, and an agency admin can fix it.
 - `public.my_person_id(ws)` returns the person record linked to the caller's active membership. Any member can be linked to
   a person on the Access page (not only people on the pre-assigned list). One membership per person is a rule of the page,
   not the database: a unique constraint would make `resolve_my_access` fail at sign-in on existing duplicates.
