@@ -66,6 +66,8 @@ export type ShellProps =
       mode: "live";
       slug: string;
       workspaceName: string;
+      /** The workspace's logo (a public URL), or null: the monogram stays (client branding, issue #34). */
+      logoUrl: string | null;
       workspaces: SwitcherWorkspace[];
       canManage: boolean;
       counts: NavCounts;
@@ -128,7 +130,7 @@ export function AppSidebar(props: ShellProps) {
           <span className="truncate font-display text-base font-bold tracking-tight group-data-[collapsible=icon]:hidden">Transpera Flow</span>
         </div>
         {props.mode === "live" ? (
-          <WorkspaceSwitcher current={props.workspaceName} subtitle="Workspace" workspaces={props.workspaces} />
+          <WorkspaceSwitcher current={props.workspaceName} subtitle="Workspace" workspaces={props.workspaces} logo={props.logoUrl} />
         ) : (
           <WorkspaceSwitcher
             current={larkspur ? "Larkspur Creative" : "Northbeam Digital"}

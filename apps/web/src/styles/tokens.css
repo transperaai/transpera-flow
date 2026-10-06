@@ -12,6 +12,8 @@
   --accent: oklch(0.52 0.105 223.128);
   --accent-soft: oklch(0.95 0.025 215);
   --accent-fg: oklch(0.984 0.019 200.873);
+  /* A client's logo always sits on white, in both themes (issue #34), so a dark logo stays visible. */
+  --logo-tile: #ffffff;
   --good: #1baf7a;
   --warn: #eda100;
   --serious: #eb6834;

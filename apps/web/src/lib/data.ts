@@ -74,10 +74,10 @@ export async function listWorkspaces(): Promise<Pick<WorkspaceRow, "id" | "name"
   return data;
 }
 
-/** A workspace's id, name and slug by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
-export const loadWorkspaceHead = cache(async (slug: string): Promise<Pick<WorkspaceRow, "id" | "name" | "slug"> | null> => {
+/** A workspace's id, name, slug and branding by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
+export const loadWorkspaceHead = cache(async (slug: string): Promise<(Pick<WorkspaceRow, "id" | "name" | "slug"> & { branding: unknown }) | null> => {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("workspaces").select("id, name, slug").eq("slug", slug).maybeSingle();
+  const { data, error } = await supabase.from("workspaces").select("id, name, slug, branding").eq("slug", slug).maybeSingle();
   if (error) throw error;
   return data;
 });

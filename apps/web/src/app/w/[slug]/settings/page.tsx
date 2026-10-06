@@ -31,6 +31,9 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       eyebrow="Company"
       actions={
         <>
+          <Link href={`/w/${slug}/settings/branding`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+            Branding
+          </Link>
           <Link href={`/w/${slug}/settings/levers`} className={buttonVariants({ variant: "outline", size: "sm" })}>
             Levers
           </Link>
