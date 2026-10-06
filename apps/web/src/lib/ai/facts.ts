@@ -168,18 +168,26 @@ const MAX_QUOTES = 12;
 const MAX_QUOTE_CHARS = 220;
 
 /** The first-principles answers the model reads, in the team's own words (no figures of theirs are facts). */
-function firstPrinciplesPayload(fp: FirstPrinciples, steps: readonly { id: string; name: string }[], people: readonly { id: string; name: string }[]) {
+function firstPrinciplesPayload(
+  fp: FirstPrinciples,
+  steps: readonly { id: string; name: string }[],
+  people: readonly { id: string; name: string }[],
+  typed: (s: string) => string,
+) {
   const stepName = (id: string | null) => steps.find((s) => s.id === id)?.name ?? null;
   const personName = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
+  // What people typed (the job, truths, requirements, improvements, the why chain) may name a person by first name; step names
+  // and the engine's own words may not be read that way ("Mark invoice paid" is a step, not Mark Lee).
+  const t = <V>(v: V): V => mapStrings(v, typed);
   return {
-    job: fp.job,
-    truthsAndAssumptions: fp.statements.filter((s) => s.text.trim()).map((s) => ({ text: s.text, kind: s.kind, source: s.source, test: s.test })),
+    job: t(fp.job),
+    truthsAndAssumptions: fp.statements.filter((s) => s.text.trim()).map((s) => t({ text: s.text, kind: s.kind, source: s.source, test: s.test })),
     requirements: fp.requirements
       .filter((r) => r.text.trim())
-      .map((r) => ({ text: r.text, owner: personName(r.owner_person_id) ?? (r.owner_text.trim() || null), why: r.why, verdict: r.verdict, step: stepName(r.step_id) })),
-    deleteCandidates: fp.deletes.map((d) => ({ step: stepName(d.step_id), breaksIfRemoved: d.breaks_if_removed, addedBack: d.added_back })),
-    improvements: fp.improvements.filter((i) => i.text.trim()).map((i) => ({ stage: i.stage, text: i.text, step: stepName(i.step_id) })),
-    why: fp.why,
+      .map((r) => ({ text: t(r.text), owner: personName(r.owner_person_id) ?? (r.owner_text.trim() ? t(r.owner_text.trim()) : null), why: t(r.why), verdict: r.verdict, step: stepName(r.step_id) })),
+    deleteCandidates: fp.deletes.map((d) => ({ step: stepName(d.step_id), breaksIfRemoved: t(d.breaks_if_removed), addedBack: d.added_back })),
+    improvements: fp.improvements.filter((i) => i.text.trim()).map((i) => ({ stage: i.stage, text: t(i.text), step: stepName(i.step_id) })),
+    why: t(fp.why),
   };
 }
 
@@ -221,9 +229,14 @@ export function buildAiInput(args: AiInputArgs): AiInput {
     .filter((q) => q.quote)
     .map((q, i) => ({ id: `quote-${letters(i)}`, ...q }));
   const aliases = aliasesFor(args.people);
+  // The engine's text (a finding's title and evidence, step and role names) names people by their full name, which is what
+  // the model is given from the model; a first name in it is just a word ("Mark invoice paid"). Only what people typed
+  // (quotes from sources, first principles) also gets first names aliased.
+  const fullNames = aliases.filter((a) => !a.first);
+  const typed = (s: string) => applyAliases(s, aliases);
   // The facts the model cites by id (B17): each finding of the engine's, by an id with no digits in it. Their text is saved
   // with the finding, so it is labelled like everything else the model wrote: names go back at render (B1 2b).
-  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: applyAliases(`${f.title}. ${f.evidence}`.slice(0, 600), aliases) }));
+  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: applyAliases(`${f.title}. ${f.evidence}`.slice(0, 600), fullNames) }));
   const payload = mapStrings(
     {
       ...factPayload,
@@ -231,10 +244,10 @@ export function buildAiInput(args: AiInputArgs): AiInput {
       findings: findingsPayload.map((f, i) => ({ id: factRefs[i]!.id, ...f })),
       market: args.marketOn ? "A market schedule is switched on, so some months are busier or quieter than others." : "No market changes are scheduled.",
       steps: steps.map((s) => ({ id: s.id, name: s.name })),
-      firstPrinciples: args.firstPrinciples ? firstPrinciplesPayload(args.firstPrinciples, steps, args.people) : null,
-      ...(args.quotes ? { quotesFromSources: quotes } : {}),
+      firstPrinciples: args.firstPrinciples ? firstPrinciplesPayload(args.firstPrinciples, steps, args.people, typed) : null,
+      ...(args.quotes ? { quotesFromSources: quotes.map((q) => ({ ...q, quote: typed(q.quote) })) } : {}),
     },
-    (s) => applyAliases(s, aliases),
+    (s) => applyAliases(s, fullNames),
   );
   // What the check reads figures from. The model sees the team's words (a measure's name, a quoted answer), but a figure
   // inside them is theirs, not the run's: so the checked copy has no quoted passages in the rule checks, no measure
@@ -246,7 +259,7 @@ export function buildAiInput(args: AiInputArgs): AiInput {
       firstPrinciplesChecks: checks.map((c) => ({ ...c, text: stripQuoted(c.text).replace(/ is owned by [\s\S]*?, which is a team\./, " is owned by a team, which is a team.") })),
       successMeasures: measuresPayload.map(({ target, today }) => ({ target, today })),
     },
-    (s) => applyAliases(s, aliases),
+    (s) => applyAliases(s, fullNames),
   );
 
   const names = [args.processName, ...steps.map((s) => s.name), ...args.roles.map((x) => x.name), ...aliases.map((a) => a.label)];

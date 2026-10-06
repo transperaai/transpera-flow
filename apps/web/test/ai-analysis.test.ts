@@ -496,7 +496,7 @@ describe("names stay out of what is saved (B1 2b)", () => {
     const made = buildAiInput({
       processName: "Lead to live",
       results: runResults(model, result, "GBP"),
-      findings: [{ ...base, title: `${p!.name} works late`, evidence: `${q!.name} can't cover. ${p!.name.split(" ")[0]} agrees.` }],
+      findings: [{ ...base, title: `${p!.name} works late`, evidence: `${q!.name} can't cover. ${p!.name} agrees.` }],
       steps: [{ id: AUDIT, name: "Audit & proposal" }],
       roles: [],
       people: bundle.people.map((x) => ({ id: x.id, name: x.name })),
@@ -522,4 +522,32 @@ describe("names stay out of what is saved (B1 2b)", () => {
     expect(applyAliases("Will Hart is at capacity; this will get worse", aliases)).toBe("Team member B is at capacity; this will get worse");
     expect(applyAliases("Ask Mark and MARK LEE about it", aliases)).toBe("Ask Team member A and Team member A about it");
   });
+
+  it("a step called 'Mark invoice paid' stays that for a person named Mark Lee: engine text takes full names only, quotes keep first names", () => {
+    const [p] = bundle.people;
+    const base = findings[0]!;
+    const made = buildAiInput({
+      processName: "Lead to live",
+      results: runResults(model, result, "GBP"),
+      findings: [{ ...base, title: "Mark invoice paid is slow; Mark Lee covers it", evidence: "Mark invoice paid waits two days." }],
+      steps: [{ id: AUDIT, name: "Mark invoice paid" }],
+      roles: [],
+      people: [{ id: p!.id, name: "Mark Lee" }],
+      firstPrinciples: null,
+      flags: null,
+      measures: [],
+      quotes: [{ step: "Mark invoice paid", quote: "Mark said it takes twelve hours; Mark Lee agrees" }],
+      marketOn: false,
+      currency: "GBP",
+    });
+    const sent = JSON.stringify(made.payload);
+    expect(sent).toContain("Mark invoice paid is slow");
+    expect(sent).not.toContain("Team member A invoice paid");
+    expect(made.payload.steps).toEqual([{ id: AUDIT, name: "Mark invoice paid" }]);
+    expect(made.facts[0]!.text).toBe("Mark invoice paid is slow; Mark Lee covers it. Mark invoice paid waits two days.".replace("Mark Lee", "Team member A"));
+    // What a person typed in a quote does name people by first name.
+    expect(made.quoteRefs[0]!.text).toBe("Team member A said it takes twelve hours; Team member A agrees");
+    expect(JSON.stringify(made.payload.quotesFromSources)).toContain("Team member A said it takes twelve hours");
+  });
 });
+
