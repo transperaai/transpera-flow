@@ -47,6 +47,19 @@ export function readPersonLabels(json: unknown): PersonLabels {
   return out;
 }
 
+/**
+ * The label of each person of a workspace, in the order given: "Team member A" to "Team member Z", then "Team member 27", "28"...
+ * (the same labels `aliasesFor` in apps/web gives the AI, so what Claude over the connector writes and what the app's AI
+ * writes name people alike). Label → person id, as stored in `person_labels`. Pass the people in the roster's order.
+ */
+export function labelsForPeople(people: readonly { id: string; name: string }[]): PersonLabels {
+  const out: PersonLabels = {};
+  people.forEach((p, i) => {
+    out[`Team member ${i < 26 ? String.fromCharCode(65 + i) : `${i + 1}`}`] = p.id;
+  });
+  return out;
+}
+
 /** The labels, longest first, so "Team member 27" is tried before "Team member 2". */
 const longestFirst = (labels: readonly string[]) => [...labels].sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
 

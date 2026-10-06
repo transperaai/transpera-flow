@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runResults, toEngineModel } from "@transpera-flow/db";
 import { simulate, type DetectedIssue } from "@transpera-flow/engine";
-import { labelNames } from "@transpera-flow/db";
+import { labelNames, labelsForPeople } from "@transpera-flow/db";
 import { aliasesFor, applyAliases, buildAiInput, squeeze } from "@/lib/ai/facts";
 import { analyseWithAi, quotationProblems, screenOutput, type AiDraftRequest, type AiModel } from "@/lib/ai/analyse";
 import { aiInputForRun, quotesFromBundle } from "@/lib/ai/input";
@@ -622,3 +622,12 @@ describe("names stay out of what is saved (B1 2b)", () => {
   });
 });
 
+
+describe("labelsForPeople (B20)", () => {
+  it("gives the labels aliasesFor gives the AI, for the same people", () => {
+    const people = Array.from({ length: 30 }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, name: `Person${i} Name${i}` }));
+    const fromAliases: Record<string, string> = {};
+    for (const a of aliasesFor(people)) fromAliases[a.label] = a.id;
+    expect(labelsForPeople(people)).toEqual(fromAliases);
+  });
+});
