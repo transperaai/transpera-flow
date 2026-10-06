@@ -121,7 +121,7 @@ describe.skipIf(!POSTGREST_URL)("importing a deals file over PostgREST", () => {
     const live = await bundle(ids.rev);
     const table = splitCsv(dealsFile());
     const mapping = suggestMapping(table[0]!, "deals");
-    expect(mapping.index).toMatchObject({ deal: 1, stage: 2, entered: 3, left: 4, source: 5, amount: 6, owner: 7 });
+    expect(mapping.index).toMatchObject({ deal: 0, stage: 2, entered: 3, left: 4, source: 5, amount: 6, owner: 7 });
     columnMap = Object.fromEntries(Object.entries(mapping.index).filter(([, i]) => i !== null).map(([id, i]) => [id, table[0]![i!]!]));
     const read = readImport(table, "deals", mapping.index);
     expect(read.errors).toEqual([]);

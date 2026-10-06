@@ -81,7 +81,7 @@ describe("the import wizard", () => {
   it("suggests every column of a HubSpot-like deals file, and keeps a column that was changed", async () => {
     const { page, errors } = await mount();
     await choose(page, "cal-log", "Deals from your CRM", csv(hubspotDeals()));
-    const mapped: Record<string, string> = { deal: "Deal Name", stage: "Deal Stage", entered: "Date entered stage", left: "Date left", source: "Original Source", amount: "Amount", owner: "Deal owner" };
+    const mapped: Record<string, string> = { deal: "Record ID", stage: "Deal Stage", entered: "Date entered stage", left: "Date left", source: "Original Source", amount: "Amount", owner: "Deal owner" };
     for (const [id, header] of Object.entries(mapped)) {
       const c = column(page, "cal-log", id);
       expect(await picked(c.locator("select")), id).toBe(header);
@@ -91,12 +91,12 @@ describe("the import wizard", () => {
     // Change one: it is kept (through a read, and when another column changes).
     const owner = column(page, "cal-log", "owner").locator("select");
     await owner.selectOption({ label: "Not in this file" });
-    await column(page, "cal-log", "source").locator("select").selectOption({ label: "Record ID" });
+    await column(page, "cal-log", "source").locator("select").selectOption({ label: "Deal Name" });
     expect(await picked(owner)).toBe("Not in this file");
     expect(await column(page, "cal-log", "owner").innerText()).not.toContain("Suggested");
     await readIt(page, "cal-log");
     expect(await picked(column(page, "cal-log", "owner").locator("select"))).toBe("Not in this file");
-    expect(await picked(column(page, "cal-log", "source").locator("select"))).toBe("Record ID");
+    expect(await picked(column(page, "cal-log", "source").locator("select"))).toBe("Deal Name");
     expect(errors).toEqual([]);
     await page.close();
   }, 120_000);
@@ -112,7 +112,7 @@ describe("the import wizard", () => {
     await column(page, "cal-log", "stage").locator("select").selectOption({ label: "Deal Stage" });
     expect(await cont.isEnabled()).toBe(true);
     // The same header for the deal and for the date entered.
-    await column(page, "cal-log", "entered").locator("select").selectOption({ label: "Deal Name" });
+    await column(page, "cal-log", "entered").locator("select").selectOption({ label: "Record ID" });
     expect(await cont.isEnabled()).toBe(false);
     expect(await column(page, "cal-log", "entered").innerText()).toContain("Used for Deal too");
     expect(await column(page, "cal-log", "deal").innerText()).toContain("Used for Date entered too");
@@ -128,6 +128,7 @@ describe("the import wizard", () => {
     expect(mapperText).toMatch(/\d different values? in the first 5 rows/);
     expect(mapperText).not.toContain("ACME-SECRET");
     expect(mapperText).not.toContain("Jane Secretperson");
+    expect(mapperText).not.toContain("J-0");
     await readIt(page, "cal-log");
     const rows = step(page, "cal-log", "rows");
     expect(await rows.locator("[data-import-preview] tbody tr").count()).toBe(20);
@@ -135,6 +136,9 @@ describe("the import wizard", () => {
     expect(body).toContain("Client 1");
     expect(body).toContain("Client 20");
     expect(body).toContain("Person 1");
+    // A job's id is labelled too: ids often hold names ("Smith v Jones").
+    expect(body).toContain("Job 1");
+    expect(body).not.toContain("J-0");
     expect(await rows.locator("[data-import-preview] caption").innerText()).toContain("Client and person names are never shown or kept. They are used only to count.");
     const all = await text(page);
     expect(all).not.toContain("ACME-SECRET");
@@ -203,7 +207,7 @@ describe("the import wizard", () => {
 
   it("reads a Windows-1252 file with a note, and splits a semicolon file on its own", async () => {
     const { page, errors } = await mount();
-    const win = ["deal;stage;entered", "Café 1;Qualify lead;2026-04-02", "Café 2;Qualify lead;2026-04-03"].join("\n");
+    const win = ["deal;stage;entered", "D1;Qualifié;2026-04-02", "D2;Qualifié;2026-04-03"].join("\n");
     await choose(page, "cal-log", "Deals from your CRM", { name: "win.csv", mimeType: "text/csv", buffer: Buffer.from(win, "latin1") });
     // Split on its semicolons: three columns, each matched.
     expect(await picked(column(page, "cal-log", "deal").locator("select"))).toBe("deal");
@@ -211,7 +215,7 @@ describe("the import wizard", () => {
     expect(await picked(column(page, "cal-log", "entered").locator("select"))).toBe("entered");
     expect(await step(page, "cal-log", "columns").innerText()).toContain("isn't UTF-8");
     await readIt(page, "cal-log");
-    expect(await step(page, "cal-log", "rows").locator("[data-import-preview] tbody").innerText()).toContain("Café 1");
+    expect(await step(page, "cal-log", "rows").locator("[data-import-preview] tbody").innerText()).toContain("Qualifié");
     expect(errors).toEqual([]);
     await page.close();
   }, 120_000);

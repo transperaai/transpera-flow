@@ -97,7 +97,7 @@ const STEP_LOG_COLS: readonly ImportColumn[] = [
 ];
 
 const DEALS_COLS: readonly ImportColumn[] = [
-  col("deal", "Deal", true, "id", ["deal", "deal id", "deal name", "opportunity", "opportunity id", "record id", "id"], "The deal. Any id or name works; it is used to follow one deal from stage to stage.", "D-101"),
+  col("deal", "Deal", true, "id", ["deal", "deal id", "record id", "deal name", "opportunity", "opportunity id", "id"], "The deal. Any id or name works; it is used to follow one deal from stage to stage, and is never shown.", "D-101"),
   col("stage", "Stage", true, "name", ["stage", "deal stage", "pipeline stage", "stage name", "status"], "The pipeline stage the deal entered. Names are matched to your steps in the next step.", "Qualified lead"),
   col("entered", "Date entered", true, "date", ["entered", "date entered", "entered stage", "stage entered", "entered at", "changed at", "date changed", "moved at", "date"], "When the deal entered the stage.", "2026-03-02 09:30"),
   col("left", "Date left", false, "date", ["left", "date left", "exited", "exited at", "left stage", "stage left"], "When the deal left the stage. Needed to measure waits.", "2026-03-03 11:00"),

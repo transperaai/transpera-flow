@@ -1,6 +1,6 @@
-// What the import wizard shows of a file (issue #40), as pure functions so the privacy rules are testable: client and person
-// values are never shown (the mapper counts them, the preview labels them "Client 1", "Person 1"), and amounts are shown
-// only to owners and editors. Nothing here is stored.
+// What the import wizard shows of a file (issue #40), as pure functions so the privacy rules are testable: client, person and id
+// values are never shown (the mapper counts them, the preview labels them "Client 1", "Person 1", "Deal 1"; a deal's name is often
+// the client's), and amounts are shown only to owners and editors. Nothing here is stored.
 
 import type { ImportColumn, ImportKindSpec } from "@transpera-flow/db/csv-import";
 
@@ -11,7 +11,7 @@ export function sampleLine(column: ImportColumn, samples: readonly string[][], i
   if (index === null) return "";
   const values = samples.map((r) => (r[index] ?? "").trim()).filter((v) => v !== "");
   if (!values.length) return `Nothing in the first ${samples.length} row${samples.length === 1 ? "" : "s"}.`;
-  if (column.type === "client" || column.type === "person") {
+  if (column.type === "client" || column.type === "person" || column.type === "id") {
     const n = new Set(values).size;
     return `${n} different value${n === 1 ? "" : "s"} in the first ${samples.length} row${samples.length === 1 ? "" : "s"}`;
   }
@@ -26,19 +26,19 @@ export interface PreviewTable {
 
 /**
  * The first parsed rows as a table, one column for each matched column of the kind. A `client` column shows "Client 1",
- * "Client 2"… and a `person` column "Person 1"…, numbered in order of first appearance, never the file's values. An amount
- * shows only to owners and editors (otherwise "—").
+ * "Client 2"… and a `person` column "Person 1"…, and an id column "Deal 1", "Job 1"… (its own label), numbered in order of first
+ * appearance, never the file's values. An amount shows only to owners and editors (otherwise "—").
  */
 export function previewTable(spec: ImportKindSpec, matched: ReadonlySet<string>, preview: readonly Record<string, string>[], canSeeAmounts: boolean): PreviewTable {
   const columns = spec.columns.filter((c) => matched.has(c.id));
   const numbering = new Map<string, Map<string, number>>();
   const label = (c: ImportColumn, value: string): string => {
     if (value === "") return "";
-    if (c.type === "client" || c.type === "person") {
+    if (c.type === "client" || c.type === "person" || c.type === "id") {
       const seen = numbering.get(c.id) ?? new Map<string, number>();
       numbering.set(c.id, seen);
       if (!seen.has(value)) seen.set(value, seen.size + 1);
-      return `${c.type === "client" ? "Client" : "Person"} ${seen.get(value)}`;
+      return `${c.type === "client" ? "Client" : c.type === "person" ? "Person" : c.label} ${seen.get(value)}`;
     }
     if (c.type === "amount") return canSeeAmounts ? value : "—";
     return cut(value, 60);

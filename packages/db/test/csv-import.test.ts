@@ -59,7 +59,7 @@ describe("suggestMapping", () => {
   it("maps a HubSpot-like deals export", () => {
     const header = ["Record ID", "Deal Name", "Deal Stage", "Date entered stage", "Original Source", "Amount", "Deal owner"];
     const { index, how } = suggestMapping(header, "deals");
-    expect(index).toEqual({ deal: 1, stage: 2, entered: 3, left: null, source: 4, amount: 5, owner: 6 });
+    expect(index).toEqual({ deal: 0, stage: 2, entered: 3, left: null, source: 4, amount: 5, owner: 6 });
     expect(how.entered).toBe("partial");
     expect(how.stage).toBe("name");
     expect(how.left).toBeNull();
@@ -337,7 +337,7 @@ describe("readImport", () => {
     expect(r.rows).toHaveLength(50_000);
     expect(r.note).toBeNull();
     expect(r.names.map((n) => n.rows)).toEqual([10_000, 10_000, 10_000, 10_000, 10_000]);
-    expect(r.rows[49_999]).toMatchObject({ item: "Deal 9999", step: "Closed won" });
+    expect(r.rows[49_999]).toMatchObject({ item: "9999", step: "Closed won" });
   });
 
   it("keeps at most 200 errors but counts them all", () => {
