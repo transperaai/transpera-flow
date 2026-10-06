@@ -2,14 +2,23 @@
 // `record_calibration` decide who may write and what; this only refuses malformed input early, skips ticked keys that
 // aren't proposals (with a reason), and keeps free text from the log out of what is stored. Framework-free for tests.
 
-import { STEP_LOG_COLUMNS, type StepLogColumn } from "@transpera-flow/db";
+import type { ImportDetails } from "@transpera-flow/db/csv-import";
+import { parseColumnMap, parseDetails } from "./import-request";
+
+/** The kinds of file a process is calibrated from: a step log, deals or time logs (both converted into a step log). */
+export type ProcessImportKind = "step_log" | "deals" | "time_logs";
+const PROCESS_KINDS: readonly string[] = ["step_log", "deals", "time_logs"];
 
 export interface ApplyRequest {
   workspaceId: string;
   processId: string;
+  /** What was imported; a missing kind is a step log. */
+  kind: ProcessImportKind;
   fileName: string;
-  columnMap: Partial<Record<StepLogColumn, string>>;
+  columnMap: Record<string, string>;
   rowCount: number;
+  /** Counts only, rebuilt from known fields; null when the page sent none. */
+  details: ImportDetails | null;
   results: { proposals: unknown[] } & Record<string, unknown>;
   keys: string[];
   /** Ticked keys left out, with why. */
@@ -25,11 +34,11 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 export const MAX_RESULTS_BYTES = 900_000;
 
 /**
- * The results as stored: the log's own names that matched nothing (step and lead source names typed in the file) are
- * kept as counts only, so no free text from the file is stored beyond names the model already has.
+ * The results as stored: the log's own names that matched nothing (step and lead source names typed in the file, and the names
+ * the person left out in the wizard) are kept as counts only, so no free text from the file is stored beyond names the model already has.
  */
 export function storedResults(results: Record<string, unknown>): Record<string, unknown> {
-  const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+  const count = (v: unknown) => (Array.isArray(v) ? v.length : typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
   const { unmatchedSteps, unmatchedSources, ...rest } = results;
   return { ...rest, unmatchedSteps: count(unmatchedSteps), unmatchedSources: count(unmatchedSources) };
 }
@@ -38,10 +47,13 @@ export function parseApplyRequest(input: unknown): { ok: true; request: ApplyReq
   if (!isObject(input)) return { ok: false, message: "Nothing to apply." };
   const { workspaceId, processId, fileName, columnMap, rowCount, results, keys } = input;
   if (!isId(workspaceId) || !isId(processId)) return { ok: false, message: "That process isn't valid." };
+  const kind = input.kind === undefined || input.kind === null ? "step_log" : input.kind;
+  if (typeof kind !== "string" || !PROCESS_KINDS.includes(kind)) return { ok: false, message: "That kind of file isn't calibrated against a process." };
   if (typeof fileName !== "string" || !fileName.trim() || fileName.length > 300) return { ok: false, message: "Give the log a name of up to 300 characters." };
-  if (!isObject(columnMap) || !Object.entries(columnMap).every(([k, v]) => (STEP_LOG_COLUMNS as readonly string[]).includes(k) && typeof v === "string" && v.length <= 200)) {
-    return { ok: false, message: "The log's columns aren't valid." };
-  }
+  const map = parseColumnMap(kind as ProcessImportKind, columnMap);
+  if (!map) return { ok: false, message: "The log's columns aren't valid." };
+  const details = parseDetails(input.details);
+  if (!details.ok) return { ok: false, message: "The import's details aren't valid." };
   if (typeof rowCount !== "number" || !Number.isInteger(rowCount) || rowCount < 0 || rowCount > 1_000_000) return { ok: false, message: "The log's row count isn't valid." };
   if (!isObject(results) || !Array.isArray(results.proposals) || results.proposals.length > 2000) return { ok: false, message: "The proposals aren't valid." };
   const stored = storedResults(results) as ApplyRequest["results"];
@@ -57,6 +69,6 @@ export function parseApplyRequest(input: unknown): { ok: true; request: ApplyReq
   if (!good.length) return { ok: false, message: "Tick at least one change to apply." };
   return {
     ok: true,
-    request: { workspaceId, processId, fileName: fileName.trim(), columnMap: columnMap as ApplyRequest["columnMap"], rowCount, results: stored, keys: good, skipped },
+    request: { workspaceId, processId, kind: kind as ProcessImportKind, fileName: fileName.trim(), columnMap: map, rowCount, details: details.details, results: stored, keys: good, skipped },
   };
 }

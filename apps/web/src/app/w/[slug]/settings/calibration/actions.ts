@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import type { Json } from "@transpera-flow/db";
 import { parseClientApplyRequest } from "@/lib/calibration/client-request";
+import { parseRecordDatasetRequest } from "@/lib/calibration/import-request";
 import { parseApplyRequest } from "@/lib/calibration/request";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,12 +31,15 @@ export async function applyCalibration(input: unknown): Promise<ApplyOutcome> {
   if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
 
   const denied = "Only owners and editors can apply calibration here.";
-  const { data, error } = await supabase.rpc("record_calibration", {
+  // `record_calibration_import` (C1, #40): the same transaction as `record_calibration`, recorded under the real kind with counts-only details.
+  const { data, error } = await supabase.rpc("record_calibration_import", {
     p_workspace: r.workspaceId,
     p_process: r.processId,
+    p_kind: r.kind,
     p_file_name: r.fileName,
     p_column_map: r.columnMap as Json,
     p_row_count: r.rowCount,
+    p_details: (r.details ?? {}) as unknown as Json,
     p_results: r.results as unknown as Json,
     p_keys: r.keys,
   });
@@ -68,7 +72,8 @@ export async function recordClientCalibration(input: unknown): Promise<ClientApp
   if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
 
   const denied = "Only owners and editors can apply calibration here.";
-  const file = (f: typeof r.clients) => (f ? ({ file_name: f.fileName, column_map: f.columnMap, row_count: f.rowCount } as Json) : null);
+  const file = (f: typeof r.clients) =>
+    f ? ({ ...(f.kind ? { kind: f.kind } : {}), file_name: f.fileName, column_map: f.columnMap, row_count: f.rowCount, details: f.details ?? {} } as unknown as Json) : null;
   const { data, error } = await supabase.rpc("record_client_calibration", {
     p_workspace: r.workspaceId,
     p_clients: file(r.clients),
@@ -82,4 +87,37 @@ export async function recordClientCalibration(input: unknown): Promise<ClientApp
   // Settings (churn drivers, client groups) and the model read what changed.
   refresh();
   return { status: "ok", calibrationId: out.calibration_id, results: [...(out.results ?? []), ...r.skipped] };
+}
+
+// An import that has no calibration (issue #40): a leads or an invoices file is recorded on its own, with its columns, row count
+// and counts-only details. Nothing from the file gets here: the page sends header names, counts and the model's lead source ids.
+// Owners and editors only (row-level security); API tokens are refused by the function.
+
+export type RecordDatasetOutcome = { status: "ok"; datasetId: string } | { status: "error"; message: string };
+
+export async function recordDataset(input: unknown): Promise<RecordDatasetOutcome> {
+  const parsed = parseRecordDatasetRequest(input);
+  if (!parsed.ok) return { status: "error", message: parsed.message };
+  const r = parsed.request;
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
+
+  const { data, error } = await supabase.rpc("record_dataset", {
+    p_workspace: r.workspaceId,
+    p_kind: r.kind,
+    p_file_name: r.fileName,
+    p_column_map: r.columnMap as Json,
+    p_row_count: r.rowCount,
+    p_details: (r.details ?? {}) as unknown as Json,
+  });
+  if (error) {
+    // Row-level security refuses a viewer or a member (42501); the function refuses an API token the same way.
+    const denied = error.code === "42501" || /row-level security/i.test(error.message);
+    return { status: "error", message: denied ? "Only owners and editors can save imports here." : "Couldn't save. Try again." };
+  }
+  if (typeof data !== "string") return { status: "error", message: "Only owners and editors can save imports here." };
+  // The Imports card lists it.
+  refresh();
+  return { status: "ok", datasetId: data };
 }

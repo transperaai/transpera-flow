@@ -13,6 +13,7 @@
     "./process-file-2-schema": "./src/process-file-2-schema.ts",
     "./simulation-gaps": "./src/simulation-gaps.ts",
     "./calibration": "./src/calibration.ts",
+    "./csv-import": "./src/csv-import.ts",
     "./workspace-import": "./src/workspace-import.ts"
   },
   "scripts": {

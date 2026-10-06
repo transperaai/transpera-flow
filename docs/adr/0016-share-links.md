@@ -1,6 +1,6 @@
 # 16. Share links: server-built frozen snapshots, checked by Postgres
 
-Date: 6 Oct 2026 · Status: accepted · Issue: #32 (B3) · Decisions D12 (kept by D22), D45 · Builds on ADR 0010 (token links), ADR 0012 (roles), the #30 rule "members and viewers get no pay data"
+Date: 6 Oct 2026 · Status: accepted · Issue: #32 (B3) · Decisions D12 (kept by D22), D46 · Builds on ADR 0010 (token links), ADR 0012 (roles), the #30 rule "members and viewers get no pay data"
 
 ## Context
 
