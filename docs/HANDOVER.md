@@ -1,7 +1,8 @@
 # Handover
 
-Updated 5 Oct 2026 (evening AEST). Milestone A is done (only A24, #27, open). The Milestone B redesign tickets (B11–B19) are
-merged and applied to production; only the map node redesign is left, to be designed with Austin. Start a new session with:
+Updated 6 Oct 2026 (afternoon AEST). This session finished B10 (#39) and B1 slices 1 and 2a (#30), with migrations rows
+53–55 applied to production. Sessions now build two or three tickets each, to keep the context window small. Start a new
+session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -9,24 +10,33 @@ merged and applied to production; only the map node redesign is left, to be desi
 
 **Milestone A** (redesign A31–A58, #96–#123): merged as #125–#160; see git history and #1 for the per-ticket log.
 
-**Milestone B redesign.** Austin's decisions: B12 links processes and never edits them; B14 skill; B15 Overview spec;
-B16 process page; B17 hybrid analysis; B18 sources library and tour; B19 manual entry; stay on Supabase Free. Merged
-(rows refer to `docs/production-migrations.md`):
+**Milestone B.** B11–B19 merged on 2–5 Oct (rows 40–52; see `docs/production-migrations.md` and the git log). This session
+(6 Oct):
 
-| Ticket | Migrations |
-|---|---|
-| B11 company map (#163) | rows 40, 42 |
-| B13 process upload (#166) | rows 41, 43 |
-| Harden versions (#171) | row 44 |
-| B14 import bundle, part 1 (#167) | row 45 |
-| B12 process library (#164), parts 1 and 2 | rows 46, 47 |
-| B18 sources library and tour (#176) | row 48 |
-| B19 manual entry (#182), part 1 and part 2 (#194) | rows 49, 51 |
-| C2 calibration, part 1 (#41) | row 50 |
-| B6, B10 part 1, B16 process page, B15 Overview (#193) | none |
-| B17 analysis rework (#175, PR #195) | row 52 |
+| Ticket | PR | Migration |
+|---|---|---|
+| B1 (1/3) keep an owner, link people, role-matrix tests (#30) | #199 | row 53 |
+| B10 (2a) export limited to admins/owners/editors, import planner (#39) | #200 | none |
+| B10 (2b) restore a workspace from a backup, closes #39 | #201 | row 54 |
+| B1 (2/3a) per-person privacy in the database, no pay data for members (#30) | #202 | row 55, ENGINE 1.7.0 |
 
-**Production database:** applied up to `20261205000000` (row 52), each checked before and after. No PRs are open.
+**Production database:** applied up to `20261207500000` (row 55), each checked before and after. No PRs are open.
+
+**Briefs** (in `docs/plans/`): `b1-brief.md` (slices 2b and 3 left), `c2-2-brief.md` (C2 part 2, ready to build),
+`b10-2-brief.md` (done). Every ticket gets one before building.
+
+**Austin's decisions on 6 Oct** (each recorded on its issue):
+- **#39 (B10):** import makes each process a draft of its live version, with no history; the new workspace keeps its own
+  company map; hidden clients go in the bundle; only agency admins, owners and editors export or import; one additive
+  SECURITY INVOKER function is fine; saved solutions are listed as not restored; a restored workspace's results match the
+  original within run-to-run variation (ids feed the random streams, so exact seed equality is impossible).
+- **#41 (C2 part 2):** all five recommendations (back-solve churn, measured drivers shown beside the simulated ones, the two
+  CSVs, late payments out). Per-person speeds were never built, so they moved to C6 (#198), which needs Austin first.
+- **#175 (B17):** Accept doesn't create the issue; company analysis is judged against the main pipeline's first principles;
+  old rule settings stay unread; **MCP may propose findings** (new ticket B20, #197).
+- **#30 (B1):** Google sign-in only (magic link superseded); invites stay email-free; members and viewers see "Team member N"
+  labels, only their own row, "A team member" for other names, and **no pay data**. Overtime cost and person-rate issue
+  costs show "—" for them. Averages were rejected because overlapping averages leak an exact rate by subtraction.
 
 **Design calls Claude made, for Austin to confirm:**
 - When a process is placed inside an ordinary process, the company map "gives way" (B12 part 2, #188).
@@ -34,20 +44,18 @@ B16 process page; B17 hybrid analysis; B18 sources library and tour; B19 manual 
 - Levers and the forecast are not on the Overview; the Settings help says so.
 - An archived process opens read-only with a banner.
 - A person's Pass verdict counts as Verified, with the simulation result shown too.
+- B1: a workspace with a single rated person in a role still shows that role's default rate to members (a planning default,
+  not a person's pay).
 
 **Waiting on Austin:**
-- **#39:** B10 part 2 (import), 4 questions.
-- **#41:** C2 part 2, 5 questions.
-- **#175:** B17, 4 questions: does Accept create the issue? First principles company-wide? Can MCP propose findings? What
-  happens to the old rule settings? (Production had 0 `analysis_rules` rows, so removing the rules editor moved no numbers.)
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
   PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
+- **C6 (#198):** whether per-person speed is wanted at all, and how.
+- **Auto mode:** its safety check blocks `prod-sql.sh` (and once a plain `git fetch`) even though `.claude/settings.json`
+  allows it. Production steps this session ran after Austin left auto mode. Decide how future sessions should run them.
 - C5 is Austin's.
 
 **Still open from Milestone A:**
-- **CI timing tests:** the PRD §6.7 tests (`scenarios.test.ts`, `servicing.test.ts`) use absolute limits that shared
-  GitHub runners miss by 15–20% now and then, even after #148. Options: a separate perf job with one retry, or
-  budgets relative to a baseline measured on the same runner. Tests have not been loosened.
 - **AI analysis sources (A46):** "read linked sources and quotes" defaults off (it would send interview quotes to
   Anthropic). Switch on per workspace in Settings → AI analysis if wanted.
 - **D38 sign-off:** a resolved issue stays off the map; a re-detection shows as an insight (recorded in the PRD; treated
@@ -66,6 +74,7 @@ as in the app).
 
 ## How we work
 
+- **Two or three tickets per session** (Austin, 6 Oct), to protect the context window. End each session with the handover.
 - **Austin approves waves; within a wave, carry on without waiting.** Tell him when each wave finishes and go
   straight to the next unless he says otherwise.
 - **Delegate building to agents** to save the main session's context. Model policy (Austin's, 5 Oct): **Opus scopes every
@@ -121,6 +130,13 @@ bash packages/db/scripts/prod-sql.sh -f apply.sql
   bodies store `can''t`, so a `like` against them needs `can''''t`; cast `"char"` columns (`tgenabled::text`); compare
   `proconfig` with `array['search_path=""']`.
 - `apps/web/test/format.test.ts` (£27.4K) fails only in the cloud container (ICU); it passes in CI.
+- **Container restarts** stop background agents mid-task (it happened once this session). Agents that pushed after every
+  step lost nothing; re-launch a fresh agent with what's pushed and what's left. Postgres stops too: restart it with the
+  command below.
+- **CI logs:** the job log tail is only Postgres server output. Download the full log (`get_job_logs` with
+  `return_content: false` gives a URL; `curl` it to the scratchpad) and grep for `FAIL` or `::error`.
+- **Engine model changes** (a new optional field, a nullable output) take `golden:approve --bump` even when no numbers
+  move (1.7.0 for B1's `payHidden`).
 
 **Local tests in the cloud container** (Postgres 16 and Chromium are preinstalled):
 
@@ -141,15 +157,30 @@ password to `postgres`.
 
 ## Next steps
 
-1. Austin's answers above (#39, #41, #175) and his live checks of B19 part 2.
-2. Build queue, each Opus-scoped then Sonnet-built: B1 (roles and visibility), then B3 and B4; B7 (forecast planning,
-   builds on B6); check B2 (People page) against B19; C1 (CSV import wizard); C4 (Storybook). B10 part 2 waits on #39,
-   C2 part 2 on #41.
-3. The map node redesign, designed with Austin.
-4. A24 (#27): needs Austin's transcripts.
+1. **B1 (2/3b), the screens** (brief: `b1-brief.md`, "part 2b"; no migration planned, but item 1 needs one). Must fix
+   two leaks that members can read today:
+   - **Saved issues leak pay:** overtime issues store an evidence sentence and an `overtime_cost` figure
+     (`apps/web/src/lib/overtime-issues.ts` ~66,72, `apps/web/src/lib/issues/draft.ts` ~129-133) from which a member can
+     compute a rate. Build saved issues without pay-dependent text and figures, and clean existing rows with a migration.
+   - **Saved AI text keeps real names** (`analyse.ts` ~113, `narrate.ts` ~148 swap names back in before saving
+     `ai_analyses`, `findings` and narrations). Save with labels; put names back only for readers who may see them.
+   - Also: own-row filtering and "A team member" naming across ~15 files; issues of the same rating may reorder for members
+     (cost is the second sort key).
+2. **B1 (3/3):** the agency workspace list (a stored headline snapshot), plus an editor-gated SECURITY DEFINER save for the
+   four client-health-rule keys (they're owner-only today because they save through `save_fields('workspaces')`). Closes
+   #30 if 2b has merged. Its brief gives migration `20261209000000`; renumber to follow row 55 and C2 if needed.
+3. **C2 part 2 (#41)**, from `c2-2-brief.md`: slices 2a (estimators and parsers) and 2b (migration `20261208000000`, page);
+   closes #41.
+4. Then: B20 (#197), B3, B4, B7, B5, check B2 against B19, C1, C4; B21 (#203) raises restore limits; the map node
+   redesign with Austin.
 
-Follow-ups from Milestone B: other source pickers still load full source text; four older PostgREST suites fail when
-re-run on the same database.
+Follow-ups noted this session:
+- The owner guard has a known gap: an owner who joined by domain can delete that domain (ADR 0003 addendum).
+- A member can join a process presence channel via dev tools and see editors' names (names only).
+- `sources.speakers` and transcripts name people (accepted).
+- Restore limits are 50 processes, 500 steps, 1,000 edges, 300 issues, 1,000 clients and link-table caps, to stay inside
+  3 s; bigger workspaces export with a warning (#203).
+- Older: other source pickers still load full source text; four older PostgREST suites fail when re-run on the same database.
 
 ## Decisions from Austin (30 Sep)
 
