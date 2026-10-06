@@ -518,9 +518,11 @@ function IfSomeoneIsAway({
           example="Maya away for 2 weeks: 12% of work lost and 3 weeks to catch up, so Bad, not urgent."
         />
       </div>
-      <p className="px-4 pb-3 text-xs text-muted-foreground">
-        Tested over the workspace&apos;s own {runWeeks}-week run, with each person away for {weeksText(weeksAway)}.
-      </p>
+      {!unlinked && (
+        <p className="px-4 pb-3 text-xs text-muted-foreground">
+          Tested over the workspace&apos;s own {runWeeks}-week run, with each person away for {weeksText(weeksAway)}.
+        </p>
+      )}
       {unlinked ? (
         <p className="px-4 pb-4 text-sm text-muted-foreground">Nothing to show for you here.</p>
       ) : away === null ? (

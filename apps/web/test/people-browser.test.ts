@@ -74,7 +74,10 @@ describe("People page as a member", { timeout: 120_000 }, () => {
     expect(await page.locator("[data-no-own-row]").innerText()).toContain("isn't linked to a person");
     // No absence test is run for them, and nothing of anyone else's shows.
     expect(await absenceRows(page).count()).toBe(0);
-    expect(await page.locator("[data-absence]").innerText()).toContain("Nothing to show for you here.");
+    const card = await page.locator("[data-absence]").innerText();
+    expect(card).toContain("Nothing to show for you here.");
+    // Only the heading and that sentence (the brief), not the line about the run's length.
+    expect(card).not.toContain("Tested over");
     expect(errors).toEqual([]);
     await page.close();
   });
