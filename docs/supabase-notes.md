@@ -322,15 +322,16 @@ Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`,
 
 ## Saved text: no pay, no real names (issue #30, B1 2b, migration 20261207700000)
 
-Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.test.ts`, which runs the migration over seeded leaks and its header's rollback) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-findings.test.ts`), not against a Supabase project. The clean-up relies on Postgres regular-expression features: a lookbehind (`(?<![[:alnum:]_])`), `[[:alnum:]]` classes, a lazy quantifier (`.+?`, which makes the whole match the shortest) and `regexp_replace(..., 'g')` with a `\1` replacement, and on `alter table ... disable trigger` for the six triggers it switches off and back on (needs table ownership, which the migration role has). Check on the real project:
+Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.test.ts`, which runs the migration over seeded leaks and its header's rollback) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-findings.test.ts`), not against a Supabase project. The clean-up relies on Postgres regular-expression features: a lookbehind (`(?<![[:alnum:]_])`, and `(?<=\\[nrtbf])` for a name right after a JSON escape), `[[:alnum:]]` classes, a lazy quantifier (`.+?` and `[^"]+?`, which make the whole match the shortest) and `regexp_replace(..., 'g')` with a `\1` replacement, and on `alter table ... disable trigger` for the six triggers it switches off and back on (needs table ownership, which the migration role has). Check on the real project:
 
-- [ ] **Preflight 3** returns `x T y.` and `a.` (the regex features work on Supabase's Postgres).
+- [ ] **Preflight 3** returns `x T y.`, `a\nT b`, `a.` and `[{"t":"a, costing about £1 a month"},{"t":"b. c"}]` (the regex features work on Supabase's Postgres).
 - [ ] **Preflight 2** shows the six triggers enabled; after applying, still six rows, all `O` (post-apply check 1).
-- [ ] **Post-apply check 4** returns 0, 0: no saved AI text still holds a full name of its workspace.
+- [ ] **Post-apply check 4** returns 0, 0: no saved AI text still holds a full name of its workspace (including right after a JSON escape such as `\n`).
+- [ ] **Post-apply check 3**, first two queries: 0, 0 and 0, 0 (no issue, analysis or AI finding of any revision still holds the money clause).
 - [ ] **Post-apply check 3**: the `issue_events` count and both `max(updated_at)` are unchanged (the clean-up is not an edit).
 - [ ] **As a linked member**, the Overview's AI analysis and the process page's findings read "A team member" for other people and the member's own name for theirs; an issue about overtime shows hours and no money.
 - [ ] **As an editor**, the same text shows real names; edit an AI finding without changing it and save: it is not marked "AI, edited".
-- [ ] After applying, **re-run Analyse** on each analysed process and the whole company, and dismiss or edit any accepted AI finding that quotes overtime money (old AI text may have quoted a cost the model was given).
+- [ ] After applying, **re-run Analyse** on each analysed process and the whole company, and dismiss or edit any accepted AI finding that quotes overtime money (old AI text may have paraphrased a cost the model was given). Re-running covers live revisions only; members can read analyses of earlier revisions, where a paraphrase may remain, so editors should check accepted findings for those too.
 
 ## Restoring a backup (issue #39, B10 2b, migration 20261207000000)
 

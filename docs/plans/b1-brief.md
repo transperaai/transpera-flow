@@ -1213,6 +1213,19 @@ inside "MayaCollins", and relabelling `jsonb::text` round-trips to valid jsonb. 
 column checks (title ≤ 200, evidence and why ≤ 2000, reason ≤ 2000); a label can be longer than the name it replaces.
 Preflight 6 checks the jsonb columns have room.
 
+**Changes after the slice-2b review** (the migration file is the authority; the SQL above is the first draft):
+- The issues clean-up is not limited to `detected_key like 'overtime:%'`: every issue whose evidence holds the clause or
+  whose metrics hold `overtime_cost` is cleaned, the same rule as `payFreeIssueFields`.
+- The money clause is stripped from the text of every analysis (summary, insights, review, reason), of any revision, and
+  from every AI finding's title, evidence, why and facts, not only from rows that also needed a label. In the jsonb updates
+  the pattern is `, costing about [^"]+? at cost rates over the [0-9,]+-week run\.` (a JSON string can't hold a raw `"`, so a
+  match can't run across two strings); plain-text columns keep `.+?`. `person_labels` is merged (`old || found`), not replaced.
+- A name matches after a JSON escape: the lookbehind is `(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))`, in `b1_2b_people` and in
+  post-apply check 4 ("Busy week.\nMaya Collins" is relabelled).
+- Full names only, case-sensitive, as above. (The app's `labelNames` and `applyAliases` match a first name case-sensitively
+  too, and a full name in any case.)
+- Preflight 3, preflight 4 and the post-apply checks cover the wider clean-up.
+
 **Accepted limits (in the header and the PR):**
 - In rows written before this migration, a person named only by first name, a nickname or a misspelling keeps it.
 - Old AI text may **quote a pay-dependent cost** the model was given ("overtime here costs about £1.2k a month"). Free
@@ -1695,6 +1708,10 @@ The originals, for the record:
   quote it in its read or a finding. Free text can't be cleaned reliably. Production has no members or viewers yet.
   *Default: after applying, editors run Analyse again everywhere (old analyses read as out of date anyway) and dismiss or
   edit any accepted AI finding that quotes overtime money. The alternative is to hide AI text written before 2b from members
-  (a `created_at` cut-off in the loaders).*
+  (a `created_at` cut-off in the loaders).* **Reach of "re-run Analyse":** it replaces the analysis of LIVE revisions only,
+  and members can read analyses of earlier revisions (`loadAiViews([shown.revision.id])` on the process page). The migration
+  removes the exact money clause from every revision's text, but an AI paraphrase of money ("costs about £1.2k a month")
+  may remain in any revision, and Analyse doesn't touch the older ones. So for older revisions, editors should check the
+  accepted findings (and read the older analyses they show), not just re-run.
 
 Nothing is blocking: 2b builds on the defaults.

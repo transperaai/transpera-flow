@@ -1,10 +1,10 @@
 -- Production apply file for 20261207700000_saved_text_privacy (B1 part 2 of 3, slice 2b, issue #30). Two new columns
--- (`ai_analyses.person_labels`, `findings.person_labels`), a one-off clean-up of saved text (overtime issues lose the money clause
--- and `overtime_cost`; AI analyses and AI findings get "Team member N" labels where full names were, with the labels written to
--- `person_labels`), and three temporary helper functions that are dropped again; applies after row 55 (20261207500000, B1 2a);
--- this is row 56. Preflight, post-apply checks and rollback are in the migration's own header, repeated below. Apply BEFORE
--- deploying the app (the app selects `person_labels`), and deploy straight after. Sets `lock_timeout` to 5 s: each
--- `disable trigger` takes a brief lock on its table.
+-- (`ai_analyses.person_labels`, `findings.person_labels`), a one-off clean-up of saved text (every issue loses the overtime money
+-- clause and `overtime_cost`; every AI analysis, of any revision, and every AI finding loses the clause and gets "Team member N"
+-- labels where full names were, with the labels written to `person_labels`), and three temporary helper functions that are
+-- dropped again; applies after row 55 (20261207500000, B1 2a); this is row 56. Preflight, post-apply checks and rollback are in
+-- the migration's own header, repeated below. Apply BEFORE deploying the app (the app selects `person_labels`), and deploy
+-- straight after. Sets `lock_timeout` to 5 s: each `disable trigger` takes a brief lock on its table.
 
 begin;
 set local lock_timeout = '5s';
@@ -28,14 +28,17 @@ set local lock_timeout = '5s';
 --   * Two columns: `ai_analyses.person_labels` and `findings.person_labels` (jsonb object, not null, default '{}', at most
 --     32 KB). Both tables have table-level grants, so the new columns need none. No policy, grant or trigger is created, no
 --     existing function is redefined, and `save_fields` is not touched.
---   * `issues` whose `detected_key` starts 'overtime:' lose the clause ", costing about ... at cost rates over the N-week
---     run." (it becomes ".") and the `overtime_cost` metric. History and updated_at stay as they were: it is a clean-up, not
---     an edit (the `issue_log` and `set_updated_at` triggers are switched off for the statement, then back on).
+--   * EVERY `issues` row, whatever its `detected_key`, whose evidence holds the clause ", costing about ... at cost rates over
+--     the N-week run." (it becomes ".") or whose `evidence_metrics` holds `overtime_cost`: the same rule as the app's
+--     `payFreeIssueFields`. History and updated_at stay as they were: it is a clean-up, not an edit (the `issue_log` and
+--     `set_updated_at` triggers are switched off for the statement, then back on).
 --   * `ai_analyses` (summary, insights, review, reason) and AI `findings` (title, evidence, why, facts): every FULL NAME of a
 --     person in the row's workspace, as written (case-sensitive) and not inside a longer word, becomes 'Team member ' || n,
 --     where n ranks the workspace's people by (created_at, id): the same numbering as `team_capacity`. The labels used are
---     written to `person_labels`. The money clause is cut from facts and pre-B17 insights too (a fact quoted the overtime
---     evidence). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
+--     written to `person_labels`. The same money clause is cut from the text of EVERY analysis (summary, insights with their
+--     facts, review, reason), including analyses of superseded revisions, which members can read, and from every AI
+--     finding's title, evidence, why and facts (a fact quoted the overtime evidence; inside jsonb the match is kept inside
+--     one JSON string, so it can't run across two). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
 --     reserved run) and `set_updated_at` are switched off for those statements, then back on. Findings added by hand are
 --     human-typed text and are not touched.
 --   * Three helper functions are created in `private` and dropped again inside this migration.
@@ -45,10 +48,12 @@ set local lock_timeout = '5s';
 --     names in old rows mostly come from source quotes, which every member already reads; matching them would also catch
 --     words like "May" or "Will"). Names under 3 characters, and names with a double quote or a backslash, are skipped.
 --     Two people with the same name both match the lower-numbered label.
---   * Old AI text may QUOTE a pay-dependent cost the model was given ("overtime here costs about £1.2k a month"). Free text
---     can't be recognised reliably. Production has no members or viewers yet, so nobody can read it today. After applying,
---     re-run Analyse on each analysed process and the whole company (every stored analysis reads as out of date anyway, from
---     the prompt-version bump), and dismiss or edit any accepted AI finding that quotes overtime money.
+--   * Old AI text may PARAPHRASE a pay-dependent cost the model was given ("overtime here costs about £1.2k a month"). The
+--     exact clause is gone from every revision after this migration, but free text can't be recognised reliably. Production
+--     has no members or viewers yet, so nobody can read it today. After applying, re-run Analyse on each analysed process and
+--     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
+--     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
+--     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
 --   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
 --     check 4.
 --
@@ -68,13 +73,27 @@ set local lock_timeout = '5s';
 --          ('public.ai_analyses'::regclass, 'ai_analyses_stamp'), ('public.ai_analyses'::regclass, 'set_updated_at'),
 --          ('public.findings'::regclass, 'findings_before_write'), ('public.findings'::regclass, 'set_updated_at'))
 --        order by 1, 2;
---   3. The regex features work here (lookbehind, classes, shortest match). Expect 'x T y.' and 'a.':
---        select regexp_replace('x Ann Lee y.', '(?<![[:alnum:]_])Ann Lee(?![[:alnum:]_])', 'T', 'g'),
---               regexp_replace('a, costing about £1,234 at cost rates over the 26-week run.', ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g');
---   4. For the log, and to compare after: what will change, the history size and the latest timestamps.
+--   3. The regex features work here (lookbehind, lookbehind after a JSON escape, classes, shortest match). Expect
+--      'x T y.', 'a\nT b', 'a.' and '[{"t":"a, costing about £1 a month"},{"t":"b. c"}]' (the last: the match stays
+--      inside one JSON string, so the first "costing about" is left alone):
+--        select regexp_replace('x Ann Lee y.', '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])', 'T', 'g'),
+--               regexp_replace('a\nAnn Lee b', '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])', 'T', 'g'),
+--               regexp_replace('a, costing about £1,234 at cost rates over the 26-week run.', ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
+--               regexp_replace('[{"t":"a, costing about £1 a month"},{"t":"b, costing about £2 at cost rates over the 26-week run. c"}]',
+--                              ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g');
+--   4. For the log, and to compare after: what will change (every issue, every analysis, every AI finding), the history size
+--      and the latest timestamps.
 --        select count(*) filter (where evidence_metrics ? 'overtime_cost') as with_metric,
 --               count(*) filter (where evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.') as with_sentence
---        from public.issues where detected_key like 'overtime:%';
+--        from public.issues;
+--        select (select count(*) from public.ai_analyses
+--                where (summary::text || insights::text || review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
+--                   or reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.') as analyses_with_sentence,
+--               (select count(*) from public.findings
+--                where origin = 'ai' and (title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.')) as findings_with_sentence;
 --        select (select count(*) from public.issue_events) as issue_events,
 --               (select count(*) from public.ai_analyses) as analyses, (select max(updated_at) from public.ai_analyses) as analyses_latest,
 --               (select count(*) from public.findings where origin = 'ai') as ai_findings, (select max(updated_at) from public.findings) as findings_latest;
@@ -93,14 +112,15 @@ set local lock_timeout = '5s';
 --   1. Re-run preflight 1: `2`. Re-run preflight 2: still 6 rows, all `O`.
 --   2. select to_regprocedure('private.b1_2b_relabel(text, uuid)'), to_regprocedure('private.b1_2b_labels(text, uuid)'),
 --             to_regprocedure('private.b1_2b_people(uuid)');   -- null, null, null
---   3. Re-run the first query of preflight 4: `0, 0`. The second: `issue_events` and both `max(updated_at)` unchanged.
+--   3. Re-run the first two queries of preflight 4: `0, 0` and `0, 0`. The third: `issue_events` and both `max(updated_at)`
+--      unchanged.
 --   4. No AI text still holds a full name of its workspace. Expect 0, 0:
 --        select (select count(*) from public.ai_analyses a join public.people p on p.workspace_id = a.workspace_id
 --                where char_length(btrim(p.name)) >= 3 and (a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''))
---                      ~ ('(?<![[:alnum:]_])' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])')),
+--                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])')),
 --               (select count(*) from public.findings f join public.people p on p.workspace_id = f.workspace_id
 --                where f.origin = 'ai' and char_length(btrim(p.name)) >= 3 and (f.title || f.evidence || f.why || f.facts::text)
---                      ~ ('(?<![[:alnum:]_])' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
+--                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
 --
@@ -157,7 +177,7 @@ alter table public.ai_analyses add column person_labels jsonb not null default '
 alter table public.findings add column person_labels jsonb not null default '{}'
   constraint findings_person_labels_shape check (jsonb_typeof(person_labels) = 'object' and octet_length(person_labels::text) <= 32768);
 
--- 2. Saved overtime issues: no money.
+-- 2. Saved issues: no money. Every issue, whatever its key: the rule is `payFreeIssueFields`'s (the app's save path).
 
 -- History and updated_at stay as they were: this is a clean-up, not an edit.
 alter table public.issues disable trigger issue_log;
@@ -165,21 +185,22 @@ alter table public.issues disable trigger set_updated_at;
 update public.issues
 set evidence = regexp_replace(evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
     evidence_metrics = evidence_metrics - 'overtime_cost'
-where detected_key like 'overtime:%'
-  and (evidence_metrics ? 'overtime_cost'
-       or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.');
+where evidence_metrics ? 'overtime_cost'
+   or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
 alter table public.issues enable trigger set_updated_at;
 alter table public.issues enable trigger issue_log;
 
 -- 3. Saved AI text: full names to labels, best effort.
 
 -- Temporary helpers, dropped below. Longest names first, so "Ann Lee" goes before "Ann". Names under 3 characters, and
--- names with a double quote or a backslash (they would break the jsonb text), are skipped.
+-- names with a double quote or a backslash (they would break the jsonb text), are skipped. In jsonb text a name can follow a
+-- JSON escape ("Busy week.\nMaya Collins"), and the `n` of `\n` is a letter: so the lookbehind also accepts a backslash
+-- plus one of n r t b f just before the name.
 create function private.b1_2b_people(ws uuid) returns table (id uuid, name text, pattern text, label text)
 language sql stable set search_path = ''
 as $$
   select n.id, n.name,
-    '(?<![[:alnum:]_])' || regexp_replace(n.name, '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])',
+    '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(n.name, '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])',
     n.label
   from (
     select pe.id, btrim(pe.name) as name, 'Team member ' || row_number() over (order by pe.created_at, pe.id) as label
@@ -221,33 +242,35 @@ $$;
 
 alter table public.ai_analyses disable trigger ai_analyses_stamp;  -- it requires a run the caller reserved in the last 15 minutes
 alter table public.ai_analyses disable trigger set_updated_at;     -- "latest analysis" is ordered by updated_at
--- Pre-B17 analyses keep facts inside `insights`: the money clause goes from there too.
+-- EVERY analysis, of any revision (members can read earlier revisions): the money clause goes from summary, insights (pre-B17
+-- analyses keep facts inside them), review and reason, and full names become labels. Inside jsonb text the money can't hold
+-- a raw double quote, so `[^"]+?` keeps the match inside one JSON string.
 update public.ai_analyses a
-set summary  = private.b1_2b_relabel(a.summary::text, a.workspace_id)::jsonb,
-    insights = private.b1_2b_relabel(
-                 regexp_replace(a.insights::text, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
-                 a.workspace_id)::jsonb,
-    review   = private.b1_2b_relabel(a.review::text, a.workspace_id)::jsonb,
-    reason   = left(private.b1_2b_relabel(a.reason, a.workspace_id), 2000),
-    person_labels = private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
+set summary  = private.b1_2b_relabel(regexp_replace(a.summary::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    insights = private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    review   = private.b1_2b_relabel(regexp_replace(a.review::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    reason   = left(private.b1_2b_relabel(regexp_replace(a.reason, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id), 2000),
+    person_labels = a.person_labels || private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
 where private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
-   or a.insights::text ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
+   or (a.summary::text || a.insights::text || a.review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
+   or a.reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
 alter table public.ai_analyses enable trigger set_updated_at;
 alter table public.ai_analyses enable trigger ai_analyses_stamp;
 
 alter table public.findings disable trigger findings_before_write;  -- it forbids changing an AI finding's facts, and would mark it edited
 alter table public.findings disable trigger set_updated_at;
 update public.findings f
-set title    = left(private.b1_2b_relabel(f.title, f.workspace_id), 200),
-    evidence = left(private.b1_2b_relabel(f.evidence, f.workspace_id), 2000),
-    why      = left(private.b1_2b_relabel(f.why, f.workspace_id), 2000),
-    facts    = private.b1_2b_relabel(
-                 regexp_replace(f.facts::text, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
-                 f.workspace_id)::jsonb,
-    person_labels = private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
+set title    = left(private.b1_2b_relabel(regexp_replace(f.title, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 200),
+    evidence = left(private.b1_2b_relabel(regexp_replace(f.evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
+    why      = left(private.b1_2b_relabel(regexp_replace(f.why, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
+    facts    = private.b1_2b_relabel(regexp_replace(f.facts::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id)::jsonb,
+    person_labels = f.person_labels || private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
 where f.origin = 'ai'
   and (private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id) <> '{}'
-       or f.facts::text ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.');
+       or f.title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+       or f.evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+       or f.why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+       or f.facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.');
 alter table public.findings enable trigger set_updated_at;
 alter table public.findings enable trigger findings_before_write;
 
@@ -274,14 +297,17 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * Two columns: `ai_analyses.person_labels` and `findings.person_labels` (jsonb object, not null, default '{}', at most
 --     32 KB). Both tables have table-level grants, so the new columns need none. No policy, grant or trigger is created, no
 --     existing function is redefined, and `save_fields` is not touched.
---   * `issues` whose `detected_key` starts 'overtime:' lose the clause ", costing about ... at cost rates over the N-week
---     run." (it becomes ".") and the `overtime_cost` metric. History and updated_at stay as they were: it is a clean-up, not
---     an edit (the `issue_log` and `set_updated_at` triggers are switched off for the statement, then back on).
+--   * EVERY `issues` row, whatever its `detected_key`, whose evidence holds the clause ", costing about ... at cost rates over
+--     the N-week run." (it becomes ".") or whose `evidence_metrics` holds `overtime_cost`: the same rule as the app's
+--     `payFreeIssueFields`. History and updated_at stay as they were: it is a clean-up, not an edit (the `issue_log` and
+--     `set_updated_at` triggers are switched off for the statement, then back on).
 --   * `ai_analyses` (summary, insights, review, reason) and AI `findings` (title, evidence, why, facts): every FULL NAME of a
 --     person in the row's workspace, as written (case-sensitive) and not inside a longer word, becomes 'Team member ' || n,
 --     where n ranks the workspace's people by (created_at, id): the same numbering as `team_capacity`. The labels used are
---     written to `person_labels`. The money clause is cut from facts and pre-B17 insights too (a fact quoted the overtime
---     evidence). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
+--     written to `person_labels`. The same money clause is cut from the text of EVERY analysis (summary, insights with their
+--     facts, review, reason), including analyses of superseded revisions, which members can read, and from every AI
+--     finding's title, evidence, why and facts (a fact quoted the overtime evidence; inside jsonb the match is kept inside
+--     one JSON string, so it can't run across two). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
 --     reserved run) and `set_updated_at` are switched off for those statements, then back on. Findings added by hand are
 --     human-typed text and are not touched.
 --   * Three helper functions are created in `private` and dropped again inside this migration.
@@ -291,10 +317,12 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     names in old rows mostly come from source quotes, which every member already reads; matching them would also catch
 --     words like "May" or "Will"). Names under 3 characters, and names with a double quote or a backslash, are skipped.
 --     Two people with the same name both match the lower-numbered label.
---   * Old AI text may QUOTE a pay-dependent cost the model was given ("overtime here costs about £1.2k a month"). Free text
---     can't be recognised reliably. Production has no members or viewers yet, so nobody can read it today. After applying,
---     re-run Analyse on each analysed process and the whole company (every stored analysis reads as out of date anyway, from
---     the prompt-version bump), and dismiss or edit any accepted AI finding that quotes overtime money.
+--   * Old AI text may PARAPHRASE a pay-dependent cost the model was given ("overtime here costs about £1.2k a month"). The
+--     exact clause is gone from every revision after this migration, but free text can't be recognised reliably. Production
+--     has no members or viewers yet, so nobody can read it today. After applying, re-run Analyse on each analysed process and
+--     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
+--     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
+--     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
 --   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
 --     check 4.
 --
@@ -314,13 +342,27 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --          ('public.ai_analyses'::regclass, 'ai_analyses_stamp'), ('public.ai_analyses'::regclass, 'set_updated_at'),
 --          ('public.findings'::regclass, 'findings_before_write'), ('public.findings'::regclass, 'set_updated_at'))
 --        order by 1, 2;
---   3. The regex features work here (lookbehind, classes, shortest match). Expect 'x T y.' and 'a.':
---        select regexp_replace('x Ann Lee y.', '(?<![[:alnum:]_])Ann Lee(?![[:alnum:]_])', 'T', 'g'),
---               regexp_replace('a, costing about £1,234 at cost rates over the 26-week run.', ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g');
---   4. For the log, and to compare after: what will change, the history size and the latest timestamps.
+--   3. The regex features work here (lookbehind, lookbehind after a JSON escape, classes, shortest match). Expect
+--      'x T y.', 'a\nT b', 'a.' and '[{"t":"a, costing about £1 a month"},{"t":"b. c"}]' (the last: the match stays
+--      inside one JSON string, so the first "costing about" is left alone):
+--        select regexp_replace('x Ann Lee y.', '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])', 'T', 'g'),
+--               regexp_replace('a\nAnn Lee b', '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))Ann Lee(?![[:alnum:]_])', 'T', 'g'),
+--               regexp_replace('a, costing about £1,234 at cost rates over the 26-week run.', ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
+--               regexp_replace('[{"t":"a, costing about £1 a month"},{"t":"b, costing about £2 at cost rates over the 26-week run. c"}]',
+--                              ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g');
+--   4. For the log, and to compare after: what will change (every issue, every analysis, every AI finding), the history size
+--      and the latest timestamps.
 --        select count(*) filter (where evidence_metrics ? 'overtime_cost') as with_metric,
 --               count(*) filter (where evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.') as with_sentence
---        from public.issues where detected_key like 'overtime:%';
+--        from public.issues;
+--        select (select count(*) from public.ai_analyses
+--                where (summary::text || insights::text || review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
+--                   or reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.') as analyses_with_sentence,
+--               (select count(*) from public.findings
+--                where origin = 'ai' and (title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+--                   or facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.')) as findings_with_sentence;
 --        select (select count(*) from public.issue_events) as issue_events,
 --               (select count(*) from public.ai_analyses) as analyses, (select max(updated_at) from public.ai_analyses) as analyses_latest,
 --               (select count(*) from public.findings where origin = 'ai') as ai_findings, (select max(updated_at) from public.findings) as findings_latest;
@@ -339,14 +381,15 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   1. Re-run preflight 1: `2`. Re-run preflight 2: still 6 rows, all `O`.
 --   2. select to_regprocedure('private.b1_2b_relabel(text, uuid)'), to_regprocedure('private.b1_2b_labels(text, uuid)'),
 --             to_regprocedure('private.b1_2b_people(uuid)');   -- null, null, null
---   3. Re-run the first query of preflight 4: `0, 0`. The second: `issue_events` and both `max(updated_at)` unchanged.
+--   3. Re-run the first two queries of preflight 4: `0, 0` and `0, 0`. The third: `issue_events` and both `max(updated_at)`
+--      unchanged.
 --   4. No AI text still holds a full name of its workspace. Expect 0, 0:
 --        select (select count(*) from public.ai_analyses a join public.people p on p.workspace_id = a.workspace_id
 --                where char_length(btrim(p.name)) >= 3 and (a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''))
---                      ~ ('(?<![[:alnum:]_])' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])')),
+--                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])')),
 --               (select count(*) from public.findings f join public.people p on p.workspace_id = f.workspace_id
 --                where f.origin = 'ai' and char_length(btrim(p.name)) >= 3 and (f.title || f.evidence || f.why || f.facts::text)
---                      ~ ('(?<![[:alnum:]_])' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
+--                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
 --
@@ -403,7 +446,7 @@ alter table public.ai_analyses add column person_labels jsonb not null default '
 alter table public.findings add column person_labels jsonb not null default '{}'
   constraint findings_person_labels_shape check (jsonb_typeof(person_labels) = 'object' and octet_length(person_labels::text) <= 32768);
 
--- 2. Saved overtime issues: no money.
+-- 2. Saved issues: no money. Every issue, whatever its key: the rule is `payFreeIssueFields`'s (the app's save path).
 
 -- History and updated_at stay as they were: this is a clean-up, not an edit.
 alter table public.issues disable trigger issue_log;
@@ -411,21 +454,22 @@ alter table public.issues disable trigger set_updated_at;
 update public.issues
 set evidence = regexp_replace(evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
     evidence_metrics = evidence_metrics - 'overtime_cost'
-where detected_key like 'overtime:%'
-  and (evidence_metrics ? 'overtime_cost'
-       or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.');
+where evidence_metrics ? 'overtime_cost'
+   or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
 alter table public.issues enable trigger set_updated_at;
 alter table public.issues enable trigger issue_log;
 
 -- 3. Saved AI text: full names to labels, best effort.
 
 -- Temporary helpers, dropped below. Longest names first, so "Ann Lee" goes before "Ann". Names under 3 characters, and
--- names with a double quote or a backslash (they would break the jsonb text), are skipped.
+-- names with a double quote or a backslash (they would break the jsonb text), are skipped. In jsonb text a name can follow a
+-- JSON escape ("Busy week.\nMaya Collins"), and the `n` of `\n` is a letter: so the lookbehind also accepts a backslash
+-- plus one of n r t b f just before the name.
 create function private.b1_2b_people(ws uuid) returns table (id uuid, name text, pattern text, label text)
 language sql stable set search_path = ''
 as $$
   select n.id, n.name,
-    '(?<![[:alnum:]_])' || regexp_replace(n.name, '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])',
+    '(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(n.name, '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])',
     n.label
   from (
     select pe.id, btrim(pe.name) as name, 'Team member ' || row_number() over (order by pe.created_at, pe.id) as label
@@ -467,33 +511,35 @@ $$;
 
 alter table public.ai_analyses disable trigger ai_analyses_stamp;  -- it requires a run the caller reserved in the last 15 minutes
 alter table public.ai_analyses disable trigger set_updated_at;     -- "latest analysis" is ordered by updated_at
--- Pre-B17 analyses keep facts inside `insights`: the money clause goes from there too.
+-- EVERY analysis, of any revision (members can read earlier revisions): the money clause goes from summary, insights (pre-B17
+-- analyses keep facts inside them), review and reason, and full names become labels. Inside jsonb text the money can't hold
+-- a raw double quote, so `[^"]+?` keeps the match inside one JSON string.
 update public.ai_analyses a
-set summary  = private.b1_2b_relabel(a.summary::text, a.workspace_id)::jsonb,
-    insights = private.b1_2b_relabel(
-                 regexp_replace(a.insights::text, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
-                 a.workspace_id)::jsonb,
-    review   = private.b1_2b_relabel(a.review::text, a.workspace_id)::jsonb,
-    reason   = left(private.b1_2b_relabel(a.reason, a.workspace_id), 2000),
-    person_labels = private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
+set summary  = private.b1_2b_relabel(regexp_replace(a.summary::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    insights = private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    review   = private.b1_2b_relabel(regexp_replace(a.review::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    reason   = left(private.b1_2b_relabel(regexp_replace(a.reason, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id), 2000),
+    person_labels = a.person_labels || private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
 where private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
-   or a.insights::text ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
+   or (a.summary::text || a.insights::text || a.review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
+   or a.reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
 alter table public.ai_analyses enable trigger set_updated_at;
 alter table public.ai_analyses enable trigger ai_analyses_stamp;
 
 alter table public.findings disable trigger findings_before_write;  -- it forbids changing an AI finding's facts, and would mark it edited
 alter table public.findings disable trigger set_updated_at;
 update public.findings f
-set title    = left(private.b1_2b_relabel(f.title, f.workspace_id), 200),
-    evidence = left(private.b1_2b_relabel(f.evidence, f.workspace_id), 2000),
-    why      = left(private.b1_2b_relabel(f.why, f.workspace_id), 2000),
-    facts    = private.b1_2b_relabel(
-                 regexp_replace(f.facts::text, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
-                 f.workspace_id)::jsonb,
-    person_labels = private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
+set title    = left(private.b1_2b_relabel(regexp_replace(f.title, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 200),
+    evidence = left(private.b1_2b_relabel(regexp_replace(f.evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
+    why      = left(private.b1_2b_relabel(regexp_replace(f.why, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
+    facts    = private.b1_2b_relabel(regexp_replace(f.facts::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id)::jsonb,
+    person_labels = f.person_labels || private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
 where f.origin = 'ai'
   and (private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id) <> '{}'
-       or f.facts::text ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.');
+       or f.title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+       or f.evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+       or f.why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
+       or f.facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.');
 alter table public.findings enable trigger set_updated_at;
 alter table public.findings enable trigger findings_before_write;
 

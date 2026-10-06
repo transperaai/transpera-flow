@@ -21,21 +21,32 @@ const ws = randomUUID();
 const ws2 = randomUUID();
 const proc = randomUUID();
 const rev = randomUUID();
+const rev2 = randomUUID();
 const role = randomUUID();
 const user = randomUUID();
 const person = { maya: randomUUID(), annLee: randomUUID(), ann: randomUUID(), al: randomUUID(), rosa: randomUUID() };
-const issue = { person: randomUUID(), role: randomUUID(), capacity: randomUUID(), manual: randomUUID() };
+const issue = { person: randomUUID(), role: randomUUID(), capacity: randomUUID(), manual: randomUUID(), clean: randomUUID() };
 const analysis = randomUUID();
+const oldAnalysis = randomUUID();
 const aiFinding = randomUUID();
+const payFinding = randomUUID();
 const handFinding = randomUUID();
 const run = randomUUID();
+const run2 = randomUUID();
 let issuesBefore: Record<string, Record<string, unknown>>;
 let triggersBefore: string;
 let eventsBefore: number;
 let analysisBefore: Record<string, unknown>;
 let aiBefore: Record<string, unknown>;
+let payFindingBefore: Record<string, unknown>;
+let oldAnalysisBefore: Record<string, unknown>;
 let handBefore: Record<string, unknown>;
 
+// Two facts side by side: a naive `.+?` would run from the first "costing about" to the second clause, across both strings.
+const TWO_FACTS = [
+  { text: "AI says overtime, costing about £1.2k a month" },
+  { text: "Y, costing about £2 at cost rates over the 26-week run. Z" },
+];
 const MAYA_FACT = `Maya Collins works 4 h/wk overtime. ${SENTENCE("£1,040")}`;
 
 beforeAll(async () => {
@@ -60,6 +71,8 @@ beforeAll(async () => {
   await client.query("insert into process_revisions (id, workspace_id, process_id, number, status) values ($1, $2, $3, 1, 'draft')", [rev, ws, proc]);
   await client.query("update process_revisions set status = 'published' where id = $1", [rev]);
   await client.query("update processes set live_revision_id = $1 where id = $2", [rev, proc]);
+  // A later revision is the live one's draft; the analysis of the first (superseded) stays readable to members.
+  await client.query("insert into process_revisions (id, workspace_id, process_id, number, status) values ($1, $2, $3, 2, 'draft')", [rev2, ws, proc]);
   await client.query("insert into roles (id, workspace_id, name) values ($1, $2, 'Strategist')", [role, ws]);
   // Created in this order, so they are people 1 to 4 of Old Co. "Ann" is inside "Ann Lee"; "Al" is too short to match.
   for (const [i, [key, who, w]] of (
@@ -79,6 +92,7 @@ beforeAll(async () => {
   await ins(issue.role, { source: "promoted", detected_key: `overtime:role:${role}`, title: "Strategist works 4 h/wk overtime", evidence: SENTENCE("A$1,040.50"), evidence_metrics: metrics, status: "dismissed" });
   await ins(issue.capacity, { source: "promoted", detected_key: `capacity:person:${person.maya}`, evidence: SENTENCE("£1,040"), evidence_metrics: metrics });
   await ins(issue.manual, { source: "manual", type: "manual", evidence: SENTENCE("£1,040"), evidence_metrics: metrics });
+  await ins(issue.clean, { source: "promoted", detected_key: `capacity:person:${person.annLee}`, evidence: CLEAN, evidence_metrics: JSON.stringify({ overtime_hours_week: 4 }) });
   // A little history, as the app leaves it.
   await client.query("update issues set status = 'in_progress' where id = $1", [issue.person]);
 
@@ -103,6 +117,26 @@ beforeAll(async () => {
      values ($1, $2, $3, 'ai', 'proposed', 'bad', 'capacity', 'Maya Collins is the only one who prices', 'Ann Lee reviews it.', 'Annual cover is thin in March.', $4, 'ai:insight:abc123', $5, $6, $7, '2026-09-20T09:00:00Z', '2026-09-20T09:05:00Z')`,
     [aiFinding, ws, proc, JSON.stringify([{ kind: "fact", key: "overtime:person:x", text: MAYA_FACT }]), analysis, run, user],
   );
+  // An analysis of another revision (rev2, which members can also read): its text follows a JSON escape ("\n"), holds two
+  // facts side by side, and states the money clause in the read, the review and the reason, with no label to map.
+  await client.query("insert into ai_runs (id, workspace_id, process_id, trigger, user_id, user_name, started_at) values ($1, $2, $3, 'manual', $4, 'Ed Itor', '2026-09-22T09:00:00Z')", [run2, ws, proc, user]);
+  await client.query(
+    `insert into ai_analyses (id, workspace_id, process_id, revision_id, status, reason, trigger, summary, insights, review, input_hash, run_id, created_by, created_at, updated_at)
+     values ($1, $2, $3, $4, 'ok', $5, 'manual', $6, $7, $8, 'h2', $9, $10, '2026-09-22T09:00:00Z', '2026-09-22T09:05:00Z')`,
+    [
+      oldAnalysis, ws, proc, rev2,
+      `Left out: ${SENTENCE("£9")}`,
+      JSON.stringify(["Busy week.\nMaya Collins is over.", `Overtime is high${SENTENCE("£1,040").slice(SENTENCE("£1,040").indexOf(", costing"))}`]),
+      JSON.stringify(TWO_FACTS),
+      JSON.stringify([{ step: "job", level: "warn", text: `Cap used${SENTENCE("£7").slice(SENTENCE("£7").indexOf(", costing"))}` }]),
+      run2, user,
+    ],
+  );
+  await client.query(
+    `insert into findings (id, workspace_id, process_id, origin, status, rating, type, title, evidence, why, facts, ai_key, created_by, created_at, updated_at)
+     values ($1, $2, $3, 'ai', 'accepted', 'bad', 'capacity', $4, $5, $6, $7, 'ai:insight:pay', $8, '2026-09-22T09:00:00Z', '2026-09-22T09:05:00Z')`,
+    [payFinding, ws, proc, "Overtime, costing about £1 at cost rates over the 26-week run.", SENTENCE("£1,040"), SENTENCE("£2,000"), JSON.stringify(TWO_FACTS), user],
+  );
   await client.query(
     `insert into findings (id, workspace_id, process_id, origin, status, rating, type, title, evidence, why, created_at, updated_at)
      values ($1, $2, $3, 'manual', 'accepted', 'bad', 'manual', 'Maya Collins pitched alone', 'Maya Collins told us.', '', '2026-09-21T09:00:00Z', '2026-09-21T09:00:00Z')`,
@@ -114,6 +148,8 @@ beforeAll(async () => {
   eventsBefore = (await client.query("select count(*)::int as n from issue_events")).rows[0].n;
   analysisBefore = (await client.query("select * from ai_analyses where id = $1", [analysis])).rows[0];
   aiBefore = (await client.query("select * from findings where id = $1", [aiFinding])).rows[0];
+  payFindingBefore = (await client.query("select * from findings where id = $1", [payFinding])).rows[0];
+  oldAnalysisBefore = (await client.query("select * from ai_analyses where id = $1", [oldAnalysis])).rows[0];
   handBefore = (await client.query("select * from findings where id = $1", [handFinding])).rows[0];
   triggersBefore = await triggerStates();
   await client.query(readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8"));
@@ -140,9 +176,10 @@ const issuesNow = async () => Object.fromEntries((await client.query("select * f
 const one = async (sql: string, params: unknown[]) => (await client.query(sql, params)).rows[0];
 
 describe("saved overtime issues", () => {
-  it("lose the money clause and the overtime_cost metric, for a person and for a role, whatever the currency", async () => {
+  it("lose the money clause and the overtime_cost metric, for a person and for a role, whatever the currency, and for any other issue that holds them", async () => {
     const now = await issuesNow();
-    for (const id of [issue.person, issue.role]) {
+    // Not only 'overtime:' ones: a capacity detection and a manual issue with the same words are cleaned by the app's rule too.
+    for (const id of [issue.person, issue.role, issue.capacity, issue.manual]) {
       expect(now[id].evidence, id).toBe(CLEAN);
       expect(now[id].evidence).toMatch(/cap\. The cap is used up\.$/);
       expect(now[id].evidence_metrics, id).toEqual({ overtime_hours_week: 4, utilisation: 1 });
@@ -151,13 +188,13 @@ describe("saved overtime issues", () => {
 
   it("change nothing else: every other column of every issue, updated_at included, is as it was, and the other issues are untouched", async () => {
     const now = await issuesNow();
-    for (const id of Object.values(issue)) {
+    for (const id of [issue.person, issue.role, issue.capacity, issue.manual]) {
       const { evidence: _e, evidence_metrics: _m, ...before } = issuesBefore[id]!;
       const { evidence: _e2, evidence_metrics: _m2, ...after } = now[id]!;
       expect(after, id).toEqual(before);
     }
-    // A detection of another kind with the same words, and a manual issue a person typed, keep everything.
-    for (const id of [issue.capacity, issue.manual]) expect(now[id], id).toEqual(issuesBefore[id]);
+    // Every issue holding the clause or the metric changes only in those two columns; one holding neither is untouched.
+    expect(now[issue.clean]).toEqual(issuesBefore[issue.clean]);
   });
 
   it("add no history", async () => {
@@ -188,6 +225,45 @@ describe("saved AI text", () => {
     // "Ann" inside "Ann Lee" is not counted again (no "Team member 3"), and "Annual" is not "Ann".
     expect(f.why).toBe("Annual cover is thin in March.");
     expect(f.facts).toEqual([{ kind: "fact", key: "overtime:person:x", text: `Team member 1 works 4 h/wk overtime. ${CLEAN}` }]);
+  });
+
+  it("cut the money clause from every analysis, of any revision, and from every AI finding, and keep each JSON string whole", async () => {
+    const o = await one("select * from ai_analyses where id = $1", [oldAnalysis]);
+    // `[^"]+?` stays inside one JSON string: the first fact is as it was, the second loses only its clause.
+    expect(o.insights).toEqual([{ text: "AI says overtime, costing about £1.2k a month" }, { text: "Y. Z" }]);
+    expect(o.summary[1]).toBe("Overtime is high. The cap is used up.");
+    expect(o.review).toEqual([{ step: "job", level: "warn", text: "Cap used. The cap is used up." }]);
+    expect(o.reason).toBe("Left out: Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap. The cap is used up.");
+    const f = await one("select * from findings where id = $1", [payFinding]);
+    expect(f.title).toBe("Overtime.");
+    expect(f.evidence).toBe(CLEAN);
+    expect(f.why).toBe(CLEAN);
+    expect(f.facts).toEqual([{ text: "AI says overtime, costing about £1.2k a month" }, { text: "Y. Z" }]);
+    expect(f.person_labels).toEqual({});
+    for (const k of ["updated_at", "created_at", "edited", "status", "ai_key"]) expect(f[k], k).toEqual(payFindingBefore[k]);
+    const all = await client.query("select summary::text || insights::text || review::text || coalesce(reason, '') as t from ai_analyses");
+    const fall = await client.query("select title || evidence || why || facts::text as t from findings where origin = 'ai'");
+    for (const r of [...all.rows, ...fall.rows]) expect(r.t).not.toMatch(/at cost rates over/);
+    expect(o.updated_at).toEqual(oldAnalysisBefore.updated_at);
+  });
+
+  it("relabel a name that follows a JSON escape, as in 'Busy week.\\nMaya Collins is over.'", async () => {
+    const o = await one("select summary, person_labels from ai_analyses where id = $1", [oldAnalysis]);
+    expect(o.summary[0]).toBe("Busy week.\nTeam member 1 is over.");
+    expect(o.person_labels).toEqual({ "Team member 1": person.maya });
+  });
+
+  it("has a post-apply check 4 that sees a name after a JSON escape, and finds none left after the migration", async () => {
+    const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
+    const block = header.split("--   4. No AI text still holds")[1]!.split("--   5.")[0]!.split("\n").filter((l) => l.startsWith("--        ")).map((l) => l.replace(/^--        /, "")).join("\n");
+    const counts = async () => (await client.query({ text: block, rowMode: "array" })).rows[0]!.map(Number);
+    expect(await counts()).toEqual([0, 0]);
+    // The same text before relabelling: the check counts it (it is what the escape-blind version missed).
+    await client.query("begin");
+    await client.query("set local session_replication_role = replica");
+    await client.query("update ai_analyses set summary = $2 where id = $1", [oldAnalysis, JSON.stringify(["Busy week.\nMaya Collins is over."])]);
+    expect(await counts()).toEqual([1, 0]);
+    await client.query("rollback");
   });
 
   it("leave updated_at, edited, analysis_id, run_id and status as they were", async () => {
