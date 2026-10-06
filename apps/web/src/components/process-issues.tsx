@@ -22,6 +22,7 @@ import { InsightsSection } from "./insights";
 import type { EditMode } from "./process-view";
 import { StepIssueBadges } from "./step-issue-badges";
 import type { StepExtras } from "./map/step-detail";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export interface ProcessIssues {
   /** Badges on the map's steps (portals; render anywhere). */
@@ -180,13 +181,13 @@ export function useProcessIssues({
     () => processSteps(bundle).filter((s) => s.kind !== "start" && s.kind !== "end").map((s) => ({ id: s.id, name: s.name })),
     [bundle],
   );
-  const people = bundle.people.filter((p) => p.active).map((p) => ({ id: p.id, name: p.name }));
+  const people = namedForViewer(viewerOf(bundle), bundle.people.filter((p) => p.active)).map((p) => ({ id: p.id, name: p.name }));
   const formOptions = useMemo(
     () =>
       issueFormOptions({
         processes: [{ id: bundle.process.id, name: bundle.process.name }],
         steps: processSteps(bundle),
-        people: bundle.people.filter((p) => p.active),
+        people: namedForViewer(viewerOf(bundle), bundle.people.filter((p) => p.active)),
         sources,
       }),
     [bundle, sources],

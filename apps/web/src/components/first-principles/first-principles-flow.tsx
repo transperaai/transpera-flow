@@ -23,6 +23,7 @@ import { useFirstPrinciplesDraft, type DraftStatus } from "@/lib/first-principle
 import type { FpBase, FpSaver } from "@/lib/first-principles/types";
 import { cn } from "@/lib/utils";
 import { StepBody, STEP_TEXT } from "./step-bodies";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export type FlowEditing =
   /** Editing the process's open draft. */
@@ -107,7 +108,7 @@ export function FirstPrinciplesFlow({
   const ctx = useMemo(
     () => ({
       steps: bundle.steps.filter((s) => s.kind === "task" || s.kind === "wait" || s.kind === "decision" || s.kind === "subprocess").map((s) => ({ id: s.id, name: s.name })),
-      people: bundle.people.map((p) => ({ id: p.id, name: p.name })),
+      people: namedForViewer(viewerOf(bundle), bundle.people).map((p) => ({ id: p.id, name: p.name })),
       roles: bundle.roles.map((r) => ({ name: r.name })),
       checks,
     }),

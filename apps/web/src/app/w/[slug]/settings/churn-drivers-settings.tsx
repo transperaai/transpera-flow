@@ -6,7 +6,7 @@
 // move (no new simulation: it works from what the latest run measured).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ModelError, toEngineModel, type ChurnDriverRow, type ProcessBundle } from "@transpera-flow/db";
+import { ModelError, toEngineModel, type ChurnDriverRow, type ProcessBundle, type Viewer } from "@transpera-flow/db";
 import { CHURN_DRIVER_SPECS, CHURN_WEIGHT_MAX, CHURN_WEIGHT_MIN, CUSTOM_DRIVER_VALUE, projectChurn, type ChurnCauses, type EngineModel } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
@@ -246,6 +246,7 @@ export function ChurnDriversSettings({
               cause={causeOf(d)}
               history={history}
               model={model}
+              viewer={bundle?.viewer}
               share={projection ? (projection.shares[engineIdOf(d)] ?? 0) : null}
               canEdit={canEdit}
               onChange={(patch) => change(d.key, patch)}
@@ -286,6 +287,7 @@ function DriverRow({
   cause,
   history,
   model,
+  viewer,
   share,
   canEdit,
   onChange,
@@ -295,6 +297,7 @@ function DriverRow({
   cause: ChurnCauses["causes"][number] | undefined;
   history: DriverHistory | null;
   model: EngineModel | null;
+  viewer?: Viewer;
   share: number | null;
   canEdit: boolean;
   onChange: (patch: DriverPatch) => void;
@@ -320,7 +323,7 @@ function DriverRow({
           <CustomFields d={d} canEdit={canEdit} onChange={onChange} onRemove={onRemove} />
         )}
         <span className="text-xs text-muted-foreground">
-          {sourceLabel(d)} · now: {valueNow(d, cause, model)}
+          {sourceLabel(d)} · now: {valueNow(d, cause, model, viewer)}
           {d.builtin ? historyNote(d.builtin, history) : ""}
         </span>
         {(valueHelp || !d.builtin) && (

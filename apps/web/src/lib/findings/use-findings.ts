@@ -57,6 +57,7 @@ export class MemoryFindingsStore implements FindingsStore {
       evidence: d.evidence.trim(),
       why: d.why.trim(),
       facts: [],
+      person_labels: {},
       source_ids: d.sourceIds ?? [],
       ai_key: null,
       analysis_id: null,

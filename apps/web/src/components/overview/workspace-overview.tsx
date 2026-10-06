@@ -37,11 +37,11 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     canEditWorkspace(ws),
     loadLiveFirstPrinciples(live.process.id, live.revision.id),
     loadWorkspaceSolutions(ws),
-    loadWorkspaceFindings(ws),
+    loadWorkspaceFindings(ws, { viewer: live.viewer, people: live.people }),
     loadWorkspaceAiSettings(ws),
   ]);
   // The latest analysis of the whole company (B17), stored against the company map; out of date once the company model changed.
-  const aiView = company ? ((await loadLatestAiViews([company.process.id]))[company.process.id] ?? null) : null;
+  const aiView = company ? ((await loadLatestAiViews([company.process.id], { viewer: live.viewer, people: live.people }))[company.process.id] ?? null) : null;
   // Out of date once what it read changed (model, first principles, Anthropic model, sources); the page adds the facts.
   const baseHash = aiView ? analysisBaseHash(live, firstPrinciples, "company", { readSources: aiSettings.read_sources, model: NARRATION_MODEL }) : null;
   const stale = isStale(aiView, { base: baseHash, revisionId: company?.revision.id ?? null });

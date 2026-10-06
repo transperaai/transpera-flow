@@ -86,8 +86,15 @@ export function PeopleSettings({ data }: { data: WorkspaceSettingsData }) {
   const active = data.people.filter((p) => p.active);
   const inactive = data.people.filter((p) => !p.active);
   return (
-    <SettingsSection id="people" title="People" description={<>{active.length} active{inactive.length ? `, ${inactive.length} inactive` : ""}. Modelled for capacity, not
-          performance.</>}>
+    <SettingsSection id="people" title="People" description={
+      data.canEdit ? (
+        <>
+          {active.length} active{inactive.length ? `, ${inactive.length} inactive` : ""}. Modelled for capacity, not performance.
+        </>
+      ) : (
+        <>Your record. Owners and editors see the whole team. Modelled for capacity, not performance.</>
+      )
+    }>
       {data.canEdit ? (
         <AddPerson data={data} />
       ) : (

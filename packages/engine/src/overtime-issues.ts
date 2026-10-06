@@ -4,6 +4,9 @@
 // finding in itself, so each person who works any is listed (roles, when the
 // model has no named people). Load beyond even the cap is the capacity
 // detector's critical "client work alone exceeds capacity" (issues.ts).
+//
+// The evidence states hours only; the money is in `cost`, which is never stored
+// (B1 2b: saved issues must not let a member work out a rate).
 
 import type { DetectedIssue } from "./issues";
 import type { EngineModel, SimulationResult } from "./model";
@@ -31,7 +34,6 @@ export function overtimeIssues(
   if (!(cap > 0)) return [];
   const people = result.resolvedPeople;
   const named = Boolean(model.people && Object.keys(model.people).length);
-  const weeks = model.horizonWeeks;
   const roleName = (id: string) => model.roles[id]?.name ?? "a role";
   const out: DetectedIssue[] = [];
 
@@ -62,14 +64,12 @@ export function overtimeIssues(
       evidence:
         `Simulated: ${num(r.ongoingHours)} h/wk of client work against ${num(subject.capacity)} h/wk capacity, so ` +
         `${num(r.overtimeHours)} h/wk overtime on average${band ? ` (range ${num(band.p10 * subject.capacity)}–${num(band.p90 * subject.capacity)})` : ""}` +
-        ` within the ${pct(cap)} cap` +
-        (subject.rate === null ? "." : `, costing about ${formatMoney(r.overtimeHours * weeks * subject.rate, money.currency)} at cost rates over the ${num(weeks, 0)}-week run.`) +
+        ` within the ${pct(cap)} cap.` +
         (atCap ? " The cap is used up: more client work pushes utilisation past 100%." : "") +
       ` ${escalationNote(outcome)}`.trimEnd(),
       metrics: {
         overtime_hours_week: r.overtimeHours,
         ...(band ? { overtime_hours_week_p10: band.p10 * subject.capacity, overtime_hours_week_p90: band.p90 * subject.capacity } : {}),
-        ...(subject.rate === null ? {} : { overtime_cost: r.overtimeHours * weeks * subject.rate }),
         ongoing_hours_week: r.ongoingHours,
         capacity_hours_week: subject.capacity,
         overtime_cap: cap,

@@ -574,7 +574,7 @@ export function ProcessView({
             issuesUi.rail(
               <div className="flex flex-col gap-3">
                 <BottleneckPanel model={shownModel} result={result} ready={sim.status === "done"} />
-                <UtilisationBars model={shownModel} result={result} />
+                <UtilisationBars model={shownModel} result={result} viewer={live.viewer} />
               </div>,
             )
           }
@@ -592,6 +592,7 @@ export function ProcessView({
                 retired={retired}
                 hiddenLevers={hidden}
                 leversHref={leversHref}
+                viewer={live.viewer}
               />
             )
           }

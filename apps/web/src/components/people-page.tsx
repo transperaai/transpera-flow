@@ -14,6 +14,7 @@ import { benchmarkOf, positionAgainst, type Benchmark } from "@/lib/client-group
 import { formatNumber, formatPercent } from "@/lib/format";
 import { BUSY_LIMIT, personRows, teamSummary, type PersonBusy } from "@/lib/people";
 import { useSimulation } from "@/lib/sim/use-simulation";
+import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 import { ForecastPanel } from "@/components/forecast/forecast-panel";
 
 const RATING_CHIP: Record<Rating, string> = {
@@ -68,12 +69,14 @@ export function PeoplePage({
   const sim = useSimulation(model);
   const run = sim.run;
   const benchmark = benchmarkOf(bundle.workspace.settings);
+  const viewer = viewerOf(bundle);
   const view = useMemo(() => {
     if (!model || !run) return null;
     const fte = new Map(bundle.people.map((p) => [p.id, Number(p.fte)]));
     const rows = personRows(model, run.result, fte);
-    return { health: clientHealthSummary(model, run.result), rows, team: teamSummary(rows) };
-  }, [model, run, bundle.people]);
+    // The team card counts the whole team; a member sees only their own row in the table (B1 2b).
+    return { health: clientHealthSummary(model, run.result), rows: ownRowsOnly(viewer, rows, (r) => r.id), team: teamSummary(rows) };
+  }, [model, run, bundle.people, viewer]);
 
   if (!model) {
     return <Card className="p-4 text-sm text-muted-foreground">This workspace&apos;s live process can&apos;t be simulated yet, so there is nothing to show here. Fix it on the map first.</Card>;
@@ -94,7 +97,7 @@ export function PeoplePage({
         <TeamCard team={team} />
       </div>
       {health.groups.length > 0 && <ClientGroupsTable health={health} />}
-      <HowBusy rows={rows} />
+      <HowBusy rows={rows} onlyOwn={!viewer.seesEveryone} />
       {forecast && <ForecastPanel bundle={forecast.bundle ?? bundle} forecastHref={forecast.href} startDate={forecast.startDate} />}
     </>
   );
@@ -182,7 +185,7 @@ function BenchmarkCard({ score, benchmark, settingsHref }: { score: number | nul
 
 function TeamCard({ team }: { team: ReturnType<typeof teamSummary> }) {
   return (
-    <Card>
+    <Card data-team-card>
       <CardContent className="flex flex-col gap-2">
         <Eyebrow
           help={{
@@ -249,9 +252,9 @@ function ClientGroupsTable({ health }: { health: ClientHealthSummary }) {
   );
 }
 
-function HowBusy({ rows }: { rows: PersonBusy[] }) {
+function HowBusy({ rows, onlyOwn }: { rows: PersonBusy[]; onlyOwn: boolean }) {
   return (
-    <Card className="gap-0 py-0">
+    <Card className="gap-0 py-0" data-how-busy>
       <div className="flex items-center px-4 pt-4 pb-2">
         <h2 className="font-heading text-base font-medium">How busy</h2>
         <Help
@@ -260,39 +263,46 @@ function HowBusy({ rows }: { rows: PersonBusy[] }) {
           example="Maya at 82% average and 97% P90 is fine most months but cannot cope with a bad one."
         />
       </div>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead className="text-right">FTE</TableHead>
-              <TableHead className="hidden sm:table-cell">How busy</TableHead>
-              <TableHead className="text-right">Average</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell className="text-sm">{p.role}</TableCell>
-                <TableCell className="text-right tabular-nums">{p.fte === null ? "–" : formatNumber(p.fte, 1)}</TableCell>
-                <TableCell className="hidden min-w-40 sm:table-cell">
-                  <span className="block h-2 overflow-hidden rounded-full bg-panel-2" role="img" aria-label={`${formatPercent(p.average)} busy on average, ${formatPercent(p.p90)} in a bad month`}>
-                    <i
-                      className={`block h-full ${p.average >= BUSY_LIMIT ? "bg-crit" : p.average >= 0.75 ? "bg-warn" : "bg-accent"}`}
-                      style={{ width: pctWidth(p.average) }}
-                    />
-                  </span>
-                </TableCell>
-                <TableCell className="text-right whitespace-nowrap tabular-nums">
-                  {formatPercent(p.average)} <span className="text-muted-foreground">P90 {formatPercent(p.p90)}</span>
-                </TableCell>
+      {onlyOwn && rows.length === 0 && (
+        <p className="px-4 pb-4 text-sm text-muted-foreground" data-no-own-row>
+          Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an owner to link you on Settings → Access.
+        </p>
+      )}
+      {(!onlyOwn || rows.length > 0) && (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead className="text-right">FTE</TableHead>
+                <TableHead className="hidden sm:table-cell">How busy</TableHead>
+                <TableHead className="text-right">Average</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {rows.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="font-medium">{p.name}</TableCell>
+                  <TableCell className="text-sm">{p.role}</TableCell>
+                  <TableCell className="text-right tabular-nums">{p.fte === null ? "–" : formatNumber(p.fte, 1)}</TableCell>
+                  <TableCell className="hidden min-w-40 sm:table-cell">
+                    <span className="block h-2 overflow-hidden rounded-full bg-panel-2" role="img" aria-label={`${formatPercent(p.average)} busy on average, ${formatPercent(p.p90)} in a bad month`}>
+                      <i
+                        className={`block h-full ${p.average >= BUSY_LIMIT ? "bg-crit" : p.average >= 0.75 ? "bg-warn" : "bg-accent"}`}
+                        style={{ width: pctWidth(p.average) }}
+                      />
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right whitespace-nowrap tabular-nums">
+                    {formatPercent(p.average)} <span className="text-muted-foreground">P90 {formatPercent(p.p90)}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </Card>
   );
 }

@@ -32,6 +32,7 @@ import { editSourceIds } from "@/lib/sources/links";
 import { NO_SOLUTIONS_DATA, effectiveVerdict, solutionHref, solutionTests, solutionsForIssue, type SolutionsData } from "@/lib/solutions/cards";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { ratingOfStored } from "@transpera-flow/engine";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 // The map is heavy; load it when the page has drawn.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
@@ -99,12 +100,12 @@ export function IssuePage(props: IssuePageProps) {
 
   const allSteps = useMemo(() => [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)], [bundle]);
   const options = useMemo(
-    () => issueFormOptions({ processes, steps: allSteps, people: bundle.people.filter((p) => p.active), sources }),
-    [processes, allSteps, bundle.people, sources],
+    () => issueFormOptions({ processes, steps: allSteps, people: namedForViewer(viewerOf(bundle), bundle.people.filter((p) => p.active)), sources }),
+    [processes, allSteps, bundle, sources],
   );
   const stepName = useMemo(() => new Map(allSteps.map((s) => [s.id, s.name])), [allSteps]);
   const processName = useMemo(() => new Map(processes.map((p) => [p.id, p.name])), [processes]);
-  const personName = useMemo(() => new Map(bundle.people.map((p) => [p.id, p.name])), [bundle.people]);
+  const personName = useMemo(() => new Map(namedForViewer(viewerOf(bundle), bundle.people).map((p) => [p.id, p.name])), [bundle]);
   const sourceTitle = useMemo(() => new Map(sources.map((s) => [s.id, s.title])), [sources]);
 
   // The map: only confirmed open issues badge a step, so a resolved issue (this one too) is gone from it.

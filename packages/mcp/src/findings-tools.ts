@@ -8,7 +8,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { findingKey, listProcesses, loadFirstPrinciples, loadIssues, readCitations, type FindingRow } from "@transpera-flow/db";
+import { findingKey, listProcesses, loadFirstPrinciples, loadIssues, loadTeam, nameAnalysisRow, nameFinding, readCitations, type FindingRow } from "@transpera-flow/db";
 import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig } from "@transpera-flow/engine";
 import { loadLiveModel, processSteps } from "./analysis-tools";
 import { resolveProcess, resolveWorkspace, type ToolContext } from "./context";
@@ -141,12 +141,14 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const page = pageOf(args);
         let q = ctx.db
           .from("findings")
-          .select("id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, source_ids, edited, created_at, decided_at", { count: "exact" })
+          .select("id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, person_labels, source_ids, edited, created_at, decided_at", { count: "exact" })
           .eq("workspace_id", ws.id)
           .in("status", statuses);
         if (proc) q = q.eq("process_id", proc.id);
         const res = await q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(...page.range);
-        const rows = check(res) as unknown as Pick<FindingRow, "id" | "process_id" | "step_id" | "origin" | "status" | "rating" | "type" | "title" | "evidence" | "why" | "facts" | "source_ids" | "edited" | "created_at" | "decided_at">[];
+        // AI text is stored with labels ("Team member A"); the token's owner gets names where they may see them (B1 2b).
+        const team = await loadTeam(ctx.db, ws.id);
+        const rows = (check(res) as unknown as Pick<FindingRow, "id" | "process_id" | "step_id" | "origin" | "status" | "rating" | "type" | "title" | "evidence" | "why" | "facts" | "person_labels" | "source_ids" | "edited" | "created_at" | "decided_at">[]).map((r) => nameFinding(r, team));
         const [processes, issues] = await Promise.all([listProcesses(ctx.db, ws.id), loadIssues(ctx.db, ws.id)]);
         const stepNames = new Map<string, string>();
         for (const p of processes.filter((p) => rows.some((r) => r.process_id === p.id))) for (const s of await processSteps(ctx, p)) stepNames.set(s.id, s.name);
@@ -202,12 +204,13 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const rows = check(
           await ctx.db
             .from("ai_analyses")
-            .select("id, revision_id, status, reason, summary, review, checked, dropped, model, model_hash, updated_at")
+            .select("id, revision_id, status, reason, summary, review, person_labels, checked, dropped, model, model_hash, updated_at")
             .eq("process_id", target.id)
             .order("updated_at", { ascending: false })
             .limit(1),
         );
-        const row = rows[0];
+        // Stored with labels; named for the token's owner (B1 2b). The insights aren't returned here (they're findings).
+        const row = rows[0] ? nameAnalysisRow({ ...rows[0], insights: [] }, await loadTeam(ctx.db, ws.id)) : undefined;
         if (!row) return { workspace: { id: ws.id, name: ws.name }, scope: target, analysis: null, note: "Nobody has analysed this yet: someone presses Analyse in the app." };
         const revision = check(await ctx.db.from("process_revisions").select("number").eq("id", row.revision_id).maybeSingle()) as { number: number } | null;
         return {

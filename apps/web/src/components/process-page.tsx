@@ -52,6 +52,7 @@ import { useEngineModel, type EditMode } from "./process-view";
 import { ServicingBanner } from "./servicing-banner";
 import { UtilisationBars } from "./utilisation-bars";
 import { WaitByStep } from "./wait-by-step";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 const NO_FINDINGS: FindingRow[] = [];
 
@@ -341,7 +342,7 @@ export function ProcessPage({
               name={bundle.process.name}
               note="Groups are drawn open."
               input={() => {
-                const names = new Map([...bundle.roles.map((r) => [r.id, r.name] as const), ...bundle.people.map((x) => [x.id, x.name] as const)]);
+                const names = new Map([...bundle.roles.map((r) => [r.id, r.name] as const), ...namedForViewer(viewerOf(bundle), bundle.people).map((x) => [x.id, x.name] as const)]);
                 return {
                   title: bundle.process.name,
                   subtitle: old ? `Version ${viewingVersion}` : unpublished ? "Draft, not published yet" : `Live, version ${liveVersion}`,
@@ -436,7 +437,7 @@ export function ProcessPage({
           {model && supporting ? (
             <div className="grid gap-3 md:grid-cols-2">
               <WaitByStep model={model} result={result} stepIds={stepIds} />
-              <UtilisationBars model={model} result={result} />
+              <UtilisationBars model={model} result={result} viewer={bundle.viewer} />
               <TimeSplit rows={supporting.timeSplit} result={result} />
               <CycleSpreadPanel spread={supporting.spread} hoursPerWeek={model.hoursPerWeek} result={result} />
               <KeyPersonPanel rows={supporting.keyPeople} result={result} />

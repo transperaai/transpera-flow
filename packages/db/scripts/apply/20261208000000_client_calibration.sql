@@ -2,7 +2,7 @@
 -- `clients` and `servicing_log`), two of row 50's functions replaced with full copies that each add one branch
 -- (`private.calibration_payload_problem`, `public.apply_calibration`) and one new function (`public.record_client_calibration`);
 -- no table, column, policy or grant changes. Needs row 50 (20261202000000, C2 part 1) and `client_groups` (20261111000000); this is
--- row 56 (rows 53-55 are applied; independent of 20261207700000 and 20261209000000). Preflight, post-apply check and rollback are
+-- row 57 (rows 53-56 are applied; independent of 20261207700000 and 20261209000000). Preflight, post-apply check and rollback are
 -- in the migration's own header, repeated below. Apply BEFORE deploying the app (the Historical data page calls the new function).
 
 begin;
