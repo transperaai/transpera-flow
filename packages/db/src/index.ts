@@ -190,6 +190,7 @@ export {
   loadChurnDrivers,
   loadClientGroups,
   loadClients,
+  loadTeam,
   loadMarket,
   MARKET_CONDITION_COLUMNS,
   MARKET_SCHEDULE_COLUMNS,
@@ -241,6 +242,8 @@ export {
   SEASONALITY_COLUMNS,
   SERVICE_COLUMNS,
   type Db,
+  type TeamInputs,
+  type Viewer,
 } from "./queries";
 export {
   EVIDENCE_COLUMNS,

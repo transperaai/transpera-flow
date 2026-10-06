@@ -24,7 +24,10 @@ import type {
   MarketConditionRow,
   MarketScheduleRow,
   EdgeRow,
+  PersonLeaveRow,
+  PersonRoleRow,
   PersonRow,
+  PersonSkillRow,
   ProcessBundle,
   ProcessPart,
   ProcessRevisionRow,
@@ -142,21 +145,70 @@ export const CLIENT_COLUMNS = "id, workspace_id, name, start_date, mrr, health, 
 export const CLIENT_SERVICE_COLUMNS = "client_id, service_id, workspace_id, start_date" as const;
 export const CLIENT_ASSIGNMENT_COLUMNS = "client_id, role_id, person_id, workspace_id" as const;
 
-/** A workspace's client roster: clients by name, their services and assignments. */
+/** Who is looking: whether they see every person, and the person record linked to their membership (B1 2/3). */
+export interface Viewer {
+  seesEveryone: boolean;
+  ownPersonId: string | null;
+}
+
+/** The whole team's simulation inputs, as `public.team_capacity` gives them to the caller (B1 2/3). */
+export interface TeamInputs {
+  viewer: Viewer;
+  people: PersonRow[];
+  personRoles: PersonRoleRow[];
+  personSkills: PersonSkillRow[];
+  personLeave: PersonLeaveRow[];
+  clientAssignments: ClientAssignmentRow[];
+}
+
+/**
+ * The whole team's simulation inputs, as `public.team_capacity` gives them to the caller: the stored values for owners,
+ * editors and agency admins; for members and viewers, "Team member N" labels (their own person keeps their name) and each
+ * cost rate replaced by the average for the person's role. Never email, notes, leave notes or skill efficiency.
+ */
+export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs> {
+  const r = await db.rpc("team_capacity", { ws: workspaceId });
+  if (r.error) throw r.error;
+  // The function's documented shape (migration 20261207500000): sees_everyone, own_person_id and one array per table, in
+  // the columns of PersonRow, PersonRoleRow, PersonSkillRow, PersonLeaveRow and ClientAssignmentRow.
+  const t = r.data as unknown as {
+    sees_everyone: boolean;
+    own_person_id: string | null;
+    people: PersonRow[];
+    person_roles: PersonRoleRow[];
+    person_skills: PersonSkillRow[];
+    person_leave: PersonLeaveRow[];
+    client_assignments: ClientAssignmentRow[];
+  };
+  return {
+    viewer: { seesEveryone: t.sees_everyone, ownPersonId: t.own_person_id },
+    people: t.people,
+    personRoles: t.person_roles,
+    personSkills: t.person_skills,
+    personLeave: t.person_leave,
+    clientAssignments: t.client_assignments,
+  };
+}
+
+/**
+ * A workspace's client roster: clients by name, their services and assignments. Pass `team` when the caller has already
+ * loaded it, so `team_capacity` runs once.
+ */
 export async function loadClients(
   db: Db,
   workspaceId: string,
+  team?: TeamInputs,
 ): Promise<{ clients: ClientRow[]; clientServices: ClientServiceRow[]; clientAssignments: ClientAssignmentRow[] }> {
   const [clients, clientServices, clientAssignments] = await Promise.all([
     db.from("clients").select(CLIENT_COLUMNS).eq("workspace_id", workspaceId).order("name").order("id"),
     db.from("client_services").select(CLIENT_SERVICE_COLUMNS).eq("workspace_id", workspaceId),
-    db.from("client_assignments").select(CLIENT_ASSIGNMENT_COLUMNS).eq("workspace_id", workspaceId),
+    team ? team.clientAssignments : loadTeam(db, workspaceId).then((t) => t.clientAssignments),
   ]);
   return {
     // provenance is jsonb; ClientRow gives it its shape.
     clients: (rows(clients) ?? []) as ClientRow[],
     clientServices: rows(clientServices) ?? [],
-    clientAssignments: rows(clientAssignments) ?? [],
+    clientAssignments,
   };
 }
 
@@ -210,22 +262,21 @@ export async function loadProcessBundle(
   revisionId: string,
 ): Promise<ProcessBundle> {
   const ws = workspace.id;
-  const [revision, roles, steps, edges, people, personRoles, personSkills, personLeave, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance] =
+  // People, roles held, skills, leave and assignments: the stored rows for editors, labels and averaged rates for members.
+  const teamLoad = loadTeam(db, ws);
+  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance] =
     await Promise.all([
       db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("id", revisionId).single(),
       db.from("roles").select("*").eq("workspace_id", ws),
       db.from("steps").select("*").eq("revision_id", revisionId),
       db.from("edges").select("*").eq("revision_id", revisionId),
-      db.from("people").select("id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date").eq("workspace_id", ws),
-      db.from("person_roles").select("person_id, role_id, workspace_id").eq("workspace_id", ws),
-      db.from("person_skills").select("person_id, step_id, workspace_id").eq("workspace_id", ws),
-      db.from("person_leave").select("id, person_id, workspace_id, start_date, end_date").eq("workspace_id", ws),
+      teamLoad,
       // Services' and settings' provenance: the robustness check perturbs only estimated values (issue #79).
       db.from("services").select(`${SERVICE_COLUMNS}, provenance`).eq("workspace_id", ws),
       db.from("lead_sources").select(LEAD_SOURCE_COLUMNS).eq("workspace_id", ws),
       db.from("seasonality").select(SEASONALITY_COLUMNS).eq("workspace_id", ws),
       db.from("demand_settings").select(DEMAND_SETTINGS_COLUMNS).eq("workspace_id", ws).maybeSingle(),
-      loadClients(db, ws),
+      teamLoad.then((t) => loadClients(db, ws, t)),
       loadClientGroups(db, ws),
       loadChurnDrivers(db, ws),
       // The company map runs nothing: it needs no other processes (the Editor draws its cards from the live processes it is given).
@@ -253,10 +304,11 @@ export async function loadProcessBundle(
     steps: inUse,
     retired,
     edges: rows(edges) ?? [],
-    people: rows(people) ?? [],
-    personRoles: rows(personRoles) ?? [],
-    personSkills: rows(personSkills) ?? [],
-    personLeave: rows(personLeave) ?? [],
+    people: team.people,
+    personRoles: team.personRoles,
+    personSkills: team.personSkills,
+    personLeave: team.personLeave,
+    viewer: team.viewer,
     // pricing_model is check-constrained; fallback_ongoing_load is jsonb.
     services: (rows(services) ?? []) as ServiceRow[],
     // Provenance is jsonb; LeadSourceRow and the others give it its shape.
@@ -820,24 +872,22 @@ export async function loadCitingRows(db: Db, workspaceId: string): Promise<Citin
 // Company model, suggestions and saved runs (issue #25)
 // ---------------------------------------------------------------------------
 
-const PERSON_COLUMNS = "id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date, provenance" as const;
-
 /** The workspace's company model: roles, people, services, clients and demand, with provenance. */
 export async function loadCompanyModel(
   db: Db,
   workspace: Pick<WorkspaceRow, "id" | "name" | "slug"> & { settings: unknown; provenance?: unknown },
 ): Promise<CompanyModel> {
   const ws = workspace.id;
-  const [roles, people, personRoles, personLeave, services, leadSources, seasonality, demand, roster] = await Promise.all([
+  // People are in name order for those who see everyone (team_capacity orders them), as the table query was.
+  const teamLoad = loadTeam(db, ws);
+  const [roles, team, services, leadSources, seasonality, demand, roster] = await Promise.all([
     db.from("roles").select("*").eq("workspace_id", ws).order("name"),
-    db.from("people").select(PERSON_COLUMNS).eq("workspace_id", ws).order("name"),
-    db.from("person_roles").select("person_id, role_id, workspace_id").eq("workspace_id", ws),
-    db.from("person_leave").select("id, person_id, workspace_id, start_date, end_date").eq("workspace_id", ws),
+    teamLoad,
     db.from("services").select(`${SERVICE_COLUMNS}, provenance`).eq("workspace_id", ws).order("name"),
     db.from("lead_sources").select(LEAD_SOURCE_COLUMNS).eq("workspace_id", ws).order("created_at").order("id"),
     db.from("seasonality").select(SEASONALITY_COLUMNS).eq("workspace_id", ws).order("month"),
     db.from("demand_settings").select(DEMAND_SETTINGS_COLUMNS).eq("workspace_id", ws).maybeSingle(),
-    loadClients(db, ws),
+    teamLoad.then((t) => loadClients(db, ws, t)),
   ]);
   // The casts give jsonb columns (settings, provenance) their shapes and narrow check-constrained text.
   return {
@@ -849,9 +899,10 @@ export async function loadCompanyModel(
       ...(workspace.provenance ? { provenance: workspace.provenance as ProvenanceMap } : {}),
     },
     roles: rows(roles) ?? [],
-    people: (rows(people) ?? []) as PersonRow[],
-    personRoles: rows(personRoles) ?? [],
-    personLeave: rows(personLeave) ?? [],
+    people: team.people,
+    personRoles: team.personRoles,
+    personLeave: team.personLeave,
+    viewer: team.viewer,
     services: (rows(services) ?? []) as ServiceRow[],
     leadSources: (rows(leadSources) ?? []) as LeadSourceRow[],
     seasonality: (rows(seasonality) ?? []) as SeasonalityRow[],

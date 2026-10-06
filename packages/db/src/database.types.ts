@@ -3212,6 +3212,8 @@ export type Database = {
       can_edit_workspace: { Args: { ws: string }; Returns: boolean }
       can_manage_workspace: { Args: { ws: string }; Returns: boolean }
       can_read_workspace: { Args: { ws: string }; Returns: boolean }
+      can_see_people: { Args: { ws: string }; Returns: boolean }
+      can_see_person: { Args: { person: string; ws: string }; Returns: boolean }
       create_library_process: {
         Args: {
           p_description?: string
@@ -3408,6 +3410,7 @@ export type Database = {
         }[]
       }
       take_link_fetch: { Args: never; Returns: number }
+      team_capacity: { Args: { ws: string }; Returns: Json }
       unlinked_source_count: {
         Args: { p_workspace: string }
         Returns: number

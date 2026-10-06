@@ -5,6 +5,7 @@
 
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
 import type { Database, Json } from "./database.types";
+import type { Viewer } from "./queries";
 
 export type MembershipRole = "agency_admin" | "owner" | "editor" | "member" | "viewer";
 export type StepKind = "task" | "wait" | "decision" | "subprocess" | "group" | "start" | "end";
@@ -712,6 +713,8 @@ export interface ProcessPart {
 
 /** Everything needed to render and simulate one process revision. */
 export interface ProcessBundle {
+  /** Who loaded it (B1 2/3). Absent means "sees everyone" (demo fixtures, tests, the golden models). */
+  viewer?: Viewer;
   workspace: WorkspaceRow;
   roles: RoleRow[];
   process: ProcessRow;
