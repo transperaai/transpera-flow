@@ -318,3 +318,16 @@ Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`,
 - [ ] **As an editor**, People and Settings → People show everyone with real names and rates.
 - [ ] **Smoke test** (post-apply check in the migration header) as an agency admin: `team_capacity` returns `sees_everyone` true and Northbeam's head count.
 - [ ] **A member's version history** shows "A team member" for other people's versions and their own name for their own.
+
+## Restoring a backup (issue #39, B10 2b, migration 20261207000000)
+
+`public.import_workspace_bundle(p_workspace, p_plan, p_label)` restores a `transpera-workspace/1` backup into a new, empty workspace in one call: SECURITY INVOKER, drafts only, nothing published, no history, all or nothing. It also grants EXECUTE on `private.scenario_library()` to `authenticated` (the "empty" check compares scenarios with the seeded library). **Verified on plain Postgres 16 and PostgREST 14.18 only** (`packages/db/test/workspace-import.test.ts`, `packages/mcp/test/postgrest-restore.test.ts`), not on Supabase.
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Time | The restore takes about 2 s on the test Postgres at every limit at once (50 processes, 500 steps, 1,000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1,000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals; a 4 MB plan). The brief's starting limits (200 processes, 2,000 issues, ...) took 6 s, so they were lowered. `authenticated` has an 8 s `statement_timeout` and one restore is one statement. | On a preview deploy, restore a Northbeam backup into a new workspace and time it. Then a plan near the 10 MB limit (many sources): check the API gateway's request size limit doesn't refuse it and the call finishes inside the 8 s timeout. If it times out, the route answers "too big to restore in one go" (57014). |
+| Request size | The browser sends the backup gzipped, at most 4 MB (Vercel allows 4.5 MB), to a Route Handler that unpacks at most 25 MB. | A real 3 to 4 MB upload through Vercel. |
+| API tokens | The function refuses a JWT with `api_token_id` (42501, "Backups are restored in the app."). PostgREST may answer that as 401, as for the suggestions guard. | An MCP token calling `/rest/v1/rpc/import_workspace_bundle` is refused. |
+| Companion rows | The company map's sync adds each new top-level process's card in one system version (cards show once a process is published); `link_cited_sources`, `issue_seed_links` and `log_perception_gaps` run as for any write. | Restore, publish every process: the map shows each top-level process once; a process held by a link is not also on the map; no duplicate perception-gap issue. |
+| Notice | A cookie set in the browser (`tf-restore-notice`) carries the sentence to the Overview. | The notice shows once after a restore, and the drafts list shows every process. |
+

@@ -2653,7 +2653,7 @@ export function runOnce(
     lostRevenue,
     services: serviceOut,
     overtimeHours,
-    overtimeCost,
+    overtimeCost: model.payHidden ? null : overtimeCost,
     ...(roster ? { clientsChurned: churned, clientsAtRisk: atRisk, touchpoints: allTouch, clients: clientsOut!, churn: churnOut() } : {}),
     cycle,
     steps: stepOut,
@@ -2753,7 +2753,7 @@ function kpis(model: EngineModel, runs: ReplicationResult[], cycle: number[]): K
     lostRevenue: stat(runs.map((r) => r.lostRevenue)),
     wipEnd: stat(runs.map((r) => pipelineWip(r, svcSteps))),
     overtimeHours: stat(runs.map((r) => r.overtimeHours)),
-    overtimeCost: stat(runs.map((r) => r.overtimeCost)),
+    overtimeCost: runs.some((r) => r.overtimeCost === null) ? null : stat(runs.map((r) => r.overtimeCost as number)),
     cycle: {
       mean: cycle.length ? cycle.reduce((a, b) => a + b, 0) / cycle.length : 0,
       p50: pct(cycle, 0.5),

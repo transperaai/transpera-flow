@@ -1,7 +1,7 @@
 -- Production apply file for 20261207500000_per_person_privacy (B1 part 2 of 3, slice 2a, issue #30). Two helpers
 -- (`public.can_see_people`, `public.can_see_person`), `public.team_capacity`, ten select policies dropped and re-created under
--- the same names, and `public.revision_history` replaced (same signature); applies after row 53 (20261206000000, B1 1/3).
--- Row 54 (20261207000000, B10 2b) may or may not be applied first: this migration doesn't depend on it. Preflight,
+-- the same names, and `public.revision_history` replaced (same signature); applies after rows 53 (20261206000000, B1 1/3) and
+-- 54 (20261207000000, B10 2b); this is row 55. Preflight,
 -- post-apply check and rollback are in the migration's own header, repeated below. Apply BEFORE deploying the app (the
 -- loaders call `team_capacity`).
 
@@ -13,8 +13,10 @@ set local lock_timeout = '5s';
 -- Until now every reader of a workspace reads every person: names, emails, notes, pay, leave, skills and client
 -- assignments. Austin's decision of 6 Oct (option A'): agency admins, `agency_admin` members, owners and editors see every
 -- person as before. Members and viewers see their OWN person's rows (when their membership is linked to a person), and get
--- the whole team's simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") with each
--- cost rate replaced by the average for the person's role. Their simulated numbers are otherwise the same as an editor's.
+-- the whole team's simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") and with NO
+-- pay: every cost rate is null except the caller's own. (Austin, 6 Oct, replacing the role-average rule: overlapping averages
+-- leak an exact rate by subtraction, and any average gives one away as people join or leave.) The figures that depend on
+-- individual pay are marked unavailable in the engine and the app; their other simulated numbers equal an editor's.
 --
 -- Additive, except that ten select policies are dropped and re-created under the same names, and `public.revision_history`
 -- is replaced (same signature, result columns and grants). It does NOT touch `save_fields`, any insert, update or delete
@@ -33,9 +35,7 @@ set local lock_timeout = '5s';
 --     team's simulation inputs. It raises 42501 unless the caller can read `ws`. Callers who see everyone get the stored
 --     values. Everyone else gets: the caller's own person under their real name and every other person as
 --     'Team member N' (N = rank by (created_at, id) over ALL people, active or not, so labels are stable); `provenance` {};
---     and cost rates replaced by hours-weighted role averages (a role is averaged only when at least 3 rated, active people
---     hold it; otherwise the workspace average, again only with at least 3; otherwise null, and the engine then uses the
---     role's default rate). A person with no rate of their own stays null. Never returned: email, notes, a leave note,
+--     and `cost_rate` null for everyone except the caller's own person (no averages, nothing derived from rates). Never returned: email, notes, a leave note,
 --     person_skills.efficiency and person_skills.provenance. Ids are the real ids.
 --     Shape: { sees_everyone, own_person_id,
 --              people: [{id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date, provenance}],
@@ -50,7 +50,7 @@ set local lock_timeout = '5s';
 -- possible follow-up.
 --
 -- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`):
---   0. Row 53 applied, nothing at or after this version. Expect 20261206000000 (and 20261207000000 if B10 2b went first),
+--   0. Rows 53 and 54 applied, nothing at or after this version. Expect exactly 20261206000000, 20261207000000, and
 --      nothing >= 20261207500000:
 --        select version from supabase_migrations.schema_migrations where version >= '20261206000000' order by 1;
 --   1. my_person_id exists; nothing of this migration does. Expect not null, null, null, null:
@@ -199,7 +199,6 @@ as $$
 declare
   everyone boolean;
   own uuid;
-  week numeric;
   result jsonb;
 begin
   if ws is null or not public.can_read_workspace(ws) then
@@ -207,47 +206,18 @@ begin
   end if;
   everyone := public.can_see_people(ws);
   own := public.my_person_id(ws);
-  select case when jsonb_typeof(w.settings -> 'hours_per_week') = 'number' then (w.settings ->> 'hours_per_week')::numeric end
-    into week from public.workspaces w where w.id = ws;
-  week := coalesce(week, 40);
 
   with p as (
     select pe.id, pe.workspace_id, pe.name, pe.fte, pe.capacity_hours_week, pe.cost_rate, pe.active, pe.start_date,
            pe.end_date, pe.provenance,
-           coalesce(pe.capacity_hours_week, pe.fte * week) as hours,
            row_number() over (order by pe.created_at, pe.id) as n
     from public.people pe where pe.workspace_id = ws
-  ),
-  held as (
-    select r.person_id, r.role_id, count(*) over (partition by r.person_id) as roles_held
-    from public.person_roles r where r.workspace_id = ws
-  ),
-  pool as (
-    select h.role_id, p.id, p.cost_rate, p.hours / h.roles_held as weight
-    from p join held h on h.person_id = p.id
-    where p.active and p.cost_rate is not null
-  ),
-  role_rate as (
-    select pool.role_id,
-           coalesce(sum(pool.cost_rate * pool.weight) / nullif(sum(pool.weight), 0), avg(pool.cost_rate)) as rate
-    from pool group by pool.role_id
-    having count(distinct pool.id) >= 3
-  ),
-  ws_rate as (
-    select coalesce(sum(p.cost_rate * p.hours) / nullif(sum(p.hours), 0), avg(p.cost_rate)) as rate
-    from p where p.active and p.cost_rate is not null
-    having count(*) >= 3
   ),
   shown as (
     select p.*,
       case when everyone or p.id = own then p.name else 'Team member ' || p.n end as shown_name,
-      case
-        when everyone then p.cost_rate
-        when p.cost_rate is null then null
-        else round(coalesce(
-          (select avg(rr.rate) from held h join role_rate rr on rr.role_id = h.role_id where h.person_id = p.id),
-          (select ws_rate.rate from ws_rate)), 4)
-      end as shown_rate
+      -- No pay for anyone but the caller's own person (and those who see everyone).
+      case when everyone or p.id = own then p.cost_rate end as shown_rate
     from p
   )
   select jsonb_build_object(
@@ -345,8 +315,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- Until now every reader of a workspace reads every person: names, emails, notes, pay, leave, skills and client
 -- assignments. Austin's decision of 6 Oct (option A'): agency admins, `agency_admin` members, owners and editors see every
 -- person as before. Members and viewers see their OWN person's rows (when their membership is linked to a person), and get
--- the whole team's simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") with each
--- cost rate replaced by the average for the person's role. Their simulated numbers are otherwise the same as an editor's.
+-- the whole team's simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") and with NO
+-- pay: every cost rate is null except the caller's own. (Austin, 6 Oct, replacing the role-average rule: overlapping averages
+-- leak an exact rate by subtraction, and any average gives one away as people join or leave.) The figures that depend on
+-- individual pay are marked unavailable in the engine and the app; their other simulated numbers equal an editor's.
 --
 -- Additive, except that ten select policies are dropped and re-created under the same names, and `public.revision_history`
 -- is replaced (same signature, result columns and grants). It does NOT touch `save_fields`, any insert, update or delete
@@ -365,9 +337,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     team's simulation inputs. It raises 42501 unless the caller can read `ws`. Callers who see everyone get the stored
 --     values. Everyone else gets: the caller's own person under their real name and every other person as
 --     'Team member N' (N = rank by (created_at, id) over ALL people, active or not, so labels are stable); `provenance` {};
---     and cost rates replaced by hours-weighted role averages (a role is averaged only when at least 3 rated, active people
---     hold it; otherwise the workspace average, again only with at least 3; otherwise null, and the engine then uses the
---     role's default rate). A person with no rate of their own stays null. Never returned: email, notes, a leave note,
+--     and `cost_rate` null for everyone except the caller's own person (no averages, nothing derived from rates). Never returned: email, notes, a leave note,
 --     person_skills.efficiency and person_skills.provenance. Ids are the real ids.
 --     Shape: { sees_everyone, own_person_id,
 --              people: [{id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date, provenance}],
@@ -382,7 +352,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- possible follow-up.
 --
 -- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`):
---   0. Row 53 applied, nothing at or after this version. Expect 20261206000000 (and 20261207000000 if B10 2b went first),
+--   0. Rows 53 and 54 applied, nothing at or after this version. Expect exactly 20261206000000, 20261207000000, and
 --      nothing >= 20261207500000:
 --        select version from supabase_migrations.schema_migrations where version >= '20261206000000' order by 1;
 --   1. my_person_id exists; nothing of this migration does. Expect not null, null, null, null:
@@ -531,7 +501,6 @@ as $$
 declare
   everyone boolean;
   own uuid;
-  week numeric;
   result jsonb;
 begin
   if ws is null or not public.can_read_workspace(ws) then
@@ -539,47 +508,18 @@ begin
   end if;
   everyone := public.can_see_people(ws);
   own := public.my_person_id(ws);
-  select case when jsonb_typeof(w.settings -> 'hours_per_week') = 'number' then (w.settings ->> 'hours_per_week')::numeric end
-    into week from public.workspaces w where w.id = ws;
-  week := coalesce(week, 40);
 
   with p as (
     select pe.id, pe.workspace_id, pe.name, pe.fte, pe.capacity_hours_week, pe.cost_rate, pe.active, pe.start_date,
            pe.end_date, pe.provenance,
-           coalesce(pe.capacity_hours_week, pe.fte * week) as hours,
            row_number() over (order by pe.created_at, pe.id) as n
     from public.people pe where pe.workspace_id = ws
-  ),
-  held as (
-    select r.person_id, r.role_id, count(*) over (partition by r.person_id) as roles_held
-    from public.person_roles r where r.workspace_id = ws
-  ),
-  pool as (
-    select h.role_id, p.id, p.cost_rate, p.hours / h.roles_held as weight
-    from p join held h on h.person_id = p.id
-    where p.active and p.cost_rate is not null
-  ),
-  role_rate as (
-    select pool.role_id,
-           coalesce(sum(pool.cost_rate * pool.weight) / nullif(sum(pool.weight), 0), avg(pool.cost_rate)) as rate
-    from pool group by pool.role_id
-    having count(distinct pool.id) >= 3
-  ),
-  ws_rate as (
-    select coalesce(sum(p.cost_rate * p.hours) / nullif(sum(p.hours), 0), avg(p.cost_rate)) as rate
-    from p where p.active and p.cost_rate is not null
-    having count(*) >= 3
   ),
   shown as (
     select p.*,
       case when everyone or p.id = own then p.name else 'Team member ' || p.n end as shown_name,
-      case
-        when everyone then p.cost_rate
-        when p.cost_rate is null then null
-        else round(coalesce(
-          (select avg(rr.rate) from held h join role_rate rr on rr.role_id = h.role_id where h.person_id = p.id),
-          (select ws_rate.rate from ws_rate)), 4)
-      end as shown_rate
+      -- No pay for anyone but the caller's own person (and those who see everyone).
+      case when everyone or p.id = own then p.cost_rate end as shown_rate
     from p
   )
   select jsonb_build_object(

@@ -319,6 +319,12 @@ export interface EngineDemand {
 }
 
 export interface EngineModel {
+  /**
+   * True when the caller may not see people's pay (members and viewers; B1 slice 2a): no person has a `cost`, and the
+   * figures that depend on individual pay are not computed (`kpi.overtimeCost` is null; issue costs that need a person's
+   * rate are marked `payHidden`). Omitted or false: simulated exactly as before this field existed.
+   */
+  payHidden?: boolean;
   horizonWeeks: number;
   hoursPerWeek: number;
   /**
@@ -665,8 +671,8 @@ export interface ReplicationResult {
   services: Record<string, ServiceCounts>;
   /** Overtime hours over the measured window, everyone together. */
   overtimeHours: number;
-  /** Their cost: each person's overtime hours × their cost rate. */
-  overtimeCost: number;
+  /** Their cost: each person's overtime hours × their cost rate. Null when `model.payHidden`. */
+  overtimeCost: number | null;
   /** With a client roster: clients that churned in the measured window. */
   clientsChurned?: number;
   /** With a client roster: active clients (roster and won) with health below 50 at the horizon. */
@@ -802,8 +808,8 @@ export interface Kpis {
   wipEnd: Stat;
   /** Overtime hours over the horizon, everyone together (0 unless `overtimeCap` is above 0). */
   overtimeHours: Stat;
-  /** Overtime cost over the horizon: overtime hours × cost rate. */
-  overtimeCost: Stat;
+  /** Overtime cost over the horizon: overtime hours × cost rate. Null when `model.payHidden`: it depends on each person's pay. */
+  overtimeCost: Stat | null;
   /** Over every completed item in every replication. */
   cycle: { mean: number; p50: number; p90: number };
   roles: Record<string, { util: Stat; pipeline: Stat; ongoing: Stat; servicing: Stat; overtime: Stat }>;

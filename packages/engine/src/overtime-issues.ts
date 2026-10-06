@@ -7,7 +7,7 @@
 
 import type { DetectedIssue } from "./issues";
 import type { EngineModel, SimulationResult } from "./model";
-import { DEFAULT_COST_CONFIG, WEEKS_PER_MONTH, formatMoney, type CostConfig } from "./cost";
+import { DEFAULT_COST_CONFIG, WEEKS_PER_MONTH, formatMoney, payHiddenCost, type CostConfig } from "./cost";
 import { escalationNote, ratingFields, rateRule, resolveRatingConfig, resolveRule, type RatingConfig, type RatingConfigInput } from "./ratings";
 
 const LOCALE = "en-GB";
@@ -35,7 +35,7 @@ export function overtimeIssues(
   const roleName = (id: string) => model.roles[id]?.name ?? "a role";
   const out: DetectedIssue[] = [];
 
-  const push = (subject: { key: string; name: string; capacity: number; roleId: string | null; personId: string | null; rate: number }, r: {
+  const push = (subject: { key: string; name: string; capacity: number; roleId: string | null; personId: string | null; rate: number | null }, r: {
     overtimeHours: number;
     overtime: number;
     ongoingHours: number;
@@ -50,22 +50,26 @@ export function overtimeIssues(
       key: subject.key,
       type: "capacity",
       ...ratingFields(outcome),
-      cost: {
-        perMonth: r.overtimeHours * subject.rate * WEEKS_PER_MONTH,
-        hoursPerMonth: r.overtimeHours * WEEKS_PER_MONTH,
-        method: `Overtime hours × cost rate: ${num(r.overtimeHours * WEEKS_PER_MONTH)} h a month at ${formatMoney(subject.rate, money.currency)} an hour.`,
-      },
+      // A null rate is a person's pay, hidden from this caller (`model.payHidden`).
+      cost: subject.rate === null
+        ? payHiddenCost()
+        : {
+            perMonth: r.overtimeHours * subject.rate * WEEKS_PER_MONTH,
+            hoursPerMonth: r.overtimeHours * WEEKS_PER_MONTH,
+            method: `Overtime hours × cost rate: ${num(r.overtimeHours * WEEKS_PER_MONTH)} h a month at ${formatMoney(subject.rate, money.currency)} an hour.`,
+          },
       title: `${subject.name} works ${num(r.overtimeHours)} h/wk overtime`,
       evidence:
         `Simulated: ${num(r.ongoingHours)} h/wk of client work against ${num(subject.capacity)} h/wk capacity, so ` +
         `${num(r.overtimeHours)} h/wk overtime on average${band ? ` (range ${num(band.p10 * subject.capacity)}–${num(band.p90 * subject.capacity)})` : ""}` +
-        ` within the ${pct(cap)} cap, costing about ${formatMoney(r.overtimeHours * weeks * subject.rate, money.currency)} at cost rates over the ${num(weeks, 0)}-week run.` +
+        ` within the ${pct(cap)} cap` +
+        (subject.rate === null ? "." : `, costing about ${formatMoney(r.overtimeHours * weeks * subject.rate, money.currency)} at cost rates over the ${num(weeks, 0)}-week run.`) +
         (atCap ? " The cap is used up: more client work pushes utilisation past 100%." : "") +
       ` ${escalationNote(outcome)}`.trimEnd(),
       metrics: {
         overtime_hours_week: r.overtimeHours,
         ...(band ? { overtime_hours_week_p10: band.p10 * subject.capacity, overtime_hours_week_p90: band.p90 * subject.capacity } : {}),
-        overtime_cost: r.overtimeHours * weeks * subject.rate,
+        ...(subject.rate === null ? {} : { overtime_cost: r.overtimeHours * weeks * subject.rate }),
         ongoing_hours_week: r.ongoingHours,
         capacity_hours_week: subject.capacity,
         overtime_cap: cap,
@@ -86,7 +90,7 @@ export function overtimeIssues(
       const r = result.people[pid];
       if (!r) continue;
       const own = p.roles.filter((rid) => rid in model.roles);
-      const rate = p.cost ?? (own.length ? own.reduce((s, rid) => s + model.roles[rid]!.cost, 0) / own.length : 0);
+      const rate = model.payHidden ? null : p.cost ?? (own.length ? own.reduce((s, rid) => s + model.roles[rid]!.cost, 0) / own.length : 0);
       push({ key: `overtime:person:${pid}`, name: p.name, capacity: p.capacity, roleId: p.roles[0] ?? null, personId: pid, rate }, r, result.kpi.people[pid]?.overtime, pid === result.bnPerson);
     }
   } else {
