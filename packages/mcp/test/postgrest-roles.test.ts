@@ -215,6 +215,10 @@ describe.skipIf(!POSTGREST_URL)("per-person privacy over PostgREST", () => {
   it("a member's tables hold only their own person; their API token's get_workspace_summary lists exactly one", async () => {
     const rows = await memberSession.from("people").select("id").eq("workspace_id", NORTHBEAM_WORKSPACE_ID);
     expect(rows.data).toEqual([{ id: pid.memberPerson }]);
+    // And only their own membership, so a label can't be tied to a person through user_id and person_id.
+    const mine = await memberSession.from("memberships").select("user_id, person_id").eq("workspace_id", NORTHBEAM_WORKSPACE_ID);
+    expect(mine.data).toEqual([{ user_id: pid.member, person_id: pid.memberPerson }]);
+    expect((await editorSession.from("memberships").select("id").eq("workspace_id", NORTHBEAM_WORKSPACE_ID)).data!.length).toBeGreaterThan(1);
     const mcp = await connect(memberToken, options);
     const summary = await call<{ people: { id: string }[] }>(mcp, "get_workspace_summary");
     expect(summary.ok).toBe(true);

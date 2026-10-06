@@ -430,6 +430,28 @@ describe("reads", () => {
     expect(await notes("owner")).toEqual(["x person other", "x person own", "x seed"]);
   });
 
+  it("memberships: owners, editors and agency admins read every row; a member or viewer only their own, so labels can't be tied to people (B1 2/3)", async () => {
+    const total = Number((await db.client.query("select count(*) from memberships where workspace_id = $1", [ws])).rows[0].count);
+    expect(total).toBeGreaterThan(5);
+    const own = async (role: RoleName) =>
+      db.as(callers[role]!.claims, async (c) => (await c.query("select user_id, person_id from memberships where workspace_id = $1", [ws])).rows as { user_id: string; person_id: string | null }[]);
+    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) expect((await own(role)).length, role).toBe(total);
+    for (const role of ["member", "viewer", "member, no person"] as const) {
+      expect(await own(role), role).toEqual([{ user_id: callers[role]!.id, person_id: role === "member" ? person.member : role === "viewer" ? person.viewer : null }]);
+    }
+    expect(await own("signed in, no membership")).toEqual([]);
+    // A deactivated member reads nothing, as before.
+    await db.client.query("begin");
+    try {
+      await db.client.query("update memberships set active = false where user_id = $1", [callers.member!.id]);
+      await db.client.query("set local role authenticated");
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers.member!.claims)]);
+      expect(Number((await db.client.query("select count(*) from memberships")).rows[0].count)).toBe(0);
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
   it("ai_runs: editors and owners read both runs, a member only their own, a viewer none", async () => {
     const names = async (role: RoleName) =>
       (await db.as(callers[role]!.claims, async (c) => (await c.query("select user_name from ai_runs where workspace_id = $1 order by user_name", [ws])).rows)).map((r) => r.user_name as string);

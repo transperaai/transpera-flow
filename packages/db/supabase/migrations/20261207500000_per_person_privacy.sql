@@ -6,7 +6,7 @@
 -- the whole team's simulation inputs only through `public.team_capacity`, under neutral labels ("Team member 3") with each
 -- cost rate replaced by the average for the person's role. Their simulated numbers are otherwise the same as an editor's.
 --
--- Additive, except that nine select policies are dropped and re-created under the same names, and `public.revision_history`
+-- Additive, except that ten select policies are dropped and re-created under the same names, and `public.revision_history`
 -- is replaced (same signature, result columns and grants). It does NOT touch `save_fields`, any insert, update or delete
 -- policy, or any grant on a table.
 --
@@ -16,7 +16,9 @@
 --   * Select policies (same names): `people`, `person_roles`, `person_skills`, `person_leave`, `client_assignments` use
 --     `can_see_person`; `runs` and `robustness_results` use `can_see_people` (only owners and editors read saved runs);
 --     `suggestions` hides a suggestion about a person (`target_table = 'people'`) from those who can't see that person;
---     `ai_runs` (which stores the name of whoever ran an analysis) is read by those who see people, or by the runner.
+--     `ai_runs` (which stores the name of whoever ran an analysis) is read by those who see people, or by the runner;
+--     `memberships` (whose user_id and person_id would tie a label to a person) is read by those who see people, and by
+--     anyone else only for their own row.
 --   * `public.team_capacity(ws) returns jsonb` (SECURITY DEFINER, empty search_path): the one way a caller gets the whole
 --     team's simulation inputs. It raises 42501 unless the caller can read `ws`. Callers who see everyone get the stored
 --     values. Everyone else gets: the caller's own person under their real name and every other person as
@@ -47,12 +49,12 @@
 --   2. revision_history is 20261127500000's. Expect one row: true, true
 --        select pg_get_function_result(oid) like '%note text%', prosrc not like '%can_see_person%'
 --        from pg_proc where pronamespace = 'public'::regnamespace and proname = 'revision_history';
---   3. The nine select policies are as this migration expects. Expect 9 rows, each qual public.can_read_workspace(workspace_id) / can_read_workspace(workspace_id):
+--   3. The ten select policies are as this migration expects. Expect 10 rows, each qual public.can_read_workspace(workspace_id) / can_read_workspace(workspace_id):
 --        select tablename, policyname, qual from pg_policies
 --        where schemaname = 'public' and cmd = 'SELECT' and (tablename, policyname) in (
 --          ('people', 'read people'), ('person_roles', 'read person_roles'), ('person_skills', 'read person_skills'),
 --          ('person_leave', 'read person_leave'), ('client_assignments', 'read client_assignments'), ('runs', 'read runs'),
---          ('robustness_results', 'read robustness results'), ('suggestions', 'read suggestions'), ('ai_runs', 'read ai_runs'))
+--          ('robustness_results', 'read robustness results'), ('suggestions', 'read suggestions'), ('ai_runs', 'read ai_runs'), ('memberships', 'read memberships'))
 --        order by 1;
 --   4. No person is linked to two active memberships (1/3 enforces it in setMemberPerson, not the database). Expect no rows;
 --      if any, two people would see the same record: unlink one on Settings -> Access before applying.
@@ -65,7 +67,7 @@
 --
 -- POST-APPLY CHECK:
 --   - Re-run preflight 3: the five per-person tables and `suggestions` now mention can_see_person; `runs`,
---     `robustness_results` and `ai_runs` mention can_see_people.
+--     `robustness_results`, `ai_runs` and `memberships` mention can_see_people.
 --   - select proname, prosecdef, proconfig from pg_proc where proname in ('can_see_people', 'can_see_person',
 --     'team_capacity', 'revision_history');  -- prosecdef false, false, true, true; {search_path=""} on all four.
 --   - has_function_privilege('authenticated', f, 'execute') true and has_function_privilege('anon', f, 'execute') false for
@@ -99,6 +101,8 @@
 --     create policy "read suggestions" on public.suggestions for select to authenticated using (public.can_read_workspace(workspace_id));
 --     drop policy "read ai_runs" on public.ai_runs;
 --     create policy "read ai_runs" on public.ai_runs for select to authenticated using (public.can_read_workspace(workspace_id));
+--     drop policy "read memberships" on public.memberships;
+--     create policy "read memberships" on public.memberships for select to authenticated using (public.can_read_workspace(workspace_id));
 --     -- revision_history: re-run the `create function public.revision_history ... $$;` block from
 --     -- 20261127500000_company_map_editing.sql with `create` changed to `create or replace` (same signature, grants kept)
 --     drop function public.team_capacity(uuid);
@@ -165,6 +169,14 @@ create policy "read suggestions" on public.suggestions for select to authenticat
 -- user_name is a stored copy of the name of whoever ran an analysis.
 drop policy "read ai_runs" on public.ai_runs;
 create policy "read ai_runs" on public.ai_runs for select to authenticated
+  using (public.can_read_workspace(workspace_id)
+         and (public.can_see_people(workspace_id) or user_id = auth.uid()));
+
+-- Who is who. A member who could read every `memberships` row (user_id and person_id) could join it to "Team member N" and
+-- name every person. Owners, editors and agency admins keep reading them all (and owners and agency admins also through
+-- "manage memberships"); everyone else reads only their own active membership.
+drop policy "read memberships" on public.memberships;
+create policy "read memberships" on public.memberships for select to authenticated
   using (public.can_read_workspace(workspace_id)
          and (public.can_see_people(workspace_id) or user_id = auth.uid()));
 

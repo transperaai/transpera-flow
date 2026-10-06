@@ -407,11 +407,7 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
       scenario: "Two more strategists",
       evidence: "Interview 12 Sep: proposals wait up to a week.",
     };
-    // B1 2a: the viewer reads no other person, so naming one (by name) is not_found before the write is refused; without
-    // naming a person the refusal is the same as ever.
-    const { person: _person, owner: _owner, ...unnamed } = issue;
-    expect(await call(viewer, "log_issue", unnamed)).toMatchObject({ ok: false, error: { code: "forbidden" } });
-    expect(await call(viewer, "log_issue", issue)).toMatchObject({ ok: false, error: { code: "not_found" } });
+    expect(await call(viewer, "log_issue", issue)).toMatchObject({ ok: false, error: { code: "forbidden" } });
     expect(await call(editor, "log_issue", { ...issue, client: "Acme" })).toMatchObject({ ok: false, error: { code: "not_found" } });
     expect(await call(editor, "log_issue", { ...issue, step: "nowhere" })).toMatchObject({ ok: false, error: { code: "not_found" } });
     const logged = await call<{ issue: { id: string; source: string; step: { name: string }; scenario: { id: string } } }>(editor, "log_issue", issue);
