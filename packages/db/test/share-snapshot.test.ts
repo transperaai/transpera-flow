@@ -357,7 +357,7 @@ describe("names with unusual white space, surnames and case, quotes, and role-ra
 
   it("quotes from sources are dropped from accepted findings, in every toggle combination; other facts stay", () => {
     for (const toggles of TOGGLES) {
-      const snap = redactShareSnapshot(raw("process", w, toggles), toggles, w.secrets) as { findings: { facts: { kind: string }[] }[] };
+      const snap = redactShareSnapshot(raw("process", w, toggles), toggles, w.secrets) as unknown as { findings: { facts: { kind: string }[] }[] };
       expect(snap.findings[0]!.facts).toEqual([]);
       const mixed = { ...raw("process", w, toggles), findings: [{ ...(raw("process", w, toggles) as { findings: object[] }).findings[0]!, facts: [{ kind: "fact", key: "k", text: "12 hours a week" }, { kind: "quote", key: "q", text: "word for word" }] }] } as unknown as ShareSnapshot;
       const out = redactShareSnapshot(mixed, toggles, w.secrets) as unknown as { findings: { facts: { kind: string }[] }[] };
