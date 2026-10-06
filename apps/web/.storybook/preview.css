@@ -1,0 +1,5 @@
+/* The variables next/font sets in the app's root layout. */
+:root {
+  --font-inter: "Inter Variable";
+  --font-plex-mono: "IBM Plex Mono";
+}

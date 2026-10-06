@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @transpera-flow/web dev",
+    "storybook": "pnpm --filter @transpera-flow/web storybook",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

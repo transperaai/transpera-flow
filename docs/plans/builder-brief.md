@@ -72,6 +72,9 @@ screens in light and dark, at 1440 px and 400 px. Use Chromium at `/opt/pw-brows
 and `/opt/node-tools/node_modules/playwright`. Attach what you saw to the PR as text evidence: what you checked and that
 it rendered without console errors.
 
+UI changes: if the `visual` job fails, look at its report, and if the change is intended push an empty commit with
+`[visual-update]` in the subject (see `docs/visual-regression.md`).
+
 ## PR
 
 Write the body with the `pr` skill's template (`.claude/skills/pr/SKILL.md`): Summary, Evidence, Merge Danger. Include:
