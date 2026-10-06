@@ -832,6 +832,8 @@ export interface ImportRead {
   missing: string[];
   /** Distinct values of the name column, by rows (most first) then value; at most 500. */
   names: { value: string; rows: number }[];
+  /** How many distinct values there are in all: over 500, the rest are not listed and their rows are left out (the screen says so). */
+  namesTotal: number;
   /** A warning for this kind of file. */
   note: string | null;
   /** Amounts that couldn't be read. Their rows are kept, with the amount blank. */
@@ -935,6 +937,7 @@ export function readImport(
     dateProblem: res.dateProblem,
     missing: res.missing,
     names,
+    namesTotal: counts.size,
     note,
     amountsUnreadable: ctx.badAmounts,
   };

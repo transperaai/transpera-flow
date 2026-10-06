@@ -163,6 +163,21 @@ describe("parseApplyRequest with a kind", () => {
   });
 });
 
+describe("names left out in the wizard are recorded as counts", () => {
+  const key = `arrivals:${source}`;
+  const base = { workspaceId: ws, processId: proc, kind: "deals", fileName: "d.csv", columnMap: { deal: "Column 1", stage: "Deal Stage", entered: "Entered" }, rowCount: 10, keys: [key] };
+
+  it("keeps a number of left-out names, and the count of unmatched names, never the names", () => {
+    const res = { proposals: [{ key }], unmatchedSteps: 7, unmatchedSources: [{ name: "ACME-SECRET-SOURCE", items: 3 }] };
+    const r = parseApplyRequest({ ...base, results: res });
+    if (!r.ok) throw new Error(r.message);
+    expect(r.request.results).toMatchObject({ unmatchedSteps: 7, unmatchedSources: 1 });
+    expect(JSON.stringify(r.request.results)).not.toContain("ACME");
+    expect(parseApplyRequest({ ...base, results: { ...res, unmatchedSteps: -3 } })).toMatchObject({ ok: true, request: { results: { unmatchedSteps: 0 } } });
+    expect(parseApplyRequest({ ...base, results: { ...res, unmatchedSteps: "lots" } })).toMatchObject({ ok: true, request: { results: { unmatchedSteps: 0 } } });
+  });
+});
+
 describe("parseClientApplyRequest with a kind", () => {
   const clients = { fileName: "clients.csv", columnMap: { client: "Customer", service: "Plan", started: "Signed" }, rowCount: 40, details: DETAILS };
   const log = { fileName: "tickets.csv", columnMap: { type: "Type", client: "Company", due: "Due date" }, rowCount: 90, kind: "jobs", details: DETAILS };

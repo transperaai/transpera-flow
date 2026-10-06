@@ -411,6 +411,11 @@ describe("readImport", () => {
     lines.push("D1,Stage 007,2026-03-02");
     const r = read(lines.join("\n"), "deals");
     expect(r.names).toHaveLength(500);
+    // The rest are counted, so the screen can say they are left out.
+    expect(r.namesTotal).toBe(600);
+    // A value past the 500th is left out, and counted as left out.
+    const unlisted = applyNameMapCounted(r, Object.fromEntries(r.names.map((n) => [n.value, n.value])));
+    expect(unlisted).toMatchObject({ kept: 500 + 1, leftOut: 100 });
     expect(r.names[0]).toEqual({ value: "Stage 007", rows: 2 });
     expect(r.names[1]).toEqual({ value: "Stage 000", rows: 1 });
   });

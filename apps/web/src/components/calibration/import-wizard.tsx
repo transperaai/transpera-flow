@@ -8,7 +8,7 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   IMPORT_KINDS,
-  applyNameMap,
+  applyNameMapCounted,
   columnMapValue,
   importDetails,
   suggestMapping,
@@ -62,6 +62,8 @@ export interface ImportReady {
   rows: ShapeRow[];
   /** For the card's own summary lines. */
   read: ImportRead;
+  /** What the person left out by name: how many distinct names (counted, never kept) and how many rows. */
+  leftOut: { names: number; rows: number };
   /** Counts only. The card adds the summary for leads and invoices. */
   details: ImportDetails;
 }
@@ -114,7 +116,8 @@ export function ImportWizard(props: ImportWizardProps) {
   const suggestedNames = useMemo(() => (read && targets && spec.nameColumn ? suggestNameMap(read.names, targets.names) : null), [read, targets, spec.nameColumn]);
   const [nameEdit, setNameEdit] = useState<{ base: unknown; map: Record<string, string | null> } | null>(null);
   const nameMap = suggestedNames ? (nameEdit && nameEdit.base === suggestedNames ? nameEdit.map : suggestedNames) : null;
-  const kept = useMemo(() => (read ? (nameMap ? applyNameMap(read, nameMap) : read.rows) : null), [read, nameMap]);
+  const counted = useMemo(() => (read ? (nameMap ? applyNameMapCounted(read, nameMap) : { rows: read.rows, kept: read.rows.length, leftOut: 0 }) : null), [read, nameMap]);
+  const kept = counted?.rows ?? null;
 
   const ready = (r: ImportReady | null) => {
     setUsed(r !== null);
@@ -170,7 +173,9 @@ export function ImportWizard(props: ImportWizardProps) {
   };
 
   const useRows = () => {
-    if (!read || !loaded || !mapping || !kept) return;
+    if (!read || !loaded || !mapping || !kept || !counted) return;
+    // Names left out: those set to Leave out, and any beyond the 500 listed.
+    const leftNames = nameMap ? read.names.filter((n) => nameMap[n.value] === null || nameMap[n.value] === undefined).length + (read.namesTotal - read.names.length) : 0;
     const columnMap: Record<string, string> = {};
     for (const c of spec.columns) {
       const i = mapping.index[c.id];
@@ -182,11 +187,12 @@ export function ImportWizard(props: ImportWizardProps) {
       columnMap,
       rows: kept,
       read,
+      leftOut: { names: leftNames, rows: counted.leftOut },
       details: importDetails(read, {
         delimiter: loaded.delimiter,
         encoding: loaded.encoding,
         headerRow,
-        nameMatches: { matched: kept.length, leftOut: read.rows.length - kept.length },
+        nameMatches: { matched: counted.kept, leftOut: counted.leftOut },
         rows: kept,
       }),
     });
@@ -442,6 +448,7 @@ export function ImportWizard(props: ImportWizardProps) {
               setNameEdit({ base: suggestedNames, map: { ...nameMap, [value]: target } });
             }}
             kept={kept.length}
+            leftByName={counted?.leftOut ?? 0}
             used={used}
             onDateOrder={(order) => goOn(order)}
             onUse={useRows}
@@ -466,6 +473,8 @@ function RowsStep(props: {
   nameMap: Record<string, string | null> | null;
   onName: (value: string, target: string | null) => void;
   kept: number;
+  /** Rows left out because their name isn't matched (and any beyond the 500 listed). */
+  leftByName: number;
   used: boolean;
   onDateOrder: (order: DateOrder) => void;
   onUse: () => void;
@@ -475,7 +484,7 @@ function RowsStep(props: {
   const spec = IMPORT_KINDS[kind];
   const matched = useMemo(() => new Set(spec.columns.filter((c) => props.mapping[c.id] !== null && props.mapping[c.id] !== undefined).map((c) => c.id)), [spec, props.mapping]);
   const table = useMemo(() => previewTable(spec, matched, read.preview, props.canSeeAmounts), [spec, matched, read.preview, props.canSeeAmounts]);
-  const leftByName = read.rows.length - props.kept;
+  const leftByName = props.leftByName;
 
   let body: ReactNode;
   if (read.dateProblem === "mixed") {
@@ -518,6 +527,12 @@ function RowsStep(props: {
           {leftByName > 0 && ` ${formatNumber(leftByName, 0)} more left out because their name isn't matched.`}
         </p>
         {read.note && <p className="text-sm text-muted-foreground">{read.note}</p>}
+        {read.namesTotal > read.names.length && (
+          <p className="text-sm text-muted-foreground">
+            The file has {formatNumber(read.namesTotal, 0)} different names. The {formatNumber(read.names.length, 0)} with the most rows are listed below; rows with any other name are left
+            out.
+          </p>
+        )}
         {read.amountsUnreadable > 0 && (
           <p className="text-sm text-muted-foreground">
             {formatNumber(read.amountsUnreadable, 0)} amount{read.amountsUnreadable === 1 ? "" : "s"} couldn&apos;t be read, so {read.amountsUnreadable === 1 ? "is" : "are"} left blank. The rows are kept.

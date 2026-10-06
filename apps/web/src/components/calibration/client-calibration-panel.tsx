@@ -172,8 +172,9 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
           clients: measure?.clients ?? 0,
           tasks: checks?.tasks ?? 0,
           startsAfterAsOf: measure?.startsAfterAsOf ?? 0,
-          unmatchedServices: measure?.unmatchedServices.length ?? 0,
-          unmatchedTasks: checks?.unmatchedTasks.length ?? 0,
+          // Names the person left out in the wizard count with the ones that matched nothing: counts only, never the names.
+          unmatchedServices: (measure?.unmatchedServices.length ?? 0) + (clientsReady?.leftOut.names ?? 0),
+          unmatchedTasks: (checks?.unmatchedTasks.length ?? 0) + (logReady?.leftOut.names ?? 0),
           noGroup,
           proposals,
           checks: (checks?.checks ?? []).map((c) => ({ id: c.id, n: c.n, value: c.value, simulated: solved?.simulated[c.id] ?? null, enough: c.enough, blocked: c.blocked, note: c.note })),

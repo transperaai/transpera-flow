@@ -104,6 +104,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
 
   const apply = () => {
     if (!read?.result) return;
+    const measured = read.result;
     const keys = [...selected].filter((k) => !applied.has(k));
     if (!keys.length) return;
     const subjects = new Map(read.result.proposals.map((p) => [p.key, `${p.subject} (${KIND_LABELS[p.kind].title.toLowerCase()})`]));
@@ -126,7 +127,8 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
         columnMap: read.ready.columnMap,
         rowCount: read.ready.rows.length,
         details: read.ready.details,
-        results: read.result,
+        // The names the person left out are recorded as a count with the ones that matched no step, never by name.
+        results: { ...measured, unmatchedSteps: measured.unmatchedSteps.length + read.ready.leftOut.names },
         keys,
       });
       if (out.status === "error") {
@@ -310,6 +312,11 @@ function LogSummary({ read }: { read: Read }) {
       </p>
       {ready.kind === "time_logs" && (
         <p className="text-muted-foreground">Time logs measure hands-on time only. Waits, branch odds, redo rates and leads a week need a stage history or deals.</p>
+      )}
+      {ready.leftOut.names > 0 && (
+        <p className="text-muted-foreground">
+          Left out by name: {ready.leftOut.names} name{ready.leftOut.names === 1 ? "" : "s"}, {ready.leftOut.rows} row{ready.leftOut.rows === 1 ? "" : "s"}. Match them to a step in the wizard above to use them.
+        </p>
       )}
       {result.unmatchedSteps.length > 0 && (
         <p className="text-muted-foreground">

@@ -205,6 +205,24 @@ describe("the import wizard", () => {
     await page.close();
   }, 120_000);
 
+  it("says so when a file has more than 500 different names, and counts the rows it leaves out", async () => {
+    const { page, errors } = await mount();
+    const lines = ["deal,stage,entered"];
+    for (let i = 0; i < 600; i++) lines.push(`D${i},Stage ${String(i).padStart(3, "0")},2026-04-02`);
+    for (let i = 0; i < 20; i++) lines.push(`E${i},Qualify lead,2026-04-02`);
+    await choose(page, "cal-log", "Deals from your CRM", csv(lines.join("\n")));
+    await readIt(page, "cal-log");
+    const rows = step(page, "cal-log", "rows");
+    const text = await rows.innerText();
+    expect(text).toContain("The file has 601 different names. The 500 with the most rows are listed below; rows with any other name are left out.");
+    // 520 rows read; Qualify lead matches; the 500 listed stages are left out, and so are the 101 not listed.
+    expect(text).toContain("620 rows");
+    expect(text).toContain("600 more left out because their name isn't matched");
+    expect(await rows.locator("[data-import-names] li").count()).toBe(500);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+
   it("reads a Windows-1252 file with a note, and splits a semicolon file on its own", async () => {
     const { page, errors } = await mount();
     const win = ["deal;stage;entered", "D1;Qualifié;2026-04-02", "D2;Qualifié;2026-04-03"].join("\n");

@@ -34,11 +34,11 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 export const MAX_RESULTS_BYTES = 900_000;
 
 /**
- * The results as stored: the log's own names that matched nothing (step and lead source names typed in the file) are
- * kept as counts only, so no free text from the file is stored beyond names the model already has.
+ * The results as stored: the log's own names that matched nothing (step and lead source names typed in the file, and the names
+ * the person left out in the wizard) are kept as counts only, so no free text from the file is stored beyond names the model already has.
  */
 export function storedResults(results: Record<string, unknown>): Record<string, unknown> {
-  const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+  const count = (v: unknown) => (Array.isArray(v) ? v.length : typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
   const { unmatchedSteps, unmatchedSources, ...rest } = results;
   return { ...rest, unmatchedSteps: count(unmatchedSteps), unmatchedSources: count(unmatchedSources) };
 }
