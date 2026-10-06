@@ -590,11 +590,14 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       const r = await call<Proposed>(mcpEditor, "propose_finding", { process: "Sales", title: "Rework is costing us", rating: "bad", type: "failure", evidence: `See ${pick!.title}.`, facts: [pick!.key] });
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r.data.finding.rests_on.map((c) => c.key)).toEqual([pick!.key]);
-      const stored = (await one("select (title, evidence, why, facts, person_labels)::text as t from findings where id = $1", [r.data.finding.id])).t as string;
+      // Random ids can contain the digits by chance (e.g. "0d069913-…"), so they're blanked before looking for figures.
+      const noIds = (t: string) => t.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>");
+      const stored = noIds((await one("select (title, evidence, why, facts, person_labels)::text as t from findings where id = $1", [r.data.finding.id])).t as string);
+      const response = noIds(JSON.stringify(r));
       const per = pick!.cost.per_month!;
       for (const figure of [String(per), String(Math.round(per)), Math.round(per).toLocaleString("en-GB"), "913"]) {
         expect(stored, `stored text holds ${figure}`).not.toContain(figure);
-        expect(JSON.stringify(r), `response holds ${figure}`).not.toContain(figure);
+        expect(response, `response holds ${figure}`).not.toContain(figure);
       }
       expect(maya).toBeTruthy();
     }, 120_000);
