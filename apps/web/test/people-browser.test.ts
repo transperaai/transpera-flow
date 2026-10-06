@@ -164,10 +164,19 @@ describe("Person detail", { timeout: 120_000 }, () => {
 describe("Horizon picker", { timeout: 120_000 }, () => {
   it("re-runs How busy at the picked length", async () => {
     const { page, errors } = await mount({ viewer: "everyone" });
+    await absenceDone(page);
+    const absenceBefore = await page.locator("[data-absence]").innerText();
+    await page.waitForSelector(".grid[aria-busy='false']");
     await page.getByRole("button", { name: "12 months" }).click();
     await page.waitForSelector("button[aria-label='12 months'][aria-pressed='true']");
-    await page.waitForSelector("[data-how-busy] tbody tr", { timeout: 90_000 });
+    // The old table is still there while the new run goes; wait for the run itself (busy, then done), not for the table.
+    await page.waitForSelector(".grid[aria-busy='true']", { timeout: 90_000 });
+    // The absence test is over the workspace's own length (Q2): the picker doesn't restart it.
+    expect(await page.locator("[data-absence] [role=status]").count()).toBe(0);
+    await page.waitForSelector(".grid[aria-busy='false']", { timeout: 90_000 });
     expect(await busyRows(page).count()).toBeGreaterThan(1);
+    expect(await page.locator("[data-absence] [role=status]").count()).toBe(0);
+    expect(await page.locator("[data-absence]").innerText()).toBe(absenceBefore);
     expect(errors).toEqual([]);
     await page.close();
   });
