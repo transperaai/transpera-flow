@@ -89,7 +89,7 @@ describe("placing an idea in the solution's copy of the map", () => {
   });
 
   it("says so, and places nothing, when the idea has no usable steps", () => {
-    const placed = placeIdea(bundle, { id: "x", title: "Empty", block: { steps: [], edges: [], entry_step_id: null }, replaces: [] });
+    const placed = placeIdea(bundle, { id: "x", title: "Empty", block: { steps: [], edges: [], entry_step_id: null }, replaces: [], levers: [], leverNotes: [] });
     expect(placed).toMatchObject({ edit: null, id: null });
     expect(placed.note).toBe("The AI's steps weren't placed: it has no usable steps. The map is a plain copy of the live one, so you can build the solution yourself.");
   });
@@ -97,7 +97,7 @@ describe("placing an idea in the solution's copy of the map", () => {
   it("says so when the steps can't be placed", () => {
     const bad = ideaToBlock({ steps: [{ key: "a", name: "A" }] });
     bad.steps[0]!.parent_step_id = "nowhere";
-    expect(placeIdea(bundle, { id: "x", title: "Bad", block: bad, replaces: [] })).toMatchObject({ edit: null, note: expect.stringContaining("can't be placed") });
+    expect(placeIdea(bundle, { id: "x", title: "Bad", block: bad, replaces: [], levers: [], leverNotes: [] })).toMatchObject({ edit: null, note: expect.stringContaining("can't be placed") });
   });
 });
 

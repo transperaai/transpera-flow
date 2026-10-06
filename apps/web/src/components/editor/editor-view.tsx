@@ -18,6 +18,8 @@ import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { blockFromSteps } from "@/lib/blocks/blocks";
 import { markDemoIdeaBuilt } from "@/lib/demo/company-store";
+import type { ScenarioPatch } from "@transpera-flow/engine";
+import { LeverChangesBox } from "@/components/editor/lever-changes-box";
 import { placeIdea, type IdeaSeed } from "@/lib/suggestions/idea";
 import { parseBlockInput } from "@/lib/blocks/save";
 import { newStepRow } from "@/lib/editor/commands";
@@ -152,7 +154,9 @@ export function EditorView({
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
   const weeks = editorHorizonWeeks(editorMode, horizonMonths);
-  const workingModel = useEngineModel(working, weeks);
+  // Solution mode (B4): the lever changes an idea brought (a visitor's moves), kept with the solution and applied when it is simulated.
+  const [levers, setLevers] = useState<ScenarioPatch[]>(() => (solutionMode ? (idea?.levers ?? []) : []));
+  const workingModel = useEngineModel(working, weeks, solutionMode ? levers : undefined);
   const liveModel = useEngineModel(live, weeks);
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
   // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
@@ -223,7 +227,7 @@ export function EditorView({
     await editor.settled();
     const now = session.editor.getState().bundle;
     const changes = diffBundles(live, now);
-    if (!changes.list.length) return setSolutionError("Change at least one step first. A solution with no changes has nothing to test.");
+    if (!changes.list.length && !levers.length) return setSolutionError("Change at least one step or lever first. A solution with no changes has nothing to test.");
     setSolutionSaving(true);
     // The automatic verdict. In a workspace the server works it out again from the stored copy and ignores what is sent; the demo has no
     // server, so it keeps the one worked out here, in a worker.
@@ -242,7 +246,7 @@ export function EditorView({
       baseRevisionId: live.revision.id,
       copy: solutionCopy(now),
       changedStepIds: changedStepIds(changes),
-      levers: [],
+      levers,
       links: issue ? [{ issueId: issue.id, autoVerdict: auto && auto.status !== "unchecked" ? auto.status : null, holdsPct: auto?.holdsPct ?? null, autoNote: auto?.note ?? "" }] : [],
     };
     const checked = parseSolutionInput(input);
@@ -387,6 +391,9 @@ export function EditorView({
             <p role="note" data-idea-note className="rounded-token border border-edit/50 bg-edit-soft p-2 text-xs">
               {placement.note}
             </p>
+          )}
+          {solutionMode && (levers.length > 0 || (idea?.leverNotes.length ?? 0) > 0) && (
+            <LeverChangesBox levers={levers} notes={idea?.leverNotes ?? []} bundle={working} onRemove={(i) => setLevers((l) => l.filter((_, n) => n !== i))} />
           )}
           {solutionMode && <IssueArea issue={issue} steps={[...live.steps, ...working.steps]} present={new Set(working.steps.map((s) => s.id))} onSelect={select} />}
           {mode === "demo" && (

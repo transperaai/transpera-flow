@@ -115,7 +115,7 @@ describe("the (i) help on the Suggestions screen (issue #117)", () => {
   const screen = read("components/proposals-review.tsx") + read("components/suggestions-review.tsx") + read("components/idea-card.tsx");
 
   it("has a label, a description and an example for each part", () => {
-    expect(Object.keys(SUGGESTIONS_HELP).sort()).toEqual(["accept", "buildIt", "bulk", "dismiss", "ideaMap", "ideas", "issues", "model", "other", "reject", "show"]);
+    expect(Object.keys(SUGGESTIONS_HELP).sort()).toEqual(["accept", "buildIt", "bulk", "dismiss", "held", "ideaMap", "ideas", "issues", "model", "other", "reject", "reply", "show", "visitorIdea"]);
     for (const [key, h] of Object.entries(SUGGESTIONS_HELP)) {
       expect(h.label.length, key).toBeGreaterThan(2);
       expect(h.description.length, `${key} description`).toBeGreaterThan(30);

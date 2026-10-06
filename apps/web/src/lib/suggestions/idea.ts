@@ -3,6 +3,7 @@
 // step the idea would replace). Pure: no I/O.
 
 import type { BlockBundle, BlockEdge, BlockStep, ProcessBundle, ProposalRow, ProposedStep } from "@transpera-flow/db";
+import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 import { blockProblem, insertBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
 import type { Edit } from "@/lib/editor/ops";
 import { solutionEditorHref } from "@/lib/solutions/links";
@@ -24,6 +25,8 @@ export interface ReadIdea {
   edges: { from: string; to: string }[] | null;
   replaces: string[];
   expect: string | null;
+  /** Lever changes the idea brings (B4: a visitor's moves), through `parsePatches`; anything invalid counts as none. */
+  levers: ScenarioPatch[];
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -58,7 +61,8 @@ export function readIdea(payload: unknown): ReadIdea {
     ? p.edges.flatMap((e) => (isObject(e) && typeof e.from === "string" && typeof e.to === "string" && e.from !== e.to && used.has(e.from) && used.has(e.to) ? [{ from: e.from, to: e.to }] : []))
     : null;
   const replaces = Array.isArray(p.replaces_step_ids) ? p.replaces_step_ids.filter((x): x is string => typeof x === "string") : [];
-  return { steps, edges, replaces, expect: typeof p.expect === "string" && p.expect.trim() ? p.expect.trim() : null };
+  const levers = parsePatches(p.levers);
+  return { steps, edges, replaces, expect: typeof p.expect === "string" && p.expect.trim() ? p.expect.trim() : null, levers: levers.ok ? levers.patches : [] };
 }
 
 /**
@@ -116,17 +120,27 @@ export interface IdeaSeed {
   block: BlockBundle;
   /** Step ids the idea would replace. */
   replaces: string[];
+  /** The lever changes the idea brings, as the Editor puts them in the solution (B4). The server checks them against live first (`mapPlayChanges`). */
+  levers: ScenarioPatch[];
+  /** What the check against live left out, in words. */
+  leverNotes: string[];
 }
 
 export function ideaSeed(p: Pick<ProposalRow, "id" | "title" | "payload">, roles: readonly { id: string; name: string }[] = []): IdeaSeed {
-  return { id: p.id, title: p.title, block: ideaToBlock(p.payload, roles), replaces: readIdea(p.payload).replaces };
+  const idea = readIdea(p.payload);
+  return { id: p.id, title: p.title, block: ideaToBlock(p.payload, roles), replaces: idea.replaces, levers: idea.levers, leverNotes: [] };
 }
 
 /**
  * "✎ Build it": the Editor in solution mode on the issue's process, for that issue, with the idea's steps placed. Null when
  * the issue names no process (there is no map to open).
  */
-export function buildIdeaHref(base: string, p: Pick<ProposalRow, "id" | "issue_id">, issue: { processId?: string | null } | undefined, from: string): string | null {
+export function buildIdeaHref(base: string, p: Pick<ProposalRow, "id" | "issue_id"> & Partial<Pick<ProposalRow, "created_via" | "payload">>, issue: { processId?: string | null } | undefined, from: string): string | null {
+  // A visitor's idea (B4) is built on the process its link shared, and may be for no issue.
+  if (p.created_via === "play_link") {
+    const processId = (p.payload as { process_id?: unknown } | undefined)?.process_id;
+    if (typeof processId === "string" && processId) return solutionEditorHref(base, processId, { issueId: p.issue_id, idea: p.id, from });
+  }
   if (!p.issue_id || !issue?.processId) return null;
   return solutionEditorHref(base, issue.processId, { issueId: p.issue_id, idea: p.id, from });
 }
@@ -146,6 +160,10 @@ export interface IdeaPlacement {
  * they can't be placed (no usable steps, or a step the Editor won't take) the result has no edit and a note saying so, never nothing.
  */
 export function placeIdea(bundle: ProcessBundle, idea: IdeaSeed): IdeaPlacement {
+  // A visitor's idea that only moves levers (B4) has no steps to place: the levers are listed in the Editor's Lever changes box.
+  if (!idea.block.steps.length && idea.levers.length) {
+    return { edit: null, id: null, note: "The idea changes levers only: they're listed under Lever changes. Adjust the map too if you like, simulate, then save." };
+  }
   const problem = blockProblem(idea.block);
   const target = idea.replaces.find((id) => bundle.steps.some((s) => s.id === id) && !replaceProblem(bundle, id)) ?? null;
   const made = problem ? null : target ? replaceWithBlock(bundle, target, idea.block, idea.title) : insertBlock(bundle, null, idea.block, idea.title);

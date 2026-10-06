@@ -63,7 +63,7 @@ describe("parseShareInput", () => {
   });
 
   it("'Let people try changes' (B4) is for a process only; elsewhere it is refused in plain words", () => {
-    const process = { kind: "process", targetId: "00000000-0000-4000-8000-0000000000c1" };
+    const process = { kind: "process", targetId: "00000000-0000-4000-8000-0000000000c1" } as const;
     expect(parse({ ...process, play: true })).toMatchObject({ ok: true, value: { play: true, kind: "process" } });
     expect(parse({ ...process })).toMatchObject({ ok: true, value: { play: false } });
     expect(parse({ ...process, play: false })).toMatchObject({ ok: true, value: { play: false } });
