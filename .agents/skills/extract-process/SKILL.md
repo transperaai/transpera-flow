@@ -49,6 +49,8 @@ Leading words, used throughout: **cited**, **assumed**, **ledger** (one line per
 7. **Submit suggestions** (see "Suggestions"). Done when every ledger line marked suggestion has a stored suggestion or an open question that explains why not. Problems and ideas go through "Proposals".
 8. **Report** (see "Summary"). Done when the summary has every section, the empty ones included.
 
+Once the process is published and the facts are in (`get_facts`), you may propose findings for the team to review with `propose_finding`, citing the fact keys and the sources' quotes; a person accepts them in the app.
+
 ## Mapping statements to fields
 
 | Heard | Field |

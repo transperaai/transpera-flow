@@ -1,7 +1,7 @@
 -- Production apply file for 20261216000000_dataset_imports (C1, issue #40). One column (`datasets.details`), two new functions
 -- (`public.record_dataset`, `public.record_calibration_import`) and `public.record_client_calibration` replaced with a full copy of
 -- row 57's that takes a kind and details; no table, policy or grant changes. Needs rows 50 (20261202000000) and 57 (20261208000000);
--- this is row 59 (row 58, 20261209000000, is independent). Preflight, post-apply check and rollback are in the migration's own
+-- this is row 62 (after B20's row 59, B5's row 60 and B21's row 61; none of them touches `datasets` or `record_client_calibration`). Preflight, post-apply check and rollback are in the migration's own
 -- header, repeated below. Apply BEFORE deploying the app (the Historical data page calls the new functions).
 
 begin;

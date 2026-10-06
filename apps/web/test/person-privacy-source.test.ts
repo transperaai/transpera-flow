@@ -46,6 +46,10 @@ describe("per-person screens use the viewer helpers", () => {
     expect(source).toMatch(/namedForViewer\(|personName\(/);
   });
 
+  it("the People page filters both the table and the absence rows to the member's own", () => {
+    expect(read("components/people-page.tsx").match(/ownRowsOnly\(/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
   it("the People page says how to get linked when a member has no row", () => {
     expect(read("components/people-page.tsx")).toContain("Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an owner to link you on Settings → Access.");
   });
