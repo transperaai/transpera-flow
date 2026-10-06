@@ -78,7 +78,7 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
   PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
 - **Supabase token (blocking):** `SUPABASE_ACCESS_TOKEN` in the cloud environment returns `401 Unauthorized` from the
-  Management API (6 Oct evening). Austin will put a new token in the environment settings; a new session picks it up.
+  Management API (6 Oct evening). Austin put a new token in the environment settings on 6 Oct evening; it takes effect in a new session.
 - **Auto mode:** its safety check blocks `prod-sql.sh` as "Production Reads", even read-only preflight. Austin plans an
   overnight run with access granted; run production steps with auto mode off or a permission rule for `prod-sql.sh`.
 - C5 is Austin's.
@@ -185,7 +185,7 @@ password to `postgres`.
 
 ## Next steps
 
-**Overnight run (Austin, 6 Oct): do everything through to merged, then carry on with the next tickets.** First check the
+**Start: land the three open PRs, then build the overnight list below.** First check the
 token: `bash packages/db/scripts/prod-sql.sh -c "select 1"` must return a row, not 401. If it fails, stop and say so.
 
 **#207's CI (as of 6 Oct evening):** after the PostgREST test fix (705a258), one CI run failed in
@@ -213,8 +213,57 @@ Then:
   the editor. Close #30.
 - Regenerate `database.types.ts` if a linked machine is available; otherwise leave the hand edits (they match the
   generator's output and order).
-- Then the next tickets, two or three per session, each with an Opus brief first: B20 (#197), B3, B4, B7, B5, check B2
-  against B19, C1, C4; B21 (#203) raises restore limits; the map node redesign with Austin.
+
+### Overnight run (Austin, 6 Oct): finish everything that doesn't need him
+
+Austin is asleep for this run. The aim is to finish Milestones B and C as far as they can go without him. The usual
+two-or-three-tickets rule is relaxed for this run only: keep the main session's context small by delegating everything,
+and update this handover (a docs-only PR, merged when green) **after every merged ticket**, so a restart loses nothing.
+
+**Order** (dependencies from each issue's "Blocked by"; after the three PRs above have merged):
+
+| # | Ticket | Notes |
+|---|---|---|
+| 1 | B2 People page (#31) | Unblocked once #30 closes. Check it against what B19 and B1 2b already built; the member view must stay own-row only |
+| 2 | B3 View-only share links with redacted snapshots (#32) | Redaction must follow #30's rules: no pay, no names beyond labels |
+| 3 | B4 Play links, proposals into Suggestions (#33) | Blocked by B3. A52's schema already supports `created_via='play_link'` |
+| 4 | B20 Claude outside the app proposes findings (#197) | MCP; Austin's #175 decision: "MCP may propose findings" |
+| 5 | B7 Forecast planning: drag markers, compare two plans (#36) | |
+| 6 | B5 Client branding (#34) | |
+| 7 | B21 Restore bigger workspaces (#203) | Raises the restore limits in "Follow-ups" |
+| 8 | C1 CSV import wizard with column mapping (#40) | C2 (#41) is built; check what it already parses before building |
+| 9 | C4 Storybook and visual regression (#43) | Last: least product risk |
+
+Not tonight: C5 (#44, Austin's), C6 (#198, parked), the map node redesign (needs Austin), performance (parked).
+
+**Per ticket** (as in "How we work"):
+1. Comment on the issue that work has started, naming the branch.
+2. An Opus agent writes `docs/plans/<ticket>-brief.md`. It covers exact files, the data model and migration spec, patterns
+   to copy, edge cases, tests, what's out of scope, and done criteria. It quotes Austin's decisions verbatim and lists
+   open questions, **each with a default**.
+3. A Sonnet agent builds from the brief on its own branch, `claude/<ticket>-…`, and opens a draft PR. It commits and pushes
+   after every step.
+4. An Opus agent does an adversarial review; Sonnet fixes every finding, each with a test. Re-review if the fixes are
+   large.
+5. Get CI green, then apply the migration with preflight and post-apply checks (additive only), then merge.
+6. Comment on the issue and on the milestone parent (#2 or #3), then update this handover.
+
+Two independent tickets may be built in parallel in separate worktrees. Number migrations in merge order, and
+regenerate `bootstrap.sql` after each merge of `main`.
+
+**Rules while Austin is away:**
+- **Open questions:** take the brief's default. Record each default on the issue and under "Design calls Claude made,
+  for Austin to confirm". Never block waiting for an answer.
+- **Stop and skip** (note it here and move on to the next ticket) for:
+  - anything destructive in production: dropping or rewriting data, other than an additive clean-up a brief specifies
+    and a review has passed;
+  - anything needing a new secret or a paid service;
+  - anything needing a design decision only Austin can make.
+- **Never weaken a test to get green.** A test that is flaky by chance gets made robust in its own small PR.
+- If the token, the auto-mode classifier or a permission prompt blocks a production step, stop the production steps,
+  carry on building and reviewing the other tickets, and say so at the top of this handover.
+- **End of run:** a summary comment on #2 and #3, and this handover rewritten for Austin's morning: what merged, what's
+  open, decisions he needs to confirm, and anything skipped.
 
 Follow-ups noted this session:
 - B1 2b: read-time key masking (`hideAiIssueKey`, `loadIssuesForReader`) stays as defence in depth after the re-key; it
