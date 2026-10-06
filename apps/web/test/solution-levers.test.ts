@@ -102,6 +102,28 @@ describe("the Forecast's plans (amends D46)", () => {
     expect(forecastModel(last.bundle, 12, DEMO_FORECAST_START).model!.leadsPerWeek).not.toBe(99);
   });
 
+  it("when a later solution replaces an earlier one for the same process, the earlier one's lever changes are dropped (and two x0.8 don't compound)", () => {
+    const step = bundle.steps.find((x) => x.kind === "task")!.id;
+    const slow = { path: `steps.${step}.work_hours`, op: "multiply", value: 0.8 } as const;
+    const A = { ...DEMO_FORECAST_SOLUTION, id: "00000000-0000-4000-8000-0000000000a1", lever_changes: [LEADS, slow] } as SolutionRow;
+    const B = { ...DEMO_FORECAST_SOLUTION, id: "00000000-0000-4000-8000-0000000000a2", lever_changes: [] } as SolutionRow;
+    const two = [
+      { id: "11111111-1111-4111-8111-111111111111", kind: "solution" as const, date: "2026-12-01", solution_id: A.id },
+      { id: "22222222-2222-4222-8222-222222222222", kind: "solution" as const, date: "2027-03-01", solution_id: B.id },
+    ];
+    const { segments } = planSegments(bundle, two, [A, B], DEMO_FORECAST_START, bounds, 40);
+    // Where only A is live its changes count; once B replaces it, none do.
+    expect(segments.some((s) => s.solutionIds.length === 1 && s.levers.length === 2)).toBe(true);
+    expect(segments[segments.length - 1]!.solutionIds).toEqual([A.id, B.id]);
+    expect(segments[segments.length - 1]!.levers).toEqual([]);
+    // Both with x0.8 on one step: the model shows x0.8, not x0.64.
+    const both = { ...B, lever_changes: [slow] } as SolutionRow;
+    const last = planSegments(bundle, two, [A, both], DEMO_FORECAST_START, bounds, 40).segments.at(-1)!;
+    expect(last.levers).toEqual([slow]);
+    const base = forecastModel(last.bundle, 12, DEMO_FORECAST_START).model!.steps.find((x) => x.id === step)!.work;
+    expect(forecastModel(last.bundle, 12, DEMO_FORECAST_START, last.levers).model!.steps.find((x) => x.id === step)!.work).toBeCloseTo(base * 0.8, 6);
+  });
+
   it("with none, the plan's models are the same as before", () => {
     const { segments } = planSegments(bundle, marker("2027-01-01"), [DEMO_FORECAST_SOLUTION], DEMO_FORECAST_START, bounds, 40);
     for (const s of segments) {

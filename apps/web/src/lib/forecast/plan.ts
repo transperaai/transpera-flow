@@ -277,13 +277,19 @@ export function planSegments(
   const segments = starts.map((from): PlanSegment => {
     let b = withPeople;
     const solutionIds: string[] = [];
-    const levers: ScenarioPatch[] = [];
-    for (const l of live) {
-      if (l.month > from) continue;
+    const applied = live.filter((l) => l.month <= from);
+    for (const l of applied) {
       b = withSolution(b, l.solution)!;
       solutionIds.push(l.solution.id);
-      levers.push(...(l.solution.lever_changes ?? []));
     }
+    // For one process the latest solution wins, so only the winners' lever changes count: a solution another replaced keeps neither its
+    // steps nor its levers (a x0.8 from both would otherwise compound to x0.64, and a replaced solution's headcount would linger).
+    const winners = new Map<string, (typeof live)[number]>();
+    for (const l of applied) {
+      winners.delete(l.solution.process_id);
+      winners.set(l.solution.process_id, l);
+    }
+    const levers: ScenarioPatch[] = [...winners.values()].flatMap((l) => l.solution.lever_changes ?? []);
     return { from, bundle: b, solutionIds, levers };
   });
   return { segments, problems, later };
