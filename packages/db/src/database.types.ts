@@ -697,6 +697,7 @@ export type Database = {
           column_map: Json
           created_at: string
           created_by: string | null
+          details: Json
           file_name: string
           id: string
           imported_at: string
@@ -709,6 +710,7 @@ export type Database = {
           column_map?: Json
           created_at?: string
           created_by?: string | null
+          details?: Json
           file_name: string
           id?: string
           imported_at?: string
@@ -721,6 +723,7 @@ export type Database = {
           column_map?: Json
           created_at?: string
           created_by?: string | null
+          details?: Json
           file_name?: string
           id?: string
           imported_at?: string
@@ -3350,6 +3353,20 @@ export type Database = {
         }
         Returns: Json
       }
+      record_calibration_import: {
+        Args: {
+          p_column_map: Json
+          p_details: Json
+          p_file_name: string
+          p_keys: string[]
+          p_kind: string
+          p_process: string
+          p_results: Json
+          p_row_count: number
+          p_workspace: string
+        }
+        Returns: Json
+      }
       record_client_calibration: {
         Args: {
           p_clients: Json
@@ -3359,6 +3376,17 @@ export type Database = {
           p_workspace: string
         }
         Returns: Json
+      }
+      record_dataset: {
+        Args: {
+          p_column_map: Json
+          p_details: Json
+          p_file_name: string
+          p_kind: string
+          p_row_count: number
+          p_workspace: string
+        }
+        Returns: string
       }
       reserve_ai_run: {
         Args: { p_process: string; p_trigger: string; p_workspace: string }
