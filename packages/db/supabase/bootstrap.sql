@@ -33252,9 +33252,15 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 --     `accent` (the light-theme accent, lower-case #rrggbb), `accent_dark` (an optional dark-theme accent; null: the app derives
 --     it) and `logo_path` (`<this workspace's id>/<uuid>.<png|jpg|webp>`, the object's name in the `branding` bucket).
 --   * `private.branding_logo_guard` and its trigger `branding_logo_guard` (before insert, or update of `branding`, on
---     `workspaces`): for anyone signed in, a new `logo_path` must name an object of the `branding` bucket. It does not compare
---     `owner_id` (unconfirmed on production, docs/HANDOVER.md); the upload policy already limits the folder to the workspace's
---     owners and agency admins.
+--     `workspaces`): for anyone signed in, a new `logo_path` must name an object of the `branding` bucket whose stored
+--     metadata says a PNG, JPEG or WebP (matching the name's extension) of 1 byte to 512 KB. It does not compare `owner_id`
+--     (unconfirmed on production, docs/HANDOVER.md); the upload policy already limits the folder to the workspace's owners
+--     and agency admins.
+--   * ACCEPTED LIMIT: Postgres can't read the bytes, so the 16 to 2048 pixel limit (the guard against a small file that
+--     declares a huge image) and the check that the bytes really are that type are made by the app only (browser, then
+--     `attachWorkspaceLogo` on the server). An owner or agency admin who skips the app, uploading through the Storage API and
+--     saving `branding.logo_path` through `save_fields`, can keep an unchecked file of the declared type and size; the sidebar
+--     decodes images asynchronously. Only owners and agency admins can do this, in their own workspace's folder.
 --   * Supabase Storage: a PUBLIC bucket `branding` (512 KB a file; PNG, JPEG and WebP only) and three policies on
 --     `storage.objects` (read, upload, delete) for owners and agency admins of the workspace in the object's first folder.
 --     No update: a logo is replaced by a new name. Anon: nothing through the API (the public URL doesn't use the policies).
@@ -33308,6 +33314,9 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 --   7. The row:
 --        select version, name from supabase_migrations.schema_migrations where version = '20261214000000';
 --
+-- ROLLBACK ORDER: B19's rollback (20261204000000, process_admin_source_files) drops private.storage_workspace, which the three
+-- policies below use, so it needs THIS rollback done first.
+--
 -- ROLLBACK (redeploy a build from before it FIRST; one transaction. Saved branding is lost; logos stay in the bucket until it
 -- is emptied from the Storage dashboard, because a bucket with objects can't be deleted from SQL):
 --
@@ -33320,6 +33329,7 @@ grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authen
 --   drop function if exists private.branding_logo_guard();
 --   alter table public.workspaces drop constraint if exists workspaces_branding_shape;
 --   alter table public.workspaces drop column if exists branding;
+--   delete from supabase_migrations.schema_migrations where version = '20261214000000';
 --   commit;
 
 -- Branding (issue #34): the light-theme accent, an optional dark-theme accent (null: derived by the app), and the logo's
@@ -33338,7 +33348,9 @@ alter table public.workspaces add constraint workspaces_branding_shape check (
   and coalesce(branding ->> 'logo_path' ~ ('^' || id::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$'), true)
 );
 
--- A workspace keeps only a logo that is in the bucket: nobody points it at a name with nothing behind it. Unlike B19's
+-- A workspace keeps only a logo that is in the bucket, whose stored metadata is a PNG, JPEG or WebP of up to 512 KB that
+-- matches the name's extension: nobody points it at a name with nothing behind it. (Pixel size and the real bytes are the
+-- app's check: see the accepted limit in the header.) Unlike B19's
 -- source guard this does NOT compare `owner_id` (unconfirmed on production; HANDOVER): the upload policy already limits
 -- the folder to the workspace's owners and agency admins. Security definer: it reads `storage.objects`.
 create function private.branding_logo_guard() returns trigger
@@ -33347,6 +33359,9 @@ set search_path = ''
 as $$
 declare
   path text := new.branding ->> 'logo_path';
+  meta jsonb;
+  want text;
+  size bigint;
 begin
   if path is null or (tg_op = 'UPDATE' and path is not distinct from (old.branding ->> 'logo_path')) then
     return new;
@@ -33355,8 +33370,15 @@ begin
   if auth.uid() is null and coalesce(current_setting('role', true), '') not in ('authenticated', 'anon') then
     return new;
   end if;
-  if not exists (select 1 from storage.objects o where o.bucket_id = 'branding' and o.name = path) then
+  select o.metadata into meta from storage.objects o where o.bucket_id = 'branding' and o.name = path;
+  if not found then
     raise exception 'Upload the logo first: the workspace keeps only a logo uploaded for it' using errcode = '42501';
+  end if;
+  -- Storage records the type it was sent and the size it stored (a number; some versions write it as text).
+  want := case substring(path from '\.([a-z]+)$') when 'png' then 'image/png' when 'jpg' then 'image/jpeg' else 'image/webp' end;
+  size := case when meta ->> 'size' ~ '^[0-9]+$' then (meta ->> 'size')::bigint else 0 end;
+  if coalesce(meta ->> 'mimetype', '') <> want or size not between 1 and 524288 then
+    raise exception 'The logo must be a PNG, JPEG or WebP image of up to 512 KB' using errcode = '42501';
   end if;
   return new;
 end;
@@ -33397,9 +33419,15 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     `accent` (the light-theme accent, lower-case #rrggbb), `accent_dark` (an optional dark-theme accent; null: the app derives
 --     it) and `logo_path` (`<this workspace''s id>/<uuid>.<png|jpg|webp>`, the object''s name in the `branding` bucket).
 --   * `private.branding_logo_guard` and its trigger `branding_logo_guard` (before insert, or update of `branding`, on
---     `workspaces`): for anyone signed in, a new `logo_path` must name an object of the `branding` bucket. It does not compare
---     `owner_id` (unconfirmed on production, docs/HANDOVER.md); the upload policy already limits the folder to the workspace''s
---     owners and agency admins.
+--     `workspaces`): for anyone signed in, a new `logo_path` must name an object of the `branding` bucket whose stored
+--     metadata says a PNG, JPEG or WebP (matching the name''s extension) of 1 byte to 512 KB. It does not compare `owner_id`
+--     (unconfirmed on production, docs/HANDOVER.md); the upload policy already limits the folder to the workspace''s owners
+--     and agency admins.
+--   * ACCEPTED LIMIT: Postgres can''t read the bytes, so the 16 to 2048 pixel limit (the guard against a small file that
+--     declares a huge image) and the check that the bytes really are that type are made by the app only (browser, then
+--     `attachWorkspaceLogo` on the server). An owner or agency admin who skips the app, uploading through the Storage API and
+--     saving `branding.logo_path` through `save_fields`, can keep an unchecked file of the declared type and size; the sidebar
+--     decodes images asynchronously. Only owners and agency admins can do this, in their own workspace''s folder.
 --   * Supabase Storage: a PUBLIC bucket `branding` (512 KB a file; PNG, JPEG and WebP only) and three policies on
 --     `storage.objects` (read, upload, delete) for owners and agency admins of the workspace in the object''s first folder.
 --     No update: a logo is replaced by a new name. Anon: nothing through the API (the public URL doesn''t use the policies).
@@ -33453,6 +33481,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   7. The row:
 --        select version, name from supabase_migrations.schema_migrations where version = ''20261214000000'';
 --
+-- ROLLBACK ORDER: B19''s rollback (20261204000000, process_admin_source_files) drops private.storage_workspace, which the three
+-- policies below use, so it needs THIS rollback done first.
+--
 -- ROLLBACK (redeploy a build from before it FIRST; one transaction. Saved branding is lost; logos stay in the bucket until it
 -- is emptied from the Storage dashboard, because a bucket with objects can''t be deleted from SQL):
 --
@@ -33465,6 +33496,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop function if exists private.branding_logo_guard();
 --   alter table public.workspaces drop constraint if exists workspaces_branding_shape;
 --   alter table public.workspaces drop column if exists branding;
+--   delete from supabase_migrations.schema_migrations where version = ''20261214000000'';
 --   commit;
 
 -- Branding (issue #34): the light-theme accent, an optional dark-theme accent (null: derived by the app), and the logo''s
@@ -33483,7 +33515,9 @@ alter table public.workspaces add constraint workspaces_branding_shape check (
   and coalesce(branding ->> ''logo_path'' ~ (''^'' || id::text || ''/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$''), true)
 );
 
--- A workspace keeps only a logo that is in the bucket: nobody points it at a name with nothing behind it. Unlike B19''s
+-- A workspace keeps only a logo that is in the bucket, whose stored metadata is a PNG, JPEG or WebP of up to 512 KB that
+-- matches the name''s extension: nobody points it at a name with nothing behind it. (Pixel size and the real bytes are the
+-- app''s check: see the accepted limit in the header.) Unlike B19''s
 -- source guard this does NOT compare `owner_id` (unconfirmed on production; HANDOVER): the upload policy already limits
 -- the folder to the workspace''s owners and agency admins. Security definer: it reads `storage.objects`.
 create function private.branding_logo_guard() returns trigger
@@ -33492,6 +33526,9 @@ set search_path = ''''
 as $$
 declare
   path text := new.branding ->> ''logo_path'';
+  meta jsonb;
+  want text;
+  size bigint;
 begin
   if path is null or (tg_op = ''UPDATE'' and path is not distinct from (old.branding ->> ''logo_path'')) then
     return new;
@@ -33500,8 +33537,15 @@ begin
   if auth.uid() is null and coalesce(current_setting(''role'', true), '''') not in (''authenticated'', ''anon'') then
     return new;
   end if;
-  if not exists (select 1 from storage.objects o where o.bucket_id = ''branding'' and o.name = path) then
+  select o.metadata into meta from storage.objects o where o.bucket_id = ''branding'' and o.name = path;
+  if not found then
     raise exception ''Upload the logo first: the workspace keeps only a logo uploaded for it'' using errcode = ''42501'';
+  end if;
+  -- Storage records the type it was sent and the size it stored (a number; some versions write it as text).
+  want := case substring(path from ''\.([a-z]+)$'') when ''png'' then ''image/png'' when ''jpg'' then ''image/jpeg'' else ''image/webp'' end;
+  size := case when meta ->> ''size'' ~ ''^[0-9]+$'' then (meta ->> ''size'')::bigint else 0 end;
+  if coalesce(meta ->> ''mimetype'', '''') <> want or size not between 1 and 524288 then
+    raise exception ''The logo must be a PNG, JPEG or WebP image of up to 512 KB'' using errcode = ''42501'';
   end if;
   return new;
 end;

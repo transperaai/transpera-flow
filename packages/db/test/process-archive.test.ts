@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { headerRollback } from "./header-rollback";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // Process admin (issue #182, B19 2/2, migration 20261204000000; ADR 0014 "B19: archiving a process"): an editor makes a
@@ -455,11 +456,10 @@ describe("the rollback in the header", () => {
       .join("\n")
       .replace("delete from supabase_migrations.schema_migrations where version = '20261204000000';", "")
       .replace("alter table public.processes drop column", () => `${bodies}\nalter table public.processes drop column`);
-    // Client branding's storage policies (20261214000000, B5) use private.storage_workspace, so they are rolled back first, as
-    // its own header says; this rollback can't drop the function while they exist.
-    await db.client.query(`drop policy if exists "branding: managers read" on storage.objects;
-      drop policy if exists "branding: managers upload" on storage.objects;
-      drop policy if exists "branding: managers delete" on storage.objects;`);
+    // Client branding's rollback (20261214000000, B5) comes first: its policies use private.storage_workspace, which this
+    // rollback drops (B5's header says so). It is parsed from B5's header, so it can't drift. The harness keeps no
+    // schema_migrations table, so that one delete is left out, as it is for this migration's own above.
+    await db.client.query(headerRollback("20261214000000_client_branding.sql").replace("delete from supabase_migrations.schema_migrations where version = '20261214000000';", ""));
     await db.client.query(rollback);
     expect(await q("select column_name from information_schema.columns where table_schema = 'public' and table_name in ('processes', 'sources') and column_name in ('archived_at', 'archived_by', 'file_path', 'file_name', 'file_type', 'file_size')")).toEqual([]);
     expect(await q("select proname from pg_proc where proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace')")).toEqual([]);
