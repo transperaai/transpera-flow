@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "./harness";
 import { headerRollback } from "./header-rollback";
 
-// Play links, migration 20261221000000 (B4, row 65): where it sits in the apply order, that the six functions it replaces are full
+// Play links, migration 20261221000000 (B4, row 66): where it sits in the apply order, that the six functions it replaces are full
 // copies of their sources changing only the `-- B4` lines, that the header's md5s are the real ones, that the apply file carries the
 // migration byte for byte, and that the header's ROLLBACK block puts everything back (run on a test database).
 
@@ -19,27 +19,27 @@ const ledger = readFileSync(join(root, "../../docs/production-migrations.md"), "
 const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.slice(0, 14)).sort();
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 
-describe("play links: row 65 of the production ledger", () => {
-  it("nothing on disk is past it, and it follows B3's 20261220000000 directly", () => {
-    expect(versions.filter((v) => v >= "20261220000000")).toEqual(["20261220000000", VERSION]);
+describe("play links: row 66 of the production ledger", () => {
+  it("nothing on disk is past it, and it follows B3's 20261220000000 (the workspace-delete fix, 20261220500000, is on main's side and may not be on this branch yet)", () => {
+    expect(versions.filter((v) => v >= "20261220000000" && v !== "20261220500000")).toEqual(["20261220000000", VERSION]);
   });
 
-  it("preflight 0 expects B3 as the latest applied and nothing at or past this version; the headers name row 65", () => {
+  it("preflight 0 expects B3 as the latest applied and nothing at or past this version; the headers name row 66", () => {
     for (const text of [migration, apply]) {
-      expect(text).toContain(`Expect 20261219000000, 20261220000000 and nothing >= '${VERSION}'`);
+      expect(text).toContain(`Expect 20261219000000, 20261220000000, 20261220500000 and nothing >= '${VERSION}'`);
       expect(text).toContain("where version >= '20261219000000'");
     }
-    expect(migration).toContain("after 20261220000000 (B3, row 64)");
-    expect(migration).toContain("this is row 65");
-    expect(apply).toContain("this is row 65");
-    expect(apply).toContain("row 64 (20261220000000, B3)");
+    expect(migration).toContain("after 20261220500000 (the workspace-delete fix, row 65)");
+    expect(migration).toContain("this is row 66");
+    expect(apply).toContain("this is row 66");
+    expect(apply).toContain("row 65 (20261220500000, the workspace-delete fix)");
   });
 
-  it("the ledger has row 65 for this version, marked NOT applied, and no other row uses 65 or this version", () => {
-    expect(ledger).toMatch(new RegExp(`\\| 65 \\| ${VERSION} \\| play_links \\| `));
-    expect(ledger.match(/^\| 65 \|/gm)).toHaveLength(1);
+  it("the ledger has row 66 for this version, marked NOT applied, and no other row uses 66 or this version", () => {
+    expect(ledger).toMatch(new RegExp(`\\| 66 \\| ${VERSION} \\| play_links \\| `));
+    expect(ledger.match(/^\| 66 \|/gm)).toHaveLength(1);
     expect(ledger.split(VERSION).length - 1).toBeGreaterThanOrEqual(1);
-    expect(ledger).toMatch(new RegExp(`\\| 65 \\| ${VERSION} \\| play_links \\| NOT applied \\| B4`));
+    expect(ledger).toMatch(new RegExp(`\\| 66 \\| ${VERSION} \\| play_links \\| NOT applied \\| B4`));
   });
 });
 

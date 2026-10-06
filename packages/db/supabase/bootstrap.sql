@@ -38743,10 +38743,10 @@ grant execute on function public.open_share_link(text) to anon, authenticated;
 --     `import_process_bundle` does with `transpera.importing`), and the trigger honours it. Any other insert is `mcp` with no visitor
 --     details and no link.
 --
--- ORDER: after 20261220000000 (B3, row 64) and every earlier row; this is row 65. Renumber if anything later merges first.
+-- ORDER: after 20261220500000 (the workspace-delete fix, row 65), 20261220000000 (B3, row 64) and every earlier row; this is row 66. Renumber if anything later merges first.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. B3 applied, nothing at or past this one. Expect 20261219000000, 20261220000000 and nothing >= '20261221000000':
+--   0. B3 and the workspace-delete fix applied, nothing at or past this one. Expect 20261219000000, 20261220000000, 20261220500000 and nothing >= '20261221000000':
 --        select version from supabase_migrations.schema_migrations where version >= '20261219000000' order by 1;
 --   1. Nothing created yet. Expect null x4 and 0, 0:
 --        select to_regprocedure('public.submit_play_proposal(text, text, text, text, text, uuid, jsonb)'), to_regprocedure('public.play_proposal_contacts(uuid)'), to_regprocedure('private.play_patch_problem(uuid, public.share_links, jsonb)'), to_regprocedure('private.lever_kind_ids()'), (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'suggestion_proposals' and column_name in ('share_link_id', 'visitor_text')), (select count(*) from pg_indexes where indexname = 'suggestion_proposals_share_link_idx');
@@ -40100,10 +40100,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     `import_process_bundle` does with `transpera.importing`), and the trigger honours it. Any other insert is `mcp` with no visitor
 --     details and no link.
 --
--- ORDER: after 20261220000000 (B3, row 64) and every earlier row; this is row 65. Renumber if anything later merges first.
+-- ORDER: after 20261220500000 (the workspace-delete fix, row 65), 20261220000000 (B3, row 64) and every earlier row; this is row 66. Renumber if anything later merges first.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. B3 applied, nothing at or past this one. Expect 20261219000000, 20261220000000 and nothing >= ''20261221000000'':
+--   0. B3 and the workspace-delete fix applied, nothing at or past this one. Expect 20261219000000, 20261220000000, 20261220500000 and nothing >= ''20261221000000'':
 --        select version from supabase_migrations.schema_migrations where version >= ''20261219000000'' order by 1;
 --   1. Nothing created yet. Expect null x4 and 0, 0:
 --        select to_regprocedure(''public.submit_play_proposal(text, text, text, text, text, uuid, jsonb)''), to_regprocedure(''public.play_proposal_contacts(uuid)''), to_regprocedure(''private.play_patch_problem(uuid, public.share_links, jsonb)''), to_regprocedure(''private.lever_kind_ids()''), (select count(*) from information_schema.columns where table_schema = ''public'' and table_name = ''suggestion_proposals'' and column_name in (''share_link_id'', ''visitor_text'')), (select count(*) from pg_indexes where indexname = ''suggestion_proposals_share_link_idx'');

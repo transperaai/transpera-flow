@@ -3,7 +3,7 @@
 Updated 6 Oct 2026 (overnight run, 20:30 UTC). All agents hit the usage limit at about 13:50 UTC and the container
 restarted; work resumed at 19:18 UTC from what was pushed. Merged tonight: #205, #207, #206, #209, #212 (B20), #214, #211
 (B2), #213 (B5), #216 (B21), #220 (C4), #221, #218 (C1), #222, #217 (B7). Production is at row 63 (`20261219000000`).
-Open: B4 (#33, draft PR `claude/b4-play-links`; migration row 65 not applied). Status table under "Next steps". Start a new session with:
+Open: B4 (#33, draft PR `claude/b4-play-links`; migration row 66 not applied). Status table under "Next steps". Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -208,7 +208,7 @@ at merge time if the order changes.
 | C4 Storybook (#43) | #220 | **merged** (new `visual` CI job; `[visual-update]` approves baselines) | none |
 | B7 Forecast planning (#36) | #217 | **merged**, applied; ENGINE 1.9.0 | `20261219000000` (63) |
 | B3 Share links (#32) | #215 `claude/b3-share-links` | fourth review round: redaction redesigned (free-text keys, token matching); fixing uuid-vs-currency false positives, first-principles keys, client whole-name matching; PRD D47 | `20261220000000` (64) |
-| B4 Play links (#33) | `claude/b4-play-links` (draft PR) | built; B3 has merged; to review, apply row 65 BEFORE deploying, then merge | `20261221000000` (65, NOT applied) |
+| B4 Play links (#33) | `claude/b4-play-links` (draft PR) | built; B3 has merged; to review, apply row 66 BEFORE deploying, then merge | `20261221000000` (66, NOT applied) |
 
 B3 must stay security-reviewed until a verification round finds nothing blocking: it is the only public, unauthenticated surface. Each review comment and fix list is on its PR.
 

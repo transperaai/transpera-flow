@@ -49,8 +49,8 @@ const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.sli
 describe("share links: row 64 of the production ledger", () => {
   it("nothing on disk is at or past it but itself and B4's 20261221000000 (row 65), and nothing is past the 20261219000000 it is applied after", () => {
     // Rows 61 (B21), 62 (C1) and 63 (B7, 20261219000000) are other tickets', not on this branch: this one is applied after them.
-    expect(versions.filter((v) => v >= VERSION)).toEqual([VERSION, "20261221000000"]);
-    expect(versions.filter((v) => v > "20261219000000" && v < VERSION)).toEqual([]);
+    expect(versions.filter((v) => v >= VERSION && v !== "20261220500000")).toEqual([VERSION, "20261221000000"]);
+    expect(versions.filter((v) => v > "20261219000000" && v < VERSION && v !== "20261220500000")).toEqual([]);
   });
 
   it("preflight 0 expects the latest applied migration to be the one before it, and nothing at or past its own", () => {

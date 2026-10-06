@@ -1,7 +1,7 @@
 -- Production apply file for 20261221000000_play_links (B4, issue #33). Two columns and an index on `suggestion_proposals`, one widened
 -- check, one column grant, four new functions (`private.lever_kind_ids`, `private.play_patch_problem`, `public.submit_play_proposal`,
 -- `public.play_proposal_contacts`) and six `create or replace` of functions copied from B3 and earlier migrations (only `-- B4` lines
--- differ). No row is changed. Applies after row 64 (20261220000000, B3); this is row 65. Preflight, post-apply checks and rollback are in
+-- differ). No row is changed. Applies after row 65 (20261220500000, the workspace-delete fix) and row 64 (20261220000000, B3); this is row 66. Preflight, post-apply checks and rollback are in
 -- the migration's own header, repeated below. Apply BEFORE deploying the app (the app calls `submit_play_proposal` and inserts `mode = 'play'`).
 -- Sets `lock_timeout` to 5 s.
 
@@ -55,10 +55,10 @@ set local lock_timeout = '5s';
 --     `import_process_bundle` does with `transpera.importing`), and the trigger honours it. Any other insert is `mcp` with no visitor
 --     details and no link.
 --
--- ORDER: after 20261220000000 (B3, row 64) and every earlier row; this is row 65. Renumber if anything later merges first.
+-- ORDER: after 20261220500000 (the workspace-delete fix, row 65), 20261220000000 (B3, row 64) and every earlier row; this is row 66. Renumber if anything later merges first.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. B3 applied, nothing at or past this one. Expect 20261219000000, 20261220000000 and nothing >= '20261221000000':
+--   0. B3 and the workspace-delete fix applied, nothing at or past this one. Expect 20261219000000, 20261220000000, 20261220500000 and nothing >= '20261221000000':
 --        select version from supabase_migrations.schema_migrations where version >= '20261219000000' order by 1;
 --   1. Nothing created yet. Expect null x4 and 0, 0:
 --        select to_regprocedure('public.submit_play_proposal(text, text, text, text, text, uuid, jsonb)'), to_regprocedure('public.play_proposal_contacts(uuid)'), to_regprocedure('private.play_patch_problem(uuid, public.share_links, jsonb)'), to_regprocedure('private.lever_kind_ids()'), (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'suggestion_proposals' and column_name in ('share_link_id', 'visitor_text')), (select count(*) from pg_indexes where indexname = 'suggestion_proposals_share_link_idx');
@@ -1412,10 +1412,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     `import_process_bundle` does with `transpera.importing`), and the trigger honours it. Any other insert is `mcp` with no visitor
 --     details and no link.
 --
--- ORDER: after 20261220000000 (B3, row 64) and every earlier row; this is row 65. Renumber if anything later merges first.
+-- ORDER: after 20261220500000 (the workspace-delete fix, row 65), 20261220000000 (B3, row 64) and every earlier row; this is row 66. Renumber if anything later merges first.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. B3 applied, nothing at or past this one. Expect 20261219000000, 20261220000000 and nothing >= '20261221000000':
+--   0. B3 and the workspace-delete fix applied, nothing at or past this one. Expect 20261219000000, 20261220000000, 20261220500000 and nothing >= '20261221000000':
 --        select version from supabase_migrations.schema_migrations where version >= '20261219000000' order by 1;
 --   1. Nothing created yet. Expect null x4 and 0, 0:
 --        select to_regprocedure('public.submit_play_proposal(text, text, text, text, text, uuid, jsonb)'), to_regprocedure('public.play_proposal_contacts(uuid)'), to_regprocedure('private.play_patch_problem(uuid, public.share_links, jsonb)'), to_regprocedure('private.lever_kind_ids()'), (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'suggestion_proposals' and column_name in ('share_link_id', 'visitor_text')), (select count(*) from pg_indexes where indexname = 'suggestion_proposals_share_link_idx');
