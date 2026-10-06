@@ -32,23 +32,23 @@ export const WORKSPACE_IMPORT_LIMITS = {
   compressedBytes: 4 * 1024 * 1024,
   /** The serialised plan. */
   planBytes: 10 * 1024 * 1024,
-  processes: 75,
-  steps: 750,
-  edges: 1500,
+  processes: 50,
+  steps: 500,
+  edges: 1000,
   sources: 200,
   sourceChars: 3_000_000,
-  issues: 600,
+  issues: 300,
   people: 500,
-  clients: 2000,
+  clients: 1000,
   scenarios: 300,
   blocks: 300,
   suggestions: 500,
   proposals: 300,
-  /** The link tables, sized from the limits above (2 role assignments a person, 5 skills a person, one assignment for every other client, 5 links a source). */
-  personRoles: 1000,
-  personSkills: 2500,
-  clientAssignments: 1000,
-  sourceLinks: 1000,
+  /** The link tables, each row about 0.2 ms: sized with the limits above so that every limit at once restores in about 2 s (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, 2 links a source). */
+  personRoles: 400,
+  personSkills: 1000,
+  clientAssignments: 400,
+  sourceLinks: 400,
 } as const;
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;

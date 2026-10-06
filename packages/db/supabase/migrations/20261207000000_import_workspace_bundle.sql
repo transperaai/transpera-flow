@@ -49,9 +49,9 @@
 --    draft (all processes exist first, so holder steps resolve whichever process they point at), services and everything that
 --    points at processes, source links, pending suggestions and proposals (recorded as uploads while `transpera.importing` is
 --    on), then the archived processes are archived and each process's import is logged (`log_process_import`).
---    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 75 processes, 750 steps, 1,500 edges, 200 sources and
---    3,000,000 characters of their text, 600 issues, 500 people, 2,000 clients, 300 scenarios, 300 blocks, 500
---    suggestions, 300 proposals, 1,000 role assignments, 2,500 skills, 1,000 client assignments, 1,000 source links, and a plan of 10 MB (lower than the brief's starting values, which took 6 s at every limit at
+--    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 50 processes, 500 steps, 1,000 edges, 200 sources and
+--    3,000,000 characters of their text, 300 issues, 500 people, 1,000 clients, 300 scenarios, 300 blocks, 500
+--    suggestions, 300 proposals, 400 role assignments, 1,000 skills, 400 client assignments, 400 source links, and a plan of 10 MB (lower than the brief's starting values, which took 6 s at every limit at
 --    once, over the 3 s budget; see the comment on WORKSPACE_IMPORT_LIMITS) (measured as the compact JSON the app sends; the database measures the
 --    jsonb text, which carries a space after each colon and comma, so it allows 13,107,200 characters of it). Supabase gives
 --    `authenticated` an 8 s `statement_timeout`: one restore is one statement, and the performance test in
@@ -206,15 +206,15 @@ begin
   select coalesce(sum(jsonb_array_length(p.value -> 'steps')), 0), coalesce(sum(jsonb_array_length(p.value -> 'edges')), 0)
     into step_total, edge_total from jsonb_array_elements(p_plan -> 'processes') p;
   select coalesce(sum(char_length(coalesce(s.value ->> 'body', ''))), 0) into chars from jsonb_array_elements(p_plan -> 'sources') s;
-  if jsonb_array_length(p_plan -> 'processes') > 75 or step_total > 750 or edge_total > 1500
+  if jsonb_array_length(p_plan -> 'processes') > 50 or step_total > 500 or edge_total > 1000
     or jsonb_array_length(p_plan -> 'sources') > 200 or chars > 3000000
-    or jsonb_array_length(p_plan -> 'issues') > 600 or jsonb_array_length(p_plan -> 'people') > 500
-    or jsonb_array_length(p_plan -> 'clients') > 2000 or jsonb_array_length(p_plan -> 'scenarios') > 300
+    or jsonb_array_length(p_plan -> 'issues') > 300 or jsonb_array_length(p_plan -> 'people') > 500
+    or jsonb_array_length(p_plan -> 'clients') > 1000 or jsonb_array_length(p_plan -> 'scenarios') > 300
     or jsonb_array_length(p_plan -> 'blocks') > 300 or jsonb_array_length(p_plan -> 'suggestions') > 500
     or jsonb_array_length(p_plan -> 'proposals') > 300
-    or jsonb_array_length(p_plan -> 'person_roles') > 1000 or jsonb_array_length(p_plan -> 'person_skills') > 2500
-    or jsonb_array_length(p_plan -> 'client_assignments') > 1000 or jsonb_array_length(p_plan -> 'source_links') > 1000 then
-    raise exception 'import_workspace_bundle: the plan is over a limit (75 processes, 750 steps, 1500 edges, 200 sources of 3,000,000 characters, 600 issues, 500 people, 2000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 1000 role assignments, 2500 skills, 1000 client assignments, 1000 source links)' using errcode = '22023';
+    or jsonb_array_length(p_plan -> 'person_roles') > 400 or jsonb_array_length(p_plan -> 'person_skills') > 1000
+    or jsonb_array_length(p_plan -> 'client_assignments') > 400 or jsonb_array_length(p_plan -> 'source_links') > 400 then
+    raise exception 'import_workspace_bundle: the plan is over a limit (50 processes, 500 steps, 1000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 400 role assignments, 1000 skills, 400 client assignments, 400 source links)' using errcode = '22023';
   end if;
   -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
   if exists (select 1 from jsonb_array_elements(p_plan -> 'scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
