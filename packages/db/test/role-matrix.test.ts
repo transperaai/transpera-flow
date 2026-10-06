@@ -27,7 +27,7 @@ interface Caller {
 
 let db: TestDb;
 const callers: Record<string, Caller> = {};
-const ids = { client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "" };
+const ids = { suggestion: "", proposal: "", client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "" };
 
 /** A SQL statement and its parameters. */
 type Q = [sql: string, params: unknown[]];
@@ -236,6 +236,7 @@ beforeAll(async () => {
   ids.seedDataset = await dataset("seed-ds.csv");
   ids.probeDataset = await dataset("probe-ds.csv");
 
+  // (Filled once the seed rows below exist.)
   // Every table gets a seed row (as the superuser), so a read count above zero and a refused update or delete mean something.
   ids.client = (await db.client.query("insert into clients (workspace_id, name) values ($1, 'x seed') returning id", [ws])).rows[0].id;
   for (const t of TABLES) {
@@ -243,6 +244,8 @@ beforeAll(async () => {
     const [sql, params] = t.insert("seed");
     await db.client.query(sql.includes("on conflict") ? sql : `${sql} on conflict do nothing`, params);
   }
+  ids.suggestion = (await db.client.query("select id from suggestions where workspace_id = $1 and note = 'x seed'", [ws])).rows[0].id;
+  ids.proposal = (await db.client.query("select id from suggestion_proposals where workspace_id = $1 and title = 'x seed'", [ws])).rows[0].id;
 }, 120_000);
 
 afterAll(async () => {
@@ -373,8 +376,8 @@ describe("functions", () => {
       call: (c) => c.query("select public.resolve_issue($1, $2, 'not_a_problem', 'Matrix', 'resolved') as r", [ws, openIssue]),
       refusal: { throws: /you cannot change issues/ },
     },
-    { name: "review_suggestions", call: (c) => c.query("select public.review_suggestions(array[]::uuid[], 'reject', null) as r"), refusal: { throws: /./ } },
-    { name: "review_proposals", call: (c) => c.query("select public.review_proposals(array[]::uuid[], 'reject', null) as r"), refusal: { throws: /./ } },
+    { name: "review_suggestions", call: (c) => c.query("select public.review_suggestions(array[$1::uuid], 'reject', null) as r", [ids.suggestion]), refusal: { status: "not_found" } },
+    { name: "review_proposals", call: (c) => c.query("select public.review_proposals(array[$1::uuid], 'reject', null) as r", [ids.proposal]), refusal: { status: "not_found" } },
     { name: "create_library_process", call: (c) => c.query("select public.create_library_process($1, 'Matrix process', 'pipeline') as r", [ws]), refusal: { status: "not_found" } },
     {
       name: "save_fields",
@@ -387,8 +390,9 @@ describe("functions", () => {
     await c.query("savepoint rpc");
     try {
       const res = (await rpc.call(c)) as pg.QueryResult;
-      const r = res.rows[0]?.r as { status?: string } | null | undefined;
-      return { status: r?.status };
+      // A result is an object with a status, or (the review functions) a list of {id, status}, one per id asked for.
+      const r = res.rows[0]?.r as { status?: string } | { status?: string }[] | null | undefined;
+      return { status: (Array.isArray(r) ? r[0] : r)?.status };
     } catch (e) {
       await c.query("rollback to savepoint rpc");
       return { error: (e as Error).message };
@@ -402,8 +406,9 @@ describe("functions", () => {
         seen[role] = await db.as(callers[role]!.claims, (c) => outcome(c, rpc));
       }
       for (const role of ["owner", "editor"]) {
-        expect(seen[role], `${rpc.name} as ${role}`).not.toMatchObject({ status: "not_found" });
-        expect(seen[role]!.error ?? "", `${rpc.name} as ${role}`).not.toMatch(/permission denied|row-level security|not allowed/i);
+        // Allowed: no error at all, and not the refusal's status.
+        expect(seen[role]!.error, `${rpc.name} as ${role}`).toBeUndefined();
+        if ("status" in rpc.refusal) expect(seen[role]!.status, `${rpc.name} as ${role}`).not.toBe(rpc.refusal.status);
       }
       for (const role of ["member", "viewer", "signed in, no membership"]) {
         if ("status" in rpc.refusal) expect(seen[role], `${rpc.name} as ${role}`).toEqual({ status: rpc.refusal.status });
