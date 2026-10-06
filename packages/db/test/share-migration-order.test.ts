@@ -41,9 +41,9 @@ const ledger = readFileSync(join(root, "../../docs/production-migrations.md"), "
 const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.slice(0, 14)).sort();
 
 describe("share links: row 64 of the production ledger", () => {
-  it("nothing on disk is at or past it but itself, and nothing on disk is past the 20261219000000 it is applied after", () => {
+  it("nothing on disk is at or past it but itself and B4's 20261221000000 (row 65), and nothing is past the 20261219000000 it is applied after", () => {
     // Rows 61 (B21), 62 (C1) and 63 (B7, 20261219000000) are other tickets', not on this branch: this one is applied after them.
-    expect(versions.filter((v) => v >= VERSION)).toEqual([VERSION]);
+    expect(versions.filter((v) => v >= VERSION)).toEqual([VERSION, "20261221000000"]);
     expect(versions.filter((v) => v > "20261219000000" && v < VERSION)).toEqual([]);
   });
 
