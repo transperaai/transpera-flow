@@ -31,7 +31,8 @@ session with:
   SECURITY INVOKER function is fine; saved solutions are listed as not restored; a restored workspace's results match the
   original within run-to-run variation (ids feed the random streams, so exact seed equality is impossible).
 - **#41 (C2 part 2):** all five recommendations (back-solve churn, measured drivers shown beside the simulated ones, the two
-  CSVs, late payments out). Per-person speeds were never built, so they moved to C6 (#198), which needs Austin first.
+  CSVs, late payments out). Per-person speeds were never built; they moved to C6 (#198), which Austin parked as phase 2
+  (not wanted for now).
 - **#175 (B17):** Accept doesn't create the issue; company analysis is judged against the main pipeline's first principles;
   old rule settings stay unread; **MCP may propose findings** (new ticket B20, #197).
 - **#30 (B1):** Google sign-in only (magic link superseded); invites stay email-free; members and viewers see "Team member N"
@@ -50,7 +51,6 @@ session with:
 **Waiting on Austin:**
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
   PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
-- **C6 (#198):** whether per-person speed is wanted at all, and how.
 - **Auto mode:** its safety check blocks `prod-sql.sh` (and once a plain `git fetch`) even though `.claude/settings.json`
   allows it. Production steps this session ran after Austin left auto mode. Decide how future sessions should run them.
 - C5 is Austin's.
