@@ -34,6 +34,13 @@ export const KIND_LABELS: Record<CalibrationKind, { title: string; description: 
     description: "At a step with more than one way out, the share of items that went each way, from the step each item was logged at next.",
     example: "20 qualified leads going on to a call and 10 lost gives 67% and 33%.",
   },
+  // Part 2 (clients file): shown on its own card, never among part 1's step-log groups (KIND_ORDER leaves it out).
+  churn: {
+    title: "Normal churn",
+    description:
+      "The share of a service's clients who leave each month when nothing is going wrong. The churn in your file already includes what today's drivers add (late work, slow replies), so that part is taken out: normal churn × today's driver pressure gives the churn in the file.",
+    example: "9 of 40 SEO clients left over a year: 2.2% a month. Today the drivers add 25%, so normal churn is 1.8%.",
+  },
 };
 
 export const SOURCE_LABELS: Record<CalibrationValueSource, string> = { estimated: "Estimated", entered: "Entered", measured: "Measured" };

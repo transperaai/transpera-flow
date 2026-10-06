@@ -1,5 +1,6 @@
 import "server-only";
 import type { Json } from "@transpera-flow/db";
+import type { HealthSetting } from "@/lib/servicing";
 import { createClient } from "@/lib/supabase/server";
 import type { SaveOutcome } from "./field-controller";
 
@@ -85,6 +86,24 @@ export async function saveField<T extends string | number | boolean | null | str
     return { status: "conflict", theirs: result.conflicts[field] as T };
   }
   return { status: "saved", value: readField(result.row, field) as T };
+}
+
+/**
+ * Save one Client health rule (a `settings.<key>` of the workspace) if its stored value is still `base`. Owners and editors may
+ * (`save_health_rules`, a SECURITY DEFINER function that writes nothing but those four keys; `save_fields('workspaces')` is
+ * owner-only). `value` is a number from 0 to 100, or null to restore the estimated default.
+ */
+export async function saveHealthRule(workspaceId: string, key: HealthSetting, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("save_health_rules", { ws: workspaceId, base: { [key]: base }, changes: { [key]: value } });
+  if (error) return errorOutcome(error);
+  const result = data as unknown as FieldsResult;
+  if (result.status === "not_found") return { status: "not_found" };
+  const field = `settings.${key}`;
+  if (result.status === "conflict" && result.conflicts && key in result.conflicts) {
+    return { status: "conflict", theirs: result.conflicts[key] as number | null };
+  }
+  return { status: "saved", value: readField(result.row, field) as number | null };
 }
 
 export type Scalar = string | number | boolean | null;

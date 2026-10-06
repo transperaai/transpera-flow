@@ -4,6 +4,7 @@ import { Page } from "@/components/shell/page";
 import { buttonVariants } from "@/components/ui/button";
 import { loadLiveProcess, loadWorkspaceClients, loadWorkspaceSettings } from "@/lib/data";
 import { clientSources } from "@/lib/clients";
+import { loadLatestChecks } from "@/lib/calibration/client-data";
 import { addClient, saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
 import { ClientsSettings } from "./clients-settings";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
@@ -24,7 +25,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
   const { slug } = await props.params;
   const [data, bundle] = await Promise.all([loadWorkspaceSettings(slug), loadLiveProcess(slug)]);
   if (!data) notFound();
-  const roster = await loadWorkspaceClients(data.workspace.id);
+  const [roster, history] = await Promise.all([loadWorkspaceClients(data.workspace.id), loadLatestChecks(data.workspace.id)]);
   return (
     <Page
       title="Settings"
@@ -71,7 +72,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         sources={clientSources(data.processes, data.services, data.clientGroups)}
         ops={{ add: addClient, saveField: saveClientField, saveServices: saveClientServices, saveAssignment: saveClientAssignment }}
       />
-      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />
+      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} history={history} />
       <HealthSettings data={data} />
       <DemandSettings data={data} />
       <MarketSettings data={data} />

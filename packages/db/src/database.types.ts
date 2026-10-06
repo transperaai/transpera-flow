@@ -3124,6 +3124,44 @@ export type Database = {
           },
         ]
       }
+      workspace_headlines: {
+        Row: {
+          computed_at: string
+          computed_by: string | null
+          engine_version: string
+          horizon_weeks: number
+          numbers: Json
+          revision_ids: string[]
+          workspace_id: string
+        }
+        Insert: {
+          computed_at?: string
+          computed_by?: string | null
+          engine_version: string
+          horizon_weeks: number
+          numbers: Json
+          revision_ids: string[]
+          workspace_id: string
+        }
+        Update: {
+          computed_at?: string
+          computed_by?: string | null
+          engine_version?: string
+          horizon_weeks?: number
+          numbers?: Json
+          revision_ids?: string[]
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_headlines_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_tours: {
         Row: {
           dismissed_at: string
@@ -3199,6 +3237,18 @@ export type Database = {
       add_source: {
         Args: { p_links: Json; p_source: Json; p_workspace: string }
         Returns: string
+      }
+      agency_workspace_list: {
+        Args: never
+        Returns: {
+          computed_at: string
+          id: string
+          last_activity: string
+          name: string
+          numbers: Json
+          open_risk_issues: number
+          slug: string
+        }[]
       }
       apply_calibration: {
         Args: { p_calibration: string; p_keys: string[] }
@@ -3303,6 +3353,16 @@ export type Database = {
         }
         Returns: Json
       }
+      record_client_calibration: {
+        Args: {
+          p_clients: Json
+          p_keys: string[]
+          p_log: Json
+          p_results: Json
+          p_workspace: string
+        }
+        Returns: Json
+      }
       reserve_ai_run: {
         Args: { p_process: string; p_trigger: string; p_workspace: string }
         Returns: Json
@@ -3362,6 +3422,7 @@ export type Database = {
         Args: { base: Json; changes: Json; key: Json; target: string }
         Returns: Json
       }
+      save_health_rules: { Args: { base: Json; changes: Json; ws: string }; Returns: Json }
       save_issue: {
         Args: {
           p_fields: Json

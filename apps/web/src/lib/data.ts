@@ -63,6 +63,7 @@ import {
   type WorkspaceRow,
   type WorkspaceSettings,
 } from "@transpera-flow/db";
+import type { HeadlineNumbers } from "./overview/headline";
 import { roleUsage, type RoleUsage } from "./roles";
 import { createClient } from "./supabase/server";
 
@@ -72,6 +73,34 @@ export async function listWorkspaces(): Promise<Pick<WorkspaceRow, "id" | "name"
   const { data, error } = await supabase.from("workspaces").select("id, name, slug").order("name");
   if (error) throw error;
   return data;
+}
+
+/** One row of the agency's workspace list: what `agency_workspace_list` returns, with the stored headline numbers typed. */
+export interface AgencyWorkspaceRow {
+  id: string;
+  name: string;
+  slug: string;
+  /** Open or in-progress issues rated Operational risk. */
+  openRiskIssues: number;
+  /** The latest change to a process version, issue, finding, source, solution or (for those who manage) the audit log; null if none. */
+  lastActivity: string | null;
+  /** Null until someone opens the workspace's Overview (the numbers are recorded from its run). */
+  headline: { numbers: HeadlineNumbers; computedAt: string } | null;
+}
+
+/** Every workspace the signed-in user reads, with its headline numbers (RLS decides which). For agency admins' home page. */
+export async function listAgencyWorkspaces(): Promise<AgencyWorkspaceRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("agency_workspace_list");
+  if (error) throw error;
+  return data.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    openRiskIssues: Number(r.open_risk_issues),
+    lastActivity: r.last_activity,
+    headline: r.numbers && r.computed_at ? { numbers: r.numbers as unknown as HeadlineNumbers, computedAt: r.computed_at } : null,
+  }));
 }
 
 /** A workspace's id, name, slug and branding by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */

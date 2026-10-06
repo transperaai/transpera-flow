@@ -358,3 +358,14 @@ A public `branding` bucket (512 KB; PNG, JPEG, WebP), three policies on `storage
 - [ ] Replacing and removing a logo deletes the old object (Storage dashboard).
 - [ ] Sweep of abandoned uploads (an upload whose check never ran is still public under a random name): `select name, created_at from storage.objects o where bucket_id = 'branding' and created_at < now() - interval '1 hour' and not exists (select 1 from public.workspaces w where w.branding ->> 'logo_path' = o.name);`
 - [ ] A deleted workspace's logo stays in the bucket (the same sweep lists it).
+
+## Editors change Client health rules (issue #30, B1 3/3, migration 20261209000000)
+
+`public.save_health_rules(ws, base, changes)` is SECURITY DEFINER with an empty `search_path`. It checks `can_edit_workspace(ws)` itself, writes only the four `settings.health_*` keys of `public.workspaces`, and lets the existing triggers do their jobs. The agency list is `public.agency_workspace_list()` (SECURITY INVOKER) over the new `public.workspace_headlines`. Verified on plain Postgres only (the role-matrix tests; the PostgREST ones run in CI).
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| `auth.uid()` in a SECURITY DEFINER function | It still reads the request's `request.jwt.claims`, so `stamp_settings_provenance` records the editor as `by` and `audit_company` logs the editor as the actor (`actor_kind` `user`). | As an editor, change "Task on time" on Settings -> Client health: the owner's change log names the editor, and `provenance -> 'settings.health_recover'` is `entered` by them. |
+| `needs_review` at trigger depth 1 | The UPDATE inside the function fires `needs_review` at `pg_trigger_depth() = 1`, and `auth.jwt()` there carries `api_token_id`, so an API token is refused ("The company model changes only by review") even though the function is SECURITY DEFINER. | An MCP token's `rpc/save_health_rules` call is refused; a session's is not. |
+| Null edit check | `can_edit_workspace` returns null (not false) for a caller with no membership; the function wraps it in `coalesce(..., false)` so a stranger gets `not_found`, not a write. | A signed-in user outside the workspace gets `{"status": "not_found"}`. |
+| Grants | `revoke all ... from anon, authenticated` then `grant select, insert, update` on `workspace_headlines` is what keeps Supabase's default privileges off the table. | `anon` holds nothing on the table or the two functions (post-apply check in the migration header). |
