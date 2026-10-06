@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { generateApiToken } from "../src";
 import { signJwt } from "./helpers";
 
-// Keeping an owner (issue #30, B1 part 1; migration 20261206000000), as the Data API (and so an API token) reaches it: the guard
-// reads `current_user`, which is `authenticated` once PostgREST has switched role for the request, so it must fire here and not
-// for the SECURITY DEFINER reconciliation behind it. Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
+// Keeping an owner (issue #30, B1 part 1; migration 20261206000000), as an API token reaches it: the request carries `x-api-token`
+// on an anonymous JWT, the pre-request hook switches the transaction to `authenticated` with the token owner's claims, and the guard
+// (which reads `current_user`) must fire there and not for the SECURITY DEFINER reconciliation behind it. Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
 
 const POSTGREST_URL = process.env.POSTGREST_URL;
 const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
@@ -18,15 +19,18 @@ const one = async (sql: string, params: unknown[] = []) => (await admin.query(sq
 
 let ws = "";
 const users = { owner: "", second: "", editor: "", agency: "" };
+const tokens = { second: "" };
 let owner: SupabaseClient;
 let editor: SupabaseClient;
 let agency: SupabaseClient;
 
-function client(token: string): SupabaseClient {
-  return createClient("http://postgrest.invalid", token, {
+/** An API token's client: an anonymous JWT plus `x-api-token`, as the MCP server sends it. */
+function client(apiToken: string): SupabaseClient {
+  const anon = signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
+  return createClient("http://postgrest.invalid", anon, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: {
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${anon}`, "x-api-token": apiToken },
       fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
     },
   });
@@ -42,13 +46,22 @@ describe.skipIf(!POSTGREST_URL)("keeping an owner over PostgREST", () => {
     ws = (await one("insert into workspaces (name, slug) values ('Roles Co', $1) returning id", [`roles-${tag}`])).id as string;
     for (const k of Object.keys(users) as (keyof typeof users)[]) {
       users[k] = randomUUID();
-      await admin.query("insert into auth.users (id, email) values ($1, $2)", [users[k], `roles-${k}-${tag}@example.com`]);
+      await admin.query("insert into auth.users (id, email, raw_app_meta_data) values ($1, $2, $3)", [
+        users[k],
+        `roles-${k}-${tag}@example.com`,
+        k === "agency" ? { agency_admin: true } : {},
+      ]);
     }
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'editor')", [ws, users.owner, users.editor]);
-    const token = (sub: string, appMetadata = {}) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: appMetadata }, JWT_SECRET);
-    owner = client(token(users.owner));
-    editor = client(token(users.editor));
-    agency = client(token(users.agency, { agency_admin: true }));
+    const issue = async (userId: string) => {
+      const { token, hash } = generateApiToken();
+      await admin.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'roles')", [userId, hash]);
+      return token;
+    };
+    owner = client(await issue(users.owner));
+    editor = client(await issue(users.editor));
+    agency = client(await issue(users.agency));
+    tokens.second = await issue(users.second);
     const deadline = Date.now() + 60_000;
     while ((await owner.from("workspaces").select("id").eq("id", ws)).data?.length !== 1) {
       if (Date.now() > deadline) throw new Error("PostgREST never became ready");
@@ -90,7 +103,7 @@ describe.skipIf(!POSTGREST_URL)("keeping an owner over PostgREST", () => {
     expect(demote.data).toHaveLength(1);
     expect(await role(users.owner)).toEqual({ role: "editor", active: true });
     // The demoted owner can no longer manage anything, and the second is now the last owner.
-    const second = client(signJwt({ sub: users.second, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET));
+    const second = client(tokens.second);
     const again = await second.from("memberships").update({ role: "viewer" }).eq("workspace_id", ws).eq("user_id", users.second).select("id");
     expect(again.error?.message).toMatch(/workspace_keeps_an_owner/);
   });
