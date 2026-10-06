@@ -25,7 +25,9 @@ const rev2 = randomUUID();
 const role = randomUUID();
 const user = randomUUID();
 const person = { maya: randomUUID(), annLee: randomUUID(), ann: randomUUID(), al: randomUUID(), rosa: randomUUID() };
-const issue = { person: randomUUID(), role: randomUUID(), capacity: randomUUID(), manual: randomUUID(), clean: randomUUID() };
+const issue = { person: randomUUID(), role: randomUUID(), capacity: randomUUID(), manual: randomUUID(), clean: randomUUID(), ai: randomUUID() };
+const source = randomUUID();
+const link = { acked: randomUUID(), orphan: randomUUID() };
 const analysis = randomUUID();
 const oldAnalysis = randomUUID();
 const aiFinding = randomUUID();
@@ -93,6 +95,10 @@ beforeAll(async () => {
   await ins(issue.capacity, { source: "promoted", detected_key: `capacity:person:${person.maya}`, evidence: SENTENCE("£1,040"), evidence_metrics: metrics });
   await ins(issue.manual, { source: "manual", type: "manual", evidence: SENTENCE("£1,040"), evidence_metrics: metrics });
   await ins(issue.clean, { source: "promoted", detected_key: `capacity:person:${person.annLee}`, evidence: CLEAN, evidence_metrics: JSON.stringify({ overtime_hours_week: 4 }) });
+  // An acknowledged pre-B17 AI insight (keyed on a hash of real-name text), with a source linked to it, and a link to one nobody acknowledged.
+  await ins(issue.ai, { source: "promoted", detected_key: "ai:insight:0123456789ab", title: "Maya Collins at the cap", evidence: "No money here." });
+  await client.query("insert into sources (id, workspace_id, title) values ($1, $2, 'Call')", [source, ws]);
+  await client.query("insert into source_links (id, workspace_id, source_id, kind, insight_key) values ($1, $2, $3, 'insight', 'ai:insight:0123456789ab'), ($4, $2, $3, 'insight', 'ai:insight:ba9876543210')", [link.acked, ws, source, link.orphan]);
   // A little history, as the app leaves it.
   await client.query("update issues set status = 'in_progress' where id = $1", [issue.person]);
 
@@ -240,11 +246,50 @@ describe("saved AI text", () => {
     expect(f.why).toBe(CLEAN);
     expect(f.facts).toEqual([{ text: "AI says overtime, costing about £1.2k a month" }, { text: "Y. Z" }]);
     expect(f.person_labels).toEqual({});
-    for (const k of ["updated_at", "created_at", "edited", "status", "ai_key"]) expect(f[k], k).toEqual(payFindingBefore[k]);
+    for (const k of ["updated_at", "created_at", "edited", "status"]) expect(f[k], k).toEqual(payFindingBefore[k]);
     const all = await client.query("select summary::text || insights::text || review::text || coalesce(reason, '') as t from ai_analyses");
     const fall = await client.query("select title || evidence || why || facts::text as t from findings where origin = 'ai'");
     for (const r of [...all.rows, ...fall.rows]) expect(r.t).not.toMatch(/at cost rates over/);
     expect(o.updated_at).toEqual(oldAnalysisBefore.updated_at);
+  });
+
+  it("re-key every kind of name-derived key to one that holds no name, and leave the other keys alone", async () => {
+    const f = await one("select ai_key from findings where id = $1", [aiFinding]);
+    expect(f.ai_key).toBe(`ai:insight:${aiFinding}`);
+    expect((await one("select ai_key from findings where id = $1", [payFinding])).ai_key).toBe(`ai:insight:${payFinding}`);
+    expect((await one("select ai_key from findings where id = $1", [handFinding])).ai_key).toBeNull();
+    const now = await issuesNow();
+    expect(now[issue.ai].detected_key).toBe(`ai:insight:${issue.ai}`);
+    // Engine keys carry ids, and a finding's key carries its id: untouched.
+    for (const id of [issue.person, issue.role, issue.capacity]) expect(now[id].detected_key, id).toBe(issuesBefore[id]!.detected_key);
+    // The issue's other columns, history and updated_at stay as they were.
+    const { detected_key: _k, ...after } = now[issue.ai]!;
+    const { detected_key: _k0, ...before } = issuesBefore[issue.ai]!;
+    expect(after).toEqual(before);
+    // Source links follow the acknowledged issue; the one with no issue gets a key of its own.
+    expect((await one("select insight_key from source_links where id = $1", [link.acked])).insight_key).toBe(`ai:insight:${issue.ai}`);
+    expect((await one("select insight_key from source_links where id = $1", [link.orphan])).insight_key).toBe(`ai:insight:${link.orphan}`);
+    // A saved insight's own key; the keys of its facts are the engine's and stay.
+    const a = await one("select insights from ai_analyses where id = $1", [analysis]);
+    expect(a.insights[0].key).toBe(`ai:insight:${analysis}:0`);
+    expect(a.insights[0].facts[0].key).toBe("overtime:person:x");
+    expect(JSON.stringify(a.insights)).not.toContain("abc123");
+  });
+
+  it("has a post-apply check 7 that finds no name-derived key left, and sees one that is", async () => {
+    const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
+    const lines = header.split("--   7. No key is derived from a name any more.")[1]!.split("\n").slice(1);
+    const sql = lines.slice(0, lines.findIndex((l) => !l.startsWith("--        "))).map((l) => l.replace(/^--        /, "")).join("\n");
+    const counts = async () => (await client.query({ text: sql, rowMode: "array" })).rows[0].map(Number);
+    expect(await counts()).toEqual([0, 0, 0, 0]);
+    await client.query("begin");
+    await client.query("set local session_replication_role = replica");
+    await client.query("update findings set ai_key = 'ai:insight:0123456789ab' where id = $1", [aiFinding]);
+    await client.query("update issues set detected_key = 'ai:insight:0123456789ab' where id = $1", [issue.ai]);
+    await client.query("update source_links set insight_key = 'ai:insight:0123456789ab' where id = $1", [link.acked]);
+    await client.query("update ai_analyses set insights = '[{\"key\":\"ai:insight:0123456789ab\"}]' where id = $1", [analysis]);
+    expect(await counts()).toEqual([1, 1, 1, 1]);
+    await client.query("rollback");
   });
 
   it("relabel a name that follows a JSON escape, as in 'Busy week.\\nMaya Collins is over.'", async () => {
@@ -270,7 +315,7 @@ describe("saved AI text", () => {
     const a = await one("select * from ai_analyses where id = $1", [analysis]);
     for (const k of ["updated_at", "created_at", "run_id", "status", "model_hash", "input_hash", "checked", "dropped", "created_by", "process_id", "revision_id"]) expect(a[k], k).toEqual(analysisBefore[k]);
     const f = await one("select * from findings where id = $1", [aiFinding]);
-    for (const k of ["updated_at", "created_at", "edited", "analysis_id", "run_id", "status", "ai_key", "rating", "type", "decided_by", "updated_by"]) expect(f[k], k).toEqual(aiBefore[k]);
+    for (const k of ["updated_at", "created_at", "edited", "analysis_id", "run_id", "status", "rating", "type", "decided_by", "updated_by"]) expect(f[k], k).toEqual(aiBefore[k]);
   });
 
   it("leave a finding added by hand alone, with no labels", async () => {
@@ -284,21 +329,21 @@ describe("saved AI text", () => {
 describe("the migration", () => {
   it("drops its three helper functions", async () => {
     const r = await one(
-      "select to_regprocedure('private.b1_2b_relabel(text, uuid)') as a, to_regprocedure('private.b1_2b_labels(text, uuid)') as b, to_regprocedure('private.b1_2b_people(uuid)') as c",
+      "select to_regprocedure('private.b1_2b_relabel(text, uuid)') as a, to_regprocedure('private.b1_2b_labels(text, uuid)') as b, to_regprocedure('private.b1_2b_people(uuid)') as c, to_regprocedure('private.b1_2b_rekey(jsonb, uuid)') as d",
       [],
     );
-    expect(r).toEqual({ a: null, b: null, c: null });
+    expect(r).toEqual({ a: null, b: null, c: null, d: null });
   });
 
-  it("leaves all six triggers enabled, and every trigger of the three tables as it was", async () => {
+  it("leaves all seven triggers enabled, and every trigger of the three tables as it was", async () => {
     expect(await triggerStates()).toBe(triggersBefore);
     const six = await client.query(
       `select tgname, tgenabled::text as e from pg_trigger where not tgisinternal and (tgrelid, tgname) in (
-         ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'),
+         ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'), ('public.issues'::regclass, 'issues_before_write'),
          ('public.ai_analyses'::regclass, 'ai_analyses_stamp'), ('public.ai_analyses'::regclass, 'set_updated_at'),
          ('public.findings'::regclass, 'findings_before_write'), ('public.findings'::regclass, 'set_updated_at'))`,
     );
-    expect(six.rows).toHaveLength(6);
+    expect(six.rows).toHaveLength(7);
     expect(six.rows.every((r) => r.e === "O")).toBe(true);
   });
 

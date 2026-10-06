@@ -41,7 +41,14 @@ set local lock_timeout = '5s';
 --     one JSON string, so it can't run across two). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
 --     reserved run) and `set_updated_at` are switched off for those statements, then back on. Findings added by hand are
 --     human-typed text and are not touched.
---   * Three helper functions are created in `private` and dropped again inside this migration.
+--   * KEYS HOLD NO NAME. A finding's `ai_key`, an AI insight's `issues.detected_key` and a saved insight's `key` inside
+--     `ai_analyses.insights` were `ai:insight:` + a sha1 of the real-name title, so a member reading them through the API could
+--     hash guessed names and check them. They are re-keyed to `ai:insight:<finding id>`, `ai:insight:<issue id>` and
+--     `ai:insight:<analysis id>:<position>`; `source_links` to an AI insight follow the issue's new key (one nobody
+--     acknowledged gets `ai:insight:<link id>`, which matches nothing). New findings are keyed on the labelled title by the app.
+--     Austin accepted that an already-proposed finding may be proposed once more, and that old pre-B17 insights lose their
+--     "acknowledged" link. `issues_before_write` (which refuses a change to `detected_key`) is switched off for that statement.
+--   * Four helper functions are created in `private` and dropped again inside this migration.
 --
 -- ACCEPTED LIMITS:
 --   * In rows written before this migration, a person named only by first name, a nickname or a misspelling keeps it (first
@@ -66,10 +73,10 @@ set local lock_timeout = '5s';
 --   1. The columns don't exist yet. Expect 0:
 --        select count(*) from information_schema.columns
 --        where table_schema = 'public' and table_name in ('ai_analyses', 'findings') and column_name = 'person_labels';
---   2. The six triggers this disables and re-enables exist and are enabled. Expect 6 rows, each O:
+--   2. The seven triggers this disables and re-enables exist and are enabled. Expect 7 rows, each O:
 --        select tgrelid::regclass, tgname, tgenabled::text from pg_trigger
 --        where not tgisinternal and (tgrelid, tgname) in (
---          ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'),
+--          ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'), ('public.issues'::regclass, 'issues_before_write'),
 --          ('public.ai_analyses'::regclass, 'ai_analyses_stamp'), ('public.ai_analyses'::regclass, 'set_updated_at'),
 --          ('public.findings'::regclass, 'findings_before_write'), ('public.findings'::regclass, 'set_updated_at'))
 --        order by 1, 2;
@@ -103,15 +110,20 @@ set local lock_timeout = '5s';
 --   6. Room for longer text. Expect each well under its limit (262144, 131072, 32768):
 --        select max(octet_length(insights::text)), max(octet_length(review::text)) from public.ai_analyses;
 --        select max(octet_length(facts::text)) from public.findings;
+--   7b. For the log, and to compare after: the keys that will be re-keyed. After applying, post-apply check 7 returns 0 x 4:
+--        select (select count(*) from public.findings where origin = 'ai') as ai_findings,
+--               (select count(*) from public.issues where detected_key like 'ai:insight:%') as ai_issues,
+--               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%') as ai_links,
+--               (select count(*) from public.ai_analyses where jsonb_typeof(insights) = 'array' and jsonb_array_length(insights) > 0) as analyses_with_insights;
 --   7. For the log: names the clean-up skips (under 3 characters, or a quote or backslash) and names two people share (both
 --      get the lower-numbered label). Expect no rows from either:
 --        select workspace_id, name from public.people where char_length(btrim(name)) < 3 or name ~ '["\\]';
 --        select workspace_id, btrim(name), count(*) from public.people group by 1, 2 having count(*) > 1;
 --
 -- POST-APPLY CHECKS:
---   1. Re-run preflight 1: `2`. Re-run preflight 2: still 6 rows, all `O`.
+--   1. Re-run preflight 1: `2`. Re-run preflight 2: still 7 rows, all `O`.
 --   2. select to_regprocedure('private.b1_2b_relabel(text, uuid)'), to_regprocedure('private.b1_2b_labels(text, uuid)'),
---             to_regprocedure('private.b1_2b_people(uuid)');   -- null, null, null
+--             to_regprocedure('private.b1_2b_people(uuid)'), to_regprocedure('private.b1_2b_rekey(jsonb, uuid)');   -- null x4
 --   3. Re-run the first two queries of preflight 4: `0, 0` and `0, 0`. The third: `issue_events` and both `max(updated_at)`
 --      unchanged.
 --   4. No AI text still holds a full name of its workspace. Expect 0, 0:
@@ -123,9 +135,17 @@ set local lock_timeout = '5s';
 --                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
+--   7. No key is derived from a name any more. Expect 0, 0, 0, 0:
+--        select (select count(*) from public.findings where origin = 'ai' and ai_key <> 'ai:insight:' || id),
+--               (select count(*) from public.issues where detected_key like 'ai:insight:%' and detected_key <> 'ai:insight:' || id),
+--               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%'
+--                  and insight_key !~ '^ai:insight:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+--               (select count(*) from public.ai_analyses a, jsonb_array_elements(case when jsonb_typeof(a.insights) = 'array' then a.insights else '[]' end) with ordinality as e(v, i)
+--                where jsonb_typeof(e.v) = 'object' and e.v ? 'key' and e.v ->> 'key' is distinct from 'ai:insight:' || a.id || ':' || (e.i - 1));
 --
 -- ROLLBACK (one transaction; redeploy the app from before 2b first, since 2b's app selects the column). The overtime clause
--- and `overtime_cost` are NOT put back: the money is still shown live to editors, so nothing is lost.
+-- and `overtime_cost` are NOT put back: the money is still shown live to editors, so nothing is lost. Nor are the old keys
+-- (hashes of names): the re-keyed ones stay.
 --   begin;
 --     -- Put names back where labels were written: each label in a row's person_labels becomes that person's current name,
 --     -- or "A team member" if they were deleted. Inside jsonb the name is JSON-escaped.
@@ -182,11 +202,22 @@ alter table public.findings add column person_labels jsonb not null default '{}'
 -- History and updated_at stay as they were: this is a clean-up, not an edit.
 alter table public.issues disable trigger issue_log;
 alter table public.issues disable trigger set_updated_at;
+alter table public.issues disable trigger issues_before_write;  -- it refuses a change to detected_key, which the re-key below makes
+-- Source links to an AI insight follow the issue's new key (this needs the issues' old keys, so it runs first). A link to an
+-- insight nobody acknowledged has no issue: it gets a key of its own, which matches nothing (a name-free orphan).
+update public.source_links sl
+set insight_key = 'ai:insight:' || coalesce(
+  (select i.id from public.issues i where i.workspace_id = sl.workspace_id and i.detected_key = sl.insight_key), sl.id)::text
+where sl.kind = 'insight' and sl.insight_key like 'ai:insight:%';
 update public.issues
 set evidence = regexp_replace(evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
     evidence_metrics = evidence_metrics - 'overtime_cost'
 where evidence_metrics ? 'overtime_cost'
    or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
+-- An acknowledged pre-B17 AI insight is keyed 'ai:insight:' + a hash of the real-name text, which a member could check a
+-- guessed name against. It becomes 'ai:insight:' + the issue's id; the insight's "acknowledged" link to the old key is lost.
+update public.issues set detected_key = 'ai:insight:' || id where detected_key like 'ai:insight:%';
+alter table public.issues enable trigger issues_before_write;
 alter table public.issues enable trigger set_updated_at;
 alter table public.issues enable trigger issue_log;
 
@@ -240,6 +271,16 @@ begin
 end;
 $$;
 
+-- Saved insights' own keys (pre-B17 analyses; a hash of the real-name title) become 'ai:insight:<analysis id>:<position>'.
+create function private.b1_2b_rekey(insights jsonb, analysis uuid) returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select case when jsonb_typeof(insights) = 'array' then
+    coalesce((select jsonb_agg(case when jsonb_typeof(e.v) = 'object' and e.v ? 'key' then jsonb_set(e.v, '{key}', to_jsonb('ai:insight:' || analysis::text || ':' || (e.i - 1))) else e.v end order by e.i)
+              from jsonb_array_elements(insights) with ordinality as e(v, i)), '[]'::jsonb)
+  else insights end;
+$$;
+
 alter table public.ai_analyses disable trigger ai_analyses_stamp;  -- it requires a run the caller reserved in the last 15 minutes
 alter table public.ai_analyses disable trigger set_updated_at;     -- "latest analysis" is ordered by updated_at
 -- EVERY analysis, of any revision (members can read earlier revisions): the money clause goes from summary, insights (pre-B17
@@ -247,11 +288,12 @@ alter table public.ai_analyses disable trigger set_updated_at;     -- "latest an
 -- a raw double quote, so `[^"]+?` keeps the match inside one JSON string.
 update public.ai_analyses a
 set summary  = private.b1_2b_relabel(regexp_replace(a.summary::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
-    insights = private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    insights = private.b1_2b_rekey(private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb, a.id),
     review   = private.b1_2b_relabel(regexp_replace(a.review::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
     reason   = left(private.b1_2b_relabel(regexp_replace(a.reason, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id), 2000),
     person_labels = a.person_labels || private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
-where private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
+where jsonb_typeof(a.insights) = 'array' and jsonb_array_length(a.insights) > 0
+   or private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
    or (a.summary::text || a.insights::text || a.review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
    or a.reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
 alter table public.ai_analyses enable trigger set_updated_at;
@@ -264,16 +306,13 @@ set title    = left(private.b1_2b_relabel(regexp_replace(f.title, ', costing abo
     evidence = left(private.b1_2b_relabel(regexp_replace(f.evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
     why      = left(private.b1_2b_relabel(regexp_replace(f.why, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
     facts    = private.b1_2b_relabel(regexp_replace(f.facts::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id)::jsonb,
+    ai_key   = 'ai:insight:' || f.id,
     person_labels = f.person_labels || private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
-where f.origin = 'ai'
-  and (private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id) <> '{}'
-       or f.title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
-       or f.evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
-       or f.why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
-       or f.facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.');
+where f.origin = 'ai';  -- every AI finding, so every ai_key is re-keyed
 alter table public.findings enable trigger set_updated_at;
 alter table public.findings enable trigger findings_before_write;
 
+drop function private.b1_2b_rekey(jsonb, uuid);
 drop function private.b1_2b_labels(text, uuid);
 drop function private.b1_2b_relabel(text, uuid);
 drop function private.b1_2b_people(uuid);
@@ -310,7 +349,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     one JSON string, so it can't run across two). `findings_before_write` and `ai_analyses_stamp` (which forbid changing an AI finding's facts and require a
 --     reserved run) and `set_updated_at` are switched off for those statements, then back on. Findings added by hand are
 --     human-typed text and are not touched.
---   * Three helper functions are created in `private` and dropped again inside this migration.
+--   * KEYS HOLD NO NAME. A finding's `ai_key`, an AI insight's `issues.detected_key` and a saved insight's `key` inside
+--     `ai_analyses.insights` were `ai:insight:` + a sha1 of the real-name title, so a member reading them through the API could
+--     hash guessed names and check them. They are re-keyed to `ai:insight:<finding id>`, `ai:insight:<issue id>` and
+--     `ai:insight:<analysis id>:<position>`; `source_links` to an AI insight follow the issue's new key (one nobody
+--     acknowledged gets `ai:insight:<link id>`, which matches nothing). New findings are keyed on the labelled title by the app.
+--     Austin accepted that an already-proposed finding may be proposed once more, and that old pre-B17 insights lose their
+--     "acknowledged" link. `issues_before_write` (which refuses a change to `detected_key`) is switched off for that statement.
+--   * Four helper functions are created in `private` and dropped again inside this migration.
 --
 -- ACCEPTED LIMITS:
 --   * In rows written before this migration, a person named only by first name, a nickname or a misspelling keeps it (first
@@ -335,10 +381,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   1. The columns don't exist yet. Expect 0:
 --        select count(*) from information_schema.columns
 --        where table_schema = 'public' and table_name in ('ai_analyses', 'findings') and column_name = 'person_labels';
---   2. The six triggers this disables and re-enables exist and are enabled. Expect 6 rows, each O:
+--   2. The seven triggers this disables and re-enables exist and are enabled. Expect 7 rows, each O:
 --        select tgrelid::regclass, tgname, tgenabled::text from pg_trigger
 --        where not tgisinternal and (tgrelid, tgname) in (
---          ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'),
+--          ('public.issues'::regclass, 'issue_log'), ('public.issues'::regclass, 'set_updated_at'), ('public.issues'::regclass, 'issues_before_write'),
 --          ('public.ai_analyses'::regclass, 'ai_analyses_stamp'), ('public.ai_analyses'::regclass, 'set_updated_at'),
 --          ('public.findings'::regclass, 'findings_before_write'), ('public.findings'::regclass, 'set_updated_at'))
 --        order by 1, 2;
@@ -372,15 +418,20 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   6. Room for longer text. Expect each well under its limit (262144, 131072, 32768):
 --        select max(octet_length(insights::text)), max(octet_length(review::text)) from public.ai_analyses;
 --        select max(octet_length(facts::text)) from public.findings;
+--   7b. For the log, and to compare after: the keys that will be re-keyed. After applying, post-apply check 7 returns 0 x 4:
+--        select (select count(*) from public.findings where origin = 'ai') as ai_findings,
+--               (select count(*) from public.issues where detected_key like 'ai:insight:%') as ai_issues,
+--               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%') as ai_links,
+--               (select count(*) from public.ai_analyses where jsonb_typeof(insights) = 'array' and jsonb_array_length(insights) > 0) as analyses_with_insights;
 --   7. For the log: names the clean-up skips (under 3 characters, or a quote or backslash) and names two people share (both
 --      get the lower-numbered label). Expect no rows from either:
 --        select workspace_id, name from public.people where char_length(btrim(name)) < 3 or name ~ '["\\]';
 --        select workspace_id, btrim(name), count(*) from public.people group by 1, 2 having count(*) > 1;
 --
 -- POST-APPLY CHECKS:
---   1. Re-run preflight 1: `2`. Re-run preflight 2: still 6 rows, all `O`.
+--   1. Re-run preflight 1: `2`. Re-run preflight 2: still 7 rows, all `O`.
 --   2. select to_regprocedure('private.b1_2b_relabel(text, uuid)'), to_regprocedure('private.b1_2b_labels(text, uuid)'),
---             to_regprocedure('private.b1_2b_people(uuid)');   -- null, null, null
+--             to_regprocedure('private.b1_2b_people(uuid)'), to_regprocedure('private.b1_2b_rekey(jsonb, uuid)');   -- null x4
 --   3. Re-run the first two queries of preflight 4: `0, 0` and `0, 0`. The third: `issue_events` and both `max(updated_at)`
 --      unchanged.
 --   4. No AI text still holds a full name of its workspace. Expect 0, 0:
@@ -392,9 +443,17 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
+--   7. No key is derived from a name any more. Expect 0, 0, 0, 0:
+--        select (select count(*) from public.findings where origin = 'ai' and ai_key <> 'ai:insight:' || id),
+--               (select count(*) from public.issues where detected_key like 'ai:insight:%' and detected_key <> 'ai:insight:' || id),
+--               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%'
+--                  and insight_key !~ '^ai:insight:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+--               (select count(*) from public.ai_analyses a, jsonb_array_elements(case when jsonb_typeof(a.insights) = 'array' then a.insights else '[]' end) with ordinality as e(v, i)
+--                where jsonb_typeof(e.v) = 'object' and e.v ? 'key' and e.v ->> 'key' is distinct from 'ai:insight:' || a.id || ':' || (e.i - 1));
 --
 -- ROLLBACK (one transaction; redeploy the app from before 2b first, since 2b's app selects the column). The overtime clause
--- and `overtime_cost` are NOT put back: the money is still shown live to editors, so nothing is lost.
+-- and `overtime_cost` are NOT put back: the money is still shown live to editors, so nothing is lost. Nor are the old keys
+-- (hashes of names): the re-keyed ones stay.
 --   begin;
 --     -- Put names back where labels were written: each label in a row's person_labels becomes that person's current name,
 --     -- or "A team member" if they were deleted. Inside jsonb the name is JSON-escaped.
@@ -451,11 +510,22 @@ alter table public.findings add column person_labels jsonb not null default '{}'
 -- History and updated_at stay as they were: this is a clean-up, not an edit.
 alter table public.issues disable trigger issue_log;
 alter table public.issues disable trigger set_updated_at;
+alter table public.issues disable trigger issues_before_write;  -- it refuses a change to detected_key, which the re-key below makes
+-- Source links to an AI insight follow the issue's new key (this needs the issues' old keys, so it runs first). A link to an
+-- insight nobody acknowledged has no issue: it gets a key of its own, which matches nothing (a name-free orphan).
+update public.source_links sl
+set insight_key = 'ai:insight:' || coalesce(
+  (select i.id from public.issues i where i.workspace_id = sl.workspace_id and i.detected_key = sl.insight_key), sl.id)::text
+where sl.kind = 'insight' and sl.insight_key like 'ai:insight:%';
 update public.issues
 set evidence = regexp_replace(evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'),
     evidence_metrics = evidence_metrics - 'overtime_cost'
 where evidence_metrics ? 'overtime_cost'
    or evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
+-- An acknowledged pre-B17 AI insight is keyed 'ai:insight:' + a hash of the real-name text, which a member could check a
+-- guessed name against. It becomes 'ai:insight:' + the issue's id; the insight's "acknowledged" link to the old key is lost.
+update public.issues set detected_key = 'ai:insight:' || id where detected_key like 'ai:insight:%';
+alter table public.issues enable trigger issues_before_write;
 alter table public.issues enable trigger set_updated_at;
 alter table public.issues enable trigger issue_log;
 
@@ -509,6 +579,16 @@ begin
 end;
 $$;
 
+-- Saved insights' own keys (pre-B17 analyses; a hash of the real-name title) become 'ai:insight:<analysis id>:<position>'.
+create function private.b1_2b_rekey(insights jsonb, analysis uuid) returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select case when jsonb_typeof(insights) = 'array' then
+    coalesce((select jsonb_agg(case when jsonb_typeof(e.v) = 'object' and e.v ? 'key' then jsonb_set(e.v, '{key}', to_jsonb('ai:insight:' || analysis::text || ':' || (e.i - 1))) else e.v end order by e.i)
+              from jsonb_array_elements(insights) with ordinality as e(v, i)), '[]'::jsonb)
+  else insights end;
+$$;
+
 alter table public.ai_analyses disable trigger ai_analyses_stamp;  -- it requires a run the caller reserved in the last 15 minutes
 alter table public.ai_analyses disable trigger set_updated_at;     -- "latest analysis" is ordered by updated_at
 -- EVERY analysis, of any revision (members can read earlier revisions): the money clause goes from summary, insights (pre-B17
@@ -516,11 +596,12 @@ alter table public.ai_analyses disable trigger set_updated_at;     -- "latest an
 -- a raw double quote, so `[^"]+?` keeps the match inside one JSON string.
 update public.ai_analyses a
 set summary  = private.b1_2b_relabel(regexp_replace(a.summary::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
-    insights = private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
+    insights = private.b1_2b_rekey(private.b1_2b_relabel(regexp_replace(a.insights::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb, a.id),
     review   = private.b1_2b_relabel(regexp_replace(a.review::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id)::jsonb,
     reason   = left(private.b1_2b_relabel(regexp_replace(a.reason, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), a.workspace_id), 2000),
     person_labels = a.person_labels || private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id)
-where private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
+where jsonb_typeof(a.insights) = 'array' and jsonb_array_length(a.insights) > 0
+   or private.b1_2b_labels(a.summary::text || a.insights::text || a.review::text || coalesce(a.reason, ''), a.workspace_id) <> '{}'
    or (a.summary::text || a.insights::text || a.review::text) ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.'
    or a.reason ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.';
 alter table public.ai_analyses enable trigger set_updated_at;
@@ -533,16 +614,13 @@ set title    = left(private.b1_2b_relabel(regexp_replace(f.title, ', costing abo
     evidence = left(private.b1_2b_relabel(regexp_replace(f.evidence, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
     why      = left(private.b1_2b_relabel(regexp_replace(f.why, ', costing about .+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id), 2000),
     facts    = private.b1_2b_relabel(regexp_replace(f.facts::text, ', costing about [^"]+? at cost rates over the [0-9,]+-week run\.', '.', 'g'), f.workspace_id)::jsonb,
+    ai_key   = 'ai:insight:' || f.id,
     person_labels = f.person_labels || private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id)
-where f.origin = 'ai'
-  and (private.b1_2b_labels(f.title || ' ' || f.evidence || ' ' || f.why || ' ' || f.facts::text, f.workspace_id) <> '{}'
-       or f.title ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
-       or f.evidence ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
-       or f.why ~ ', costing about .+ at cost rates over the [0-9,]+-week run\.'
-       or f.facts::text ~ ', costing about [^"]+ at cost rates over the [0-9,]+-week run\.');
+where f.origin = 'ai';  -- every AI finding, so every ai_key is re-keyed
 alter table public.findings enable trigger set_updated_at;
 alter table public.findings enable trigger findings_before_write;
 
+drop function private.b1_2b_rekey(jsonb, uuid);
 drop function private.b1_2b_labels(text, uuid);
 drop function private.b1_2b_relabel(text, uuid);
 drop function private.b1_2b_people(uuid);

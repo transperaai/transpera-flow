@@ -326,6 +326,7 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 
 - [ ] **Preflight 3** returns `x T y.`, `a\nT b`, `a.` and `[{"t":"a, costing about £1 a month"},{"t":"b. c"}]` (the regex features work on Supabase's Postgres).
 - [ ] **Preflight 2** shows the six triggers enabled; after applying, still six rows, all `O` (post-apply check 1).
+- [ ] **Post-apply check 7** returns 0, 0, 0, 0: no `ai_key`, issue `detected_key`, insight source link or saved insight key is derived from a name (a member reading through the API can't hash guessed names against them). Preflight 2 and post-apply 1 list seven triggers (`issues_before_write` is switched off for the re-key).
 - [ ] **Post-apply check 4** returns 0, 0: no saved AI text still holds a full name of its workspace (including right after a JSON escape such as `\n`).
 - [ ] **Post-apply check 3**, first two queries: 0, 0 and 0, 0 (no issue, analysis or AI finding of any revision still holds the money clause).
 - [ ] **Post-apply check 3**: the `issue_events` count and both `max(updated_at)` are unchanged (the clean-up is not an edit).

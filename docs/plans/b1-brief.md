@@ -1224,6 +1224,13 @@ Preflight 6 checks the jsonb columns have room.
   post-apply check 4 ("Busy week.\nMaya Collins" is relabelled).
 - Full names only, case-sensitive, as above. (The app's `labelNames` and `applyAliases` match a first name case-sensitively
   too, and a full name in any case.)
+- Keys hold no name (Austin, after the review: the direct-API route can't be masked in the app). The migration re-keys every
+  AI finding's `ai_key` to `ai:insight:<finding id>`, every issue with an `ai:insight:` `detected_key` to
+  `ai:insight:<issue id>` (its `source_links` follow, `issues_before_write` is switched off for that statement), and each
+  saved insight's key to `ai:insight:<analysis id>:<position>`. New findings are keyed on the labelled title, so a key never
+  holds a name. Accepted: a finding proposed before may be proposed once more, and pre-B17 insights lose their acknowledged
+  link. The read-time masking (`hideAiIssueKey`, opaque `ai_key` in `nameFinding`, opaque insight keys in `nameAnalysisRow`) is
+  kept as defence in depth: an old app run between apply and deploy, and a restored old backup, can still write hashed keys.
 - Preflight 3, preflight 4 and the post-apply checks cover the wider clean-up.
 
 **Accepted limits (in the header and the PR):**
