@@ -346,3 +346,15 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 | Companion rows | The company map's sync adds each new top-level process's card in one system version (cards show once a process is published); `link_cited_sources`, `issue_seed_links` and `log_perception_gaps` run as for any write. | Restore, publish every process: the map shows each top-level process once; a process held by a link is not also on the map; no duplicate perception-gap issue. |
 | Notice | A cookie set in the browser (`tf-restore-notice`) carries the sentence to the Overview. | The notice shows once after a restore, and the drafts list shows every process. |
 
+## Findings proposed over the connector (issue #197, B20, migration 20261212000000)
+
+`private.findings_before_write` reads `auth.jwt() ? 'api_token_id'` to tell an API token's request from a session's, takes
+`pg_advisory_xact_lock(hashtextextended(...))` before counting a workspace's recent connector proposals, and refuses a
+token's update when `pg_trigger_depth() = 1`.
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Token claims in a BEFORE trigger | `auth.jwt()` inside the trigger carries `api_token_id`, as `private.api_token_claims` sets it in the pre-request hook (the same read the `suggestions` and `review_proposals` triggers make). Verified on plain Postgres (claims set with `set_config('request.jwt.claims', ...)`) and on a local PostgREST v14.18 (the CI version) only. | An editor's MCP token proposes a finding on the Supabase project; the row has `proposed_via = 'connector'`. |
+| Update refusal | A token's PATCH of a finding answers 42501 ("not over the API"). PostgREST answered 401 in the e2e test (PostgREST v14.18, plain Postgres) (the request's JWT role is anon until the hook runs), as for the suggestions guard. | An editor's token PATCHing `findings` over the Data API is refused. |
+| Advisory lock and caps | The transaction-level lock serialises the two count checks per workspace. Verified on plain Postgres only. | Two concurrent proposals at 49 waiting: one succeeds, one gets 54000. |
+
