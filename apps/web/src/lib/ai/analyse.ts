@@ -5,8 +5,12 @@
 //
 // Unlike narration there is no template to fall back to: an item that cites a figure the run doesn't have is left out,
 // and the rest is kept. A draft with nothing left is a failure, with the reason in words.
+//
+// What is kept is saved as the model wrote it, with people as labels ("Team member A"), and `personLabels` says which
+// person each label is. Names go back when the text is shown, to the readers who may see them (B1 2b, docs/adr/0013).
 
 import { createHash } from "node:crypto";
+import { labelsUsed, type PersonLabels } from "@transpera-flow/db";
 import { NarrationError } from "@/lib/narration/narrate";
 import { checkNumbers, type NumberProblem } from "@/lib/narration/numbers";
 import { restoreNames } from "@/lib/narration/facts";
@@ -57,6 +61,8 @@ export interface AiOutcome {
   summary: string[];
   insights: AiInsight[];
   review: AiReviewFinding[];
+  /** The labels the summary, insights, review and reason use, and the person each stands for (saved beside them, B1 2b). */
+  personLabels: PersonLabels;
   /** Numbers in what was kept, each matched to a figure of the run. */
   checked: number;
   /** Items left out of the last draft for citing a figure that isn't in the run (or quoting words that aren't in a source). */
@@ -110,6 +116,8 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
     if (problems.length) rejected.push({ where, text, problems });
     return { ok: problems.length === 0, checked: numbers.numbers.length };
   };
+  // Text is kept as written, with labels. Only the key an insight is stored under reads real names: it is hashed on the
+  // title as it always was, so a finding proposed before B1 2b isn't proposed again as a new one.
   const back = (s: string) => restoreNames(s, input.aliases);
 
   // The read.
@@ -120,7 +128,7 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
   if (paragraphs.length) {
     const r = check("the read", paragraphs);
     if (r.ok) {
-      summary = { paragraphs: paragraphs.map(back), checked: r.checked };
+      summary = { paragraphs, checked: r.checked };
       readFailed = false;
     } else dropped++;
   }
@@ -148,8 +156,8 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
     // that cites no fact of the run, when the run has some, rests on nothing the engine measured: it is dropped.
     const cited = [...new Set(Array.isArray(r.facts) ? r.facts.filter((x): x is string => typeof x === "string") : [])];
     const facts = [
-      ...input.facts.filter((f) => cited.includes(f.id)).map((f) => ({ kind: "fact" as const, key: f.key, text: back(f.text) })),
-      ...input.quoteRefs.filter((q) => cited.includes(q.id)).map((q) => ({ kind: "quote" as const, key: back(q.key), text: back(q.text) })),
+      ...input.facts.filter((f) => cited.includes(f.id)).map((f) => ({ kind: "fact" as const, key: f.key, text: f.text })),
+      ...input.quoteRefs.filter((q) => cited.includes(q.id)).map((q) => ({ kind: "quote" as const, key: q.key, text: q.text })),
     ];
     if (input.facts.length && !facts.some((f) => f.kind === "fact")) {
       rejected.push({ where: `the insight “${title}”`, text: title, problems: [{ text: title, reason: "a finding that cites none of the facts it was given" } as NumberProblem] });
@@ -159,7 +167,8 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
     const key = keyOf(back(title), stepId);
     if (seen.has(key)) continue;
     seen.add(key);
-    insights.push({ item: { key, type, rating, title: back(title), evidence: back(evidence), why: back(why), stepId, facts }, checked: res.checked });
+    const personLabels = labelsUsed([title, evidence, why, ...facts.map((f) => f.text)], input.personLabels);
+    insights.push({ item: { key, type, rating, title, evidence, why, stepId, facts, personLabels }, checked: res.checked });
   }
 
   // The first-principles review.
@@ -176,7 +185,7 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
       dropped++;
       continue;
     }
-    review.push({ item: { step, level, text: back(text) }, checked: res.checked });
+    review.push({ item: { step, level, text }, checked: res.checked });
   }
   return { summary, insights, review, rejected, dropped, readFailed };
 }
@@ -199,6 +208,7 @@ export async function analyseWithAi(
     summary: [],
     insights: [],
     review: [],
+    personLabels: {},
     checked: 0,
     dropped: 0,
     model: model?.name ?? null,
@@ -269,12 +279,15 @@ export async function analyseWithAi(
     : !summary
       ? `the read was left out: it cited figures that aren't in the run${listProblems(rejectedAll) ? ` (${listProblems(rejectedAll)})` : ""}`
       : null;
+  const kept = keptInsights.map((i) => i.item);
+  const texts = [...(summary ?? []), ...kept.flatMap((i) => [i.title, i.evidence, i.why, ...(i.facts ?? []).map((f) => f.text)]), ...keptReview.map((r) => r.item.text), reason ?? ""];
   return {
     status: nothing ? "failed" : "ok",
     reason,
     summary: summary ?? [],
-    insights: keptInsights.map((i) => i.item),
+    insights: kept,
     review: keptReview.map((r) => r.item),
+    personLabels: labelsUsed(texts, input.personLabels),
     checked,
     dropped,
     model: lastModel,

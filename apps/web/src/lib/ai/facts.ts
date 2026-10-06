@@ -12,7 +12,7 @@
 // workspace name and the people's utilisation never go. Quotes are short, and only when the switch is on.
 
 import { createHash } from "node:crypto";
-import type { RunResults } from "@transpera-flow/db";
+import type { PersonLabels, RunResults } from "@transpera-flow/db";
 import { describeTarget, RATING_LABELS, type DetectedIssue, type FirstPrinciples, type FpFlags, type FpStepKey, type SuccessCheck, FP_STEPS } from "@transpera-flow/engine";
 import { formatIssueCost } from "@/lib/issues/register";
 import { formatPercent } from "@/lib/format";
@@ -20,7 +20,7 @@ import { context, headlineResults } from "@/lib/narration/facts";
 import type { CheckContext, Fact } from "@/lib/narration/numbers";
 
 /** Bump when the payload or the prompt changes, so a stored analysis is seen as out of date. */
-export const AI_PROMPT_VERSION = 2;
+export const AI_PROMPT_VERSION = 3;
 
 export interface AiInputArgs {
   processName: string;
@@ -57,8 +57,10 @@ export interface AiInput {
   payload: Record<string, unknown>;
   /** What its text is checked against. */
   check: CheckContext;
-  /** Real name → label, for the payload; the model's text is mapped back. */
-  aliases: { name: string; label: string }[];
+  /** Real name → label, for the payload (and for the key an insight is stored under: `ai_key`s are hashed on the name). */
+  aliases: { id: string; name: string; label: string }[];
+  /** Every person's label → their id: what is saved beside the text, so names go back at render per reader (B1 2b). */
+  personLabels: PersonLabels;
   /** The step ids it may point at, with their names. */
   steps: { id: string; name: string }[];
   /** Every string the model was given, lower-cased and squeezed, so a quotation in its text can be matched to what it was given. */
@@ -86,8 +88,8 @@ export function letters(i: number): string {
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** People's names to labels: the full name, and the first name where it is unambiguous and long enough to be a name. */
-export function aliasesFor(people: readonly { name: string }[]): { name: string; label: string }[] {
-  const out: { name: string; label: string }[] = [];
+export function aliasesFor(people: readonly { id: string; name: string }[]): { id: string; name: string; label: string }[] {
+  const out: { id: string; name: string; label: string }[] = [];
   const firsts = new Map<string, number>();
   for (const p of people) {
     const f = p.name.trim().split(/\s+/)[0] ?? "";
@@ -96,9 +98,9 @@ export function aliasesFor(people: readonly { name: string }[]): { name: string;
   people.forEach((p, i) => {
     const label = `Team member ${i < 26 ? String.fromCharCode(65 + i) : `${i + 1}`}`;
     const full = p.name.trim();
-    if (full.length >= 3) out.push({ name: full, label });
+    if (full.length >= 3) out.push({ id: p.id, name: full, label });
     const first = full.split(/\s+/)[0] ?? "";
-    if (first.length >= 3 && first !== full && firsts.get(first.toLowerCase()) === 1) out.push({ name: first, label });
+    if (first.length >= 3 && first !== full && firsts.get(first.toLowerCase()) === 1) out.push({ id: p.id, name: first, label });
   });
   return out;
 }
@@ -215,9 +217,10 @@ export function buildAiInput(args: AiInputArgs): AiInput {
     .map((q) => ({ step: q.step, quote: q.quote.trim().slice(0, MAX_QUOTE_CHARS) }))
     .filter((q) => q.quote)
     .map((q, i) => ({ id: `quote-${letters(i)}`, ...q }));
-  // The facts the model cites by id (B17): each finding of the engine's, by an id with no digits in it.
-  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: `${f.title}. ${f.evidence}`.slice(0, 600) }));
   const aliases = aliasesFor(args.people);
+  // The facts the model cites by id (B17): each finding of the engine's, by an id with no digits in it. Their text is saved
+  // with the finding, so it is labelled like everything else the model wrote: names go back at render (B1 2b).
+  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: applyAliases(`${f.title}. ${f.evidence}`.slice(0, 600), aliases) }));
   const payload = mapStrings(
     {
       ...factPayload,
@@ -248,10 +251,11 @@ export function buildAiInput(args: AiInputArgs): AiInput {
     payload,
     check: { ...context(checkPayload, raw, [], names, r.currency, r.hours_per_week), phrases: exemptPhrases(checkPayload, names) },
     aliases,
+    personLabels: Object.fromEntries(aliases.map((a) => [a.label, a.id])),
     steps: steps.map((s) => ({ id: s.id, name: s.name })),
     quotes: wordsGiven(payload),
     facts: factRefs,
-    quoteRefs: quotes.map((q) => ({ id: q.id, key: q.step, text: q.quote })),
+    quoteRefs: quotes.map((q) => ({ id: q.id, key: q.step, text: applyAliases(q.quote, aliases) })),
     hash: createHash("sha256").update(JSON.stringify({ v: AI_PROMPT_VERSION, payload })).digest("hex"),
   };
 }

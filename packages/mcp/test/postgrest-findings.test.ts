@@ -204,7 +204,7 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
 
   it("supersedes, run by run, the proposals a later run on the same version didn't make again, and proposes one again", async () => {
     const revision = (await one("select live_revision_id from processes where id = $1", [ids.process])).live_revision_id as string;
-    const proposal = (aiKey: string, title: string): ProposedFinding => ({ aiKey, processId: ids.process, stepId: null, rating: "bad", type: "delay", title, evidence: "Work waits.", why: "Clients wait.", facts: [] });
+    const proposal = (aiKey: string, title: string): ProposedFinding => ({ aiKey, processId: ids.process, stepId: null, rating: "bad", type: "delay", title, evidence: "Work waits.", why: "Clients wait.", facts: [], personLabels: {} });
     const A = proposal("ai:insight:aaaaaaaaaaa1", "Proposals wait for one person");
     const B = proposal("ai:insight:bbbbbbbbbbb2", "Only one strategist can price work");
     const run = async (findings: ProposedFinding[]) => {
@@ -229,6 +229,7 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
         model: "fake",
         model_hash: null,
         usage: [],
+        person_labels: {},
       });
       if (!analysisId) throw new Error("the analysis wasn't saved");
       const out = await storeProposedFindings(editor as never, { workspaceId: ids.ws, analysisId, runId: reserved.runId, scope: ids.process, findings });

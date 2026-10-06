@@ -38,6 +38,7 @@ import { anthropicAnalyst, NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { analyseWithAi, type AiModel, type AiOutcome } from "./analyse";
 import { aiInputForRun, costedRoleIds, quotesFromBundle, ruleFindings, type AiRunInput } from "./input";
 import { analysisBaseHash, factsDigest, joinAnalysisHash } from "./model-hash";
+import { payFreeBundle } from "./neutral";
 import type { AiInsight } from "./types";
 
 /** The replications and seed every page uses, so AI reads the same run the person sees. */
@@ -116,6 +117,7 @@ export function proposedFindings(insights: readonly AiInsight[], scope: "process
     evidence: i.evidence,
     why: i.why,
     facts: i.facts ?? [],
+    personLabels: i.personLabels ?? {},
   }));
 }
 
@@ -157,6 +159,7 @@ export async function runAnalysis(deps: AiRunDeps): Promise<AiRunResult> {
     review: outcome.review as unknown as SaveAiAnalysisInput["review"],
     checked: outcome.checked,
     dropped: outcome.dropped,
+    person_labels: outcome.personLabels as unknown as SaveAiAnalysisInput["person_labels"],
     input_hash: made.input.hash,
     model: outcome.model,
     model_hash: modelHash,
@@ -177,7 +180,8 @@ export async function runAnalysis(deps: AiRunDeps): Promise<AiRunResult> {
 async function loadRun(db: Db, bundle: ProcessBundle, firstPrinciplesOf: string): Promise<AiRunInput | { error: string }> {
   let model;
   try {
-    model = toEngineModel(bundle);
+    // AI text is shared with members, so AI reads no pay: the model is built as a member's browser builds it (B1 2b).
+    model = toEngineModel(payFreeBundle(bundle));
   } catch (err) {
     if (err instanceof ModelError) return { error: err.message };
     throw err;

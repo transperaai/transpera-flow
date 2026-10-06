@@ -197,6 +197,48 @@ describe("AI findings", () => {
     });
   });
 
+  it("stores the labels its text uses (B1 2b); a later run replaces them with its own, and changing them alone is no edit", async () => {
+    const maya = "00000000-0000-4000-8000-00000000000a";
+    const ann = "00000000-0000-4000-8000-00000000000b";
+    const first = await seedAnalysis(users.editor!.id);
+    await db.as(users.editor!.claims, async (c) => {
+      const labels = JSON.stringify({ "Team member A": maya });
+      const row = (await ai(c, first, { title: "Team member A prices every pitch", person_labels: labels })).rows[0];
+      expect(row.person_labels).toEqual({ "Team member A": maya });
+      // A finding by hand has none.
+      expect((await manual(c)).rows[0].person_labels).toEqual({});
+      // The labels are the app's bookkeeping: changing them alone leaves the words as they were, so nobody has edited it.
+      const same = (await c.query("update findings set person_labels = $2 where id = $1 returning edited, title", [row.id, JSON.stringify({ "Team member A": maya, "Team member B": ann })])).rows[0];
+      expect(same).toEqual({ edited: false, title: "Team member A prices every pitch" });
+      // What editFinding does for an unchanged finding: store the very same words again. It is not an edit either.
+      const saved = (await c.query("update findings set title = $2, evidence = $3, why = $4 where id = $1 returning edited", [row.id, row.title, row.evidence, row.why])).rows[0];
+      expect(saved.edited).toBe(false);
+      // A real change is one, labels kept.
+      const changed = (await c.query("update findings set title = 'Team member A prices all pitches' where id = $1 returning edited, person_labels", [row.id])).rows[0];
+      expect(changed.edited).toBe(true);
+      expect(changed.person_labels).toEqual({ "Team member A": maya, "Team member B": ann });
+    });
+    // The finding is as the administrator seeds it for the next step.
+    await db.client.query("begin");
+    await db.client.query("set local session_replication_role = replica");
+    await db.client.query(
+      "insert into findings (workspace_id, process_id, origin, status, rating, type, title, ai_key, analysis_id, run_id, person_labels) values ($1, $2, 'ai', 'proposed', 'bad', 'delay', 'Team member A prices every pitch', 'ai:insight:zzz123', $3, $4, $5)",
+      [ws, proc, first, runOf.get(first), JSON.stringify({ "Team member A": maya })],
+    );
+    await db.client.query("commit");
+    // A later run proposes it again (it was superseded meanwhile), with its own text and labels.
+    const id = (await db.client.query("select id from findings where origin = 'ai'")).rows[0].id as string;
+    await db.client.query("begin");
+    await db.client.query("set local session_replication_role = replica");
+    await db.client.query("update findings set status = 'superseded' where id = $1", [id]);
+    await db.client.query("commit");
+    const next = await rerun(first, users.editor!.id);
+    await db.as(users.editor!.claims, async (c) => {
+      const again = (await c.query("update findings set status = 'proposed', run_id = $2, title = 'Team member B waits', person_labels = $3 where id = $1 returning edited, status, person_labels", [id, next, JSON.stringify({ "Team member B": ann })])).rows[0];
+      expect(again).toEqual({ edited: false, status: "proposed", person_labels: { "Team member B": ann } });
+    });
+  });
+
   it("refuses to accept or dismiss a superseded proposal; a later run of the writer's can propose it again", async () => {
     const a = await seedAnalysis(users.editor!.id);
     await db.client.query("begin");

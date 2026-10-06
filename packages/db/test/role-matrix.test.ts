@@ -462,6 +462,38 @@ describe("reads", () => {
     expect(await names("signed in, no membership")).toEqual([]);
   });
 
+  it("person_labels (B1 2b) reads like every other column of findings and ai_analyses: every member of the workspace reads it, only owners and editors write it", async () => {
+    const labels = { "Team member A": person.member };
+    await db.client.query("update findings set person_labels = $2 where workspace_id = $1 and title = 'x seed'", [ws, JSON.stringify(labels)]);
+    // An analysis, seeded as a restore would (triggers off).
+    await db.client.query("begin");
+    await db.client.query("set local session_replication_role = replica");
+    const run = (await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, 'Seeder') returning id", [ws, callers.editor!.id])).rows[0].id;
+    await db.client.query(
+      "insert into ai_analyses (workspace_id, process_id, revision_id, status, trigger, input_hash, run_id, created_by, person_labels) values ($1, $2, $3, 'ok', 'manual', 'h', $4, $5, $6)",
+      [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, run, callers.editor!.id, JSON.stringify(labels)],
+    );
+    await db.client.query("commit");
+    for (const [role, { reads, writes }] of Object.entries(ROLES) as [RoleName, (typeof ROLES)[RoleName]][]) {
+      await db.as(callers[role]!.claims, async (c) => {
+        const found = await c.query("select person_labels from findings where workspace_id = $1 and title = 'x seed'", [ws]);
+        const analyses = await c.query("select person_labels from ai_analyses where workspace_id = $1", [ws]);
+        if (reads) {
+          expect(found.rows.map((r) => r.person_labels), role).toEqual([labels]);
+          expect(analyses.rows.map((r) => r.person_labels), role).toEqual([labels]);
+        } else {
+          expect(found.rows, role).toEqual([]);
+          expect(analyses.rows, role).toEqual([]);
+        }
+        const wrote = await refused(c, () => c.query("update findings set person_labels = '{}' where workspace_id = $1 and title = 'x seed'", [ws]));
+        if (writes) expect(wrote, role).toBeGreaterThan(0);
+        else expect(wrote, role).toMatch(/refused|no rows/);
+      });
+    }
+    await db.client.query("delete from ai_analyses where workspace_id = $1", [ws]);
+    await db.client.query("update findings set person_labels = '{}' where workspace_id = $1", [ws]);
+  });
+
   it("scopes the readers to their own workspace: nothing of Larkspur's shows in Northbeam's view", async () => {
     await db.as(callers.member!.claims, async (c) => {
       expect(Number((await c.query("select count(*) from workspaces")).rows[0].count)).toBe(1);

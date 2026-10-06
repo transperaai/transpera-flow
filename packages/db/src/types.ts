@@ -482,6 +482,8 @@ export interface AiAnalysisRow {
   usage: Json;
   /** The reserved run that wrote it, and so who ran it. */
   run_id: string;
+  /** The labels its text uses ("Team member A") and the person each stands for: `{ label: person id }` (B1 2b). Names go back at render. */
+  person_labels: Json;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -520,6 +522,8 @@ export interface FindingRow {
   evidence: string;
   why: string;
   facts: Json;
+  /** The labels its title, evidence, why and facts use ("Team member A") and the person each stands for (B1 2b). `{}` for a finding by hand. */
+  person_labels: Json;
   source_ids: string[];
   ai_key: string | null;
   analysis_id: string | null;

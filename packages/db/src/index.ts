@@ -332,5 +332,16 @@ export {
 } from "./simulation-gaps";
 export * from "./workspace-bundle";
 export * from "./workspace-import";
-export { A_TEAM_MEMBER, canSeePerson } from "./person-labels";
+export {
+  A_TEAM_MEMBER,
+  canSeePerson,
+  labelNames,
+  labelsUsed,
+  nameAnalysisRow,
+  nameFinding,
+  nameLabels,
+  readPersonLabels,
+  type NameSource,
+  type PersonLabels,
+} from "./person-labels";
 export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";

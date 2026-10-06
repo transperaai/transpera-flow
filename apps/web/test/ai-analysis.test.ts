@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { toEngineModel } from "@transpera-flow/db";
+import { runResults, toEngineModel } from "@transpera-flow/db";
 import { simulate, type DetectedIssue } from "@transpera-flow/engine";
+import { buildAiInput, squeeze } from "@/lib/ai/facts";
 import { analyseWithAi, quotationProblems, screenOutput, type AiDraftRequest, type AiModel } from "@/lib/ai/analyse";
 import { aiInputForRun, quotesFromBundle } from "@/lib/ai/input";
 import { aiDetections, aiViewFromRow, readInsights } from "@/lib/ai/types";
@@ -405,7 +409,7 @@ describe("AI insights in the insight list", () => {
       "nonsense",
     ];
     expect(readInsights(stored).map((i) => i.title)).toEqual(["Fine"]);
-    const view = aiViewFromRow({ id: "1", workspace_id: "w", process_id: "p", revision_id: "r", status: "ok", reason: null, trigger: "publish", summary: ["One.", 3, ""], insights: stored, review: [{ step: "job", level: "warn", text: "t" }, { step: "x", level: "warn", text: "t" }], checked: 3, dropped: 1, input_hash: "h", model: "m", model_hash: "mh", usage: [], run_id: "run", created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", run_by: "Ed Itor" });
+    const view = aiViewFromRow({ id: "1", workspace_id: "w", process_id: "p", revision_id: "r", status: "ok", reason: null, trigger: "publish", summary: ["One.", 3, ""], insights: stored, review: [{ step: "job", level: "warn", text: "t" }, { step: "x", level: "warn", text: "t" }], checked: 3, dropped: 1, input_hash: "h", model: "m", model_hash: "mh", usage: [], run_id: "run", person_labels: {}, created_by: "u", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", run_by: "Ed Itor" });
     expect(view).toMatchObject({ summary: ["One."], review: [{ step: "job" }], checked: 3, dropped: 1, runBy: "Ed Itor", modelHash: "mh", costUsd: null });
     expect(view.review).toHaveLength(1);
   });
@@ -415,5 +419,100 @@ describe("the findings the model is given are the ones the pages show", () => {
   it("are rule findings, none of them AI's", () => {
     const keys = findings.map((f: DetectedIssue) => f.key);
     expect(keys.every((k) => !k.startsWith("ai:"))).toBe(true);
+  });
+});
+
+describe("names stay out of what is saved (B1 2b)", () => {
+  // The model is sent "Team member A", and what it writes is saved as it wrote it, with a map from each label to the person.
+  // Names go back at render, per reader (packages/db/test/person-labels.test.ts).
+  const [a, b] = bundle.people;
+  const labelled = () => ({
+    read: [`Over the run Northbeam wins ${results.wins}. Team member A is the busiest.`],
+    insights: [
+      {
+        title: "Team member A holds up the whole line",
+        type: "bottleneck",
+        rating: "bad",
+        stepId: AUDIT,
+        evidence: `${firstSentence(first.evidence)} Team member B waits for Team member A.`,
+        why: "Team member A prices everything.",
+        facts: [input.facts[0]!.id],
+      },
+    ],
+    review: [{ step: "saa", level: "bad", text: "Team member B owns the qualifier." }],
+  });
+  const everyone = [a!, b!, ...bundle.people].map((p) => p.name);
+
+  it("saves the summary, insights, review and facts with labels, never a real name", async () => {
+    const out = await analyseWithAi(input, fake(() => labelled()));
+    expect(out.status).toBe("ok");
+    const saved = JSON.stringify([out.summary, out.insights, out.review, out.reason]);
+    for (const name of everyone) expect(saved, name).not.toContain(name);
+    expect(out.summary[0]).toContain("Team member A is the busiest.");
+    expect(out.insights[0]!.title).toBe("Team member A holds up the whole line");
+    expect(out.insights[0]!.why).toBe("Team member A prices everything.");
+    expect(out.review[0]!.text).toBe("Team member B owns the qualifier.");
+  });
+
+  it("maps exactly the labels used to the right people, for the analysis and for each insight", async () => {
+    const out = await analyseWithAi(input, fake(() => labelled()));
+    expect(out.personLabels).toEqual({ "Team member A": a!.id, "Team member B": b!.id });
+    expect(out.insights[0]!.personLabels).toEqual({ "Team member A": a!.id, "Team member B": b!.id });
+    // A text with one label maps one.
+    const one = labelled();
+    one.insights[0]!.evidence = firstSentence(first.evidence);
+    one.insights[0]!.why = "It matters.";
+    one.review = [{ step: "saa", level: "bad", text: "The qualifier needs an owner." }];
+    one.read = [`Over the run Northbeam wins ${results.wins}.`];
+    const few = await analyseWithAi(input, fake(() => one));
+    expect(few.personLabels).toEqual({ "Team member A": a!.id });
+    // None, when the model named nobody.
+    expect((await analyseWithAi(input, fake(() => good()))).personLabels).toEqual({});
+  });
+
+  it("keys an insight on the title as it reads with the real name, as before B1 2b, so a finding proposed earlier isn't proposed again", async () => {
+    const out = await analyseWithAi(input, fake(() => labelled()));
+    const expected = `ai:insight:${createHash("sha1").update(`${squeeze(`${a!.name} holds up the whole line`)}|${AUDIT}`).digest("hex").slice(0, 12)}`;
+    expect(out.insights[0]!.key).toBe(expected);
+  });
+
+  it("keeps the facts it cites as labelled text: nothing in a fact names a person either", async () => {
+    const out = await analyseWithAi(input, fake(() => labelled()));
+    const text = JSON.stringify(out.insights[0]!.facts);
+    for (const name of everyone) expect(text, name).not.toContain(name);
+    expect(out.insights[0]!.facts![0]).toMatchObject({ kind: "fact", key: input.facts[0]!.key, text: input.facts[0]!.text });
+  });
+
+  it("no longer maps stored text through restoreNames except for the key", () => {
+    const source = readFileSync(join(__dirname, "..", "src", "lib/ai/analyse.ts"), "utf8");
+    const uses = source.split("\n").filter((l) => /\bback\(/.test(l) && !/^\s*(\/\/|const back)/.test(l));
+    expect(uses).toHaveLength(1);
+    expect(uses[0]).toContain("keyOf(back(title), stepId)");
+  });
+
+  it("buildAiInput's fact and quote refs hold labels, not names; the map covers everyone", () => {
+    const [p, q] = bundle.people;
+    const base = findings[0]!;
+    const made = buildAiInput({
+      processName: "Lead to live",
+      results: runResults(model, result, "GBP"),
+      findings: [{ ...base, title: `${p!.name} works late`, evidence: `${q!.name} can't cover. ${p!.name.split(" ")[0]} agrees.` }],
+      steps: [{ id: AUDIT, name: "Audit & proposal" }],
+      roles: [],
+      people: bundle.people.map((x) => ({ id: x.id, name: x.name })),
+      firstPrinciples: null,
+      flags: null,
+      measures: [],
+      quotes: [{ step: "Audit & proposal", quote: `${q!.name} said it takes twelve hours` }],
+      marketOn: false,
+      currency: "GBP",
+    });
+    expect(made.facts[0]!.text).toBe("Team member A works late. Team member B can't cover. Team member A agrees.");
+    expect(made.quoteRefs[0]!.text).toBe("Team member B said it takes twelve hours");
+    expect(made.quoteRefs[0]!.key).toBe("Audit & proposal");
+    expect(made.personLabels["Team member A"]).toBe(p!.id);
+    expect(made.personLabels["Team member B"]).toBe(q!.id);
+    expect(Object.keys(made.personLabels)).toHaveLength(bundle.people.length);
+    expect(made.aliases.every((x) => typeof x.id === "string")).toBe(true);
   });
 });

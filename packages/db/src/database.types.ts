@@ -25,6 +25,7 @@ export type Database = {
           insights: Json
           model: string | null
           model_hash: string | null
+          person_labels: Json
           process_id: string
           reason: string | null
           review: Json
@@ -47,6 +48,7 @@ export type Database = {
           insights?: Json
           model?: string | null
           model_hash?: string | null
+          person_labels?: Json
           process_id: string
           reason?: string | null
           review?: Json
@@ -69,6 +71,7 @@ export type Database = {
           insights?: Json
           model?: string | null
           model_hash?: string | null
+          person_labels?: Json
           process_id?: string
           reason?: string | null
           review?: Json
@@ -858,6 +861,7 @@ export type Database = {
           facts: Json
           id: string
           origin: string
+          person_labels: Json
           process_id: string | null
           rating: string
           run_id: string | null
@@ -883,6 +887,7 @@ export type Database = {
           facts?: Json
           id?: string
           origin: string
+          person_labels?: Json
           process_id?: string | null
           rating: string
           run_id?: string | null
@@ -908,6 +913,7 @@ export type Database = {
           facts?: Json
           id?: string
           origin?: string
+          person_labels?: Json
           process_id?: string | null
           rating?: string
           run_id?: string | null

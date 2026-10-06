@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { AI_DAILY_RUN_LIMIT, DEFAULT_AI_SETTINGS, toEngineModel, type ProposedFinding, type SaveAiAnalysisInput } from "@transpera-flow/db";
+import { AI_DAILY_RUN_LIMIT, DEFAULT_AI_SETTINGS, larkspurBundle, toEngineModel, type ProposedFinding, type SaveAiAnalysisInput } from "@transpera-flow/db";
 import { absenceTest, simulate, successMeasureSource } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { perceptionGapDetections } from "@/lib/issues/perception";
@@ -11,6 +13,7 @@ import { analysisBaseHash, isStale, joinAnalysisHash, sourceCitations } from "@/
 import { replyOf } from "@/lib/ai/reply";
 import { proposedFindings, runAnalysis, stepProcesses, type AiRunDeps } from "@/lib/ai/service";
 import { demoFirstPrinciples } from "@/lib/first-principles/demo-seed";
+import { payFreeBundle } from "@/lib/ai/neutral";
 import { demoBundle } from "@/lib/sources/demo";
 
 vi.mock("server-only", () => ({}));
@@ -401,5 +404,59 @@ describe("the extra runs the server makes are affordable", () => {
     const t = Date.now();
     absenceTest(model, { seed: 1, weeks: 2 });
     expect(Date.now() - t).toBeLessThan(20_000);
+  });
+});
+
+describe("saved AI text keeps labels and reads no pay (B1 2b)", () => {
+  const [a, b] = bundle.people;
+  const named = () => ({
+    read: ["Team member A is busy."],
+    insights: [{ title: "Proposals queue for Team member A", type: "delay", rating: "bad", stepId: AUDIT, evidence: "Most of the wait is in one queue, Team member B says.", why: "Founders go elsewhere.", facts: [facts[0]!.id] }],
+    review: [],
+  });
+
+  it("saves person_labels with the analysis, and proposes findings with their own labels", async () => {
+    const d = deps({ model: fakeModel(named()), processId: bundle.process.id });
+    await runAnalysis(d);
+    expect(d.saved[0]!.summary).toEqual(["Team member A is busy."]);
+    expect(d.saved[0]!.person_labels).toEqual({ "Team member A": a!.id, "Team member B": b!.id });
+    const proposed = d.proposed[0]!.findings[0]!;
+    expect(proposed.title).toBe("Proposals queue for Team member A");
+    expect(proposed.personLabels).toEqual({ "Team member A": a!.id, "Team member B": b!.id });
+  });
+
+  it("saves an empty map when nobody is named, and proposes with an empty map", async () => {
+    const d = deps({ model: fakeModel(finding()), processId: bundle.process.id });
+    await runAnalysis(d);
+    expect(d.saved[0]!.person_labels).toEqual({});
+    expect(d.proposed[0]!.findings[0]!.personLabels).toEqual({});
+  });
+
+  it("an insight's own labels become its finding's", () => {
+    const base = { key: "ai:insight:aaaaaaaaaaaa", type: "delay" as const, rating: "bad" as const, title: "T", evidence: "E", why: "W", stepId: null };
+    expect(proposedFindings([{ ...base, personLabels: { "Team member A": a!.id } }, base], "process", "p1", new Map()).map((f) => f.personLabels)).toEqual([{ "Team member A": a!.id }, {}]);
+  });
+
+  it("reads no pay: with a rated person on overtime, the overtime fact's cost reads '—' and the model gets no money for it", () => {
+    const lark = larkspurBundle();
+    const read = (b: typeof lark) => {
+      const m = toEngineModel(b);
+      const r = simulate(m, 12, 1);
+      return aiInputForRun({ bundle: lark, model: m, result: r, firstPrinciples: fp })!;
+    };
+    const editor = read(lark);
+    const ai = read(payFreeBundle(lark));
+    const overtime = (x: ReturnType<typeof read>) => (x.input.payload.findings as { cost: string; title: string }[]).filter((f) => /overtime/i.test(f.title));
+    expect(overtime(editor).length).toBeGreaterThan(0);
+    expect(overtime(editor).some((f) => /£|a month/.test(f.cost))).toBe(true);
+    expect(overtime(ai).length).toBeGreaterThan(0);
+    expect(overtime(ai).every((f) => f.cost === "—")).toBe(true);
+    // The fact it may cite never carries the money either way: the evidence states hours only (1.8.0).
+    expect(JSON.stringify(ai.input.payload)).not.toMatch(/costing about/);
+  });
+
+  it("builds the model it reads from payFreeBundle (the loader), not from the bundle as the editor sees it", () => {
+    const source = readFileSync(join(__dirname, "..", "src", "lib/ai/service.ts"), "utf8");
+    expect(source).toContain("toEngineModel(payFreeBundle(bundle))");
   });
 });

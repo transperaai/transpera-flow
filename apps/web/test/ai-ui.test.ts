@@ -53,6 +53,7 @@ const proposal = (over: Partial<FindingRow> = {}): FindingRow => ({
   evidence: "Work waits 6.2 working days for Audit & proposal.",
   why: "Founders go elsewhere.",
   facts: [{ kind: "fact", key: "wait:step:a", text: "Work waits 6.2 working days for Audit & proposal." }],
+  person_labels: {},
   source_ids: [],
   ai_key: "ai:insight:aaaaaaaaaaaa",
   analysis_id: "a",
