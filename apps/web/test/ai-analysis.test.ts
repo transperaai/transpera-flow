@@ -602,7 +602,7 @@ describe("names stay out of what is saved (B1 2b)", () => {
       marketOn: false,
       currency: "GBP",
     });
-    const sent = made.payload as Record<string, any>;
+    const sent = made.payload as unknown as { firstPrinciplesChecks: { text: string }[]; successMeasures: { measure: string }[]; findings: { title: string; evidence: string }[] };
     expect(sent.firstPrinciplesChecks[0].text).toBe("“Team member A checks every quote” is marked as a truth but has no source");
     expect(sent.successMeasures[0].measure).toBe("Team member A reviews each pitch");
     expect(sent.findings[0].title).toBe("Goal not reliably met: Team member A reviews each pitch");
