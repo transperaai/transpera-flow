@@ -1,7 +1,7 @@
 -- Production apply file for 20261215000000_bigger_restores (B21, issue #203). Strictly additive: one index
 -- (`audit_log (target_id)`) and one `create or replace` of `public.import_workspace_bundle(uuid, jsonb, text)` with the same signature, the
 -- same refusals, sections and result (bigger limits, a 40 s `statement_timeout` of its own, a faster id remap, and a second restore into
--- the same workspace refused at once); applies after row 54 (20261207000000), independent of rows 55 to 58. Preflight, post-apply checks and
+-- the same workspace refused at once); applies after row 54 (20261207000000), independent of rows 55 to 59. Preflight, post-apply checks and
 -- rollback are in the migration's own header, repeated below. Apply BEFORE deploying the app, because the app's new limits need the function's.
 
 begin;
@@ -51,7 +51,7 @@ set local lock_timeout = '5s';
 -- refusals, sections and result. It doesn't redefine `save_fields` or any other function, trigger or policy. The grant on
 -- `private.scenario_library()` (row 54) is untouched.
 --
--- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 58. Apply BEFORE deploying the app: the app's new limits
+-- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 59. Apply BEFORE deploying the app: the app's new limits
 -- need the function's.
 --
 -- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
@@ -66,8 +66,9 @@ set local lock_timeout = '5s';
 --   3. How big audit_log is (the index is built under a lock that blocks audit writes while it builds; the apply file sets
 --      lock_timeout = 5s). Expect well under a million rows; record the numbers:
 --        select count(*), pg_size_pretty(pg_total_relation_size('public.audit_log')) from public.audit_log;
---   4. Nobody restoring right now (no long-running call of the function). Expect 0:
---        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and pid <> pg_backend_pid();
+--   4. Nobody restoring right now (no running call of the function; an idle pooled connection still holds its last query, so only
+--      backends that aren't idle count). Expect 0:
+--        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and state <> 'idle' and pid <> pg_backend_pid();
 --
 -- POST-APPLY CHECKS:
 --   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:
@@ -962,7 +963,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- refusals, sections and result. It doesn't redefine `save_fields` or any other function, trigger or policy. The grant on
 -- `private.scenario_library()` (row 54) is untouched.
 --
--- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 58. Apply BEFORE deploying the app: the app's new limits
+-- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 59. Apply BEFORE deploying the app: the app's new limits
 -- need the function's.
 --
 -- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
@@ -977,8 +978,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   3. How big audit_log is (the index is built under a lock that blocks audit writes while it builds; the apply file sets
 --      lock_timeout = 5s). Expect well under a million rows; record the numbers:
 --        select count(*), pg_size_pretty(pg_total_relation_size('public.audit_log')) from public.audit_log;
---   4. Nobody restoring right now (no long-running call of the function). Expect 0:
---        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and pid <> pg_backend_pid();
+--   4. Nobody restoring right now (no running call of the function; an idle pooled connection still holds its last query, so only
+--      backends that aren't idle count). Expect 0:
+--        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and state <> 'idle' and pid <> pg_backend_pid();
 --
 -- POST-APPLY CHECKS:
 --   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:

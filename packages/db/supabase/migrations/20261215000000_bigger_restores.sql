@@ -42,7 +42,7 @@
 -- refusals, sections and result. It doesn't redefine `save_fields` or any other function, trigger or policy. The grant on
 -- `private.scenario_library()` (row 54) is untouched.
 --
--- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 58. Apply BEFORE deploying the app: the app's new limits
+-- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 59. Apply BEFORE deploying the app: the app's new limits
 -- need the function's.
 --
 -- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
@@ -57,8 +57,9 @@
 --   3. How big audit_log is (the index is built under a lock that blocks audit writes while it builds; the apply file sets
 --      lock_timeout = 5s). Expect well under a million rows; record the numbers:
 --        select count(*), pg_size_pretty(pg_total_relation_size('public.audit_log')) from public.audit_log;
---   4. Nobody restoring right now (no long-running call of the function). Expect 0:
---        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and pid <> pg_backend_pid();
+--   4. Nobody restoring right now (no running call of the function; an idle pooled connection still holds its last query, so only
+--      backends that aren't idle count). Expect 0:
+--        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and state <> 'idle' and pid <> pg_backend_pid();
 --
 -- POST-APPLY CHECKS:
 --   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:

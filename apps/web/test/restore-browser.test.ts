@@ -135,7 +135,14 @@ describe("the restore component", () => {
 
   it("refuses a file over the size limit before reading it", async () => {
     const { page } = await mount();
-    await page.setInputFiles("input[type=file]", { name: "huge.json", mimeType: "application/json", buffer: Buffer.alloc(MAX_BACKUP_BYTES + 1, 32) });
+    // Made inside the page: sending 25 MB through setInputFiles over CDP took most of the 5 s timeout on a busy CI runner.
+    await page.evaluate((bytes) => {
+      const input = document.querySelector<HTMLInputElement>("input[type=file]")!;
+      const files = new DataTransfer();
+      files.items.add(new File([new Uint8Array(bytes).fill(32)], "huge.json", { type: "application/json" }));
+      input.files = files.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }, MAX_BACKUP_BYTES + 1);
     await page.waitForSelector("[data-restore-problem]");
     expect(await page.locator("[data-restore-problem]").innerText()).toMatch(/That file is 25\.0 MB; a restore takes at most 25\.0 MB\./);
     await page.close();

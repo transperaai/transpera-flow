@@ -441,6 +441,7 @@ get_bottlenecks({process?})                    -> ranked constraints with eviden
 log_issue({title, type, severity, step?, person?, client?, evidence?, owner?, scenario?})
 list_issues({status?, type?, process?})
 get_facts({process?}) / list_findings({status?, process?}) / get_analysis({process? | company}) / list_sources({process?}) / list_solutions({process?})   (B17: what an analysis needs)
+propose_finding({title, rating, type, process? | company, step?, evidence?, why?, facts?, quotes?, sources?})  -> a proposed finding for review in the app (B20)
 export_report({format: pdf|json, scenarios?: []}) -> signed URL
 ```
 
