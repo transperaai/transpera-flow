@@ -34299,6 +34299,7 @@ create policy "branding: managers delete" on storage.objects for delete to authe
 --     RLS: owners, editors and agency admins only. Column-level grants: the token hash and the snapshot are never readable
 --     through the API; `mode` is not insertable ('view' only until B4).
 --   * `private.share_snapshot_problem(...)`: the leak check, run by a BEFORE trigger on every insert and every snapshot change.
+--   * `private.share_norm(text)`: the text those checks match on (NFKC, invisible characters out, straight quotes, one space for any white space).
 --   * `private.share_links_before_write()` + trigger `share_links_before_write`: refuses API tokens, stamps the caller, checks
 --     the target belongs to the workspace, freezes the guarded columns, keeps revoked links revoked, runs the leak check.
 --   * `public.share_team_capacity(ws, show_people)`: `team_capacity`'s shape for a share link (labels or names, NO pay for anyone).
@@ -34364,6 +34365,7 @@ create policy "branding: managers delete" on storage.objects for delete to authe
 --   drop table if exists public.share_links;
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
+--   drop function if exists private.share_norm(text);
 --   drop function if exists private.share_emails_ok(text[]);
 --   delete from supabase_migrations.schema_migrations where version = '20261218000000';
 --   commit;
@@ -34451,6 +34453,24 @@ grant update (label, snapshot, engine_version, revoked_at) on public.share_links
 -- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
 -- email in the message). Full names only: the app's twin (`shareSnapshotLeaks`) also checks unique first names, which this
 -- cannot do without refusing links over common words ("Will", "Mark").
+-- The text a share link's checks match on, in one form: Unicode NFKC (a no-break space or a full-width letter becomes its plain
+-- form), invisible format characters removed (zero-width space, soft hyphen, bidi marks), curly quotes and apostrophes and the
+-- hyphen variants straightened, and every run of white space (or a JSON escape of one: \n, \t,   written out) one space.
+-- The app's `normaliseView` (packages/db/src/share-text.ts) does the same, so the two agree on what a name or an amount looks like.
+create function private.share_norm(t text) returns text
+language sql immutable
+set search_path = ''
+as $$
+  select pg_catalog.btrim(pg_catalog.regexp_replace(
+    pg_catalog.translate(
+      pg_catalog.regexp_replace(normalize(coalesce(t, ''), nfkc), '[­؜᠎​-‏‪-‮⁠-⁤﻿]', '', 'g'),
+      U&'\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212',
+      pg_catalog.repeat('''', 6) || '""' || '------'),
+    '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g'));
+$$;
+
+revoke execute on function private.share_norm(text) from public;
+
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
 language plpgsql stable
@@ -34462,11 +34482,12 @@ declare
   escaped text;
   pat text;
   parts text[];
-  -- Between the words of a name: any white space (a no-break space, several spaces, a line break), or the JSON escape of one.
-  sep constant text := '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4}|[' || chr(160) || chr(8192) || '-' || chr(8203) || chr(8239) || chr(12288) || chr(65279) || '])+';
-  -- Before a name: the start, a character that is not a letter or digit, or a JSON escape (`jsonb::text` writes a line break as
-  -- the two characters \n and a control character as \u001f, so a name after one is preceded by a letter).
-  lb constant text := '(^|[^[:alnum:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})';
+  alt text;
+  -- Everything below is matched on the NORMALISED text (`private.share_norm`), names normalised the same way, so every white
+  -- space is one space. Between the words of a name: one space or none (a zero-width space between two words is removed).
+  sep constant text := ' ?';
+  -- Around a name: the start or end, or a character that is not a letter or digit.
+  lb constant text := '(^|[^[:alnum:]])';
   rb constant text := '($|[^[:alnum:]])';
 begin
   -- 1. The snapshot is the link's.
@@ -34478,10 +34499,12 @@ begin
      or snap -> 'toggles' -> 'financials' is distinct from to_jsonb(show_financials) then
     return 'The snapshot doesn''t match the link.';
   end if;
-  txt := snap::text;
+  -- Keys are in the text too. Normalised: NFKC, invisible characters out, curly quotes straight, one space for any white space.
+  txt := private.share_norm(snap::text);
 
-  -- 2. No email address, anywhere.
-  if txt ~* '[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}' then
+  -- 2. No email address, anywhere. The part before the @ ends in a letter, digit or one of _ % + - (so `roles.@busiest.headcount`,
+  -- a scenario's selector, is not one).
+  if txt ~* '[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}' then
     return 'The snapshot contains an email address.';
   end if;
 
@@ -34499,9 +34522,9 @@ begin
 
   -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
   -- are not checked (same floor as the app's `labelNames`).
-  for nm in select btrim(c.name) as name from public.clients c
-            where c.workspace_id = ws and char_length(btrim(c.name)) >= 3 loop
-    parts := array_remove(regexp_split_to_array(nm.name, '[[:space:]]+|' || chr(160)), '');
+  for nm in select private.share_norm(c.name) as name from public.clients c
+            where c.workspace_id = ws and char_length(private.share_norm(c.name)) >= 3 loop
+    parts := array_remove(regexp_split_to_array(nm.name, ' '), '');
     select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
     pat := lb || escaped || rb;
     if txt ~* pat then
@@ -34512,9 +34535,9 @@ begin
   -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
   -- own. A first name alone is left to the app's check (it would refuse links over words like "Will" and "Mark").
   if not show_people then
-    for nm in select btrim(p.name) as name from public.people p
-              where p.workspace_id = ws and char_length(btrim(p.name)) >= 3 loop
-      parts := array_remove(regexp_split_to_array(nm.name, '[[:space:]]+|' || chr(160)), '');
+    for nm in select private.share_norm(p.name) as name from public.people p
+              where p.workspace_id = ws and char_length(private.share_norm(p.name)) >= 3 loop
+      parts := array_remove(regexp_split_to_array(nm.name, ' '), '');
       select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
       pat := lb || escaped || rb;
       if txt ~* pat then
@@ -34528,6 +34551,18 @@ begin
         end if;
       end if;
     end loop;
+
+    -- 6b. A word of a person's name (3+ characters, first name or surname) right next to a "Team member N" label: that would
+    -- tie the label to the name, however the name was written.
+    select string_agg(distinct regexp_replace(x, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), '|') into alt
+      from (select unnest(regexp_split_to_array(private.share_norm(p.name), ' ')) as x
+              from public.people p where p.workspace_id = ws) as words
+      where char_length(x) >= 3;
+    if alt is not null and (
+         txt ~* ('(^|[^[:alnum:]])(' || alt || ') Team member [0-9]+([^0-9]|$)')
+      or txt ~* ('Team member [0-9]+ (' || alt || ')($|[^[:alnum:]])')) then
+      return 'The snapshot puts a person''s name next to a label.';
+    end if;
   end if;
 
   -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
@@ -34535,6 +34570,7 @@ begin
   if not show_financials and (
        jsonb_path_exists(snap, 'lax $.**.default_cost_rate ? (@.type() == "string" || (@.type() == "number" && @ != 0))')
     or jsonb_path_exists(snap, 'lax $.**.margin ? (@.type() == "string" || (@.type() == "number" && @ != 0))')
+    or jsonb_path_exists(snap, 'lax $.**.cost_override ? (@ != null)')
     or jsonb_path_exists(snap, 'lax $.**.overhead_monthly')
     or jsonb_path_exists(snap, 'lax $.**.target_margin')
     or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
@@ -34600,8 +34636,17 @@ begin
           and p.archived_at is null and not p.is_company)
       when 'issue' then exists (
         select 1 from public.issues i where i.id = new.target_id and i.workspace_id = new.workspace_id)
+        -- An issue or a solution of an archived process shows that process: refused like the process itself.
+        and not exists (
+          select 1 from public.processes p
+          where p.workspace_id = new.workspace_id and p.archived_at is not null
+            and (p.id = (select i.process_id from public.issues i where i.id = new.target_id)
+              or p.id in (select l.process_id from public.issue_links l where l.issue_id = new.target_id and l.process_id is not null)))
       when 'solution' then exists (
         select 1 from public.solutions s where s.id = new.target_id and s.workspace_id = new.workspace_id)
+        and not exists (
+          select 1 from public.solutions s join public.processes p on p.id = s.process_id
+          where s.id = new.target_id and p.archived_at is not null)
       else false end;
     if not ok then
       raise exception 'That isn''t in this workspace.' using errcode = '22023';
@@ -34733,10 +34778,13 @@ begin
     if auth.uid() is null then
       return jsonb_build_object('status', 'sign_in');
     end if;
-    -- A confirmed address AND a Google identity: a password sign-up with a listed address is not the person it names.
+    -- A confirmed address AND a Google identity whose own email is that address (any case): a password sign-up with a listed
+    -- address is not the person it names, and neither is an account that links an unrelated Google identity to it.
     select lower(u.email) into e from auth.users u
       where u.id = auth.uid() and u.email_confirmed_at is not null
-        and exists (select 1 from auth.identities i where i.user_id = u.id and i.provider = 'google');
+        and exists (select 1 from auth.identities i
+                     where i.user_id = u.id and i.provider = 'google'
+                       and lower(i.identity_data ->> 'email') = lower(u.email));
     if e is null or not (e = any (l.allowed_emails)) then
       return jsonb_build_object('status', 'not_allowed');
     end if;
@@ -34767,6 +34815,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     RLS: owners, editors and agency admins only. Column-level grants: the token hash and the snapshot are never readable
 --     through the API; `mode` is not insertable (''view'' only until B4).
 --   * `private.share_snapshot_problem(...)`: the leak check, run by a BEFORE trigger on every insert and every snapshot change.
+--   * `private.share_norm(text)`: the text those checks match on (NFKC, invisible characters out, straight quotes, one space for any white space).
 --   * `private.share_links_before_write()` + trigger `share_links_before_write`: refuses API tokens, stamps the caller, checks
 --     the target belongs to the workspace, freezes the guarded columns, keeps revoked links revoked, runs the leak check.
 --   * `public.share_team_capacity(ws, show_people)`: `team_capacity`''s shape for a share link (labels or names, NO pay for anyone).
@@ -34832,6 +34881,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop table if exists public.share_links;
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
+--   drop function if exists private.share_norm(text);
 --   drop function if exists private.share_emails_ok(text[]);
 --   delete from supabase_migrations.schema_migrations where version = ''20261218000000'';
 --   commit;
@@ -34919,6 +34969,24 @@ grant update (label, snapshot, engine_version, revoked_at) on public.share_links
 -- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
 -- email in the message). Full names only: the app''s twin (`shareSnapshotLeaks`) also checks unique first names, which this
 -- cannot do without refusing links over common words ("Will", "Mark").
+-- The text a share link''s checks match on, in one form: Unicode NFKC (a no-break space or a full-width letter becomes its plain
+-- form), invisible format characters removed (zero-width space, soft hyphen, bidi marks), curly quotes and apostrophes and the
+-- hyphen variants straightened, and every run of white space (or a JSON escape of one: \n, \t,   written out) one space.
+-- The app''s `normaliseView` (packages/db/src/share-text.ts) does the same, so the two agree on what a name or an amount looks like.
+create function private.share_norm(t text) returns text
+language sql immutable
+set search_path = ''''
+as $$
+  select pg_catalog.btrim(pg_catalog.regexp_replace(
+    pg_catalog.translate(
+      pg_catalog.regexp_replace(normalize(coalesce(t, ''''), nfkc), ''[­؜᠎​-‏‪-‮⁠-⁤﻿]'', '''', ''g''),
+      U&''\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212'',
+      pg_catalog.repeat('''''''', 6) || ''""'' || ''------''),
+    ''([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+'', '' '', ''g''));
+$$;
+
+revoke execute on function private.share_norm(text) from public;
+
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
 language plpgsql stable
@@ -34930,11 +34998,12 @@ declare
   escaped text;
   pat text;
   parts text[];
-  -- Between the words of a name: any white space (a no-break space, several spaces, a line break), or the JSON escape of one.
-  sep constant text := ''([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4}|['' || chr(160) || chr(8192) || ''-'' || chr(8203) || chr(8239) || chr(12288) || chr(65279) || ''])+'';
-  -- Before a name: the start, a character that is not a letter or digit, or a JSON escape (`jsonb::text` writes a line break as
-  -- the two characters \n and a control character as \u001f, so a name after one is preceded by a letter).
-  lb constant text := ''(^|[^[:alnum:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})'';
+  alt text;
+  -- Everything below is matched on the NORMALISED text (`private.share_norm`), names normalised the same way, so every white
+  -- space is one space. Between the words of a name: one space or none (a zero-width space between two words is removed).
+  sep constant text := '' ?'';
+  -- Around a name: the start or end, or a character that is not a letter or digit.
+  lb constant text := ''(^|[^[:alnum:]])'';
   rb constant text := ''($|[^[:alnum:]])'';
 begin
   -- 1. The snapshot is the link''s.
@@ -34946,10 +35015,12 @@ begin
      or snap -> ''toggles'' -> ''financials'' is distinct from to_jsonb(show_financials) then
     return ''The snapshot doesn''''t match the link.'';
   end if;
-  txt := snap::text;
+  -- Keys are in the text too. Normalised: NFKC, invisible characters out, curly quotes straight, one space for any white space.
+  txt := private.share_norm(snap::text);
 
-  -- 2. No email address, anywhere.
-  if txt ~* ''[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}'' then
+  -- 2. No email address, anywhere. The part before the @ ends in a letter, digit or one of _ % + - (so `roles.@busiest.headcount`,
+  -- a scenario''s selector, is not one).
+  if txt ~* ''[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}'' then
     return ''The snapshot contains an email address.'';
   end if;
 
@@ -34967,9 +35038,9 @@ begin
 
   -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
   -- are not checked (same floor as the app''s `labelNames`).
-  for nm in select btrim(c.name) as name from public.clients c
-            where c.workspace_id = ws and char_length(btrim(c.name)) >= 3 loop
-    parts := array_remove(regexp_split_to_array(nm.name, ''[[:space:]]+|'' || chr(160)), '''');
+  for nm in select private.share_norm(c.name) as name from public.clients c
+            where c.workspace_id = ws and char_length(private.share_norm(c.name)) >= 3 loop
+    parts := array_remove(regexp_split_to_array(nm.name, '' ''), '''');
     select string_agg(regexp_replace(w, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), sep) into escaped from unnest(parts) as w;
     pat := lb || escaped || rb;
     if txt ~* pat then
@@ -34980,9 +35051,9 @@ begin
   -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
   -- own. A first name alone is left to the app''s check (it would refuse links over words like "Will" and "Mark").
   if not show_people then
-    for nm in select btrim(p.name) as name from public.people p
-              where p.workspace_id = ws and char_length(btrim(p.name)) >= 3 loop
-      parts := array_remove(regexp_split_to_array(nm.name, ''[[:space:]]+|'' || chr(160)), '''');
+    for nm in select private.share_norm(p.name) as name from public.people p
+              where p.workspace_id = ws and char_length(private.share_norm(p.name)) >= 3 loop
+      parts := array_remove(regexp_split_to_array(nm.name, '' ''), '''');
       select string_agg(regexp_replace(w, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), sep) into escaped from unnest(parts) as w;
       pat := lb || escaped || rb;
       if txt ~* pat then
@@ -34996,6 +35067,18 @@ begin
         end if;
       end if;
     end loop;
+
+    -- 6b. A word of a person''s name (3+ characters, first name or surname) right next to a "Team member N" label: that would
+    -- tie the label to the name, however the name was written.
+    select string_agg(distinct regexp_replace(x, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), ''|'') into alt
+      from (select unnest(regexp_split_to_array(private.share_norm(p.name), '' '')) as x
+              from public.people p where p.workspace_id = ws) as words
+      where char_length(x) >= 3;
+    if alt is not null and (
+         txt ~* (''(^|[^[:alnum:]])('' || alt || '') Team member [0-9]+([^0-9]|$)'')
+      or txt ~* (''Team member [0-9]+ ('' || alt || '')($|[^[:alnum:]])'')) then
+      return ''The snapshot puts a person''''s name next to a label.'';
+    end if;
   end if;
 
   -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
@@ -35003,6 +35086,7 @@ begin
   if not show_financials and (
        jsonb_path_exists(snap, ''lax $.**.default_cost_rate ? (@.type() == "string" || (@.type() == "number" && @ != 0))'')
     or jsonb_path_exists(snap, ''lax $.**.margin ? (@.type() == "string" || (@.type() == "number" && @ != 0))'')
+    or jsonb_path_exists(snap, ''lax $.**.cost_override ? (@ != null)'')
     or jsonb_path_exists(snap, ''lax $.**.overhead_monthly'')
     or jsonb_path_exists(snap, ''lax $.**.target_margin'')
     or jsonb_path_exists(snap, ''lax $.**.path ? (@ like_regex "cost_rate$")'')
@@ -35068,8 +35152,17 @@ begin
           and p.archived_at is null and not p.is_company)
       when ''issue'' then exists (
         select 1 from public.issues i where i.id = new.target_id and i.workspace_id = new.workspace_id)
+        -- An issue or a solution of an archived process shows that process: refused like the process itself.
+        and not exists (
+          select 1 from public.processes p
+          where p.workspace_id = new.workspace_id and p.archived_at is not null
+            and (p.id = (select i.process_id from public.issues i where i.id = new.target_id)
+              or p.id in (select l.process_id from public.issue_links l where l.issue_id = new.target_id and l.process_id is not null)))
       when ''solution'' then exists (
         select 1 from public.solutions s where s.id = new.target_id and s.workspace_id = new.workspace_id)
+        and not exists (
+          select 1 from public.solutions s join public.processes p on p.id = s.process_id
+          where s.id = new.target_id and p.archived_at is not null)
       else false end;
     if not ok then
       raise exception ''That isn''''t in this workspace.'' using errcode = ''22023'';
@@ -35201,10 +35294,13 @@ begin
     if auth.uid() is null then
       return jsonb_build_object(''status'', ''sign_in'');
     end if;
-    -- A confirmed address AND a Google identity: a password sign-up with a listed address is not the person it names.
+    -- A confirmed address AND a Google identity whose own email is that address (any case): a password sign-up with a listed
+    -- address is not the person it names, and neither is an account that links an unrelated Google identity to it.
     select lower(u.email) into e from auth.users u
       where u.id = auth.uid() and u.email_confirmed_at is not null
-        and exists (select 1 from auth.identities i where i.user_id = u.id and i.provider = ''google'');
+        and exists (select 1 from auth.identities i
+                     where i.user_id = u.id and i.provider = ''google''
+                       and lower(i.identity_data ->> ''email'') = lower(u.email));
     if e is null or not (e = any (l.allowed_emails)) then
       return jsonb_build_object(''status'', ''not_allowed'');
     end if;

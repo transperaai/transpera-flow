@@ -247,6 +247,27 @@ describe("the write trigger", () => {
     });
   });
 
+  it("an issue or a solution of an archived process is refused too (22023)", async () => {
+    await db.client.query("begin");
+    try {
+      const archived = (await db.client.query("select id from processes where workspace_id = $1 and live_revision_id is not null and not is_company and id <> $2 order by id desc limit 1", [ws, NORTHBEAM_PROCESS_ID])).rows[0].id as string;
+      const issue = (await db.client.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'bottleneck', 'On an old process') returning id", [ws, archived])).rows[0].id;
+      const linked = (await db.client.query("insert into issues (workspace_id, type, title) values ($1, 'bottleneck', 'Linked to an old process') returning id", [ws])).rows[0].id;
+      await db.client.query("insert into issue_links (workspace_id, issue_id, process_id) values ($1, $2, $3)", [ws, linked, archived]);
+      const solution = (await db.client.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) select workspace_id, id, live_revision_id, 'Old idea', $2::jsonb from processes where id = $1 returning id", [archived, JSON.stringify({ steps: [], edges: [], entry_step_id: null })])).rows[0].id;
+      // Archived by the superuser with the guards off (the real one refuses while a service enters it); the link trigger runs as usual.
+      await db.client.query("set local session_replication_role = replica");
+      await db.client.query("update processes set archived_at = now() where id = $1", [archived]);
+      await db.client.query("set local session_replication_role = origin");
+      for (const [kind, target] of [["issue", issue], ["issue", linked], ["solution", solution]] as const) {
+        const r = await attempt(db.client, () => insertLink(db.client, { kind, target }));
+        expect(r, `${kind} ${target}`).toMatchObject({ ok: false, code: "22023" });
+      }
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
   it("an unpublished, an archived and the company map process are refused (22023)", async () => {
     await db.client.query("begin");
     try {
@@ -481,6 +502,76 @@ describe("the leak check", () => {
     await accepted({ ...clean("overview", false, true), scenarios: [{ patch: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }], services: [{ margin: "0.4" }], note: "£4,100" }, { financials: true });
   });
 
+  it("6c. text is checked on its normalised form: a soft hyphen, a zero-width space, a full-width letter, a curly apostrophe, a JSON escape", async () => {
+    const msg = "The snapshot names a person.";
+    const [first, ...rest] = personName.split(" ");
+    const surname = rest[rest.length - 1]!;
+    const fullwidth = (s: string) => s.replace(/[A-Za-z]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0xfee0));
+    await refused({ ...clean(), note: `${first}­ ${surname}` }, {}, msg);
+    await refused({ ...clean(), note: `${first} ${surname.slice(0, 2)}­${surname.slice(2)}` }, {}, msg);
+    await refused({ ...clean(), note: `${first}​${surname}` }, {}, msg);
+    await refused({ ...clean(), note: `${first} ${surname}` }, {}, msg);
+    await refused({ ...clean(), note: `${fullwidth(first!)} ${surname}` }, {}, msg);
+    await refused({ ...clean(), note: `${first}\\n${surname}` }, {}, msg);
+    await refused({ ...clean(), note: `x\\n${surname} said` }, {}, msg);
+    // A name as a JSON key is text too.
+    await refused({ ...clean(), liveRevisions: { [`${first} ${surname}`]: "r1" } }, {}, msg);
+    // A name with a curly apostrophe is found when the text has a straight one, and the other way round.
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into people (workspace_id, name) values ($1, $2)", [ws, "Ann O’Neil"]);
+      const tryNote = (note: string) => attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note }, tok: randomUUID() }));
+      expect(await tryNote("Ann O'Neil said")).toMatchObject({ ok: false, message: msg });
+      expect(await tryNote("Ann O’Neil said")).toMatchObject({ ok: false, message: msg });
+      expect(await tryNote("Ann O‘Neil said")).toMatchObject({ ok: false, message: msg });
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("6d. a word of a person's name next to a \"Team member N\" label is refused, either side, any case; two labels are fine", async () => {
+    const msg = "The snapshot puts a person's name next to a label.";
+    const [first, ...rest] = personName.split(" ");
+    const surname = rest[rest.length - 1]!;
+    for (const note of [`Team member 1 ${surname}`, `${first} Team member 1`, `${surname.toUpperCase()} Team member 12`, `Team member 3 ${first!.toLowerCase()}`]) {
+      // The surname alone is caught by check 6; whichever message, a person next to a label is refused.
+      await asEditor(async (c) => expect(await make(c, { snapshot: { ...clean(), note } }), note).toMatchObject({ ok: false, code: "23514" }));
+    }
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into people (workspace_id, name) values ($1, 'Zed Quill')", [ws]);
+      const r = await attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note: "Team member 4 Zed" }, tok: randomUUID() }));
+      expect(r).toMatchObject({ ok: false, code: "23514", message: msg });
+      const r2 = await attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note: "Quill Team member 4" }, tok: randomUUID() }));
+      expect(r2).toMatchObject({ ok: false, code: "23514" });
+    } finally {
+      await db.client.query("rollback");
+    }
+    await accepted({ ...clean(), note: "Team member 1 and Team member 2" });
+  });
+
+  it("2b. a scenario's selector (roles.@busiest) is not an email; a full-width email is", async () => {
+    await accepted({ ...clean(), scenarios: [{ patch: [{ path: "roles.@busiest.headcount", op: "set", value: 3 }, { path: "steps.@heaviest.work_hours", op: "set", value: 2 }] }] });
+    await refused({ ...clean(), note: "write to ｓａｍ@northbeam.example" }, {}, "The snapshot contains an email address.");
+    await refused({ ...clean(), roles: { "a.b@x.example": 1 } }, {}, "The snapshot contains an email address.");
+  });
+
+  it("7c. money in every form the app hides: several spaces, a French thousands space, a symbol and a no-break space", async () => {
+    const msg = "The snapshot contains costs or margins.";
+    for (const text of ["GBP  4,100 a month", "4 512 €", "4 512 €", "£ 4,100", "£  4,100", "£  4,100", "4,100 pounds", "1.2m GBP", "＄５"]) {
+      await refused({ ...clean(), note: text }, {}, msg);
+    }
+    await accepted({ ...clean("overview", false, true), note: "4 512 €" }, { financials: true });
+  });
+
+  it("7d. a step's cost_override with Financials off (a number or a string), allowed with it on, null always", async () => {
+    const msg = "The snapshot contains costs or margins.";
+    await refused({ ...clean(), steps: [{ cost_override: 120 }] }, {}, msg);
+    await refused({ ...clean(), a: { b: [{ cost_override: "120" }] } }, {}, msg);
+    await accepted({ ...clean(), steps: [{ cost_override: null }] });
+    await accepted({ ...clean("overview", false, true), steps: [{ cost_override: 120 }] }, { financials: true });
+  });
+
   it("4b. evidence notes of any JSON type, and quotes from sources, are refused", async () => {
     const msg = "The snapshot contains evidence notes.";
     await refused({ ...clean(), a: { provenance: ["x"] } }, {}, msg);
@@ -615,7 +706,10 @@ describe("open_share_link", () => {
     const unconfirmed = await createUser(db, "pending@share.example", {}, { unconfirmed: true, google: {} });
     // Confirmed and listed, but a password sign-up: no Google identity, so it is not the person the address names.
     const password = await createUser(db, "ana@share.example");
-    const m: Made = { people: true, emails: ["sam@share.example", "pending@share.example", "ana@share.example"], expires: future() };
+    // Confirmed, listed, and a Google identity - but the identity's own email is someone else's: not the person the address names.
+    const linked = await createUser(db, "lee@share.example");
+    await db.client.query("insert into auth.identities (user_id, provider, provider_id, identity_data) values ($1, 'google', $2, $3)", [linked.id, randomUUID(), { sub: randomUUID(), email: "someone.else@gmail.example" }]);
+    const m: Made = { people: true, emails: ["sam@share.example", "pending@share.example", "ana@share.example", "lee@share.example"], expires: future() };
     await asAnon(seed(t, m), async (c) => {
       expect(await open(c, t)).toEqual({ status: "sign_in" });
     });
@@ -632,6 +726,7 @@ describe("open_share_link", () => {
       // Signed in, not listed (and a workspace member, who gets no member view here).
       expect(await as(who.member!.claims)).toEqual({ status: "not_allowed" });
       expect(await as(password.claims)).toEqual({ status: "not_allowed" });
+      expect(await as(linked.claims)).toEqual({ status: "not_allowed" });
       // Listed but the address isn't confirmed.
       expect(await as(unconfirmed.claims)).toEqual({ status: "not_allowed" });
       // Listed `sam@share.example`, signed in as `Sam@Share.example`: the comparison is case-insensitive.

@@ -78,6 +78,16 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
 - B4 (play links) replaces the write trigger, adds `mode` to the insert grant and a rate-limited submission function. It
   needs `lever_settings` in the snapshot.
 
+- Text is scrubbed and checked on a normalised view (NFKC, invisible characters and soft hyphens out, curly quotes straight,
+  any white space or JSON escape of one a single space): the app (`share-text.ts`) maps each match back to the original span
+  and replaces all of it, and the database (`private.share_norm`) normalises the same way before its checks. After scrubbing
+  the app checks its own output again and refuses a name word next to a "Team member N" label. A scenario's patch paths are not
+  emails (`roles.@busiest.headcount`), so the email pattern needs a letter, digit or one of `_%+-` before the `@`.
+- One money pattern (`money.ts`) serves B20's `propose_finding` check and the share link's redaction, and the database applies
+  the same forms to the normalised text. A step's `cost_override` is nulled with Financials off and refused by both checks.
+- A Google identity counts only when its own email equals the account's confirmed email (any case) and that address is listed.
+- An issue or a solution of an archived process is refused, in the app and by the write trigger.
+
 ## Rejected
 
 - **A Postgres function that builds the snapshot** (the ticket's wording): a second copy of the loaders in SQL.

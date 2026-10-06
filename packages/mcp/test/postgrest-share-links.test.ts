@@ -206,7 +206,7 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
 
         // The raw JSON, as PostgREST sent it.
         const raw = JSON.stringify(opened.data);
-        expect(raw).not.toMatch(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+        expect(raw).not.toMatch(/[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}/i);
         expect(raw).not.toMatch(/"cost_rate":\s*[0-9-]/);
         expect(raw).not.toContain("larkspur-private");
         for (const c of await names("clients")) expect(raw, `client ${c}`).not.toContain(c);
@@ -340,6 +340,27 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
     } finally {
       await admin.query("delete from issues where id = $1", [iss]);
       await admin.query("delete from processes where id = $1", [proc]);
+    }
+  });
+
+  it("an issue or a solution of an archived process is refused, like the process itself", async () => {
+    const sol = targetId("solution")!;
+    const proc = (await admin.query("select process_id from solutions where id = $1", [sol])).rows[0].process_id as string;
+    const iss = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'On a process that will be archived') returning id", [ws, proc])).rows[0].id as string;
+    const setArchived = async (on: boolean) => {
+      // The superuser, with the archive guards off (the real ones refuse while a service enters the process).
+      await admin.query("set session_replication_role = replica");
+      await admin.query(`update processes set archived_at = ${on ? "now()" : "null"} where id = $1`, [proc]);
+      await admin.query("set session_replication_role = origin");
+    };
+    await setArchived(true);
+    try {
+      const workspace = await workspaceRow();
+      await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "issue", id: iss }, TOGGLES[0]!)).rejects.toThrow(/archived/);
+      await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "solution", id: sol }, TOGGLES[0]!)).rejects.toThrow(/archived/);
+    } finally {
+      await setArchived(false);
+      await admin.query("delete from issues where id = $1", [iss]);
     }
   });
 

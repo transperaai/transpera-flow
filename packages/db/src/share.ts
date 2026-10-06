@@ -535,6 +535,7 @@ export async function loadShareData(
     if (processId && processId !== probe.live.process.id && !own) throw new ShareBuildError("Publish this process first: a link shows the published version.");
     const bundle = (own ?? probe).live;
     if (isUnpublished(bundle)) throw new ShareBuildError("Publish this process first: a link shows the published version.");
+    await refuseArchived(db, ws, [processId, bundle.process.id]);
     const [processes, liveRevisions, solutions] = await Promise.all([
       listProcesses(rdb, ws).then((ps) => ps.map((p) => ({ id: p.id, name: p.name }))),
       loadLiveRevisionIds(rdb, ws),
@@ -549,6 +550,7 @@ export async function loadShareData(
     const loaded = (await loadProcessBySlug(rdb, workspace.slug, { draft: false, processId: solution.process_id })) ?? (await loadProcessBySlug(rdb, workspace.slug, { draft: false }));
     if (!loaded) throw new ShareBuildError("Publish a process first.");
     const live = loaded.live;
+    await refuseArchived(db, ws, [solution.process_id, live.process.id]);
     let compareBase: SolutionShare["compareBase"] = null;
     let movedOn: string | null = null;
     try {
@@ -569,6 +571,15 @@ export async function loadShareData(
     raw = { ...base, kind: "solution", solutionId: solution.id, bundle: live, solutions, issues, processes, compareBase, movedOn };
   }
   return redactShareSnapshot(raw, toggles, secrets);
+}
+
+/** An archived process can't be shared on any path: an issue or a solution of one is as much a view of it as its own link. */
+async function refuseArchived(db: Db, workspaceId: string, processIds: readonly (string | null | undefined)[]): Promise<void> {
+  const ids = [...new Set(processIds.filter((x): x is string => !!x))];
+  if (!ids.length) return;
+  const { data, error } = await db.from("processes").select("id, archived_at").eq("workspace_id", workspaceId).in("id", ids);
+  if (error) throw error;
+  if ((data ?? []).some((p) => p.archived_at)) throw new ShareBuildError("An archived process can't be shared. Restore it first.");
 }
 
 /**
