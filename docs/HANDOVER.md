@@ -71,6 +71,11 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
   has no ad-hoc servicing, so the demo's response-time check reads "No servicing work is set to come in as ad-hoc requests"
   (adding one would move goldens).
 - B1 3/3: headline numbers are a closed five-key shape; `computed_by`/`computed_at` are stamped by a trigger.
+- B3 (#32): restricted share links verify by **Google sign-in**, not magic link (magic link needs custom SMTP). Toggles are
+  People and Financials; **no one person's pay is ever in a link** (Financials on shows role rates, margins, overhead and
+  insight costs; figures that need one person's pay show "—"). Links are frozen copies with Update copy; the server builds
+  the snapshot and Postgres refuses a leaky one (ADR 0016, PRD D47). A visitor without a Google account for the listed
+  address can't open a restricted link.
 
 **Waiting on Austin:**
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a

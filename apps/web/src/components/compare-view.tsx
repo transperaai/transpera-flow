@@ -4,6 +4,8 @@
 // headline with ranges, a KPI delta table, and utilisation per role and per
 // person side by side. Every sentence comes from compareHeadline's templates.
 
+import { MoneyHidden } from "@/components/money-hidden";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { useState, type ReactNode } from "react";
 import { compareTable, type Comparison, type CompareRow, type EnginePerson, type Headline, type Stat } from "@transpera-flow/engine";
 import type { Viewer } from "@transpera-flow/db";
@@ -21,6 +23,7 @@ const signed = (v: number, format: (x: number) => string) => {
 
 /** Rows from the engine's compareTable, which MCP `compare_scenarios` returns too, so both read the same. */
 function KpiDeltaTable({ rows }: { rows: CompareRow[] }) {
+  const hideMoney = useShareFinancialsHidden();
   return (
     <table className="w-full text-sm">
       <caption className="sr-only">Key results, baseline and scenario, with 10th–90th percentile ranges</caption>
@@ -43,6 +46,18 @@ function KpiDeltaTable({ rows }: { rows: CompareRow[] }) {
       <tbody>
         {rows.map((r) => {
           const tone = r.tone === "good" ? "text-good" : r.tone === "bad" ? "text-crit" : "";
+          // A share link without Financials hides the labour cost (role rates are zero there, so it would read as 0).
+          if (hideMoney && r.metric === "labour")
+            return (
+              <tr key={r.label} className="border-b border-line/60 align-top">
+                <th scope="row" className="py-1.5 pr-2 text-left font-normal">
+                  {r.label}
+                </th>
+                <td colSpan={3} className="py-1.5 text-right">
+                  <MoneyHidden />
+                </td>
+              </tr>
+            );
           return (
             <tr key={r.label} className="border-b border-line/60 align-top">
               <th scope="row" className="py-1.5 pr-2 text-left font-normal">

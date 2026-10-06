@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { IssueEventRow, IssueRow, ResolveHow } from "@transpera-flow/db";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
+import type { ScreenMode } from "@/lib/mode";
 import { liveIssueStore } from "./live-store";
 import { MemoryIssueStore, type IssueStore, type SaveIssueResult } from "./store";
 import type { IssueField, IssueInput, PromoteInput, SaveIssueInput, Scalar } from "./validate";
@@ -40,7 +41,7 @@ export interface IssuesState {
 export function useIssues(
   workspaceId: string,
   initial: readonly IssueRow[],
-  mode: "live" | "demo" | "readonly",
+  mode: ScreenMode,
   /** Each process's live revision id: a dismissed insight is hidden until its process's live revision changes. */
   liveRevisions: Readonly<Record<string, string>> = NO_REVISIONS,
 ): IssuesState {

@@ -721,6 +721,8 @@ export interface ProcessPart {
 export interface ProcessBundle {
   /** Who loaded it (B1 2/3). Absent means "sees everyone" (demo fixtures, tests, the golden models). */
   viewer?: Viewer;
+  /** Pay is hidden even though the viewer may see everyone (a share link, B3). */
+  payHidden?: true;
   workspace: WorkspaceRow;
   roles: RoleRow[];
   process: ProcessRow;
@@ -874,6 +876,14 @@ export interface ForecastPlanRow {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+}
+
+/** A workspace's solutions and which issues each solves, as loaded with a page (the demo keeps its own in memory). */
+export interface SolutionsData {
+  solutions: SolutionRow[];
+  links: SolutionIssueRow[];
+  /** Ids of solutions that were built from an AI idea (a built proposal names them). Left out when that isn't known: they read "By hand". */
+  aiIds?: string[];
 }
 
 /** One issue a solution solves: the automatic verdict against the issue's target, and the user's own. */

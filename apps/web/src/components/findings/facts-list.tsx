@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { headline, sourceOf } from "@/lib/insights/insights";
 import { PayHidden } from "@/components/pay-hidden";
-import { formatIssueCost } from "@/lib/issues/register";
+import { IssueCostText } from "@/components/money-hidden";
 
 const DOT: Record<string, string> = { risk: "var(--rate-risk)", bad: "var(--rate-bad)", good: "var(--rate-good)", great: "var(--rate-great)" };
 
@@ -70,7 +70,11 @@ export function FactsList({
                 {f.cost.payHidden ? (
                   <PayHidden />
                 ) : (
-                  (f.cost.perMonth != null || f.cost.hoursPerMonth != null) && <span className="tabular-nums">{formatIssueCost(f.cost, currency)}</span>
+                  (f.cost.perMonth != null || f.cost.hoursPerMonth != null) && (
+                    <span className="tabular-nums">
+                      <IssueCostText cost={f.cost} currency={currency} />
+                    </span>
+                  )
                 )}
               </span>
             </li>

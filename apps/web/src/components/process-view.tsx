@@ -1,5 +1,6 @@
 "use client";
 
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -53,7 +54,7 @@ import { ServicingBanner } from "./servicing-banner";
  * in memory (lost on reload), `readonly` not at all (viewers). Either way
  * edits go into the process's draft, never the live revision (issue #9).
  */
-export type EditMode = "live" | "demo" | "readonly";
+export type EditMode = ScreenMode;
 
 /** Who you are on the public demo, where nobody signs in. */
 const DEMO_VIEWER: Viewer = { userId: "demo-you", name: "You", email: null };
@@ -453,7 +454,7 @@ export function ProcessView({
             colleague={connection.colleague}
             selectedStep={selected.steps.length === 1 ? selected.steps[0]! : null}
           />
-          {shownModel && mode !== "readonly" && (!hasDraft || showingLive) && (
+          {shownModel && !isReadOnly(mode) && (!hasDraft || showingLive) && (
             // Saved runs are of the live model (issue #25).
             <SaveRunBar
               mode={mode}

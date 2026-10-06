@@ -4,6 +4,7 @@
 // <SourceLinkingProvider> with the workspace's sources, links and link targets. It holds the one Add / Link source dialog the Sources
 // blocks (./linking-context.tsx) open, and saves through Server Actions (live), the tab (demo) or nowhere (read only).
 
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { linkTarget, sameTarget, type LinkTargets, type SourceLinkRow, type SourceLinkTarget, type SourceRow } from "@transpera-flow/db";
@@ -17,7 +18,7 @@ import { MemorySourceStore, type SourceStore } from "@/lib/sources/store";
 export interface SourceLinkingProviderProps {
   workspaceId: string;
   /** live: saved through Server Actions; demo: kept in the tab; readonly: the viewer can't change links. */
-  mode: "live" | "demo" | "readonly";
+  mode: ScreenMode;
   sources: SourceRow[];
   links: SourceLinkRow[];
   targets: LinkTargets;
@@ -116,7 +117,7 @@ export function SourceLinkingProvider({ workspaceId, mode, sources: initialSourc
 
   const value = useMemo<SourceLinking>(
     () => ({
-      canEdit: mode !== "readonly",
+      canEdit: !isReadOnly(mode),
       sources,
       links,
       linkedTo,
@@ -133,7 +134,7 @@ export function SourceLinkingProvider({ workspaceId, mode, sources: initialSourc
   return (
     <SourceLinkingContext.Provider value={value}>
       {children}
-      {mode !== "readonly" && (
+      {!isReadOnly(mode) && (
         <SourceDialog
           open={dialog !== null}
           targets={targets}

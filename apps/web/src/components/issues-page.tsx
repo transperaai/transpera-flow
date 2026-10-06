@@ -3,6 +3,7 @@
 // The Issues list (issue #113, A48; prototype: "Issues"): the problems people have confirmed, with Open / Resolved / All
 // and rating filters (both kept in the URL), sorted by rating and then cost. A cost comes from the latest run of the live
 // process, simulated here in a worker as on the process page; until it is back the issues are sorted without it.
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
@@ -59,7 +60,7 @@ export function IssuesPage({
   processes: Named[];
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
   sources?: SourceRow[];
-  mode: "live" | "demo" | "readonly";
+  mode: ScreenMode;
   /** Where the workspace's pages live: `/w/<slug>` or `/demo`. An issue's page is `<base>/issues/<number>`. */
   base: string;
   liveRevisions?: Record<string, string>;
@@ -102,7 +103,7 @@ export function IssuesPage({
   const counts = showCounts(state.issues);
   const ratings = ratingCounts(state.issues, filters.show);
   const list = listIssues(state.issues, filters, costOf);
-  const canEdit = mode !== "readonly";
+  const canEdit = !isReadOnly(mode);
   // The CSV is the list as drawn: the same filters, order and costs.
   const exportCsv = () => {
     const names = { processes: processNames, steps: stepNames, people: peopleNames };
@@ -304,7 +305,7 @@ function RatingChips({ ratings, value, onChange }: { ratings: ReturnType<typeof 
 function useIssueCosts(
   bundle: ProcessBundle,
   scenarios: ScenarioRow[],
-  mode: "live" | "demo" | "readonly",
+  mode: ScreenMode,
   firstPrinciples: FirstPrinciples | null | undefined,
 ): Map<string, IssueCost> | null {
   const model = useMemo(() => {

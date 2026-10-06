@@ -5,6 +5,7 @@
 // the market stress test: components/solutions/solution-compare.tsx) and notes.
 // Your verdict and notes are saved on the solution's links and logged on each issue's history by the database.
 
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -44,13 +45,15 @@ export interface SolutionPageProps {
   processes: { id: string; name: string }[];
   /** `/w/<slug>` or `/demo`. */
   base: string;
-  mode: "live" | "demo" | "readonly";
+  mode: ScreenMode;
   viewerId?: string | null;
   memberNames?: Readonly<Record<string, string>>;
   /** The version of the process the solution was copied from, for the comparison. The demo works it out itself. */
   compareBase?: ProcessBundle | null;
   /** A sentence when the process has been published since the solution was copied from it. */
   movedOn?: string | null;
+  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  share?: ReactNode;
 }
 
 /** The demo's process a solution was copied from, built once (not on every render). */
@@ -75,7 +78,7 @@ export function SolutionPage(props: SolutionPageProps) {
   }
   const data = mode === "demo" ? inTab : local;
   const solution = data.solutions.find((s) => s.id === solutionId);
-  const canEdit = mode !== "readonly";
+  const canEdit = !isReadOnly(mode);
   // The version the solution was copied from, for the comparison. Held by identity, so a re-render (a verdict pressed) leaves the
   // comparison alone. The demo has no server: it is the demo's own process.
   const demoBase = useDemoBase(mode === "demo", solution?.process_id);
@@ -144,6 +147,7 @@ export function SolutionPage(props: SolutionPageProps) {
         </div>
         {canEdit && (
           <span className="flex flex-wrap items-center gap-2">
+            {props.share}
             <DeleteSolution
               name={solution.name}
               linked={links.length}

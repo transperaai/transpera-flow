@@ -19,7 +19,6 @@ import {
   entriesInProcess,
   filterEntries,
   fixFor,
-  formatIssueCost,
   issueLabel,
   registerEntries,
   type IssueFilters,
@@ -29,7 +28,8 @@ import type { IssuesState } from "@/lib/issues/use-issues";
 import { ISSUE_STATUSES, type IssueField } from "@/lib/issues/validate";
 import { draftFromIssue, emptyDraft, toSaveInput, type IssueDraft, type IssueFormOptions } from "@/lib/issues/draft";
 import { buttonVariants } from "@/components/ui/button";
-import { PayHidden } from "@/components/pay-hidden";
+import { IssueCostText, visibleCostMethod } from "@/components/money-hidden";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { NativeSelect } from "@/components/ui/native-select";
 import { AcknowledgeDialog } from "./acknowledge-dialog";
 import { SelectField, TextField, type SelectOption } from "./fields";
@@ -313,6 +313,7 @@ function IssueItem({
 }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const hideMoney = useShareFinancialsHidden();
   const v = entryView(entry);
   const fix = fixFor(entry, scenarios);
   // A fix that needs attention must be re-pointed (issue #16).
@@ -371,9 +372,11 @@ function IssueItem({
       <p className="text-sm font-semibold">{v.title}</p>
       {v.evidence && <p className="mt-0.5 text-xs text-fg-2">{v.evidence}</p>}
       {entry.kind === "detected" || entry.detection ? (
-        <p className="mt-0.5 text-xs text-fg-2" data-cost title={v.cost?.method}>
-          {v.cost?.payHidden ? <PayHidden /> : <span className="font-medium">{formatIssueCost(v.cost, currency)}</span>}
-          {v.cost?.method && !v.cost.payHidden ? <span className="text-fg-3"> · {v.cost.method}</span> : null}
+        <p className="mt-0.5 text-xs text-fg-2" data-cost title={visibleCostMethod(v.cost, hideMoney)}>
+          <span className="font-medium">
+            <IssueCostText cost={v.cost ?? null} currency={currency} />
+          </span>
+          {visibleCostMethod(v.cost, hideMoney) ? <span className="text-fg-3"> · {visibleCostMethod(v.cost, hideMoney)}</span> : null}
         </p>
       ) : null}
       {where.length > 0 && <p className="mt-0.5 text-xs text-fg-3">{where.join(" · ")}</p>}

@@ -230,3 +230,15 @@
 [data-highlight-tone="issue"] [data-lit="false"] {
   opacity: 1 !important;
 }
+
+/* A share link's page (B3, issue #32): read only, with no sidebar. The sidebar toggles the screens draw in their own headers do
+   nothing there, and a link to another page of the workspace reads as plain text (components/share/inert-links.ts marks them). */
+[data-share-frame] [data-sidebar="trigger"] {
+  display: none;
+}
+[data-share-frame] a[data-share-inert] {
+  pointer-events: none;
+  color: inherit;
+  text-decoration: none;
+  cursor: default;
+}

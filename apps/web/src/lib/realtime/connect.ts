@@ -6,6 +6,7 @@ import type { ProcessBundle } from "@transpera-flow/db";
 import { serverDraftBackend } from "@/lib/drafts/server-backend";
 import { MemoryDraftBackend, type DraftBackend } from "@/lib/drafts/session";
 import { createClient } from "@/lib/supabase/browser";
+import type { ScreenMode } from "@/lib/mode";
 import { DemoColleague } from "./demo-colleague";
 import { MemoryRealtime } from "./memory";
 import { supabaseRevisionReader } from "./supabase-reads";
@@ -28,8 +29,10 @@ export function connectScratch(live: ProcessBundle): Connection {
   return { backend: new MemoryDraftBackend(live, null), transport: null, colleague: null };
 }
 
-export function connect(mode: "live" | "demo" | "readonly", live: ProcessBundle): Connection {
+export function connect(mode: ScreenMode, live: ProcessBundle): Connection {
   const processId = live.process.id;
+  // A share link's page (B3) makes no server or Realtime call, and has no colleague.
+  if (mode === "share") return connectScratch(live);
   if (mode === "demo") {
     const realtime = new MemoryRealtime(DEMO_LATENCY_MS);
     const memory = new MemoryDraftBackend(live, realtime);

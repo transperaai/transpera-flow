@@ -7,6 +7,7 @@
 import { useCallback, useState } from "react";
 import { findingDraftProblem, type FindingDraft, type FindingRow, type FindingWrite } from "@transpera-flow/db";
 import { createFinding, decideFinding, editFinding } from "@/app/w/[slug]/findings-actions";
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 
 export interface FindingsStore {
   create(draft: FindingDraft): Promise<FindingWrite>;
@@ -126,14 +127,14 @@ export interface FindingsState {
 const messageOf = (w: Exclude<FindingWrite, { status: "saved" }>) =>
   w.status === "forbidden" ? "Only owners and editors can change findings." : w.status === "invalid" ? w.message : w.message;
 
-export function useFindings(workspaceId: string, initial: readonly FindingRow[], mode: "live" | "demo" | "readonly", store?: FindingsStore): FindingsState {
+export function useFindings(workspaceId: string, initial: readonly FindingRow[], mode: ScreenMode, store?: FindingsStore): FindingsState {
   const [writer] = useState<FindingsStore>(() => store ?? (mode === "live" ? liveFindingsStore(workspaceId) : new MemoryFindingsStore(workspaceId, [...initial])));
   const [findings, setFindings] = useState<FindingRow[]>(() => [...initial]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const run = useCallback(async (write: () => Promise<FindingWrite>) => {
-    if (mode === "readonly") return null;
+    if (isReadOnly(mode)) return null;
     setBusy(true);
     setError(null);
     try {
@@ -156,7 +157,7 @@ export function useFindings(workspaceId: string, initial: readonly FindingRow[],
     findings,
     busy,
     error,
-    canEdit: mode !== "readonly",
+    canEdit: !isReadOnly(mode),
     create: (d) => run(() => writer.create(d)),
     edit: (id, d, accept = false) => run(() => writer.edit(id, d, accept)),
     accept: (id) => run(() => writer.decide(id, "accepted")),

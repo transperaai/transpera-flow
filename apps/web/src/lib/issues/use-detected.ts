@@ -6,6 +6,8 @@
 // role would bring), so the issues show first without it and again, costed, once a
 // worker has run it.
 
+import { sortWithoutMoney } from "@transpera-flow/db";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { useEffect, useMemo, useState } from "react";
 import type { AbsenceTest, AnalysisSettings, DetectedIssue, EngineModel, SimulationResult, SuccessMeasureSource } from "@transpera-flow/engine";
 import { rerate } from "@/lib/rules/edit";
@@ -69,10 +71,14 @@ export function useDetectedIssues(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, result, wanted]);
 
+  // A share link without Financials reads the issues in an order that never depends on money (B3).
+  const hideMoney = useShareFinancialsHidden();
   return useMemo(() => {
     if (!model || !result || !first) return first;
-    return prices && prices.model === model && prices.result === result
-      ? rerate(model, result, rules, processId, absence, { currency, shadowPrices: prices.value, successMeasures })
-      : first;
-  }, [model, result, first, prices, rules, processId, currency, absence, successMeasures]);
+    const found =
+      prices && prices.model === model && prices.result === result
+        ? rerate(model, result, rules, processId, absence, { currency, shadowPrices: prices.value, successMeasures })
+        : first;
+    return hideMoney ? sortWithoutMoney(found) : found;
+  }, [model, result, first, prices, rules, processId, currency, absence, successMeasures, hideMoney]);
 }

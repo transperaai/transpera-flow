@@ -16,6 +16,18 @@ const nextConfig: NextConfig = {
   },
   // Trace from the monorepo root: the pnpm store (node_modules/.pnpm) lives there.
   outputFileTracingRoot: monorepoRoot,
+  // A share link's page (B3): the token is in the address, so nothing may leak it (no Referer to other sites), nothing may keep a copy
+  // (no caching), and search engines stay away.
+  headers: async () => [
+    {
+      source: "/s/:path*",
+      headers: [
+        { key: "Referrer-Policy", value: "no-referrer" },
+        { key: "Cache-Control", value: "private, no-store" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ],
+    },
+  ],
   // The Block library's address before it was built (a bookmark of the placeholder still works).
   redirects: async () => [
     { source: "/w/:slug/library", destination: "/w/:slug/blocks", permanent: false },
