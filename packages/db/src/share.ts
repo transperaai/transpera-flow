@@ -8,8 +8,9 @@
 // Austin, 6 Oct (#30): members and viewers get no pay data, so no link carries an individual cost rate whatever its toggles.
 // Real ids stay in a snapshot: they seed the engine's random streams, so replacing them would move every number (Q5).
 
-import type { FirstPrinciples } from "@transpera-flow/engine";
+import { compareRatingsDesc, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
 import { loadFindings } from "./findings";
+import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
 import { labelNames, nameFinding, type PersonLabels } from "./person-labels";
 import {
@@ -172,44 +173,79 @@ const EMAIL_HIDDEN = "[email hidden]";
 const AMOUNT_HIDDEN = "[amount hidden]";
 const MIN_NAME = 3;
 
-// Currency symbol forms (£ $ € A$ US$) followed by a number with optional , or . and k/m/bn, or a number and an ISO code.
-const NUMBER = "\\d[\\d,]*(?:\\.\\d+)?";
-const MAGNITUDE = "(?:\\s?(?:bn|billion|million|thousand|k|m)(?![A-Za-z]))?";
-const MONEY = new RegExp(
-  `(?<![A-Za-z])(?:US\\$|A\\$|[£$€])\\s?${NUMBER}${MAGNITUDE}|${NUMBER}${MAGNITUDE}\\s?(?:GBP|USD|EUR|AUD|NZD|CAD)(?![A-Za-z])`,
-  "gi",
-);
+// Money in text: B20's pattern (src/money.ts), in any case, plus amounts written in words.
+const MONEY = shareMoneyRegex();
 
+/**
+ * White space between the words of a name: any `\s` (a no-break space pasted from a document, several spaces, a line break, a
+ * tab) and the zero-width space, which `\s` leaves out.
+ */
+const GAP = "[\\s\\u200b]+";
+
+/** A name as a pattern: its words, each escaped, with any white space between them (and none required inside a word). */
+const wordsOf = (name: string) => name.trim().split(/\s+/).filter(Boolean);
+const namePattern = (words: readonly string[]) => words.map(escapeRe).join(GAP);
+
+/** The name, any case, whole (no letter or digit either side). Surnames and one-word names use the same pattern. */
+const nameRe = (words: readonly string[], flags = "giu") => new RegExp(`${NOT_LETTER_OR_DIGIT_BEFORE}${namePattern(words)}${NOT_LETTER_OR_DIGIT_AFTER}`, flags);
+/** A first name as written: a whole word, case-sensitive (`labelNames`' rule; "will" and "mark" are words). */
 const wordRe = (name: string, flags: string) => new RegExp(`${NOT_LETTER_OR_DIGIT_BEFORE}${escapeRe(name)}${NOT_LETTER_OR_DIGIT_AFTER}`, flags);
 const firstNameOf = (name: string) => name.trim().split(/\s+/)[0] ?? "";
 
 interface NameMatcher {
-  /** Replace each full name with its label (several words: any case; one word: as written). */
-  replaceFull(text: string): string;
-  /** True when a full name occurs. */
-  hasFull(text: string): boolean;
+  /** Replace each name with its label. */
+  replace(text: string): string;
+  /** True when a name occurs. */
+  has(text: string): boolean;
 }
 
-/** Full names, longest first, ready to replace or find. Names under three characters are not checked (the floor `labelNames` has). */
-function nameMatcher(entries: readonly SecretName[]): NameMatcher {
-  const items = entries
-    .map((e) => ({ name: e.name.trim(), label: e.label }))
-    .filter((e) => e.name.length >= MIN_NAME)
-    .sort((a, b) => b.name.length - a.name.length)
-    .map((e) => ({ ...e, lower: e.name.toLowerCase(), multi: /\s/.test(e.name), re: wordRe(e.name, /\s/.test(e.name) ? "giu" : "gu") }));
-  const needs = (text: string, lower: string, i: (typeof items)[number]) => (i.multi ? lower.includes(i.lower) : text.includes(i.name));
+interface NameItem {
+  re: RegExp;
+  label: string;
+  /** Lower-case first word: a cheap test before the full pattern. */
+  head: string;
+}
+
+function matcherOf(items: readonly NameItem[]): NameMatcher {
   return {
-    replaceFull(text) {
+    replace(text) {
       const lower = text.toLowerCase();
       let out = text;
-      for (const i of items) if (needs(text, lower, i)) out = out.replace(i.re, i.label);
+      for (const i of items) if (lower.includes(i.head)) out = out.replace(i.re, i.label);
       return out;
     },
-    hasFull(text) {
+    has(text) {
       const lower = text.toLowerCase();
-      return items.some((i) => needs(text, lower, i) && (i.re.lastIndex = 0, i.re.test(text)));
+      return items.some((i) => lower.includes(i.head) && (i.re.lastIndex = 0, i.re.test(text)));
     },
   };
+}
+
+/** Full names, longest first: any case, any white space between the words. Names under three characters are not checked (the floor `labelNames` has). */
+function nameMatcher(entries: readonly SecretName[]): NameMatcher {
+  return matcherOf(
+    entries
+      .map((e) => ({ words: wordsOf(e.name), label: e.label }))
+      .filter((e) => e.words.join(" ").length >= MIN_NAME)
+      .sort((a, b) => b.words.join(" ").length - a.words.join(" ").length)
+      .map((e) => ({ re: nameRe(e.words), label: e.label, head: e.words[0]!.toLowerCase() })),
+  );
+}
+
+/**
+ * The last word of a person's name (3+ characters, the name having two or more words), on its own, any case. A surname one person
+ * holds becomes their label; a surname two people share becomes "a team member".
+ */
+function surnameMatcher(people: readonly SecretName[]): NameMatcher {
+  const bySurname = new Map<string, SecretName[]>();
+  for (const p of people) {
+    const words = wordsOf(p.name);
+    const last = words[words.length - 1];
+    if (words.length > 1 && last && last.length >= MIN_NAME) bySurname.set(last.toLowerCase(), [...(bySurname.get(last.toLowerCase()) ?? []), p]);
+  }
+  return matcherOf(
+    [...bySurname].map(([surname, who]) => ({ re: nameRe([surname]), label: who.length === 1 ? who[0]!.label : "a team member", head: surname })),
+  );
 }
 
 /** First names of 3+ letters, as written. `shared` are the ones two or more people have (`labelNames` leaves those alone). */
@@ -228,24 +264,24 @@ interface Scrubber {
 
 function scrubber(toggles: ShareToggles, secrets: ShareSecrets): Scrubber {
   const clients = nameMatcher(secrets.clients);
+  const fullNames = nameMatcher(secrets.people);
+  const surnames = surnameMatcher(secrets.people);
   const labels: PersonLabels = Object.fromEntries(secrets.people.map((p) => [p.label, p.id]));
   const people = secrets.people.map((p) => ({ id: p.id, name: p.name }));
   const { shared } = firstNames(secrets.people);
   const sharedRes = shared.map((f) => wordRe(f, "gu"));
-  const needles = secrets.people.flatMap((p) => [p.name.trim().toLowerCase(), firstNameOf(p.name).toLowerCase()]).filter((n) => n.length >= MIN_NAME);
   return {
     text(s) {
       if (s.length < MIN_NAME) return s;
       let t = s;
       if (t.includes("@")) t = t.replace(EMAIL, EMAIL_HIDDEN);
-      t = clients.replaceFull(t);
+      t = clients.replace(t);
       if (!toggles.people && secrets.people.length) {
-        const lower = t.toLowerCase();
-        if (needles.some((n) => lower.includes(n))) {
-          t = labelNames(t, labels, people);
-          // A first name two people share isn't replaced by `labelNames`: it becomes "a team member" (Q11).
-          for (const re of sharedRes) t = t.replace(re, "a team member");
-        }
+        // Full names first (any case, any white space), then a surname alone, then first names as written (`labelNames`: a
+        // first name one person has becomes their label) and a first name two people share becomes "a team member" (Q11).
+        t = surnames.replace(fullNames.replace(t));
+        t = labelNames(t, labels, people);
+        for (const re of sharedRes) t = t.replace(re, "a team member");
       }
       if (!toggles.financials) t = t.replace(MONEY, AMOUNT_HIDDEN);
       return t;
@@ -293,6 +329,11 @@ function redactBundle(b: Obj, toggles: ShareToggles, secrets: ShareSecrets): Obj
 }
 
 /** Keys whose value never goes into a snapshot, and what stands in for it. */
+/** A role-rate change (`roles.<id>.cost_rate`) inside a scenario's patch or a solution's lever changes: the visitor's browser would price work at the real rate. */
+const isRatePatch = (v: unknown): boolean => isObj(v) && typeof v.path === "string" && /cost_rate$/.test(v.path);
+/** A fact of a finding that quotes a source word for word. */
+const isQuoteFact = (v: unknown): boolean => isObj(v) && v.kind === "quote";
+
 const BLANKED: Record<string, unknown> = {
   provenance: {},
   cost_rate: null,
@@ -317,7 +358,14 @@ export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, s
     if (!isObj(value)) return value;
     const src = isBundleLike(value) ? redactBundle(value, toggles, secrets) : value;
     const out: Obj = {};
-    for (const [k, v] of Object.entries(src)) out[k] = Object.hasOwn(BLANKED, k) ? structuredClone(BLANKED[k]) : walk(v);
+    for (const [k, v] of Object.entries(src)) {
+      if (Object.hasOwn(BLANKED, k)) out[k] = structuredClone(BLANKED[k]);
+      // Word-for-word quotes from sources never go out (they name people and clients as the speaker said them).
+      else if (k === "facts" && Array.isArray(v)) out[k] = v.filter((f) => !isQuoteFact(f)).map(walk);
+      // With Financials off, no role-rate change in a scenario's patch or a solution's lever changes.
+      else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isRatePatch(p)).map(walk);
+      else out[k] = walk(v);
+    }
     return out;
   };
   const redacted = walk(raw) as Obj;
@@ -350,6 +398,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
   const found = new Set<ShareLeak>();
   const clients = nameMatcher(secrets.clients);
   const people = nameMatcher(secrets.people);
+  const surnames = surnameMatcher(secrets.people);
   const firsts = firstNames(secrets.people).all.map((f) => wordRe(f, "u"));
   const s = snapshot as Obj;
   if (
@@ -370,8 +419,8 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     if (typeof value === "string") {
       if (value.includes("@") && (EMAIL.lastIndex = 0, EMAIL.test(value))) found.add("email");
       EMAIL.lastIndex = 0;
-      if (clients.hasFull(value)) found.add("client");
-      if (!toggles.people && (people.hasFull(value) || firsts.some((re) => re.test(value)))) found.add("person");
+      if (clients.has(value)) found.add("client");
+      if (!toggles.people && (people.has(value) || surnames.has(value) || firsts.some((re) => re.test(value)))) found.add("person");
       if (!toggles.financials && hasMoney(value)) found.add("money");
       return;
     }
@@ -379,11 +428,14 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {
       if (k === "cost_rate" && v !== null && v !== undefined) found.add("pay");
-      if (k === "provenance" && isObj(v) && Object.keys(v).length) found.add("evidence");
+      // Evidence notes of any JSON type: only an empty object (or null) is clean.
+      if (k === "provenance" && v !== null && v !== undefined && !(isObj(v) && Object.keys(v).length === 0)) found.add("evidence");
+      if (k === "facts" && Array.isArray(v) && v.some(isQuoteFact)) found.add("evidence");
       if (!toggles.financials) {
         if (k === "default_cost_rate" && v !== 0 && v != null) found.add("costs");
         if (k === "margin" && v !== 0 && v != null) found.add("costs");
         if ((k === "overhead_monthly" || k === "target_margin") && v !== undefined) found.add("costs");
+        if ((k === "patch" || k === "lever_changes") && Array.isArray(v) && v.some(isRatePatch)) found.add("costs");
       }
       walk(v);
     }
@@ -510,12 +562,15 @@ export async function loadShareData(
     const issues = await loadIssuesForReader(rdb, ws);
     const issue = issues.find((i) => i.id === target.id && i.number != null);
     if (!issue) throw new ShareBuildError("That issue isn't here any more.");
-    const probe = await loadProcessBySlug(rdb, workspace.slug);
+    // Only a published version is ever shared, never a draft.
+    const probe = await loadProcessBySlug(rdb, workspace.slug, { draft: false });
     if (!probe) throw new ShareBuildError("Publish a process first.");
     const processId = issue.links.find((l) => l.process_id)?.process_id ?? issue.process_id;
-    const own = processId && processId !== probe.live.process.id ? await loadProcessBySlug(rdb, workspace.slug, { processId }) : probe;
-    const { live, draft } = own ?? probe;
-    const bundle = isUnpublished(live) && draft ? draft : live;
+    const own = processId && processId !== probe.live.process.id ? await loadProcessBySlug(rdb, workspace.slug, { processId, draft: false }) : probe;
+    // The issue's own process must be published; falling back to another process would show the wrong map.
+    if (processId && processId !== probe.live.process.id && !own) throw new ShareBuildError("Publish this process first: a link shows the published version.");
+    const bundle = (own ?? probe).live;
+    if (isUnpublished(bundle)) throw new ShareBuildError("Publish this process first: a link shows the published version.");
     const [processes, liveRevisions, solutions] = await Promise.all([
       listProcesses(rdb, ws).then((ps) => ps.map((p) => ({ id: p.id, name: p.name }))),
       loadLiveRevisionIds(rdb, ws),
@@ -550,4 +605,15 @@ export async function loadShareData(
     raw = { ...base, kind: "solution", solutionId: solution.id, bundle: live, solutions, issues, processes, compareBase, movedOn };
   }
   return redactShareSnapshot(raw, toggles, secrets);
+}
+
+/**
+ * Detected issues in the order a share link without Financials reads them: worst rating first, then by key. No cost decides it,
+ * money or hours: the editor's order puts the dearest first, which needs the role rates and pay a link hides (and ordering by
+ * pay-derived costs would leak their rank), and a pay-dependent cost has no hours either in a link. Sorted this way an editor
+ * and a visitor read the same list in the same order.
+ */
+export function sortWithoutMoney<T extends { key: string; rating: Rating }>(list: readonly T[]): T[] {
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [...list].sort((a, b) => compareRatingsDesc(a.rating, b.rating) || cmp(a.key, b.key));
 }

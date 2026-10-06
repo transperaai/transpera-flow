@@ -79,6 +79,8 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
       users[k] = randomUUID();
       await admin.query("insert into auth.users (id, email) values ($1, $2)", [users[k], k === "visitor" ? visitorEmail : `share-${k}-${tag}@example.com`]);
     }
+    // The visitor signs in with Google: restricted links need that identity, not just a confirmed address.
+    await admin.query("insert into auth.identities (user_id, provider, provider_id, identity_data) values ($1, 'google', $2, $3)", [users.visitor, users.visitor, { sub: users.visitor, email: visitorEmail }]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member'), ($4, $2, 'editor')", [ws, users.editor, users.member, NORTHBEAM_WORKSPACE_ID]);
     const { token, hash } = generateApiToken();
     await admin.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'share')", [users.editor, hash]);
@@ -329,6 +331,25 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
     }
     console.info("Overview snapshot sizes (bytes):", JSON.stringify(sizes, null, 1));
   }, 120_000);
+
+  it("an issue on a process that has no published version is refused, never shared as a draft or as another process", async () => {
+    const proc = (await admin.query("insert into processes (workspace_id, name) values ($1, 'Never published') returning id", [ws])).rows[0].id as string;
+    const iss = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'On a draft process') returning id", [ws, proc])).rows[0].id as string;
+    try {
+      await expect(loadShareData(editorSession as unknown as Db, await workspaceRow(), { kind: "issue", id: iss }, TOGGLES[0]!)).rejects.toThrow(/Publish this process first/);
+    } finally {
+      await admin.query("delete from issues where id = $1", [iss]);
+      await admin.query("delete from processes where id = $1", [proc]);
+    }
+  });
+
+  it("a password sign-up with a listed address is not let in: restricted links need a Google identity", async () => {
+    const snapshot = await build("overview", TOGGLES[1]!);
+    const { token, res } = await save("overview", TOGGLES[1]!, snapshot, { allowed_emails: [`pw-${users.stranger.slice(0, 8)}@example.com`] });
+    expect(res.error).toBeNull();
+    await admin.query("update auth.users set email = $2 where id = $1", [users.stranger, `pw-${users.stranger.slice(0, 8)}@example.com`]);
+    expect((await open(strangerSession, token)).data).toEqual({ status: "not_allowed" });
+  });
 
   it("opens are counted, and the editor's list shows the count, never the link", async () => {
     const snapshot = await build("overview", TOGGLES[0]!);

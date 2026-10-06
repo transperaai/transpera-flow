@@ -20,6 +20,8 @@
 // worker, only once the two runs above are first in and only when something needs them; they don't depend on the horizon
 // and are kept for the session, so changing the horizon doesn't run them again. The trend charts load on their own.
 
+import { sortWithoutMoney } from "@transpera-flow/db";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import type { FirstPrinciples } from "@transpera-flow/engine";
@@ -271,12 +273,14 @@ export function Overview({
   const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(base && baseResult ? base : null, baseResult?.seed ?? 1, resolveMoney(rules).absenceWeeks);
   const successMeasures = useSuccessMeasures(live.process.id, mode === "demo", firstPrinciples);
+  // A share link without Financials reads the findings in an order that never depends on money (B3).
+  const hideMoney = useShareFinancialsHidden();
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(parts.flatMap((p) => p.steps))), [rules, parts]);
   // Who gets too busy, and when, over the horizon (B6): "Across the company".
   const forecastFindings = useMemo(() => (horizonModel && horizonResult ? forecastInsights(horizonModel, horizonResult, rules, start) : []), [horizonModel, horizonResult, rules, start]);
   const facts = useMemo(
-    () => (base && baseResult ? sortFindings([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings]) : null),
-    [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, forecastFindings],
+    () => (base && baseResult ? (hideMoney ? sortWithoutMoney : sortFindings)([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings]) : null),
+    [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, forecastFindings, hideMoney],
   );
   // Acknowledging an insight tracks it here, so it badges the map straight away.
   // A dismissed insight stays away until its process's next published version: each part is at its live revision.

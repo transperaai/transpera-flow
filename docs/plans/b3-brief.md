@@ -810,3 +810,7 @@ Run everything per `builder-brief.md` (Postgres, Chromium, `pnpm lint && pnpm ty
 | Q12 | MCP? | Refused (42501); no tools. |
 | Q13 | Where is the list? | `/w/[slug]/share`, sidebar "Share links" for owners and editors. |
 | Q14 | Count opens? | Yes: a count and the last time; nothing about who. |
+
+## Amendments after the Opus review (#215)
+
+Names: any case, any white space between the words, a surname of 3+ letters on its own; a lone first name stays an accepted limit (app only, as written). Quotes from sources are dropped from findings. Role-rate patches are dropped with Financials off. Restricted links need a Google identity. Issue order with Financials off is rating then key. See docs/adr/0016-share-links.md.

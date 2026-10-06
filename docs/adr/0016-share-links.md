@@ -34,7 +34,7 @@ give a rate away by subtraction).
   whose **confirmed** email isn't listed. It counts opens (a number and the last time; nothing about who) and never
   returns the workspace id, the hash, the emails or the creator. The visitor's page (`/s/[token]`) calls that one function
   and imports no loader that reads a table (a source-text test checks it).
-- **Restricted links verify by Google sign-in**, not magic link. Any toggle on needs at least one allowed email and an
+- **Restricted links verify by Google sign-in**, not magic link: `open_share_link` needs a confirmed address on the list AND a Google identity (a password sign-up with a listed address is `not_allowed`). Any toggle on needs at least one allowed email and an
   expiry (a table constraint, and the dialog). The visitor signs in with Google using a listed address; a short-lived
   cookie (`tf_after_sign_in`, only ever `/s/<43 characters>`) sends `/auth/callback` back to the link.
 - **No pay, ever.** `cost_rate` is null for every person in every snapshot, whatever the toggles; `ProcessBundle.payHidden`
@@ -53,16 +53,28 @@ give a rate away by subtraction).
 
 Sources and their text, AI summaries, proposed findings, AI ideas, issue history (it names people), author names, drafts and
 earlier versions, `provenance` (it holds evidence quotes), emails and notes. Accepted findings are included, named for the
-snapshot's own viewer.
+snapshot's own viewer, **without** the word-for-word quotes from sources (`facts` of kind `quote`).
 
 ## Consequences
 
 - A link is only as fresh as its last **Update copy**; a deleted target keeps its last copy.
 - A new engine version simulates an old copy with today's engine; `engine_version` is stored for diagnosis.
 - The snapshot format is versioned (`v`); an old link reads "This link needs to be made again".
-- Names under three characters are not scrubbed or checked (the floor `labelNames` has); the database checks full names,
-  the app also first names. A client with a common one-word name ("Blue") is matched as written, so the lower-case word
-  survives.
+- Names under three characters are not scrubbed or checked (the floor `labelNames` has). With People off a full name is
+  matched in any case with any white space between its words (a no-break space, several spaces, a line break, JSON `\n`),
+  and a surname of 3 or more letters is matched on its own, in any case; the database checks the same. **Accepted limit:** a
+  lone first name is replaced only by the app, as written (a first name one person has becomes their label; one two people
+  share becomes "a team member"), and the database does not check it (it would refuse links over words like "Will" and
+  "Mark"). A name that is also a common word is replaced everywhere it appears. Clients are matched by the whole name, in
+  any case, with any white space; a part of a client name alone ("Fenwick") is not.
+- Money in text (Financials off) uses one pattern shared with B20's `propose_finding` check (`packages/db/src/money.ts`),
+  plus amounts written in words ("4,100 pounds"); the database checks a conservative equivalent. A bare "4.1k a month" with no
+  symbol, code or unit cannot be told from a count and is left.
+- A role-rate change (`roles.<id>.cost_rate`) inside a scenario's patch or a solution's lever changes is dropped with
+  Financials off (the visitor's browser would price work at the real rate); both checks refuse one.
+- **Order:** with Financials off the visitor reads detected issues sorted by rating, then key (`sortWithoutMoney`). The editor's
+  own order puts the dearest first, which needs rates and pay a link hides, so a link's order can't be the editor's cost
+  order without leaking its rank; an editor and a visitor who sort this way read the same list.
 - B4 (play links) replaces the write trigger, adds `mode` to the insert grant and a rate-limited submission function. It
   needs `lever_settings` in the snapshot.
 

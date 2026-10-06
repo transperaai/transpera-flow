@@ -8,6 +8,7 @@ import {
   redactShareSnapshot,
   shareReaderDb,
   shareSnapshotLeaks,
+  sortWithoutMoney,
   toEngineModel,
   type Db,
   type IssueRow,
@@ -296,12 +297,105 @@ describe("redactShareSnapshot: no hidden field in the raw payload, for every kin
 
   it("money forms: symbols, magnitudes and ISO codes, but not words or ids", () => {
     const w = worlds[0]!;
-    const texts = ["£12.4k", "US$3,000", "A$ 40", "€1.2m", "$5bn", "4,100 GBP", "300 usd", "£4 million"];
+    const texts = ["£12.4k", "US$3,000", "A$ 40", "€1.2m", "$5bn", "4,100 GBP", "300 usd", "GBP 4,100", "EUR 40", "4,512€", "4,100 pounds", "40 euros", "NZ$ 1.234,50"];
     const input = raw("process", w, TOGGLES[0]!);
     const snap = redactShareSnapshot({ ...input, issues: texts.map((t) => ({ ...w.issue, title: `x ${t} y`, evidence: "Ids 20261218000000 and 12 hours" })) } as ShareSnapshot, TOGGLES[0]!, w.secrets) as { issues: IssueRow[] };
     for (const i of snap.issues) {
       expect(i.title).toBe("x [amount hidden] y");
       expect(i.evidence).toBe("Ids 20261218000000 and 12 hours");
+    }
+  });
+});
+
+describe("names with unusual white space, surnames and case, quotes, and role-rate patches", () => {
+  const w = worlds[1]!;
+  const off = TOGGLES[0]!;
+  const full = w.personFull[0]!;
+  const [first, ...rest] = full.split(" ");
+  const surname = rest[rest.length - 1]!;
+  const redact = (note: string, toggles: ShareToggles = off) => {
+    const input = raw("process", w, toggles);
+    const snap = redactShareSnapshot({ ...input, issues: [{ ...w.issue, title: note, evidence: null }] } as ShareSnapshot, toggles, w.secrets) as { issues: IssueRow[] };
+    return { title: snap.issues[0]!.title, snap, input: { ...input, issues: [{ ...w.issue, title: note, evidence: null }] } as ShareSnapshot };
+  };
+
+  it("a full name split by a no-break space, two spaces, a tab, a line break or a zero-width space is replaced whole and flagged when left", () => {
+    for (const gap of ["\u00a0", "  ", "\t", "\n", " \u200b ", "\u2009"]) {
+      const { title, snap, input } = redact(`Ask ${first}${gap}${rest.join(gap)} now`);
+      expect(title, JSON.stringify(gap)).toBe("Ask Team member 1 now");
+      expect(title).not.toContain(surname);
+      expect(shareSnapshotLeaks(snap, w.secrets, off), JSON.stringify(gap)).toEqual([]);
+      expect(shareSnapshotLeaks(input, w.secrets, off), JSON.stringify(gap)).toContain("person");
+    }
+  });
+
+  it("any case: the full name, and the surname on its own, are replaced; a surname two people share becomes \"a team member\"", () => {
+    expect(redact(`ask ${full.toUpperCase()} now`).title).toBe("ask Team member 1 now");
+    expect(redact(`ask ${full.toLowerCase()} now`).title).toBe("ask Team member 1 now");
+    const alone = redact(`${surname} is slow, ${surname.toUpperCase()} too`);
+    expect(alone.title).toBe("Team member 1 is slow, Team member 1 too");
+    expect(shareSnapshotLeaks(alone.snap, w.secrets, off)).toEqual([]);
+    expect(shareSnapshotLeaks(alone.input, w.secrets, off)).toContain("person");
+    const twins: ShareSecrets = { ...w.secrets, people: w.secrets.people.map((p, i) => (i < 2 ? { ...p, name: `Ana Twin${""}` } : p)) };
+    const t = redactShareSnapshot({ ...raw("issue", w, off), issues: [{ ...w.issue, title: "Twin is away", evidence: null }] } as ShareSnapshot, off, twins) as { issues: IssueRow[] };
+    expect(t.issues[0]!.title).toBe("a team member is away");
+  });
+
+  it("a client is replaced whole in any case and with any white space; a part of its name alone is left", () => {
+    const client = w.clientNames[0]!;
+    const words = client.split(" ");
+    expect(redact(`at ${client.toLowerCase()}`).title).toBe("at Client 1");
+    expect(redact(`at ${words.join("\u00a0")}`).title).toBe("at Client 1");
+    expect(redact(`at ${words.join("\n")}`).title).toBe("at Client 1");
+    expect(shareSnapshotLeaks(redact(`at ${words.join("  ")}`).input, w.secrets, off)).toContain("client");
+  });
+
+  it("People on: names are left alone, clients are still replaced", () => {
+    const on = TOGGLES[1]!;
+    expect(redact(`Ask ${full} about ${w.clientNames[0]}`, on).title).toBe(`Ask ${full} about Client 1`);
+  });
+
+  it("quotes from sources are dropped from accepted findings, in every toggle combination; other facts stay", () => {
+    for (const toggles of TOGGLES) {
+      const snap = redactShareSnapshot(raw("process", w, toggles), toggles, w.secrets) as { findings: { facts: { kind: string }[] }[] };
+      expect(snap.findings[0]!.facts).toEqual([]);
+      const mixed = { ...raw("process", w, toggles), findings: [{ ...(raw("process", w, toggles) as { findings: object[] }).findings[0]!, facts: [{ kind: "fact", key: "k", text: "12 hours a week" }, { kind: "quote", key: "q", text: "word for word" }] }] } as unknown as ShareSnapshot;
+      const out = redactShareSnapshot(mixed, toggles, w.secrets) as unknown as { findings: { facts: { kind: string }[] }[] };
+      expect(out.findings[0]!.facts.map((f) => f.kind)).toEqual(["fact"]);
+      expect(shareSnapshotLeaks(mixed, w.secrets, toggles)).toContain("evidence");
+      expect(shareSnapshotLeaks(out, w.secrets, toggles)).toEqual([]);
+    }
+  });
+
+  it("evidence notes of any JSON type are flagged; only an empty object or null is clean", () => {
+    const clean = redactShareSnapshot(raw("process", w, off), off, w.secrets) as unknown as Anyish;
+    for (const bad of [["x"], "a note", 5, true, { a: 1 }]) expect(shareSnapshotLeaks({ ...clean, x: { provenance: bad } }, w.secrets, off), JSON.stringify(bad)).toContain("evidence");
+    for (const fine of [{}, null]) expect(shareSnapshotLeaks({ ...clean, x: { provenance: fine } }, w.secrets, off)).toEqual([]);
+  });
+
+  it("with Financials off, a role-rate change in a scenario or a solution's lever changes is dropped; other changes stay; with it on, all stay", () => {
+    const rate = { path: "roles.r1.cost_rate", op: "set", value: 95 };
+    const hours = { path: "steps.s1.work_hours", op: "set", value: 2 };
+    const make = (toggles: ShareToggles) => {
+      const input = raw("process", w, toggles) as unknown as { scenarios: unknown[]; solutions: { solutions: SolutionRow[] } };
+      return {
+        ...input,
+        scenarios: [{ id: "sc", workspace_id: "w", name: "What if", description: null, parent_scenario_id: null, patch: [rate, hours] }],
+        solutions: { ...input.solutions, solutions: input.solutions.solutions.map((x) => ({ ...x, lever_changes: [rate, hours] })) },
+      } as unknown as ShareSnapshot;
+    };
+    for (const toggles of [TOGGLES[0]!, TOGGLES[1]!]) {
+      const input = make(toggles);
+      const out = redactShareSnapshot(input, toggles, w.secrets) as unknown as { scenarios: { patch: unknown[] }[]; solutions: { solutions: { lever_changes: unknown[] }[] } };
+      expect(out.scenarios[0]!.patch).toEqual([hours]);
+      expect(out.solutions.solutions[0]!.lever_changes).toEqual([hours]);
+      expect(shareSnapshotLeaks(input, w.secrets, toggles)).toContain("costs");
+      expect(shareSnapshotLeaks(out, w.secrets, toggles)).toEqual([]);
+    }
+    for (const toggles of [TOGGLES[2]!, TOGGLES[3]!]) {
+      const out = redactShareSnapshot(make(toggles), toggles, w.secrets) as unknown as { scenarios: { patch: unknown[] }[] };
+      expect(out.scenarios[0]!.patch).toEqual([rate, hours]);
+      expect(shareSnapshotLeaks(make(toggles), w.secrets, toggles)).not.toContain("costs");
     }
   });
 });
@@ -388,6 +482,13 @@ describe("a redacted view's numbers are the unredacted run's", () => {
         const mine = keyed(detectIssues(shareModel, b));
         const theirs = keyed(relabel(detectIssues(editorModel, a), a, b));
         expect([...mine.keys()].sort()).toEqual([...theirs.keys()].sort());
+        // The order: a link without Financials sorts by rating, then key, with no cost in it (the editor's own order puts the
+        // dearest first, which needs the rates and pay a link hides). Sorted that way, the visitor reads the editor's list in the editor's order.
+        if (!toggles.financials) {
+          const visitorOrder = sortWithoutMoney(detectIssues(shareModel, b)).map((i) => i.key);
+          expect(visitorOrder).toEqual(sortWithoutMoney(detectIssues(editorModel, a)).map((i) => i.key));
+          expect(visitorOrder.length).toBeGreaterThan(3);
+        }
         for (const [key, m] of mine) {
           const e = theirs.get(key)!;
           expect(m.rating, key).toEqual(e.rating);
