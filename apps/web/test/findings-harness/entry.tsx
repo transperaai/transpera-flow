@@ -5,11 +5,12 @@
 
 import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
-import { NORTHBEAM_PROCESS_ID } from "@transpera-flow/db";
+import { NORTHBEAM_PROCESS_ID, nameAnalysisRow, nameFinding, type AiAnalysisRow, type FindingRow, type NameSource } from "@transpera-flow/db";
 import { AnalysisPanel } from "@/components/findings/analysis-panel";
 import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
 import { InsightsSection } from "@/components/insights";
 import { demoAiView } from "@/lib/ai/demo";
+import { aiViewFromRow } from "@/lib/ai/types";
 import { demoAnalyse, demoFindings } from "@/lib/findings/demo";
 import { useFindings } from "@/lib/findings/use-findings";
 import { findingsIn, pageDetections, proposedFindings } from "@/lib/findings/view";
@@ -20,13 +21,76 @@ import { demoBundle } from "@/lib/sources/demo";
 
 declare global {
   interface Window {
-    mountFindings: (options: { mode: "demo" | "readonly" }) => void;
+    /** `member`: the AI text is stored with labels and shown to a member linked to no one (B1 2b), named through `nameAnalysisRow` and `nameFinding`. */
+    mountFindings: (options: { mode: "demo" | "readonly"; member?: boolean }) => void;
   }
 }
 
-function Harness({ mode }: { mode: "demo" | "readonly" }) {
+const MAYA = "00000000-0000-4000-8000-00000000000a";
+const ROSA = "00000000-0000-4000-8000-00000000000b";
+const LABELS = { "Team member A": MAYA, "Team member B": ROSA };
+/** A member linked to no one: they see "A team member" wherever the saved text has a label. */
+const MEMBER: NameSource = { viewer: { seesEveryone: false, ownPersonId: null }, people: [] };
+const AT = "2026-10-01T09:00:00.000Z";
+
+/** An analysis and a proposed finding as the app now saves them: the model's own text, with labels. */
+function savedWithLabels(processId: string, workspaceId: string) {
+  const analysis: AiAnalysisRow = {
+    id: "00000000-0000-4000-8000-0000000000a1",
+    workspace_id: workspaceId,
+    process_id: processId,
+    revision_id: "00000000-0000-4000-8000-0000000000a2",
+    status: "ok",
+    reason: null,
+    trigger: "manual",
+    summary: ["Team member A is overloaded, and Team member B covers for Team member A."],
+    insights: [],
+    review: [],
+    checked: 1,
+    dropped: 0,
+    input_hash: "h",
+    model: "fake",
+    model_hash: null,
+    usage: [],
+    run_id: "00000000-0000-4000-8000-0000000000a3",
+    person_labels: LABELS,
+    created_by: "u",
+    created_at: AT,
+    updated_at: AT,
+  };
+  const finding: FindingRow = {
+    id: "00000000-0000-4000-8000-0000000000f1",
+    workspace_id: workspaceId,
+    process_id: processId,
+    step_id: null,
+    origin: "ai",
+    status: "proposed",
+    rating: "bad",
+    type: "capacity",
+    title: "Team member A carries the whole line",
+    evidence: "Team member B only reviews what Team member A writes.",
+    why: "Team member A is the only one who can price.",
+    facts: [],
+    person_labels: LABELS,
+    source_ids: [],
+    ai_key: "ai:insight:333333333333",
+    analysis_id: analysis.id,
+    run_id: analysis.run_id,
+    edited: false,
+    created_by: null,
+    created_at: AT,
+    updated_by: null,
+    updated_at: AT,
+    decided_by: null,
+    decided_at: null,
+  };
+  return { view: aiViewFromRow(nameAnalysisRow(analysis, MEMBER)), finding: nameFinding(finding, MEMBER) };
+}
+
+function Harness({ mode, member }: { mode: "demo" | "readonly"; member: boolean }) {
   const bundle = useMemo(() => demoBundle(), []);
-  const findings = useFindings(bundle.workspace.id, demoFindings(NORTHBEAM_PROCESS_ID), mode);
+  const labelled = useMemo(() => savedWithLabels(bundle.process.id, bundle.workspace.id), [bundle]);
+  const findings = useFindings(bundle.workspace.id, member ? [labelled.finding] : demoFindings(NORTHBEAM_PROCESS_ID), mode);
   const issues = useIssues(bundle.workspace.id, [], mode);
   const steps = useMemo(() => processSteps(bundle).filter((s) => s.kind !== "start" && s.kind !== "end"), [bundle]);
   const options: FindingDialogOptions = { processes: [{ id: bundle.process.id, name: bundle.process.name }], company: false, steps: steps.map((s) => ({ id: s.id, name: s.name, processId: bundle.process.id })) };
@@ -38,7 +102,7 @@ function Harness({ mode }: { mode: "demo" | "readonly" }) {
       <AnalysisPanel
         mode={mode}
         scope="process"
-        ai={{ view: demoAiView(bundle.process.id), configured: true, hasFirstPrinciples: true, versionNumber: 3 }}
+        ai={{ view: member ? labelled.view : demoAiView(bundle.process.id), configured: true, hasFirstPrinciples: true, versionNumber: 3 }}
         findings={findings}
         proposed={proposedFindings(own)}
         options={options}
@@ -63,6 +127,6 @@ function Harness({ mode }: { mode: "demo" | "readonly" }) {
   );
 }
 
-window.mountFindings = ({ mode }) => {
-  createRoot(document.getElementById("root")!).render(<Harness mode={mode} />);
+window.mountFindings = ({ mode, member = false }) => {
+  createRoot(document.getElementById("root")!).render(<Harness mode={mode} member={member} />);
 };
