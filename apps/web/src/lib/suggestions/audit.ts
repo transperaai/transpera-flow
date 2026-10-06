@@ -24,6 +24,7 @@ export const COMPANY_AUDIT_TABLES = [
   "person_roles",
   "person_skills",
   "person_leave",
+  "person_capacity_factors",
   "clients",
   "client_services",
   "client_assignments",
@@ -72,7 +73,7 @@ export function describeAuditEntry(e: AuditEntry, model: CompanyModel): string {
   const row = { ...(e.diff.old ?? {}), ...(e.diff.new ?? {}) } as Record<string, unknown>;
   const name = (list: { id: string; name: string }[], id: unknown) => list.find((x) => x.id === id)?.name ?? "someone or something since removed";
   const who = (table: string) => {
-    if (table === "people" || table === "person_roles" || table === "person_skills" || table === "person_leave") {
+    if (table === "people" || table === "person_roles" || table === "person_skills" || table === "person_leave" || table === "person_capacity_factors") {
       return String(row.name ?? name(model.people, row.person_id ?? e.target_id));
     }
     if (table === "client_groups") return String(name(model.services, row.service_id));
@@ -103,6 +104,9 @@ export function describeAuditEntry(e: AuditEntry, model: CompanyModel): string {
     }
     case "person_skills":
       return `${who("person_skills")}: a skill ${e.action === "insert" ? "added" : e.action === "delete" ? "removed" : "changed"}`;
+    // Per-person times (C6): never the number in text (the diff holds it, and only managers read the log).
+    case "person_capacity_factors":
+      return `${who("person_capacity_factors")}: a per-person time ${e.action === "insert" ? "set" : e.action === "delete" ? "removed" : "changed"}`;
     case "person_leave":
       return `${who("person_leave")}: leave ${String(row.start_date ?? "")} to ${String(row.end_date ?? "")} ${e.action === "insert" ? "added" : e.action === "delete" ? "removed" : "changed"}`;
   }

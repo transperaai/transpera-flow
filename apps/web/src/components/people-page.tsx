@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useMemo, useState } from "react";
-import type { ProcessBundle, Viewer } from "@transpera-flow/db";
+import { speedsNormalisedFor, type ProcessBundle, type Viewer } from "@transpera-flow/db";
 import { ABSENCE_MAX_PEOPLE, RATING_LABELS, clientHealthSummary, resolveMoney, toRatingConfig, type ClientHealthSummary, type Rating } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { Help } from "@/components/help";
@@ -21,8 +21,12 @@ import {
   BUSY_LIMIT,
   absenceCoverage,
   absenceRows,
+  FACTOR_HELP,
+  SPEEDS_NORMALISED_NOTE,
   capacityFactorsShown,
+  factorWords,
   personDetail,
+  personFactors,
   personRows,
   teamSummary,
   weeksLabel,
@@ -351,6 +355,12 @@ function HowBusy({
           example="Maya at 82% average and 97% P90 is fine most months but cannot cope with a bad one."
         />
       </div>
+      {speedsNormalisedFor(bundle) && (
+        <p className="flex items-center px-4 pb-2 text-sm text-muted-foreground" data-speeds-normalised>
+          {SPEEDS_NORMALISED_NOTE.text}
+          <Help label="Per-person times" description={SPEEDS_NORMALISED_NOTE.description} example={SPEEDS_NORMALISED_NOTE.example} />
+        </p>
+      )}
       {onlyOwn && rows.length === 0 && notInRun && (
         <p className="px-4 pb-4 text-sm text-muted-foreground" data-not-in-run>
           You aren&apos;t in this simulation: your record is inactive or starts later. Owners and editors can change that in Settings → People.
@@ -444,9 +454,14 @@ function HowBusy({
   );
 }
 
-/** What one person's row opens to: their record, the steps they can do and their leave. Capacity factors only if the gate lets any through, which it never does today (C6, #198). */
+/**
+ * What one person's row opens to: their record, the steps they can do, their leave and, when the workspace has switched per-person
+ * times on, their own times (C6, #198) through the `capacityFactorsShown` gate. A member's bundle holds only their own, and the
+ * table above already shows only their own row. Never in a table column, never ranked or compared.
+ */
 function PersonDetailBlock({ person, detail, bundle, editHref }: { person: PersonBusy; detail: PersonDetail; bundle: ProcessBundle; editHref: string | null }) {
-  const factors = capacityFactorsShown(bundle.workspace.settings, []);
+  const stepNames = new Map([...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((o) => o.steps)].map((s) => [s.id, s.name] as const));
+  const factors = capacityFactorsShown(bundle.workspace.settings, personFactors(bundle, person.id, stepNames));
   const dates = [detail.startDate ? `Started ${formatDateRange(detail.startDate, detail.startDate)}` : null, detail.endDate ? `Leaves ${formatDateRange(detail.endDate, detail.endDate)}` : null].filter(Boolean);
   return (
     <div className="flex flex-col gap-3 py-2 text-sm">
@@ -484,7 +499,21 @@ function PersonDetailBlock({ person, detail, bundle, editHref }: { person: Perso
           </ul>
         )}
       </div>
-      {factors.length > 0 && <div data-capacity-factors />}
+      {factors.length > 0 && (
+        <div data-capacity-factors>
+          <span className="flex items-center text-xs font-medium text-fg-2">
+            Time on each step
+            <Help label="Time on each step" {...FACTOR_HELP} />
+          </span>
+          <ul>
+            {factors.map((f) => (
+              <li key={f.stepId ?? "every"}>
+                {f.stepName}: {f.factor} × normal ({factorWords(f.factor)})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {editHref && (
         <Link href={editHref} className="w-fit underline underline-offset-2">
           Change in Settings

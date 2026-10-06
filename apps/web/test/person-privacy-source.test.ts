@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -116,6 +116,34 @@ describe("issues.detected_key is opaque for AI-text keys when the reader can't s
     for (const f of users) expect(read(f)).toMatch(/\bloadIssues\(/);
     const pages = ["components/workspace-process-page.tsx", "components/overview/workspace-overview.tsx", "app/w/[slug]/issues/page.tsx", "app/w/[slug]/issues/[number]/page.tsx"];
     for (const f of pages) expect(read(f), f).not.toMatch(/\bloadIssues\(/);
+  });
+});
+
+// Per-person times (C6, #198): never ranked, never compared across people, never in a table column (PRD D20).
+describe("per-person times are never ranked or compared", () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(join(__dirname, "..", "src", dir), { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : [],
+    );
+
+  it("no file under apps/web/src sorts by a factor", () => {
+    const files = walk("");
+    expect(files.length).toBeGreaterThan(100);
+    for (const f of files) expect(read(f), f).not.toMatch(/sort\([^)]*factor/i);
+  });
+
+  it("no file averages, ranks or takes a median of factors", () => {
+    for (const f of walk("")) expect(read(f), f).not.toMatch(/(median|average|rank|mean)\w*\([^)]*capacityFactor|capacityFactor[^\n]*(median|average|\.reduce)/i);
+  });
+
+  it("the People page reads per-person times only through personFactors, inside PersonDetailBlock", () => {
+    const source = read("components/people-page.tsx");
+    expect(source).not.toContain("personCapacityFactors");
+    const uses = [...source.matchAll(/personFactors\(/g)];
+    expect(uses).toHaveLength(1);
+    const block = source.slice(source.indexOf("function PersonDetailBlock"));
+    expect(block).toContain("personFactors(");
+    expect(source.indexOf("personFactors(")).toBeGreaterThan(source.indexOf("function PersonDetailBlock"));
   });
 });
 

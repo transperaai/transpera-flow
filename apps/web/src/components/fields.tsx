@@ -333,6 +333,7 @@ export function ToggleField({
   onLabel,
   offLabel,
   disabled,
+  hint,
   help,
 }: {
   label: string;
@@ -341,12 +342,13 @@ export function ToggleField({
   onLabel: string;
   offLabel: string;
   disabled?: boolean;
+  hint?: ReactNode;
   help?: FieldHelp;
 }) {
   const id = useId();
   const field = useField<boolean>(value, save);
   return (
-    <Shell id={id} label={label} help={help} field={field} display={(v) => (v ? onLabel : offLabel)}>
+    <Shell id={id} label={label} help={help} hint={hint} field={field} display={(v) => (v ? onLabel : offLabel)}>
       <span className="flex items-center gap-2 py-1.5">
         <input
           id={id}

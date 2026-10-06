@@ -123,6 +123,15 @@ describe("the change log", () => {
     ).toBe("Rejected a suggested change to the company model: “No”");
   });
 
+  it("tells a per-person time (C6) in words and never states the number", () => {
+    const sam = northbeamPersonIds["Sam Patel"];
+    const say = (action: string, diff: AuditEntry["diff"]) => describeAuditEntry(entry({ target_table: "person_capacity_factors", action, target_id: sam, diff }), m);
+    expect(say("insert", { new: { person_id: sam, step_id: null, factor: 0.8 } })).toBe("Sam Patel: a per-person time set");
+    expect(say("update", { old: { factor: 0.8 }, new: { factor: 1.3 } })).toBe("Sam Patel: a per-person time changed");
+    expect(say("delete", { old: { person_id: sam, factor: 1.3 } })).toBe("Sam Patel: a per-person time removed");
+    for (const text of [say("insert", { new: { person_id: sam, factor: 0.8 } }), say("update", { old: { factor: 0.8 }, new: { factor: 1.3 } })]) expect(text).not.toMatch(/0\.8|1\.3/);
+  });
+
   it("tells branding changes (issue #34): colours by value, the logo never by its storage path", () => {
     const WS = "0d5f6f0e-0000-4000-8000-000000000001";
     const logo = (n: number) => `${WS}/00000000-0000-4000-8000-00000000000${n}.png`;

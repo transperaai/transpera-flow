@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import type { MarketFactorKey } from "@transpera-flow/engine";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
-import { saveField, saveLinks } from "@/lib/fields/server";
+import { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveLinks } from "@/lib/fields/server";
 import { isGrowth, isMonth, isMultiplier, parseLeadSourceField, parseNewLeadSource, type LeadSourceField } from "@/lib/demand";
 import { copyName, parseChange, parseConditionField } from "@/lib/market";
 import { parseNewRole, parseRoleField, type RoleField } from "@/lib/roles";
@@ -109,6 +109,31 @@ export async function saveOvertimeCap(workspaceId: string, base: number | null, 
   if (!isId(workspaceId) || !share(value) || !isScalar(base)) return invalid;
   if (!(await signedIn())) return signedOut;
   return saveField("workspaces", { id: workspaceId }, "settings.overtime_cap", base, value);
+}
+
+/**
+ * Switch Per-person times (C6). Owners and editors (a dedicated function writes only this key). Refreshes on a save, because the
+ * page shows or hides the per-person fields.
+ */
+export async function saveCapacityFactorsEnabled(workspaceId: string, base: boolean | null, value: boolean): Promise<SaveOutcome<boolean>> {
+  if (!isId(workspaceId) || typeof value !== "boolean" || !(base === null || typeof base === "boolean")) return invalid;
+  if (!(await signedIn())) return signedOut;
+  const outcome = await saveCapacityFactorSwitch(workspaceId, base, value);
+  if (outcome.status === "saved") refresh();
+  return outcome;
+}
+
+/** One person's time on one step (`stepId` null: every step they do), from 0.5 to 2 to two decimals; null removes it (C6). */
+export async function savePersonCapacityFactor(
+  personId: string,
+  stepId: string | null,
+  base: number | null,
+  value: number | null,
+): Promise<SaveOutcome<number | null>> {
+  const inRange = (v: unknown) => v === null || (number(v) && (v as number) >= 0.5 && (v as number) <= 2);
+  if (!isId(personId) || !(stepId === null || isId(stepId)) || !inRange(value) || !(base === null || isFiniteNumber(base))) return invalid;
+  if (!(await signedIn())) return signedOut;
+  return saveCapacityFactor(personId, stepId, base, value === null ? null : Math.round(value * 100) / 100);
 }
 
 /**

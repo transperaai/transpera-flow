@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SettingsSection } from "./section";
+import { CapacityFactors } from "./capacity-factors-field";
 import type { PersonDetail, WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { formatNumber } from "@/lib/format";
@@ -17,6 +18,7 @@ import {
   createPerson,
   removeLeave,
   saveAvailabilityFloor,
+  saveCapacityFactorsEnabled,
   saveOvertimeCap,
   savePersonField,
   savePersonSet,
@@ -39,8 +41,22 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   const overtime = workspace.settings.overtime_cap ?? null;
   const ownersOnly = canManage ? undefined : "Only workspace owners can change this.";
   return (
-    <SettingsSection id="simulation" title="Simulation" description="Two limits on how the simulation treats people's time.">
+    <SettingsSection id="simulation" title="Simulation" description="Limits on how the simulation treats people's time.">
       <div className="grid gap-4 sm:grid-cols-2">
+        <ToggleField
+          label="Per-person times"
+          value={workspace.settings.capacity_factor_enabled === true}
+          save={(base, next) => saveCapacityFactorsEnabled(workspace.id, base, next)}
+          onLabel="On: people can have their own times"
+          offLabel="Off: everyone works at their role's normal time"
+          disabled={!data.canEdit}
+          hint={data.canEdit ? undefined : "Only owners and editors can change this."}
+          help={{
+            description:
+              "Let owners and editors say that one person takes more or less time than their role's normal time on some steps. Off: everyone in a role works at the role's normal time. Each person sees only their own times; they are never ranked or compared across people. Members' and viewers' simulations always use the role's normal time.",
+            example: "Maya has run kickoffs for years and takes about 0.8 of the normal time on Kickoff, 20% faster. Switch this on and set 0.8 on Kickoff in her detail under People.",
+          }}
+        />
         <NumberField
           label="Availability floor"
           value={floor}
@@ -160,6 +176,8 @@ function PersonRow({ person: p, data }: { person: PersonDetail; data: WorkspaceS
   const capacity = p.capacity_hours_week ?? Number(p.fte) * hoursPerWeek;
   const disabled = !data.canEdit;
   const roleName = new Map(data.roles.map((r) => [r.id, r.name]));
+  const factorsOn = data.workspace.settings.capacity_factor_enabled === true;
+  const hasStoredFactors = data.personCapacityFactors.some((f) => f.person_id === p.id);
 
   return (
     <details className="group py-2">
@@ -245,6 +263,15 @@ function PersonRow({ person: p, data }: { person: PersonDetail; data: WorkspaceS
               disabled={disabled} help={{ description: "Limit this person to particular steps within their roles. If nothing is ticked, they can do every step of their roles.", example: "Tick only Kickoff and strategy if Tom does kickoffs but not audits." }} />
           </div>
         )}
+        {factorsOn ? (
+          <div className="sm:col-span-2 lg:col-span-3">
+            <CapacityFactors person={p} data={data} />
+          </div>
+        ) : hasStoredFactors ? (
+          <p className="text-fg-3 sm:col-span-2 lg:col-span-3" data-factors-off>
+            Per-person times are off, so these aren&apos;t used.
+          </p>
+        ) : null}
         <div className="sm:col-span-2 lg:col-span-3">
           <Leave personId={p.id} workspaceId={p.workspace_id} leave={leave} disabled={disabled} />
         </div>
