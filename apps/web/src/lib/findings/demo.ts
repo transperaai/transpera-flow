@@ -32,6 +32,7 @@ export function demoFindings(processId: string = NORTHBEAM_PROCESS_ID): FindingR
     analysis_id: null,
     run_id: null,
     edited: false,
+    proposed_via: null,
     created_by: null,
     created_at: AT,
     updated_by: null,
