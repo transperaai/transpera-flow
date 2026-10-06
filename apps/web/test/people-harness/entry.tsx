@@ -11,6 +11,8 @@ import { PeoplePage } from "@/components/people-page";
 declare global {
   interface Window {
     workerScripts: Record<string, string>;
+    /** Every message the page posted to a worker: which worker, and the absence request's `personIds` (undefined when none). */
+    workerRequests?: { file: string; hasPersonIds: boolean; personIds?: string[] }[];
     /** `own`: whose row the member may see (a Larkspur key such as "jess"), or null for a member linked to no one. */
     mountPeople: (options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean }) => void;
   }
@@ -23,6 +25,14 @@ window.Worker = class extends NativeWorker {
     const script = window.workerScripts[file];
     if (!script) throw new Error(`No bundled worker for ${file}`);
     super(URL.createObjectURL(new Blob([script], { type: "text/javascript" })));
+    this.file = file;
+  }
+  private file: string;
+  // What the page asks each worker to do, so a test can see (for the absence test) whom the browser is asked to test.
+  postMessage(message: unknown, ...rest: unknown[]) {
+    const m = message as { personIds?: string[] } | null;
+    (window.workerRequests ??= []).push({ file: this.file, hasPersonIds: m !== null && typeof m === "object" && m.personIds !== undefined, personIds: m?.personIds });
+    (super.postMessage as (...a: unknown[]) => void)(message, ...rest);
   }
 } as typeof Worker;
 

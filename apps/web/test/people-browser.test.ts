@@ -1,5 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { larkspurPersonIds } from "@transpera-flow/db";
 import { bundleHarness } from "./build-harness";
 
 // The People page as a member sees it (B1 2b, issue #30), in a real browser with its simulation in a real Web Worker
@@ -118,6 +119,40 @@ describe("If someone is away", { timeout: 180_000 }, () => {
     expect(await absenceRows(page).count()).toBe(0);
     expect(await page.locator("[data-absence]").innerText()).toContain("You aren't the only one who can do any step, so you weren't tested.");
     expect(errors).toEqual([]);
+    await page.close();
+  });
+});
+
+/** What the page posted to the absence worker, as the harness recorded it. */
+const absenceRequests = (page: Page) => page.evaluate(() => (window.workerRequests ?? []).filter((r) => r.file === "absence.worker.ts"));
+
+describe("What the page asks the absence worker (Q3)", { timeout: 180_000 }, () => {
+  it("asks for everyone's test from an editor: no personIds", async () => {
+    const { page } = await mount({ viewer: "everyone" });
+    await absenceDone(page);
+    const requests = await absenceRequests(page);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.hasPersonIds).toBe(false);
+    await page.close();
+  });
+
+  it("asks a member's browser to test only their own person", async () => {
+    const { page } = await mount({ viewer: "own", own: "imogen" });
+    await absenceDone(page);
+    const requests = await absenceRequests(page);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.personIds).toEqual([larkspurPersonIds.imogen]);
+    await page.close();
+  });
+
+  it("sends no absence request at all for an unlinked member", async () => {
+    const { page } = await mount({ viewer: "unlinked" });
+    // The test would start a debounce after the first run finishes; give it time to have been sent.
+    await page.waitForSelector(".grid[aria-busy='false']");
+    await page.waitForTimeout(1500);
+    expect(await absenceRequests(page)).toEqual([]);
+    // The baseline run itself did go to its worker.
+    expect((await page.evaluate(() => window.workerRequests ?? [])).some((r) => r.file === "simulate.worker.ts")).toBe(true);
     await page.close();
   });
 });
