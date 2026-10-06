@@ -4,7 +4,6 @@ import {
   LARKSPUR_WORKSPACE_ID,
   NORTHBEAM_WORKSPACE_ID,
   larkspurPersonIds,
-  larkspurRoleIds,
   toEngineModel,
   type ProcessBundle,
 } from "../src";
@@ -24,15 +23,6 @@ let member: { id: string; claims: Record<string, unknown> };
 let editor: { id: string; claims: Record<string, unknown> };
 let admin: { id: string; claims: Record<string, unknown> };
 
-interface Raw {
-  id: string;
-  name: string;
-  fte: number;
-  hours: number | null;
-  cost: number | null;
-  active: boolean;
-  created_at: string;
-}
 interface Shown {
   id: string;
   name: string;

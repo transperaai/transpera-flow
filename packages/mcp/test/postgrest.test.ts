@@ -223,7 +223,8 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
     expect(run.data).not.toHaveProperty("trace");
     // The browser: toEngineModel(bundle) in ProcessView, then simulate(model, 30, 1) in the worker.
     const browser = simulate(toEngineModel(northbeamBundle(), { startDate }), 30, 1);
-    expect(run.data.kpi).toEqual(JSON.parse(JSON.stringify(browser.kpi)));
+    // This token is a viewer's: the same numbers as the browser, except the overtime cost, which depends on pay and is unavailable (null, not 0).
+    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
     expect(run.data).toMatchObject({ reps: 30, seed: 1, engine_version: ENGINE_VERSION });
   });
 
@@ -239,7 +240,8 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
     await client.close();
     const browser = simulate(applyPatches(toEngineModel(northbeamBundle(), { startDate }), overrides).model, 30, 1);
     expect(run.ok).toBe(true);
-    expect(run.data.kpi).toEqual(JSON.parse(JSON.stringify(browser.kpi)));
+    // This token is a viewer's: the same numbers as the browser, except the overtime cost, which depends on pay and is unavailable (null, not 0).
+    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
     expect(run.data.overrides).toEqual(overrides);
     expect(bad).toMatchObject({ ok: false, error: { code: "invalid_overrides" } });
   });
@@ -260,7 +262,7 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
       await client.close();
       const browser = simulate(toEngineModel(northbeamBundle(), { startDate }), 5, 1);
       expect(live.data.revision.status).toBe("published");
-      expect(live.data.kpi).toEqual(JSON.parse(JSON.stringify(browser.kpi)));
+      expect(live.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
       expect(draft.data.revision.status).toBe("draft");
       expect(draft.data.kpi).not.toEqual(live.data.kpi);
       expect(process.data.steps.some((s) => Number(s.work_hours) === 30)).toBe(false);
