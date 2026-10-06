@@ -90,6 +90,18 @@ export function quotationProblems(text: string, quotes: readonly string[]): Numb
   return out;
 }
 
+/**
+ * A title with each label ("Team member C") swapped for the person's id. Labels are numbered by position in the roster, so
+ * they shift when someone is hired; the id doesn't, and holds no name. Longest label first ("Team member 27" before "Team member 2").
+ */
+export function personTokens(title: string, labels: Record<string, string>): string {
+  let out = title;
+  for (const label of Object.keys(labels).sort((a, b) => b.length - a.length || (a < b ? -1 : 1))) {
+    out = out.replace(new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "gu"), `person:${labels[label]}`);
+  }
+  return out;
+}
+
 const keyOf = (title: string, stepId: string | null) => `ai:insight:${createHash("sha1").update(`${squeeze(title)}|${stepId ?? ""}`).digest("hex").slice(0, 12)}`;
 
 interface Screened {
@@ -163,7 +175,7 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
       dropped++;
       continue;
     }
-    const key = keyOf(title, stepId);
+    const key = keyOf(personTokens(title, input.personLabels), stepId);
     if (seen.has(key)) continue;
     seen.add(key);
     const personLabels = labelsUsed([title, evidence, why, ...facts.map((f) => f.text)], input.personLabels);

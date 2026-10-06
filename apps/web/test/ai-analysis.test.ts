@@ -470,9 +470,9 @@ describe("names stay out of what is saved (B1 2b)", () => {
     expect((await analyseWithAi(input, fake(() => good()))).personLabels).toEqual({});
   });
 
-  it("keys an insight on the title as the model wrote it, with the label and no real name", async () => {
+  it("keys an insight on the title with each label swapped for the person's id: no real name, and no letter", async () => {
     const out = await analyseWithAi(input, fake(() => labelled()));
-    const expected = `ai:insight:${createHash("sha1").update(`${squeeze("Team member A holds up the whole line")}|${AUDIT}`).digest("hex").slice(0, 12)}`;
+    const expected = `ai:insight:${createHash("sha1").update(`${squeeze(`person:${a!.id} holds up the whole line`)}|${AUDIT}`).digest("hex").slice(0, 12)}`;
     expect(out.insights[0]!.key).toBe(expected);
   });
 
@@ -486,7 +486,7 @@ describe("names stay out of what is saved (B1 2b)", () => {
   it("no longer maps stored text through restoreNames at all: the key is hashed on the labelled title", () => {
     const source = readFileSync(join(__dirname, "..", "src", "lib/ai/analyse.ts"), "utf8");
     expect(source).not.toMatch(/restoreNames|\bback\(/);
-    expect(source).toContain("keyOf(title, stepId)");
+    expect(source).toContain("keyOf(personTokens(title, input.personLabels), stepId)");
   });
 
   it("an insight's key is the same whatever the people are called, so it holds no name; a different labelled title is a different key", async () => {
@@ -559,6 +559,26 @@ describe("names stay out of what is saved (B1 2b)", () => {
     // What a person typed in a quote does name people by first name.
     expect(made.quoteRefs[0]!.text).toBe("Team member A said it takes twelve hours; Team member A agrees");
     expect(JSON.stringify(made.payload.quotesFromSources)).toContain("Team member A said it takes twelve hours");
+  });
+
+  it("an insight keeps its key when the roster is reordered or grows, and another person gives another key", async () => {
+    const out = await analyseWithAi(input, fake(() => labelled()));
+    const letter = (i: number) => `Team member ${String.fromCharCode(65 + i)}`;
+    // Maya is "A" in `input`. Hire two people ahead of her: she becomes "C", the title the model writes says so.
+    const shifted = { ...input, personLabels: { [letter(0)]: "new-1", [letter(1)]: "new-2", [letter(2)]: a!.id, [letter(3)]: b!.id } };
+    const hired = labelled();
+    hired.insights[0]!.title = "Team member C holds up the whole line";
+    hired.insights[0]!.evidence = `${firstSentence(first.evidence)} Team member D waits for Team member C.`;
+    hired.insights[0]!.why = "Team member C prices everything.";
+    hired.review = [{ step: "saa", level: "bad", text: "Team member D owns the qualifier." }];
+    hired.read = [`Over the run Northbeam wins ${results.wins}. Team member C is the busiest.`];
+    const again = await analyseWithAi(shifted, fake(() => hired));
+    expect(again.status).toBe("ok");
+    expect(again.insights[0]!.key).toBe(out.insights[0]!.key);
+    // The new first person, in the old title's words, is a different finding.
+    const other = labelled();
+    const swapped = { ...input, personLabels: { ...input.personLabels, "Team member A": "someone-else" } };
+    expect((await analyseWithAi(swapped, fake(() => other))).insights[0]!.key).not.toBe(out.insights[0]!.key);
   });
 });
 
