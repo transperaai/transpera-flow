@@ -252,6 +252,51 @@ describe("the Share dialog", () => {
     await page.close();
   });
 
+  it("'Let people try changes' is off by default, has an (i), and a process link made with it on is a play link; the done text says where the ideas go (B4)", async () => {
+    const { page, errors } = await mountBare("mountShareDialog");
+    await page.click("[data-share-open]");
+    await page.waitForSelector("[data-share-dialog]");
+    expect(await page.locator("[data-share-play]").getAttribute("aria-checked")).toBe("false");
+    expect(await page.getByRole("button", { name: "About Let people try changes" }).count()).toBe(1);
+    expect(await page.locator("[data-share-dialog]").innerText()).toContain("Let people try changes");
+    await page.locator("[data-share-no-end]").check();
+    await page.click("[data-share-create]");
+    await page.waitForSelector("[data-share-done]");
+    expect((await page.evaluate(() => window.shareCreates))[0]).toMatchObject({ play: false });
+    expect(await page.locator("[data-share-play-done]").count()).toBe(0);
+    await page.close();
+
+    const again = await mountBare("mountShareDialog");
+    await again.page.click("[data-share-open]");
+    await again.page.waitForSelector("[data-share-dialog]");
+    await again.page.click("[data-share-play]");
+    await again.page.locator("[data-share-no-end]").check();
+    await again.page.click("[data-share-create]");
+    await again.page.waitForSelector("[data-share-done]");
+    expect((await again.page.evaluate(() => window.shareCreates))[0]).toMatchObject({ kind: "process", play: true });
+    expect(await again.page.locator("[data-share-play-done]").innerText()).toBe("People who open it can send you ideas. You'll find them in Suggestions.");
+    expect(errors).toEqual([]);
+    await again.page.close();
+  });
+
+  it("a play link in the Share links table says 'Try changes' and how many ideas were sent, linking to Suggestions; a view link shows —", async () => {
+    const view: ShareLinkRow = { id: "00000000-0000-4000-8000-00000000f010", kind: "process", mode: "view", ideas: null, what: "Lead to live", label: null, showPeople: false, showFinancials: false, emails: [], expiresAt: null, snapshotAt: "2026-10-01T09:00:00Z", createdAt: "2026-10-01T09:00:00Z", madeBy: "Maya Collins", opens: 0, lastOpenedAt: null, status: "active" };
+    const play: ShareLinkRow = { ...view, id: "00000000-0000-4000-8000-00000000f011", mode: "play", ideas: 3 };
+    const none: ShareLinkRow = { ...view, id: "00000000-0000-4000-8000-00000000f012", mode: "play", ideas: 0 };
+    const { page, errors } = await mountBare("mountShareList", [view, play, none]);
+    await page.waitForSelector("[data-share-links]");
+    const rows = page.locator("[data-share-link]");
+    expect(await rows.nth(0).locator("[data-share-play]").count()).toBe(0);
+    expect(await rows.nth(0).locator("[data-share-ideas]").innerText()).toBe("—");
+    expect(await rows.nth(1).locator("[data-share-play]").innerText()).toBe("Try changes");
+    expect(await rows.nth(1).locator("[data-share-ideas]").innerText()).toBe("3 sent");
+    expect(await rows.nth(1).locator("[data-share-ideas] a").getAttribute("href")).toBe("/w/northbeam/suggestions");
+    expect(await rows.nth(2).locator("[data-share-ideas]").innerText()).toBe("None sent");
+    expect(await page.getByRole("button", { name: "About Ideas" }).count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
   it("an open link needs no emails and no end date: Create works with both switches off", async () => {
     const { page } = await mountBare("mountShareDialog");
     await page.click("[data-share-open]");

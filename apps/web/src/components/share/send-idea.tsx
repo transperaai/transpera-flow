@@ -193,7 +193,7 @@ export function SendIdea({ bundle, play, patches, onClose }: { bundle: ProcessBu
               </Field>
             )}
             {/* The honeypot: a person never sees or fills it. Off-screen, not display:none, so a bot that skips hidden fields still meets it. */}
-            <div aria-hidden className="absolute -left-[9999px] top-auto h-px w-px overflow-hidden" data-send-honeypot>
+            <div aria-hidden style={{ position: "absolute", left: -9999, top: "auto", width: 1, height: 1, overflow: "hidden" }} data-send-honeypot>
               <label>
                 Website
                 <input name="website" type="text" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />

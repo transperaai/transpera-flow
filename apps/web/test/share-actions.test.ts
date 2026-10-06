@@ -18,7 +18,7 @@ const message = (over: Partial<ShareInput>) => {
 
 describe("parseShareInput", () => {
   it("accepts an open link: both switches off, no emails, no end date", () => {
-    expect(parse()).toEqual({ ok: true, value: { kind: "overview", targetId: null, people: false, financials: false, emails: [], expiresAt: null, label: null } });
+    expect(parse()).toEqual({ ok: true, value: { kind: "overview", targetId: null, people: false, financials: false, emails: [], expiresAt: null, label: null, play: false } });
   });
 
   it("an open link may still have an end date, which is the end of that day (UTC)", () => {
@@ -60,6 +60,16 @@ describe("parseShareInput", () => {
     expect(message({ expiresOn: "2026-02-31" })).toBe("Choose when the link stops working.");
     expect(message({ expiresOn: "tomorrow" })).toBe("Choose when the link stops working.");
     expect(parse({ expiresOn: "2026-10-07" }).ok).toBe(true);
+  });
+
+  it("'Let people try changes' (B4) is for a process only; elsewhere it is refused in plain words", () => {
+    const process = { kind: "process", targetId: "00000000-0000-4000-8000-0000000000c1" };
+    expect(parse({ ...process, play: true })).toMatchObject({ ok: true, value: { play: true, kind: "process" } });
+    expect(parse({ ...process })).toMatchObject({ ok: true, value: { play: false } });
+    expect(parse({ ...process, play: false })).toMatchObject({ ok: true, value: { play: false } });
+    expect(message({ play: true })).toBe("Only a process can be shared for trying changes.");
+    expect(message({ kind: "issue", targetId: "00000000-0000-4000-8000-0000000000a2", play: true })).toBe("Only a process can be shared for trying changes.");
+    expect(message({ kind: "solution", targetId: "00000000-0000-4000-8000-0000000000a1", play: true })).toBe("Only a process can be shared for trying changes.");
   });
 
   it("the name is trimmed, empty is none, and 120 characters is the most", () => {

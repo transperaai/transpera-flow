@@ -148,18 +148,19 @@ export function parsePlayIdea(input: unknown, options: { needEmail?: boolean; sn
   const noteRaw = text(i.note);
   const email = text(i.email).toLowerCase();
 
-  if (options.needEmail !== false) {
-    if (!email) return fail("Add your email address so the team can reply.");
-    if (email.length > MAX_EMAIL || !EMAIL.test(email)) return fail("That isn't an email address.");
-  } else if (email && (email.length > MAX_EMAIL || !EMAIL.test(email))) {
-    return fail("That isn't an email address.");
-  }
   if (!title) return fail("Give your idea a name.");
   if (title.length > MAX_TITLE) return fail(`Keep the name under ${MAX_TITLE} characters.`);
   if (!name) return fail("Add your name.");
   if (name.length > MAX_NAME) return fail(`Keep your name under ${MAX_NAME} characters.`);
   if (noteRaw.length > MAX_NOTE) return fail("Keep the note under 1,000 characters.");
   if (CONTROL_STRICT.test(title) || CONTROL_STRICT.test(name) || CONTROL_NOTE.test(noteRaw)) return fail("Remove the unusual characters and try again.");
+  // The email last here (the database checks it first): the dialog's fields run top to bottom, so the first problem shown is the first field's.
+  if (options.needEmail !== false) {
+    if (!email) return fail("Add your email address so the team can reply.");
+    if (email.length > MAX_EMAIL || !EMAIL.test(email)) return fail("That isn't an email address.");
+  } else if (email && (email.length > MAX_EMAIL || !EMAIL.test(email))) {
+    return fail("That isn't an email address.");
+  }
 
   const problem = playPatchProblem(i.levers, options.snapshot);
   if (problem) return fail(problem);
