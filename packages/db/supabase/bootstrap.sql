@@ -36117,7 +36117,8 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 -- never reach the database: the page sends header names, counts and model ids (D27, #30). Records are insert-only, so a second
 -- import of a kind adds a record and the first stays listed.
 --
--- ADDITIVE: it adds one column and two functions, and replaces `record_client_calibration` (row 57) with a full copy of its
+-- ADDITIVE: it adds one column, two public functions, three `private` helper functions and two check constraints, and replaces
+-- `record_client_calibration` (row 57) with a full copy of its
 -- latest definition that takes a kind and `details`, signature unchanged (the same rule as `save_fields`: the latest definition,
 -- copied; the added lines are marked `-- C1`). It does NOT touch `save_fields`, `record_calibration`, `apply_calibration`,
 -- `calibration_payload_problem`, the `calibrations` trigger, `datasets_kind` (it already allows the eight kinds; row 50 reserved
@@ -36127,12 +36128,16 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 --     date order, lines, rows kept and left out, how many rows matched a name in the model, the window, and for leads and
 --     invoices a summary (lead source ids and numbers; counts). No string from the file. Table grants are table-level
 --     (select, insert), so the column is covered; it is insert-only like the rest of the row (no update grant).
---   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (numbers, the delimiter,
---     encoding and date-order enums, uuid lead source ids). So a client's name, a person's or an amount can't be stored even by a
+--   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (whole counts up to 10
+--     million, dates up to the year 2100, the delimiter, encoding and date-order enums, uuid lead source ids). So a client's name, a person's or an amount can't be stored even by a
 --     caller that skips the app. The app's own rebuild (`storedImportDetails`) is the first line; this is the second.
---   * `datasets.column_map` values are short labels: `private.column_map_ok(jsonb)` allows only text of up to 60 characters. The page stores
---     a position (`Column 4`) for client, person, id and amount columns, never the header text, because a file with no header row
---     makes its first data row the "headers". Added NOT VALID: records made before it are not checked.
+--   * `datasets.column_map` holds short labels: `private.column_map_ok(jsonb)` allows only the kinds' column ids as keys (lower-case
+--     letters, at most 20) and text of up to 60 characters as values. The page stores a position (`Column 4`) unless the header is the
+--     column's own name or alias, because a file with no header row makes its first data row the "headers". Added NOT VALID (as
+--     `datasets_column_map_labels`): records made before it are not checked.
+--   * New objects: `private.column_map_ok(jsonb)`, `private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)` and
+--     `private.import_details_ok(jsonb)` (execute for `authenticated` only: a check constraint runs as the inserting role), and the
+--     constraints `datasets_details`, `datasets_details_known` and `datasets_column_map_labels` (the first of them with the column).
 --   * `public.record_dataset(p_workspace, p_kind, p_file_name, p_column_map, p_row_count, p_details)` (SECURITY INVOKER): records
 --     an import that has no calibration: `leads` or `invoices`, with no process. Refuses an API token (42501) and any other kind
 --     (22023). Row-level security refuses viewers, members and strangers (insert policy `can_edit_workspace`). Returns the id.
@@ -36157,9 +36162,14 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 --        where n.nspname = 'public' and p.proname = 'record_client_calibration';
 --   3. No details column yet. Expect 0:
 --        select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'datasets' and column_name = 'details';
---   4. The new functions don't exist. Expect null, null:
+--   4. The new functions don't exist. Expect five nulls:
 --        select to_regprocedure('public.record_dataset(uuid, text, text, jsonb, integer, jsonb)'),
---               to_regprocedure('public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])');
+--               to_regprocedure('public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])'),
+--               to_regprocedure('private.column_map_ok(jsonb)'),
+--               to_regprocedure('private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)'),
+--               to_regprocedure('private.import_details_ok(jsonb)');
+--      And neither new constraint exists. Expect 0:
+--        select count(*) from pg_constraint where conname in ('datasets_details', 'datasets_details_known', 'datasets_column_map_labels');
 --   5. datasets_kind already allows the eight kinds. Expect one row listing step_log, clients, servicing_log, leads, deals, jobs, time_logs, invoices:
 --        select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_kind';
 --   6. For the record (the column add is metadata-only with a constant default): select count(*) from public.datasets;
@@ -36173,7 +36183,11 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 --     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --     where n.nspname = 'public' and p.proname in ('record_dataset', 'record_calibration_import', 'record_client_calibration') order by 1;
 --     -- each: f, {search_path=""}, f, t
---   select conname from pg_constraint where conname in ('datasets_details_known', 'datasets_column_map_labels') order by 1;  -- 2 rows
+--   select conname from pg_constraint where conname in ('datasets_details', 'datasets_details_known', 'datasets_column_map_labels') order by 1;  -- 3 rows
+--   The three private functions refuse anon and allow authenticated. Expect f, t for each:
+--   select p.proname, has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = 'private' and p.proname in ('column_map_ok', 'import_numbers_ok', 'import_details_ok') order by 1;
 --   select version from supabase_migrations.schema_migrations where version = '20261216000000';  -- 1 row
 --
 -- ROLLBACK (one transaction; roll the app back first):
@@ -36484,7 +36498,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- never reach the database: the page sends header names, counts and model ids (D27, #30). Records are insert-only, so a second
 -- import of a kind adds a record and the first stays listed.
 --
--- ADDITIVE: it adds one column and two functions, and replaces `record_client_calibration` (row 57) with a full copy of its
+-- ADDITIVE: it adds one column, two public functions, three `private` helper functions and two check constraints, and replaces
+-- `record_client_calibration` (row 57) with a full copy of its
 -- latest definition that takes a kind and `details`, signature unchanged (the same rule as `save_fields`: the latest definition,
 -- copied; the added lines are marked `-- C1`). It does NOT touch `save_fields`, `record_calibration`, `apply_calibration`,
 -- `calibration_payload_problem`, the `calibrations` trigger, `datasets_kind` (it already allows the eight kinds; row 50 reserved
@@ -36494,12 +36509,16 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     date order, lines, rows kept and left out, how many rows matched a name in the model, the window, and for leads and
 --     invoices a summary (lead source ids and numbers; counts). No string from the file. Table grants are table-level
 --     (select, insert), so the column is covered; it is insert-only like the rest of the row (no update grant).
---   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (numbers, the delimiter,
---     encoding and date-order enums, uuid lead source ids). So a client''s name, a person''s or an amount can''t be stored even by a
+--   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (whole counts up to 10
+--     million, dates up to the year 2100, the delimiter, encoding and date-order enums, uuid lead source ids). So a client''s name, a person''s or an amount can''t be stored even by a
 --     caller that skips the app. The app''s own rebuild (`storedImportDetails`) is the first line; this is the second.
---   * `datasets.column_map` values are short labels: `private.column_map_ok(jsonb)` allows only text of up to 60 characters. The page stores
---     a position (`Column 4`) for client, person, id and amount columns, never the header text, because a file with no header row
---     makes its first data row the "headers". Added NOT VALID: records made before it are not checked.
+--   * `datasets.column_map` holds short labels: `private.column_map_ok(jsonb)` allows only the kinds'' column ids as keys (lower-case
+--     letters, at most 20) and text of up to 60 characters as values. The page stores a position (`Column 4`) unless the header is the
+--     column''s own name or alias, because a file with no header row makes its first data row the "headers". Added NOT VALID (as
+--     `datasets_column_map_labels`): records made before it are not checked.
+--   * New objects: `private.column_map_ok(jsonb)`, `private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)` and
+--     `private.import_details_ok(jsonb)` (execute for `authenticated` only: a check constraint runs as the inserting role), and the
+--     constraints `datasets_details`, `datasets_details_known` and `datasets_column_map_labels` (the first of them with the column).
 --   * `public.record_dataset(p_workspace, p_kind, p_file_name, p_column_map, p_row_count, p_details)` (SECURITY INVOKER): records
 --     an import that has no calibration: `leads` or `invoices`, with no process. Refuses an API token (42501) and any other kind
 --     (22023). Row-level security refuses viewers, members and strangers (insert policy `can_edit_workspace`). Returns the id.
@@ -36524,9 +36543,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        where n.nspname = ''public'' and p.proname = ''record_client_calibration'';
 --   3. No details column yet. Expect 0:
 --        select count(*) from information_schema.columns where table_schema = ''public'' and table_name = ''datasets'' and column_name = ''details'';
---   4. The new functions don''t exist. Expect null, null:
+--   4. The new functions don''t exist. Expect five nulls:
 --        select to_regprocedure(''public.record_dataset(uuid, text, text, jsonb, integer, jsonb)''),
---               to_regprocedure(''public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])'');
+--               to_regprocedure(''public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])''),
+--               to_regprocedure(''private.column_map_ok(jsonb)''),
+--               to_regprocedure(''private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)''),
+--               to_regprocedure(''private.import_details_ok(jsonb)'');
+--      And neither new constraint exists. Expect 0:
+--        select count(*) from pg_constraint where conname in (''datasets_details'', ''datasets_details_known'', ''datasets_column_map_labels'');
 --   5. datasets_kind already allows the eight kinds. Expect one row listing step_log, clients, servicing_log, leads, deals, jobs, time_logs, invoices:
 --        select pg_get_constraintdef(oid) from pg_constraint where conname = ''datasets_kind'';
 --   6. For the record (the column add is metadata-only with a constant default): select count(*) from public.datasets;
@@ -36540,7 +36564,11 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --     where n.nspname = ''public'' and p.proname in (''record_dataset'', ''record_calibration_import'', ''record_client_calibration'') order by 1;
 --     -- each: f, {search_path=""}, f, t
---   select conname from pg_constraint where conname in (''datasets_details_known'', ''datasets_column_map_labels'') order by 1;  -- 2 rows
+--   select conname from pg_constraint where conname in (''datasets_details'', ''datasets_details_known'', ''datasets_column_map_labels'') order by 1;  -- 3 rows
+--   The three private functions refuse anon and allow authenticated. Expect f, t for each:
+--   select p.proname, has_function_privilege(''anon'', p.oid, ''execute''), has_function_privilege(''authenticated'', p.oid, ''execute'')
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = ''private'' and p.proname in (''column_map_ok'', ''import_numbers_ok'', ''import_details_ok'') order by 1;
 --   select version from supabase_migrations.schema_migrations where version = ''20261216000000'';  -- 1 row
 --
 -- ROLLBACK (one transaction; roll the app back first):
