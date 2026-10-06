@@ -1,8 +1,8 @@
 # Handover
 
-Updated 6 Oct 2026 (evening AEST). This session built B1 slices 2b and 3/3 (#30) and C2 part 2 (#41). All three are
-reviewed, green or nearly green, and **waiting only on production**: the stored Supabase token now returns 401, so
-nothing was applied. Start a new session with:
+Updated 6 Oct 2026 (overnight run, in progress). The token works again. #205, #207 and #206 are applied (rows 56–58) and
+merged, closing #30 and #41; #209 made the restore round-trip test robust. The overnight tickets are being scoped and
+built in parallel (status table under "Next steps"). Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -20,23 +20,20 @@ nothing was applied. Start a new session with:
 | B10 (2b) restore a workspace from a backup, closes #39 | #201 | row 54 |
 | B1 (2/3a) per-person privacy in the database, no pay data for members (#30) | #202 | row 55, ENGINE 1.7.0 |
 
-**Open PRs (this session, 6 Oct evening).** Each was built by Sonnet from an Opus brief, adversarially reviewed by Opus,
-and every finding fixed with a test. Apply and merge **in this order**:
+**Merged 6 Oct evening** (each Sonnet-built from an Opus brief and Opus-reviewed; applied with preflight and post-apply
+checks, logged in `docs/production-migrations.md`):
 
-| Order | PR | Branch | Migration | Row | CI |
-|---|---|---|---|---|---|
-| 1 | #205 B1 (2/3b) privacy on screen; no pay or names in saved text (#30) | `claude/amazing-planck-64op6x` | `20261207700000_saved_text_privacy` | 56 | green; ready for review |
-| 2 | #207 C2 (2/2) client churn back-solve, the two CSVs, measured checks; closes #41 | `claude/c2-2-calibration` | `20261208000000_client_calibration` | 57 | test fix pushed (705a258), check CI |
-| 3 | #206 B1 (3/3) agency workspace list; editors change client health rules; closes #30 | `claude/b1-3-agency-list` | `20261209000000_agency_list` | 58 | green; draft |
+| PR | Ticket | Migration |
+|---|---|---|
+| #209 | Restore round-trip test compares means over 16 runs (6 standard errors) | none |
+| #205 | B1 (2/3b) privacy on screen; no pay or names in saved text (#30); ENGINE 1.8.0 | row 56 `20261207700000` |
+| #207 | C2 (2/2) client churn back-solve, two CSVs, measured checks; closes #41 | row 57 `20261208000000` |
+| #206 | B1 (3/3) agency workspace list; editors change client health rules; closes #30 | row 58 `20261209000000` |
 
-- #205 bumps `ENGINE_VERSION` to 1.8.0 (overtime evidence states hours only; no golden number moved). It had two Opus
-  reviews. Its migration also re-keys stored AI keys that hashed real names (Austin's call, below).
-- #207 keeps 1.7.0 itself; after #205 merges it sits on 1.8.0. It needs no bump.
-- All three hand-edited `packages/db/src/database.types.ts` (`gen:types` needs the linked project). Regenerate once all
-  three are applied.
+Production had no saved AI text or overtime issues, so row 56's clean-up changed no rows. `database.types.ts` still holds
+the hand edits from #205–#207 (they match the generator); regenerate when a linked machine is available.
 
-**Production database:** applied up to `20261207500000` (row 55). Rows 56–58 are written, with apply files, preflight
-and post-apply checks in each migration's header, and logged in `docs/production-migrations.md` as NOT applied.
+**Production database:** applied up to `20261209000000` (row 58).
 
 **Briefs** (in `docs/plans/`): `b1-brief.md` (all slices built; 2b's section has the leak fixes and "Changes after the
 review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets one before building.
@@ -185,35 +182,24 @@ password to `postgres`.
 
 ## Next steps
 
-**Start: land the three open PRs, then build the overnight list below.** First check the
-token: `bash packages/db/scripts/prod-sql.sh -c "select 1"` must return a row, not 401. If it fails, stop and say so.
+**Overnight status** (update after every merge). Reserved migration versions follow the planned merge order; renumber
+at merge time if the order changes.
 
-**#207's CI (as of 6 Oct evening):** after the PostgREST test fix (705a258), one CI run failed in
-`packages/db/test/workspace-import.test.ts` ("a restore is a round trip > Northbeam … within run-to-run variation"):
-`costPerWin` restored 4038.9 vs source 3337.2, tolerance 655.5. #207 doesn't touch restore. A restored workspace gets new
-ids, which feed the random streams, so this check is statistical and can fail by chance (it also failed once locally under
-load). The second run on the same commit passed, so it fails by chance. **First job of the run:** make it robust in its
-own small PR (e.g. more replications, or a tolerance derived from the measured run-to-run spread), never by skipping or
-loosening it blindly, and merge that before the three PRs so their CI is reliable.
+| Ticket | Branch | Brief | Build | Review | Migration | State |
+|---|---|---|---|---|---|---|
+| B2 People page (#31) | `claude/b2-people-page` | done | building | | none | |
+| B3 Share links (#32) | `claude/b3-share-links` | done | building | | `20261211000000` | |
+| B20 MCP proposes findings (#197) | `claude/b20-mcp-findings` | done | building | | `20261212000000` | |
+| B7 Forecast planning (#36) | `claude/b7-forecast-planning` | done | building | | `20261213000000` | |
+| B5 Client branding (#34) | `claude/b5-client-branding` | done | building | | `20261214000000` | |
+| B21 Bigger restores (#203) | `claude/b21-bigger-restores` | scoping | | | `20261215000000` | |
+| C1 CSV import wizard (#40) | | | | | | queued |
+| B4 Play links (#33) | | | | | | after B3 |
+| C4 Storybook (#43) | | | | | | queued |
 
-For each PR in order (#205, then #207, then #206), follow "Applying a migration" below:
-1. Bring `origin/main` into the branch (merge, never rebase). For #207 and #206 that brings the previous migration in:
-   regenerate `bootstrap.sql` with `pnpm --filter @transpera-flow/db gen:bootstrap` and fix the
-   `docs/production-migrations.md` rows (56, 57, 58). Push; wait for CI to go green.
-2. Run the migration header's **preflight** queries one file at a time (`prod-sql.sh -f`; it returns only the last
-   statement's result). Record the numbers in the PR. Stop on any surprise.
-3. Apply the apply file (`packages/db/scripts/apply/<version>.sql`).
-4. Run the **post-apply checks**. #205's check 7 must run **before** its merge deploys the app.
-5. Mark the row applied in `docs/production-migrations.md`, push, wait for CI, take the PR out of draft, and squash-merge
-   with the full head SHA (`expectedHeadSha`). Merging deploys.
-6. Comment on the issue (#30 or #41) with what was applied and checked.
-
-Then:
-- After #205 deploys: tell Austin to re-run Analyse in each workspace and check accepted AI findings (Q11).
-- After #206: check on the live site that an editor can change a client health rule, and that the owner's change log names
-  the editor. Close #30.
-- Regenerate `database.types.ts` if a linked machine is available; otherwise leave the hand edits (they match the
-  generator's output and order).
+Still for Austin from the evening PRs:
+- Re-run Analyse in each workspace and check accepted AI findings (#205, Q11).
+- On the live site, an editor changes a client health rule and the owner's change log names them (#206).
 
 ### Overnight run (Austin, 6 Oct): finish everything that doesn't need him
 
