@@ -1,0 +1,653 @@
+import { describe, expect, it } from "vitest";
+import {
+  IMPORT_KINDS,
+  IMPORT_KIND_LIST,
+  applyNameMap,
+  dealsNote,
+  dealsToStepLog,
+  decodeImportFile,
+  displayHeaders,
+  importDetails,
+  invoicesSummary,
+  jobsToServicing,
+  leadsSummary,
+  loadTable,
+  parseAmount,
+  parseDuration,
+  readImport,
+  storedInvoicesSummary,
+  storedLeadsSummary,
+  suggestMapping,
+  suggestNameMap,
+  timeLogToStepLog,
+  type DealRow,
+  type ImportKind,
+  type ImportRead,
+  type InvoiceRow,
+  type JobRow,
+  type LeadRow,
+  type TimeLogRow,
+} from "../src/csv-import";
+import { detectDateOrder, detectDelimiter, hasTimeOfDay, parseLogTime, splitCsv } from "../src/calibration";
+
+// The import wizard's pure core (issue #40): suggesting a mapping, reading eight kinds of file, converting them into the
+// shapes calibration reads, and what may be stored. No database.
+
+const d = (y: number, m: number, day: number, h = 0, mi = 0, s = 0) => Date.UTC(y, m - 1, day, h, mi, s);
+const read = (text: string, kind: ImportKind, index?: Record<string, number | null>, options: Parameters<typeof readImport>[3] = {}): ImportRead => {
+  const table = splitCsv(text);
+  const header = table.find((r) => r.some((c) => c.trim() !== "")) ?? [];
+  return readImport(table, kind, index ?? suggestMapping(header, kind).index, options);
+};
+
+describe("suggestMapping", () => {
+  it("maps each kind's template fully, with no previous import", () => {
+    for (const kind of IMPORT_KIND_LIST) {
+      const spec = IMPORT_KINDS[kind];
+      const header = splitCsv(spec.template)[0]!;
+      const { index, how } = suggestMapping(header, kind);
+      for (const c of spec.columns) {
+        expect(index[c.id], `${kind}.${c.id}`).not.toBeNull();
+        expect(how[c.id], `${kind}.${c.id}`).toBe("name");
+      }
+      expect(new Set(Object.values(index)).size).toBe(spec.columns.length);
+    }
+  });
+
+  it("maps a HubSpot-like deals export", () => {
+    const header = ["Record ID", "Deal Name", "Deal Stage", "Date entered stage", "Original Source", "Amount", "Deal owner"];
+    const { index, how } = suggestMapping(header, "deals");
+    expect(index).toEqual({ deal: 1, stage: 2, entered: 3, left: null, source: 4, amount: 5, owner: 6 });
+    expect(how.entered).toBe("partial");
+    expect(how.stage).toBe("name");
+    expect(how.left).toBeNull();
+  });
+
+  it("prefers the earlier import's choice, then a name, then a partial match", () => {
+    const header = ["Stage", "Pipeline Stage", "Deal Stage Name", "Deal", "Entered"];
+    expect(suggestMapping(header, "deals", { stage: "pipeline  stage" }).index.stage).toBe(1);
+    expect(suggestMapping(header, "deals", { stage: "pipeline  stage" }).how.stage).toBe("previous");
+    expect(suggestMapping(header, "deals").index.stage).toBe(0);
+    expect(suggestMapping(["Deal Stage Name", "Deal", "Entered"], "deals").how.stage).toBe("partial");
+    // A previous header that is no longer in the file falls back to the suggestion.
+    expect(suggestMapping(header, "deals", { stage: "Gone" }).how.stage).toBe("name");
+  });
+
+  it("never uses a header twice", () => {
+    const { index } = suggestMapping(["Date", "Source"], "leads");
+    expect(index.created).toBe(0);
+    expect(index.source).toBe(1);
+    const { index: two } = suggestMapping(["Stage", "Entered"], "deals");
+    expect(Object.values(two).filter((v) => v !== null)).toHaveLength(new Set(Object.values(two).filter((v) => v !== null)).size);
+    // One "Date" header can't be both the date entered and the date left.
+    const one = suggestMapping(["Deal", "Stage", "Date"], "deals");
+    expect(one.index.entered).toBe(2);
+    expect(one.index.left).toBeNull();
+  });
+
+  it("matches required columns before optional ones", () => {
+    // "Reference" is an alias of both the job (optional) and, as a whole word, nothing required; the required type and client go first.
+    const { index } = suggestMapping(["Reference", "Ticket Type", "Company", "Due date"], "jobs");
+    expect(index).toMatchObject({ type: 1, client: 2, due: 3, job: 0 });
+    // Required columns may be matched by whole words; optional ones may not.
+    const optional = suggestMapping(["Ticket", "Type", "Client", "Due", "Date closed"], "jobs");
+    expect(optional.index.closed).toBeNull();
+  });
+
+  it("matches whole words only", () => {
+    expect(suggestMapping(["Stagecoach", "Deal", "Entered"], "deals").index.stage).toBeNull();
+    expect(suggestMapping(["Deal Stage Name", "Deal", "Entered"], "deals").index.stage).toBe(0);
+  });
+
+  it("uses the display names of empty and repeated headers", () => {
+    expect(displayHeaders(["Stage", "", " ", "Stage", "Stage", "Date"])).toEqual(["Stage", "Column 2", "Column 3", "Stage (2)", "Stage (3)", "Date"]);
+    expect(suggestMapping(["Deal", "", "Stage"], "deals", { entered: "Column 2" }).index.entered).toBe(1);
+  });
+});
+
+describe("loadTable", () => {
+  it("finds the header row, the delimiter and the first sample rows", () => {
+    const l = loadTable("Report\nCreated by me\n\na;b\n1;2\n3;4\n", ";", 3);
+    if ("error" in l) throw new Error(l.error);
+    expect(l.headers).toEqual(["a", "b"]);
+    expect(l.samples).toEqual([["1", "2"], ["3", "4"]]);
+    expect(l.lines).toBe(2);
+    expect(l.delimiter).toBe(";");
+    // Automatic detection looks at the first line of the file, as it always has.
+    const auto = loadTable("a;b\n1;2\n", "auto", 1);
+    if ("error" in auto) throw new Error(auto.error);
+    expect(auto.delimiter).toBe(";");
+    const explicit = loadTable("a|b\n1|2\n", "|", 1);
+    if ("error" in explicit) throw new Error(explicit.error);
+    expect(explicit.headers).toEqual(["a", "b"]);
+    expect(explicit.delimiter).toBe("|");
+  });
+
+  it("says plainly when there is nothing to read", () => {
+    expect(loadTable("a,b\n", "auto", 1)).toEqual({ error: "No rows to read." });
+    expect(loadTable("", "auto", 1)).toEqual({ error: "No rows to read." });
+    expect(loadTable("a,b\n1,2", "auto", 5)).toMatchObject({ error: expect.stringContaining("row 5") });
+  });
+});
+
+describe("decodeImportFile", () => {
+  const bytes = (s: string) => new TextEncoder().encode(s);
+  it("reads UTF-8 with or without a mark, and UTF-16 with one", () => {
+    expect(decodeImportFile(bytes("a,b\n1,2"))).toMatchObject({ text: "a,b\n1,2", encoding: "utf-8", note: null });
+    expect(decodeImportFile(new Uint8Array([0xef, 0xbb, 0xbf, ...bytes("a,b")]))).toMatchObject({ text: "a,b", encoding: "utf-8" });
+    const le = new Uint8Array([0xff, 0xfe, ...[..."a,b"].flatMap((c) => [c.charCodeAt(0), 0])]);
+    expect(decodeImportFile(le)).toMatchObject({ text: "a,b", encoding: "utf-16" });
+  });
+
+  it("reads Windows text with a note", () => {
+    const r = decodeImportFile(new Uint8Array([0x43, 0x61, 0x66, 0xe9])); // "Café" in Windows-1252
+    expect(r).toMatchObject({ text: "Café", encoding: "windows-1252" });
+    expect("note" in r && r.note).toMatch(/isn't UTF-8/);
+  });
+
+  it("refuses UTF-16 without its marker", () => {
+    const noBom = new Uint8Array([..."a,b\n1,2"].flatMap((c) => [c.charCodeAt(0), 0]));
+    expect(decodeImportFile(noBom)).toEqual({ error: "This looks like a Unicode file without its marker. In Excel, save it as CSV UTF-8 and choose it again." });
+  });
+});
+
+describe("splitCsv with a delimiter", () => {
+  it("splits on the delimiter given, not the one detected", () => {
+    expect(splitCsv("a|b,c\n1|2,3", "|")).toEqual([["a", "b,c"], ["1", "2,3"]]);
+    expect(splitCsv("a;b,c\n1;2,3", ",")).toEqual([["a;b", "c"], ["1;2", "3"]]);
+    expect(detectDelimiter("a\tb;c,d")).toBe("\t");
+    expect(detectDelimiter("a;b;c,d")).toBe(";");
+    expect(detectDelimiter("a,b")).toBe(",");
+  });
+  it("reads short rows as blank and ignores extra cells", () => {
+    const r = read("deal,stage,entered,left\nD1,Qualify,2026-03-02\nD2,Qualify,2026-03-02,2026-03-03,extra,more\n", "deals");
+    expect(r.errors).toEqual([]);
+    expect(r.rows).toHaveLength(2);
+  });
+});
+
+describe("readImport", () => {
+  it("reads good rows of each kind into its shape", () => {
+    const step = read(IMPORT_KINDS.step_log.template, "step_log");
+    expect(step.errors).toEqual([]);
+    expect(step.rows[0]).toEqual({ item: "D-101", step: "Qualify", started: d(2026, 3, 2, 9), finished: d(2026, 3, 2, 10, 30), hours: 1.5, source: "Website" });
+    const deals = read(IMPORT_KINDS.deals.template, "deals");
+    expect(deals.errors).toEqual([]);
+    expect(deals.rows).toHaveLength(5);
+    expect(deals.rows[0]).toEqual({ item: "D-101", step: "Qualified lead", started: d(2026, 3, 2, 9), finished: d(2026, 3, 3, 13), hours: null, source: "Website enquiries" });
+    expect(deals.names).toEqual([
+      { value: "Qualified lead", rows: 2 },
+      { value: "Closed lost", rows: 1 },
+      { value: "Closed won", rows: 1 },
+      { value: "Discovery call", rows: 1 },
+    ]);
+    const time = read(IMPORT_KINDS.time_logs.template, "time_logs");
+    expect(time.errors).toEqual([]);
+    expect(time.rows).toEqual([
+      { item: "J-101", step: "Qualify lead", started: d(2026, 3, 2), finished: null, hours: 0.75, source: null },
+      { item: "J-101", step: "Discovery call", started: d(2026, 3, 3), finished: null, hours: 1.5, source: null },
+      { item: "J-101", step: "Audit & proposal", started: d(2026, 3, 4), finished: null, hours: 7, source: null },
+      { item: "J-102", step: "Qualify lead", started: d(2026, 3, 4), finished: null, hours: 1.25, source: null },
+    ]);
+    const leads = read(IMPORT_KINDS.leads.template, "leads");
+    expect(leads.errors).toEqual([]);
+    expect(leads.rows[0]).toEqual({ lead: "L-1001", created: d(2026, 3, 2), source: "Website enquiries" });
+    const clients = read(IMPORT_KINDS.clients.template, "clients");
+    expect(clients.rows[1]).toEqual({ client: "C-002", service: "SEO retainer", started: d(2025, 2, 3), ended: d(2025, 11, 28) });
+    const log = read(IMPORT_KINDS.servicing_log.template, "servicing_log");
+    expect(log.rows[0]).toMatchObject({ task: "Monthly report", client: "C-001", due: d(2026, 3, 6) + 86_400_000 - 1, done: d(2026, 3, 5, 16) });
+    const jobs = read(IMPORT_KINDS.jobs.template, "jobs");
+    expect(jobs.errors).toEqual([]);
+    expect(jobs.rows[2]).toEqual({ task: "Client check-in", client: "C-001", due: d(2026, 3, 13, 17), done: d(2026, 3, 13, 15), requested: null });
+    const inv = read(IMPORT_KINDS.invoices.template, "invoices");
+    expect(inv.errors).toEqual([]);
+    expect(inv.rows).toHaveLength(4);
+    expect(inv.names).toEqual([]);
+  });
+
+  it("shows the first 20 rows by the kind's column ids", () => {
+    const lines = ["deal,stage,entered,left"];
+    for (let i = 0; i < 30; i++) lines.push(`D-${i},Qualify,2026-03-02 09:30,`);
+    const r = read(lines.join("\n"), "deals");
+    expect(r.preview).toHaveLength(20);
+    expect(r.preview[0]).toEqual({ deal: "D-0", stage: "Qualify", entered: "2 Mar 2026 09:30", left: "", source: "", amount: "", owner: "" });
+    expect(read("deal,stage,entered\nD,S,2026-03-02", "deals").preview[0]!.entered).toBe("2 Mar 2026");
+  });
+
+  it("reports each row error by line, counting blank lines", () => {
+    const text = [
+      "deal,stage,entered,left,source,amount,owner",
+      "D1,Qualify,2026-03-02,,,,", // line 2: fine
+      "", // line 3
+      ",Qualify,2026-03-02,,,,", // line 4
+      "D3,Qualify,someday,,,,", // line 5
+      "D4,Qualify,2026-03-05,2026-03-01,,,", // line 6
+      `D5,${"x".repeat(201)},2026-03-02,,,,`, // line 7
+      "D6,Qualify,2026-03-02,,,not money,", // line 8
+      "D7,Qualify,45352,,,,", // line 9
+      "D8,Qualify,2026-03-02,,,£12,", // line 10: fine
+    ].join("\n");
+    const r = read(text, "deals");
+    expect(r.rows).toHaveLength(2);
+    expect(r.errorCount).toBe(6);
+    expect(r.errors.map((e) => e.line)).toEqual([4, 5, 6, 7, 8, 9]);
+    expect(r.errors[0]!.message).toBe("Missing deal.");
+    expect(r.errors[1]!.message).toMatch(/^Can't read the date entered "someday"/);
+    expect(r.errors[2]!.message).toBe("It left the stage before it entered it.");
+    expect(r.errors[3]!.message).toMatch(/over 200 characters/);
+    expect(r.errors[4]!.message).toBe("The amount can't be read as a number.");
+    expect(r.errors[5]!.message).toBe('Can\'t read the date "45352". Format the column as a date in Excel before saving.');
+    expect(r.lines).toBe(8);
+  });
+
+  it("reads time-log hours in every form and refuses the rest", () => {
+    const r = read("job,task,date,hours\nJ,A,2026-03-02,1h 30m\nJ,B,2026-03-02,abc\nJ,C,2026-03-02,-1h\n", "time_logs");
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({ hours: 1.5 });
+    expect(r.errors.map((e) => e.line)).toEqual([3, 4]);
+    expect(r.errors[0]!.message).toBe('Hours "abc" isn\'t a number of hours.');
+  });
+
+  it("flags a job closed before it was opened, and ends a date-only due at the end of its day", () => {
+    const r = read("type,client,due,closed,opened\nReport,C1,2026-03-06,2026-03-05,2026-03-07\nReport,C2,2026-03-06,,\nReport,C3,06 Mar 2026 00:00,,\nReport,C4,2026-03-06 17:00,,\n", "jobs");
+    expect(r.errors).toEqual([{ line: 2, message: "It was closed before it was opened." }]);
+    expect(r.rows.map((x) => (x as { due: number }).due)).toEqual([d(2026, 3, 7) - 1, d(2026, 3, 7) - 1, d(2026, 3, 6, 17)]);
+  });
+
+  it("lists required columns with no header chosen, and reads nothing", () => {
+    const r = read("deal,stage,entered\nD1,Qualify,2026-03-02", "deals", { deal: 0, stage: null, entered: null });
+    expect(r.missing).toEqual(["stage", "entered"]);
+    expect(r.rows).toEqual([]);
+    expect(r.lines).toBe(1);
+  });
+
+  it("asks when slashed dates are ambiguous, refuses a mixed file, and reads once told", () => {
+    const text = "deal,stage,entered\nD1,Q,02/03/2026\nD2,Q,04/05/2026";
+    const ask = read(text, "deals");
+    expect(ask.dateProblem).toBe("ambiguous");
+    expect(ask.rows).toEqual([]);
+    const dmy = read(text, "deals", undefined, { dateOrder: "dmy" });
+    expect(dmy.dateOrder).toBe("dmy");
+    expect(dmy.rows[0]).toMatchObject({ started: d(2026, 3, 2) });
+    const mdy = read(text, "deals", undefined, { dateOrder: "mdy" });
+    expect(mdy.rows[0]).toMatchObject({ started: d(2026, 2, 3) });
+    const mixed = read("deal,stage,entered\nD1,Q,13/03/2026\nD2,Q,03/13/2026", "deals");
+    expect(mixed.dateProblem).toBe("mixed");
+    expect(mixed.rows).toEqual([]);
+    // Month names are never ambiguous.
+    expect(read("deal,stage,entered\nD1,Q,2 Mar 2026\nD2,Q,4 May 2026", "deals").dateProblem).toBeNull();
+  });
+
+  it("takes the column names from a later row, with title rows above", () => {
+    const text = "Pipeline export\nRun on 2 March\ndeal,stage,entered\nD1,Qualify,2026-03-02\nD2,Won,2026-03-03\n";
+    const r = readImport(splitCsv(text), "deals", { deal: 0, stage: 1, entered: 2 }, { headerRow: 3 });
+    expect(r.errors).toEqual([]);
+    expect(r.rows).toHaveLength(2);
+    expect(r.lines).toBe(2);
+    // Line numbers still count the title rows.
+    const bad = readImport(splitCsv(text.replace("2026-03-03", "never")), "deals", { deal: 0, stage: 1, entered: 2 }, { headerRow: 3 });
+    expect(bad.errors.map((e) => e.line)).toEqual([5]);
+  });
+
+  it("reads an explicit semicolon or vertical-bar delimiter", () => {
+    for (const sep of [";", "|"] as const) {
+      const text = ["deal", "stage", "entered"].join(sep) + "\n" + ["D1", "Qualify, again", "2026-03-02"].join(sep) + "\n";
+      const l = loadTable(text, sep, 1);
+      if ("error" in l) throw new Error(l.error);
+      const r = readImport(l.table, "deals", suggestMapping(l.headers, "deals").index);
+      expect(r.rows).toHaveLength(1);
+      expect(r.rows[0]).toMatchObject({ step: "Qualify, again" });
+    }
+  });
+
+  it("stops at 200,000 rows with the message C2 gives, and reports progress every 5,000", () => {
+    const lines = ["lead,created,source"];
+    for (let i = 0; i < 200_001; i++) lines.push(`L${i},2026-03-02,Web`);
+    const progress: number[] = [];
+    const r = read(lines.join("\n"), "leads", undefined, { onProgress: (done, total) => progress.push(done * 1_000_000 + total) });
+    expect(r.rows).toHaveLength(200_000);
+    expect(r.errorCount).toBe(1);
+    expect(r.errors[0]!.message).toBe("Only the first 200,000 rows are read.");
+    expect(progress.length).toBe(40);
+    expect(progress[0]).toBe(5000 * 1_000_000 + 200_001);
+  });
+
+  it("calls onProgress every 5,000 rows", () => {
+    const lines = ["deal,stage,entered"];
+    for (let i = 0; i < 12_000; i++) lines.push(`D${i},Qualify,2026-03-02`);
+    const calls: [number, number][] = [];
+    read(lines.join("\n"), "deals", undefined, { onProgress: (a, b) => calls.push([a, b]) });
+    expect(calls).toEqual([
+      [5000, 12_000],
+      [10_000, 12_000],
+    ]);
+  });
+
+  it("reads a generated 50,000-row deals file", () => {
+    const stages = ["Qualified lead", "Discovery call", "Proposal sent", "Negotiation", "Closed won"];
+    const lines = ["Record ID,Deal Name,Deal Stage,Date entered stage,Original Source,Amount,Deal owner"];
+    for (let i = 0; i < 10_000; i++) {
+      for (let s = 0; s < 5; s++) lines.push(`${i},Deal ${i},${stages[s]},${new Date(Date.UTC(2026, 0, 1) + (i + s) * 3_600_000).toISOString().slice(0, 16).replace("T", " ")},Web,£${1000 + i},Rep ${i % 7}`);
+    }
+    const r = read(lines.join("\n"), "deals");
+    expect(r.errors).toEqual([]);
+    expect(r.lines).toBe(50_000);
+    expect(r.rows).toHaveLength(50_000);
+    expect(r.note).toBeNull();
+    expect(r.names.map((n) => n.rows)).toEqual([10_000, 10_000, 10_000, 10_000, 10_000]);
+    expect(r.rows[49_999]).toMatchObject({ item: "Deal 9999", step: "Closed won" });
+  });
+
+  it("keeps at most 200 errors but counts them all", () => {
+    const lines = ["deal,stage,entered"];
+    for (let i = 0; i < 300; i++) lines.push(`D${i},Q,nope`);
+    const r = read(lines.join("\n"), "deals");
+    expect(r.errors).toHaveLength(200);
+    expect(r.errorCount).toBe(300);
+  });
+
+  it("lists distinct names by rows, then value, at most 500", () => {
+    const lines = ["deal,stage,entered"];
+    for (let i = 0; i < 600; i++) lines.push(`D${i},Stage ${String(i).padStart(3, "0")},2026-03-02`);
+    lines.push("D1,Stage 007,2026-03-02");
+    const r = read(lines.join("\n"), "deals");
+    expect(r.names).toHaveLength(500);
+    expect(r.names[0]).toEqual({ value: "Stage 007", rows: 2 });
+    expect(r.names[1]).toEqual({ value: "Stage 000", rows: 1 });
+  });
+
+  it("notes a list of deals, and not a stage history", () => {
+    const once = read("deal,stage,entered\nD1,Qualify,2026-03-02\nD2,Qualify,2026-03-02\n", "deals");
+    expect(once.note).toMatch(/^Each deal appears about once/);
+    const history = read(IMPORT_KINDS.deals.template, "deals");
+    expect(history.note).toBeNull();
+  });
+});
+
+describe("conversions", () => {
+  const deal = (deal: string, stage: string, entered: number, left: number | null = null, source: string | null = null): DealRow => ({ deal, stage, entered, left, source, amount: 1, owner: "x" });
+
+  it("turns deals into a step log", () => {
+    expect(dealsToStepLog([deal("D1", "Qualify", 1, 2, "Web"), deal("D1", "Won", 2)])).toEqual([
+      { item: "D1", step: "Qualify", started: 1, finished: 2, hours: null, source: "Web" },
+      { item: "D1", step: "Won", started: 2, finished: null, hours: null, source: null },
+    ]);
+    expect(dealsNote([])).toBeNull();
+    // Exactly 10% with two rows is enough.
+    const rows = [deal("D0", "A", 1), deal("D0", "B", 2), ...Array.from({ length: 9 }, (_, i) => deal(`E${i}`, "A", 1))];
+    expect(dealsNote(rows)).toBeNull();
+    expect(dealsNote(rows.slice(1))).toMatch(/list of deals/);
+  });
+
+  it("merges consecutive entries on a task into one visit and sums the hours", () => {
+    const e = (job: string, task: string, date: number, hours: number): TimeLogRow => ({ job, task, date, hours, person: "p", client: "c" });
+    const out = timeLogToStepLog([e("J1", "A", 1, 1), e("J2", "X", 1, 5), e("J1", "A", 2, 0.5), e("J1", "B", 3, 2), e("J1", "A", 4, 1)]);
+    expect(out).toEqual([
+      { item: "J1", step: "A", started: 1, finished: null, hours: 1.5, source: null },
+      { item: "J1", step: "B", started: 3, finished: null, hours: 2, source: null },
+      { item: "J1", step: "A", started: 4, finished: null, hours: 1, source: null },
+      { item: "J2", step: "X", started: 1, finished: null, hours: 5, source: null },
+    ]);
+    // Entries out of order are sorted by date; ties keep their file order.
+    const sorted = timeLogToStepLog([e("J", "B", 5, 1), e("J", "A", 1, 1), e("J", "B", 1, 1), e("J", "A", 1, 1)]);
+    expect(sorted.map((v) => v.step)).toEqual(["A", "B", "A", "B"]);
+  });
+
+  it("turns jobs into a servicing log", () => {
+    const j: JobRow = { job: "T1", type: "Report", client: "C1", due: 10, closed: 8, opened: 2, assignee: "a" };
+    expect(jobsToServicing([j, { ...j, closed: null, opened: null }])).toEqual([
+      { task: "Report", client: "C1", due: 10, done: 8, requested: 2 },
+      { task: "Report", client: "C1", due: 10, done: null, requested: null },
+    ]);
+  });
+
+  describe("leadsSummary", () => {
+    const sources = [
+      { id: "s1", name: "Website enquiries", volumeWeek: 8 },
+      { id: "s2", name: "Google Ads", volumeWeek: 4 },
+    ];
+    const lead = (source: string, created: number): LeadRow => ({ lead: null, created, source });
+    const asOf = d(2026, 6, 1);
+
+    it("counts leads a week for each source over the window to asOf", () => {
+      const rows: LeadRow[] = [];
+      for (let i = 0; i < 40; i++) rows.push(lead("website  enquiries", d(2026, 3, 2) + i * 86_400_000));
+      for (let i = 0; i < 9; i++) rows.push(lead("Google Ads", d(2026, 3, 9) + i * 86_400_000));
+      for (let i = 0; i < 3; i++) rows.push(lead("Podcast", d(2026, 4, 1)));
+      const s = leadsSummary(rows, sources, asOf);
+      expect(s.blocked).toBeNull();
+      expect(s.from).toBe(d(2026, 3, 2));
+      expect(s.weeks).toBeCloseTo((asOf - d(2026, 3, 2)) / (7 * 86_400_000), 6);
+      expect(s.unmatched).toBe(3);
+      expect(s.leads).toBe(52);
+      expect(s.sources[0]).toMatchObject({ leadSourceId: "s1", leads: 40, current: 8, enough: true });
+      expect(s.sources[0]!.perWeek).toBeCloseTo(40 / s.weeks, 2);
+      expect(s.sources[1]).toMatchObject({ leadSourceId: "s2", leads: 9, enough: false });
+    });
+
+    it("needs at least four weeks", () => {
+      const s = leadsSummary([lead("Google Ads", d(2026, 5, 20))], sources, asOf);
+      expect(s.blocked).toBe("The file covers 1.7 weeks; at least 4 are needed.");
+      expect(s.sources.every((x) => !x.enough && x.perWeek === 0)).toBe(true);
+    });
+
+    it("matches no source when two share a name", () => {
+      const s = leadsSummary([lead("Ads", d(2026, 1, 1))], [{ id: "a", name: "ads", volumeWeek: 1 }, { id: "b", name: "Ads", volumeWeek: 1 }], asOf);
+      expect(s.unmatched).toBe(1);
+    });
+
+    it("keeps no names when stored", () => {
+      const s = leadsSummary([lead("Google Ads", d(2026, 1, 1))], sources, asOf);
+      const stored = storedLeadsSummary(s);
+      expect(JSON.stringify(stored)).not.toContain("Google");
+      expect(stored.sources[0]).toEqual({ leadSourceId: "s1", leads: 0, perWeek: expect.any(Number), current: 8 });
+    });
+  });
+
+  it("summarises invoices without summing amounts", () => {
+    const inv = (client: string, issued: number, due: number | null, paid: number | null, amount: number | null): InvoiceRow => ({ invoice: null, client, issued, due, paid, amount });
+    const asOf = d(2026, 6, 1);
+    const s = invoicesSummary(
+      [
+        inv("A", d(2026, 3, 1), d(2026, 3, 30), d(2026, 3, 28), 100), // on time
+        inv("A", d(2026, 3, 8), d(2026, 4, 5), d(2026, 4, 9), 200), // late
+        inv("B", d(2026, 3, 9), d(2026, 4, 6), null, null), // unpaid past due
+        inv("C", d(2026, 5, 20), d(2026, 7, 1), null, 50), // not due yet
+        inv("C", d(2026, 5, 21), null, null, null),
+      ],
+      asOf,
+    );
+    expect(s).toEqual({ invoices: 5, clients: 3, from: d(2026, 3, 1), to: d(2026, 5, 21), withDue: 4, paidLate: 0.5, unpaidPastDue: 1, withAmount: 3 });
+    expect(invoicesSummary([], asOf)).toMatchObject({ invoices: 0, paidLate: null, from: null });
+    expect(JSON.stringify(storedInvoicesSummary(s))).not.toContain("amount\":1");
+  });
+});
+
+describe("matching names to the model", () => {
+  const names = [{ value: "Qualified lead" }, { value: "discovery  CALL" }, { value: "Won" }];
+  it("matches a name once normalised, else leaves it out", () => {
+    expect(suggestNameMap(names, ["Qualify lead", "Discovery call", "Won"])).toEqual({ "Qualified lead": null, "discovery  CALL": "Discovery call", Won: "Won" });
+  });
+  it("matches neither of two targets that normalise the same", () => {
+    expect(suggestNameMap([{ value: "Won" }], ["Won", "won!"])).toEqual({ Won: null });
+  });
+  it("rewrites names and drops the rows mapped to nothing", () => {
+    const r = read("deal,stage,entered\nD1,Qualified lead,2026-03-02\nD1,Discovery,2026-03-03\nD2,Qualified lead,2026-03-04\n", "deals");
+    const rows = applyNameMap(r, { "Qualified lead": "Qualify lead", Discovery: null });
+    expect(rows.map((x) => (x as { step: string }).step)).toEqual(["Qualify lead", "Qualify lead"]);
+    // Values not in the map are dropped too.
+    expect(applyNameMap(r, {})).toEqual([]);
+    // A lead's source is renamed; invoices have no name to match.
+    const leads = read("created,source\n2026-03-02,ads\n", "leads");
+    expect(applyNameMap(leads, { ads: "Google Ads" })).toEqual([{ lead: null, created: d(2026, 3, 2), source: "Google Ads" }]);
+    const inv = read(IMPORT_KINDS.invoices.template, "invoices");
+    expect(applyNameMap(inv, {})).toBe(inv.rows);
+  });
+});
+
+describe("parseDuration", () => {
+  it("reads decimal hours, h:mm and spelled-out forms", () => {
+    const cases: [string, number][] = [
+      ["1.5", 1.5],
+      ["1,5", 1.5],
+      ["2", 2],
+      ["1:30", 1.5],
+      ["01:30:00", 1.5],
+      ["0:45", 0.75],
+      ["1h 30m", 1.5],
+      ["1h", 1],
+      ["90m", 1.5],
+      ["90 min", 1.5],
+      ["90 mins", 1.5],
+      ["1h30", 1],
+      ["10000", 10_000],
+    ];
+    for (const [text, hours] of cases) {
+      if (text === "1h30") expect(parseDuration(text), text).toBeNull();
+      else expect(parseDuration(text), text).toBeCloseTo(hours, 6);
+    }
+  });
+  it("refuses what isn't a length of time", () => {
+    for (const s of ["", "abc", "-1h", "-2", "1.2.3", "1:75", "10001", "h", "1h 90x"]) expect(parseDuration(s), s).toBeNull();
+  });
+});
+
+describe("parseAmount", () => {
+  it("reads currency symbols, codes, brackets and signs", () => {
+    const cases: [string, number][] = [
+      ["1200", 1200],
+      ["£9,999", 9999],
+      ["$ 12.50", 12.5],
+      ["€12,50", 12.5],
+      ["A$1,234.50", 1234.5],
+      ["AUD 1,234.50", 1234.5],
+      ["1,234.50 GBP", 1234.5],
+      ["12 USD", 12],
+      ["(123.45)", -123.45],
+      ["-123.45", -123.45],
+      ["-£5", -5],
+    ];
+    for (const [text, n] of cases) expect(parseAmount(text), text).toBeCloseTo(n, 6);
+  });
+  it("tells thousands from decimals by which separator comes last", () => {
+    expect(parseAmount("1,234.50")).toBe(1234.5);
+    expect(parseAmount("1.234,50")).toBe(1234.5);
+    expect(parseAmount("1 234,50")).toBe(1234.5);
+    expect(parseAmount("1,234,567.89")).toBe(1_234_567.89);
+    expect(parseAmount("1.234.567,89")).toBe(1_234_567.89);
+    expect(parseAmount("1,234,567")).toBe(1_234_567);
+  });
+  it("refuses what isn't an amount", () => {
+    for (const s of ["", "abc", "1.2.3", "12abc", "£", "--5", "1,23,456.7", "12 34"]) expect(parseAmount(s), s).toBeNull();
+  });
+});
+
+describe("parseLogTime extensions", () => {
+  it("reads everything it read before, to the same millisecond", () => {
+    const table: [string, number | null][] = [
+      ["2026-03-02", 1772409600000],
+      ["2026-03-02 09:30", 1772443800000],
+      ["2026-03-02T09:30:15Z", 1772443815000],
+      ["2026-03-02T09:30:00+10:00", 1772407800000],
+      ["2026-03-02 09:30:15.250", 1772443815000],
+      ["02/03/2026", 1772409600000],
+      ["2/3/2026 17:05", 1772471100000],
+      ["02.03.2026 09:30:15", 1772443815000],
+      ["13/03/2026", 1773360000000],
+      ["", null],
+      ["yesterday", null],
+      ["2026-02-31", null],
+      ["13/13/2026", null],
+      ["2026-03-02 25:00", null],
+      ["02/03/202", null],
+    ];
+    for (const [text, ms] of table) expect(parseLogTime(text), text).toBe(ms);
+    expect(parseLogTime("02/03/2026", "mdy")).toBe(d(2026, 2, 3));
+  });
+
+  it("reads month names, full or short, in any case, with an optional time", () => {
+    expect(parseLogTime("2 Mar 2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("02-Mar-2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("2 March 2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("2 MARCH 2026 09:30")).toBe(d(2026, 3, 2, 9, 30));
+    expect(parseLogTime("Mar 2, 2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("March 2 2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("mar 2, 2026 09:30:15")).toBe(d(2026, 3, 2, 9, 30, 15));
+    expect(parseLogTime("2 Sep 2026")).toBe(d(2026, 9, 2));
+    expect(parseLogTime("2 Marc 2026")).toBeNull();
+    expect(parseLogTime("31 Feb 2026")).toBeNull();
+    expect(parseLogTime("2 Mar")).toBeNull();
+  });
+
+  it("reads AM and PM", () => {
+    expect(parseLogTime("02/03/2026 9:30 PM")).toBe(d(2026, 3, 2, 21, 30));
+    expect(parseLogTime("02/03/2026 9:30pm")).toBe(d(2026, 3, 2, 21, 30));
+    expect(parseLogTime("2 Mar 2026 9:30am")).toBe(d(2026, 3, 2, 9, 30));
+    expect(parseLogTime("02/03/2026 12:15 AM")).toBe(d(2026, 3, 2, 0, 15));
+    expect(parseLogTime("02/03/2026 12:15 PM")).toBe(d(2026, 3, 2, 12, 15));
+    expect(parseLogTime("02/03/2026 13:15 PM")).toBeNull();
+    expect(parseLogTime("02/03/2026 0:15 AM")).toBeNull();
+  });
+
+  it("reads two-digit years on slashed dates", () => {
+    expect(parseLogTime("02/03/26")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("13/03/26 09:00")).toBe(d(2026, 3, 13, 9));
+    expect(detectDateOrder(["13/03/26"])).toBe("dmy");
+    expect(detectDateOrder(["02/03/26"])).toBe("ambiguous");
+    expect(detectDateOrder(["2 Mar 2026"])).toBeNull();
+  });
+
+  it("sees a time of day in the new forms", () => {
+    expect(hasTimeOfDay("2 Mar 2026")).toBe(false);
+    expect(hasTimeOfDay("2 Mar 2026 09:30")).toBe(true);
+    expect(hasTimeOfDay("02/03/2026 9:30 PM")).toBe(true);
+    expect(hasTimeOfDay("Mar 2, 2026")).toBe(false);
+  });
+});
+
+describe("what is stored", () => {
+  // Every column of every kind filled with something that must never reach the database.
+  const SECRET = { client: "ACME-SECRET-CLIENT", person: "Jane Secretperson", amount: "£9,999" };
+  const fileFor = (kind: ImportKind) => {
+    const spec = IMPORT_KINDS[kind];
+    const value = (type: string) =>
+      type === "client" ? SECRET.client : type === "person" ? SECRET.person : type === "amount" ? SECRET.amount : type === "date" ? "2026-03-02" : type === "duration" ? "1.5" : type === "name" ? "Some step" : "ID-1";
+    return [spec.columns.map((c) => c.id).join(","), spec.columns.map((c) => value(c.type)).join(","), spec.columns.map((c) => value(c.type)).join(",")].join("\n");
+  };
+
+  it("holds no client, person or amount from the file, for every kind", () => {
+    for (const kind of IMPORT_KIND_LIST) {
+      const r = read(fileFor(kind), kind);
+      expect(r.errors, kind).toEqual([]);
+      expect(r.rows.length, kind).toBeGreaterThan(0);
+      const summary =
+        kind === "leads"
+          ? storedLeadsSummary(leadsSummary(r.rows as LeadRow[], [{ id: "s1", name: "Some step", volumeWeek: 1 }], d(2026, 6, 1)))
+          : kind === "invoices"
+            ? storedInvoicesSummary(invoicesSummary(r.rows as InvoiceRow[], d(2026, 6, 1)))
+            : undefined;
+      const details = importDetails(r, { delimiter: ",", encoding: "utf-8", headerRow: 1, nameMatches: { matched: r.rows.length, leftOut: 0 }, summary });
+      const json = JSON.stringify(details);
+      for (const secret of [...Object.values(SECRET), "Some step", "ID-1"]) expect(json, `${kind}: ${secret}`).not.toContain(secret);
+      expect(details.rows).toBe(r.rows.length);
+      expect(details.window).not.toBeNull();
+    }
+  });
+
+  it("holds numbers and enums", () => {
+    const r = read("deal,stage,entered\nD1,Q,02/03/2026\nD2,Q,13/03/2026\nD3,Q,nope", "deals");
+    const details = importDetails(r, { delimiter: "weird", encoding: "windows-1252", headerRow: 99, nameMatches: { matched: 2, leftOut: 0 } });
+    expect(details).toEqual({
+      delimiter: ",",
+      encoding: "windows-1252",
+      headerRow: 20,
+      dateOrder: "dmy",
+      lines: 3,
+      rows: 2,
+      leftOut: 1,
+      nameMatches: { matched: 2, leftOut: 0 },
+      window: { from: d(2026, 3, 2), to: d(2026, 3, 13) },
+      summary: null,
+    });
+  });
+});
