@@ -79,7 +79,9 @@ export function storedImportDetails(input: unknown): ImportDetails | null {
   if (dateOrder !== null && dateOrder !== undefined && dateOrder !== "dmy" && dateOrder !== "mdy") return null;
   const names = isObject(input.nameMatches) ? input.nameMatches : {};
   const w = isObject(input.window) ? input.window : null;
-  const window = w && finite(w.from) !== null && finite(w.to) !== null ? { from: finite(w.from)!, to: finite(w.to)! } : null;
+  // Epoch milliseconds from 1970 to the year 2100, whole numbers, as the database checks.
+  const when = (v: unknown) => (finite(v) !== null && finite(v)! >= 0 && finite(v)! <= 4_200_000_000_000 ? Math.round(finite(v)!) : null);
+  const window = w && when(w.from) !== null && when(w.to) !== null ? { from: when(w.from)!, to: when(w.to)! } : null;
   const s = isObject(input.summary) ? input.summary : null;
   const details: ImportDetails = {
     delimiter,

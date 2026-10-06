@@ -84,7 +84,7 @@ set local lock_timeout = '5s';
 --   alter table public.datasets drop constraint if exists datasets_details_known;
 --   alter table public.datasets drop constraint if exists datasets_column_map_labels;
 --   drop function if exists private.import_details_ok(jsonb);
---   drop function if exists private.import_numbers_ok(jsonb, text[]);
+--   drop function if exists private.import_numbers_ok(jsonb, text[], text[], numeric, numeric);
 --   drop function if exists private.column_map_ok(jsonb);
 --   alter table public.datasets drop column if exists details;
 --   delete from supabase_migrations.schema_migrations where version = '20261216000000';
@@ -98,17 +98,22 @@ set local lock_timeout = '5s';
 alter table public.datasets add column details jsonb not null default '{}'
   constraint datasets_details check (jsonb_typeof(details) = 'object' and octet_length(details::text) <= 20000);
 
--- Counts only: an object whose keys are among `allowed` and whose values are all numbers.
-create function private.import_numbers_ok(o jsonb, allowed text[]) returns boolean
+-- Counts only: an object whose keys are among `allowed` and whose values are numbers from lo to hi (whole numbers for `whole_keys`).
+create function private.import_numbers_ok(o jsonb, allowed text[], whole_keys text[], lo numeric, hi numeric) returns boolean
 language sql
 immutable
 set search_path = ''
 as $$
   select jsonb_typeof(o) = 'object' and not exists (
-    select 1 from jsonb_each(o) e where e.key <> all (allowed) or jsonb_typeof(e.value) <> 'number');
+    select 1 from jsonb_each(o) e
+    where e.key <> all (allowed)
+       or jsonb_typeof(e.value) <> 'number'
+       or (e.value #>> '{}')::numeric not between lo and hi
+       or (e.key = any (whole_keys) and (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)));
 $$;
 
--- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields).
+-- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields). Counts are whole numbers
+-- up to 10 million; dates are epoch milliseconds up to the year 2100; a lead source is a uuid. So it can't carry text, even as digits.
 create function private.import_details_ok(d jsonb) returns boolean
 language plpgsql
 immutable
@@ -125,7 +130,7 @@ begin
   end if;
   for k, v in select e.key, e.value from jsonb_each(d) e loop
     if k in ('headerRow', 'lines', 'rows', 'leftOut') then
-      if jsonb_typeof(v) <> 'number' then return false; end if;
+      if not private.import_numbers_ok(jsonb_build_object(k, v), array[k], array[k], 0, 10000000) then return false; end if;
     elsif k = 'delimiter' then
       if jsonb_typeof(v) <> 'string' or (v #>> '{}') not in (',', ';', E'\t', '|') then return false; end if;
     elsif k = 'encoding' then
@@ -133,23 +138,33 @@ begin
     elsif k = 'dateOrder' then
       if jsonb_typeof(v) <> 'null' and (jsonb_typeof(v) <> 'string' or (v #>> '{}') not in ('dmy', 'mdy')) then return false; end if;
     elsif k = 'nameMatches' then
-      if not private.import_numbers_ok(v, array['matched', 'leftOut']) then return false; end if;
+      if not private.import_numbers_ok(v, array['matched', 'leftOut'], array['matched', 'leftOut'], 0, 10000000) then return false; end if;
     elsif k = 'window' then
-      if jsonb_typeof(v) <> 'null' and not private.import_numbers_ok(v, array['from', 'to']) then return false; end if;
+      if jsonb_typeof(v) <> 'null' and not private.import_numbers_ok(v, array['from', 'to'], array['from', 'to'], 0, 4200000000000) then return false; end if;
     elsif k = 'summary' then
       if jsonb_typeof(v) = 'null' then continue; end if;
       if jsonb_typeof(v) <> 'object' then return false; end if;
       s := v - 'sources' - 'blocked' - 'paidLate' - 'kind';
-      if not private.import_numbers_ok(s, array['weeks', 'leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount']) then return false; end if;
+      if not private.import_numbers_ok(
+        s,
+        array['weeks', 'leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount'],
+        array['leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount'],
+        0,
+        10000000) then
+        return false;
+      end if;
       if coalesce(v ->> 'kind', '') not in ('leads', 'invoices') then return false; end if;
       if v ? 'blocked' and jsonb_typeof(v -> 'blocked') <> 'boolean' then return false; end if;
-      if v ? 'paidLate' and jsonb_typeof(v -> 'paidLate') not in ('number', 'null') then return false; end if;
+      if v ? 'paidLate' and not (jsonb_typeof(v -> 'paidLate') = 'null' or private.import_numbers_ok(jsonb_build_object('paidLate', v -> 'paidLate'), array['paidLate'], array[]::text[], 0, 1)) then
+        return false;
+      end if;
       if v ? 'sources' then
         if jsonb_typeof(v -> 'sources') <> 'array' or jsonb_array_length(v -> 'sources') > 500 then return false; end if;
         for src in select x from jsonb_array_elements(v -> 'sources') x loop
-          if not private.import_numbers_ok(src - 'leadSourceId', array['leads', 'perWeek', 'current'])
+          if jsonb_typeof(src) <> 'object'
              or jsonb_typeof(src -> 'leadSourceId') <> 'string'
-             or (src ->> 'leadSourceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+             or (src ->> 'leadSourceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+             or not private.import_numbers_ok(src - 'leadSourceId', array['leads', 'perWeek', 'current'], array['leads'], 0, 10000000) then
             return false;
           end if;
         end loop;
@@ -162,20 +177,23 @@ begin
 end;
 $$;
 
-revoke all on function private.import_numbers_ok(jsonb, text[]) from public, anon;
-grant execute on function private.import_numbers_ok(jsonb, text[]) to authenticated;
+revoke all on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) from public, anon;
+grant execute on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) to authenticated;
 revoke all on function private.import_details_ok(jsonb) from public, anon;
 grant execute on function private.import_details_ok(jsonb) to authenticated;
 
 alter table public.datasets add constraint datasets_details_known check (private.import_details_ok(details));
 
--- A column map holds short labels (a header name, or a position such as `Column 4`), never a long value from a file.
+-- A column map holds short labels (a header name, or a position such as `Column 4`) under the kinds' column ids (lower-case letters,
+-- at most 20), never a long value from a file.
 create function private.column_map_ok(m jsonb) returns boolean
 language sql
 immutable
 set search_path = ''
 as $$
-  select not exists (select 1 from jsonb_each(m) e where jsonb_typeof(e.value) <> 'string' or char_length(e.value #>> '{}') > 60);
+  select jsonb_typeof(m) = 'object' and not exists (
+    select 1 from jsonb_each(m) e
+    where e.key !~ '^[a-z]{1,20}$' or jsonb_typeof(e.value) <> 'string' or char_length(e.value #>> '{}') > 60);
 $$;
 
 revoke all on function private.column_map_ok(jsonb) from public, anon;
@@ -433,7 +451,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   alter table public.datasets drop constraint if exists datasets_details_known;
 --   alter table public.datasets drop constraint if exists datasets_column_map_labels;
 --   drop function if exists private.import_details_ok(jsonb);
---   drop function if exists private.import_numbers_ok(jsonb, text[]);
+--   drop function if exists private.import_numbers_ok(jsonb, text[], text[], numeric, numeric);
 --   drop function if exists private.column_map_ok(jsonb);
 --   alter table public.datasets drop column if exists details;
 --   delete from supabase_migrations.schema_migrations where version = '20261216000000';
@@ -447,17 +465,22 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 alter table public.datasets add column details jsonb not null default '{}'
   constraint datasets_details check (jsonb_typeof(details) = 'object' and octet_length(details::text) <= 20000);
 
--- Counts only: an object whose keys are among `allowed` and whose values are all numbers.
-create function private.import_numbers_ok(o jsonb, allowed text[]) returns boolean
+-- Counts only: an object whose keys are among `allowed` and whose values are numbers from lo to hi (whole numbers for `whole_keys`).
+create function private.import_numbers_ok(o jsonb, allowed text[], whole_keys text[], lo numeric, hi numeric) returns boolean
 language sql
 immutable
 set search_path = ''
 as $$
   select jsonb_typeof(o) = 'object' and not exists (
-    select 1 from jsonb_each(o) e where e.key <> all (allowed) or jsonb_typeof(e.value) <> 'number');
+    select 1 from jsonb_each(o) e
+    where e.key <> all (allowed)
+       or jsonb_typeof(e.value) <> 'number'
+       or (e.value #>> '{}')::numeric not between lo and hi
+       or (e.key = any (whole_keys) and (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)));
 $$;
 
--- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields).
+-- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields). Counts are whole numbers
+-- up to 10 million; dates are epoch milliseconds up to the year 2100; a lead source is a uuid. So it can't carry text, even as digits.
 create function private.import_details_ok(d jsonb) returns boolean
 language plpgsql
 immutable
@@ -474,7 +497,7 @@ begin
   end if;
   for k, v in select e.key, e.value from jsonb_each(d) e loop
     if k in ('headerRow', 'lines', 'rows', 'leftOut') then
-      if jsonb_typeof(v) <> 'number' then return false; end if;
+      if not private.import_numbers_ok(jsonb_build_object(k, v), array[k], array[k], 0, 10000000) then return false; end if;
     elsif k = 'delimiter' then
       if jsonb_typeof(v) <> 'string' or (v #>> '{}') not in (',', ';', E'\t', '|') then return false; end if;
     elsif k = 'encoding' then
@@ -482,23 +505,33 @@ begin
     elsif k = 'dateOrder' then
       if jsonb_typeof(v) <> 'null' and (jsonb_typeof(v) <> 'string' or (v #>> '{}') not in ('dmy', 'mdy')) then return false; end if;
     elsif k = 'nameMatches' then
-      if not private.import_numbers_ok(v, array['matched', 'leftOut']) then return false; end if;
+      if not private.import_numbers_ok(v, array['matched', 'leftOut'], array['matched', 'leftOut'], 0, 10000000) then return false; end if;
     elsif k = 'window' then
-      if jsonb_typeof(v) <> 'null' and not private.import_numbers_ok(v, array['from', 'to']) then return false; end if;
+      if jsonb_typeof(v) <> 'null' and not private.import_numbers_ok(v, array['from', 'to'], array['from', 'to'], 0, 4200000000000) then return false; end if;
     elsif k = 'summary' then
       if jsonb_typeof(v) = 'null' then continue; end if;
       if jsonb_typeof(v) <> 'object' then return false; end if;
       s := v - 'sources' - 'blocked' - 'paidLate' - 'kind';
-      if not private.import_numbers_ok(s, array['weeks', 'leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount']) then return false; end if;
+      if not private.import_numbers_ok(
+        s,
+        array['weeks', 'leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount'],
+        array['leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount'],
+        0,
+        10000000) then
+        return false;
+      end if;
       if coalesce(v ->> 'kind', '') not in ('leads', 'invoices') then return false; end if;
       if v ? 'blocked' and jsonb_typeof(v -> 'blocked') <> 'boolean' then return false; end if;
-      if v ? 'paidLate' and jsonb_typeof(v -> 'paidLate') not in ('number', 'null') then return false; end if;
+      if v ? 'paidLate' and not (jsonb_typeof(v -> 'paidLate') = 'null' or private.import_numbers_ok(jsonb_build_object('paidLate', v -> 'paidLate'), array['paidLate'], array[]::text[], 0, 1)) then
+        return false;
+      end if;
       if v ? 'sources' then
         if jsonb_typeof(v -> 'sources') <> 'array' or jsonb_array_length(v -> 'sources') > 500 then return false; end if;
         for src in select x from jsonb_array_elements(v -> 'sources') x loop
-          if not private.import_numbers_ok(src - 'leadSourceId', array['leads', 'perWeek', 'current'])
+          if jsonb_typeof(src) <> 'object'
              or jsonb_typeof(src -> 'leadSourceId') <> 'string'
-             or (src ->> 'leadSourceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+             or (src ->> 'leadSourceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+             or not private.import_numbers_ok(src - 'leadSourceId', array['leads', 'perWeek', 'current'], array['leads'], 0, 10000000) then
             return false;
           end if;
         end loop;
@@ -511,20 +544,23 @@ begin
 end;
 $$;
 
-revoke all on function private.import_numbers_ok(jsonb, text[]) from public, anon;
-grant execute on function private.import_numbers_ok(jsonb, text[]) to authenticated;
+revoke all on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) from public, anon;
+grant execute on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) to authenticated;
 revoke all on function private.import_details_ok(jsonb) from public, anon;
 grant execute on function private.import_details_ok(jsonb) to authenticated;
 
 alter table public.datasets add constraint datasets_details_known check (private.import_details_ok(details));
 
--- A column map holds short labels (a header name, or a position such as `Column 4`), never a long value from a file.
+-- A column map holds short labels (a header name, or a position such as `Column 4`) under the kinds' column ids (lower-case letters,
+-- at most 20), never a long value from a file.
 create function private.column_map_ok(m jsonb) returns boolean
 language sql
 immutable
 set search_path = ''
 as $$
-  select not exists (select 1 from jsonb_each(m) e where jsonb_typeof(e.value) <> 'string' or char_length(e.value #>> '{}') > 60);
+  select jsonb_typeof(m) = 'object' and not exists (
+    select 1 from jsonb_each(m) e
+    where e.key !~ '^[a-z]{1,20}$' or jsonb_typeof(e.value) <> 'string' or char_length(e.value #>> '{}') > 60);
 $$;
 
 revoke all on function private.column_map_ok(jsonb) from public, anon;

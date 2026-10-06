@@ -99,6 +99,12 @@ describe("storedImportDetails", () => {
     expect(out?.summary).toEqual({ kind: "leads", weeks: 0, leads: 4, unmatched: 0, blocked: false, sources: [{ leadSourceId: source, leads: 1_000_000, perWeek: 0, current: 7 }] });
   });
 
+  it("keeps a window to plausible epoch milliseconds", () => {
+    expect(storedImportDetails({ ...DETAILS, window: { from: -5, to: 2 } })?.window).toBeNull();
+    expect(storedImportDetails({ ...DETAILS, window: { from: 1, to: 9e15 } })?.window).toBeNull();
+    expect(storedImportDetails({ ...DETAILS, window: { from: 1.6, to: 2.2 } })?.window).toEqual({ from: 2, to: 2 });
+  });
+
   it("keeps an invoices summary as counts, and drops an unknown one", () => {
     const out = storedImportDetails({ ...DETAILS, summary: { kind: "invoices", invoices: 4, clients: 3, withDue: 4, paidLate: 1.5, unpaidPastDue: 1, withAmount: 3, total: 9999, topClient: "ACME-SECRET-CLIENT" } });
     expect(out?.summary).toEqual({ kind: "invoices", invoices: 4, clients: 3, withDue: 4, paidLate: 1, unpaidPastDue: 1, withAmount: 3 });

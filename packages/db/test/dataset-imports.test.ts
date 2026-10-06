@@ -171,6 +171,15 @@ describe("datasets.details", () => {
       "an unknown summary": { ...DETAILS, summary: { kind: "payroll", leads: 1 } },
       "a name in a summary": { ...DETAILS, summary: { kind: "invoices", invoices: 1, topClient: "ACME" } },
       "a name for a lead source": { ...DETAILS, summary: { kind: "leads", weeks: 1, leads: 1, sources: [{ leadSourceId: "Website enquiries", leads: 1 }] } },
+      "a huge count": { ...DETAILS, rows: 1e12 },
+      "a negative count": { ...DETAILS, rows: -1 },
+      "a fraction as a count": { ...DETAILS, lines: 1.5 },
+      "text encoded as digits": { ...DETAILS, leftOut: 1e300 },
+      "a negative date": { ...DETAILS, window: { from: -5, to: 2 } },
+      "a date in the far future": { ...DETAILS, window: { from: 1, to: 9e15 } },
+      "a scalar source": { ...DETAILS, summary: { kind: "leads", weeks: 1, leads: 1, sources: [5] } },
+      "a huge lead count": { ...DETAILS, summary: { kind: "leads", weeks: 1, leads: 1e9, sources: [] } },
+      "paidLate over 1": { ...DETAILS, summary: { kind: "invoices", invoices: 1, paidLate: 5 } },
       "a name beside a lead source": { ...DETAILS, summary: { kind: "leads", weeks: 1, leads: 1, sources: [{ leadSourceId: SRC, leads: 1, name: "Website" }] } },
     };
     for (const [what, details] of Object.entries(bad)) {
@@ -190,6 +199,13 @@ describe("datasets.column_map", () => {
       commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', $2, 1, '{}')", [ws, { client: 5 }])),
     ).rejects.toMatchObject({ code: "23514" });
     expect(await count()).toBe(start);
+    // Only the kinds' column ids are keys: text can't be smuggled in as a key.
+    for (const key of ["a key that is really a long sentence of text", "Client", "x1", "x".repeat(21)]) {
+      await expect(
+        commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', $2, 1, '{}')", [ws, { [key]: "Column 1" }])),
+        key,
+      ).rejects.toMatchObject({ code: "23514" });
+    }
     await commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', $2, 1, '{}')", [ws, { client: "Column 1", issued: "x".repeat(60) }]));
     expect(await count()).toBe(start + 1);
   });
