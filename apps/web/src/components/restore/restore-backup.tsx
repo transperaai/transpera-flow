@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { MAX_BACKUP_BYTES, MAX_COMPRESSED_BYTES, checkWorkspaceBundle, type BundleCheck, type SummaryLine } from "@transpera-flow/db/workspace-import";
 import { Button } from "@/components/ui/button";
+import { LOST_CONNECTION_MESSAGE } from "@/lib/restore/errors";
 import { noticeCookieValue, restoredMessage, RESTORE_NOTICE_COOKIE } from "@/lib/restore/notice";
 
 const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -69,31 +70,42 @@ export function RestoreBackup({ slug, canManage = true, post }: { slug: string; 
 
   async function restore(fileName: string, text: string, check: BundleCheck) {
     setStep({ kind: "restoring", fileName });
+    let body: Blob;
     try {
-      const body = await gzip(text);
-      if (body.size > MAX_COMPRESSED_BYTES) {
-        setStep({ kind: "failed", fileName, text, check, message: "This backup is too big to restore in one go." });
-        return;
-      }
+      body = await gzip(text);
+    } catch {
+      setStep({ kind: "failed", fileName, text, check, message: "The restore failed. Nothing was restored. Try again." });
+      return;
+    }
+    if (body.size > MAX_COMPRESSED_BYTES) {
+      setStep({ kind: "failed", fileName, text, check, message: "This backup is too big to restore in one go." });
+      return;
+    }
+    // From here the request is on its way: a restore can run for up to 40 s, and the database may commit after the connection drops, so
+    // when no answer comes back from the route (a thrown fetch, or a gateway's own page such as an HTML 504) the page can't say "Nothing was restored".
+    const lost = () => setStep({ kind: "failed", fileName, text, check, message: LOST_CONNECTION_MESSAGE });
+    try {
       const res = await (post ?? fetch)(`/w/${slug}/restore/bundle`, {
         method: "POST",
         headers: { "Content-Type": "application/gzip", "X-Backup-Name": encodeURIComponent(fileName) },
         body,
       });
-      const answer = (await res.json().catch(() => ({}))) as { message?: string; processes?: unknown[]; settings?: string };
+      const answer = (await res.json().catch(() => null)) as { message?: unknown; processes?: unknown[]; settings?: string } | null;
       if (!res.ok) {
-        setStep({ kind: "failed", fileName, text, check, message: answer.message ?? "The restore failed. Nothing was restored. Try again." });
+        // The route's own answers carry a message; anything else came from somewhere between.
+        if (typeof answer?.message === "string" && answer.message) setStep({ kind: "failed", fileName, text, check, message: answer.message });
+        else lost();
         return;
       }
       try {
-        document.cookie = `${RESTORE_NOTICE_COOKIE}=${noticeCookieValue(restoredMessage((answer.processes ?? []).length, answer.settings ?? "none"))}; path=/; max-age=60; samesite=lax`;
+        document.cookie = `${RESTORE_NOTICE_COOKIE}=${noticeCookieValue(restoredMessage((answer?.processes ?? []).length, answer?.settings ?? "none"))}; path=/; max-age=60; samesite=lax`;
       } catch {
         // The notice is only a courtesy.
       }
       router.push(`/w/${slug}`);
       router.refresh();
     } catch {
-      setStep({ kind: "failed", fileName, text, check, message: "The restore failed. Nothing was restored. Try again." });
+      lost();
     }
   }
 
@@ -189,6 +201,11 @@ export function RestoreBackup({ slug, canManage = true, post }: { slug: string; 
           >
             {busy ? "Restoring…" : "Restore"}
           </Button>
+          {busy && (
+            <p data-restore-wait role="status" className="mt-2 text-sm text-fg-2">
+              A big backup can take up to a minute. Keep this page open.
+            </p>
+          )}
         </div>
       )}
     </div>

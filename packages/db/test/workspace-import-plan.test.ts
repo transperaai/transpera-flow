@@ -287,6 +287,11 @@ describe("checkWorkspaceBundle: limits", () => {
     { name: "personSkills", max: L.personSkills, add: (b, n) => b.company_model.person_skills!.push(...filler(n - 1, () => ({ person_id: b.company_model.people![0]!.id, step_id: b.company_model.person_skills![0]!.step_id }))), message: `The backup has ${n(L.personSkills + 1)} skills; a restore takes at most ${n(L.personSkills)}.` },
     { name: "clientAssignments", max: L.clientAssignments, add: (b, n) => b.company_model.client_assignments!.push(...filler(n, () => ({ client_id: b.company_model.clients![0]!.id, role_id: b.company_model.roles![0]!.id, person_id: b.company_model.people![0]!.id }))), message: `The backup has ${n(L.clientAssignments + 1)} client assignments; a restore takes at most ${n(L.clientAssignments)}.` },
     { name: "sourceLinks", max: L.sourceLinks, add: (b, n) => b.source_links.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, source_id: b.sources[0]!.id, kind: "process", process_id: b.processes[1]!.id }))), message: `The backup has ${n(L.sourceLinks + 1)} source links; a restore takes at most ${n(L.sourceLinks)}.` },
+    // The sections B21 (#203) gave a cap. The fixture restores no client services and no leave, and 5 rows of the eight small company tables
+    // (1 service, 1 servicing rule, 1 custom market condition, 2 schedule rows).
+    { name: "clientServices", max: L.clientServices, add: (b, n) => b.company_model.client_services!.push(...filler(n, () => ({ client_id: b.company_model.clients![0]!.id, service_id: b.company_model.services![0]!.id }))), message: `The backup has ${n(L.clientServices + 1)} client services; a restore takes at most ${n(L.clientServices)}.` },
+    { name: "personLeave", max: L.personLeave, add: (b, n) => b.company_model.person_leave!.push(...filler(n, () => ({ id: id(), person_id: b.company_model.people![0]!.id, start_date: "2026-01-01", end_date: "2026-01-02" }))), message: `The backup has ${n(L.personLeave + 1)} leave entries; a restore takes at most ${n(L.personLeave)}.` },
+    { name: "companyOther", max: L.companyOther, add: (b, n) => b.company_model.lead_sources!.push(...filler(n - 5, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.companyOther + 1)} other company settings rows; a restore takes at most ${n(L.companyOther)}.` },
     {
       name: "processes",
       max: L.processes,
@@ -355,9 +360,11 @@ describe("an export of a workspace bigger than a restore takes", () => {
     const big = clone(fits);
     for (let i = 0; i < L.processes; i++) big.processes.push({ id: id(), name: "p", is_company: false, workspace_id: big.workspace.id, parent_process_id: null, versions: [{ id: id(), live: true, draft: false, steps: [], edges: [], workspace_id: big.workspace.id }] } as Row);
     big.company_model.person_roles!.push(...Array.from({ length: L.personRoles }, () => ({ person_id: big.company_model.people![0]!.id, role_id: big.company_model.roles![0]!.id })));
+    big.company_model.client_services!.push(...Array.from({ length: L.clientServices + 1 }, () => ({ client_id: big.company_model.clients![0]!.id, service_id: big.company_model.services![0]!.id })));
     const warning = restoreSizeWarning(recount(big))!;
     expect(warning).toContain(`This workspace is bigger than a backup can restore in one go (${L.processes + 3} processes; the limit is ${L.processes}`);
     expect(warning).toContain(`${(L.personRoles + 1).toLocaleString("en-US")} role assignments; the limit is ${L.personRoles.toLocaleString("en-US")}`);
+    expect(warning).toContain(`${(L.clientServices + 1).toLocaleString("en-US")} client services; the limit is ${L.clientServices.toLocaleString("en-US")}`);
     expect(warning).toContain("Keep the file; restoring a workspace this size isn't supported yet.");
   });
 
@@ -439,10 +446,10 @@ describe("checkWorkspaceBundle: deep nesting and oversized lists", () => {
     // Not even a shape check: rows of the wrong kind in an oversized list are not read.
     const sloppy = clone(makeBundle().bundle);
     sloppy.sources = Array.from({ length: L.sources * 2 + 1 }, () => 5) as unknown as Row[];
-    expect(checkWorkspaceBundle(sloppy).errors).toEqual([`The backup has ${L.sources * 2 + 1} sources; a restore takes at most ${L.sources}.`]);
+    expect(checkWorkspaceBundle(sloppy).errors).toEqual([`The backup has ${(L.sources * 2 + 1).toLocaleString("en-US")} sources; a restore takes at most ${L.sources.toLocaleString("en-US")}.`]);
     const people = clone(makeBundle().bundle);
     people.company_model.people = Array.from({ length: L.people * 2 + 1 }, () => 5) as unknown as Row[];
-    expect(checkWorkspaceBundle(people).errors).toEqual([`The backup has ${(L.people * 2 + 1).toLocaleString("en-US")} people; a restore takes at most ${L.people}.`]);
+    expect(checkWorkspaceBundle(people).errors).toEqual([`The backup has ${(L.people * 2 + 1).toLocaleString("en-US")} people; a restore takes at most ${L.people.toLocaleString("en-US")}.`]);
   });
 });
 

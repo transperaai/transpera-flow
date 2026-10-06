@@ -1,5 +1,5 @@
 import { MAX_BACKUP_BYTES, MAX_COMPRESSED_BYTES, checkWorkspaceBundle, planWorkspaceImport, type WorkspaceBundle } from "@transpera-flow/db";
-import { restoreFailure, ROLE_MESSAGE } from "@/lib/restore/errors";
+import { restoreFailure, ROLE_MESSAGE, SLOW_START_MESSAGE } from "@/lib/restore/errors";
 import { supabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -12,8 +12,17 @@ import { createClient } from "@/lib/supabase/server";
 // the body, unzip, JSON, `checkWorkspaceBundle` (400 with its errors), `can_manage_workspace`, the plan, the database call.
 // Everything is read and written as the signed-in user, so row-level security and the database's own rules decide. Nothing is
 // cached, and no SQL reaches the answer.
+//
+// Time (B21, #203): the one database call may run for up to 40 s (the function sets its own `statement_timeout`; every other request
+// by the signed-in user keeps Supabase's 8 s). The route's 60 s covers reading, unzipping, checking and planning a 25 MB backup (a few
+// seconds) plus that call, but only if the call starts early: once 15 s have gone since the request arrived the route doesn't start it
+// (503, `SLOW_START_MESSAGE`), so Vercel never cuts the request off while the database goes on to commit. The page says what to do
+// when it loses the connection anyway.
 
 export const maxDuration = 60;
+
+/** The database call isn't started once this long (ms) has passed since the request arrived: 15 s + the call's 40 s stays inside `maxDuration`. */
+const START_BUDGET_MS = 15_000;
 
 const noStore = { "Cache-Control": "private, no-store" };
 const reply = (body: unknown, status: number) => Response.json(body, { status, headers: noStore });
@@ -58,6 +67,7 @@ function backupName(header: string | null): string | null {
 }
 
 export async function POST(request: Request, ctx: RouteContext<"/w/[slug]/restore/bundle">): Promise<Response> {
+  const started = Date.now();
   if (!supabaseEnv()) return reply({ message: "Restoring needs a connected workspace; the demo has none." }, 503);
   const { slug } = await ctx.params;
   const supabase = await createClient();
@@ -98,9 +108,10 @@ export async function POST(request: Request, ctx: RouteContext<"/w/[slug]/restor
   if (!check.ok) return reply({ message: check.errors[0] ?? "This backup can't be restored.", errors: check.errors }, 400);
 
   const { plan, summary } = planWorkspaceImport(parsed as WorkspaceBundle, { canManage: canManage === true });
-  const { data, error: failed } = await supabase.rpc("import_workspace_bundle", { p_workspace: workspace.id, p_plan: plan as never, p_label: backupName(request.headers.get("x-backup-name")) ?? undefined });
+  if (Date.now() - started > START_BUDGET_MS) return reply({ message: SLOW_START_MESSAGE }, 503);
+  const { data, error: failed, status } = await supabase.rpc("import_workspace_bundle", { p_workspace: workspace.id, p_plan: plan as never, p_label: backupName(request.headers.get("x-backup-name")) ?? undefined });
   if (failed) {
-    const f = restoreFailure(failed);
+    const f = restoreFailure(failed, status);
     return reply({ message: f.message }, f.status);
   }
   const done = data as { processes?: { id: string; name: string }[]; counts?: Record<string, number>; settings?: string } | null;
