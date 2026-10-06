@@ -43,7 +43,7 @@ const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.sli
 describe("share links: row 64 of the production ledger", () => {
   it("it is on disk once, and nothing on disk is between it and the 20261219000000 it is applied after", () => {
     // Rows 61 (B21), 62 (C1) and 63 (B7, 20261219000000) are other tickets': this one is applied after them. Row 64 is applied, so
-    // later migrations (row 66, 20261222000000) may follow it.
+    // later migrations (row 65, 20261220500000) may follow it.
     expect(versions.filter((v) => v === VERSION)).toEqual([VERSION]);
     expect(versions.filter((v) => v > "20261219000000" && v < VERSION)).toEqual([]);
   });

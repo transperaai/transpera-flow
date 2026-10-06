@@ -5,12 +5,12 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 import { headerRollback } from "./header-rollback";
 
 // Deleting a workspace takes everything in it (bug found while scoping B21: every workspace delete failed on
-// `steps_role_id_workspace_id_fkey`). Migration 20261222000000_workspace_delete_cascade.
+// `steps_role_id_workspace_id_fkey`). Migration 20261220500000_workspace_delete_cascade.
 
 let db: TestDb;
 const ws = NORTHBEAM_WORKSPACE_ID;
 const sam = northbeamPersonIds["Sam Patel"]!;
-const MIGRATION = "20261222000000_workspace_delete_cascade.sql";
+const MIGRATION = "20261220500000_workspace_delete_cascade.sql";
 
 beforeAll(async () => {
   db = await createTestDb();
@@ -158,7 +158,7 @@ describe("the header", () => {
     const sql = headerRollback(MIGRATION)
       .replace(/^begin;$/m, "")
       .replace(/^commit;$/m, "")
-      .replace("delete from supabase_migrations.schema_migrations where version = '20261222000000';", "");
+      .replace("delete from supabase_migrations.schema_migrations where version = '20261220500000';", "");
     await rolledBack(async (c) => {
       await c.query(sql);
       const flags = (

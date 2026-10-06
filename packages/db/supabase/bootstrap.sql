@@ -38695,7 +38695,7 @@ revoke execute on function public.open_share_link(text) from public;
 grant execute on function public.open_share_link(text) to anon, authenticated;
 ']);
 
--- 20261222000000_workspace_delete_cascade.sql
+-- 20261220500000_workspace_delete_cascade.sql
 -- Deleting a workspace works again (bug found while scoping B21; see docs/HANDOVER.md).
 --
 -- WHAT FAILED: every `delete from public.workspaces`, even as a superuser, failed with
@@ -38740,12 +38740,12 @@ grant execute on function public.open_share_link(text) to anon, authenticated;
 -- it fail rather than queue every step write behind it). Postgres 15+ is not needed: ALTER CONSTRAINT ... DEFERRABLE dates from
 -- 9.4.
 --
--- ORDER: after 20261220000000 (row 64, B3). B4 holds 20261221000000 (row 65); this one is independent of it and of every other
+-- ORDER: after 20261220000000 (row 64, B3). this is row 65, before B4 (20261221000000, now row 66); this one is independent of it and of every other
 -- migration since rows 1 and 2 made the two constraints, so it can apply before or after B4. The app needs nothing; apply whenever.
 --
 -- PREFLIGHT (read-only; run each with `bash packages/db/scripts/prod-sql.sh -c "..."`):
 --   0. This version isn't applied, and row 64 is. Expect 0, then 1:
---        select count(*) from supabase_migrations.schema_migrations where version = '20261222000000';
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261220500000';
 --        select count(*) from supabase_migrations.schema_migrations where version = '20261220000000';
 --   1. The two constraints are still as rows 1 (init, role) and 2 (people, person) made them: NO ACTION ('a'), not deferrable, validated, on these columns.
 --      Expect exactly two rows, both `a | f | f | t`, with these definitions (the referenced table may print as `public.people`):
@@ -38778,7 +38778,7 @@ grant execute on function public.open_share_link(text) to anon, authenticated;
 --   4. The `in_use` guard still holds, rolled back. Expect an error "Role ... is still used by steps, people or clients":
 --        begin; delete from public.roles where id = (select role_id from public.steps where role_id is not null limit 1); rollback;
 --   5. The row. Expect 1:
---        select count(*) from supabase_migrations.schema_migrations where version = '20261222000000';
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261220500000';
 --
 -- ROLLBACK (one transaction; puts both constraints back to NOT DEFERRABLE INITIALLY IMMEDIATE, as rows 1 and 2 made them, which brings
 -- the bug back):
@@ -38786,7 +38786,7 @@ grant execute on function public.open_share_link(text) to anon, authenticated;
 --   begin;
 --   alter table public.steps alter constraint steps_role_id_workspace_id_fkey not deferrable;
 --   alter table public.steps alter constraint steps_person_id_workspace_id_fkey not deferrable;
---   delete from supabase_migrations.schema_migrations where version = '20261222000000';
+--   delete from supabase_migrations.schema_migrations where version = '20261220500000';
 --   commit;
 --
 -- Production data: none needed.
@@ -38794,7 +38794,7 @@ grant execute on function public.open_share_link(text) to anon, authenticated;
 alter table public.steps alter constraint steps_role_id_workspace_id_fkey deferrable initially deferred;
 alter table public.steps alter constraint steps_person_id_workspace_id_fkey deferrable initially deferred;
 
-insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261222000000', 'workspace_delete_cascade', array['-- Deleting a workspace works again (bug found while scoping B21; see docs/HANDOVER.md).
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261220500000', 'workspace_delete_cascade', array['-- Deleting a workspace works again (bug found while scoping B21; see docs/HANDOVER.md).
 --
 -- WHAT FAILED: every `delete from public.workspaces`, even as a superuser, failed with
 --   update or delete on table "roles" violates foreign key constraint "steps_role_id_workspace_id_fkey" on table "steps"
@@ -38838,12 +38838,12 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- it fail rather than queue every step write behind it). Postgres 15+ is not needed: ALTER CONSTRAINT ... DEFERRABLE dates from
 -- 9.4.
 --
--- ORDER: after 20261220000000 (row 64, B3). B4 holds 20261221000000 (row 65); this one is independent of it and of every other
+-- ORDER: after 20261220000000 (row 64, B3). this is row 65, before B4 (20261221000000, now row 66); this one is independent of it and of every other
 -- migration since rows 1 and 2 made the two constraints, so it can apply before or after B4. The app needs nothing; apply whenever.
 --
 -- PREFLIGHT (read-only; run each with `bash packages/db/scripts/prod-sql.sh -c "..."`):
 --   0. This version isn''t applied, and row 64 is. Expect 0, then 1:
---        select count(*) from supabase_migrations.schema_migrations where version = ''20261222000000'';
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261220500000'';
 --        select count(*) from supabase_migrations.schema_migrations where version = ''20261220000000'';
 --   1. The two constraints are still as rows 1 (init, role) and 2 (people, person) made them: NO ACTION (''a''), not deferrable, validated, on these columns.
 --      Expect exactly two rows, both `a | f | f | t`, with these definitions (the referenced table may print as `public.people`):
@@ -38876,7 +38876,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   4. The `in_use` guard still holds, rolled back. Expect an error "Role ... is still used by steps, people or clients":
 --        begin; delete from public.roles where id = (select role_id from public.steps where role_id is not null limit 1); rollback;
 --   5. The row. Expect 1:
---        select count(*) from supabase_migrations.schema_migrations where version = ''20261222000000'';
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261220500000'';
 --
 -- ROLLBACK (one transaction; puts both constraints back to NOT DEFERRABLE INITIALLY IMMEDIATE, as rows 1 and 2 made them, which brings
 -- the bug back):
@@ -38884,7 +38884,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   begin;
 --   alter table public.steps alter constraint steps_role_id_workspace_id_fkey not deferrable;
 --   alter table public.steps alter constraint steps_person_id_workspace_id_fkey not deferrable;
---   delete from supabase_migrations.schema_migrations where version = ''20261222000000'';
+--   delete from supabase_migrations.schema_migrations where version = ''20261220500000'';
 --   commit;
 --
 -- Production data: none needed.
