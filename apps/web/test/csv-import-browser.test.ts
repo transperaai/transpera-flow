@@ -101,6 +101,29 @@ describe("the import wizard", () => {
     await page.close();
   }, 120_000);
 
+  it("is usable by keyboard and screen reader: one tab stop for the file, errors linked to their field, column headers scoped", async () => {
+    const { page, errors } = await mount();
+    // The visually hidden file input is not a second tab stop beside the button.
+    expect(await page.locator("#cal-log-file").getAttribute("tabindex")).toBe("-1");
+    await choose(page, "cal-log", "Deals from your CRM", csv(hubspotDeals()));
+    // A column's error is linked to its select.
+    await column(page, "cal-log", "stage").locator("select").selectOption({ value: "" });
+    const select = column(page, "cal-log", "stage").locator("select");
+    const described = await select.getAttribute("aria-describedby");
+    expect(described).toBeTruthy();
+    expect(await page.locator(`#${described}`).innerText()).toBe("Choose a column for Stage.");
+    await select.selectOption({ label: "Deal Stage" });
+    expect(await select.getAttribute("aria-describedby")).toBeNull();
+    await readIt(page, "cal-log");
+    // The preview's headers are column headers.
+    const heads = step(page, "cal-log", "rows").locator("[data-import-preview] thead th");
+    expect(await heads.count()).toBeGreaterThan(3);
+    for (const scope of await heads.evaluateAll((els) => els.map((e) => e.getAttribute("scope")))) expect(scope).toBe("col");
+    // The progress count is hidden from a screen reader's live region (it is said once).
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+
   it("blocks Continue when a required column has no header, or one header is chosen twice", async () => {
     const { page, errors } = await mount();
     await choose(page, "cal-log", "Deals from your CRM", csv(hubspotDeals()));

@@ -242,6 +242,8 @@ export function ImportWizard(props: ImportWizardProps) {
             type="file"
             accept=".csv,.tsv,.txt,text/csv,text/plain"
             className="sr-only"
+            // The "Choose a CSV file" button opens it: one tab stop, not two.
+            tabIndex={-1}
             aria-label={`${spec.label} CSV file`}
             onChange={(e) => {
               loadFile(e.target.files?.[0]);
@@ -363,7 +365,7 @@ export function ImportWizard(props: ImportWizardProps) {
                     {how && <span className="inline-block rounded-token border border-line bg-panel-2 px-1.5 text-[11px] leading-4 text-fg-2">{BADGES[how]}</span>}
                   </span>
                   <span className="flex flex-col gap-1">
-                    <ColumnSelect id={fieldId} value={index === null ? "" : String(index)} onChange={(e) => setColumn(c.id, e.target.value)} aria-invalid={problems[c.id] !== undefined}>
+                    <ColumnSelect id={fieldId} value={index === null ? "" : String(index)} onChange={(e) => setColumn(c.id, e.target.value)} aria-invalid={problems[c.id] !== undefined} aria-describedby={problems[c.id] ? `${fieldId}-error` : undefined}>
                       <option value="">{c.required ? "Choose a column" : "Not in this file"}</option>
                       {loaded.headers.map((h, i) => (
                         <option key={i} value={i}>
@@ -371,7 +373,11 @@ export function ImportWizard(props: ImportWizardProps) {
                         </option>
                       ))}
                     </ColumnSelect>
-                    {problems[c.id] && <span className="text-xs text-destructive">{problems[c.id]}</span>}
+                    {problems[c.id] && (
+                      <span id={`${fieldId}-error`} className="text-xs text-destructive">
+                        {problems[c.id]}
+                      </span>
+                    )}
                   </span>
                   <span className="min-w-0 text-xs break-words text-muted-foreground">{sampleLine(c, loaded.samples, index, canSeeAmounts)}</span>
                 </li>
@@ -403,7 +409,11 @@ export function ImportWizard(props: ImportWizardProps) {
           <div className="flex flex-wrap items-center gap-2">
             {reading ? (
               <>
-                <span role="status" className="text-sm text-muted-foreground">
+                {/* Said once to a screen reader; the count changes every few thousand rows and is not announced. */}
+                <span role="status" className="sr-only">
+                  Reading the file…
+                </span>
+                <span aria-hidden="true" className="text-sm text-muted-foreground">
                   Reading… {formatNumber(state.done, 0)} of {formatNumber(state.total || loaded.lines, 0)} rows
                 </span>
                 <Button type="button" variant="outline" size="sm" onClick={hook.stop}>
@@ -558,7 +568,7 @@ function RowsStep(props: {
               <thead>
                 <tr className="border-y border-line text-left text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
                   {table.columns.map((c) => (
-                    <th key={c.id} className="px-3 py-1.5">
+                    <th key={c.id} scope="col" className="px-3 py-1.5">
                       {c.label}
                     </th>
                   ))}

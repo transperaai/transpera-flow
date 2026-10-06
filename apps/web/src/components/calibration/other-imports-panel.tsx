@@ -166,10 +166,10 @@ function LeadsCheck({ summary }: { summary: LeadsSummary }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
-                <th className="px-3 py-1.5">Lead source</th>
-                <th className="px-3 py-1.5">Leads a week in the file</th>
-                <th className="px-3 py-1.5">In Settings now</th>
-                <th className="px-3 py-1.5 text-right">Leads</th>
+                <th scope="col" className="px-3 py-1.5">Lead source</th>
+                <th scope="col" className="px-3 py-1.5">Leads a week in the file</th>
+                <th scope="col" className="px-3 py-1.5">In Settings now</th>
+                <th scope="col" className="px-3 py-1.5 text-right">Leads</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
