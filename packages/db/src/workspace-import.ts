@@ -12,6 +12,7 @@
 
 import { ENGINE_VERSION } from "@transpera-flow/engine";
 import type { Database } from "./database.types";
+import { payFreeIssueFields } from "./issue-pay";
 import type { WorkspaceSettings } from "./types";
 import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./workspace-bundle";
 
@@ -676,7 +677,9 @@ export function planWorkspaceImport(
     if (links.length < rowsOf(i.links).length) note("issues", "cleared");
     const owners = (Array.isArray(i.owner_ids) ? i.owner_ids : []).filter((x) => sets.people!.has(lc(x)));
     const srcs = (Array.isArray(i.source_ids) ? i.source_ids : []).filter((x) => sets.sources!.has(lc(x)));
-    return { ...pick(i, IMPORT_COLUMNS.issues), links, owner_ids: owners, source_ids: srcs };
+    // A backup may hold the old overtime sentence and money: restored issues carry no pay (B1 2b).
+    const row = { ...pick(i, IMPORT_COLUMNS.issues), links, owner_ids: owners, source_ids: srcs };
+    return payFreeIssueFields(row);
   });
   const issueEvents = bundle.issues.reduce((n, i) => n + rowsOf(i.events).length, 0);
 

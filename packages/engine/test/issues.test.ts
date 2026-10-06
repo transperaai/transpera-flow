@@ -5,6 +5,7 @@ import {
   applyPatches,
   detectIssues,
   isBlocking,
+  larkspurModel,
   northbeamModel,
   northbeamWithServicing,
   RATINGS,
@@ -473,4 +474,25 @@ describe("StepResult.p90", () => {
     });
     expect(r.steps.a!.p90!.avgWait).toBeGreaterThan(0);
   });
+});
+
+describe("saved issues hold no pay (B1 2b)", () => {
+  // An issue's evidence and metrics are saved, and every member reads them. Overtime hours and overtime money in one
+  // sentence would give a rate away, so the evidence states hours only and the money stays in `cost`, which is never saved.
+  const MONEY = /costing|£|\$|€|A\$/;
+  for (const [name, model, hasOvertime] of [["Larkspur", larkspurModel, true], ["the seeded Northbeam", northbeamWithServicing, false]] as const) {
+    it(`${name}: evidence is the same with pay hidden, states no money, and no issue has an overtime_cost metric`, () => {
+      const m = model();
+      const shown = detectIssues(m, simulate(m, 12, 1));
+      const hidden = detectIssues({ ...m, payHidden: true }, simulate({ ...m, payHidden: true }, 12, 1));
+      // Larkspur's copywriter works overtime; the seeded Northbeam has none to report.
+      expect(shown.some((i) => i.key.startsWith("overtime:"))).toBe(hasOvertime);
+      const evidence = (list: DetectedIssue[]) => Object.fromEntries(list.map((i) => [i.key, i.evidence]));
+      expect(evidence(hidden)).toEqual(evidence(shown));
+      for (const i of [...shown, ...hidden]) {
+        expect(i.evidence, i.key).not.toMatch(MONEY);
+        expect(i.metrics, i.key).not.toHaveProperty("overtime_cost");
+      }
+    });
+  }
 });

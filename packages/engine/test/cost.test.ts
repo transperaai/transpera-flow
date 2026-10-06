@@ -232,7 +232,14 @@ describe("the cost of each insight", () => {
     const ot = detectIssues(m, r, NO_ESC).filter((i) => i.key.startsWith("overtime:"));
     expect(ot.length).toBeGreaterThan(0);
     for (const i of ot) {
-      expect(i.cost.perMonth).toBeCloseTo(i.metrics.overtime_cost! * (WEEKS_PER_MONTH / m.horizonWeeks), 6);
+      // The rate: the person's own, else their roles' average; a role subject takes the role's.
+      const person = i.personId ? m.people![i.personId]! : null;
+      const own = person ? person.roles.filter((rid) => rid in m.roles) : [];
+      const rate = person
+        ? (person.cost ?? (own.length ? own.reduce((s, rid) => s + m.roles[rid]!.cost, 0) / own.length : 0))
+        : m.roles[i.roleId!]!.cost;
+      expect(i.cost.perMonth).toBeCloseTo(i.metrics.overtime_hours_week! * rate * WEEKS_PER_MONTH, 6);
+      expect(i.metrics).not.toHaveProperty("overtime_cost");
     }
   });
 
