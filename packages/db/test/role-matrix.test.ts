@@ -141,6 +141,14 @@ const TABLES: TableCase[] = [
     delete: ["delete from runs where workspace_id = $1 and name = 'x seed'", [ws]],
     reads: "editors",
   },
+  // Forecast plans (B7) can name a person on leave: only callers who see everyone read them, and only they write.
+  {
+    table: "forecast_plans",
+    insert: (tag) => ["insert into forecast_plans (workspace_id, name, markers) values ($1, $2, '[]')", [ws, `x ${tag}`]],
+    update: ["update forecast_plans set name = name where workspace_id = $1 and name = 'x seed'", [ws]],
+    delete: ["delete from forecast_plans where workspace_id = $1 and name = 'x seed'", [ws]],
+    reads: "editors",
+  },
   {
     table: "robustness_results",
     insert: (tag) => [
