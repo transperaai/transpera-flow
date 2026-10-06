@@ -7,6 +7,7 @@ import {
   toEngineModel,
   type ProcessBundle,
 } from "../src";
+import { headerRollback } from "./header-rollback";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // What a member's browser gets from `public.team_capacity` (B1 2a): labels and NO pay (Austin, 6 Oct: every cost rate is
@@ -88,6 +89,91 @@ describe("team_capacity cost rates", () => {
   it("a member cannot read other people's rates from the tables either", async () => {
     const rows = await db.as(member.claims, async (c) => (await c.query("select id from people where workspace_id = $1", [ws])).rows as { id: string }[]);
     expect(rows.map((r) => r.id)).toEqual([P.jess]);
+  });
+});
+
+describe("team_capacity per-person times (C6)", () => {
+  interface Factor {
+    person_id: string;
+    step_id: string | null;
+    workspace_id: string;
+    factor: number;
+    source: string;
+    [k: string]: unknown;
+  }
+  type WithFactors = { person_capacity_factors: Factor[]; [k: string]: unknown };
+  const factorsAs = async (who: { claims: Record<string, unknown> }) => ((await teamAs(who)) as unknown as WithFactors).person_capacity_factors;
+  let steps: string[];
+  const key = (f: Factor) => `${f.person_id}:${f.step_id ?? "default"}:${f.factor}`;
+
+  beforeAll(async () => {
+    steps = (await db.client.query("select id from steps where workspace_id = $1 order by id limit 2", [ws])).rows.map((r) => r.id as string);
+    // Jess (the member's own person) and two others, one default and one step each.
+    for (const [person, def, step] of [[P.jess!, 0.9, 1.2], [P.callum!, 0.8, 1.5], [P.hana!, 1.1, 0.7]] as const) {
+      await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, null, $3), ($1, $2, $4, $5)", [person, ws, def, steps[0], step]);
+    }
+  });
+  afterAll(async () => {
+    await db.client.query("delete from person_capacity_factors");
+  });
+
+  it("an editor and an agency admin get all six; the member gets only Jess's two; nothing carries provenance or created_by", async () => {
+    const all = [`${P.hana}:default:1.1`, `${P.hana}:${steps[0]}:0.7`, `${P.callum}:default:0.8`, `${P.callum}:${steps[0]}:1.5`, `${P.jess}:default:0.9`, `${P.jess}:${steps[0]}:1.2`].sort();
+    for (const who of [editor, admin]) {
+      const f = await factorsAs(who);
+      expect(f.map(key).sort()).toEqual(all);
+      for (const row of f) {
+        expect(Object.keys(row).sort()).toEqual(["factor", "person_id", "source", "step_id", "workspace_id"]);
+        expect(row.source).toBe("entered");
+        expect(row.workspace_id).toBe(ws);
+        expect(typeof row.factor).toBe("number");
+      }
+    }
+    const mine = await factorsAs(member);
+    expect(mine.map(key).sort()).toEqual([`${P.jess}:default:0.9`, `${P.jess}:${steps[0]}:1.2`].sort());
+    // The default comes first for a person, then by step.
+    expect((await factorsAs(editor)).filter((r) => r.person_id === P.jess).map((r) => r.step_id)).toEqual([null, steps[0]]);
+  });
+
+  it("a member linked to nobody and a viewer linked to someone else get only their own or an empty list; no one else's number appears anywhere in the text", async () => {
+    const unlinked = await createUser(db, "cf-unlinked@tc.example");
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ws, unlinked.id]);
+    expect(await factorsAs(unlinked)).toEqual([]);
+    const viewer = await createUser(db, "cf-viewer@tc.example");
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'viewer', $3)", [ws, viewer.id, P.callum!]);
+    expect((await factorsAs(viewer)).map(key).sort()).toEqual([`${P.callum}:default:0.8`, `${P.callum}:${steps[0]}:1.5`].sort());
+    // A viewer linked to a person with no factors gets none.
+    const bare = await createUser(db, "cf-bare@tc.example");
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'viewer', $3)", [ws, bare.id, P.priti!]);
+    expect(await factorsAs(bare)).toEqual([]);
+    // Jess's text holds no one else's value.
+    const text = await db.as(member.claims, async (c) => (await c.query("select public.team_capacity($1)::text as t", [ws])).rows[0].t as string);
+    expect(text).not.toMatch(/"factor": (0\.8|1\.5|1\.1|0\.7)\b/);
+    expect(text).not.toContain(P.callum!.toString() + '", "step_id"');
+  });
+
+  it("a person's factor rows are also read through the table by their own person only (RLS), as person_skills", async () => {
+    const rows = await db.as(member.claims, async (c) => (await c.query("select person_id from person_capacity_factors")).rows.map((r) => r.person_id as string));
+    expect(new Set(rows)).toEqual(new Set([P.jess]));
+    expect(rows).toHaveLength(2);
+  });
+
+  it("everything else the function returns is what it returned before C6: the new key removed, the old body gives the same", async () => {
+    const t = (await db.as(editor.claims, async (c) => (await c.query("select public.team_capacity($1) as t", [ws])).rows[0].t)) as Record<string, unknown>;
+    expect(Object.keys(t).sort()).toEqual(["client_assignments", "own_person_id", "people", "person_capacity_factors", "person_leave", "person_roles", "person_skills", "sees_everyone"]);
+    // The old body: run as written in the migration's rollback, in a transaction that is rolled back.
+    const rollback = headerRollback("20261223000000_capacity_factors.sql");
+    const start = rollback.indexOf("create or replace function public.team_capacity");
+    const end = rollback.indexOf("$$;", start) + 3;
+    await db.client.query("begin");
+    try {
+      await db.client.query(rollback.slice(start, end));
+      const old = (await db.as(editor.claims, async (c) => (await c.query("select public.team_capacity($1) as t", [ws])).rows[0].t)) as Record<string, unknown>;
+      const { person_capacity_factors: _new, ...rest } = t;
+      expect(old).toEqual(rest);
+    } finally {
+      await db.client.query("rollback");
+    }
   });
 });
 

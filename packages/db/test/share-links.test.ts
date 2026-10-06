@@ -976,3 +976,77 @@ describe("share_team_capacity on Larkspur", () => {
     expect(mine.people.map((p) => p.id).sort()).toEqual(theirs.people.map((p) => p.id).sort());
   });
 });
+
+describe("share links never carry per-person times (C6)", () => {
+  const MSG = "The snapshot contains per-person times.";
+  const row = { person_id: "00000000-0000-4000-8000-000000000001", step_id: null, workspace_id: ws, factor: 0.8, source: "entered" };
+  const withSnapshot = (extra: Json, kind = "overview") => ({ ...clean(kind), ...extra });
+
+  it("an editor's link whose snapshot holds personCapacityFactors, person_capacity_factors or a capacityFactor key, at any depth, is refused (23514) with the new message", async () => {
+    await asEditor(async (c) => {
+      const cases: [string, Json][] = [
+        ["top-level personCapacityFactors", { personCapacityFactors: [row] }],
+        ["top-level person_capacity_factors", { person_capacity_factors: [row] }],
+        ["nested in live", { live: { process: {}, personCapacityFactors: [row] } }],
+        ["nested deeper (a bundle in a list)", { live: { others: [{ bundle: { personCapacityFactors: [{ factor: 1.2 }] } }] } }],
+        ["a capacityFactor on a person", { live: { people: [{ id: "x", capacityFactor: { default: 0.9 } }] } }],
+        ["a capacityFactor with steps only", { live: { model: { people: { p: { capacityFactor: { steps: { s: 1.2 } } } } } } }],
+      ];
+      for (const [label, extra] of cases) {
+        expect(await make(c, { snapshot: withSnapshot(extra) }), label).toMatchObject({ ok: false, code: "23514", message: MSG });
+      }
+    });
+  });
+
+  it("whatever the toggles: with People and Financials on, a link is refused all the same", async () => {
+    await asEditor(async (c) => {
+      const snapshot = { ...clean("overview", true, true), personCapacityFactors: [row] };
+      expect(await make(c, { people: true, financials: true, snapshot })).toMatchObject({ ok: false, code: "23514", message: MSG });
+    });
+  });
+
+  it("an empty personCapacityFactors list (or person_capacity_factors) passes: nothing to find under [*]", async () => {
+    await asEditor(async (c) => {
+      expect(await make(c, { snapshot: withSnapshot({ personCapacityFactors: [] }) })).toMatchObject({ ok: true });
+      expect(await make(c, { tok: "second", snapshot: withSnapshot({ live: { personCapacityFactors: [], person_capacity_factors: [] } }) })).toMatchObject({ ok: true });
+    });
+  });
+
+  it("changing the snapshot of an existing link to one with a factor is refused too", async () => {
+    await asEditor(async (c) => {
+      const made = await make(c);
+      expect(made.ok).toBe(true);
+      const id = made.rows![0].id as string;
+      const upd = await attempt(c, () => c.query("update share_links set snapshot = $2::jsonb where id = $1", [id, JSON.stringify(withSnapshot({ live: { people: [{ capacityFactor: { default: 0.9 } }] } }))]));
+      expect(upd).toMatchObject({ ok: false, code: "23514", message: MSG });
+    });
+  });
+
+  it("share_team_capacity (used for a link's team inputs) has no person_capacity_factors key, even when factors are stored", async () => {
+    await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, null, 0.8)", [larkspurPersonIds.jess!, other]);
+    try {
+      const lEditor = await createUser(db, "cf-l-editor@share.example");
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [other, lEditor.id]);
+      for (const show of [false, true]) {
+        const t = await db.as(lEditor.claims, async (c) => (await c.query("select public.share_team_capacity($1, $2) as t", [other, show])).rows[0].t as Json);
+        expect(t).not.toHaveProperty("person_capacity_factors");
+        expect(JSON.stringify(t)).not.toContain("0.8");
+      }
+      // Its own team_capacity does carry them, for the same editor: that is the contrast.
+      const own = await db.as(lEditor.claims, async (c) => (await c.query("select public.team_capacity($1) as t", [other])).rows[0].t as { person_capacity_factors: unknown[] });
+      expect(own.person_capacity_factors).toHaveLength(1);
+    } finally {
+      await db.client.query("delete from person_capacity_factors");
+    }
+  });
+
+  it("the trigger exists on share_links, is not SECURITY DEFINER and has an empty search_path; no client can execute the function", async () => {
+    const t = (await db.client.query("select tgname from pg_trigger where tgrelid = 'public.share_links'::regclass and tgname = 'share_links_no_speeds'")).rows;
+    expect(t).toHaveLength(1);
+    const f = (await db.client.query("select prosecdef, proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname = 'share_links_no_speeds'")).rows;
+    expect(f).toEqual([{ prosecdef: false, proconfig: ['search_path=""'] }]);
+    for (const role of ["anon", "authenticated"]) {
+      expect((await db.client.query("select has_function_privilege($1, 'private.share_links_no_speeds()', 'execute') as h", [role])).rows[0].h, role).toBe(false);
+    }
+  });
+});
