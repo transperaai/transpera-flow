@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const baselines = process.env.VISUAL_BASELINES === "1";
 
@@ -10,6 +10,14 @@ if (baselines) {
   const { version } = JSON.parse(readFileSync("node_modules/@playwright/test/package.json", "utf8")) as { version: string };
   if (process.env.PLAYWRIGHT_IMAGE !== `v${version}-noble`) {
     throw new Error(`VISUAL_BASELINES=1 needs PLAYWRIGHT_IMAGE=v${version}-noble (the image tag must match @playwright/test ${version}); got "${process.env.PLAYWRIGHT_IMAGE ?? ""}".`);
+  }
+  // The tag above is only what CI (or docker.sh) says it runs in. This looks at the container itself: the browsers the image
+  // carries must be the Chromium this Playwright version drives, so a different image can't produce the pixels.
+  const { browsers } = JSON.parse(readFileSync("node_modules/playwright-core/browsers.json", "utf8")) as { browsers: { name: string; revision: string }[] };
+  const revision = browsers.find((b) => b.name === "chromium")?.revision;
+  const dir = process.env.PLAYWRIGHT_BROWSERS_PATH || "/ms-playwright";
+  if (!revision || !existsSync(`${dir}/chromium-${revision}`)) {
+    throw new Error(`VISUAL_BASELINES=1 must run in the Playwright image for @playwright/test ${version}: ${dir}/chromium-${revision ?? "?"} is missing, so this container carries a different Chromium.`);
   }
 }
 

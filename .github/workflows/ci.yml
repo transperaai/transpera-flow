@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -57,51 +60,71 @@ jobs:
         run: docker logs postgrest || true
       - run: pnpm --filter @transpera-flow/web build
 
-  # Which pushes need the visual job: see docs/visual-regression.md.
+  # Which pushes need the visual job, and whether this one approves new baselines: see docs/visual-regression.md.
+  # Only branch pushes (never tags). Off main it diffs the whole branch against the merge-base with origin/main, so a docs-only
+  # follow-up push can't hide an unapproved visual difference; on main it diffs the push.
   changes:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
     runs-on: ubuntu-latest
     outputs:
       visual: ${{ steps.f.outputs.visual }}
       update: ${{ steps.f.outputs.update }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: f
         env:
           BEFORE: ${{ github.event.before }}
         run: |
+          paths='^(apps/web/(src/|stories/|\.storybook/|visual/|package\.json|postcss|playwright\.visual\.config\.ts|test/build-harness-stubs/|tsconfig\.json)|packages/(engine|db)/src/|pnpm-lock\.yaml|\.nvmrc|\.github/workflows/)'
           subject=$(git log -1 --format=%s)
           update=false
+          visual=false
           if [ "$GITHUB_REF" != "refs/heads/main" ] && printf '%s' "$subject" | grep -qF '[visual-update]'; then update=true; fi
-          if [ "$update" = true ] || [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then visual=true
-          elif git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -qE '^(apps/web/(src|stories|\.storybook|visual|package\.json|postcss)|packages/(engine|db)/src/|pnpm-lock\.yaml|\.github/workflows/)'; then visual=true
-          else visual=false; fi
+          if [ "$update" = true ]; then
+            visual=true
+          elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then visual=true
+            elif git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -qE "$paths"; then visual=true; fi
+          else
+            if base=$(git merge-base origin/main "$GITHUB_SHA" 2>/dev/null); then
+              if git diff --name-only "$base" "$GITHUB_SHA" | grep -qE "$paths"; then visual=true; fi
+            else
+              visual=true
+            fi
+          fi
           echo "visual=$visual" >> "$GITHUB_OUTPUT"
           echo "update=$update" >> "$GITHUB_OUTPUT"
 
   # Screenshots of every Storybook story in both themes, compared with the committed baselines. Runs in the pinned Playwright
-  # image so the pixels are the same every time; the image tag must equal the @playwright/test version (the config checks).
+  # image so the pixels are the same every time. Read-only: it never holds a token that can push. In update mode it uploads the
+  # regenerated baselines as an artifact and `visual-commit` commits them.
   visual:
     needs: changes
     if: needs.changes.outputs.visual == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: write
+      contents: read
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      # The tag must equal the @playwright/test version (checked below and by the config); the digest makes it immutable.
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
       options: --ipc=host
     env:
       VISUAL_BASELINES: "1"
-      PLAYWRIGHT_IMAGE: v1.63.0-noble
       STORYBOOK_DISABLE_TELEMETRY: "1"
     steps:
-      - uses: actions/checkout@v4
-      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Read the image tag this job runs in
+        run: |
+          tag=$(grep -oE 'mcr\.microsoft\.com/playwright:v[0-9.]+-noble' .github/workflows/ci.yml | head -1 | cut -d: -f2)
+          echo "PLAYWRIGHT_IMAGE=$tag" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -110,28 +133,19 @@ jobs:
       - name: Compare with the baselines
         if: needs.changes.outputs.update != 'true'
         run: pnpm --filter @transpera-flow/web visual
-      - name: Update the baselines, check they are stable, commit them
-        id: update
+      - name: Regenerate the baselines and check they are stable
         if: needs.changes.outputs.update == 'true'
         run: |
           pnpm --filter @transpera-flow/web visual:update
           pnpm --filter @transpera-flow/web visual
-          git add -A apps/web/visual/__screenshots__
-          if git diff --cached --quiet; then echo "Baselines unchanged."; exit 0; fi
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "Update visual baselines" -m "Regenerated in the pinned Playwright image from $(git rev-parse --short HEAD)."
-          if ! git push origin "HEAD:$GITHUB_REF_NAME"; then
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
-            echo "::error::The new baselines could not be pushed (GITHUB_TOKEN may be read-only for this repository). They are in the visual-baselines artifact: unzip it into apps/web/visual/__screenshots__/ and commit it."
-            exit 1
-          fi
-      - name: Upload the regenerated baselines (the push was refused)
-        if: failure() && steps.update.outputs.pushed == 'false'
-        uses: actions/upload-artifact@v4
+      - name: Upload the regenerated baselines
+        if: needs.changes.outputs.update == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: visual-baselines
           path: apps/web/visual/__screenshots__
           retention-days: 7
+          if-no-files-found: error
       - name: List the failing stories
         if: failure() && needs.changes.outputs.update != 'true'
         run: |
@@ -143,10 +157,40 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the visual report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: visual-report
           path: |
             apps/web/playwright-report
             apps/web/test-results
           retention-days: 7
+
+  # Commits the baselines `visual` regenerated. The only job that can push, and the only code it runs is git: no install, no
+  # build. Branch pushes whose commit subject contains [visual-update] only (never main, never tags).
+  visual-commit:
+    needs: [changes, visual]
+    if: needs.changes.outputs.update == 'true' && success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+      - name: Replace the baselines with the regenerated ones
+        run: rm -rf apps/web/visual/__screenshots__
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: visual-baselines
+          path: apps/web/visual/__screenshots__
+      - name: Commit and push
+        run: |
+          git add -A apps/web/visual/__screenshots__
+          if git diff --cached --quiet; then echo "Baselines unchanged."; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Update visual baselines" -m "Regenerated in the pinned Playwright image from $(git rev-parse --short HEAD)."
+          if ! git push origin "HEAD:$GITHUB_REF_NAME"; then
+            echo "::error::The new baselines could not be pushed (the branch moved, or GITHUB_TOKEN is read-only here). They are in the visual-baselines artifact of this run: unzip it into apps/web/visual/__screenshots__/ and commit it."
+            exit 1
+          fi
