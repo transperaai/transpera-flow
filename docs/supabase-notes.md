@@ -384,7 +384,7 @@ token's update when `pg_trigger_depth() = 1`.
 | Advisory lock and caps | The transaction-level lock serialises the two count checks per workspace. Verified on plain Postgres only. | Two concurrent proposals at 49 waiting: one succeeds, one gets 54000. |
 
 
-## Share links (issue #32, B3, migration 20261218000000)
+## Share links (issue #32, B3, migration 20261220000000)
 
 Verified only against plain Postgres 16 (`packages/db/test/share-links.test.ts`, with Supabase's default privileges on new tables, and the role matrix) and PostgREST v14 (`packages/mcp/test/postgrest-share-links.test.ts`; run locally on v14.1, CI uses its pinned image). Nothing here has run on a Supabase project.
 

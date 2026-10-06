@@ -31,7 +31,7 @@ guess.** Austin is asleep for this run: every open question below has a default,
 
 | What | Where |
 |---|---|
-| Table `share_links` (token hash, target, toggles, allowed emails, expiry, frozen redacted `snapshot`, revoked, opens) | migration `20261218000000_share_links` |
+| Table `share_links` (token hash, target, toggles, allowed emails, expiry, frozen redacted `snapshot`, revoked, opens) | migration `20261220000000_share_links` |
 | `private.share_snapshot_problem(...)`: the server-side leak check, run by a BEFORE trigger on every insert and update | same |
 | `public.share_team_capacity(ws, show_people)`: `team_capacity`'s shape for a share link (labels or names, **no pay for anyone**) | same |
 | `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated) | same |
@@ -43,7 +43,7 @@ guess.** Austin is asleep for this run: every open question below has a default,
 | Restricted links: "Continue with Google", back to the link after sign-in | `apps/web/src/app/s/[token]/`, `auth/callback/route.ts` |
 
 One branch, one PR: `claude/b3-share-links` (this brief is its first commit). `Closes #32`. Migration version
-**`20261218000000`**, name **`share_links`**. No engine change, no `ENGINE_VERSION` bump, no golden moves.
+**`20261220000000`**, name **`share_links`**. No engine change, no `ENGINE_VERSION` bump, no golden moves.
 
 Build in this order, **commit and push after each step**:
 1. Migration + apply file + `database.types.ts` hand edits + bootstrap + DB tests (`share-links.test.ts`, role matrix).
@@ -185,7 +185,7 @@ exchanges it through [...] a narrow security definer function that returns one r
 
 ## Data model and migration
 
-File: `packages/db/supabase/migrations/20261218000000_share_links.sql`. **Strictly additive**: one table, one trigger
+File: `packages/db/supabase/migrations/20261220000000_share_links.sql`. **Strictly additive**: one table, one trigger
 function, three functions, one trigger. Nothing existing is changed: not `save_fields`, not `team_capacity`, no existing
 policy or grant.
 
@@ -338,7 +338,7 @@ and the row is not revoked).
 ### Migration header (write all of it)
 
 Purpose; the rules above; `ORDER`; **PREFLIGHT** (read-only, `prod-sql.sh -c`, one file at a time):
-0. Latest applied versions; expect nothing `>= '20261218000000'`:
+0. Latest applied versions; expect nothing `>= '20261220000000'`:
    `select version from supabase_migrations.schema_migrations where version >= '20261207500000' order by 1;`
 1. Nothing created yet. Expect null ×5:
    `select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'), to_regprocedure('public.share_team_capacity(uuid, boolean)'), to_regprocedure('private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'), to_regprocedure('private.share_emails_ok(text[])');`
@@ -377,14 +377,14 @@ drop table if exists public.share_links;
 drop function if exists private.share_links_before_write();
 drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
 drop function if exists private.share_emails_ok(text[]);
-delete from supabase_migrations.schema_migrations where version = '20261218000000';
+delete from supabase_migrations.schema_migrations where version = '20261220000000';
 commit;
 ```
 
-**Apply file:** `packages/db/scripts/apply/20261218000000_share_links.sql`: header comment (copy the pattern of
+**Apply file:** `packages/db/scripts/apply/20261220000000_share_links.sql`: header comment (copy the pattern of
 `packages/db/scripts/apply/20261209000000_agency_list.sql`: what, order, "apply BEFORE deploying the app"), `begin;`,
 `set local lock_timeout = '5s';`, the migration SQL, the `insert into supabase_migrations.schema_migrations (version,
-name, statements) values ('20261218000000', 'share_links', array[$mig$<the migration SQL>$mig$]);`, `commit;`.
+name, statements) values ('20261220000000', 'share_links', array[$mig$<the migration SQL>$mig$]);`, `commit;`.
 
 Then: `pnpm --filter @transpera-flow/db gen:bootstrap` (never by hand); hand-edit `packages/db/src/database.types.ts`
 (the table's Row/Insert/Update and the two public functions' Args/Returns, in the generator's alphabetical order, as #206
@@ -774,7 +774,7 @@ Run everything per `builder-brief.md` (Postgres, Chromium, `pnpm lint && pnpm ty
 
 ## Done criteria
 
-- [ ] Migration `20261218000000_share_links` with full header (preflight, post-apply, rollback); apply file; bootstrap
+- [ ] Migration `20261220000000_share_links` with full header (preflight, post-apply, rollback); apply file; bootstrap
       regenerated; `database.types.ts` hand-edited; row added to `docs/production-migrations.md` as **NOT applied**.
 - [ ] Share button on Overview, process, issue and solution pages (owners/editors); Share links page lists, updates and
       turns off links; sidebar item.

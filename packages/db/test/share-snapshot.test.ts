@@ -301,10 +301,10 @@ describe("redactShareSnapshot: no hidden field in the raw payload, for every kin
     const w = worlds[0]!;
     const texts = ["£12.4k", "US$3,000", "A$ 40", "€1.2m", "$5bn", "4,100 GBP", "300 usd", "GBP 4,100", "EUR 40", "4,512€", "4,100 pounds", "40 euros", "NZ$ 1.234,50"];
     const input = raw("process", w, TOGGLES[0]!);
-    const snap = redactShareSnapshot({ ...input, issues: texts.map((t) => ({ ...w.issue, title: `x ${t} y`, evidence: "Ids 20261218000000 and 12 hours" })) } as ShareSnapshot, TOGGLES[0]!, w.secrets) as { issues: IssueRow[] };
+    const snap = redactShareSnapshot({ ...input, issues: texts.map((t) => ({ ...w.issue, title: `x ${t} y`, evidence: "Ids 20261220000000 and 12 hours" })) } as ShareSnapshot, TOGGLES[0]!, w.secrets) as { issues: IssueRow[] };
     for (const i of snap.issues) {
       expect(i.title).toBe("x [amount hidden] y");
-      expect(i.evidence).toBe("Ids 20261218000000 and 12 hours");
+      expect(i.evidence).toBe("Ids 20261220000000 and 12 hours");
     }
   });
 });

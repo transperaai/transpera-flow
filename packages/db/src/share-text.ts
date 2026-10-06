@@ -11,7 +11,7 @@
 // person's or client's name is replaced, and the whole original span with it, separators included; a run of tokens of one
 // name joined by a few non-letters ("priya-shah", "priya (shah") is one span. A name token can't survive next to a label,
 // whatever sat between the words. A match is mapped back to the span of the ORIGINAL text, so nothing of it is left behind.
-// The database applies the same rules in `private.share_snapshot_problem` (migration 20261218000000).
+// The database applies the same rules in `private.share_snapshot_problem` (migration 20261220000000).
 
 /** The normalised text, and for each of its characters the span of the original text it stands for. */
 export interface View {

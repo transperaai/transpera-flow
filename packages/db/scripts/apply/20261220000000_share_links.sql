@@ -1,6 +1,6 @@
--- Production apply file for 20261218000000_share_links (B3, issue #32). One table (`share_links`), one trigger, two private
+-- Production apply file for 20261220000000_share_links (B3, issue #32). One table (`share_links`), one trigger, two private
 -- functions (the leak check and the email rule) plus the trigger function, and two public functions (`share_team_capacity`,
--- `open_share_link`). Strictly additive: nothing existing is changed. Applies after row 62 (20261216000000, C1); this is row 63. Preflight, post-apply checks and rollback are in the migration's own
+-- `open_share_link`). Strictly additive: nothing existing is changed. Applies after row 63 (20261219000000, B7); this is row 64. Preflight, post-apply checks and rollback are in the migration's own
 -- header, repeated below. Apply BEFORE deploying the app (the app calls `open_share_link` and inserts into `share_links`).
 -- Sets `lock_timeout` to 5 s.
 
@@ -33,11 +33,11 @@ set local lock_timeout = '5s';
 --   * `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated).
 -- No `audit` trigger: it would copy the multi-megabyte snapshot into `audit_log`; `created_by` and `revoked_by` record who.
 --
--- ORDER: after 20261216000000 (C1, row 62: B5 is row 60, B21 row 61) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
+-- ORDER: after 20261219000000 (B7, row 63: C1 is row 62, B21 row 61, B5 row 60) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. Latest applied versions; expect the latest to be 20261216000000 and nothing >= '20261218000000':
---        select version from supabase_migrations.schema_migrations where version >= '20261212000000' order by 1;
+--   0. Latest applied versions; expect the latest to be 20261219000000 and nothing >= '20261220000000':
+--        select version from supabase_migrations.schema_migrations where version >= '20261215000000' order by 1;
 --   1. Nothing created yet. Expect null x9:
 --        select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'),
 --               to_regprocedure('public.share_team_capacity(uuid, boolean)'),
@@ -106,7 +106,7 @@ set local lock_timeout = '5s';
 --   drop function if exists private.share_norm(text);
 --   drop function if exists private.share_unpct(text);
 --   drop function if exists private.share_emails_ok(text[]);
---   delete from supabase_migrations.schema_migrations where version = '20261218000000';
+--   delete from supabase_migrations.schema_migrations where version = '20261220000000';
 --   commit;
 --
 -- Production data: none needed.
@@ -604,7 +604,7 @@ $$;
 revoke execute on function public.open_share_link(text) from public;
 grant execute on function public.open_share_link(text) to anon, authenticated;
 
-insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261218000000', 'share_links', array[$mig$-- View-only share links with redacted snapshots (issue #32, B3; docs/plans/b3-brief.md, docs/adr/0016-share-links.md).
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261220000000', 'share_links', array[$mig$-- View-only share links with redacted snapshots (issue #32, B3; docs/plans/b3-brief.md, docs/adr/0016-share-links.md).
 --
 -- Owners and editors make a token link to a frozen, redacted copy ("snapshot") of the Overview, a process, an issue or a
 -- solution. The Next.js server builds the snapshot from the existing loaders (through the same redacted team-input shape
@@ -630,11 +630,11 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated).
 -- No `audit` trigger: it would copy the multi-megabyte snapshot into `audit_log`; `created_by` and `revoked_by` record who.
 --
--- ORDER: after 20261216000000 (C1, row 62: B5 is row 60, B21 row 61) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
+-- ORDER: after 20261219000000 (B7, row 63: C1 is row 62, B21 row 61, B5 row 60) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. Latest applied versions; expect the latest to be 20261216000000 and nothing >= '20261218000000':
---        select version from supabase_migrations.schema_migrations where version >= '20261212000000' order by 1;
+--   0. Latest applied versions; expect the latest to be 20261219000000 and nothing >= '20261220000000':
+--        select version from supabase_migrations.schema_migrations where version >= '20261215000000' order by 1;
 --   1. Nothing created yet. Expect null x9:
 --        select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'),
 --               to_regprocedure('public.share_team_capacity(uuid, boolean)'),
@@ -703,7 +703,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop function if exists private.share_norm(text);
 --   drop function if exists private.share_unpct(text);
 --   drop function if exists private.share_emails_ok(text[]);
---   delete from supabase_migrations.schema_migrations where version = '20261218000000';
+--   delete from supabase_migrations.schema_migrations where version = '20261220000000';
 --   commit;
 --
 -- Production data: none needed.
