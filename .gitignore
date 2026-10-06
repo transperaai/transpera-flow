@@ -10,6 +10,8 @@ coverage/
 .vercel
 test-results/
 playwright-report/
+storybook-static/
+apps/web/visual/.local-screenshots/
 packages/db/supabase/.temp/
 .claude/worktrees/
 
