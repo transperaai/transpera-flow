@@ -337,6 +337,18 @@ interface ServiceState {
 }
 
 /**
+ * The monthly fee of a client in a model with no client roster: the mix-share-weighted average price of its retainer
+ * services (a plain average when the shares sum to 0), or `model.retainer` when it has none. The same rule as the app's
+ * `startingMrr`.
+ */
+export function pooledMonthlyFee(model: EngineModel): number {
+  const retainers = Object.values(model.services ?? {}).filter((s) => s.pricingModel === "retainer");
+  if (!retainers.length) return model.retainer;
+  const share = retainers.reduce((sum, s) => sum + s.mixShare, 0);
+  return share > 0 ? retainers.reduce((sum, s) => sum + s.price * s.mixShare, 0) / share : retainers.reduce((sum, s) => sum + s.price, 0) / retainers.length;
+}
+
+/**
  * The model's services, or one implicit retainer at `model.retainer` when it
  * has none, so such a model's revenue is `won × retainer` as before.
  */
@@ -963,6 +975,7 @@ export function runOnce(
   const nM = bounds ? bounds.length - 1 : 0;
   const nR = roleIds.length;
   const nP = people.length;
+  const pooledFee = sampleMonthly ? pooledMonthlyFee(model) : 0;
   const mon = sampleMonthly
     ? {
         roleWork: new Float64Array(nR * nM),
@@ -980,6 +993,8 @@ export function runOnce(
         waitN: new Float64Array(stepList.length * nM),
         late: new Float64Array(nM),
         clients: new Map<string, Float64Array>(),
+        mrr: new Float64Array(nM),
+        atRisk: new Map<string, Float64Array>(),
         ticks: new Float64Array(nM),
       }
     : null;
@@ -2359,8 +2374,18 @@ export function runOnce(
           if (!row) mon.clients.set(key, (row = new Float64Array(nM)));
           row[m]! += n;
         };
-        if (roster) for (const rc of rosterClients) add(rc.svcKey, 1);
-        else add("", active);
+        if (roster) {
+          for (const rc of rosterClients) {
+            add(rc.svcKey, 1);
+            mon.mrr[m]! += rc.weeklyBill * WEEKS_PER_MONTH;
+            let risk = mon.atRisk.get(rc.svcKey);
+            if (!risk) mon.atRisk.set(rc.svcKey, (risk = new Float64Array(nM)));
+            if (rc.health < AT_RISK_HEALTH) risk[m]!++;
+          }
+        } else {
+          add("", active);
+          mon.mrr[m]! += active * pooledFee;
+        }
       }
       if (weekly) {
         for (const st of stepList) weekly.queue[st.s.id]!.push(st.stat.qLen);
@@ -2451,6 +2476,10 @@ export function runOnce(
     for (const [key, counts] of [...sums.clients.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       clients[key] = Array.from(counts, (n, m) => (sums.ticks[m]! > 0 ? n / sums.ticks[m]! : 0));
     }
+    const atRisk: Record<string, number[]> = {};
+    for (const [key, counts] of [...sums.atRisk.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      atRisk[key] = Array.from(counts, (n, m) => (sums.ticks[m]! > 0 ? n / sums.ticks[m]! : 0));
+    }
     return {
       bounds: [...bounds!],
       roleWork,
@@ -2464,6 +2493,8 @@ export function runOnce(
       waitN,
       lateTasks: Array.from(sums.late),
       clients,
+      mrr: Array.from(sums.mrr, (v, m) => (sums.ticks[m]! > 0 ? v / sums.ticks[m]! : 0)),
+      atRisk,
     };
   }
 
@@ -3118,6 +3149,9 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
   const keys = [...new Set(reps.flatMap((r) => Object.keys(r.clients)))].sort();
   const clients: Record<string, Stat[]> = {};
   for (const key of keys) clients[key] = months.map((_, m) => stat(reps.map((r) => r.clients[key]?.[m] ?? 0)));
+  const riskKeys = [...new Set(reps.flatMap((r) => Object.keys(r.atRisk)))].sort();
+  const atRisk: Record<string, Stat[]> = {};
+  for (const key of riskKeys) atRisk[key] = months.map((_, m) => stat(reps.map((r) => r.atRisk[key]?.[m] ?? 0)));
   const uncovered: Record<string, (number | null)[]> = {};
   for (const id of Object.keys(reps[0]!.roleUncovered)) {
     uncovered[id] = months.map((_, m) => {
@@ -3133,5 +3167,7 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
     waits,
     lateTasks: months.map((_, m) => stat(reps.map((r) => r.lateTasks[m]!))),
     clients,
+    mrr: months.map((_, m) => stat(reps.map((r) => r.mrr[m]!))),
+    atRisk,
   };
 }
