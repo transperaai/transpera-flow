@@ -332,3 +332,4 @@ export {
 } from "./simulation-gaps";
 export * from "./workspace-bundle";
 export * from "./workspace-import";
+export { A_TEAM_MEMBER, canSeePerson } from "./person-labels";

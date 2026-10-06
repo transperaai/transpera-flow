@@ -103,6 +103,7 @@ import { InlineEditContext, NodeInlineEditor, type InlineEditing } from "./node-
 import { PlaybackBar } from "./playback-bar";
 import { PlaybackLayer } from "./playback-layer";
 import { NodeMenu, type CanvasCommands, type MenuState } from "./node-menu";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export type { CanvasCommands } from "./node-menu";
 
@@ -1040,7 +1041,7 @@ function Canvas({
   const [nodeCache] = useState(() => new Map<string, StepFlowNode | TerminalFlowNode>());
   const nodes = useMemo(() => {
     const roles = new Map(bundle.roles.map((r) => [r.id, r]));
-    const people = new Map(bundle.people.map((p) => [p.id, p]));
+    const people = new Map(namedForViewer(viewerOf(bundle), bundle.people).map((p) => [p.id, p]));
     const names = new Map(bundle.steps.map((s) => [s.id, s.name]));
     const selected = new Set(selection.steps);
     const who = (s: StepRow) =>
@@ -1743,7 +1744,7 @@ function Canvas({
           {detailStep && (
             <StepDetail
               step={detailStep}
-              who={(detailStep.person_id ? bundle.people.find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
+              who={(detailStep.person_id ? namedForViewer(viewerOf(bundle), bundle.people).find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
               rating={ratingOfRank(rating?.(detailStep.id)?.rank ?? -1)}
               extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
               sources={sourcesOf(detailStep, sourceTitles)}

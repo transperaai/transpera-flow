@@ -31,6 +31,7 @@ import { retiredSteps } from "@/lib/scenarios/broken";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export interface Named {
   id: string;
@@ -86,14 +87,14 @@ export function IssuesPage({
       issueFormOptions({
         processes,
         steps: [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)],
-        people: bundle.people.filter((p) => p.active),
+        people: namedForViewer(viewerOf(bundle), bundle.people.filter((p) => p.active)),
         sources,
       }),
     [processes, bundle, sources],
   );
   const stepNames = useMemo(() => new Map([...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)].map((s) => [s.id, s.name])), [bundle]);
   const processNames = useMemo(() => new Map(processes.map((p) => [p.id, p.name])), [processes]);
-  const peopleNames = useMemo(() => new Map(bundle.people.map((p) => [p.id, p.name])), [bundle.people]);
+  const peopleNames = useMemo(() => new Map(namedForViewer(viewerOf(bundle), bundle.people).map((p) => [p.id, p.name])), [bundle]);
   const inTab = useDemoSolutions();
   const solutionData = mode === "demo" ? inTab : (solutions ?? NO_SOLUTIONS_DATA);
   const summaries = useMemo(() => solutionSummaries(solutionData), [solutionData]);

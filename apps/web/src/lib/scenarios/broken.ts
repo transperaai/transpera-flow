@@ -3,7 +3,7 @@
 // break if published, and where a broken patch can be re-pointed. Pure; the
 // checks themselves are the engine's (packages/engine/src/broken.ts).
 
-import type { ProcessBundle, ScenarioRow } from "@transpera-flow/db";
+import type { ProcessBundle, ScenarioRow, Viewer } from "@transpera-flow/db";
 import {
   BrokenScenarioError,
   checkScenario,
@@ -14,6 +14,7 @@ import {
   type RetiredSteps,
   type ScenarioPatch,
 } from "@transpera-flow/engine";
+import { personName, viewerOf } from "@/lib/viewer";
 
 type Steps = Pick<ProcessBundle, "steps" | "retired">;
 
@@ -67,13 +68,13 @@ export interface Named {
  * first, then every other target of the same kind in the model (by name).
  * Nothing for a patch outside the grammar or on demand and finances.
  */
-export function repointTargets(model: EngineModel, b: BrokenPatch): { suggested: Named[]; others: Named[] } {
+export function repointTargets(model: EngineModel, b: BrokenPatch, viewer?: Viewer): { suggested: Named[]; others: Named[] } {
   const suggested = b.replacements;
   const taken = new Set(suggested.map((s) => s.id));
   let all: Named[] = [];
   if (b.kind === "steps") all = model.steps.filter((s) => s.role || s.person || s.work > 0 || s.wait > 0).map((s) => ({ id: s.id, name: s.name }));
   else if (b.kind === "roles") all = Object.entries(model.roles).map(([id, r]) => ({ id, name: r.name }));
-  else if (b.kind === "people") all = Object.entries(model.people ?? {}).map(([id, p]) => ({ id, name: p.name }));
+  else if (b.kind === "people") all = Object.entries(model.people ?? {}).map(([id, p]) => ({ id, name: personName(viewerOf({ viewer }), id, p.name) }));
   else if (b.kind === "services") all = Object.entries(model.services ?? {}).map(([id, s]) => ({ id, name: s.name }));
   const others = all.filter((x) => !taken.has(x.id)).sort((x, y) => x.name.localeCompare(y.name, "en-GB"));
   return { suggested, others };

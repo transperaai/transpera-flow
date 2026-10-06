@@ -6,7 +6,9 @@
 
 import { useState, type ReactNode } from "react";
 import { compareTable, type Comparison, type CompareRow, type EnginePerson, type Headline, type Stat } from "@transpera-flow/engine";
+import type { Viewer } from "@transpera-flow/db";
 import { formatNumber, formatPercent } from "@/lib/format";
+import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const THRESHOLD = 0.85;
 const MINUS = "−";
@@ -84,16 +86,18 @@ function UtilisationCompare({
   comparison,
   roleNames,
   people,
+  viewer,
 }: {
   comparison: Comparison;
   roleNames: Record<string, string>;
   people: Record<string, EnginePerson>;
+  viewer?: Viewer;
 }) {
   const [view, setView] = useState<"roles" | "people">("roles");
   const rows =
     view === "roles"
       ? Object.entries(comparison.roles).map(([id, v]) => ({ id, label: roleNames[id] ?? id, ...v }))
-      : Object.entries(comparison.people)
+      : ownRowsOnly(viewerOf({ viewer }), Object.entries(comparison.people), ([id]) => id)
           .map(([id, v]) => ({ id, label: people[id]?.name ?? id, ...v }))
           .sort((a, b) => (roleNames[people[a.id]?.roles[0] ?? ""] ?? "").localeCompare(roleNames[people[b.id]?.roles[0] ?? ""] ?? "") || a.label.localeCompare(b.label));
   return (
@@ -161,6 +165,7 @@ export function CompareView({
   headline,
   roleNames,
   people,
+  viewer,
   currency,
   hoursPerWeek,
   horizonWeeks,
@@ -173,6 +178,8 @@ export function CompareView({
   roleNames: Record<string, string>;
   /** People on either side, by id. */
   people: Record<string, EnginePerson>;
+  /** Who is looking: a member or viewer sees their own person only in the people view (B1 2b). */
+  viewer?: Viewer;
   currency: string;
   hoursPerWeek: number;
   horizonWeeks: number;
@@ -213,7 +220,7 @@ export function CompareView({
             Averages, with the 10th–90th percentile range underneath. Both sides use the same random draws, so the change&apos;s range is
             taken replication by replication.
           </p>
-          <UtilisationCompare comparison={comparison} roleNames={roleNames} people={people} />
+          <UtilisationCompare comparison={comparison} roleNames={roleNames} people={people} viewer={viewer} />
           {robustness}
         </>
       )}

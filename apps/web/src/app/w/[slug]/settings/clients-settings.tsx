@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import type { ClientAssignmentRow, ClientRow, ClientServiceRow } from "@transpera-flow/db";
+import { A_TEAM_MEMBER, type ClientAssignmentRow, type ClientRow, type ClientServiceRow } from "@transpera-flow/db";
 import { ChecklistField, DateField, NumberField, SelectField, TextField, ToggleField, type FieldHelp } from "@/components/fields";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
@@ -180,6 +180,8 @@ function ClientRowView({ client: c, ...props }: ClientsSettingsProps & { client:
               const assigned = props.clientAssignments.find((a) => a.client_id === c.id && a.role_id === r.id)?.person_id ?? null;
               const holders = new Set(props.personRoles.filter((pr) => pr.role_id === r.id).map((pr) => pr.person_id));
               const options = props.people.filter((p) => (p.active && holders.has(p.id)) || p.id === assigned).map((p) => ({ value: p.id, label: p.name }));
+              // A member reads only their own person: someone else's assignment still shows, as "A team member" (B1 2b).
+              if (assigned && !options.some((o) => o.value === assigned)) options.push({ value: assigned, label: A_TEAM_MEMBER });
               return (
                 <SelectField
                   key={r.id}
