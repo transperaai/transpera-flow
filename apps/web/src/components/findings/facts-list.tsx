@@ -9,6 +9,7 @@ import type { DetectedIssue } from "@transpera-flow/engine";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { headline, sourceOf } from "@/lib/insights/insights";
+import { PayHidden } from "@/components/pay-hidden";
 import { formatIssueCost } from "@/lib/issues/register";
 
 const DOT: Record<string, string> = { risk: "var(--rate-risk)", bad: "var(--rate-bad)", good: "var(--rate-good)", great: "var(--rate-great)" };
@@ -66,7 +67,11 @@ export function FactsList({
               <span className="flex flex-wrap gap-x-2.5 pl-4 text-xs text-muted-foreground">
                 <span>{sourceOf(f).name}</span>
                 {where && <span>{where}</span>}
-                {(f.cost.perMonth != null || f.cost.hoursPerMonth != null) && <span className="tabular-nums">{formatIssueCost(f.cost, currency)}</span>}
+                {f.cost.payHidden ? (
+                  <PayHidden />
+                ) : (
+                  (f.cost.perMonth != null || f.cost.hoursPerMonth != null) && <span className="tabular-nums">{formatIssueCost(f.cost, currency)}</span>
+                )}
               </span>
             </li>
           );

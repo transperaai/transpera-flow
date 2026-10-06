@@ -680,6 +680,8 @@ describe("team_capacity (B1 2a)", () => {
     await db.client.query("update people set provenance = '{\"fte\": {\"source\": \"entered\"}}', email = 'x@y.example', notes = 'private' where workspace_id = $1", [ws]);
     await db.client.query("update person_leave set note = 'private' where workspace_id = $1", [ws]);
     await db.client.query("update person_skills set efficiency = 1.5 where workspace_id = $1", [ws]);
+    const rates = (await db.client.query("select id, cost_rate::float8 as cost_rate from people where workspace_id = $1", [ws])).rows as { id: string; cost_rate: number | null }[];
+    await db.client.query("update people set cost_rate = 77.7 where workspace_id = $1", [ws]);
     try {
       for (const role of ["member", "viewer", "member, no person"] as const) {
         const raw = await db.as(callers[role]!.claims, async (c) => (await c.query("select public.team_capacity($1)::text as t", [ws])).rows[0].t as string);
@@ -691,13 +693,18 @@ describe("team_capacity (B1 2a)", () => {
           if (p.id === own) expect(p.name, role).toBe(role === "member" ? "Leah Brooks" : "Dan Okafor");
           else expect(p.name, role).toMatch(/^Team member \d+$/);
           expect(p.provenance, role).toEqual({});
+          // No pay for a member or viewer: null for everyone but themselves (Austin, 6 Oct).
+          if (p.id === own) expect(p.cost_rate, role).toBe(77.7);
+          else expect(p.cost_rate, role).toBeNull();
         }
+        expect(raw.replace(/"cost_rate": 77\.7/, ""), role).not.toContain("77.7");
         expect(raw, role).not.toMatch(/x@y\.example|private|"email"|"notes"|"note"|efficiency/);
       }
     } finally {
       await db.client.query("update people set provenance = '{}', email = null, notes = null where workspace_id = $1", [ws]);
       await db.client.query("update person_leave set note = null where workspace_id = $1", [ws]);
       await db.client.query("update person_skills set efficiency = 1 where workspace_id = $1", [ws]);
+      for (const r of rates) await db.client.query("update people set cost_rate = $1 where id = $2", [r.cost_rate, r.id]);
     }
   });
 

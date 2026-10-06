@@ -81,14 +81,20 @@ Austin's decision of 6 Oct 2026 (issue #30, option A').
   Writes are unchanged: members and viewers never wrote.
 - **`team_capacity(ws)`** (SECURITY DEFINER) is how a caller gets the whole team's simulation inputs: people, roles held,
   skills, leave and client assignments, with the real ids. Callers who see everyone get the stored values. Everyone else gets
-  "Team member N" labels (their own person keeps their name), `provenance` `{}`, and each person's own cost rate replaced by
-  the average for their role, weighted by hours (a person in k roles counts 1/k in each). It never returns email, notes,
-  leave notes or skill efficiency. `loadProcessBundle`, `loadClients` and `loadCompanyModel` read the team only through it,
-  so a member's numbers are an editor's except overtime cost (the only number person rates feed, apart from the cost figures
-  on detected issues).
-- **The k = 3 pool.** A role is averaged only when at least three active people with a rate hold it, otherwise the
-  workspace average (again only with three), otherwise no rate, and the engine then uses the role's default rate. With
-  one or two people the "average" would be their pay.
+  "Team member N" labels (their own person keeps their name), `provenance` `{}`, and **no cost rates: `cost_rate` is null for
+  everyone but their own person**. It never returns email, notes, leave notes or skill efficiency. `loadProcessBundle`,
+  `loadClients` and `loadCompanyModel` read the team only through it.
+- **Pay is hidden from members and viewers (Austin, 6 Oct; it replaced a role-average rule decided earlier that day).** The
+  first version replaced each rate with the average for the person's role (weighted by hours, only for roles of three or more
+  rated people, otherwise a company-wide average). Review showed that overlapping averages leak an exact rate by
+  subtraction (an average over four people and one over three of them give the fourth's rate: 4 x 76.3625 - 3 x 60.6667 =
+  123.45), and that any average gives a rate away over time as people join or leave. So nothing derived from rates is
+  returned. The figures that need individual pay are unavailable for those callers: the engine takes `payHidden` on the
+  model (set when the viewer doesn't see everyone) and then leaves out the KPI "Overtime cost" (null, not 0) and the costs
+  of detected issues that use a person's rate (`cost.payHidden`), and never substitutes a role's default rate for a hidden
+  one. The screens show "—" with an (i), "Only owners and editors see costs that depend on people's pay." Labour cost uses
+  the roles' default rates, which every member reads, so it, and every other number, equals an editor's. Without the flag
+  (everyone who sees everyone, the demo, the golden models) the engine's output is unchanged.
 - **Labels** are the person's rank by `(created_at, id)` over all people, active or not: adding a person appends a number,
   deactivating one changes nothing. Deleting a person renumbers those created after them (people are normally deactivated).
 - **Accepted limit.** A member using browser dev tools can still read anonymous hours and leave dates, because the browser

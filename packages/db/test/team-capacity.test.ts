@@ -1,4 +1,4 @@
-import { simulate, type SimulationResult } from "@transpera-flow/engine";
+import { detectIssues, simulate, type DetectedIssue, type SimulationResult } from "@transpera-flow/engine";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   LARKSPUR_WORKSPACE_ID,
@@ -10,8 +10,8 @@ import {
 } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
-// What a member's browser gets from `public.team_capacity` (B1 2a): labels, and each cost rate replaced by the role's
-// hours-weighted average. Larkspur has a person in two roles (Hana: strat and am), a person with 30 hours (Theo), skills
+// What a member's browser gets from `public.team_capacity` (B1 2a): labels and NO pay (Austin, 6 Oct: every cost rate is
+// null except the caller's own; no averages, so nothing leaks by subtraction). Larkspur has a person in two roles (Hana: strat and am), a person with 30 hours (Theo), skills
 // (Freya) and leave (Ruby, Kai).
 
 type Json = { kpi: Record<string, unknown>; samples: Record<string, unknown>; resolvedPeople: Record<string, Record<string, unknown>> };
@@ -65,109 +65,39 @@ afterAll(async () => {
 const teamAs = async (who: { claims: Record<string, unknown> }) =>
   db.as(who.claims, async (c) => (await c.query("select public.team_capacity($1) as t", [ws])).rows[0].t as { people: Shown[]; own_person_id: string | null });
 
-/** The stored people, with how many hours each is, and the roles each holds. */
-async function rawRows() {
-  const settings = (await db.client.query("select settings from workspaces where id = $1", [ws])).rows[0].settings as Record<string, unknown>;
-  const week = typeof settings.hours_per_week === "number" ? settings.hours_per_week : 40;
-  const people = (
-    await db.client.query("select id, name, fte::float8 as fte, capacity_hours_week::float8 as hours, cost_rate::float8 as cost, active, created_at::text from people where workspace_id = $1", [ws])
-  ).rows as Raw[];
-  const roles = (await db.client.query("select person_id, role_id from person_roles where workspace_id = $1", [ws])).rows as { person_id: string; role_id: string }[];
-  return { week, people, roles };
-}
-
-/** The rule from the brief, written independently of the SQL: the rate a member sees for every person. */
-function expectedRates(week: number, people: Raw[], roles: { person_id: string; role_id: string }[], minPool = 3): Map<string, number | null> {
-  const hours = (p: Raw) => p.hours ?? p.fte * week;
-  const heldBy = (id: string) => roles.filter((r) => r.person_id === id).map((r) => r.role_id);
-  const weighted = (entries: { rate: number; weight: number }[]) => {
-    const total = entries.reduce((a, e) => a + e.weight, 0);
-    return total > 0 ? entries.reduce((a, e) => a + e.rate * e.weight, 0) / total : entries.reduce((a, e) => a + e.rate, 0) / entries.length;
-  };
-  const pool = people.filter((p) => p.active && p.cost !== null);
-  const roleRate = new Map<string, number>();
-  for (const role of new Set(roles.map((r) => r.role_id))) {
-    const inRole = pool.filter((p) => heldBy(p.id).includes(role));
-    if (inRole.length >= minPool) roleRate.set(role, weighted(inRole.map((p) => ({ rate: p.cost!, weight: hours(p) / heldBy(p.id).length }))));
-  }
-  const workspaceRate = pool.length >= minPool ? weighted(pool.map((p) => ({ rate: p.cost!, weight: hours(p) }))) : null;
-  const out = new Map<string, number | null>();
-  for (const p of people) {
-    if (p.cost === null) {
-      out.set(p.id, null);
-      continue;
-    }
-    const rates = heldBy(p.id).flatMap((r) => (roleRate.has(r) ? [roleRate.get(r)!] : []));
-    const shown = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : workspaceRate;
-    out.set(p.id, shown === null ? null : Math.round(shown * 10000) / 10000);
-  }
-  return out;
-}
-
-const matchRate = (got: number | null, want: number | null, label: string) => {
-  if (want === null) expect(got, label).toBeNull();
-  else expect(got, label).toBeCloseTo(want, 4);
-};
-
-describe("team_capacity cost rates for a member", () => {
-  it("follow the rule: role average where three people are rated, else the workspace average, else null", async () => {
-    const { week, people, roles } = await rawRows();
-    const want = expectedRates(week, people, roles);
+describe("team_capacity cost rates", () => {
+  it("a member gets none but their own; an editor and an admin get the stored rates", async () => {
     const shown = (await teamAs(member)).people;
-    for (const p of shown) matchRate(p.cost_rate, want.get(p.id) ?? null, p.id);
     const byId = new Map(shown.map((p) => [p.id, p.cost_rate]));
-    // Priti has no rate of her own: she stays null, so the engine uses her role's default.
-    expect(byId.get(P.priti!)).toBeNull();
-    // The am people share one rate; Hana's is the same because strat has fewer than three rated people.
-    const am = byId.get(P.jess!);
-    expect(am).not.toBeNull();
-    expect(byId.get(P.hana!)).toBe(am);
-    expect(byId.get(P.callum!)).toBe(am);
-    // The designers (two rated) get the workspace average, which is neither of their own rates.
-    const designers = byId.get(P.ruby!);
-    expect(byId.get(P.theo!)).toBe(designers);
-    expect(designers).not.toBe(55);
-    expect(designers).not.toBe(65);
-    // Marek is inactive: shown a rate by the same rule, but in no pool (so nobody's average includes his 90).
-    expect(byId.get(P.marek!)).toBe(designers);
-    const without = expectedRates(week, people.map((p) => (p.id === P.marek ? { ...p, active: true } : p)), roles);
-    expect(without.get(P.ruby!)).not.toBeCloseTo(want.get(P.ruby!)!, 4);
-    // An editor and an admin get the stored rates.
+    // Jess is the member's own person: her own rate, unchanged. Everyone else is null, rated or not.
+    expect(byId.get(P.jess!)).toBe(50);
+    for (const p of shown) if (p.id !== P.jess) expect(p.cost_rate, p.id).toBeNull();
+    for (const key of ["hana", "callum", "ruby", "marek", "theo", "priti"] as const) expect(byId.get(P[key]!), key).toBeNull();
     for (const who of [editor, admin]) {
       const t = await teamAs(who);
       expect(t.people.find((p) => p.id === P.hana)!.cost_rate).toBe(80);
+      expect(t.people.find((p) => p.id === P.ruby)!.cost_rate).toBe(55);
       expect(t.people.find((p) => p.id === P.priti)!.cost_rate).toBeNull();
     }
   });
 
-  it("keep the am role's overtime-driving total: sum of rate x hours / roles held over its pool is the same as from the raw rows", async () => {
-    const { week, people, roles } = await rawRows();
-    const am = larkspurRoleIds.am!;
-    const shown = new Map((await teamAs(member)).people.map((p) => [p.id, p.cost_rate]));
-    const total = (rate: (p: Raw) => number) =>
-      people
-        .filter((p) => p.active && p.cost !== null && roles.some((r) => r.person_id === p.id && r.role_id === am))
-        .reduce((a, p) => a + (rate(p) * (p.hours ?? p.fte * week)) / roles.filter((r) => r.person_id === p.id).length, 0);
-    expect(total((p) => shown.get(p.id)!)).toBeCloseTo(total((p) => p.cost!), 2);
+  it("a member with no linked person gets no rate at all, and nothing derived from rates", async () => {
+    const u = await createUser(db, "unlinked@tc.example");
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [ws, u.id]);
+    const t = await teamAs(u);
+    expect(t.people.length).toBeGreaterThan(0);
+    for (const p of t.people) expect(p.cost_rate, p.id).toBeNull();
+    // The whole response: no rate of anyone's appears as a number anywhere in it.
+    const text = JSON.stringify(t);
+    expect(text).not.toMatch(/"cost_rate":\s*[0-9]/);
+    // No averaging code is left in the function.
+    const src = (await db.client.query("select prosrc from pg_proc where proname = 'team_capacity' and pronamespace = 'public'::regnamespace")).rows[0].prosrc as string;
+    expect(src).not.toMatch(/avg\(|role_rate|ws_rate|weight/i);
   });
 
-  it("with zero hours everywhere the averages are plain averages and nothing divides by zero", async () => {
-    await db.client.query("begin");
-    try {
-      await db.client.query("update workspaces set settings = jsonb_set(settings, '{hours_per_week}', '0') where id = $1", [ws]);
-      await db.client.query("update people set capacity_hours_week = null where workspace_id = $1", [ws]);
-      const { week, people, roles } = await rawRows();
-      expect(week).toBe(0);
-      const want = expectedRates(week, people, roles);
-      await db.client.query("set local role authenticated");
-      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(member.claims)]);
-      const t = (await db.client.query("select public.team_capacity($1) as t", [ws])).rows[0].t as { people: Shown[] };
-      for (const p of t.people) matchRate(p.cost_rate, want.get(p.id) ?? null, p.id);
-      // The am rate is the plain average of 80, 50 and 40.
-      expect(t.people.find((p) => p.id === P.jess)!.cost_rate).toBeCloseTo(170 / 3, 4);
-    } finally {
-      await db.client.query("rollback");
-    }
+  it("a member cannot read other people's rates from the tables either", async () => {
+    const rows = await db.as(member.claims, async (c) => (await c.query("select id from people where workspace_id = $1", [ws])).rows as { id: string }[]);
+    expect(rows.map((r) => r.id)).toEqual([P.jess]);
   });
 });
 
@@ -191,6 +121,7 @@ describe("a member's simulation equals an editor's", () => {
       }
       const team = viaTeam ? ((await one("select public.team_capacity($1) as t", [wsId])).t as Record<string, unknown[]>) : null;
       return {
+        ...(team ? { viewer: { seesEveryone: team.sees_everyone as unknown as boolean, ownPersonId: (team.own_person_id as unknown as string | null) ?? null } } : {}),
         workspace,
         process,
         revision: await one("select * from process_revisions where id = $1", [process.live_revision_id]),
@@ -213,44 +144,64 @@ describe("a member's simulation equals an editor's", () => {
     });
   }
 
-  /**
-   * The editor's result with each person's real name replaced by the label the member's run used for them (names also appear in
-   * the engine's own text, such as a key person or an overload issue), and without what may differ: overtime cost, which
-   * uses person rates (`dropRates`), and the people's own cost rates.
-   */
-  const relabelled = (editorRun: SimulationResult, memberRun: SimulationResult, dropRates: boolean) => {
-    let text = JSON.stringify(editorRun);
+  /** Replaces each person's real name with the label the member's run used for them, in any JSON (names also appear in the engine's own text). */
+  const relabel = <T,>(value: T, editorRun: SimulationResult, memberRun: SimulationResult): T => {
+    let text = JSON.stringify(value);
     for (const [id, p] of Object.entries(editorRun.resolvedPeople)) {
       text = text.split(JSON.stringify(p.name)).join(JSON.stringify(memberRun.resolvedPeople[id]!.name));
       text = text.split(p.name).join(memberRun.resolvedPeople[id]!.name);
     }
-    return strip(JSON.parse(text), dropRates);
+    return JSON.parse(text) as T;
   };
-  const strip = (r: Json, dropRates: boolean) => {
+  /** A result without what may differ for a member: people's own cost rates (the engine's overtime cost is null for the member, checked apart). */
+  const strip = (r: Json) => {
     const copy = JSON.parse(JSON.stringify(r)) as Json;
-    if (dropRates) {
-      delete copy.kpi.overtimeCost;
-      delete copy.samples.overtimeCost;
-      for (const p of Object.values(copy.resolvedPeople) as Record<string, unknown>[]) delete p.cost;
-    }
+    delete copy.kpi.overtimeCost;
+    for (const p of Object.values(copy.resolvedPeople) as Record<string, unknown>[]) delete p.cost;
     return copy;
   };
 
-  it("Larkspur: deep-equal apart from overtime cost and names and rates, and the overtime cost is close", async () => {
+  it("Larkspur: a member's numbers equal an editor's exactly, except the figures that depend on pay, which are unavailable (not 0)", async () => {
     const opts = { startDate: "2026-10-05" };
-    const viaTables = simulate(toEngineModel(await bundleFor(editor, ws, false), opts), 30, 1);
-    const viaTeam = simulate(toEngineModel(await bundleFor(member, ws, true), opts), 30, 1);
+    const editorModel = toEngineModel(await bundleFor(editor, ws, false), opts);
+    const memberModel = toEngineModel(await bundleFor(member, ws, true), opts);
+    expect(editorModel.payHidden).toBeUndefined();
+    expect(memberModel.payHidden).toBe(true);
+    // No person in the member's model has a rate, not even a role's default standing in for it.
+    for (const p of Object.values(memberModel.people ?? {})) expect(p.cost).toBeUndefined();
+    const viaTables = simulate(editorModel, 30, 1);
+    const viaTeam = simulate(memberModel, 30, 1);
     // The member's rows must carry labels, or the comparison proves nothing.
     expect(Object.values(viaTeam.resolvedPeople).some((p) => /^Team member \d+$/.test(p.name))).toBe(true);
-    const a = viaTables.kpi.overtimeCost.mean;
-    const b = viaTeam.kpi.overtimeCost.mean;
-    expect(Number.isFinite(a) && Number.isFinite(b)).toBe(true);
-    expect(a).toBeGreaterThan(0);
-    expect(Math.abs(a - b)).toBeLessThanOrEqual(0.25 * Math.abs(a));
-    expect(strip(viaTeam as unknown as Json, true)).toEqual(relabelled(viaTables, viaTeam, true));
+    // Overtime cost: a number for the editor (it is real money), unavailable for the member: null, not 0.
+    expect(viaTables.kpi.overtimeCost!.mean).toBeGreaterThan(0);
+    expect(viaTeam.kpi.overtimeCost).toBeNull();
+    expect(strip(viaTeam as unknown as Json)).toEqual(strip(relabel(viaTables, viaTables, viaTeam) as unknown as Json));
+
+    // Detected issues: the same issues, ratings, titles and evidence; the costs that need pay are unavailable.
+    const byKey = (list: DetectedIssue[]) => new Map(list.map((i) => [i.key, i]));
+    const mine = byKey(detectIssues(memberModel, viaTeam));
+    const theirs = byKey(relabel(detectIssues(editorModel, viaTables), viaTables, viaTeam));
+    expect([...mine.keys()].sort()).toEqual([...theirs.keys()].sort());
+    let hidden = 0;
+    for (const [key, m] of mine) {
+      const e = theirs.get(key)!;
+      if (m.cost.payHidden) {
+        hidden++;
+        expect(m.cost, key).toMatchObject({ perMonth: null, hoursPerMonth: null, payHidden: true });
+        // Everything else about it is the same; its evidence and metrics only drop the pay-dependent sentence and figure.
+        expect({ ...m, cost: null, evidence: null, metrics: null }, key).toEqual({ ...e, cost: null, evidence: null, metrics: null });
+        expect(m.metrics, key).not.toHaveProperty("overtime_cost");
+      } else {
+        expect(m, key).toEqual(e);
+      }
+    }
+    // Larkspur's copywriter works overtime: that issue's cost is one of the unavailable ones.
+    expect(hidden).toBeGreaterThan(0);
+    expect([...mine.values()].some((i) => i.cost.payHidden && i.key.startsWith("overtime:person:"))).toBe(true);
   });
 
-  it("Northbeam (no person rates): deep-equal with only the names removed", async () => {
+  it("Northbeam (no person rates): deep-equal with only the names removed, and the overtime cost still unavailable", async () => {
     const opts = { startDate: "2026-10-05" };
     const nbMember = await createUser(db, "nb-member@tc.example");
     await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [NORTHBEAM_WORKSPACE_ID, nbMember.id]);
@@ -258,6 +209,7 @@ describe("a member's simulation equals an editor's", () => {
     await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, nbEditor.id]);
     const viaTables = simulate(toEngineModel(await bundleFor(nbEditor, NORTHBEAM_WORKSPACE_ID, false), opts), 30, 1);
     const viaTeam = simulate(toEngineModel(await bundleFor(nbMember, NORTHBEAM_WORKSPACE_ID, true), opts), 30, 1);
-    expect(strip(viaTeam as unknown as Json, false)).toEqual(relabelled(viaTables, viaTeam, false));
+    expect(viaTeam.kpi.overtimeCost).toBeNull();
+    expect(strip(viaTeam as unknown as Json)).toEqual(strip(relabel(viaTables, viaTables, viaTeam) as unknown as Json));
   });
 });

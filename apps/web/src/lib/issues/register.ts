@@ -74,6 +74,8 @@ const NO_COST = noCost("");
  * the workspace currency. No money method shows time, or "n/a".
  */
 export function formatIssueCost(cost: IssueCost | null, currency: string): string {
+  // Depends on people's pay, which this viewer may not see (the screens add an (i); see PayHidden).
+  if (cost?.payHidden) return "—";
   if (cost?.perMonth != null) return `About ${formatWholeCurrency(cost.perMonth, currency)} a month (estimate)`;
   if (cost?.hoursPerMonth != null) return `About ${formatNumber(cost.hoursPerMonth, cost.hoursPerMonth < 10 ? 1 : 0)} h a month (estimate, time only)`;
   return "Cost per month: n/a";

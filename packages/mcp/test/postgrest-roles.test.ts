@@ -225,4 +225,47 @@ describe.skipIf(!POSTGREST_URL)("per-person privacy over PostgREST", () => {
     expect(summary.data.people).toEqual([expect.objectContaining({ id: pid.memberPerson })]);
     await mcp.close();
   });
+  it("no response a member can get contains any cost rate: team_capacity, the people endpoints and MCP (Austin, 6 Oct: no pay for members)", async () => {
+    // Give everyone but the member's own person a rate nothing else would produce; restore afterwards.
+    const before = (await db.query("select id, cost_rate::float8 as cost_rate from people where workspace_id = $1", [NORTHBEAM_WORKSPACE_ID])).rows as { id: string; cost_rate: number | null }[];
+    const rates = new Map<string, number>();
+    before.filter((p) => p.id !== pid.memberPerson).forEach((p, i) => rates.set(p.id, 913.37 + i * 11.11));
+    try {
+      for (const [id, rate] of rates) await db.query("update people set cost_rate = $1 where id = $2", [rate, id]);
+      const seen: Record<string, string> = {};
+      // The database: the function and the tables, through PostgREST as the member's session.
+      seen.team_capacity = JSON.stringify((await memberSession.rpc("team_capacity", { ws: NORTHBEAM_WORKSPACE_ID })).data);
+      seen.people = JSON.stringify((await memberSession.from("people").select("*").eq("workspace_id", NORTHBEAM_WORKSPACE_ID)).data);
+      const others = await memberSession.from("people").select("*").neq("id", pid.memberPerson);
+      const rated = await memberSession.from("people").select("id, cost_rate").not("cost_rate", "is", null);
+      seen.peopleOthers = JSON.stringify(others.data);
+      seen.peopleRated = JSON.stringify(rated.data);
+      seen.roles = JSON.stringify((await memberSession.from("roles").select("*").eq("workspace_id", NORTHBEAM_WORKSPACE_ID)).data);
+      // The app's loader.
+      seen.bundle = JSON.stringify((await bundle(memberSession)).people);
+      // MCP, as the member's own API token.
+      const mcp = await connect(memberToken, options);
+      for (const tool of ["get_workspace_summary", "get_bottlenecks", "get_facts", "list_findings", "list_issues", "get_process"]) {
+        const r = await mcp.callTool({ name: tool, arguments: {} });
+        seen[`mcp ${tool}`] = JSON.stringify(r.content);
+      }
+      const facts = await call<{ facts?: { cost: { per_month: number | null; pay_hidden?: boolean } }[] }>(mcp, "get_facts", {});
+      await mcp.close();
+      // Only their own person is readable, and Northbeam's own person has no rate here.
+      expect(others.data).toEqual([]);
+      expect(rated.data).toEqual([]);
+      for (const [where, text] of Object.entries(seen)) {
+        // No stored rate of anyone's, whatever the key it is under, and no cost_rate with a value.
+        for (const rate of rates.values()) expect(text, `${where}: ${rate}`).not.toContain(String(rate));
+        // (A role's default_cost_rate is the role, not a person's pay.)
+        expect(text, where).not.toMatch(/(?<![a-z_])cost_rate\\?"\s*:\s*[0-9]/);
+      }
+      // The figures that need pay come back unavailable: marked, not 0.
+      expect(facts.ok).toBe(true);
+      expect(facts.data?.facts?.length ?? 0).toBeGreaterThan(0);
+      for (const f of facts.data?.facts ?? []) if (f.cost.pay_hidden) expect(f.cost.per_month).toBeNull();
+    } finally {
+      for (const p of before) await db.query("update people set cost_rate = $1 where id = $2", [p.cost_rate, p.id]);
+    }
+  });
 });

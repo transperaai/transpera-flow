@@ -16,6 +16,7 @@ import { FindingDialog, type FindingDialogOptions } from "@/components/findings/
 import type { FindingsState } from "@/lib/findings/use-findings";
 import { citationsOf } from "@/lib/findings/view";
 import { Help } from "@/components/help";
+import { PayHidden } from "@/components/pay-hidden";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
@@ -151,8 +152,8 @@ export function Insights(props: InsightsProps) {
                   <b className="font-semibold break-words">{i.title}</b>
                   <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
                     <RatingPill rating={i.rating} />
-                    <span className="tabular-nums" data-cost title={i.cost.method}>
-                      {formatIssueCost(i.cost, currency)}
+                    <span className="tabular-nums" data-cost title={i.cost.payHidden ? undefined : i.cost.method}>
+                      {i.cost.payHidden ? <PayHidden /> : formatIssueCost(i.cost, currency)}
                     </span>
                     <span className="min-w-0">{i.number}</span>
                   </span>
@@ -327,7 +328,7 @@ function InsightDialog({
                 Cost
                 <Help {...INSIGHT_HELP.cost} />
               </dt>
-              <dd data-cost>{formatIssueCost(insight.cost, currency)}</dd>
+              <dd data-cost>{insight.cost.payHidden ? <PayHidden /> : formatIssueCost(insight.cost, currency)}</dd>
               <dt className="text-xs font-medium text-muted-foreground uppercase">How it&apos;s worked out</dt>
               <dd className="text-muted-foreground">
                 {ai

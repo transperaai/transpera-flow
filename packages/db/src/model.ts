@@ -280,6 +280,8 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   const churnDrivers = engineChurnDrivers(bundle);
 
   const model: EngineModel = {
+    // Members and viewers get no pay data (B1 2a): the engine leaves the figures that need it out.
+    ...(bundle.viewer && !bundle.viewer.seesEveryone ? { payHidden: true } : {}),
     horizonWeeks: s.horizon_weeks,
     hoursPerWeek: s.hours_per_week,
     leadsPerWeek: arrivalsPerWeek(bundle, services),
@@ -666,7 +668,8 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
         .map((r) => r.role_id)
         .sort(),
       capacity: p.capacity_hours_week != null ? Number(p.capacity_hours_week) : Number(p.fte) * s.hours_per_week,
-      ...(p.cost_rate != null ? { cost: Number(p.cost_rate) } : {}),
+      // A hidden rate is never used: not as 0, not as the role's default (`model.payHidden` marks what depends on it).
+      ...(p.cost_rate != null && !(bundle.viewer && !bundle.viewer.seesEveryone) ? { cost: Number(p.cost_rate) } : {}),
       ...(skillRows.length ? { skills: skillRows.map((k) => k.step_id).filter((id) => stepIds.has(id)).sort() } : {}),
       ...(leave.length ? { leave } : {}),
       ...(planned && p.start_date && p.start_date > startDate ? { from: hoursTo(p.start_date) } : {}),

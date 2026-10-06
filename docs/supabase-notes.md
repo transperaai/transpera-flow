@@ -314,8 +314,9 @@ Verified only against plain Postgres 16 (`packages/db/test/access.test.ts`, "kee
 
 Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`, `team-capacity.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-roles.test.ts`), not against a Supabase project. The select policies, `can_see_person`, `team_capacity` and `revision_history` rely on `auth.uid()` and `auth.jwt()` reading the request's claims, including inside the SECURITY DEFINER functions (the same as `workspace_role`). Check on the real project:
 
-- [ ] **As a linked member** (Settings → Access links the membership to a person), Settings → People shows exactly one person, and the Overview's numbers match an editor's (apart from overtime cost).
+- [ ] **As a linked member** (Settings → Access links the membership to a person), Settings → People shows exactly one person, and the Overview's numbers match an editor's, except the overtime cost, which shows "—" with an (i).
 - [ ] **As an editor**, People and Settings → People show everyone with real names and rates.
+- [ ] **As a member**, no cost rate of anyone else's appears anywhere (People, the network tab's `team_capacity` response, MCP): only their own.
 - [ ] **Smoke test** (post-apply check in the migration header) as an agency admin: `team_capacity` returns `sees_everyone` true and Northbeam's head count.
 - [ ] **A member's version history** shows "A team member" for other people's versions and their own name for their own.
 

@@ -163,8 +163,8 @@ export interface TeamInputs {
 
 /**
  * The whole team's simulation inputs, as `public.team_capacity` gives them to the caller: the stored values for owners,
- * editors and agency admins; for members and viewers, "Team member N" labels (their own person keeps their name) and each
- * cost rate replaced by the average for the person's role. Never email, notes, leave notes or skill efficiency.
+ * editors and agency admins; for members and viewers, "Team member N" labels (their own person keeps their name) and a null cost rate for everyone but
+ * themselves: no pay, and no average of it. Never email, notes, leave notes or skill efficiency.
  */
 export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs> {
   const r = await db.rpc("team_capacity", { ws: workspaceId });
@@ -262,7 +262,7 @@ export async function loadProcessBundle(
   revisionId: string,
 ): Promise<ProcessBundle> {
   const ws = workspace.id;
-  // People, roles held, skills, leave and assignments: the stored rows for editors, labels and averaged rates for members.
+  // People, roles held, skills, leave and assignments: the stored rows for editors, labels and no pay for members.
   const teamLoad = loadTeam(db, ws);
   const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance] =
     await Promise.all([
