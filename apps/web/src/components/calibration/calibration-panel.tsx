@@ -305,7 +305,7 @@ function LogSummary({ read }: { read: Read }) {
   return (
     <section aria-label="What the rows measure" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3 text-sm">
       <p>
-        Using <strong className="tabular-nums">{formatNumber(ready.rows.length, 0)}</strong> rows, about{" "}
+        Using <strong className="tabular-nums">{formatNumber(ready.rows.length, 0)}</strong> {ready.kind === "time_logs" ? "visits" : "rows"}, about{" "}
         <strong className="tabular-nums">{formatNumber(result.items, 0)}</strong> items, over {formatWindow(result.window)}.
         {result.inProgressAtStart > 0 &&
           ` ${result.inProgressAtStart} item${result.inProgressAtStart === 1 ? " was" : "s were"} already part-way through when the log starts, so ${result.inProgressAtStart === 1 ? "isn't" : "aren't"} counted as new leads.`}

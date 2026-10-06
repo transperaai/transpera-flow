@@ -244,6 +244,8 @@ describe("the import wizard", () => {
     await choose(page, "cal-log", "Time logs", csv(seconds));
     await readIt(page, "cal-log");
     expect(await step(page, "cal-log", "rows").innerText()).toMatch(/middle entry is [\d,]+ hours long/);
+    // Time logs count entries and visits, not rows.
+    expect(await step(page, "cal-log", "rows").innerText()).toContain("Read 12 entries, merged into 12 visits");
     await page.locator("#cal-log-unit").selectOption({ label: "Seconds" });
     // The old answer is hidden until it is read again.
     expect(await step(page, "cal-log", "rows").count()).toBe(0);

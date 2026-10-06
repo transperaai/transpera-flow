@@ -522,9 +522,19 @@ function RowsStep(props: {
     body = (
       <>
         <p className="text-sm">
-          Read <strong className="tabular-nums">{formatNumber(read.rows.length, 0)}</strong> rows. {formatNumber(read.errorCount, 0)} left out.
+          {read.entries ? (
+            <>
+              Read <strong className="tabular-nums">{formatNumber(read.entries.length, 0)}</strong> entries, merged into{" "}
+              <strong className="tabular-nums">{formatNumber(props.kept, 0)}</strong> visits (entries in a row on one step are one visit).{" "}
+            </>
+          ) : (
+            <>
+              Read <strong className="tabular-nums">{formatNumber(read.rows.length, 0)}</strong> rows.{" "}
+            </>
+          )}
+          {formatNumber(read.errorCount, 0)} left out.
           {read.dateOrder && ` Dates read ${read.dateOrder === "dmy" ? "day first" : "month first"}.`}
-          {leftByName > 0 && ` ${formatNumber(leftByName, 0)} more left out because their name isn't matched.`}
+          {leftByName > 0 && ` ${formatNumber(leftByName, 0)} more ${read.entries ? "entries " : ""}left out because their name isn't matched.`}
         </p>
         {read.note && <p className="text-sm text-muted-foreground">{read.note}</p>}
         {read.namesTotal > read.names.length && (
@@ -622,7 +632,7 @@ function RowsStep(props: {
           <>
             {props.used ? (
               <span role="status" className="text-sm font-medium">
-                Using {formatNumber(props.kept, 0)} rows from {props.fileName}.
+                Using {formatNumber(props.kept, 0)} {read.entries ? "visits" : "rows"} from {props.fileName}.
               </span>
             ) : (
               <Button type="button" disabled={props.kept === 0} onClick={props.onUse}>
