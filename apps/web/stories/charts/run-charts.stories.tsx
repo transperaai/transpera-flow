@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { KpiStrip } from "@/components/kpi-strip";
 import { UtilisationBars } from "@/components/utilisation-bars";
 import { WaitByStep } from "@/components/wait-by-step";
@@ -62,7 +63,11 @@ export const Kpis: StoryObj = {
   tags: ["visual-phone"],
   render: () => {
     const { bundle, model, result } = northbeamRun();
-    return <KpiStrip model={model} currency={bundle.workspace.settings.currency} result={result} status="done" durationMs={420} />;
+    return (
+      <TooltipProvider>
+        <KpiStrip model={model} currency={bundle.workspace.settings.currency} result={result} status="done" durationMs={420} />
+      </TooltipProvider>
+    );
   },
 };
 
@@ -70,6 +75,10 @@ export const KpisRunning: StoryObj = {
   name: "KpiStrip (running)",
   render: () => {
     const { bundle, model } = northbeamRun();
-    return <KpiStrip model={model} currency={bundle.workspace.settings.currency} result={null} status="running" />;
+    return (
+      <TooltipProvider>
+        <KpiStrip model={model} currency={bundle.workspace.settings.currency} result={null} status="running" />
+      </TooltipProvider>
+    );
   },
 };

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { ProcessEditor } from "@/lib/editor/editor";
@@ -42,17 +42,53 @@ export const GroupsOpen: StoryObj = {
   },
 };
 
+/**
+ * The highlight is applied once the map has framed itself and held still, as it is in the app (a hover, after the page has
+ * drawn): a highlight present at mount races the map's first fit, so where the map ends up would depend on timing.
+ * `data-visual-pending` tells the visual suite the story is not ready until the highlight is on.
+ */
+function HighlightMap() {
+  const { bundle } = northbeamRun();
+  const [lit, setLit] = useState<readonly string[] | null>(null);
+  const [pending, setPending] = useState(true);
+  useEffect(() => {
+    let frame = 0;
+    let last = "";
+    let still = 0;
+    let done = false;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      if (done) return;
+      const transform = document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? "";
+      still = transform && transform === last ? still + 1 : 0;
+      last = transform;
+      if (still >= 30) {
+        setLit([northbeamStepIds.audit, northbeamStepIds.ppc]);
+        settle = setTimeout(() => setPending(false), 600);
+        return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      done = true;
+      cancelAnimationFrame(frame);
+      clearTimeout(settle);
+    };
+  }, []);
+  return (
+    <div data-visual-pending={pending ? "" : undefined}>
+      <Block>
+        <ProcessCanvas bundle={bundle} highlight={lit} showPlayback={false} />
+      </Block>
+    </div>
+  );
+}
+
 /** Two steps highlighted, the rest dimmed. */
 export const Highlight: StoryObj = {
   tags: ["visual-phone"],
-  render: () => {
-    const { bundle } = northbeamRun();
-    return (
-      <Block>
-        <ProcessCanvas bundle={bundle} highlight={[northbeamStepIds.audit, northbeamStepIds.ppc]} showPlayback={false} />
-      </Block>
-    );
-  },
+  render: () => <HighlightMap />,
 };
 
 function CompanyMap_() {
