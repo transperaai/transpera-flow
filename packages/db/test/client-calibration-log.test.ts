@@ -109,6 +109,16 @@ describe("parseServicingLog", () => {
     expect(r.rows.map((x) => x.due)).toEqual([d(2026, 3, 6) + 86_400_000 - 1, d(2026, 3, 6, 9), d(2026, 3, 13) + 86_400_000 - 1]);
   });
 
+  it("reads a due of exactly midnight with no zone as a date, so work done that afternoon is on time", () => {
+    const r = parseServicingLog("task,client,due,done\nA,C1,2026-03-06 00:00:00,2026-03-06 16:00\nB,C1,2026-03-06 00:00,2026-03-06 16:00\nC,C1,2026-03-06T00:00:00Z,2026-03-06 16:00\nD,C1,2026-03-06 00:00:01,2026-03-06 16:00");
+    const [a, b, c, d] = r.rows;
+    expect(a!.done!).toBeLessThanOrEqual(a!.due);
+    expect(b!.done!).toBeLessThanOrEqual(b!.due);
+    // With a zone, or a second past midnight, it is an exact time.
+    expect(c!.due).toBe(d!.due - 1000);
+    expect(c!.done!).toBeGreaterThan(c!.due);
+  });
+
   it("reports bad rows by line, allows done before due, and refuses done before requested", () => {
     const r = parseServicingLog(
       [

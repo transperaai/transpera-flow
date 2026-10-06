@@ -2,7 +2,7 @@ import "server-only";
 import { loadProcessBySlug, type ClientCalibrationRows, type ProcessBundle } from "@transpera-flow/db";
 import { createClient } from "@/lib/supabase/server";
 import { clientCalibrationRows, simulationPlan } from "./client-rows";
-import type { StoredCheck } from "./client-request";
+import { pickLatestChecks, type StoredCheck } from "./client-request";
 
 // What the "Clients and servicing work" card (issue #41, part 2) needs: the workspace's services, client groups and
 // servicing links, the live process that simulates each service's clients, and the last client calibrations. Everything is
@@ -104,9 +104,7 @@ export async function loadLatestChecks(workspaceId: string): Promise<{ asOf: num
     .eq("workspace_id", workspaceId)
     .eq("results->>kind", "clients")
     .order("created_at", { ascending: false })
-    .limit(1);
-  const row = data?.[0];
-  if (!row || typeof row.asOf !== "number" || !Array.isArray(row.checks)) return null;
-  const checks = (row.checks as unknown[]).filter((c) => isObject(c) && (c.id === "late" || c.id === "resp" || c.id === "onb")) as unknown as StoredCheck[];
-  return checks.length ? { asOf: row.asOf, checks } : null;
+    .limit(20);
+  // The newest with checks: a clients-only calibration saves none, and must not hide an earlier one's.
+  return pickLatestChecks(data ?? []);
 }

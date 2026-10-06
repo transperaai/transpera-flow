@@ -36,7 +36,8 @@ export function mergeSolved(list: readonly BackSolvedChurn[]): BackSolvedChurn |
     multipliers: Object.assign({}, ...list.map((s) => s.multipliers)),
     why: Object.assign({}, ...list.map((s) => s.why)),
     runs: Math.max(...list.map((s) => s.runs)),
-    converged: list.every((s) => s.converged),
+    // Only a job that solved something can be approximate.
+    converged: list.filter((s) => Object.keys(s.bases).length > 0).every((s) => s.converged),
     simulated: { late: pick("late"), resp: pick("resp"), onb: pick("onb") },
     engineVersion: first.engineVersion,
     seed: first.seed,

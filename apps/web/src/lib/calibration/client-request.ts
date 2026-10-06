@@ -5,6 +5,7 @@
 // Framework-free for tests.
 
 import { CLIENTS_COLUMNS, SERVICING_LOG_COLUMNS } from "@transpera-flow/db/calibration";
+import { knownMessage } from "./client-messages";
 
 export interface FileRecord {
   fileName: string;
@@ -82,7 +83,10 @@ export interface StoredClientResults {
   run: { engineVersion: string; seed: number; reps: number; horizonWeeks: number; runs: number; converged: boolean; processIds: string[] } | null;
 }
 
-function storedProposal(p: unknown): StoredChurnProposal | null {
+/** A name as the workspace has it: case and spacing ignored, as the engine matches service names. */
+const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+function storedProposal(p: unknown, names: ReadonlySet<string>): StoredChurnProposal | null {
   if (!isObject(p) || typeof p.key !== "string" || !KEY.test(p.key) || p.kind !== "churn") return null;
   const target = isObject(p.target) ? p.target : null;
   if (!target || target.table !== "client_groups" || !isId(target.id)) return null;
@@ -93,7 +97,8 @@ function storedProposal(p: unknown): StoredChurnProposal | null {
     key: p.key,
     kind: "churn",
     target: { table: "client_groups", id: target.id },
-    subject: text(p.subject, 200) ?? "",
+    // Only a name the workspace has: nothing typed in an uploaded file.
+    subject: typeof p.subject === "string" && names.has(normName(p.subject)) ? p.subject.trim() : "",
     n: finite(p.n) ?? 0,
     leavers: finite(p.leavers) ?? 0,
     enough: p.enough === true,
@@ -103,8 +108,8 @@ function storedProposal(p: unknown): StoredChurnProposal | null {
     multiplier: finite(p.multiplier),
     proposed: finite(p.proposed),
     changed: p.changed === true,
-    blocked: text(p.blocked, 600),
-    note: text(p.note, 1000) ?? "",
+    blocked: knownMessage(text(p.blocked, 600)),
+    note: knownMessage(text(p.note, 1000)) ?? "",
     set,
     before: set ? before : null,
   };
@@ -118,17 +123,19 @@ function storedCheck(c: unknown): StoredCheck | null {
     value: finite(c.value),
     simulated: finite(c.simulated),
     enough: c.enough === true,
-    blocked: text(c.blocked, 600),
-    note: text(c.note, 1000) ?? "",
+    blocked: knownMessage(text(c.blocked, 600)),
+    note: knownMessage(text(c.note, 1000)) ?? "",
   };
 }
 
 /**
  * The calibration's results as stored: rebuilt from known fields only, never spread, so a field holding a client id (or
- * anything else the model doesn't have) is dropped. Names in the files that matched nothing are kept as counts. The notes
- * are built from numbers and the model's own names.
+ * anything else the model doesn't have) is dropped. Names in the files that matched nothing are kept as counts. A name (a proposal's
+ * subject, a service with no client group) is kept only when the workspace has it, and a note or a reason only when every sentence of it
+ * is one the calibration writes (client-messages.ts), so nothing typed in an uploaded file is stored.
  */
-export function storedClientResults(results: Record<string, unknown>): StoredClientResults {
+export function storedClientResults(results: Record<string, unknown>, knownNames: readonly string[]): StoredClientResults {
+  const names = new Set(knownNames.map(normName));
   const w = isObject(results.window) ? results.window : null;
   const window = w && finite(w.from) !== null && finite(w.to) !== null && finite(w.weeks) !== null ? { from: finite(w.from)!, to: finite(w.to)!, weeks: finite(w.weeks)! } : null;
   const run = isObject(results.run) ? results.run : null;
@@ -142,8 +149,8 @@ export function storedClientResults(results: Record<string, unknown>): StoredCli
     startsAfterAsOf: finite(results.startsAfterAsOf) ?? 0,
     unmatchedServices: count(results.unmatchedServices),
     unmatchedTasks: count(results.unmatchedTasks),
-    noGroup: (Array.isArray(results.noGroup) ? results.noGroup : []).map((n) => text(n, 200)).filter((n): n is string => n !== null).slice(0, 100),
-    proposals: (Array.isArray(results.proposals) ? results.proposals : []).slice(0, 2000).map(storedProposal).filter((p): p is StoredChurnProposal => p !== null),
+    noGroup: (Array.isArray(results.noGroup) ? results.noGroup : []).map((n) => text(n, 200)).filter((n): n is string => n !== null && names.has(normName(n))).slice(0, 100),
+    proposals: (Array.isArray(results.proposals) ? results.proposals : []).slice(0, 2000).map((p) => storedProposal(p, names)).filter((p): p is StoredChurnProposal => p !== null),
     checks: (Array.isArray(results.checks) ? results.checks : []).slice(0, 3).map(storedCheck).filter((c): c is StoredCheck => c !== null),
     run: run
       ? {
@@ -169,7 +176,8 @@ function fileRecord(input: unknown, columns: readonly string[]): FileRecord | nu
   return { fileName: fileName.trim(), columnMap: columnMap as Record<string, string>, rowCount };
 }
 
-export function parseClientApplyRequest(input: unknown): { ok: true; request: ClientApplyRequest } | { ok: false; message: string } {
+/** `knownNames`: the workspace's service (and so client group) names, the only names that are stored. */
+export function parseClientApplyRequest(input: unknown, knownNames: readonly string[]): { ok: true; request: ClientApplyRequest } | { ok: false; message: string } {
   if (!isObject(input)) return { ok: false, message: "Nothing to save." };
   const { workspaceId, results, keys } = input;
   if (!isId(workspaceId)) return { ok: false, message: "That workspace isn't valid." };
@@ -179,7 +187,7 @@ export function parseClientApplyRequest(input: unknown): { ok: true; request: Cl
   if (log === "bad") return { ok: false, message: "The servicing log's name or columns aren't valid." };
   if (!clients && !log) return { ok: false, message: "Add a clients file or a servicing log first." };
   if (!isObject(results) || !Array.isArray(results.proposals) || results.proposals.length > 2000) return { ok: false, message: "The proposals aren't valid." };
-  const stored = storedClientResults(results);
+  const stored = storedClientResults(results, knownNames);
   if (JSON.stringify(stored).length > MAX_RESULTS_BYTES) return { ok: false, message: "Too much to save at once." };
   if (keys !== undefined && keys !== null && (!Array.isArray(keys) || keys.length > 2000)) return { ok: false, message: "The ticked changes aren't valid." };
   const known = new Set(stored.proposals.map((p) => p.key));
@@ -190,4 +198,14 @@ export function parseClientApplyRequest(input: unknown): { ok: true; request: Cl
     else skipped.push({ key: typeof k === "string" ? k.slice(0, 100) : String(k), status: "not_proposed" });
   }
   return { ok: true, request: { workspaceId, clients, log, results: stored, keys: good, skipped } };
+}
+
+/** From calibrations newest first, the first whose checks aren't empty (a clients-only calibration saves none): its date and checks. */
+export function pickLatestChecks(rows: readonly { checks?: unknown; asOf?: unknown }[]): { asOf: number; checks: StoredCheck[] } | null {
+  for (const row of rows) {
+    if (typeof row.asOf !== "number" || !Array.isArray(row.checks)) continue;
+    const checks = row.checks.map(storedCheck).filter((c): c is StoredCheck => c !== null);
+    if (checks.length) return { asOf: row.asOf, checks };
+  }
+  return null;
 }

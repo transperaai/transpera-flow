@@ -6,7 +6,7 @@
 // speed against what happened. The churn changes a person ticks are applied live, marked measured. The three checks are never
 // applied. Both files are read in the browser; client ids and the rows are never stored. On the demo nothing is saved.
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { ModelError, toEngineModel, type ProcessBundle } from "@transpera-flow/db";
 import { churnProposals, measureChurn, servicingChecks, type BackSolvedChurn, type CalibrationProposal, type ServicingCheckId } from "@transpera-flow/engine";
 import {
@@ -26,7 +26,7 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { progressText, type ChurnJob } from "@/lib/calibration/backsolve";
-import { CHECK_LABELS, CHECK_ORDER, CHURN_HELP, applySummary, formatAsOf, formatChurn, formatCheckValue, formatMultiplier, initiallySelected, selectable } from "@/lib/calibration/client-view";
+import { CHECK_LABELS, CHECK_ORDER, CHURN_HELP, localDateText, applySummary, formatAsOf, formatChurn, formatCheckValue, formatMultiplier, initiallySelected, selectable } from "@/lib/calibration/client-view";
 import { useChurnBackSolve } from "@/lib/calibration/use-churn-backsolve";
 import { SOURCE_LABELS } from "@/lib/calibration/view";
 import { formatNumber } from "@/lib/format";
@@ -45,7 +45,7 @@ export interface ClientCalibrationPanelProps {
   runs: { processId: string; processName: string; serviceIds: string[]; bundle: ProcessBundle | null }[];
   history: { id: string; createdAt: string; clientsFile: string | null; logFile: string | null; proposals: number; applied: number }[];
   /** The date the clients file is true on to start with: today, or the sample's date on the demo (YYYY-MM-DD). */
-  defaultAsOf: string;
+  defaultAsOf?: string;
   /** Files to try (the demo's samples). */
   sample?: { clients: { name: string; text: string }; log: { name: string; text: string } };
 }
@@ -82,7 +82,16 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
   const canApply = mode !== "readonly";
   const [clientsSource, setClientsSource] = useState<Source | null>(null);
   const [logSource, setLogSource] = useState<Source | null>(null);
-  const [asOfText, setAsOfText] = useState(props.defaultAsOf);
+  // The date picked, or else the default: the sample's, or today by the browser's clock and zone (the server's date can be a day off;
+  // it is empty on the server render and filled in by the browser).
+  const [picked, setPicked] = useState<string | null>(null);
+  const today = useSyncExternalStore(
+    () => () => {},
+    () => localDateText(new Date()),
+    () => "",
+  );
+  const asOfText = picked ?? props.defaultAsOf ?? today;
+  const setAsOfText = setPicked;
   const [touched, setTouched] = useState<Map<string, boolean>>(new Map());
   const [applied, setApplied] = useState<Set<string>>(new Set());
   const [done, setDone] = useState<Done | null>(null);

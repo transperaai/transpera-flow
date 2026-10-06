@@ -57,10 +57,13 @@ export type ClientApplyOutcome =
   | { status: "error"; message: string };
 
 export async function recordClientCalibration(input: unknown): Promise<ClientApplyOutcome> {
-  const parsed = parseClientApplyRequest(input);
+  const supabase = await createClient();
+  // The workspace's own service names are the only names stored (RLS: members read them).
+  const workspace = typeof input === "object" && input !== null ? (input as { workspaceId?: unknown }).workspaceId : null;
+  const { data: services } = typeof workspace === "string" ? await supabase.from("services").select("name").eq("workspace_id", workspace) : { data: [] };
+  const parsed = parseClientApplyRequest(input, (services ?? []).map((s) => s.name));
   if (!parsed.ok) return { status: "error", message: parsed.message };
   const r = parsed.request;
-  const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
 

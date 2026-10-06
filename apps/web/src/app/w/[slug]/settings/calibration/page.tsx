@@ -48,7 +48,6 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
           rows={clientData.rows}
           runs={clientData.runs}
           history={clientData.history}
-          defaultAsOf={new Date().toISOString().slice(0, 10)}
         />
       )}
     </Page>

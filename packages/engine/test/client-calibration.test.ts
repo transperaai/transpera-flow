@@ -310,6 +310,40 @@ describe("servicingChecks", () => {
     });
   });
 
+  it("leaves out ad-hoc requests done after the counted-up-to date, and words a partly logged requested column accurately", () => {
+    const clients: ClientRow[] = [row("a1", "SEO retainer", T - 100 * DAY)];
+    const log = [
+      ...Array.from({ length: 10 }, (_, i) => task("Ad-hoc request", "a1", T + i * DAY, T + i * DAY + wh(4), i < 4 ? T + i * DAY - wh(10) : null)),
+      task("Ad-hoc request", "a1", ASOF, ASOF + 3 * DAY),
+    ];
+    const resp = byId(checks(log, clients), "resp");
+    expect(resp.n).toBe(10);
+    expect(resp.note).toContain("where that is logged (4 of 10)");
+    expect(resp.note).not.toContain("from when each was requested.");
+  });
+
+  it("counts onboarding only for matched, non-one-off services, and once per client even when two services start the same day", () => {
+    const start = T + DAY;
+    const clients: ClientRow[] = [
+      row("old", "SEO retainer", T - 400 * DAY),
+      ...Array.from({ length: 10 }, (_, i) => row(`n${i}`, "SEO retainer", start + i * DAY)),
+      // Starts a second service the same day: still one new client.
+      ...Array.from({ length: 10 }, (_, i) => row(`n${i}`, "PPC management", start + i * DAY)),
+      // A one-off service and a service nobody has: not onboarding.
+      ...Array.from({ length: 5 }, (_, i) => row(`o${i}`, "Audit", start + i * DAY)),
+      ...Array.from({ length: 5 }, (_, i) => row(`u${i}`, "Unknown thing", start + i * DAY)),
+    ];
+    const log: ServicingRow[] = [
+      task("Monthly report", "old", T, T + DAY),
+      ...Array.from({ length: 10 }, (_, i) => task("Monthly report", `n${i}`, start + (i + 7) * DAY, start + i * DAY + 0.6 * WEEK)),
+      ...Array.from({ length: 5 }, (_, i) => task("Monthly report", `o${i}`, start + 7 * DAY, start + 0.6 * WEEK + i * DAY)),
+      ...Array.from({ length: 5 }, (_, i) => task("Monthly report", `u${i}`, start + 7 * DAY, start + 0.6 * WEEK + i * DAY)),
+    ];
+    const onb = servicingChecks({ log, clients, links: LINKS, services: [SEO, PPC, { ...SEO, serviceId: "once", name: "Audit", pricingModel: "one_off", group: null }], hoursPerWeek: 40, asOf: ASOF }).checks.find((c) => c.id === "onb")!;
+    expect(onb.n).toBe(10);
+    expect(onb.value).toBeCloseTo(3, 9);
+  });
+
   it("lists task names that match no servicing process, and still counts them for late", () => {
     const log = [
       ...Array.from({ length: 10 }, (_, i) => task("Monthly report", `c${i}`, T + i * DAY, T + i * DAY)),
@@ -440,11 +474,30 @@ describe("backSolveChurn", () => {
     expect(seen.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("is converged when there is nothing to solve, so no proposal is called approximate", () => {
+    const none = backSolveChurn(model, {}, { reps: 4 });
+    expect(none.converged).toBe(true);
+    expect(none.runs).toBe(1);
+    expect(none.simulated.late).not.toBeNull();
+    const unknown = backSolveChurn(model, { nonesuch: 0.02 }, { reps: 4 });
+    expect(unknown.converged).toBe(true);
+  });
+
   it("makes the calibrated churn the Stable market level", () => {
     // After applying the proposal, a Stable market (100% in every month) runs exactly as no market: the calibrated churn
     // is the Stable level. Late payments are untouched by design (decision 5: no cash model yet).
     const calibrated = withBases(model, solved.bases);
-    expect(simulate(withMarketCondition(calibrated, MARKET_PRESETS.stable.factors), 6, 1)).toEqual(simulate(calibrated, 6, 1));
+    const stable = simulate(withMarketCondition(calibrated, MARKET_PRESETS.stable.factors), 6, 1);
+    expect(stable).toEqual(simulate(calibrated, 6, 1));
+    // The equality alone holds for any bases (Stable is 1.0), so also check the calibration reached the run: the clients the
+    // run loses to normal churn are the proposed bases' (below the uncalibrated model's), and each service's normal churn
+    // times today's multiplier is the measured figure.
+    const expected = Object.entries(solved.bases).reduce((sum, [sid, b]) => sum + b * model.clientGroups![sid]!.count, 0);
+    expect(stable.churnCauses!.baseClientsPerMonth).toBeCloseTo(expected, 9);
+    expect(stable.churnCauses!.baseClientsPerMonth).toBeLessThan(simulate(model, 6, 1).churnCauses!.baseClientsPerMonth);
+    for (const sid of Object.keys(MEASURED) as (keyof typeof MEASURED)[]) {
+      expect((solved.bases[sid]! * solved.multipliers[sid]!) / MEASURED[sid]).toBeCloseTo(1, 1);
+    }
   });
 
   it("leaves robustness as it was: a group's normal churn is never perturbed, sensitivity still is", () => {

@@ -96,3 +96,9 @@ export function applySummary(results: readonly { key: string; status: string }[]
   const notes = skipped.map((r) => `${subjects.get(r.key) ?? r.key}: ${STATUS_WORDS[r.status] ?? r.status}`);
   return `${head}${notes.length ? ` ${notes.join("; ")}.` : ""}`;
 }
+
+/** A date as YYYY-MM-DD by its local calendar day (not UTC), for the date input's default. */
+export function localDateText(d: Date): string {
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+}

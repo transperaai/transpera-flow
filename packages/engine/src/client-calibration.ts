@@ -351,22 +351,26 @@ export function servicingChecks(input: {
     resp = finish("resp", 0, null, "No servicing work is set to come in as ad-hoc requests.", "No servicing work is set to come in as ad-hoc requests.");
   } else {
     const responses: number[] = [];
-    const slas = new Set<number>();
+    const used: ServicingRow[] = [];
     for (const r of log) {
-      if (r.done === null) continue;
+      if (r.done === null || r.done > asOf) continue;
       const mine = takes.get(r.client);
       const matching = adhocLinks.filter((l) => norm(l.processName) === norm(r.task) && (!mine || mine.has(l.serviceId)));
       if (!matching.length) continue;
       const sla = Math.min(...matching.map((l) => l.slaHours));
       if (new Set(matching.map((l) => l.slaHours)).size > 1) slaVaries = true;
-      slas.add(sla);
+      used.push(r);
       responses.push(r.requested !== null ? hours(r.done - r.requested) : Math.max(0, hours(r.done - r.due) + sla));
     }
     const n = responses.length;
     const mean = n ? responses.reduce((a, b) => a + b, 0) / n : null;
-    const how = log.some((r) => r.requested !== null)
-      ? "from when each was requested"
-      : "taking each request as coming in one SLA before it was due, as the simulation does";
+    const withRequested = used.filter((r) => r.requested !== null).length;
+    const how =
+      withRequested === 0
+        ? "taking each request as coming in one SLA before it was due, as the simulation does"
+        : withRequested === used.length
+          ? "from when each was requested"
+          : `from when each was requested where that is logged (${withRequested} of ${used.length}), otherwise one SLA before it was due`;
     resp = finish(
       "resp",
       n,
@@ -388,8 +392,14 @@ export function servicingChecks(input: {
       list.push(r);
       rowsByClient.set(r.client, list);
     }
+    // Only clients of matched, non-one-off services, and one spell per client across them: starting two services on one day is one onboarding.
     const spells = spellsBy(
-      input.clients.filter((r) => r.started <= asOf).map((r) => ({ client: r.client, key: norm(r.service), started: r.started, ended: r.ended })),
+      input.clients
+        .filter((r) => {
+          const sv = serviceByName.get(norm(r.service));
+          return r.started <= asOf && sv && sv.pricingModel !== "one_off";
+        })
+        .map((r) => ({ client: r.client, key: "", started: r.started, ended: r.ended })),
       asOf,
     );
     const speeds: number[] = [];
@@ -528,7 +538,8 @@ export function backSolveChurn(
       break;
     }
   }
-  if (!Object.keys(b).length) converged = false;
+  // Nothing to solve (no measured services, or none could be): nothing is approximate.
+  if (!Object.keys(b).length) converged = true;
 
   const bases: Record<string, number> = {};
   const multipliers: Record<string, number> = {};

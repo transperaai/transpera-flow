@@ -3,9 +3,9 @@ import { backSolveChurn, churnProposals, measureChurn, servicingChecks, type Bac
 import { clientCalibrationServices, parseClientsFile, parseServicingLog, servicingLinks, toEngineModel } from "@transpera-flow/db";
 import { mergeSolved, progressText } from "@/lib/calibration/backsolve";
 import { clientCalibrationRows, simulationPlan } from "@/lib/calibration/client-rows";
-import { parseClientApplyRequest, storedClientResults } from "@/lib/calibration/client-request";
+import { parseClientApplyRequest, pickLatestChecks, storedClientResults } from "@/lib/calibration/client-request";
 import { SAMPLE_AS_OF, northbeamSampleClients, northbeamSampleServicingLog, sampleClientIds } from "@/lib/calibration/client-sample";
-import { CHECK_LABELS, applySummary, formatCheckValue, formatChurn, formatMultiplier, historyNote, initiallySelected, selectable } from "@/lib/calibration/client-view";
+import { CHECK_LABELS, applySummary, formatCheckValue, formatChurn, formatMultiplier, historyNote, initiallySelected, localDateText, selectable } from "@/lib/calibration/client-view";
 import { demoBundle } from "@/lib/sources/demo";
 
 // Historical data, "Clients and servicing work" (issue #41, part 2): what it ticks, how it words values and outcomes, what it
@@ -15,6 +15,8 @@ const WS = "00000000-0000-4000-8000-000000000001";
 const GROUP = "00000000-0000-4000-8000-0000000000aa";
 const GROUP2 = "00000000-0000-4000-8000-0000000000bb";
 const KEY = `churn:${GROUP}`;
+const NAMES = ["SEO retainer", "PPC management", "Web design"];
+const store = (r: Record<string, unknown>) => storedClientResults(r, NAMES);
 
 const proposal = (over: Partial<CalibrationProposal> = {}): CalibrationProposal => ({
   key: KEY,
@@ -101,22 +103,22 @@ describe("wording", () => {
 
 describe("parseClientApplyRequest", () => {
   it("accepts a ticked churn key, and none at all: the checks are saved on their own", () => {
-    const some = parseClientApplyRequest(request());
+    const some = parseClientApplyRequest(request(), NAMES);
     expect(some.ok && some.request.keys).toEqual([KEY]);
-    const none = parseClientApplyRequest(request({ keys: [] }));
+    const none = parseClientApplyRequest(request({ keys: [] }), NAMES);
     expect(none.ok && none.request.keys).toEqual([]);
-    const missing = parseClientApplyRequest(request({ keys: undefined }));
+    const missing = parseClientApplyRequest(request({ keys: undefined }), NAMES);
     expect(missing.ok && missing.request.keys).toEqual([]);
   });
 
   it("accepts one file or the other, and refuses neither", () => {
-    expect(parseClientApplyRequest(request({ log: null })).ok).toBe(true);
-    expect(parseClientApplyRequest(request({ clients: null })).ok).toBe(true);
-    expect(parseClientApplyRequest(request({ clients: null, log: null }))).toEqual({ ok: false, message: "Add a clients file or a servicing log first." });
+    expect(parseClientApplyRequest(request({ log: null }), NAMES).ok).toBe(true);
+    expect(parseClientApplyRequest(request({ clients: null }), NAMES).ok).toBe(true);
+    expect(parseClientApplyRequest(request({ clients: null, log: null }), NAMES)).toEqual({ ok: false, message: "Add a clients file or a servicing log first." });
   });
 
   it("skips ticked keys that aren't proposals, with why", () => {
-    const out = parseClientApplyRequest(request({ keys: [KEY, `churn:${GROUP2}`, "work:x", "churn:nonsense", 5] }));
+    const out = parseClientApplyRequest(request({ keys: [KEY, `churn:${GROUP2}`, "work:x", "churn:nonsense", 5] }), NAMES);
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.request.keys).toEqual([KEY]);
@@ -141,14 +143,14 @@ describe("parseClientApplyRequest", () => {
       null,
       "x",
     ]) {
-      expect(parseClientApplyRequest(bad).ok).toBe(false);
+      expect(parseClientApplyRequest(bad, NAMES).ok).toBe(false);
     }
   });
 });
 
 describe("storedClientResults (D27: client ids are never stored)", () => {
   it("rebuilds from known fields: an extra field holding a client id is dropped, and so are names that matched nothing", () => {
-    const stored = storedClientResults({
+    const stored = store({
       kind: "clients",
       asOf: 1,
       rows: 40,
@@ -177,8 +179,28 @@ describe("storedClientResults (D27: client ids are never stored)", () => {
     );
   });
 
+  it("keeps a name only when the workspace has it, and a note or reason only when it is one of our sentences: nothing typed in a file is stored", () => {
+    const stored = store({
+      noGroup: ["Web design", "Acme Corp (C-014)"],
+      proposals: [
+        { ...proposal(), subject: "C-014 Acme", note: "Client C-014 left. 4 of 20 clients left over 52 weeks (2% a month).", blocked: "Client C-014 is unknown." },
+        { ...proposal({ key: `churn:${GROUP2}`, target: { table: "client_groups", id: GROUP2 }, subject: " seo   RETAINER " }) },
+      ],
+      checks: [{ id: "late", n: 1, value: 0.1, enough: true, note: "C-014 was late", blocked: "C-014" }],
+    });
+    const text = JSON.stringify(stored);
+    expect(text).not.toContain("C-014");
+    expect(text).not.toContain("Acme");
+    expect(stored.noGroup).toEqual(["Web design"]);
+    expect(stored.proposals.map((p) => p.subject)).toEqual(["", "seo   RETAINER"]);
+    expect(stored.proposals[0]!.note).toBe("");
+    expect(stored.proposals[0]!.blocked).toBeNull();
+    expect(stored.proposals[1]!.note).toBe("4 of 20 clients left over 52 weeks (2% a month).");
+    expect(stored.checks[0]).toMatchObject({ note: "", blocked: null });
+  });
+
   it("drops proposals and checks that aren't what they claim, and takes counts as they come", () => {
-    const stored = storedClientResults({
+    const stored = store({
       unmatchedServices: 3,
       proposals: [{ ...proposal(), key: "churn:bad" }, { ...proposal(), target: { table: "steps", id: GROUP } }, { ...proposal(), kind: "work" }, proposal()],
       checks: [{ id: "other", n: 1 }, { id: "onb", n: 12, value: 8, simulated: null, enough: true, blocked: null, note: "n" }],
@@ -279,10 +301,21 @@ describe("the demo samples", () => {
       checks: checks.checks.map((c) => ({ id: c.id, n: c.n, value: c.value, simulated: solved.simulated[c.id], enough: c.enough, blocked: c.blocked, note: c.note })),
       run: { engineVersion: solved.engineVersion, seed: solved.seed, reps: solved.reps, horizonWeeks: solved.horizonWeeks, runs: solved.runs, converged: solved.converged, processIds: [bundle.process.id] },
     };
-    const parsed = parseClientApplyRequest({ workspaceId: WS, clients: FILE, log: LOG, results, keys: proposals.map((p) => p.key) });
+    const parsed = parseClientApplyRequest({ workspaceId: WS, clients: FILE, log: LOG, results, keys: proposals.map((p) => p.key) }, NAMES);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.request.keys).toHaveLength(2);
+    // Every note and reason the calibration itself writes is one the store keeps.
+    for (const p of proposals) {
+      const kept = parsed.request.results.proposals.find((x) => x.key === p.key)!;
+      expect(kept.note).toBe(p.note);
+      expect(kept.subject).toBe(p.subject);
+    }
+    for (const c of checks.checks) {
+      const kept = parsed.request.results.checks.find((x) => x.id === c.id)!;
+      expect(kept.note).toBe(c.note);
+      expect(kept.blocked).toBe(c.blocked);
+    }
     const stored = JSON.stringify(parsed.request.results);
     for (const id of sampleClientIds()) expect(stored).not.toContain(id);
     expect(stored).toContain("SEO retainer");
@@ -341,8 +374,35 @@ describe("putting the processes' answers together", () => {
     expect(mergeSolved([])).toBeNull();
   });
 
+  it("is converged unless a job that solved something is approximate", () => {
+    const merged = mergeSolved([solved({ converged: true, bases: { a: 0.01 } }), solved({ converged: false, bases: {} })])!;
+    expect(merged.converged).toBe(true);
+    expect(mergeSolved([solved({ converged: false, bases: { a: 0.01 } })])!.converged).toBe(false);
+  });
+
   it("words the progress", () => {
     expect(progressText(1, 0, 1)).toBe("Measuring today's driver pressure… (run 2 of up to 4)");
     expect(progressText(3, 1, 2)).toBe("Measuring today's driver pressure… (run 4 of up to 4, process 2 of 2)");
+  });
+});
+
+describe("the newest checks, and today's date", () => {
+  const check = { id: "late", n: 100, value: 0.15, simulated: 0.12, enough: true, blocked: null, note: "x" };
+
+  it("skips a newer clients-only calibration (no checks) for an older one that has them", () => {
+    const picked = pickLatestChecks([
+      { checks: [], asOf: 3 },
+      { checks: undefined, asOf: 2 },
+      { checks: [check], asOf: 1 },
+    ]);
+    expect(picked?.asOf).toBe(1);
+    expect(picked?.checks.map((c) => c.id)).toEqual(["late"]);
+    expect(pickLatestChecks([{ checks: [], asOf: 3 }])).toBeNull();
+    expect(pickLatestChecks([])).toBeNull();
+  });
+
+  it("writes the local calendar day, not the UTC one", () => {
+    expect(localDateText(new Date(2026, 9, 6, 0, 30))).toBe("2026-10-06");
+    expect(localDateText(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
   });
 });

@@ -15,7 +15,7 @@
 //
 //   task       required  the servicing process's name ("Monthly report")
 //   client     required  the same ids as the clients file, if both are given
-//   due        required  when it was due. A date with no time is due at the end of that day.
+//   due        required  when it was due. A date with no time, or exactly midnight (00:00) with no zone, is due at the end of that day.
 //   done       optional  when it was done; blank means not done
 //   requested  optional  when an ad-hoc request came in (for response times)
 //
@@ -197,7 +197,8 @@ export const SERVICING_LOG_HEADERS: Record<ServicingLogColumn, readonly string[]
 export type ParsedServicingLog = Parsed<ServicingLogColumn, ServicingRow>;
 
 /**
- * Reads a servicing log. A `due` with no time of day is the end of that day, so work done any time on its due day is
+ * Reads a servicing log. A `due` with no time of day, or exactly midnight with no zone (spreadsheets write a date that way),
+ * is the end of that day, so work done any time on its due day is
  * on time. Done before due is fine (early); done before requested is a row error.
  */
 export function parseServicingLog(text: string, options: { dateOrder?: DateOrder } = {}): ParsedServicingLog {
@@ -216,7 +217,9 @@ export function parseServicingLog(text: string, options: { dateOrder?: DateOrder
       if (task.length > 200 || client.length > 200) return "A task or client name is over 200 characters.";
       const dueAt = parseLogTime(dueText, order);
       if (dueAt === null) return `Can't read the due date "${dueText.slice(0, 40)}". Use 2026-03-02 09:30, or one order of day and month for every date.`;
-      const due = hasTimeOfDay(dueText) ? dueAt : dueAt + 86_400_000 - 1;
+      // A date alone, or exactly midnight with no zone (what spreadsheets write for a date), is due at the end of that day.
+      const dateOnly = !hasTimeOfDay(dueText) || /[T ]0{1,2}:00(:00(\.0+)?)?$/i.test(dueText.trim());
+      const due = dateOnly ? dueAt + 86_400_000 - 1 : dueAt;
       const doneText = cell("done");
       const done = doneText ? parseLogTime(doneText, order) : null;
       if (doneText && done === null) return `Can't read the done date "${doneText.slice(0, 40)}".`;
