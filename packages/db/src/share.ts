@@ -79,7 +79,7 @@ export interface OverviewShare extends ShareSnapshotBase {
 export interface ProcessShare extends ShareSnapshotBase {
   kind: "process";
   bundle: ProcessBundle;
-  processes: { id: string; name: string; parentId: string | null; kind?: string }[];
+  processes: { id: string; name: string; parentId: string | null; kind: "pipeline" | "servicing" }[];
   scenarios: ScenarioRow[];
   issues: IssueRow[];
   liveRevisions: Record<string, string>;

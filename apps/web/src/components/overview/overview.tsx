@@ -20,6 +20,7 @@
 // worker, only once the two runs above are first in and only when something needs them; they don't depend on the horizon
 // and are kept for the session, so changing the horizon doesn't run them again. The trend charts load on their own.
 
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import type { FirstPrinciples } from "@transpera-flow/engine";
 import dynamic from "next/dynamic";
@@ -95,7 +96,7 @@ export interface OverviewProps {
   issues: IssueRow[];
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
   sources?: SourceRow[];
-  mode: "live" | "demo" | "readonly";
+  mode: ScreenMode;
   /** The pipeline's live first principles, whose success measures rule 11 (goals met) rates. */
   firstPrinciples?: FirstPrinciples | null;
   /** The workspace's solutions and their verdicts (the demo reads the ones built in this tab instead). */
@@ -121,6 +122,8 @@ export interface OverviewProps {
   ai?: AiPanelData;
   /** The workspace's findings (B17): the accepted ones are listed by process, the proposed ones wait for review. */
   findings?: FindingRow[];
+  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  share?: ReactNode;
 }
 
 const NO_SOURCES: SourceRow[] = [];
@@ -213,6 +216,7 @@ export function Overview({
   forecastHref,
   ai,
   findings: initialFindings = NO_FINDINGS,
+  share,
 }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -386,7 +390,7 @@ export function Overview({
             processOfStep={processOfStep}
             onLight={setLit}
             registerHref={issuesHref}
-            canEdit={mode !== "readonly"}
+            canEdit={!isReadOnly(mode)}
             findings={findingsState}
             findingOptions={findingOptions}
           />
@@ -426,6 +430,7 @@ export function Overview({
         <PageHeader
           eyebrow="Overview"
           title={workspaceName}
+          actions={share}
           description={
             <span className="inline-flex items-center gap-2">
               <i aria-hidden className={`size-2 rounded-full ${simulating ? "animate-pulse bg-warn" : "bg-good"}`} />

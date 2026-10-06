@@ -14,6 +14,7 @@ import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { Help } from "@/components/help";
+import { ShareButton } from "@/components/share/share-dialog";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
 import { createClient } from "@/lib/supabase/server";
 
@@ -77,6 +78,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       forecastHref={`${base}/forecast`}
       ai={{ view: aiView, stale, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: null }}
       findings={findings}
+      share={canEdit ? <ShareButton slug={slug} kind="overview" targetId={null} what="The Overview" /> : undefined}
     />
     </SourceLinkingScope>
   );

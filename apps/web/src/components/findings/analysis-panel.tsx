@@ -7,6 +7,7 @@
 // principles, sources or the Anthropic model), then marked out of date. "Analyse again" runs it even when nothing changed
 // (it still counts against the day's runs). Viewers see the read; the review list and the buttons are for owners and editors.
 
+import { isReadOnly } from "@/lib/mode";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -71,7 +72,7 @@ export function AnalysisPanel({
   const stale = useMemo(() => Boolean(view && (ai.stale || factsChanged(view.modelHash, facts))), [view, ai.stale, facts]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const demo = mode === "demo";
-  const canEdit = mode !== "readonly" && findings.canEdit;
+  const canEdit = !isReadOnly(mode) && findings.canEdit;
   const runnable = canRun && canEdit && (demo || (configured && hasFirstPrinciples));
   const review = proposedFindings(proposed);
 

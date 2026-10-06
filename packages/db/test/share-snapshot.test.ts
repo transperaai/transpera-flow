@@ -169,7 +169,7 @@ function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
     case "overview":
       return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, findings: [finding as never], firstPrinciples: null };
     case "process":
-      return { ...base, kind, bundle: w.bundle, processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: null };
+      return { ...base, kind, bundle: w.bundle, processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: null };
     case "issue":
       return { ...base, kind, issueId: w.issue.id, bundle: w.bundle, issues: common.issues, processes: [], liveRevisions: {}, solutions };
     case "solution":

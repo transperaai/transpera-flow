@@ -13,6 +13,7 @@ import {
   LogOut,
   Network,
   Settings2,
+  Share2,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -53,6 +54,7 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   forecast: TrendingUp,
   settings: Settings2,
   access: ShieldCheck,
+  share: Share2,
 };
 
 const BADGE: Record<CountTone, string> = {
@@ -68,6 +70,8 @@ export type ShellProps =
       workspaceName: string;
       workspaces: SwitcherWorkspace[];
       canManage: boolean;
+      /** Owners, editors and agency admins: they see Share links. */
+      canEdit?: boolean;
       counts: NavCounts;
       viewer: { name: string; email: string | null } | null;
     }
@@ -79,7 +83,7 @@ export function AppSidebar(props: ShellProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const groups =
     props.mode === "live"
-      ? workspaceNav({ slug: props.slug, pathname, canManage: props.canManage, counts: props.counts })
+      ? workspaceNav({ slug: props.slug, pathname, canManage: props.canManage, canEdit: props.canEdit ?? false, counts: props.counts })
       : demoNav({ pathname, counts: props.counts });
   const larkspur = props.mode === "demo" && (pathname === "/demo/larkspur" || pathname.startsWith("/demo/larkspur/"));
 

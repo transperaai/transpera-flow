@@ -16,13 +16,14 @@ import { FindingDialog, type FindingDialogOptions } from "@/components/findings/
 import type { FindingsState } from "@/lib/findings/use-findings";
 import { citationsOf } from "@/lib/findings/view";
 import { Help } from "@/components/help";
-import { PayHidden } from "@/components/pay-hidden";
+import { IssueCostText, visibleCostMethod } from "@/components/money-hidden";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { entriesInProcess, formatIssueCost, issueLabel, registerEntries } from "@/lib/issues/register";
+import { entriesInProcess, issueLabel, registerEntries } from "@/lib/issues/register";
 import { acknowledgeDraft, acknowledgeInsight, dismissInsight, type InsightContext } from "@/lib/insights/actions";
 import type { IssueDraft, IssueFormOptions } from "@/lib/issues/draft";
 import { buildInsights, filterByRating, limitInsights, ratingCountsOf, type Insight } from "@/lib/insights/insights";
@@ -85,6 +86,7 @@ export function Insights(props: InsightsProps) {
   const [open, setOpen] = useState<string | null>(null);
   const [acking, setAcking] = useState<string | null>(null);
   const [all, setAll] = useState(false);
+  const hideMoney = useShareFinancialsHidden();
   const counts = useMemo(() => ratingCountsOf(insights ?? []), [insights]);
 
   if (!insights) {
@@ -152,8 +154,8 @@ export function Insights(props: InsightsProps) {
                   <b className="font-semibold break-words">{i.title}</b>
                   <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
                     <RatingPill rating={i.rating} />
-                    <span className="tabular-nums" data-cost title={i.cost.payHidden ? undefined : i.cost.method}>
-                      {i.cost.payHidden ? <PayHidden /> : formatIssueCost(i.cost, currency)}
+                    <span className="tabular-nums" data-cost title={visibleCostMethod(i.cost, hideMoney)}>
+                      <IssueCostText cost={i.cost} currency={currency} />
                     </span>
                     <span className="min-w-0">{i.number}</span>
                   </span>
@@ -328,7 +330,7 @@ function InsightDialog({
                 Cost
                 <Help {...INSIGHT_HELP.cost} />
               </dt>
-              <dd data-cost>{insight.cost.payHidden ? <PayHidden /> : formatIssueCost(insight.cost, currency)}</dd>
+              <dd data-cost><IssueCostText cost={insight.cost} currency={currency} /></dd>
               <dt className="text-xs font-medium text-muted-foreground uppercase">How it&apos;s worked out</dt>
               <dd className="text-muted-foreground">
                 {ai

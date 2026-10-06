@@ -4,6 +4,7 @@
 // what it does with an example. They save as you flip them, one switch at a time, per workspace; the public demo keeps
 // them in this tab. Reading sources is off until someone turns it on, because it sends quotes to the AI company.
 
+import { isReadOnly } from "@/lib/mode";
 import { useRef, useState } from "react";
 import type { AiSettings } from "@transpera-flow/db";
 import { Help } from "@/components/help";
@@ -21,7 +22,7 @@ export type AiSettingsMode = "live" | "readonly" | "demo";
 type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
 
 export function AiSettingsPage({ mode, workspaceId, initial, configured }: { mode: AiSettingsMode; workspaceId: string | null; initial: AiSettings; configured: boolean }) {
-  const canEdit = mode !== "readonly";
+  const canEdit = !isReadOnly(mode);
   const [values, setValues] = useState<AiSettings>(initial);
   const [state, setState] = useState<SaveState>({ kind: "idle" });
   // Switches flipped one after another save in order, so the last flip wins.

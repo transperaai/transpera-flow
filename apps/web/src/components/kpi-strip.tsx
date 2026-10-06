@@ -1,6 +1,8 @@
 import { Info } from "lucide-react";
 import { withClientGroups, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { PayHidden } from "@/components/pay-hidden";
+import { MoneyHidden } from "@/components/money-hidden";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCurrency, formatDays, formatInitialState, formatNumber, formatPercent, formatRange } from "@/lib/format";
@@ -25,6 +27,7 @@ interface Tile {
 }
 
 export function KpiStrip({ model, currency, result, status, durationMs }: KpiStripProps) {
+  const hideMoney = useShareFinancialsHidden();
   const k = result?.kpi;
   const whole = (v: number) => formatNumber(v, 0);
   const days = (h: number) => formatDays(h, model.hoursPerWeek);
@@ -146,7 +149,7 @@ export function KpiStrip({ model, currency, result, status, durationMs }: KpiStr
                 </Tooltip>
               )}
             </p>
-            <p className={`truncate font-display text-xl font-bold tabular-nums ${t.tone === "crit" ? "text-crit" : ""}`}>{t.payHidden ? <PayHidden /> : t.value}</p>
+            <p className={`truncate font-display text-xl font-bold tabular-nums ${t.tone === "crit" ? "text-crit" : ""}`}>{t.payHidden ? hideMoney ? <MoneyHidden /> : <PayHidden /> : t.value}</p>
             <p className="text-xs text-muted-foreground tabular-nums">{t.detail}&nbsp;</p>
           </Card>
         ))}
