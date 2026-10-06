@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { Card } from "@/components/ui/card";
 import { ForecastTimeline, TimelineLegend } from "@/components/forecast/forecast-timeline";
 import { northbeamForecast } from "../fixtures";
 
@@ -10,10 +11,10 @@ export const ByRole: StoryObj = {
   render: () => {
     const { data, cutoffs } = northbeamForecast();
     return (
-      <div className="flex w-full max-w-5xl flex-col gap-3 rounded-xl border bg-card p-4">
+      <Card className="w-full max-w-5xl gap-3 px-4 py-4">
         <ForecastTimeline data={data} rows="roles" cutoffs={cutoffs} label="How busy each role is, month by month" />
         <TimelineLegend busyLine={cutoffs[1]} hasMarkers={data.markers.length > 0} hasMarket />
-      </div>
+      </Card>
     );
   },
 };
@@ -23,9 +24,9 @@ export const ByPerson: StoryObj = {
   render: () => {
     const { data, cutoffs } = northbeamForecast();
     return (
-      <div className="w-full max-w-5xl rounded-xl border bg-card p-4">
+      <Card className="w-full max-w-5xl gap-3 px-4 py-4">
         <ForecastTimeline data={data} rows="people" cutoffs={cutoffs} label="How busy each person is, month by month" />
-      </div>
+      </Card>
     );
   },
 };

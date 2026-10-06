@@ -25,8 +25,9 @@ fixed start date). Never use `new Date()` or random data in a story.
 - `maxDiffPixels` is 0: any pixel past the per-pixel colour tolerance fails. There is no ratio that could hide a 1 px change.
 - Baselines are PNGs in `apps/web/visual/__screenshots__/<story-id>--<theme>[--400].png`.
 - **Baselines are made only inside the pinned Playwright image** `mcr.microsoft.com/playwright:v1.63.0-noble`, where Chromium,
-  fonts and freetype are identical on every run. The image tag must equal the `@playwright/test` version; the config throws
-  if they disagree, so bumping Playwright means bumping the image (in `.github/workflows/ci.yml` and here) too.
+  fonts and freetype are identical on every run. The image (tag and digest) is set in the `visual` job of
+  `.github/workflows/ci.yml`; its tag must equal the `@playwright/test` version, and the container must carry that version's
+  Chromium. The config throws if either disagrees, so bumping Playwright means bumping the image tag and digest too.
 
 ## Approving a visual change
 
@@ -39,9 +40,16 @@ git commit --allow-empty -m "Approve visual changes [visual-update]"
 git push
 ```
 
-The `visual` job sees `[visual-update]` in the commit subject, regenerates all baselines, deletes baselines whose story no
-longer exists, runs the comparison again to prove the new baselines are stable, and commits the PNGs to your branch as
-"Update visual baselines". Never on `main`.
+The `visual` job (read-only: it holds no token that can push) sees `[visual-update]` in the commit subject of a branch push,
+regenerates all baselines, deletes baselines whose story no longer exists, runs the comparison again to prove the new
+baselines are stable, and uploads them as the `visual-baselines` artifact. The small `visual-commit` job (the only one with
+write access; it runs no install or build) downloads that artifact and commits the PNGs to your branch as "Update visual
+baselines". Never on `main`, never on tags.
+
+Which pushes run `visual`: off `main`, the whole branch is diffed against its merge-base with `origin/main`, so a docs-only
+follow-up push still re-checks earlier UI changes. Touching `apps/web/{src,stories,.storybook,visual,package.json,postcss*,
+playwright.visual.config.ts,tsconfig.json,test/build-harness-stubs}`, `packages/{engine,db}/src`, `pnpm-lock.yaml`, `.nvmrc`
+or the workflows runs it.
 
 1. `git pull --rebase` to get that commit.
 2. Pushes made with `GITHUB_TOKEN` don't start workflows, so push any commit (an empty one is fine) so `check` and `visual`
@@ -51,8 +59,9 @@ longer exists, runs the comparison again to prove the new baselines are stable, 
 
 A **new story** has no baseline, so `visual` fails with "missing snapshot" until you run the approve step. That is intended.
 
-If `git push` from the job is refused (the organisation caps `GITHUB_TOKEN` at read), the job fails with a clear message and
-uploads the regenerated PNGs as the artifact `visual-baselines`; unzip it into `apps/web/visual/__screenshots__/` and commit.
+If the push from `visual-commit` is refused (the branch moved, or the organisation caps `GITHUB_TOKEN` at read), the job fails
+with a clear message; the regenerated PNGs are in the run's `visual-baselines` artifact: unzip it into
+`apps/web/visual/__screenshots__/` and commit.
 
 ## Local runs
 

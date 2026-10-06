@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { ReactNode } from "react";
 import { partOf } from "@transpera-flow/db";
+import { Card } from "@/components/ui/card";
 import { MrrChart } from "@/components/overview/charts";
 import { BeforeAfterChart, IssuesDonut, OpenedResolvedChart, TimeSplitChart } from "@/components/overview/trend-charts";
 import { impactNumbers, type SolutionImpact } from "@/lib/overview/impact-run";
@@ -11,7 +12,8 @@ import { northbeamRun } from "../fixtures";
 const meta: Meta = { title: "Charts/Overview" };
 export default meta;
 
-const Frame = ({ children }: { children: ReactNode }) => <div className="w-full max-w-3xl rounded-xl border bg-card p-4">{children}</div>;
+// The chart cards of the app: the real Card (its overflow-hidden also clips the charts' screen-reader tables).
+const Frame = ({ children }: { children: ReactNode }) => <Card className="w-full max-w-3xl gap-3 px-4 py-4">{children}</Card>;
 
 // Hand-written points: the chart takes plain arrays.
 const mrr: MrrPoint[] = [

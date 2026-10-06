@@ -1,9 +1,26 @@
 // One screenshot per story and theme (and per story at 400 px when tagged `visual-phone`), compared with the committed baselines.
 // The stories come from the built Storybook's index.json: build it first (`pnpm build-storybook`).
 import { expect, test } from "@playwright/test";
-import { readShots } from "./names.mjs";
+import { canvasTypes, readShots, readStories } from "./names.mjs";
 
 const shots = readShots();
+
+// Every node and edge type the canvas registers must be drawn by at least one map story, so adding a type without a story fails here.
+test("the map stories draw every node and edge type the canvas defines", async ({ page }) => {
+  const { nodes, edges } = canvasTypes();
+  expect(nodes.length).toBeGreaterThan(0);
+  expect(edges.length).toBeGreaterThan(0);
+  const drawn = new Set<string>();
+  for (const story of readStories().filter((s) => s.id.startsWith("map-processcanvas--"))) {
+    await page.goto(`/iframe.html?id=${story.id}&viewMode=story`);
+    await page.waitForSelector(".react-flow__viewport", { state: "attached" });
+    await page.waitForTimeout(500);
+    const classes = await page.evaluate(() => [...document.querySelectorAll('[class*="react-flow__node-"], [class*="react-flow__edge-"]')].flatMap((el) => [...el.classList]));
+    for (const c of classes) drawn.add(c);
+  }
+  const missing = [...nodes.map((n) => `react-flow__node-${n}`), ...edges.map((e) => `react-flow__edge-${e}`)].filter((c) => !drawn.has(c));
+  expect(missing, `No map story draws: ${missing.join(", ")}`).toEqual([]);
+});
 
 for (const shot of shots) {
   test(`${shot.id} ${shot.theme}${shot.phone ? " 400" : ""}`, async ({ page }) => {
@@ -51,6 +68,9 @@ for (const shot of shots) {
         { timeout: 10_000 },
       );
     }
+
+    // At 400 px nothing may make the page scroll sideways (a chart's hidden table escaping its card did, in a story frame without the real Card).
+    if (shot.phone) expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 
     await page.mouse.move(0, 0);
     const target = whole ? page : page.locator("#storybook-root");

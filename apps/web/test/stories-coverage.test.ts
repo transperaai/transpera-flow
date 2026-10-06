@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { canvasTypes } from "../visual/names.mjs";
 
 // Storybook coverage (issue #43): every shared component, chart, canvas node and edge has a story, and the visual suite
 // screenshots each story in both themes. A new `ui` component without a story fails here, so the gate can't silently shrink.
@@ -88,6 +89,12 @@ describe("Storybook coverage", () => {
     for (const [file, name] of [...SHARED, ...CHARTS]) {
       expect(read(`src/components/${file}.tsx`), `${name} in components/${file}.tsx`).toMatch(new RegExp(`export (?:async )?(?:function|const) ${name}\\b`));
     }
+  });
+
+  it("finds the node and edge types the canvas defines (the visual suite checks each is drawn by a map story)", () => {
+    const { nodes, edges } = canvasTypes();
+    expect(nodes).toEqual(expect.arrayContaining(["step", "terminal", "group"]));
+    expect(edges).toEqual(expect.arrayContaining(["branch"]));
   });
 
   it("renders the process map, which draws every node and edge type, in each map story file", () => {
