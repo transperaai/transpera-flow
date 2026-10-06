@@ -165,6 +165,24 @@ describe("a shared view, People off and Financials off", () => {
   }, 240_000);
 });
 
+describe("a shared view never shows per-person times (C6)", { timeout: 120_000 }, () => {
+  for (const kind of KINDS) {
+    it(`${kind}, People and Financials on: the snapshot came from an editor's bundle with times, and the page has none`, async () => {
+      const { page, errors } = await mount(kind, true, true);
+      await settled(page, kind);
+      const markup = await dataMarkup(page);
+      const text = await page.locator("body").innerText();
+      for (const t of [markup, text]) {
+        expect(t).not.toContain("× normal");
+        expect(t).not.toMatch(/Time on each step|faster\)|slower\)/);
+        expect(t).not.toContain("Per-person times are on in this workspace");
+      }
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+  }
+});
+
 describe("a shared view with the toggles on", () => {
   it("People on shows names (with the line gone), Financials on shows costs and no money hiding", async () => {
     const { page, errors, names } = await mount("process", true, true);

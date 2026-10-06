@@ -402,3 +402,17 @@ Verified only against plain Postgres 16 (`packages/db/test/share-links.test.ts`,
 | Size | An Overview snapshot of Northbeam or Larkspur is about 120 KB; the table refuses more than 5 MB. A `jsonb` column of that size is TOASTed and read only by `open_share_link`; the list never selects it. | The Share links page loads in the same time as any list. |
 | API tokens | A request with `api_token_id` in its claims may open a link like anyone (the counter update isn't refused) but may not insert or change one (42501, "Share links are made in the app."). PostgREST may answer 401 for the guard as for suggestions. | An MCP token's `POST /rest/v1/share_links`. |
 | Headers | `/s/:path*` sends `Referrer-Policy: no-referrer`, `Cache-Control: private, no-store` and `X-Robots-Tag: noindex, nofollow` from `next.config.ts`. | `curl -sI` a share address on the Vercel preview. |
+
+
+## Per-person times (issue #198, C6, migration 20261223000000)
+
+Verified only against plain Postgres 16 (`packages/db/test/capacity-factors.test.ts`, the role matrix, `team-capacity.test.ts` and `share-links.test.ts`).
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Partial unique indexes as identity | `person_capacity_factors` has no primary key: `(person_id, step_id) where step_id is not null` and `(person_id) where step_id is null` are the identity, so `on conflict` isn't used; `save_capacity_factor` catches `unique_violation` instead. PostgREST can't upsert on a partial index. | Insert a default twice over the API: the second is a 409 (23505). |
+| `$.**` jsonpath in a trigger | `private.share_links_no_speeds` uses `jsonb_path_exists(snapshot, 'lax $.**.personCapacityFactors[*]')` (and `person_capacity_factors`, `capacityFactor`) to refuse a snapshot at any depth; an empty list passes. | Insert a share link whose snapshot holds `personCapacityFactors: [{...}]` as an editor: 23514 "The snapshot contains per-person times." |
+| API token through a SECURITY INVOKER function | `save_capacity_factor` is refused for an API token (42501) by the `needs_review` trigger at depth 1, even though the call is a function. | Call `rpc/save_capacity_factor` with an MCP token: 42501. |
+| `null` vs `false` for the switch | `save_capacity_factor_switch` treats an absent key, JSON null and false as the same (off), compared as `coalesce(nullif(x, 'null'), 'false')`. | Save `true` over the API with base `{"capacity_factor_enabled": false}` against a workspace with no key: `saved`. |
+| Paging the export | The bundle export orders by `person_id, step_id` (nulls last) with offset paging. `(person_id, step_id)` is unique, so the order is total. | Export a workspace with more than 1,000 factors: none repeated or missing. |
+

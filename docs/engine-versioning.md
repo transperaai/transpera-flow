@@ -154,6 +154,10 @@ today's price and tenure, and the pooled billing estimate still uses the won-mon
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
 
+## Per-person times (engine 1.10.0, C6)
+
+`EnginePerson.capacityFactor` (`{ default?, steps? }`, `packages/engine/src/simulate.ts` `factorsFor`) multiplies the hands-on time a person takes on a step: `st.work() × factor`, after the draw, so no random stream moves and a model with no factors (or every factor exactly 1) takes the old path with one null check per service start. `steps` wins over `default`; a step in neither is 1; the engine accepts any positive finite number (the database limits 0.5 to 2) and throws, naming the person, for anything else. No fixture has a factor and the app's switch is off by default, so no golden number moved: 1.10.0 was approved with `golden:approve --bump` and the ledger digest equals 1.9.0's. Analytic estimates stay at the role's normal time (`offeredLoad`'s `stepHours`, work at unstaffed steps, the issues' "hands-on X h"). A saved run's `resolvedPeople` echoes the model's people, so it carries the factors of an editor's run (saved runs are editor-only).
+
 ## 24-month horizon (A58, no engine change)
 
 The horizon picker (1, 3, 6, 12 or 24 months, `apps/web/src/lib/horizon.ts`) sets `horizonWeeks` to 4, 13, 26, 52 or

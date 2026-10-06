@@ -1,6 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { larkspurPersonIds } from "@transpera-flow/db";
+import { larkspurBundle, larkspurPersonIds, type PersonCapacityFactorRow } from "@transpera-flow/db";
 import { bundleHarness } from "./build-harness";
 
 // The People page as a member sees it (B1 2b, issue #30), in a real browser with its simulation in a real Web Worker
@@ -26,7 +26,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later" }, width = 1440): Promise<{ page: Page; errors: string[] }> {
+async function mount(options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later"; factors?: PersonCapacityFactorRow[] }, width = 1440): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 1000 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -211,12 +211,74 @@ describe("Person detail", { timeout: 120_000 }, () => {
     await page.close();
   });
 
-  it("shows no capacity factor anywhere, even with the setting on (C6 is parked)", async () => {
-    const { page, errors } = await mount({ viewer: "everyone", capacityFactorEnabled: true });
+  // Per-person times (C6, #198). Larkspur's first step stands in for "a step"; Hana's 1.35 is the value no one else may see.
+  const live = larkspurBundle();
+  const STEP = live.steps[0]!;
+  const row = (person: string, step: string | null, factor: number): PersonCapacityFactorRow => ({ person_id: larkspurPersonIds[person]!, workspace_id: live.workspace.id, step_id: step, factor, source: "entered" });
+  const FACTORS = [row("freya", null, 0.9), row("freya", STEP.id, 0.8), row("hana", null, 1.35), row("jess", STEP.id, 1.2)];
+
+  it("switch off, with factors stored: no 'Time on each step' text anywhere and no [data-capacity-factors]", async () => {
+    const { page, errors } = await mount({ viewer: "everyone", capacityFactorEnabled: false, factors: FACTORS });
     await absenceDone(page);
     await busyRows(page).getByRole("button", { name: "Freya Walsh" }).click();
-    expect((await page.locator("body").innerText()).toLowerCase()).not.toContain("capacity factor");
-    expect((await page.content()).toLowerCase()).not.toContain("capacity factor");
+    expect(await page.locator("[data-person-detail]").count()).toBe(1);
+    expect(await page.locator("[data-capacity-factors]").count()).toBe(0);
+    for (const text of [await page.locator("body").innerText(), await page.locator("#root").innerHTML()]) {
+      expect(text).not.toContain("Time on each step");
+      expect(text).not.toContain("× normal");
+      expect(text.toLowerCase()).not.toContain("capacity factor");
+    }
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("switch on, a viewer who sees everyone: a person with times shows them in their detail; one without shows nothing; the How busy table has none", async () => {
+    const { page, errors } = await mount({ viewer: "everyone", capacityFactorEnabled: true, factors: FACTORS });
+    await absenceDone(page);
+    // No note for someone who sees everyone, and nothing in the table.
+    expect(await page.locator("[data-speeds-normalised]").count()).toBe(0);
+    const table = await page.locator("[data-how-busy] table").innerText();
+    expect(table).not.toMatch(/×|faster|slower|normal time/);
+    await busyRows(page).getByRole("button", { name: "Freya Walsh" }).click();
+    const detail = page.locator("[data-person-detail] [data-capacity-factors]");
+    const text = await detail.innerText();
+    expect(text).toContain("Time on each step");
+    expect(text).toContain("Every step: 0.9 × normal (10% faster)");
+    expect(text).toContain(`${STEP.name}: 0.8 × normal (20% faster)`);
+    // The default comes first, and Jess's and Hana's values are not in Freya's detail.
+    expect(text.indexOf("Every step")).toBeLessThan(text.indexOf(STEP.name));
+    expect(text).not.toMatch(/1\.35|\b1\.2 ×/);
+    // The (i) is there.
+    expect(await detail.getByRole("button").count()).toBeGreaterThan(0);
+    // Opening someone without any closes Freya's and shows nothing.
+    await busyRows(page).getByRole("button", { name: "Priti Desai" }).click();
+    expect(await page.locator("[data-capacity-factors]").count()).toBe(0);
+    expect(await page.locator("[data-how-busy] table").innerText()).not.toMatch(/×|faster|slower/);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  for (const width of [1440, 400]) {
+    it(`switch on, a member (own times only): their detail shows them, the note is visible, nobody else's value appears (${width}px)`, async () => {
+      const { page, errors } = await mount({ viewer: "own", own: "jess", capacityFactorEnabled: true, factors: FACTORS }, width);
+      expect(await page.locator("[data-speeds-normalised]").innerText()).toContain("Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what owners and editors see.");
+      await busyRows(page).getByRole("button", { name: "Jess Monroe" }).click();
+      const text = await page.locator("[data-capacity-factors]").innerText();
+      expect(text).toContain(`${STEP.name}: 1.2 × normal (20% slower)`);
+      for (const t of [await page.locator("body").innerText(), await page.locator("#root").innerHTML()]) {
+        expect(t).not.toContain("1.35");
+        expect(t).not.toContain("0.9 ×");
+      }
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+  }
+
+  it("switch on, a member linked to nobody: the note shows, no times", async () => {
+    const { page, errors } = await mount({ viewer: "unlinked", capacityFactorEnabled: true, factors: FACTORS });
+    expect(await page.locator("[data-speeds-normalised]").count()).toBe(1);
+    expect(await page.locator("[data-capacity-factors]").count()).toBe(0);
+    expect(await page.locator("#root").innerHTML()).not.toContain("1.35");
     expect(errors).toEqual([]);
     await page.close();
   });

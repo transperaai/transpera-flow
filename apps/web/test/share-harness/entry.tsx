@@ -66,7 +66,12 @@ function editorBundle(): ProcessBundle {
   b.clients = (b.clients ?? []).map((c) => ({ ...c, notes: `Renewal talk with ${c.name}` }));
   b.roles = b.roles.map((r) => ({ ...r, default_cost_rate: r.default_cost_rate || 55 }));
   b.services = b.services.map((s) => ({ ...s, margin: 0.3 }));
-  b.workspace = { ...b.workspace, settings: { ...b.workspace.settings, overhead_monthly: 9000, target_margin: 0.25 } as never };
+  b.workspace = { ...b.workspace, settings: { ...b.workspace.settings, overhead_monthly: 9000, target_margin: 0.25, capacity_factor_enabled: true } as never };
+  // An editor's per-person times (C6): the switch is on and people have times; no link may carry them.
+  b.personCapacityFactors = b.people.flatMap((p, i) => [
+    { person_id: p.id, workspace_id: b.workspace.id, step_id: null, factor: 0.9, source: "entered" },
+    ...(i === 0 ? [{ person_id: p.id, workspace_id: b.workspace.id, step_id: b.steps[0]!.id, factor: 1.35, source: "entered" }] : []),
+  ]);
   return b;
 }
 
