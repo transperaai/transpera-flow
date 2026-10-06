@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runResults, toEngineModel } from "@transpera-flow/db";
 import { simulate, type DetectedIssue } from "@transpera-flow/engine";
+import { labelNames } from "@transpera-flow/db";
 import { aliasesFor, applyAliases, buildAiInput, squeeze } from "@/lib/ai/facts";
 import { analyseWithAi, quotationProblems, screenOutput, type AiDraftRequest, type AiModel } from "@/lib/ai/analyse";
 import { aiInputForRun, quotesFromBundle } from "@/lib/ai/input";
@@ -579,6 +580,45 @@ describe("names stay out of what is saved (B1 2b)", () => {
     const other = labelled();
     const swapped = { ...input, personLabels: { ...input.personLabels, "Team member A": "someone-else" } };
     expect((await analyseWithAi(swapped, fake(() => other))).insights[0]!.key).not.toBe(out.insights[0]!.key);
+  });
+
+  it("engine text that quotes what people typed gets first names aliased: checks, measure names and success findings; step names don't", () => {
+    const [p] = bundle.people;
+    const base = findings[0]!;
+    const made = buildAiInput({
+      processName: "Lead to live",
+      results: runResults(model, result, "GBP"),
+      findings: [
+        { ...base, key: "success:measure:m1", title: "Goal not reliably met: Maya reviews each pitch", evidence: "Maya reviews each pitch is met in 40% of runs." },
+        { ...base, key: "spof:step:s1", title: "Mark invoice paid waits", evidence: "Mark invoice paid is slow." },
+      ],
+      steps: [{ id: AUDIT, name: "Mark invoice paid" }],
+      roles: [],
+      people: [{ id: p!.id, name: "Maya Shah" }],
+      firstPrinciples: null,
+      flags: { job: [], truths: [{ level: "warn", code: "truth_no_source", text: "“Maya checks every quote” is marked as a truth but has no source" }], reqs: [], del: [], saa: [], why: [], measures: [] },
+      measures: [{ measure: { id: "m1", text: "Maya reviews each pitch", kpi: null, comparator: "atLeast", target: 1, horizon: "" }, check: null, metShare: 0.4 }],
+      quotes: [],
+      marketOn: false,
+      currency: "GBP",
+    });
+    const sent = made.payload as Record<string, any>;
+    expect(sent.firstPrinciplesChecks[0].text).toBe("“Team member A checks every quote” is marked as a truth but has no source");
+    expect(sent.successMeasures[0].measure).toBe("Team member A reviews each pitch");
+    expect(sent.findings[0].title).toBe("Goal not reliably met: Team member A reviews each pitch");
+    expect(sent.findings[0].evidence).toBe("Team member A reviews each pitch is met in 40% of runs.");
+    expect(made.facts[0]!.text).toContain("Team member A reviews each pitch");
+    // An engine finding that is not a success measure: "Mark" isn't a name here, and Maya isn't in it.
+    expect(sent.findings[1].title).toBe("Mark invoice paid waits");
+    expect(JSON.stringify(made.payload)).not.toContain("Maya");
+  });
+
+  it("a one-word name matches only as written, in aliasesFor and in labelNames; a multi-word name still matches in any case", () => {
+    const people = [{ id: "00000000-0000-4000-8000-000000000001", name: "Will" }, { id: "00000000-0000-4000-8000-000000000002", name: "Ann Lee" }];
+    const aliases = aliasesFor(people);
+    expect(applyAliases("Will is at capacity; this will get worse. ANN LEE too.", aliases)).toBe("Team member A is at capacity; this will get worse. Team member B too.");
+    const labels = { "Team member A": people[0]!.id, "Team member B": people[1]!.id };
+    expect(labelNames("Will is at capacity; this will get worse. ann lee too.", labels, people)).toBe("Team member A is at capacity; this will get worse. Team member B too.");
   });
 });
 

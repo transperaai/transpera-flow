@@ -106,18 +106,18 @@ export function labelNames(text: string, labels: PersonLabels, people: readonly 
     firsts.set(f.toLowerCase(), (firsts.get(f.toLowerCase()) ?? 0) + 1);
   }
   const byId = new Map(people.map((p) => [p.id.toLowerCase(), p]));
-  const aliases: { name: string; label: string; first?: boolean }[] = [];
+  const aliases: { name: string; label: string; first?: boolean; exact?: boolean }[] = [];
   for (const [label, id] of Object.entries(labels)) {
     const person = byId.get(id.toLowerCase());
     if (!person) continue;
     const full = person.name.trim();
-    if (full.length >= 3) aliases.push({ name: full, label });
+    if (full.length >= 3) aliases.push({ name: full, label, ...(/\s/.test(full) ? {} : { exact: true }) });
     const first = full.split(/\s+/)[0] ?? "";
     if (first.length >= 3 && first !== full && firsts.get(first.toLowerCase()) === 1) aliases.push({ name: first, label, first: true });
   }
   let out = text;
   for (const a of aliases.sort((x, y) => y.name.length - x.name.length)) {
-    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(a.name)}${NO_LETTER_OR_DIGIT_AFTER}`, a.first ? "gu" : "giu"), a.label);
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(a.name)}${NO_LETTER_OR_DIGIT_AFTER}`, a.first || a.exact ? "gu" : "giu"), a.label);
   }
   return out;
 }

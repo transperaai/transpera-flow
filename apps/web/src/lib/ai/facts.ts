@@ -58,7 +58,7 @@ export interface AiInput {
   /** What its text is checked against. */
   check: CheckContext;
   /** Real name → label, for the payload. */
-  aliases: { id: string; name: string; label: string; first?: boolean }[];
+  aliases: { id: string; name: string; label: string; first?: boolean; exact?: boolean }[];
   /** Every person's label → their id: what is saved beside the text, so names go back at render per reader (B1 2b). */
   personLabels: PersonLabels;
   /** The step ids it may point at, with their names. */
@@ -88,8 +88,8 @@ export function letters(i: number): string {
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** People's names to labels: the full name, and the first name where it is unambiguous and long enough to be a name. */
-export function aliasesFor(people: readonly { id: string; name: string }[]): { id: string; name: string; label: string; first?: boolean }[] {
-  const out: { id: string; name: string; label: string; first?: boolean }[] = [];
+export function aliasesFor(people: readonly { id: string; name: string }[]): { id: string; name: string; label: string; first?: boolean; exact?: boolean }[] {
+  const out: { id: string; name: string; label: string; first?: boolean; exact?: boolean }[] = [];
   const firsts = new Map<string, number>();
   for (const p of people) {
     const f = p.name.trim().split(/\s+/)[0] ?? "";
@@ -98,7 +98,8 @@ export function aliasesFor(people: readonly { id: string; name: string }[]): { i
   people.forEach((p, i) => {
     const label = `Team member ${i < 26 ? String.fromCharCode(65 + i) : `${i + 1}`}`;
     const full = p.name.trim();
-    if (full.length >= 3) out.push({ id: p.id, name: full, label });
+    // A one-word name is a word too ("Will"): it matches only as written, like a first name.
+    if (full.length >= 3) out.push({ id: p.id, name: full, label, ...(/\s/.test(full) ? {} : { exact: true }) });
     const first = full.split(/\s+/)[0] ?? "";
     if (first.length >= 3 && first !== full && firsts.get(first.toLowerCase()) === 1) out.push({ id: p.id, name: first, label, first: true });
   });
@@ -109,10 +110,10 @@ export function aliasesFor(people: readonly { id: string; name: string }[]): { i
  * Names to labels in a text (longest names first, whole words only). A full name matches in any case; a first name only
  * as written, so "Will" the name is relabelled but "will" the word, and "Mark" in "Mark invoice paid" only as capitalised.
  */
-export function applyAliases(text: string, aliases: readonly { name: string; label: string; first?: boolean }[]): string {
+export function applyAliases(text: string, aliases: readonly { name: string; label: string; first?: boolean; exact?: boolean }[]): string {
   let out = text;
   for (const a of [...aliases].sort((x, y) => y.name.length - x.name.length)) {
-    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(a.name)}(?![\\p{L}\\p{N}])`, a.first ? "gu" : "giu"), a.label);
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(a.name)}(?![\\p{L}\\p{N}])`, a.first || a.exact ? "gu" : "giu"), a.label);
   }
   return out;
 }
@@ -196,19 +197,27 @@ export function buildAiInput(args: AiInputArgs): AiInput {
   const { results: r, findings, steps, flags, measures } = args;
   const head = headlineResults(r);
   const stepName = (id: string | null) => steps.find((s) => s.id === id)?.name ?? null;
+  const aliases = aliasesFor(args.people);
+  // The engine's text (a finding's title and evidence, step and role names) names people by their full name, which is what
+  // the model is given from the model; a first name in it is just a word ("Mark invoice paid"). Only what people typed
+  // (quotes from sources, first principles) also gets first names aliased.
+  const fullNames = aliases.filter((a) => !a.first);
+  const typed = (s: string) => applyAliases(s, aliases);
 
+  // A "success:" finding's title (and evidence) embeds the measure's name, which a person typed: it gets the typed-text aliases.
+  const wording = (f: { key: string }) => (f.key.startsWith("success:") ? typed : (x: string) => x);
   const findingsPayload = findings.map((f) => ({
-    title: f.title,
+    title: wording(f)(f.title),
     rating: RATING_LABELS[f.rating],
     step: stepName(f.stepId),
-    evidence: f.evidence,
+    evidence: wording(f)(f.evidence),
     cost: formatIssueCost(f.cost, args.currency),
   }));
   const checks = flags
-    ? FP_STEPS.flatMap((s) => (flags[s.key as FpStepKey] ?? []).map((f) => ({ step: s.key, level: f.level, check: f.code, text: f.text })))
+    ? FP_STEPS.flatMap((s) => (flags[s.key as FpStepKey] ?? []).map((f) => ({ step: s.key, level: f.level, check: f.code, text: typed(f.text) })))
     : [];
   const measuresPayload = measures.map((m) => ({
-    measure: m.measure.text || (m.measure.kpi ?? "Success measure"),
+    measure: typed(m.measure.text || (m.measure.kpi ?? "Success measure")),
     target: describeTarget(m.measure),
     today: m.metShare === null ? "the simulation can't check this one" : `met in ${formatPercent(m.metShare)} of runs`,
   }));
@@ -228,15 +237,9 @@ export function buildAiInput(args: AiInputArgs): AiInput {
     .map((q) => ({ step: q.step, quote: q.quote.trim().slice(0, MAX_QUOTE_CHARS) }))
     .filter((q) => q.quote)
     .map((q, i) => ({ id: `quote-${letters(i)}`, ...q }));
-  const aliases = aliasesFor(args.people);
-  // The engine's text (a finding's title and evidence, step and role names) names people by their full name, which is what
-  // the model is given from the model; a first name in it is just a word ("Mark invoice paid"). Only what people typed
-  // (quotes from sources, first principles) also gets first names aliased.
-  const fullNames = aliases.filter((a) => !a.first);
-  const typed = (s: string) => applyAliases(s, aliases);
   // The facts the model cites by id (B17): each finding of the engine's, by an id with no digits in it. Their text is saved
   // with the finding, so it is labelled like everything else the model wrote: names go back at render (B1 2b).
-  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: applyAliases(`${f.title}. ${f.evidence}`.slice(0, 600), fullNames) }));
+  const factRefs: AiFactRef[] = findings.map((f, i) => ({ id: `fact-${letters(i)}`, key: f.key, text: applyAliases(`${f.title}. ${f.evidence}`.slice(0, 600), f.key.startsWith("success:") ? aliases : fullNames) }));
   const payload = mapStrings(
     {
       ...factPayload,
