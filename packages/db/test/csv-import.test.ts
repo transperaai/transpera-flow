@@ -646,6 +646,12 @@ describe("parseDuration", () => {
     expect(parseDuration("3600", "seconds")).toBe(1);
     expect(parseDuration("1800", "seconds")).toBe(0.5);
     expect(parseDuration("1.5")).toBe(1.5);
+    // A comma is a thousands separator in minutes and seconds, and a decimal comma in hours.
+    expect(parseDuration("1,500", "seconds")).toBeCloseTo(1500 / 3600, 6);
+    expect(parseDuration("1,500", "minutes")).toBe(25);
+    expect(parseDuration("99,999,999", "seconds")).toBeNull();
+    expect(parseDuration("1,500")).toBe(1.5);
+    expect(parseDuration("1,5", "seconds")).toBeCloseTo(1.5 / 3600, 6);
     // Forms with a unit don't depend on the choice.
     expect(parseDuration("1:30", "seconds")).toBe(1.5);
     expect(parseDuration("90m", "seconds")).toBe(1.5);

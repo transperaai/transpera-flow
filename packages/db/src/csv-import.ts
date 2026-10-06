@@ -441,7 +441,9 @@ export function parseDuration(text: string, bare: DurationUnit = "hours"): numbe
   if (!s) return null;
   let hours: number | null = null;
   let m: RegExpExecArray | null;
-  if ((m = /^(\d+(?:[.,]\d+)?|[.,]\d+)$/.exec(s))) hours = Number(m[1]!.replace(",", ".")) / UNIT_HOURS[bare];
+  // In minutes or seconds a comma is a thousands separator (1,500 seconds), as seconds and minutes are whole; in hours it is a decimal comma (1,5).
+  if (bare !== "hours" && /^\d{1,3}(,\d{3})+$/.test(s)) hours = Number(s.replace(/,/g, "")) / UNIT_HOURS[bare];
+  else if ((m = /^(\d+(?:[.,]\d+)?|[.,]\d+)$/.exec(s))) hours = Number(m[1]!.replace(",", ".")) / UNIT_HOURS[bare];
   else if ((m = /^(\d+)\s*h\s*([0-5]?\d)$/.exec(s))) hours = Number(m[1]) + Number(m[2]) / 60;
   else if ((m = /^(\d+):([0-5]\d)(?::([0-5]\d))?$/.exec(s))) hours = Number(m[1]) + Number(m[2]) / 60 + Number(m[3] ?? 0) / 3600;
   else if ((m = /^(?:(\d+(?:[.,]\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+(?:[.,]\d+)?)\s*m(?:ins?|inutes?)?)?$/.exec(s)) && (m[1] !== undefined || m[2] !== undefined)) {
