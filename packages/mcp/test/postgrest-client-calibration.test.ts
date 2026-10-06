@@ -74,10 +74,12 @@ describe.skipIf(!POSTGREST_URL)("calibration from a clients file over PostgREST"
     await admin.query("insert into lead_sources (workspace_id, name, volume_week, conversion_to_qualified) values ($1, 'Website', 3, 0.5)", [ids.ws]);
     ids.service = (await one("insert into services (workspace_id, name, price, churn_monthly_base) values ($1, 'Retainer', 1000, 0.03) returning id", [ids.ws])).id as string;
     ids.group = (
-      await one("insert into client_groups (workspace_id, service_id, client_count, fee, churn_monthly, stay_months, starting_health) values ($1, $2, 24, 1000, 0.03, 12, 70) returning id", [
-        ids.ws,
-        ids.service,
-      ])
+      // As the seed does: an insert that gives no provenance is stamped `entered` (a person typed it), so say these are estimates.
+      await one(
+        `insert into client_groups (workspace_id, service_id, client_count, fee, churn_monthly, stay_months, starting_health, provenance)
+         values ($1, $2, 24, 1000, 0.03, 12, 70, $3) returning id`,
+        [ids.ws, ids.service, Object.fromEntries(["client_count", "fee", "churn_monthly", "stay_months", "starting_health"].map((c) => [c, { source: "estimated" }]))],
+      )
     ).id as string;
     ids.proc = (await one("insert into processes (workspace_id, name, kind, entity_name) values ($1, 'Enquiry to signed', 'pipeline', 'enquiry') returning id", [ids.ws])).id as string;
     ids.rev = (await one("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 1, 'published') returning id", [ids.ws, ids.proc])).id as string;
