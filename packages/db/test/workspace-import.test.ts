@@ -802,6 +802,9 @@ describe("limits", () => {
     ["skills", (p: ImportPlan) => { p.person_skills = rows(L.personSkills + 1); }],
     ["client assignments", (p: ImportPlan) => { p.client_assignments = rows(L.clientAssignments + 1); }],
     ["source links", (p: ImportPlan) => { p.source_links = rows(L.sourceLinks + 1); }],
+    ["client services", (p: ImportPlan) => { p.client_services = rows(L.clientServices + 1); }],
+    ["leave entries", (p: ImportPlan) => { p.person_leave = rows(L.personLeave + 1); }],
+    ["other company rows", (p: ImportPlan) => { p.lead_sources = rows(L.companyOther + 1); }],
   ])("refuses one more than the limit of %s", async (label, mutate) => {
     await over(label, mutate);
   });
@@ -826,67 +829,4 @@ describe("limits", () => {
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/2" }))).code).toBe("22023");
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/1" }))).code).toBe("22023");
   });
-});
-
-/** A synthetic plan with `L` rows of everything (the limits, or fewer). */
-function syntheticPlan(L: Record<keyof typeof WORKSPACE_IMPORT_LIMITS, number>) {
-    const id = (n: number) => `${PLACEHOLDER_PREFIX}${n.toString(16).padStart(12, "0")}`;
-    let next = 1;
-    const mk = () => id(next++);
-    const when = "2026-01-01T00:00:00Z";
-    const role = mk();
-    const roles = [{ id: role, name: "Role", color: "#336699", created_at: when }, ...[1, 2].map((i) => ({ id: mk(), name: `Role ${i}`, color: "#336699", created_at: when }))];
-    const people = Array.from({ length: L.people }, (_, i) => ({ id: mk(), name: `Person ${i}`, created_at: when }));
-    const clients = Array.from({ length: L.clients }, (_, i) => ({ id: mk(), name: `Client ${i}`, created_at: when }));
-    const stepsPer = Math.floor(L.steps / L.processes);
-    const processes = Array.from({ length: L.processes }, (_, p) => {
-      const stepIds = Array.from({ length: stepsPer }, () => mk());
-      const steps = stepIds.map((sid, i) => ({ id: sid, name: `S${i}`, kind: i === 0 ? "start" : i === stepsPer - 1 ? "end" : "task", outcome: i === stepsPer - 1 ? "done" : null, work_hours: 1, wait_hours: 0, rework_rate: 0, x: i * 10, y: 0, role_id: i > 0 && i < stepsPer - 1 ? role : null }));
-      // 9 chain edges and 11 more, 20 per process: 4,000 in all.
-      const edges: Row[] = [];
-      for (let i = 0; i + 1 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 1], probability: 1 });
-      for (let i = 0; edges.length < L.edges / L.processes && i + 2 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 2], probability: 0 });
-      for (let i = 0; edges.length < L.edges / L.processes && i + 3 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 3], probability: 0 });
-      for (let i = 0; edges.length < L.edges / L.processes && i + 4 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 4], probability: 0 });
-      return { id: mk(), parent_process_id: null, name: `Process ${p}`, kind: "pipeline", entity_name: "item", description: null, archived: p % 20 === 0, layout: {}, steps, edges, first_principles: null };
-    });
-    const sourceIds = Array.from({ length: L.sources }, () => mk());
-    const sources = sourceIds.map((sid, i) => ({ id: sid, kind: "notes", title: `Source ${i}`, body: "x".repeat(Math.floor(L.sourceChars / L.sources)), created_at: when }));
-    const issues = Array.from({ length: L.issues }, (_, i) => ({
-      id: mk(), type: "idea", title: `Issue ${i}`, created_at: when, source: "manual", status: "open",
-      links: [{ process_id: processes[i % processes.length]!.id, step_id: processes[i % processes.length]!.steps[1]!.id }], owner_ids: [people[i % people.length]!.id], source_ids: [sourceIds[i % sourceIds.length]],
-    }));
-    const scenarios = Array.from({ length: L.scenarios }, (_, i) => ({ id: mk(), name: `Scenario ${i}`, patch: [{ path: "demand.leads_per_week", op: "multiply", value: 1 + i / 1000 }], created_at: when }));
-    const blocks = Array.from({ length: L.blocks }, (_, i) => ({ id: mk(), name: `Block ${i}`, type: "manual", steps: { steps: [], edges: [] }, created_at: when }));
-    const suggestions = Array.from({ length: L.suggestions }, (_, i) => ({ id: mk(), target_table: "people", target_id: people[i % people.length]!.id, patch: { set: { notes: `n${i}` } }, evidence: [], note: null, created_at: when }));
-    const proposals = Array.from({ length: L.proposals }, (_, i) => ({ id: mk(), kind: "issue", title: `Proposal ${i}`, detail: "d", payload: {}, evidence: [], created_at: when }));
-    // The link tables, each at its limit: 3 roles a person, 10 skills a person, one assignment a client, 2,000 source links.
-    const person_roles = people.flatMap((p) => roles.map((r) => ({ person_id: p.id, role_id: r.id, created_at: when }))).slice(0, L.personRoles);
-    const allSteps = processes.flatMap((p) => p.steps.map((st) => st.id));
-    const person_skills = people.flatMap((p, i) => Array.from({ length: 10 }, (_, k) => ({ person_id: p.id, step_id: allSteps[(i * 10 + k) % allSteps.length], efficiency: 1, created_at: when }))).slice(0, L.personSkills);
-    const client_assignments = clients.map((c, i) => ({ client_id: c.id, role_id: role, person_id: people[i % people.length]!.id, created_at: when })).slice(0, L.clientAssignments);
-    const source_links = sourceIds.flatMap((sid) => processes.map((p) => ({ id: mk(), source_id: sid, kind: "process", process_id: p.id }))).slice(0, L.sourceLinks);
-    const plan = {
-      format: "transpera-workspace-import/1", settings: null, roles, people, person_roles, person_leave: [], lead_sources: [], seasonality: [], demand_settings: null, churn_drivers: [],
-      market_conditions: [], market_schedule: [], lever_settings: null, analysis_rules: null, clients, sources, processes, scenarios, blocks, issues, services: [], service_servicing: [],
-      client_groups: [], client_services: [], client_assignments, person_skills, source_links, suggestions, proposals,
-    };
-  return plan;
-}
-
-describe("performance", () => {
-  it("restores a synthetic plan at every limit well inside the 8 s statement timeout (budget 3 s)", async () => {
-    const L = WORKSPACE_IMPORT_LIMITS;
-    const plan = syntheticPlan(L);
-    expect(JSON.stringify(plan).length).toBeLessThan(L.planBytes);
-    const ws = await newWorkspace();
-    const t0 = Date.now();
-    const result = await restoreAs(admin, ws, plan);
-    const ms = Date.now() - t0;
-    console.log(`restore at every limit: ${ms} ms, ${JSON.stringify(plan).length} bytes of plan`);
-    expect(ms).toBeLessThan(3000);
-    expect(result.processes.length).toBe(L.processes);
-    expect(await count("steps", ws, "process_id in (select id from processes where not is_company)")).toBe(L.steps);
-    for (const [t, n] of [["person_roles", L.personRoles], ["person_skills", L.personSkills], ["client_assignments", L.clientAssignments], ["source_links", L.sourceLinks]] as const) expect(await count(t, ws, t === "source_links" ? "kind = 'process'" : "true"), t).toBe(n);
-  }, 60_000);
 });

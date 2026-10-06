@@ -19,12 +19,14 @@ import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./works
 export const PLAN_FORMAT = "transpera-workspace-import/1";
 
 /**
- * What a restore will take. The brief's starting values (200 processes, 2,000 steps, 4,000 edges, 300 sources of 5,000,000
- * characters, 2,000 issues, 1,000 people, 5,000 clients, 500 scenarios, 500 blocks, 1,000 suggestions, 500 proposals) took 6 s on
- * the test Postgres with every limit reached at once (200 processes alone 2.6 s, growing faster than linearly because the
- * company map's sync runs for each new process; 2,000 issues 2.7 s). That is over the 3 s budget of the performance test in
- * packages/db/test/workspace-import.test.ts (Supabase's `authenticated` role stops a statement at 8 s), so the counts below are
- * lower: they restore in about 2 s there. The SQL function checks the same numbers.
+ * What a restore will take. B10 2b started at 50 processes, 500 steps and so on (they restored in about 2 s, inside a 3 s budget
+ * because Supabase stops a statement by `authenticated` at 8 s). B21 (#203) raised them to three times that. The brief sized them at
+ * four times from a plan without leave, client services and the small company tables (6.6 to 7.3 s with the faster id remap and the
+ * `audit_log (target_id)` index); the performance test fills every table (packages/db/test/workspace-import-large.test.ts) and took
+ * 14.9 to 17.7 s at four times on the shared test Postgres, over its 15 s local budget, so every limit was lowered by a quarter
+ * (about 9.6 s of database CPU at three times). The function has its own `statement_timeout` of 40 s. `sourceChars` is only 1.5
+ * times: prose gzips to a third, so more would push a real backup past the 4 MB request limit before any other limit. The SQL
+ * function checks the same numbers.
  */
 export const WORKSPACE_IMPORT_LIMITS = {
   /** The file as read, and decompressed on the server. */
@@ -32,24 +34,29 @@ export const WORKSPACE_IMPORT_LIMITS = {
   /** The request body, gzipped (Vercel's limit is 4.5 MB). */
   compressedBytes: 4 * 1024 * 1024,
   /** The serialised plan. */
-  planBytes: 10 * 1024 * 1024,
-  processes: 50,
-  steps: 500,
-  edges: 1000,
-  sources: 200,
-  sourceChars: 3_000_000,
-  issues: 300,
-  people: 500,
-  clients: 1000,
-  scenarios: 300,
-  blocks: 300,
-  suggestions: 500,
-  proposals: 300,
-  /** The link tables, each row about 0.2 ms: sized with the limits above so that every limit at once restores in about 2 s (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, 2 links a source). */
-  personRoles: 400,
-  personSkills: 1000,
-  clientAssignments: 400,
-  sourceLinks: 400,
+  planBytes: 15 * 1024 * 1024,
+  processes: 150,
+  steps: 1500,
+  edges: 3000,
+  sources: 600,
+  sourceChars: 4_500_000,
+  issues: 900,
+  people: 1500,
+  clients: 3000,
+  scenarios: 900,
+  blocks: 900,
+  suggestions: 1500,
+  proposals: 900,
+  /** The link tables, each row about 0.1 ms: sized with the limits above (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, a few links a source). */
+  personRoles: 1200,
+  personSkills: 3000,
+  clientAssignments: 1200,
+  sourceLinks: 3000,
+  /** Sections that had no cap before B21. */
+  clientServices: 3000,
+  personLeave: 1500,
+  /** Lead sources, seasonality, churn drivers, market conditions, market schedule, services, servicing rules and client groups, counted together. */
+  companyOther: 1500,
 } as const;
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;
@@ -145,7 +152,7 @@ export interface ImportSummary {
   /** Whether the workspace settings would be written (an owner or agency admin), suggested (an editor), or aren't in the file. */
   settings: "applied" | "suggested" | "none";
   /** The numbers the limits are checked against. */
-  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; clientAssignments: number; sourceLinks: number; planBytes: number };
+  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; clientAssignments: number; sourceLinks: number; clientServices: number; personLeave: number; companyOther: number; planBytes: number };
 }
 
 export interface BundleCheck {
@@ -334,7 +341,7 @@ export function checkWorkspaceBundle(value: unknown, options: { canManage?: bool
     restored: [],
     leftOut: [],
     settings: "none",
-    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, clientAssignments: 0, sourceLinks: 0, planBytes: 0 },
+    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, clientAssignments: 0, sourceLinks: 0, clientServices: 0, personLeave: 0, companyOther: 0, planBytes: 0 },
   };
   const stop = (message: string): BundleCheck => ({ ok: false, errors: [message], warnings: [], summary: empty });
 
@@ -435,6 +442,9 @@ function limitProblems(m: ImportSummary["measures"]): string[] {
   over(m.personSkills, L.personSkills, "skills");
   over(m.clientAssignments, L.clientAssignments, "client assignments");
   over(m.sourceLinks, L.sourceLinks, "source links");
+  over(m.clientServices, L.clientServices, "client services");
+  over(m.personLeave, L.personLeave, "leave entries");
+  over(m.companyOther, L.companyOther, "other company settings rows");
   if (m.planBytes > L.planBytes) out.push(`The backup is too big to restore in one go: it comes to ${num(m.planBytes)} bytes once prepared, and a restore takes at most ${num(L.planBytes)}.`);
   return out;
 }
@@ -457,7 +467,8 @@ export function restoreSizeWarning(bundle: WorkspaceBundle): string | null {
     [m.sourceChars, L.sourceChars, "characters of source text"], [m.issues, L.issues, "issues"], [m.people, L.people, "people"], [m.clients, L.clients, "clients"],
     [m.scenarios, L.scenarios, "scenarios"], [m.blocks, L.blocks, "blocks"], [m.suggestions, L.suggestions, "pending suggestions"], [m.proposals, L.proposals, "pending proposals"],
     [m.personRoles, L.personRoles, "role assignments"], [m.personSkills, L.personSkills, "skills"], [m.clientAssignments, L.clientAssignments, "client assignments"],
-    [m.sourceLinks, L.sourceLinks, "source links"], [m.planBytes, L.planBytes, "bytes once prepared"],
+    [m.sourceLinks, L.sourceLinks, "source links"], [m.clientServices, L.clientServices, "client services"], [m.personLeave, L.personLeave, "leave entries"],
+    [m.companyOther, L.companyOther, "other company settings rows"], [m.planBytes, L.planBytes, "bytes once prepared"],
   ];
   const over = parts.filter(([n, max]) => n > max).map(([n, max, what]) => `${num(n)} ${what}; the limit is ${num(max)}`);
   if (over.length === 0) return null;
@@ -822,6 +833,11 @@ export function planWorkspaceImport(
       personSkills: plan.person_skills.length,
       clientAssignments: plan.client_assignments.length,
       sourceLinks: plan.source_links.length,
+      clientServices: plan.client_services.length,
+      personLeave: plan.person_leave.length,
+      companyOther:
+        plan.lead_sources.length + plan.seasonality.length + plan.churn_drivers.length + plan.market_conditions.length + plan.market_schedule.length +
+        plan.services.length + plan.service_servicing.length + plan.client_groups.length,
       planBytes,
     },
   };
