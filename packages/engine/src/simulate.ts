@@ -511,6 +511,27 @@ export function sampleDuration(rng: Rng, mean: number, dist: Distribution): numb
   }
 }
 
+/**
+ * A person's per-person time by step index (`StepState.mi`), or null when they have none or every one resolves to exactly 1.
+ * A step's factor is `steps[id] ?? default ?? 1`. The engine accepts any positive number (the database limits 0.5 to 2).
+ */
+function factorsFor(person: EnginePerson, stepList: { s: EngineStep; mi: number }[]): Float64Array | null {
+  const cf = person.capacityFactor;
+  if (!cf) return null;
+  const ok = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v > 0;
+  const bad = () => new Error(`${person.name}'s per-person time must be a number above 0`);
+  if (cf.default !== undefined && !ok(cf.default)) throw bad();
+  for (const id in cf.steps ?? {}) if (!ok(cf.steps![id])) throw bad();
+  const out = new Float64Array(stepList.length);
+  let any = false;
+  for (const st of stepList) {
+    const f = cf.steps?.[st.s.id] ?? cf.default ?? 1;
+    out[st.mi] = f;
+    if (f !== 1) any = true;
+  }
+  return any ? out : null;
+}
+
 /** The model's people, or one anonymous person per role head-count when it has none. */
 export function resolvePeople(model: EngineModel): Record<string, EnginePerson> {
   if (model.people && Object.keys(model.people).length) return model.people;
@@ -530,6 +551,8 @@ interface PersonState {
   person: EnginePerson;
   /** Their index in `people`, for the month-by-month sums. */
   idx: number;
+  /** Per-person time by `StepState.mi` (C6): null when every factor is 1 (the common case, one null check per service start). */
+  factors: Float64Array | null;
   /** Whether they are on the team now: false before a planned start and from an end date on (always true without them). */
   present: boolean;
   busy: boolean;
@@ -879,6 +902,7 @@ export function runOnce(
     id,
     person,
     idx,
+    factors: factorsFor(person, stepList),
     present: presentAt(person, -W),
     busy: false,
     freeSince: 0,
@@ -2027,7 +2051,9 @@ export function runOnce(
     if (p) {
       p.busy = true;
       const frac = availFrac(p);
-      const handsOn = st.work();
+      // Draw first, always: a per-person time (C6) never changes how many numbers a stream gives.
+      const drawn = st.work();
+      const handsOn = p.factors ? drawn * p.factors[st.mi]! : drawn;
       dur = handsOn / frac;
       st.stat.handsOnSum += handsOn;
       st.stat.handsOnN++;

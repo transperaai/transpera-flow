@@ -6,4 +6,4 @@
 // "<why>"` writes the new baselines and bumps this line. Don't edit it by
 // hand, except to raise it to a new major version before approving.
 
-export const ENGINE_VERSION = "1.9.0";
+export const ENGINE_VERSION = "1.10.0";
