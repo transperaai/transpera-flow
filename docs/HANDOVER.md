@@ -47,6 +47,11 @@ session with:
 - A person's Pass verdict counts as Verified, with the simulation result shown too.
 - B1: a workspace with a single rated person in a role still shows that role's default rate to members (a planning default,
   not a person's pay).
+- B3 (#32): restricted share links verify by **Google sign-in**, not magic link (magic link needs custom SMTP). Toggles are
+  People and Financials; **no one person's pay is ever in a link** (Financials on shows role rates, margins, overhead and
+  insight costs; figures that need one person's pay show "—"). Links are frozen copies with Update copy; the server builds
+  the snapshot and Postgres refuses a leaky one (ADR 0016, PRD D45). A visitor without a Google account for the listed
+  address can't open a restricted link.
 
 **Waiting on Austin:**
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a

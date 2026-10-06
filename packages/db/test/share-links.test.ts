@@ -103,7 +103,8 @@ async function asAnon<T>(setup: (c: pg.Client) => Promise<unknown>, fn: (c: pg.C
 const open = async (c: pg.Client, tok: string) => (await c.query("select public.open_share_link($1) as r", [tok])).rows[0].r as Json | null;
 
 beforeAll(async () => {
-  db = await createTestDb();
+  // As a Supabase project: new tables are granted to anon and authenticated by default, which the migration must take back.
+  db = await createTestDb({ supabaseDefaultPrivileges: true });
   const member = async (email: string, role: string) => {
     const u = await createUser(db, email);
     await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, u.id, role]);
