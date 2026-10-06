@@ -3,6 +3,7 @@ import {
   IMPORT_KINDS,
   IMPORT_KIND_LIST,
   applyNameMap,
+  applyNameMapCounted,
   dealsNote,
   dealsToStepLog,
   decodeImportFile,
@@ -471,6 +472,27 @@ describe("matching names to the model", () => {
   it("matches neither of two targets that normalise the same", () => {
     expect(suggestNameMap([{ value: "Won" }], ["Won", "won!"])).toEqual({ Won: null });
   });
+  it("matches time log entries to steps before merging them into visits", () => {
+    const text = ["job,task,date,hours", "J1,Audit,2026-03-02,2", "J1,audit ,2026-03-03,2", "J1,AUDIT,2026-03-04,2", "J2,Audit,2026-03-02,1", "J2,Proposal,2026-03-03,3"].join("\n");
+    const r = read(text, "time_logs");
+    expect(r.entries).toHaveLength(5);
+    // Spellings of one step are one visit of 6 hours, not three of 2.
+    const spelled = applyNameMap(r, { Audit: "Audit", audit: "Audit", AUDIT: "Audit", Proposal: "Audit" });
+    expect(spelled).toEqual([
+      { item: "J1", step: "Audit", started: d(2026, 3, 2), finished: null, hours: 6, source: null },
+      { item: "J2", step: "Audit", started: d(2026, 3, 2), finished: null, hours: 4, source: null },
+    ]);
+    // Two names matched to one step merge too.
+    expect(applyNameMap(read("job,task,date,hours\nJ1,Audit,2026-03-02,2\nJ1,Proposal,2026-03-03,3", "time_logs"), { Audit: "Audit & proposal", Proposal: "Audit & proposal" })).toEqual([
+      { item: "J1", step: "Audit & proposal", started: d(2026, 3, 2), finished: null, hours: 5, source: null },
+    ]);
+    // An entry left out is dropped before merging: A, X, A is one visit.
+    const left = read("job,task,date,hours\nJ1,A,2026-03-02,1\nJ1,X,2026-03-03,5\nJ1,A,2026-03-04,2", "time_logs");
+    const counted = applyNameMapCounted(left, { A: "A", X: null });
+    expect(counted.rows).toEqual([{ item: "J1", step: "A", started: d(2026, 3, 2), finished: null, hours: 3, source: null }]);
+    expect(counted).toMatchObject({ kept: 2, leftOut: 1 });
+  });
+
   it("rewrites names and drops the rows mapped to nothing", () => {
     const r = read("deal,stage,entered\nD1,Qualified lead,2026-03-02\nD1,Discovery,2026-03-03\nD2,Qualified lead,2026-03-04\n", "deals");
     const rows = applyNameMap(r, { "Qualified lead": "Qualify lead", Discovery: null });

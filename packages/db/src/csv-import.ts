@@ -776,8 +776,13 @@ export function invoicesSummary(rows: readonly InvoiceRow[], asOf: number): Invo
 
 export interface ImportRead {
   kind: ImportKind;
-  /** Rows by the kind's shape, after conversion. */
+  /** Rows by the kind's shape, after conversion. For time logs these are visits with the task names as the file has them. */
   rows: ShapeRow[];
+  /**
+   * Time logs only: the entries as read. Names are matched to the model's before entries are merged into visits (`applyNameMap`), so
+   * spellings of one step ("Audit", "audit ", "AUDIT") are one visit. Null for the other kinds.
+   */
+  entries: TimeLogRow[] | null;
   /** The first 20 parsed rows by the kind's column ids, values as text for display. Client and person values are the file's own: the screen labels them. */
   preview: Record<string, string>[];
   /** The first 200 rows left out, with why. */
@@ -875,6 +880,7 @@ export function readImport(
   return {
     kind,
     rows,
+    entries: kind === "time_logs" ? (kindRows as TimeLogRow[]) : null,
     preview: kindRows.slice(0, PREVIEW_ROWS).map((r) => previewRow(spec, r)),
     errors: res.errors.slice(0, MAX_IMPORT_ERRORS),
     errorCount: res.errors.length,
@@ -909,20 +915,36 @@ export function suggestNameMap(names: readonly { value: string }[], targets: rea
 
 /**
  * The read's rows with their name field (`step`, `service`, `task` or a lead's `source`) rewritten to the target each value
- * is matched to. Rows whose value is matched to null, or isn't in the map, are dropped; the caller reports how many.
+ * is matched to. Rows whose value is matched to null, or isn't in the map, are dropped; the caller reports how many. Time log
+ * entries are matched first and merged into visits after, so entries that name one step in different spellings, or two names
+ * matched to one step, are one visit; an entry matched to nothing is dropped before merging.
  */
 export function applyNameMap(read: ImportRead, map: Record<string, string | null>): ShapeRow[] {
+  return applyNameMapCounted(read, map).rows;
+}
+
+/** `applyNameMap` with how many of the file's rows (time log entries, for time logs) were kept and left out. */
+export function applyNameMapCounted(read: ImportRead, map: Record<string, string | null>): { rows: ShapeRow[]; kept: number; leftOut: number } {
+  const target = (value: string) => (Object.hasOwn(map, value) ? (map[value] ?? null) : null);
+  if (read.entries) {
+    const entries: TimeLogRow[] = [];
+    for (const e of read.entries) {
+      const t = target(e.task);
+      if (t !== null) entries.push({ ...e, task: t });
+    }
+    return { rows: timeLogToStepLog(entries), kept: entries.length, leftOut: read.entries.length - entries.length };
+  }
   const shape = IMPORT_KINDS[read.kind].shape;
   const field = SHAPE_NAME_FIELD[shape];
-  if (!field) return read.rows;
+  if (!field) return { rows: read.rows, kept: read.rows.length, leftOut: 0 };
   const out: ShapeRow[] = [];
   for (const row of read.rows) {
     const r = row as unknown as Record<string, unknown>;
-    const target = Object.hasOwn(map, r[field] as string) ? map[r[field] as string] : null;
-    if (target === null || target === undefined) continue;
-    out.push({ ...row, [field]: target } as ShapeRow);
+    const t = target(r[field] as string);
+    if (t === null) continue;
+    out.push({ ...row, [field]: t } as ShapeRow);
   }
-  return out;
+  return { rows: out, kept: out.length, leftOut: read.rows.length - out.length };
 }
 
 // ---------------------------------------------------------------------------
