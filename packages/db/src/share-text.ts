@@ -2,13 +2,16 @@
 //
 // Text is matched on a NORMALISED VIEW of it, never as written:
 //   1. best-effort percent-decoding (`priya%20shah` is "priya shah"),
-//   2. Unicode NFKC (a no-break space or a full-width letter becomes its plain form),
+//   2. Unicode NFKD (a no-break space or a full-width letter becomes its plain form, an accented letter its base letter),
 //   3. every default-ignorable code point (zero-width space and joiners, soft hyphen, combining grapheme joiner, variation
 //      selectors, Hangul fillers), every combining mark and every format character removed,
-//   4. curly quotes and the hyphen variants straightened, casefolded,
-//   5. every run of white space (and a JSON `\n`, `\t` or ` ` escape written as text) one space.
-// Names are matched as TOKENS of that view: its runs of letters (`\p{L}+`). A token that equals any part (3+ characters) of any
-// person's or client's name is replaced, and the whole original span with it, separators included; a run of tokens of one
+//   4. curly quotes and the hyphen variants straightened, lower-cased, the letters that don't decompose folded (ł ø đ ð ı ß æ œ þ, and the
+//      Greek final sigma ς to σ), so "Jose Nunez" finds "José Núñez" and Turkish İ is the same here and in the database,
+//   5. every run of white space (and a JSON `\n`, `\t` or ` ` escape written as text) one space,
+//   6. every uuid and every long hex string (a hash) masked, so ids are never taken for money, an email or a name.
+// People's names are matched as TOKENS of that view: its runs of letters (`\p{L}+`). A token that equals any part (3+ characters,
+// 2 for a part in a non-Latin script) of any person's name is replaced; a client is matched only by the whole of its name, as a run of
+// tokens (never by a single word of it). Han, Kana and Hangul names are also found inside an unspaced run, and the whole original span with it, separators included; a run of tokens of one
 // name joined by a few non-letters ("priya-shah", "priya (shah") is one span. A name token can't survive next to a label,
 // whatever sat between the words. A match is mapped back to the span of the ORIGINAL text, so nothing of it is left behind.
 // The database applies the same rules in `private.share_snapshot_problem` (migration 20261220000000).
@@ -26,6 +29,10 @@ const QUOTES: Record<string, string> = { "’": "'", "‘": "'", "ʼ": "'", "′
 const HYPHENS = /[‐‑‒–—−]/u;
 const ESCAPE = /^\\(?:[nrtbf]|u[0-9a-fA-F]{4})/;
 const PERCENT_RUN = /^(?:%[0-9a-fA-F]{2})+/;
+/** Letters that don't decompose, folded to what a keyboard without them types. */
+const FOLD: Record<string, string> = { ł: "l", ø: "o", đ: "d", ð: "d", ı: "i", ß: "ss", æ: "ae", œ: "oe", þ: "th", ς: "σ" };
+/** A uuid, or a hex string of 16+ characters with a letter in it (a hash): an id, never money, an email or a name. */
+const ID = /(?<![0-9a-z])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]*[a-f])[0-9a-f]{16,})(?![0-9a-z])/g;
 
 /** One character of the text with the span of the original it came from (after percent-decoding, a decoded run shares one span). */
 interface Piece {
@@ -95,20 +102,23 @@ export function normaliseView(s: string): View {
         continue;
       }
     }
-    for (const c of p.ch.normalize("NFKC")) {
+    for (const c of p.ch.normalize("NFKD")) {
       if (IGNORABLE.test(c)) continue;
       if (SPACE.test(c)) {
         space(p.start, p.end);
         continue;
       }
       for (const lower of (QUOTES[c] ?? (HYPHENS.test(c) ? "-" : c)).toLowerCase()) {
-        n.push(lower);
-        starts.push(p.start);
-        ends.push(p.end);
+        for (const folded of FOLD[lower] ?? lower) {
+          n.push(folded);
+          starts.push(p.start);
+          ends.push(p.end);
+        }
       }
     }
   }
-  return { n: n.join(""), starts, ends };
+  // Ids and hashes are no text: masked (same length, so the spans still map back) before anything is matched.
+  return { n: n.join("").replace(ID, (m) => "\u0001".repeat(m.length)), starts, ends };
 }
 
 /** The letter tokens of a view: where each starts and ends in `view.n`. */
@@ -129,6 +139,9 @@ const LABEL_WORDS = new Set(["team", "member", "client", "hidden", "email", "amo
 /** Words that are no part of anyone's identity ("The Smith Group Ltd"). */
 const STOP_WORDS = new Set(["the", "and", "for", "ltd", "inc", "llc", "plc"]);
 export const MIN_TOKEN = 3;
+const LATIN = /\p{Script=Latin}/u;
+/** The shortest part of a name that counts: 3 characters, 2 for a part with no Latin letter in it (a Chinese or Greek name). */
+export const minLen = (tok: string): number => (LATIN.test(tok) ? MIN_TOKEN : 2);
 
 /** What a name token stands for: who owns it (their labels), and whether it came from people or clients. */
 export interface NameToken {
@@ -149,7 +162,7 @@ export function nameTokenIndex(groups: readonly { kind: "person" | "client"; ent
   const out = new Map<string, { labels: Set<string>; people: boolean; clients: boolean; glue: boolean }>();
   const add = (tok: string, label: string, kind: "person" | "client") => {
     if (LABEL_WORDS.has(tok) || STOP_WORDS.has(tok)) return;
-    const glue = tok.length < MIN_TOKEN;
+    const glue = tok.length < minLen(tok);
     const o = out.get(tok) ?? { labels: new Set<string>(), people: false, clients: false, glue };
     o.labels.add(label);
     if (kind === "person") o.people = true;
@@ -161,7 +174,7 @@ export function nameTokenIndex(groups: readonly { kind: "person" | "client"; ent
     for (const e of g.entries) {
       const parts = nameParts(e.name).filter((p) => !STOP_WORDS.has(p));
       // A name of one short word ("Li") is no name: nothing to match.
-      if (parts.join("").length < MIN_TOKEN) continue;
+      if (parts.join("").length < minLen(parts.join(""))) continue;
       for (let a = 0; a < parts.length; a++) {
         for (let b = a; b < parts.length; b++) add(parts.slice(a, b + 1).join(""), e.label, g.kind);
       }
@@ -174,6 +187,23 @@ export interface Span {
   start: number;
   end: number;
   label: string;
+}
+
+const CLOSER: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
+
+/** The span from one token to another, taking the closing brackets that match an opening one inside it ("priya (shah)" is one span). */
+function spanBetween(view: View, first: Token, last: Token, label: string): Span {
+  const stack: string[] = [];
+  for (const ch of view.n.slice(first.from, last.to)) {
+    if (CLOSER[ch]) stack.push(ch);
+    else if (ch === ")" || ch === "]" || ch === "}") stack.pop();
+  }
+  let end = last.to;
+  while (stack.length && view.n[end] === CLOSER[stack[stack.length - 1]!]) {
+    stack.pop();
+    end++;
+  }
+  return { start: view.starts[first.from]!, end: view.ends[end - 1]!, label };
 }
 
 /**
@@ -197,7 +227,62 @@ export function nameSpans(view: View, index: ReadonlyMap<string, NameToken>, use
   }
   return runs
     .filter((r) => r.solid)
-    .map((r) => ({ start: view.starts[r.first.from]!, end: view.ends[r.last.to - 1]!, label: r.labels.size === 1 ? [...r.labels][0]! : r.people ? "a team member" : "a client" }));
+    .map((r) => spanBetween(view, r.first, r.last, r.labels.size === 1 ? [...r.labels][0]! : r.people ? "a team member" : "a client"));
+}
+
+/** A client's name as a run of tokens (stop words left out): matched whole, never by one of its words. */
+export interface ClientName {
+  parts: string[];
+  joined: string;
+  label: string;
+}
+export function clientNames(entries: readonly { name: string; label: string }[]): ClientName[] {
+  const out: ClientName[] = [];
+  for (const e of entries) {
+    const parts = nameParts(e.name).filter((p) => !STOP_WORDS.has(p));
+    const joined = parts.join("");
+    if (!parts.length || joined.length < minLen(joined) || LABEL_WORDS.has(joined)) continue;
+    out.push({ parts, joined, label: e.label });
+  }
+  return out;
+}
+
+/** The spans where a client's whole name stands: its tokens in order with at most three non-letters between, or its joined form. */
+export function clientSpans(view: View, clients: readonly ClientName[]): Span[] {
+  const byFirst = new Map<string, ClientName[]>();
+  for (const c of clients) for (const key of new Set([c.parts[0]!, c.joined])) byFirst.set(key, [...(byFirst.get(key) ?? []), c]);
+  const toks = tokens(view);
+  const out: Span[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    for (const c of byFirst.get(toks[i]!.text) ?? []) {
+      if (toks[i]!.text === c.joined) {
+        out.push(spanBetween(view, toks[i]!, toks[i]!, c.label));
+        continue;
+      }
+      let ok = true;
+      for (let j = 1; j < c.parts.length && ok; j++) {
+        const next = toks[i + j];
+        ok = !!next && next.text === c.parts[j] && next.from - toks[i + j - 1]!.to <= 3;
+      }
+      if (ok) out.push(spanBetween(view, toks[i]!, toks[i + c.parts.length - 1]!, c.label));
+    }
+  }
+  return out;
+}
+
+const SCRIPT_RUN = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]{2,}$/u;
+/** The parts of names written in Han, Kana or Hangul: found as substrings, since such text has no spaces between words. */
+export function scriptParts(entries: readonly { name: string; label: string }[]): { text: string; label: string }[] {
+  return entries.flatMap((e) => nameParts(e.name).filter((p) => SCRIPT_RUN.test(p)).map((p) => ({ text: p, label: e.label })));
+}
+export function scriptSpans(view: View, parts: readonly { text: string; label: string }[]): Span[] {
+  const out: Span[] = [];
+  for (const p of parts) {
+    for (let at = view.n.indexOf(p.text); at >= 0; at = view.n.indexOf(p.text, at + p.text.length)) {
+      out.push({ start: view.starts[at]!, end: view.ends[at + p.text.length - 1]!, label: p.label });
+    }
+  }
+  return out;
 }
 
 /** An email address: the part before the @ ends in a letter, digit or one of _ % + - (so `roles.@busiest`, a scenario selector, is not one). */

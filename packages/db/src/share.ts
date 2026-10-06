@@ -13,7 +13,7 @@ import { loadFindings } from "./findings";
 import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
 import { nameFinding } from "./person-labels";
-import { EMAIL, MIN_TOKEN, nameSpans, nameTokenIndex, normaliseView, pickSpans, replaceSpans, spansOf, tokens, type NameToken, type Span, type View } from "./share-text";
+import { EMAIL, MIN_TOKEN, clientNames, clientSpans, nameSpans, nameTokenIndex, normaliseView, pickSpans, replaceSpans, scriptParts, scriptSpans, spansOf, tokens, type Span, type View } from "./share-text";
 import {
   isUnpublished,
   listProcesses,
@@ -178,10 +178,29 @@ const MIN_NAME = MIN_TOKEN;
  * money are looked for in every string value (never in keys).
  */
 export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
-  "actor", "agreed_by", "auto_note", "body", "breaks_if_removed", "message", "owner_text", "source", "statement", "test", "horizon", "description", "detail", "domain", "evidence", "example", "excerpt", "expect", "job_done",
+  "actor", "agreed_by", "entity_name", "quote", "auto_note", "body", "breaks_if_removed", "chain", "done", "message", "owner_text", "problem", "progress", "root", "situation", "source", "statement", "test", "who", "horizon", "description", "detail", "domain", "evidence", "example", "excerpt", "expect", "job_done",
   "job_progress", "job_situation", "job_who", "label", "movedOn", "name", "note", "notes", "proposer_name", "reason", "review_note",
   "resolution_note", "root_cause", "speaker", "speakers", "summary", "target_goal", "target_measure", "target_now", "text", "title", "tool",
   "user_name", "user_notes", "why", "why_problem", "workspaceName",
+];
+/**
+ * The keys that hold a string but no free text: ids, dates, enums, engine tags, selectors and paths. A string under one is never
+ * scrubbed for a name. Every string key in every kind of snapshot is on this list or on `SHARE_FREE_TEXT_KEYS` (a test walks
+ * them all), so a new field has to be classified before it can ship.
+ * `email` is on it because emails are hidden in every string, whatever its key. `condition_tag` and `path_tags` are tags the
+ * engine routes work by: a tag is a label for a path, not a name, and rewriting one would change the numbers.
+ */
+export const SHARE_NON_TEXT_KEYS: readonly string[] = [
+  "ai_key", "analysis_id", "archived_at", "at", "base_revision_id", "by", "child_process_id", "client_id", "color", "comparator",
+  "condition_id", "condition_tag", "created_at", "created_by", "currency", "dataset_id", "decided_at", "decided_by", "detected_key",
+  "dismissed_revision_id", "email", "end_date", "entry_process_id", "entry_step_id", "every", "file_url", "from_step_id", "id",
+  "import_source", "input_hash", "insight_key", "issue_id", "issueId", "key", "kind", "linked_parameter", "live_revision_id",
+  "market_pending_at", "model", "model_hash", "origin", "outcome", "owner_ids", "owner_person_id", "parent_process_id",
+  "parent_scenario_id", "parent_step_id", "path_tags", "person_id", "pricing_model", "process_id", "rating", "recorded_at",
+  "replaced_by", "replaces_step_ids", "resolved_at", "resolved_solution_id", "reviewed_at", "reviewed_by", "revision_id",
+  "rework_to_step_id", "role_id", "run_id", "scenario_id", "service_id", "severity", "slug", "solution_id", "solutionId", "source_id",
+  "source_ids", "stage", "start_date", "started_at", "status", "step_id", "suggestion_id", "timestamp", "to_step_id", "type",
+  "updated_at", "updated_by", "user_id", "verdict", "wait_dist", "work_dist", "workspace_id",
 ];
 const FREE_TEXT = new Set(SHARE_FREE_TEXT_KEYS);
 
@@ -190,17 +209,17 @@ const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|
 
 /** What a share link hides, as the spans of one string's original text. Shared by the scrub and the check, so they can't disagree. */
 function spansFor(toggles: ShareToggles, secrets: ShareSecrets) {
-  const index = nameTokenIndex([
-    { kind: "client", entries: secrets.clients },
-    { kind: "person", entries: secrets.people },
-  ]);
+  const people = nameTokenIndex([{ kind: "person", entries: secrets.people }]);
+  const scripts = scriptParts(secrets.people);
+  const clients = clientNames(secrets.clients);
   const email = [{ re: EMAIL, label: EMAIL_HIDDEN }];
   const money = [{ re: shareMoneyRegex(), label: AMOUNT_HIDDEN }];
-  const names = (t: NameToken) => t.clients || !toggles.people;
   return (view: View, free: boolean): Span[] => [
     ...spansOf(view, email),
     ...(toggles.financials ? [] : spansOf(view, money)),
-    ...(free ? nameSpans(view, index, names) : []),
+    // A client only by the whole of its name; a person by any part of theirs.
+    ...(free ? clientSpans(view, clients) : []),
+    ...(free && !toggles.people ? [...nameSpans(view, people, () => true), ...scriptSpans(view, scripts)] : []),
   ];
 }
 
@@ -330,10 +349,9 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
   const found = new Set<ShareLeak>();
   const email = [{ re: EMAIL, label: "" }];
   const money = [{ re: shareMoneyRegex(), label: "" }];
-  const index = nameTokenIndex([
-    { kind: "client", entries: secrets.clients },
-    { kind: "person", entries: secrets.people },
-  ]);
+  const people = nameTokenIndex([{ kind: "person", entries: secrets.people }]);
+  const scripts = scriptParts(secrets.people);
+  const clients = clientNames(secrets.clients);
   const s = snapshot as Obj;
   if (
     !isObj(s) ||
@@ -353,11 +371,12 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     if (spansOf(view, email).length) found.add("email");
     if (!toggles.financials && spansOf(view, money).length) found.add("money");
     if (!free) return;
+    if (clientSpans(view, clients).length) found.add("client");
+    if (toggles.people) return;
+    if (scriptSpans(view, scripts).length) found.add("person");
     for (const t of tokens(view)) {
-      const name = index.get(t.text);
-      if (!name || name.glue) continue;
-      if (name.clients) found.add("client");
-      if (name.people && !toggles.people) found.add("person");
+      const name = people.get(t.text);
+      if (name && !name.glue) found.add("person");
     }
   };
   const walk = (value: unknown, key = "") => {

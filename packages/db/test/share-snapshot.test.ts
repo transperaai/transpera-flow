@@ -1,4 +1,5 @@
-import { detectIssues, parsePatchPath, simulate, type DetectedIssue, type SimulationResult } from "@transpera-flow/engine";
+import { detectIssues, parsePatchPath, simulate, type DetectedIssue, type FirstPrinciples, type SimulationResult } from "@transpera-flow/engine";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   SHARE_SNAPSHOT_VERSION,
@@ -19,8 +20,7 @@ import {
   type ShareToggles,
   type SolutionRow,
 } from "../src";
-import { SHARE_FREE_TEXT_KEYS } from "../src/share";
-import { EMAIL, nameTokenIndex, normaliseView, tokens } from "../src/share-text";
+import { SHARE_FREE_TEXT_KEYS, SHARE_NON_TEXT_KEYS } from "../src/share";
 
 // Share links, the pure half (issue #32, B3): the Db a snapshot is read through, the redaction of every kind of snapshot under
 // every toggle combination, its checker, and the proof that a redacted view's numbers are the unredacted run's.
@@ -137,6 +137,22 @@ function world(name: string, base: ProcessBundle): World {
 
 const worlds = [world("northbeam", northbeamBundle()), world("larkspur", larkspurBundle())];
 
+/** A first-principles document with a real person or client in every free-text field (the snapshot carries the document, with its own keys). */
+function filledFp(w: World): FirstPrinciples {
+  const [p0, p1, p2] = w.personFull;
+  const c0 = w.clientNames[0];
+  const step = w.bundle.steps[0]!.id;
+  return {
+    job: { who: `${p0}, our account lead`, progress: `${p1} gets the brief`, situation: `When ${c0} calls`, done: `${p2} signs off` },
+    statements: [{ text: `${p0} approves`, kind: "truth", source: `Email from ${p1}`, test: `Ask ${c0}`, linked_parameter: `step.${step}.work_hours` }],
+    requirements: [{ text: `${c0} wants a reply`, owner_person_id: null, owner_text: `${p2}, finance director`, why: `Because ${p0} said so`, verdict: "keep", step_id: step }],
+    deletes: [{ step_id: step, breaks_if_removed: `${p1} loses the report`, agreed_by: null, added_back: false }],
+    improvements: [{ step_id: step, stage: "simplify", text: `Let ${p2} skip it`, scenario_id: null }],
+    why: { problem: `${c0} waits`, chain: [`Because ${p0} is away`, `And ${p1} is too`], root: `${p2} owns everything` },
+    measures: [{ id: "m1", text: `${c0} renews`, kpi: null, comparator: "atLeast", target: 0.9, horizon: `by ${p0}'s review` }],
+  };
+}
+
 /** What `loadShareData` builds before redacting: the editor's bundle (as a People-on read), and everything around it, with names. */
 function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
   const base = { v: SHARE_SNAPSHOT_VERSION, toggles, workspaceName: `${w.name} (${w.clientNames[0]})` } as const;
@@ -170,9 +186,9 @@ function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
   const common = { issues: [w.issue] };
   switch (kind) {
     case "overview":
-      return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, findings: [finding as never], firstPrinciples: null };
+      return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, findings: [finding as never], firstPrinciples: filledFp(w) };
     case "process":
-      return { ...base, kind, bundle: w.bundle, processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: null };
+      return { ...base, kind, bundle: w.bundle, processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: filledFp(w) };
     case "issue":
       return { ...base, kind, issueId: w.issue.id, bundle: w.bundle, issues: common.issues, processes: [], liveRevisions: {}, solutions };
     case "solution":
@@ -707,26 +723,136 @@ describe("people whose names are also field names (the third review): the engine
   }
 });
 
-describe("the free-text allow-list covers every place a name sits", () => {
+describe("every string in every kind of snapshot is classified: free text or explicitly not text", () => {
   const FREE = new Set(SHARE_FREE_TEXT_KEYS);
+  const NOT_TEXT = new Set(SHARE_NON_TEXT_KEYS);
+
+  it("the two lists don't overlap", () => {
+    expect(SHARE_FREE_TEXT_KEYS.filter((k) => NOT_TEXT.has(k))).toEqual([]);
+  });
+
   for (const w of worlds) {
-    it(`${w.name}: in the raw snapshots of every kind, no name token is in a string under a key that isn't on the list`, () => {
-      const index = nameTokenIndex([
-        { kind: "client", entries: w.secrets.clients },
-        { kind: "person", entries: w.secrets.people },
-      ]);
-      const stray: string[] = [];
-      const walk = (v: unknown, key: string) => {
+    it(`${w.name}: every string path in the overview, process, issue and solution snapshots (a filled first-principles document included) is on one list; a new field fails here`, () => {
+      const unclassified = new Set<string>();
+      const walk = (v: unknown, key: string, at: string) => {
+        // A map keyed by labels, blanked whole by the redaction: its keys are no field names.
+        if (key === "person_labels") return;
         if (typeof v === "string") {
-          if (FREE.has(key) || new RegExp(EMAIL.source, "iu").test(v)) return;
-          for (const t of tokens(normaliseView(v))) if (index.get(t.text) && !index.get(t.text)!.glue) stray.push(`${key}: ${v.slice(0, 60)}`);
-        } else if (Array.isArray(v)) v.forEach((x) => walk(x, key));
-        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+          if (!FREE.has(key) && !NOT_TEXT.has(key)) unclassified.add(`${at}`);
+        } else if (Array.isArray(v)) v.forEach((x) => walk(x, key, at));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k, `${at}.${k}`);
       };
-      for (const kind of ["overview", "process", "issue", "solution"] as const) walk(raw(kind, w, TOGGLES[0]!), "");
-      expect(stray).toEqual([]);
+      for (const kind of KINDS) walk(raw(kind, w, TOGGLES[0]!), "", kind);
+      expect([...unclassified].sort()).toEqual([]);
+    });
+
+    it(`${w.name}: no person's or client's name survives in any string, in any toggle combination`, () => {
+      const parts = [...new Set(w.secrets.people.flatMap((p) => p.name.toLowerCase().split(/\s+/)).filter((x) => x.length >= 3))];
+      for (const toggles of TOGGLES) {
+        for (const kind of KINDS) {
+          const out = JSON.stringify(redactShareSnapshot(raw(kind, w, toggles), toggles, w.secrets)).toLowerCase();
+          for (const c of w.clientNames) expect(out, `${kind} ${label(toggles)} client ${c}`).not.toContain(c.toLowerCase());
+          if (!toggles.people) for (const p of parts) expect(out.replace(/"[a-z_]+":/g, ""), `${kind} ${label(toggles)} ${p}`).not.toMatch(new RegExp(`(?<![a-z])${p}(?![a-z])`));
+        }
+      }
     });
   }
+});
+
+describe("the fourth round: ids, whole client names, accents, scripts and brackets", () => {
+  const w = worlds[0]!;
+  const off = TOGGLES[0]!;
+  const bare = (extra: object, toggles: ShareToggles = off) => ({ v: SHARE_SNAPSHOT_VERSION, kind: "overview", toggles, workspaceName: "w", ...extra }) as unknown as ShareSnapshot;
+  const redactTitle = (title: string, secrets: ShareSecrets = w.secrets, toggles: ShareToggles = off) =>
+    (redactShareSnapshot({ ...raw("process", w, toggles), issues: [{ ...w.issue, title, evidence: null }] } as ShareSnapshot, toggles, secrets) as unknown as { issues: IssueRow[] }).issues[0]!.title;
+
+  it("random uuids are never money, an email or a name: 10,000 of them pass both the scrub and the check", () => {
+    const ids: string[] = Array.from({ length: 10_000 }, () => randomUUID());
+    ids.push("0184c93c-120f-4cad-9a3c-5d3e1b2c199c", "00000000-0000-4000-8000-1b2c199cad1a", "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "4cad4cad4cad4cad4cad4cad");
+    for (const toggles of TOGGLES) {
+      const input = bare({ ids, paths: ids.slice(0, 50).map((i) => `steps.${i}.work_hours`), model_hash: ids[ids.length - 2] }, toggles);
+      expect(shareSnapshotLeaks(input, w.secrets, toggles), label(toggles)).toEqual([]);
+      const out = redactShareSnapshot(input, toggles, w.secrets) as unknown as { ids: string[]; paths: string[]; model_hash: string };
+      expect(out.ids, label(toggles)).toEqual(ids);
+      expect(out.paths).toEqual((input as unknown as { paths: string[] }).paths);
+      expect(out.model_hash).toBe(ids[ids.length - 2]);
+    }
+  });
+
+  it("a currency code is a standalone token: glued to a digit inside something longer it is no money", () => {
+    for (const text of ["order 123cad456", "ref 5cadx", "code 12CAD7", "v4cad", "a1cad"]) expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+    for (const text of ["costs 5 CAD", "12 cad.", "(40 USD)"]) expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).toContain("money");
+  });
+
+  const everyday = [
+    "Group review on Friday", "Care plan", "Hire a freelancer for holiday cover", "Estate agents", "Lane closure", "Planning call", "Legal check",
+    "Tea break", "Coffee with the team", "Trust score", "Theory of change", "Financial review", "Quarterly review", "Budget meeting", "Weekly stand-up",
+    "Book the venue", "Garden party", "School run", "Dental appointment", "Driving test", "Kids club", "Yoga class", "Rail strike", "Outdoor event",
+    "Heritage walk", "Kettle descaling",
+  ];
+  for (const world of worlds) {
+    it(`${world.name}: a word of a client's name is no client: ${everyday.length} ordinary phrases are unchanged, and each client's whole name is still replaced`, () => {
+      for (const toggles of TOGGLES) {
+        const w2 = world;
+        const title = (t: string) => (redactShareSnapshot({ ...raw("process", w2, toggles), issues: [{ ...w2.issue, title: t, evidence: null }] } as ShareSnapshot, toggles, w2.secrets) as unknown as { issues: IssueRow[] }).issues[0]!.title;
+        for (const phrase of everyday) {
+          const out = title(phrase);
+          // With People off a person's name part may change a phrase; a client never does.
+          if (toggles.people) expect(out, `${label(toggles)}: ${phrase}`).toBe(phrase);
+          else expect(out, `${label(toggles)}: ${phrase}`).not.toMatch(/Client \d/);
+        }
+        w2.clientNames.forEach((c, i) => {
+          expect(title(`at ${c}`), c).toBe(`at Client ${i + 1}`);
+          expect(title(`at ${c.toUpperCase()}.`), c).toBe(`at Client ${i + 1}.`);
+          expect(title(`at ${c.replace(/ /g, "-")}`), c).toBe(`at Client ${i + 1}`);
+          expect(title(`at ${c.replace(/[^\p{L}]/gu, "")}`), c).toBe(`at Client ${i + 1}`);
+        });
+      }
+    });
+  }
+
+  it("accents are folded both ways, and Turkish, Greek and the letters that don't decompose agree", () => {
+    const extra = [
+      ["José Núñez", "Jose Nunez said", "Team member 90 said"],
+      ["Zoë Łukasiewicz", "Zoe Lukasiewicz", "Team member 91"],
+      ["Søren Ødegård", "Soren Odegard", "Team member 92"],
+      ["Ramon Munoz", "Ramón Muñoz", "Team member 93"],
+      ["Αλέξης Παπά", "ΑΛΈΞΗΣ ΠΑΠΆ", "Team member 94"],
+      ["İbrahim Yılmaz", "Ibrahim Yilmaz said", "Team member 95 said"],
+      ["Ana Strauß", "ANA STRAUSS", "Team member 96"],
+    ] as const;
+    const secrets: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, ...extra.map(([name], i) => ({ id: `00000000-0000-4000-8000-0000000000f${i}`, name, label: `Team member ${90 + i}` }))] };
+    extra.forEach(([name, text, expected]) => {
+      expect(redactTitle(text, secrets), `${name} / ${text}`).toBe(expected);
+      expect(redactTitle(name, secrets), name).toBe(expected.replace(/ said$/, ""));
+      expect(shareSnapshotLeaks({ ...bare({}), note: text }, secrets, off), text).toContain("person");
+    });
+  });
+
+  it("a name in Han, Kana or Hangul, or any non-Latin script, counts from 2 characters, also inside an unspaced run", () => {
+    const people = [
+      { id: "00000000-0000-4000-8000-0000000000e1", name: "李伟", label: "Team member 80" },
+      { id: "00000000-0000-4000-8000-0000000000e2", name: "田中 太郎", label: "Team member 81" },
+      { id: "00000000-0000-4000-8000-0000000000e3", name: "Ωμέγα Νίκος", label: "Team member 82" },
+    ];
+    const secrets: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, ...people] };
+    expect(redactTitle("李伟 said", secrets)).toBe("Team member 80 said");
+    expect(redactTitle("李伟说过", secrets)).toBe("Team member 80说过");
+    expect(redactTitle("请联系田中太郎", secrets)).toMatch(/Team member 81/);
+    expect(redactTitle("Νίκος", secrets)).toBe("Team member 82");
+    for (const text of ["李伟 said", "李伟说过", "Νίκος"]) expect(shareSnapshotLeaks({ ...bare({}), note: text }, secrets, off), text).toContain("person");
+    // A two-letter Latin name is still no name.
+    const li: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, { id: "00000000-0000-4000-8000-0000000000e4", name: "Li", label: "Team member 83" }] };
+    expect(redactTitle("Li is here", li)).toBe("Li is here");
+  });
+
+  it("brackets stay balanced: priya (Shah) is one name, (Priya Shah) keeps its brackets", () => {
+    const [first, surname] = w.personFull[0]!.split(" ") as [string, string];
+    expect(redactTitle(`${first.toLowerCase()} (${surname})`)).toBe("Team member 1");
+    expect(redactTitle(`${first.toLowerCase()} [${surname}] said`)).toBe("Team member 1 said");
+    expect(redactTitle(`(${first} ${surname})`)).toBe("(Team member 1)");
+    expect(redactTitle(`ask ${first} (${surname}), then`)).toBe("ask Team member 1, then");
+  });
 });
 
 describe("payHidden on a bundle", () => {

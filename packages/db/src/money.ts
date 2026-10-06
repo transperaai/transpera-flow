@@ -32,7 +32,9 @@ export const shareMoneyRegex = (): RegExp =>
     [
       String.raw`(?<![a-z0-9])(?:[a-z]{1,3}\$|${SIGNS}|${ISO}|rs\.?)\s*(?:${SPACED})${MAG}(?![a-z0-9])`,
       String.raw`${SIGNS}\s*\d[\d.,]*`,
-      String.raw`(?:${SPACED})${MAG}\s*(?:${ISO}(?![a-z])|[£€¥₹])`,
+      String.raw`(?:${SPACED})${MAG}\s*[£€¥₹]`,
+      // A code after the number is a standalone token: not a digit run glued to letters inside something longer.
+      String.raw`(?<![a-z0-9])(?:${SPACED})${MAG}\s*${ISO}(?![a-z0-9])`,
       String.raw`(?:${SPACED})${MAG}\s*(?:pounds?|dollars?|euros?|quid|sterling)(?![a-z])`,
     ].join("|"),
     "giu",

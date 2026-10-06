@@ -299,11 +299,13 @@ set search_path = ''
 as $$
 declare
   -- The keys whose string values are free text (keep equal to SHARE_FREE_TEXT_KEYS in packages/db/src/share.ts).
-  free_keys constant text[] := array['actor', 'agreed_by', 'auto_note', 'body', 'breaks_if_removed', 'message', 'owner_text', 'source',
-    'statement', 'test', 'horizon', 'description', 'detail', 'domain', 'evidence', 'example', 'excerpt', 'expect', 'job_done',
-    'job_progress', 'job_situation', 'job_who', 'label', 'movedOn', 'name', 'note', 'notes', 'proposer_name', 'reason', 'review_note',
-    'resolution_note', 'root_cause', 'speaker', 'speakers', 'summary', 'target_goal', 'target_measure', 'target_now', 'text', 'title',
-    'tool', 'user_name', 'user_notes', 'why', 'why_problem', 'workspaceName'];
+  free_keys constant text[] := array['actor', 'agreed_by', 'entity_name', 'quote', 'auto_note', 'body', 'breaks_if_removed', 'chain', 'done',
+    'message', 'owner_text', 'problem', 'progress', 'root', 'situation', 'source', 'statement', 'test', 'who',
+    'horizon', 'description', 'detail', 'domain', 'evidence', 'example', 'excerpt', 'expect', 'job_done',
+    'job_progress', 'job_situation', 'job_who', 'label', 'movedOn', 'name', 'note', 'notes', 'proposer_name',
+    'reason', 'review_note', 'resolution_note', 'root_cause', 'speaker', 'speakers', 'summary', 'target_goal',
+    'target_measure', 'target_now', 'text', 'title', 'tool', 'user_name', 'user_notes', 'why', 'why_problem',
+    'workspaceName'];
   everything text;
   free text;
 begin
