@@ -33,7 +33,7 @@ async function mount(options: Options = {}): Promise<{ page: Page; errors: strin
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.setContent(`<div id="root"></div>`);
-  await page.evaluate((w) => (window.workerScripts = w), workers);
+  await page.evaluate((w) => (window.importWorkerScripts = w), workers);
   await page.addScriptTag({ content: script });
   await page.evaluate((o) => window.mountImport(o), options);
   return { page, errors };
@@ -231,7 +231,7 @@ describe("the import wizard", () => {
     });
     await readIt(page, "cal-log");
     expect(await page.evaluate(() => (window as unknown as { sawReading: boolean }).sawReading)).toBe(true);
-    const posts = await page.evaluate(() => [...window.workerPosts]);
+    const posts = await page.evaluate(() => [...window.importWorkerPosts]);
     expect(posts.filter((p) => p.file === "csv-import.worker.ts" && p.op === "read")).toHaveLength(1);
     expect(posts.filter((p) => p.file === "csv-import.worker.ts" && p.op === "load")).toHaveLength(1);
     const rows = step(page, "cal-log", "rows");
@@ -263,7 +263,7 @@ describe("the import wizard", () => {
     await columns.getByRole("button", { name: "Continue" }).click();
     await step(page, "cal-log", "rows").waitFor({ timeout: 150_000 });
     expect(await step(page, "cal-log", "rows").innerText()).toContain("Read 200,000 rows.");
-    const posts = await page.evaluate(() => [...window.workerPosts]);
+    const posts = await page.evaluate(() => [...window.importWorkerPosts]);
     expect(posts.filter((p) => p.op === "load").length).toBeGreaterThanOrEqual(2);
     expect(errors).toEqual([]);
     await page.close();

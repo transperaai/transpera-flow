@@ -3,8 +3,8 @@
 // can see the read go through it and stop it. Next's modules and Server Actions are stood in for by ../build-harness.ts. Nothing here ships.
 //
 // The wizard's worker is made with `new Worker(new URL("../../workers/csv-import.worker.ts", import.meta.url), { type: "module" })`.
-// The test bundles each worker script and hands it over as `window.workerScripts`; `Worker` is replaced by one that starts the
-// bundled script for the file asked for, and notes every message posted to it in `window.workerPosts` (the file and the op).
+// The test bundles each worker script and hands it over as `window.importWorkerScripts`; `Worker` is replaced by one that starts the
+// bundled script for the file asked for, and notes every message posted to it in `window.importWorkerPosts` (the file and the op).
 
 import { createRoot } from "react-dom/client";
 import type { ImportKind } from "@transpera-flow/db/csv-import";
@@ -19,26 +19,26 @@ import { demoBundle } from "@/lib/sources/demo";
 
 declare global {
   interface Window {
-    workerScripts: Record<string, string>;
+    importWorkerScripts: Record<string, string>;
     /** Each message posted to a worker, in order: its file, and the `op` of the message. */
-    workerPosts: { file: string; op: string | null }[];
+    importWorkerPosts: { file: string; op: string | null }[];
     mountImport: (options?: { mode?: "live" | "readonly" | "demo"; previous?: Partial<Record<ImportKind, Record<string, string>>>; samples?: boolean }) => void;
   }
 }
 
 const NativeWorker = window.Worker;
-window.workerPosts = [];
+window.importWorkerPosts = [];
 window.Worker = class extends NativeWorker {
   private readonly file: string;
   constructor(url: string | URL) {
     const file = String(url).split("/").pop()!;
-    const script = window.workerScripts[file];
+    const script = window.importWorkerScripts[file];
     if (!script) throw new Error(`No bundled worker for ${file}`);
     super(URL.createObjectURL(new Blob([script], { type: "text/javascript" })));
     this.file = file;
   }
   postMessage(message: unknown, options?: StructuredSerializeOptions | Transferable[]) {
-    window.workerPosts.push({ file: this.file, op: typeof message === "object" && message !== null ? ((message as { op?: string }).op ?? null) : null });
+    window.importWorkerPosts.push({ file: this.file, op: typeof message === "object" && message !== null ? ((message as { op?: string }).op ?? null) : null });
     super.postMessage(message, options as StructuredSerializeOptions);
   }
 } as typeof Worker;
