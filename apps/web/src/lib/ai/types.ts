@@ -7,6 +7,7 @@
 import type { AiAnalysisRow, AiAnalysisStatus, AiAnalysisTrigger, PersonLabels } from "@transpera-flow/db";
 import { noCost, type FpFlagLevel, type FpStepKey, type IssueType, type Rating } from "@transpera-flow/engine";
 import type { Detection } from "@/lib/insights/insights";
+import type { ScreenMode } from "@/lib/mode";
 import { costOfUsage } from "./cost";
 
 /** What the AI may file an insight under. Perception gaps and broken scenarios are the app's own. */
@@ -76,7 +77,7 @@ export interface AiAnalysisView {
   costUsd?: number | null;
 }
 
-export type AiMode = "live" | "readonly" | "demo";
+export type AiMode = ScreenMode;
 
 /** What a page needs to show AI for the version on screen. */
 export interface AiPanelData {

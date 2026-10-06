@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { AFTER_SIGN_IN_COOKIE, afterSignInPath } from "@/lib/share/after-sign-in";
 import { createClient } from "@/lib/supabase/server";
 
-/** Sign-in landing: exchange the code for a session, resolve workspace access, then go home. */
+/**
+ * Sign-in landing: exchange the code for a session, resolve workspace access, then go home, or back to the share link the visitor
+ * came from (a cookie the link's sign-in set; only `/s/<token>` is honoured, B3).
+ */
 export async function GET(request: NextRequest) {
   const url = request.nextUrl.clone();
+  // Read before the query is cleared; always dropped below, so it can't send a later sign-in anywhere.
+  const back = afterSignInPath(request.cookies.get(AFTER_SIGN_IN_COOKIE)?.value);
   const code = url.searchParams.get("code");
   // Supabase appends these when the link itself was rejected (expired, already used).
   let error = url.searchParams.get("error_description") ?? url.searchParams.get("error");
@@ -28,7 +34,9 @@ export async function GET(request: NextRequest) {
     url.pathname = "/login";
     url.searchParams.set("error", error);
   } else {
-    url.pathname = "/";
+    url.pathname = back ?? "/";
   }
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.cookies.delete(AFTER_SIGN_IN_COOKIE);
+  return response;
 }

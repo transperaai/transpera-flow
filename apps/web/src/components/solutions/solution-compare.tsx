@@ -19,6 +19,8 @@ import { horizonWeeks, monthsForWeeks } from "@/lib/horizon";
 import { checkpointMonths, checkpointWeeks, mrrSeries } from "@/lib/overview/projection";
 import { useProjection } from "@/lib/overview/use-projection";
 import { formatCurrency } from "@/lib/format";
+import { MoneyHidden } from "@/components/money-hidden";
+import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { SCHEDULE_KEY, compareMaps, overallResult, pinProblems, stressConditions, stressTargets, toneWord } from "@/lib/solutions/compare";
 import { SOLUTION_PAGE_HELP } from "@/lib/solutions/help";
@@ -188,6 +190,8 @@ function MeasuresTable({
   currency: string;
 }) {
   const rows = useMemo(() => (live && solution ? compareTable(compareRuns(live, solution), { horizonWeeks: weeks, hoursPerWeek, currency }) : null), [live, solution, weeks, hoursPerWeek, currency]);
+  // A share link without Financials hides the labour cost: role rates are zero there, so it would read as £0 (B3).
+  const hideMoney = useShareFinancialsHidden();
   if (blocked) return <p className="text-sm text-muted-foreground">No measures: the solution can&apos;t be simulated.</p>;
   if (failed) return <p className="text-sm text-muted-foreground">The measures couldn&apos;t be worked out.</p>;
   if (!rows) return <Skeleton className="h-40 w-full" aria-busy="true" />;
@@ -220,11 +224,19 @@ function MeasuresTable({
               <th scope="row" className="px-4 py-2 font-normal">
                 {r.label}
               </th>
-              <td className="px-3 py-2 text-right tabular-nums">{r.text.baseline}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{r.text.scenario}</td>
-              <td className={cn("px-3 py-2 whitespace-nowrap", r.tone === "good" ? "text-good" : r.tone === "bad" ? "text-crit" : "text-muted-foreground")}>
-                <span className="font-semibold">{r.better ? toneWord(r.tone) : "Not rated"}</span> <span className="tabular-nums">{r.text.change}</span>
-              </td>
+              {hideMoney && r.metric === "labour" ? (
+                <td colSpan={3} className="px-3 py-2 text-right text-muted-foreground">
+                  <MoneyHidden />
+                </td>
+              ) : (
+                <>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.text.baseline}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.text.scenario}</td>
+                  <td className={cn("px-3 py-2 whitespace-nowrap", r.tone === "good" ? "text-good" : r.tone === "bad" ? "text-crit" : "text-muted-foreground")}>
+                    <span className="font-semibold">{r.better ? toneWord(r.tone) : "Not rated"}</span> <span className="tabular-nums">{r.text.change}</span>
+                  </td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>

@@ -5,6 +5,7 @@
 // Acknowledge dialog, Mark resolved opens the Resolve dialog, and a resolved issue offers Reopen and shows a
 // "Resolved <date> · by …" bar. The history is kept after resolving.
 
+import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -54,7 +55,7 @@ export interface IssuePageProps {
   sources: SourceRow[];
   /** The history as loaded; refreshed after each change. */
   events: IssueEventRow[];
-  mode: "live" | "demo" | "readonly";
+  mode: ScreenMode;
   /** Where the workspace's pages live: `/w/<slug>` or `/demo`. */
   base: string;
   /** The Editor in solution mode for this issue (A49). Until A49 builds it the Editor says "Coming soon". */
@@ -68,6 +69,8 @@ export interface IssuePageProps {
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
   memberNames?: Readonly<Record<string, string>>;
+  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  share?: ReactNode;
 }
 
 export function IssuePage(props: IssuePageProps) {
@@ -75,7 +78,7 @@ export function IssuePage(props: IssuePageProps) {
   const router = useRouter();
   const state = useIssues(bundle.workspace.id, props.issues, mode, props.liveRevisions ?? { [bundle.process.id]: bundle.revision.id });
   const issue = state.issues.find((i) => i.id === props.issue.id) ?? props.issue;
-  const canEdit = mode !== "readonly";
+  const canEdit = !isReadOnly(mode);
   const open = isOpenIssue(issue);
 
   const [events, setEvents] = useState(props.events);
@@ -158,6 +161,7 @@ export function IssuePage(props: IssuePageProps) {
         </div>
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2">
+            {props.share}
             <span className="flex items-center">
               <Button type="button" variant="outline" onClick={() => setEdit(true)}>
                 Edit

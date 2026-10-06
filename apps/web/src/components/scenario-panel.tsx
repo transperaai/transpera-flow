@@ -6,6 +6,7 @@
 // its own worker with the baseline's seed and replication count, so the two
 // runs pair up replication by replication.
 
+import { isReadOnly } from "@/lib/mode";
 import { useEffect, useMemo, useState } from "react";
 import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import { applyPatches, compareHeadline, compareRuns, repointPatch, type EngineModel, type EnginePerson, type ProvenanceRows, type RetiredSteps } from "@transpera-flow/engine";
@@ -64,7 +65,7 @@ export function ScenarioPanel({
   /** Who is looking: a member or viewer gets people rows and levers for their own person only (B1 2b). */
   viewer?: Viewer;
 }) {
-  const canEdit = mode !== "readonly";
+  const canEdit = !isReadOnly(mode);
   const [store] = useState<ScenarioStore>(() => (mode === "live" ? liveScenarioStore(workspaceId) : new MemoryScenarioStore(workspaceId)));
   const [scenarios, setScenarios] = useState(initialScenarios);
   const [stackIds, setStackIds] = useState<string[]>([]);

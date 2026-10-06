@@ -289,6 +289,17 @@ const TABLES: TableCase[] = [
     update: ["update workspace_headlines set horizon_weeks = horizon_weeks where workspace_id = $1", [ws]],
     delete: null,
   },
+  // Share links (B3): owners, editors and agency admins only; links are revoked, never deleted (asserted below).
+  {
+    table: "share_links",
+    insert: (tag) => [
+      "insert into share_links (workspace_id, token_hash, kind, snapshot, engine_version) values ($1, $2, 'overview', $3::jsonb, '1.8.0')",
+      [ws, (tag === "seed" ? "a" : "b").repeat(64), JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials: false } })],
+    ],
+    update: ["update share_links set label = 'x' where workspace_id = $1 and engine_version = '1.8.0'", [ws]],
+    delete: null,
+    reads: "editors",
+  },
   {
     table: "calibrations",
     insert: (tag) => [
@@ -550,7 +561,7 @@ describe("writes", () => {
 
   it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions, clients and headlines are never deleted", async () => {
     await db.as(callers.owner!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });
@@ -626,6 +637,8 @@ describe("functions", () => {
         c.query("select public.save_solution($1, $2, $3, 'Matrix', $4::jsonb, '[]', '[]', '[]') as r", [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, bundle]),
       refusal: { throws: /you cannot edit this workspace/ },
     },
+    // B3: only those who may make share links get team inputs for one (no pay for anyone).
+    { name: "share_team_capacity", call: (c) => c.query("select public.share_team_capacity($1, false) as r", [ws]), refusal: { throws: /you cannot make share links/ } },
     { name: "save_issue", call: (c) => c.query("select public.save_issue($1, $2::jsonb, $3) as r", [ws, JSON.stringify({ status: "open" }), openIssue]), refusal: { throws: /you cannot change issues/ } },
     {
       name: "resolve_issue",
@@ -962,6 +975,24 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
       expect((await latest("owner")).getTime()).toBeGreaterThan((await latest("editor")).getTime());
     } finally {
       await db.client.query("rollback");
+    }
+  });
+});
+
+describe("open_share_link (B3)", () => {
+  it("anon and every signed-in role may call it, and an unknown token gets nothing from any of them", async () => {
+    const tok = "z".repeat(43);
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      expect((await db.client.query("select public.open_share_link($1) as r", [tok])).rows[0].r).toBeNull();
+    } finally {
+      await db.client.query("rollback");
+    }
+    for (const role of Object.keys(ROLES) as RoleName[]) {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect((await c.query("select public.open_share_link($1) as r", [tok])).rows[0].r, role).toBeNull();
+      });
     }
   });
 });

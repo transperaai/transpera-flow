@@ -2,6 +2,7 @@
 
 // Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps, Kept out of process-view.tsx so that file only wires it in.
 
+import { isReadOnly } from "@/lib/mode";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { FindingRow, IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult, type SuccessMeasureSource } from "@transpera-flow/engine";
@@ -125,7 +126,7 @@ export function useProcessIssues({
   const resolving = useRef(new Set<string>());
   const { issues: tracked, saver, promote } = state;
   useEffect(() => {
-    if (mode === "readonly" || !model) return;
+    if (isReadOnly(mode) || !model) return;
     const still = new Set(broken.map((d) => d.key));
     for (const i of tracked) {
       if (i.type !== "broken_scenario" || !i.detected_key || still.has(i.detected_key)) continue;
@@ -212,7 +213,7 @@ export function useProcessIssues({
       options={formOptions}
       scenarios={scenarios}
       brokenScenarios={brokenScenarios}
-      canEdit={mode !== "readonly"}
+      canEdit={!isReadOnly(mode)}
       currency={bundle.workspace.settings.currency}
       stepFilter={stepFilter}
       onStepFilterChange={setStepFilter}
@@ -233,7 +234,7 @@ export function useProcessIssues({
       stepName={(id) => stepNames.get(id) ?? null}
       onLight={setLit}
       registerHref={registerHref}
-      canEdit={mode !== "readonly"}
+      canEdit={!isReadOnly(mode)}
       findings={findingsState}
       findingOptions={findingOptions}
     />
@@ -279,7 +280,7 @@ export function useProcessIssues({
               options={formOptions}
               scenarios={scenarios}
               brokenScenarios={brokenScenarios}
-              canEdit={mode !== "readonly"}
+              canEdit={!isReadOnly(mode)}
               currency={bundle.workspace.settings.currency}
               stepFilter={stepFilter}
               onStepFilterChange={setStepFilter}

@@ -5,6 +5,7 @@
 // step on screen, each checked against the simulation's numbers before it was stored. It reads what was stored, so the page
 // never calls the model, and it says so when it hasn't run, can't (no API key) or reviewed a different version.
 
+import { isReadOnly } from "@/lib/mode";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { AI_NOT_SET_UP, type AiMode, type AiPanelData, type AiReviewFinding } from "@/lib/ai/types";
@@ -35,7 +36,7 @@ export function AiReviewPanel({
   const demo = mode === "demo";
   const { view, configured, hasFirstPrinciples, versionNumber } = ai;
   const { pending, message, run } = useAiRun(demo, processId);
-  const runnable = canRun && mode !== "readonly" && (demo || (configured && hasFirstPrinciples));
+  const runnable = canRun && !isReadOnly(mode) && (demo || (configured && hasFirstPrinciples));
   const here = view?.review.filter((f) => f.step === step) ?? [];
 
   let body;
@@ -88,7 +89,7 @@ export function AiReviewPanel({
           description="A reviewer that reads these answers next to the simulation's results and writes findings. It uses only numbers the simulation produced, and leaves out any finding whose number doesn't match. It reviews the published version when someone presses Analyse."
           example="“You named proposal review; the simulation's bottleneck is the discovery call.”"
         />
-        {canRun && mode !== "readonly" && (
+        {canRun && !isReadOnly(mode) && (
           <span className="ml-auto flex items-center">
             <Button variant="ghost" size="sm" disabled={!runnable || pending} onClick={run} title={!runnable ? (!configured ? AI_NOT_SET_UP : "Publish first principles first") : undefined}>
               {pending ? "Analysing…" : "Analyse"}

@@ -5,6 +5,7 @@
 // findings), Facts from the run (the evidence, B17), Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
+import { isReadOnly } from "@/lib/mode";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
@@ -93,7 +94,10 @@ export function ProcessPage({
   findings: initialFindings = NO_FINDINGS,
   aboutInfo,
   ideaIssueIds = [],
+  share,
 }: {
+  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  share?: ReactNode;
   /** The workspace's findings (B17): this process's accepted ones are listed, its proposed ones wait for review. */
   findings?: FindingRow[];
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
@@ -163,7 +167,7 @@ export function ProcessPage({
   const inTab = useDemoSolutions();
   const solData = mode === "demo" ? inTab : (solutions?.data ?? NO_SOLUTIONS_DATA);
   const solBase = solutions?.base ?? (mode === "demo" ? "/demo" : "");
-  const canBuild = mode !== "readonly" && viewingVersion === null && !!solutions?.base;
+  const canBuild = !isReadOnly(mode) && viewingVersion === null && !!solutions?.base;
   const ideaSet = useMemo(() => new Set(ideaIssueIds), [ideaIssueIds]);
   const issueExtra = (issue: IssueRow) => (
     <IssueTrackView
@@ -175,7 +179,7 @@ export function ProcessPage({
 
   // Findings (B17): this process's and those of the processes inside it. Written in the live version only.
   const old = viewingVersion !== null;
-  const findingsState = useFindings(bundle.workspace.id, initialFindings, mode === "demo" ? "demo" : mode === "live" && !old ? "live" : "readonly");
+  const findingsState = useFindings(bundle.workspace.id, initialFindings, mode === "demo" || mode === "share" ? mode : mode === "live" && !old ? "live" : "readonly");
   const scope = useMemo(() => {
     const steps = processSteps(bundle);
     const ids = new Set(steps.map((s) => s.id));
@@ -292,9 +296,12 @@ export function ProcessPage({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button asChild variant="outline">
-              <Link href={historyHref}>History</Link>
-            </Button>
+            {share}
+            {mode !== "share" && (
+              <Button asChild variant="outline">
+                <Link href={historyHref}>History</Link>
+              </Button>
+            )}
             {editHref && (
               <Button asChild className="bg-edit text-edit-fg hover:bg-edit/90">
                 <Link href={withHorizon(editHref, pickedMonths)}>✎ Open in Editor</Link>
@@ -328,7 +335,7 @@ export function ProcessPage({
             model={model}
             result={result}
             href={firstPrinciples?.href ?? "#first-principles"}
-            canEdit={mode !== "readonly" && !old}
+            canEdit={!isReadOnly(mode) && !old}
             draftChanged={firstPrinciples?.draftChanged}
             inheritedFrom={firstPrinciples?.inheritedFrom}
           />

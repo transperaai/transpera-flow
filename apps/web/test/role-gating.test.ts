@@ -73,8 +73,8 @@ describe("screens whose controls come in as props that are undefined without can
   it("Solutions: New solution only with canEdit, and Delete solution and New solution on the solution page too", () => {
     expect(read(PAGE("solutions"))).toContain("actions={canEdit ? <NewSolutionButton");
     const page = read("components/solutions/solution-page.tsx");
-    expect(page).toContain('const canEdit = mode !== "readonly";');
-    expect(page).toMatch(/\{canEdit && \(\s*<span className="flex flex-wrap items-center gap-2">\s*<DeleteSolution/);
+    expect(page).toContain('const canEdit = !isReadOnly(mode);');
+    expect(page).toMatch(/\{canEdit && \(\s*<span className="flex flex-wrap items-center gap-2">\s*(\{props\.share\}\s*)?<DeleteSolution/);
   });
 
   it("the Block library: no New block link without canEdit", () => {
@@ -82,14 +82,14 @@ describe("screens whose controls come in as props that are undefined without can
   });
 
   it("the process page offers New solution and Build solution only to those who can edit", () => {
-    expect(read("components/process-page.tsx")).toContain('const canBuild = mode !== "readonly" && viewingVersion === null && !!solutions?.base;');
+    expect(read("components/process-page.tsx")).toContain('const canBuild = !isReadOnly(mode) && viewingVersion === null && !!solutions?.base;');
     expect(read("components/solutions/process-solutions.tsx")).toMatch(/\{canEdit && \(/);
   });
 
   it("the issue page: Edit, Resolve, Reopen, Build solution and Link a source only with canEdit", () => {
     const page = read("components/issues/issue-page.tsx");
-    expect(page).toContain('const canEdit = mode !== "readonly";');
-    expect(page).toMatch(/\{canEdit && \(\s*<div[^>]*>\s*<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
+    expect(page).toContain('const canEdit = !isReadOnly(mode);');
+    expect(page).toMatch(/\{canEdit && \(\s*<div[^>]*>\s*(\{props\.share\}\s*)?<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
   });
 
   it("Suggestions: Accept and Dismiss only with canEdit, and the page says who reviews", () => {

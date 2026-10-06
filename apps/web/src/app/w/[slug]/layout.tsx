@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
-import { canManageWorkspace, currentViewer } from "@/lib/access-data";
+import { canEditWorkspace, canManageWorkspace, currentViewer } from "@/lib/access-data";
 import { brandingCss, logoUrl, readBranding } from "@/lib/branding/branding";
 import { pendingSuggestionCount, shellCounts } from "@/lib/company-data";
 import { listWorkspaces, loadWorkspaceHead } from "@/lib/data";
@@ -11,9 +11,10 @@ export default async function WorkspaceLayout(props: LayoutProps<"/w/[slug]">) {
   const { slug } = await props.params;
   const workspace = await loadWorkspaceHead(slug);
   if (!workspace) notFound();
-  const [workspaces, canManage, pendingSuggestions, shell, viewer] = await Promise.all([
+  const [workspaces, canManage, canEdit, pendingSuggestions, shell, viewer] = await Promise.all([
     listWorkspaces(),
     canManageWorkspace(workspace.id),
+    canEditWorkspace(workspace.id),
     pendingSuggestionCount(workspace.id),
     shellCounts(workspace.id),
     currentViewer(),
@@ -36,6 +37,7 @@ export default async function WorkspaceLayout(props: LayoutProps<"/w/[slug]">) {
         logoUrl={logoUrl(branding.logoPath, process.env.NEXT_PUBLIC_SUPABASE_URL)}
         workspaces={workspaces.map((w) => ({ name: w.name, href: `/w/${w.slug}` }))}
         canManage={canManage}
+        canEdit={canEdit}
         counts={{ processes: shell.processes, openIssues: shell.openIssues, pendingSuggestions, unlinkedSources: shell.unlinkedSources }}
         viewer={viewer ? { name: viewer.name, email: viewer.email } : null}
       >

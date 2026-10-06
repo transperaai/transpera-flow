@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseEnv } from "@/lib/supabase/env";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/demo", "/privacy"];
+// "/s" is a share link's page (B3): it opens signed out; a restricted link asks for Google sign-in itself.
+const PUBLIC_PATHS = ["/login", "/auth", "/demo", "/privacy", "/s"];
 
 /** Refreshes the Supabase session on every request and guards signed-in pages. */
 export async function proxy(request: NextRequest) {
