@@ -44,6 +44,8 @@ import {
   type ServiceServicingRow,
   type BlockRow,
   type ChurnDriverRow,
+  type ForecastPlanRow,
+  loadForecastPlans,
   type ClientGroupRow,
   type DemandSettingsRow,
   type IssueEventRow,
@@ -213,6 +215,19 @@ export async function loadWorkspaceSolutions(workspaceId: string, processId?: st
   } catch (err) {
     console.error("Couldn't load the solutions; showing none.", err instanceof Error ? err.message : err);
     return { solutions: [], links: [] };
+  }
+}
+
+/**
+ * The workspace's forecast plans by name (B7). RLS: only owners, editors and agency admins read them, so anyone else gets
+ * none. If they can't be read (say the table isn't there yet), the page shows none rather than break.
+ */
+export async function loadWorkspaceForecastPlans(workspaceId: string): Promise<ForecastPlanRow[]> {
+  try {
+    return await loadForecastPlans(await createClient(), workspaceId);
+  } catch (err) {
+    console.error("Couldn't load the forecast plans; showing none.", err instanceof Error ? err.message : err);
+    return [];
   }
 }
 

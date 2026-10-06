@@ -103,7 +103,9 @@ not onboarding, delivery or servicing. Prices scale the fee of each client won (
 leaving scale churn. Known limits, which A56 considered (see "Churn drivers" below): `lostRevenue` is valued at
 today's price and LTV uses today's tenure (both still true), a roster client's reported `churnMonthly` was its base
 rate (fixed in 1.6.0), and the pooled billing estimate uses the churn factor of the month a client is won in (still
-true). `withMarketCondition` replaces any schedule on the model. The
+true; the pooled month-by-month `mrr`, added in 1.9.0, decays with the pool's `churnMonthly` and follows the `clients[""]`
+count, while a won retainer's `billed` uses that service's own `churnMonthly`, so the two can differ when the rates do).
+`withMarketCondition` replaces any schedule on the model. The
 `northbeam-downturn` golden model runs Northbeam as seeded under Downturn, so a change to this maths shows up in the
 golden test. Time to hire and late payments are stored but change
 nothing, as the engine has no hiring or cash-flow model yet. To run a model under one condition (the stress test
