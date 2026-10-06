@@ -155,7 +155,7 @@ const HEALTH_HELP: Record<HealthSetting, { description: string; example: string 
 
 /** How servicing moves client health (docs/PRD.md §6.3.5): blank uses the estimated defaults. */
 export function HealthSettings({ data }: { data: WorkspaceSettingsData }) {
-  const { workspace, canManage } = data;
+  const { workspace, canEdit } = data;
   const settings = workspace.settings as unknown as Record<string, number | undefined>;
   return (
     <SettingsSection id="health" title="Client health" description={<>How servicing tasks move a client&apos;s health (0–100). Monthly churn = the service&apos;s base churn × (1 + sensitivity ×
@@ -176,8 +176,8 @@ export function HealthSettings({ data }: { data: WorkspaceSettingsData }) {
               max={rule.max}
               step={1}
               placeholder={`${rule.fallback} (estimated)`}
-              disabled={!canManage}
-              hint={canManage ? rule.hint : "Only workspace owners can change this."}
+              disabled={!canEdit}
+              hint={canEdit ? rule.hint : "You can view these; owners and editors can change them."}
               help={HEALTH_HELP[key]}
             />
           );
