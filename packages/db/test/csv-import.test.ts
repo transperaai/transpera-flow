@@ -124,7 +124,9 @@ describe("column_map", () => {
     expect(columnMapValue(by("amount"), "Amount", 5)).toBe("Column 6");
     expect(columnMapValue(IMPORT_KINDS.time_logs.columns.find((c) => c.id === "client")!, "Customer", 5)).toBe("Column 6");
     expect(columnMapValue(by("stage"), "  Deal Stage ", 2)).toBe("Deal Stage");
-    expect(columnMapValue(by("stage"), "x".repeat(100), 2)).toHaveLength(60);
+    // Text that isn't one of the column's names is not certainly a header, so it is stored by position.
+    expect(columnMapValue(by("stage"), "Qualified lead", 1)).toBe("Column 2");
+    expect(columnMapValue(by("stage"), "x".repeat(100), 2)).toBe("Column 3");
   });
 
   it("never holds a cell value when the file has no header row", () => {
@@ -141,6 +143,38 @@ describe("column_map", () => {
     const t = mapOf("J1,Audit,2026-03-02,2,Jane Secretperson,ACME Ltd\nJ2,Audit,2026-03-03,2,Sam,Smith Ltd", "time_logs").l;
     const person = IMPORT_KINDS.time_logs.columns.find((c) => c.id === "person")!;
     expect(columnMapValue(person, t.headers[4]!, 4)).toBe("Column 5");
+  });
+
+  it("never holds a value from the file in any column of any kind, with or without a header row", () => {
+    const sample = (type: string, i: number) =>
+      type === "date" ? `2026-03-0${(i % 8) + 1}` : type === "duration" ? `${i + 1}.5` : type === "amount" ? `£${9000 + i}` : `Secret value ${i} (Jane Secretperson, ACME Ltd)`;
+    for (const kind of IMPORT_KIND_LIST) {
+      const spec = IMPORT_KINDS[kind];
+      const row = (n: number) => spec.columns.map((c, i) => sample(c.type, i + n));
+      // No header row: the first data row is taken as the names, and every column is matched to a cell of it.
+      const text = [row(0), row(1), row(2)].map((r) => r.join(",")).join("\n");
+      const l = loadTable(text, ",", 1);
+      if ("error" in l) throw new Error(l.error);
+      const cells = new Set(text.split(/[\n,]/));
+      spec.columns.forEach((c, i) => {
+        const v = columnMapValue(c, l.headers[i]!, i);
+        expect(cells.has(v), `${kind}.${c.id} (${v})`).toBe(false);
+        expect(v.length, `${kind}.${c.id}`).toBeLessThanOrEqual(60);
+      });
+      // Real headers: a column named as the template names it keeps its name (the identity columns are always positions).
+      const t = loadTable(spec.template, ",", 1);
+      if ("error" in t) throw new Error(t.error);
+      const { index } = suggestMapping(t.headers, kind);
+      for (const c of spec.columns) {
+        const at = index[c.id]!;
+        const v = columnMapValue(c, t.headers[at]!, at);
+        const identity = c.type === "client" || c.type === "person" || c.type === "id" || c.type === "amount";
+        expect(v, `${kind}.${c.id}`).toBe(identity ? `Column ${at + 1}` : t.headers[at]);
+      }
+    }
+    // The example from the review: a real header is kept.
+    const stage = IMPORT_KINDS.deals.columns.find((c) => c.id === "stage")!;
+    expect(columnMapValue(stage, "Deal Stage", 2)).toBe("Deal Stage");
   });
 
   it("offers a position again next time, and an earlier header name still matches", () => {

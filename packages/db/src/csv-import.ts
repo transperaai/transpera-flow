@@ -338,10 +338,15 @@ export type MatchHow = "previous" | "name" | "partial";
 /**
  * What `column_map` holds for a column matched to a header. A client, person, id or amount column is stored by position (`Column 4`),
  * never by the header text: a file with no header row makes its first data row the "headers", and a name or an amount must not
- * reach the database that way. Other columns keep the header name (at most 60 characters).
+ * reach the database that way. Any other column keeps the header text only when it is certainly a header, that is when it is the
+ * column's own label or one of its aliases; otherwise it is stored by position too. So no value from a file is stored, with or
+ * without a header row.
  */
 export function columnMapValue(column: ImportColumn, header: string, index: number): string {
-  return column.type === "client" || column.type === "person" || column.type === "id" || column.type === "amount" ? `Column ${index + 1}` : header.trim().slice(0, 60);
+  const positional = `Column ${index + 1}`;
+  if (column.type === "client" || column.type === "person" || column.type === "id" || column.type === "amount") return positional;
+  const known = [column.label, ...column.aliases].map(normHeader);
+  return known.includes(normHeader(header)) ? header.trim().slice(0, 60) : positional;
 }
 
 const POSITIONAL = /^Column (\d+)$/;
@@ -385,7 +390,7 @@ export function suggestMapping(
   for (const c of ordered) {
     const prev = previous?.[c.id];
     const spot = typeof prev === "string" ? POSITIONAL.exec(prev) : null;
-    if (spot && (c.type === "client" || c.type === "person" || c.type === "id" || c.type === "amount")) {
+    if (spot) {
       // Stored by position: the same position, if the file still has it.
       const i = Number(spot[1]) - 1;
       if (i >= 0 && i < shown.length && free(i)) {
