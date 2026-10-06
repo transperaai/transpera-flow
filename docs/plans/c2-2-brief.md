@@ -180,7 +180,7 @@ export interface ParsedServicingLog { rows: ServicingRow[]; columns; missing; er
 export function parseServicingLog(text: string, options?: { dateOrder?: DateOrder }): ParsedServicingLog;
 ```
 
-- **A `due` with no time of day is the end of that day** (`t + 86_400_000 − 1`), so work done any time on its due day
+- **A `due` with no time of day, or exactly midnight (`00:00` or `00:00:00`) with no timezone, is the end of that day** (orchestrator decision after review: spreadsheets write a date as midnight) (`t + 86_400_000 − 1`), so work done any time on its due day
   is on time. Decide "no time of day" with the same two regexes `parseLogTime` uses (group 4 absent). Export a small
   helper `hasTimeOfDay(text)` from `calibration.ts` rather than copying the regexes.
 - `done` before `requested` is a row error. `done` before `due` is fine (early).

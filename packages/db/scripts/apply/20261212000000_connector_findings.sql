@@ -1,6 +1,6 @@
 -- Production apply file for 20261212000000_connector_findings (B20, issue #197). Strictly additive: one nullable column
 -- (`findings.proposed_via`), one partial index and one function redefined (`private.findings_before_write`); applies after
--- row 56 (20261207700000, B1 2/3b, #205). Preflight, post-apply checks and rollback (with the old function body in full)
+-- row 58 (20261209000000, B1 3/3, #30). Preflight, post-apply checks and rollback (with the old function body in full)
 -- are in the migration's own header, repeated below. Apply BEFORE deploying the app (it selects `findings.proposed_via`).
 
 begin;
@@ -42,7 +42,7 @@ set local lock_timeout = '5s';
 -- 42501 from row-level security. Members and viewers read connector findings as they read every finding (the app names people
 -- by labels, B1 2b, #30).
 --
--- Applies after row 56 (20261207700000, B1 2/3b, #205). The previous definition of the function is the one in
+-- Applies after row 58 (20261209000000, B1 3/3, #30), the latest when this was written; it touches nothing they do. The previous definition of the function is the one in
 -- 20261205000000_analysis_findings.sql (B1 2b only disabled and re-enabled the trigger). Its md5 (prosrc) on a database built
 -- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
 --
@@ -379,7 +379,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- 42501 from row-level security. Members and viewers read connector findings as they read every finding (the app names people
 -- by labels, B1 2b, #30).
 --
--- Applies after row 56 (20261207700000, B1 2/3b, #205). The previous definition of the function is the one in
+-- Applies after row 58 (20261209000000, B1 3/3, #30), the latest when this was written; it touches nothing they do. The previous definition of the function is the one in
 -- 20261205000000_analysis_findings.sql (B1 2b only disabled and re-enabled the trigger). Its md5 (prosrc) on a database built
 -- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
 --
