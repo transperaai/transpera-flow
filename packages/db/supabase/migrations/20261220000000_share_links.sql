@@ -82,7 +82,7 @@
 --        select set_config('request.jwt.claims', '{"sub":"<uuid>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
 --        insert a link with the token hash of a known 43-character token and a minimal clean snapshot
 --        ({"v":1,"kind":"overview","toggles":{"people":false,"financials":false}}, engine_version '1.8.0') -> succeeds;
---        the same with "x":"<a real person's full name>" -> 23514 "The snapshot names a person.";
+--        the same with "title":"<a real person's full name>" -> 23514 "The snapshot names a person.";
 --        set local role anon; select public.open_share_link('<token>') ->> 'status'; -> ok;  rollback;
 --
 -- ROLLBACK (run as one transaction; nothing existing was changed). Rolling it back deletes every share link:
@@ -181,10 +181,12 @@ grant update (label, snapshot, engine_version, revoked_at) on public.share_links
 -- ---------------------------------------------------------------------------
 
 -- The text a share link's checks match on, in one form (the app's `normaliseView`, packages/db/src/share-text.ts, is its twin):
--- best-effort percent-decoding, Unicode NFKC, every default-ignorable character (zero-width space and joiners, soft hyphen,
--- combining grapheme joiner, variation selectors, Hangul fillers) and every combining mark removed, curly quotes and apostrophes
--- and the hyphen variants straightened, lower case, and every run of white space (or a JSON escape of one written out as text:
--- \n, \t,  ) one space. The list of marks and ignorables is spelled out (Postgres has no Unicode property classes).
+-- best-effort percent-decoding, Unicode NFKD (an accented letter becomes its base letter), every default-ignorable character
+-- (zero-width space and joiners, soft hyphen, combining grapheme joiner, variation selectors, Hangul fillers) and every combining
+-- mark removed, curly quotes and apostrophes and the hyphen variants straightened, lower case, the letters that don't decompose
+-- folded (ł ø đ ð ı ß æ œ þ, Greek final sigma), every uuid and long hex string masked (an id is never money, an email or a name),
+-- and every run of white space (or a JSON escape of one written out as text: \n, \t,  ) one space. The lists of marks and
+-- ignorables are spelled out (Postgres has no Unicode property classes).
 
 -- `%20`, `%C3%A9`: a run of %XX that is valid UTF-8 becomes its characters; anything else stays as written.
 create function private.share_unpct(t text) returns text
@@ -197,6 +199,9 @@ declare
   run text;
   p integer;
 begin
+  if strpos(rest, '%') = 0 then
+    return rest;
+  end if;
   loop
     run := substring(rest from '((?:%[0-9A-Fa-f]{2})+)');
     exit when run is null;
@@ -214,18 +219,46 @@ end;
 $$;
 
 create function private.share_norm(t text) returns text
-language sql immutable
+language plpgsql immutable
 set search_path = ''
 as $$
-  select pg_catalog.btrim(pg_catalog.regexp_replace(
-    pg_catalog.lower(pg_catalog.translate(
-      pg_catalog.regexp_replace(
-        normalize(private.share_unpct(t), nfkc),
-        U&'[\00AD\034F\061C\115F\1160\17B4\17B5\180B-\180F\200B-\200F\202A-\202E\2060-\206F\3164\FE00-\FE0F\FEFF\FFA0\FFF0-\FFF8\+0E0000-\+0E0FFF\+01BCA0-\+01BCA3\+01D173-\+01D17A\0300-\036F\0483-\0489\0591-\05BD\05BF\05C1\05C2\05C4\05C5\05C7\0610-\061A\064B-\065F\0670\06D6-\06DC\06DF-\06E4\06E7\06E8\06EA-\06ED\0711\0730-\074A\0900-\0903\093A-\093C\093E-\094F\0951-\0957\0962\0963\0E31\0E34-\0E3A\0E47-\0E4E\1AB0-\1AFF\1DC0-\1DFF\20D0-\20FF\302A-\302F\3099\309A\FE20-\FE2F]',
-        '', 'g'),
-      U&'\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212',
-      pg_catalog.repeat('''', 6) || '""' || '------')),
+declare
+  d text := private.share_unpct(t);
+  x text;
+begin
+  -- Plain ASCII (most text): nothing to decompose, strip or fold; only case, ids and white space, each behind one cheap test.
+  if d !~ '[^\x09\x0A\x0D\x20-\x7E]' then
+    x := pg_catalog.translate(pg_catalog.lower(d), '`', '''');
+    if x !~ '[0-9a-f]{16}|[0-9a-f]{8}-[0-9a-f]{4}-|[\x09-\x0D]|  |\\[nrtbf]|\\u[0-9a-fA-F]{4}' then
+      return pg_catalog.btrim(x);
+    end if;
+    if x ~ '[0-9a-f]{8}-[0-9a-f]{4}-' then
+      x := pg_catalog.regexp_replace(x, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', E'\x01', 'g');
+    end if;
+    if x ~ '[0-9a-f]{16}' then
+      x := pg_catalog.regexp_replace(x, '(?<![0-9a-z])(?=[0-9a-f]*[a-f])[0-9a-f]{16,}(?![0-9a-z])', E'\x01', 'g');
+    end if;
+    if x ~ '[\x09-\x0D]|  |\\[nrtbf]|\\u[0-9a-fA-F]{4}' then
+      x := pg_catalog.regexp_replace(x, '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g');
+    end if;
+    return pg_catalog.btrim(x);
+  end if;
+  return pg_catalog.btrim(pg_catalog.regexp_replace(
+    pg_catalog.regexp_replace(
+      pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(pg_catalog.replace(
+        pg_catalog.translate(
+          pg_catalog.lower(pg_catalog.translate(
+            pg_catalog.regexp_replace(
+              normalize(d, nfkd),
+              U&'[\00AD\034F\061C\115F\1160\17B4\17B5\180B-\180F\200B-\200F\202A-\202E\2060-\206F\3164\FE00-\FE0F\FEFF\FFA0\FFF0-\FFF8\+0E0000-\+0E0FFF\+01BCA0-\+01BCA3\+01D173-\+01D17A\0300-\036F\0483-\0489\0591-\05BD\05BF\05C1\05C2\05C4\05C5\05C7\0610-\061A\064B-\065F\0670\06D6-\06DC\06DF-\06E4\06E7\06E8\06EA-\06ED\0711\0730-\074A\0900-\0903\093A-\093C\093E-\094F\0951-\0957\0962\0963\0E31\0E34-\0E3A\0E47-\0E4E\1AB0-\1AFF\1DC0-\1DFF\20D0-\20FF\302A-\302F\3099\309A\FE20-\FE2F]',
+              '', 'g'),
+            U&'\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212',
+            pg_catalog.repeat('''', 6) || '""' || '------')),
+          U&'\0142\00F8\0111\00F0\0131\03C2', 'lodd' || 'i' || U&'\03C3'),
+        U&'\00DF', 'ss'), U&'\00E6', 'ae'), U&'\0153', 'oe'), U&'\00FE', 'th'),
+      '(?<![0-9a-z])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]*[a-f])[0-9a-f]{16,})(?![0-9a-z])', E'\x01', 'g'),
     '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g'));
+end;
 $$;
 
 revoke execute on function private.share_unpct(text) from public;
@@ -250,9 +283,14 @@ as $$
   select w.k, w.v #>> '{}' from w where pg_catalog.jsonb_typeof(w.v) = 'string';
 $$;
 
--- The tokens of the names of a workspace's people or clients that a share link must not carry: every letter run of a name that
--- is 3+ characters, and every run of them joined ("priyashah": what is left when a zero-width space sat between the words);
--- never a word of the labels the link writes, never a stop word. Parts under 3 characters ("o" in "O'Neil") are not tokens.
+-- What the check looks for in a workspace's people, as text to compare with (a PL/pgSQL loop on purpose: as one query the planner
+-- priced it high enough to start JIT compilation, 0.3 s a call):
+--   kind 'person': every part of a name (3+ characters, 2 for a part with no Latin letter in it) and every joined run of parts
+--     ("priyashah": what is left when a zero-width space sat between the words), never a word of the labels the link writes,
+--     never a stop word; parts under the minimum are no tokens ("O" in "O'Neil").
+--   kind 'script': the parts of names written in Han, Kana or Hangul (2+ characters), which are looked for as substrings, since
+--     such text has no spaces between words.
+-- A client is not looked for by its words, only by the whole of its name: see `share_snapshot_problem`.
 create function private.share_name_tokens(ws uuid, kind text) returns setof text
 language plpgsql stable
 set search_path = ''
@@ -263,20 +301,31 @@ declare
   a integer;
   b integer;
   tok text;
+  latin constant text := U&'[a-z\00C0-\024F\1E00-\1EFF]';
+  script constant text := U&'^[\1100-\11FF\3040-\30FF\3400-\4DBF\4E00-\9FFF\F900-\FAFF]{2,}$';
 begin
-  -- A loop, not one big query: as a query the planner priced it high enough to start JIT compilation (0.3 s a call).
-  for nm in select private.share_norm(n.name) as name
-            from (select c.name from public.clients c where c.workspace_id = ws and kind = 'client'
-                  union all
-                  select p.name from public.people p where p.workspace_id = ws and kind = 'person') as n loop
+  if kind not in ('person', 'script') then
+    return;
+  end if;
+  for nm in select private.share_norm(p.name) as name from public.people p where p.workspace_id = ws loop
     parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
                    where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
+    if kind = 'script' then
+      foreach tok in array parts loop
+        if tok ~ script then
+          return next tok;
+        end if;
+      end loop;
+      continue;
+    end if;
     -- A name of one short word ("Li") is no name.
-    continue when char_length(array_to_string(parts, '')) < 3;
+    tok := array_to_string(parts, '');
+    continue when char_length(tok) < (case when tok ~ latin then 3 else 2 end);
     for a in 1 .. cardinality(parts) loop
       for b in a .. cardinality(parts) loop
         tok := array_to_string(parts[a:b], '');
-        if char_length(tok) >= 3 and tok not in ('team', 'member', 'client', 'hidden', 'email', 'amount') then
+        if char_length(tok) >= (case when tok ~ latin then 3 else 2 end)
+           and tok not in ('team', 'member', 'client', 'hidden', 'email', 'amount') then
           return next tok;
         end if;
       end loop;
@@ -290,8 +339,9 @@ revoke execute on function private.share_strings(jsonb) from public;
 revoke execute on function private.share_name_tokens(uuid, text) from public;
 
 -- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
--- email in the message). Names are looked for token by token in the free-text values only (the keys below, the same list as the
--- app's `SHARE_FREE_TEXT_KEYS`); emails and money in every string value; JSON keys never.
+-- email in the message). Names are looked for in the free-text values only (the keys below, the same list as the app's
+-- `SHARE_FREE_TEXT_KEYS`): a person by any token of the name, a client only by the whole of its name; emails and money in every
+-- string value (ids masked); JSON keys never.
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
 language plpgsql stable
@@ -308,6 +358,11 @@ declare
     'workspaceName'];
   everything text;
   free text;
+  ft text[];
+  nm record;
+  parts text[];
+  joined text;
+  latin constant text := U&'[a-z\00C0-\024F\1E00-\1EFF]';
 begin
   -- 1. The snapshot is the link's.
   if snap is null or jsonb_typeof(snap) <> 'object'
@@ -318,12 +373,12 @@ begin
      or snap -> 'toggles' -> 'financials' is distinct from to_jsonb(show_financials) then
     return 'The snapshot doesn''t match the link.';
   end if;
-  -- Every string value, normalised (the \x01 between them is no space and no letter, so nothing matches across two values),
-  -- and the free-text ones on their own.
-  select string_agg(private.share_norm(s.v), E'\x01'),
-         string_agg(private.share_norm(s.v), E'\x01') filter (where s.k = any (free_keys))
+  -- Every string value, normalised ONCE (the \x01 between them is no space and no letter, so nothing matches across two values),
+  -- and the free-text ones on their own. A bare uuid is skipped before it costs a normalisation.
+  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where n.k = any (free_keys))
     into everything, free
-    from private.share_strings(snap) as s;
+    from (select s.k, private.share_norm(s.v) as v from private.share_strings(snap) as s
+          where s.v !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') as n;
   everything := coalesce(everything, '');
   free := coalesce(free, '');
 
@@ -345,16 +400,31 @@ begin
     return 'The snapshot contains evidence notes.';
   end if;
 
-  -- 5. Clients are always anonymised: no token of a client's name (3+ characters, any case, any separators) in free text.
-  if exists (select 1 from regexp_split_to_table(free, '[^[:alpha:]]+') as w (tok)
-              where w.tok in (select private.share_name_tokens(ws, 'client'))) then
-    return 'The snapshot names a client.';
-  end if;
+  -- 5. Clients are always anonymised, by the whole of the name: its words (stop words left out) one after another in free text
+  -- with at most three non-letters between, or run together; never by one word of it ("Group review" is no client).
+  select array_agg(distinct t) into ft from regexp_split_to_table(free, '[^[:alpha:]]+') as t where t <> '';
+  ft := coalesce(ft, '{}');
+  for nm in select private.share_norm(c.name) as name from public.clients c where c.workspace_id = ws loop
+    parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
+                   where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
+    joined := array_to_string(parts, '');
+    continue when cardinality(parts) = 0 or char_length(joined) < (case when joined ~ latin then 3 else 2 end)
+               or joined in ('team', 'member', 'client', 'hidden', 'email', 'amount');
+    if joined = any (ft) then
+      return 'The snapshot names a client.';
+    end if;
+    if cardinality(parts) > 1 and parts <@ ft
+       and free ~ ('(^|[^[:alpha:]])' || array_to_string(parts, '[^[:alpha:]]{1,3}') || '($|[^[:alpha:]])') then
+      return 'The snapshot names a client.';
+    end if;
+  end loop;
 
-  -- 6. People are labels unless People is on: the same for a person's name (first name, surname, any part), so a name
-  -- token can't survive next to a "Team member N" label either.
-  if not show_people and exists (select 1 from regexp_split_to_table(free, '[^[:alpha:]]+') as w (tok)
-                                  where w.tok in (select private.share_name_tokens(ws, 'person'))) then
+  -- 6. People are labels unless People is on: no token of a person's name (first name, surname, any part) in free text, so a name
+  -- token can't survive next to a "Team member N" label either; and no Han, Kana or Hangul part of a name anywhere in it.
+  if not show_people and (
+       exists (select 1 from regexp_split_to_table(free, '[^[:alpha:]]+') as w (tok)
+                where w.tok in (select private.share_name_tokens(ws, 'person')))
+    or exists (select 1 from private.share_name_tokens(ws, 'script') as s (part) where strpos(free, s.part) > 0)) then
     return 'The snapshot names a person.';
   end if;
 
@@ -368,8 +438,9 @@ begin
     or jsonb_path_exists(snap, 'lax $.**.target_margin')
     or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
     or everything ~* ('[£$€¥₹][[:space:]]*[0-9]|[0-9][[:space:]]*[£€¥₹]'
-      || '|(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]]*[0-9][0-9.,]*([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
-      || '|[0-9]([[:space:]]*(k|m|bn))?[[:space:]]*(gbp|usd|eur|aud|nzd|cad|pounds?|dollars?|euros?|quid|sterling)([^a-z]|$)')) then
+      || '|(^|[^a-z0-9])(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]]*[0-9][0-9.,]*([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
+      || '|(^|[^a-z0-9])[0-9][0-9.,]*([[:space:]]*(k|m|bn))?[[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'
+      || '|[0-9]([[:space:]]*(k|m|bn))?[[:space:]]*(pounds?|dollars?|euros?|quid|sterling)([^a-z]|$)')) then
     return 'The snapshot contains costs or margins.';
   end if;
 

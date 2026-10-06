@@ -586,6 +586,53 @@ describe("the leak check", () => {
     }
   });
 
+  it("6f. the fourth round: ids are never money, an email or a name; 10,000 random uuids and some hashes pass with Financials off", async () => {
+    const ids: string[] = Array.from({ length: 10_000 }, () => randomUUID());
+    ids.push("0184c93c-120f-4cad-9a3c-5d3e1b2c199c", "00000000-0000-4000-8000-1b2c199cad1a", "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08");
+    await accepted({ ...clean(), ids, paths: ids.slice(0, 50).map((i) => `steps.${i}.work_hours`), model_hash: ids[ids.length - 1] });
+    // A code glued to a digit inside something longer is no money; a standalone one is.
+    await accepted({ ...clean(), note: "order 123cad456 and ref 5cadx and v4cad" });
+    await refused({ ...clean(), note: "it costs 5 CAD" }, {}, "The snapshot contains costs or margins.");
+  });
+
+  it("6g. first-principles keys (job.who, job.situation, why.chain, why.root and the rest) are free text", async () => {
+    const msg = "The snapshot names a person.";
+    const fp = (over: object) => ({ ...clean(), firstPrinciples: { job: { who: "", progress: "", situation: "", done: "" }, statements: [], requirements: [], deletes: [], improvements: [], why: { problem: "", chain: [""], root: "" }, measures: [], ...over } });
+    await refused(fp({ job: { who: `${personName}, our account lead`, progress: "", situation: "", done: "" } }), {}, msg);
+    await refused(fp({ job: { who: "", progress: `${personFirst} gets the brief`, situation: "", done: "" } }), {}, msg);
+    await refused(fp({ why: { problem: "", chain: ["Because ", `${personName} is away`], root: "" } }), {}, msg);
+    await refused(fp({ why: { problem: "", chain: [""], root: `${personName} owns everything` } }), {}, msg);
+    await refused(fp({ requirements: [{ text: "x", owner_text: `${personName}, finance director`, why: "", verdict: "keep" }] }), {}, msg);
+    await refused(fp({ quote: personName }), {}, msg);
+    await refused(fp({ job: { who: "", progress: "", situation: `When ${multiWordClient} calls`, done: "" } }), {}, "The snapshot names a client.");
+    await accepted(fp({ statements: [{ text: "Approve", kind: "truth", linked_parameter: "step.abc.work_hours" }] }));
+  });
+
+  it("6h. a client is matched by the whole of its name, never by one of its words; a person by any part", async () => {
+    const words = multiWordClient.split(" ").filter((w) => w.length >= 3);
+    const one = words[0]!;
+    // People on (so only clients are in question): a single word of a multi-word client name is just a word.
+    await accepted({ ...clean("overview", true, false), note: `a ${one.toLowerCase()} review on Friday` }, { people: true });
+    await refused({ ...clean("overview", true, false), note: `at ${multiWordClient.replace(/ /g, "-")}` }, { people: true }, "The snapshot names a client.");
+    await refused({ ...clean("overview", true, false), note: `at ${multiWordClient.replace(/[^A-Za-z]/g, "").toUpperCase()}` }, { people: true }, "The snapshot names a client.");
+    await refused({ ...clean(), note: `ask ${personFirst.toLowerCase()}` }, {}, "The snapshot names a person.");
+  });
+
+  it("6i. accents are folded, Turkish and Greek agree, and a name in Han or Kana counts from 2 characters, also inside a run", async () => {
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into people (workspace_id, name) values ($1, 'José Núñez'), ($1, 'Zoë Łukasiewicz'), ($1, 'İbrahim Yılmaz'), ($1, 'Αλέξης Παπά'), ($1, '李伟'), ($1, 'Li')", [ws]);
+      const msg = "The snapshot names a person.";
+      const tryNote = (note: string) => attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note }, tok: randomUUID() }));
+      for (const note of ["Jose Nunez said", "JOSE NUNEZ", "Zoe Lukasiewicz", "Ibrahim Yilmaz said", "İBRAHİM", "ΑΛΈΞΗΣ", "李伟 said", "李伟说过", "请联系李伟"]) {
+        expect(await tryNote(note), note).toMatchObject({ ok: false, code: "23514", message: msg });
+      }
+      expect((await tryNote("Li is here")).ok).toBe(true);
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
   it("2b. a scenario's selector (roles.@busiest) is not an email; a full-width email is", async () => {
     await accepted({ ...clean(), scenarios: [{ patch: [{ path: "roles.@busiest.headcount", op: "set", value: 3 }, { path: "steps.@heaviest.work_hours", op: "set", value: 2 }] }] });
     await refused({ ...clean(), note: "write to ｓａｍ@northbeam.example" }, {}, "The snapshot contains an email address.");

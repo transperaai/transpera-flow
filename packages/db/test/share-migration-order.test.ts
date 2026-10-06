@@ -18,6 +18,12 @@ describe("share links: the leak check's helpers and lists", () => {
     expect(header).toContain("Expect null x9");
   });
 
+  it("the post-apply smoke test names a person under a free-text key (title), not under a key that is no text", () => {
+    const smoke = /the same with "(\w+)":"<a real person's full name>"/.exec(migrationText);
+    expect(smoke?.[1]).toBe("title");
+    expect(SHARE_FREE_TEXT_KEYS).toContain(smoke![1]!);
+  });
+
   it("the database's list of free-text keys is the app's", () => {
     const m = /free_keys constant text\[\] := array\[([^\]]*)\]/.exec(migrationText)!;
     const inDb = [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);

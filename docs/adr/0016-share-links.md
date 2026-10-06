@@ -82,12 +82,19 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
   `private.share_snapshot_problem`). JSON keys, ids, enums, paths and numbers are never scrubbed or checked for names, so a
   person called Tom Price, Jo Weeks or Ann Kind cannot turn `price`, `horizon_weeks` or `kind` into a label and change the
   engine's input. Emails and money are looked for in every string value.
-- Matching is by letter tokens of a normalised view (percent-decoded, NFKC, default-ignorable code points, combining marks and
-  variation selectors removed, casefolded). Any token that equals a part (3+ characters) of a person's or client's name is
-  replaced, a run of tokens of one name with whatever sat between them (hyphen, dot, bracket, space) as one span mapped back to
-  the original text. A name token can't survive next to a label. The check tokenises the output the same way, in the app and in
-  the database (`private.share_norm`, `share_name_tokens`). The price: a word that is also part of a name ("Will", "Home",
-  "Kind") is hidden in free text; the numbers don't move because free text is not engine input.
+- Matching is by letter tokens of a normalised view (percent-decoded, NFKD with combining marks dropped and the letters that
+  don't decompose folded, default-ignorable code points and variation selectors removed, lower-cased, uuids and hex hashes masked).
+  A person: any token that equals a part (3+ characters, 2 for a part with no Latin letter in it) of the name is replaced, a run
+  of tokens of one name with whatever sat between them (hyphen, dot, space) as one span mapped back to the original text, brackets
+  kept balanced; names in Han, Kana or Hangul are also found as substrings of an unspaced run. A client: only the whole of its
+  name, as a run of tokens (or run together), never one of its words, so "Group review" is no client; if Austin wants partial
+  client names hidden too, that is his decision and a change here. A name token can't survive next to a label. The check
+  tokenises the output the same way, in the app and in the database (`private.share_norm`, `share_name_tokens`). The price on the
+  people side: a word that is also part of a name ("Will", "Grant", "Kind") is hidden in free text; the numbers don't move
+  because free text is not engine input. Not looked at, on purpose: `condition_tag` and `path_tags` (tags the engine routes by:
+  rewriting one would change the numbers, and a tag is a label for a path), and a name split across two fields ("Pri" / "ya").
+- Every string in a snapshot is classified: free text (`SHARE_FREE_TEXT_KEYS`) or not text (`SHARE_NON_TEXT_KEYS`); a test walks
+  every string path of every kind of snapshot, a first-principles document included, and fails on a new field nobody classified.
 - One money pattern (`money.ts`) serves B20's `propose_finding` check and the share link's redaction, and the database applies
   the same forms to the normalised text. A step's `cost_override` is nulled with Financials off and refused by both checks.
 - A Google identity counts only when its own email equals the account's confirmed email (any case) and that address is listed.
