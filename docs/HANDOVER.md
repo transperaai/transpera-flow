@@ -192,8 +192,9 @@ token: `bash packages/db/scripts/prod-sql.sh -c "select 1"` must return a row, n
 `packages/db/test/workspace-import.test.ts` ("a restore is a round trip > Northbeam … within run-to-run variation"):
 `costPerWin` restored 4038.9 vs source 3337.2, tolerance 655.5. #207 doesn't touch restore. A restored workspace gets new
 ids, which feed the random streams, so this check is statistical and can fail by chance (it also failed once locally under
-load). Check the second run on the same commit. If this test fails on any branch, make it robust in its own small PR (e.g.
-more replications or a tolerance derived from the run-to-run spread), never by skipping it, and merge that first.
+load). The second run on the same commit passed, so it fails by chance. **First job of the run:** make it robust in its
+own small PR (e.g. more replications, or a tolerance derived from the measured run-to-run spread), never by skipping or
+loosening it blindly, and merge that before the three PRs so their CI is reliable.
 
 For each PR in order (#205, then #207, then #206), follow "Applying a migration" below:
 1. Bring `origin/main` into the branch (merge, never rebase). For #207 and #206 that brings the previous migration in:
