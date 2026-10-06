@@ -1,5 +1,5 @@
 -- Production apply file for 20261214000000_client_branding (B5, issue #34): `workspaces.branding`, its logo guard and the public
--- `branding` bucket with three storage policies. Row 59 of docs/production-migrations.md (renumber at merge time if needed).
+-- `branding` bucket with three storage policies. Row 60 of docs/production-migrations.md (renumber at merge time if needed).
 -- Preflight, post-apply checks and rollback are in the migration's own header, repeated below. Sets `lock_timeout` to 5 s.
 
 begin;

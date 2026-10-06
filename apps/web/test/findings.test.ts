@@ -7,7 +7,7 @@ import { FactsList } from "@/components/findings/facts-list";
 import { costOfUsage, formatCost } from "@/lib/ai/cost";
 import { MemoryFindingsStore } from "@/lib/findings/use-findings";
 import { findingDetection, findingsIn, legacyDetection, pageDetections, proposedFindings } from "@/lib/findings/view";
-import { buildInsights } from "@/lib/insights/insights";
+import { buildInsights, sourceOf } from "@/lib/insights/insights";
 import { registerEntries } from "@/lib/issues/register";
 import { COMPANY_GROUP, findingsByProcess, groupOfFinding, groupOfIssue } from "@/lib/overview/by-process";
 import { rerate } from "@/lib/rules/edit";
@@ -43,6 +43,7 @@ const finding = (over: Partial<FindingRow> = {}): FindingRow => ({
   analysis_id: null,
   run_id: null,
   edited: false,
+  proposed_via: null,
   created_by: null,
   created_at: "2026-10-01T09:00:00.000Z",
   updated_by: null,
@@ -113,6 +114,19 @@ describe("what a page lists", () => {
     const company = finding({ id: "d", process_id: null });
     expect(findingsIn([a, company], { processIds: new Set([pipeline]) }).map((f) => f.id)).toEqual(["a"]);
     expect(findingsIn([a, company], null).map((f) => f.id)).toEqual(["d"]);
+  });
+});
+
+describe("findings Claude proposed over the connector (B20)", () => {
+  it("carries where it came from into its detection, and names its source", () => {
+    const viaApp = findingDetection(finding());
+    const viaConnector = findingDetection(finding({ proposed_via: "connector" }));
+    expect(viaApp).not.toHaveProperty("via");
+    expect(viaConnector).toMatchObject({ origin: "ai", via: "connector" });
+    expect(sourceOf(viaApp)).toEqual({ kind: "ai", name: "AI" });
+    expect(sourceOf(viaConnector)).toEqual({ kind: "ai", name: "Claude (connector)" });
+    expect(sourceOf(findingDetection(finding({ proposed_via: "connector", edited: true })))).toEqual({ kind: "ai", name: "Claude (connector), edited", edited: true });
+    expect(sourceOf(findingDetection(finding({ edited: true })))).toEqual({ kind: "ai", name: "AI, edited", edited: true });
   });
 });
 

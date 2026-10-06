@@ -863,6 +863,7 @@ export type Database = {
           origin: string
           person_labels: Json
           process_id: string | null
+          proposed_via: string | null
           rating: string
           run_id: string | null
           source_ids: string[]
@@ -889,6 +890,7 @@ export type Database = {
           origin: string
           person_labels?: Json
           process_id?: string | null
+          proposed_via?: string | null
           rating: string
           run_id?: string | null
           source_ids?: string[]
@@ -915,6 +917,7 @@ export type Database = {
           origin?: string
           person_labels?: Json
           process_id?: string | null
+          proposed_via?: string | null
           rating?: string
           run_id?: string | null
           source_ids?: string[]

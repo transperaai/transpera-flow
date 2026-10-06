@@ -63,6 +63,7 @@ export class MemoryFindingsStore implements FindingsStore {
       analysis_id: null,
       run_id: null,
       edited: false,
+      proposed_via: null,
       created_by: this.who,
       created_at: now,
       updated_by: this.who,

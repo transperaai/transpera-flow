@@ -370,3 +370,16 @@ A public `branding` bucket (512 KB; PNG, JPEG, WebP), three policies on `storage
 | `needs_review` at trigger depth 1 | The UPDATE inside the function fires `needs_review` at `pg_trigger_depth() = 1`, and `auth.jwt()` there carries `api_token_id`, so an API token is refused ("The company model changes only by review") even though the function is SECURITY DEFINER. | An MCP token's `rpc/save_health_rules` call is refused; a session's is not. |
 | Null edit check | `can_edit_workspace` returns null (not false) for a caller with no membership; the function wraps it in `coalesce(..., false)` so a stranger gets `not_found`, not a write. | A signed-in user outside the workspace gets `{"status": "not_found"}`. |
 | Grants | `revoke all ... from anon, authenticated` then `grant select, insert, update` on `workspace_headlines` is what keeps Supabase's default privileges off the table. | `anon` holds nothing on the table or the two functions (post-apply check in the migration header). |
+
+## Findings proposed over the connector (issue #197, B20, migration 20261212000000)
+
+`private.findings_before_write` reads `auth.jwt() ? 'api_token_id'` to tell an API token's request from a session's, takes
+`pg_advisory_xact_lock(hashtextextended(...))` before counting a workspace's recent connector proposals, and refuses a
+token's update when `pg_trigger_depth() = 1`.
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Token claims in a BEFORE trigger | `auth.jwt()` inside the trigger carries `api_token_id`, as `private.api_token_claims` sets it in the pre-request hook (the same read the `suggestions` and `review_proposals` triggers make). Verified on plain Postgres (claims set with `set_config('request.jwt.claims', ...)`) and on a local PostgREST v14.18 (the CI version) only. | An editor's MCP token proposes a finding on the Supabase project; the row has `proposed_via = 'connector'`. |
+| Update refusal | A token's PATCH of a finding answers 42501 ("not over the API"). PostgREST answered 401 in the e2e test (PostgREST v14.18, plain Postgres) (the request's JWT role is anon until the hook runs), as for the suggestions guard. | An editor's token PATCHing `findings` over the Data API is refused. |
+| Advisory lock and caps | The transaction-level lock serialises the two count checks per workspace. Verified on plain Postgres only. | Two concurrent proposals at 49 waiting: one succeeds, one gets 54000. |
+
