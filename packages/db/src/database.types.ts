@@ -2530,6 +2530,83 @@ export type Database = {
           },
         ]
       }
+      share_links: {
+        Row: {
+          allowed_emails: string[]
+          created_at: string
+          created_by: string | null
+          engine_version: string
+          expires_at: string | null
+          id: string
+          kind: string
+          label: string | null
+          last_opened_at: string | null
+          mode: string
+          opens: number
+          revoked_at: string | null
+          revoked_by: string | null
+          show_financials: boolean
+          show_people: boolean
+          snapshot: Json
+          snapshot_at: string
+          target_id: string | null
+          token_hash: string
+          workspace_id: string
+        }
+        Insert: {
+          allowed_emails?: string[]
+          created_at?: string
+          created_by?: string | null
+          engine_version: string
+          expires_at?: string | null
+          id?: string
+          kind: string
+          label?: string | null
+          last_opened_at?: string | null
+          mode?: string
+          opens?: number
+          revoked_at?: string | null
+          revoked_by?: string | null
+          show_financials?: boolean
+          show_people?: boolean
+          snapshot: Json
+          snapshot_at?: string
+          target_id?: string | null
+          token_hash: string
+          workspace_id: string
+        }
+        Update: {
+          allowed_emails?: string[]
+          created_at?: string
+          created_by?: string | null
+          engine_version?: string
+          expires_at?: string | null
+          id?: string
+          kind?: string
+          label?: string | null
+          last_opened_at?: string | null
+          mode?: string
+          opens?: number
+          revoked_at?: string | null
+          revoked_by?: string | null
+          show_financials?: boolean
+          show_people?: boolean
+          snapshot?: Json
+          snapshot_at?: string
+          target_id?: string | null
+          token_hash?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "share_links_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       solutions: {
         Row: {
           base_revision_id: string
@@ -3260,6 +3337,7 @@ export type Database = {
       }
       my_person_id: { Args: { ws: string }; Returns: string }
       open_draft: { Args: { target_process: string }; Returns: Json }
+      open_share_link: { Args: { token: string }; Returns: Json }
       publish_process: {
         Args: { accept_estimates?: boolean; target_process: string }
         Returns: Json
@@ -3418,6 +3496,10 @@ export type Database = {
           updated_at: string
           workspace_id: string
         }[]
+      }
+      share_team_capacity: {
+        Args: { show_people: boolean; ws: string }
+        Returns: Json
       }
       take_link_fetch: { Args: never; Returns: number }
       team_capacity: { Args: { ws: string }; Returns: Json }
