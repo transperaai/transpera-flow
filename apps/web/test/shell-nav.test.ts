@@ -191,8 +191,8 @@ describe("the live shell's workspace tile (client branding, issue #34)", () => {
         canManage: true,
         counts: {},
         viewer: null,
-        children: null,
       }),
+      null,
     );
   it("passes the logo through to the tile: an <img> on the white tile, decorative, no monogram", () => {
     const html = shell("https://abc.supabase.co/storage/v1/object/public/branding/x.png");
