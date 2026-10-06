@@ -246,7 +246,9 @@ export type ParsedServicingLog = Parsed<ServicingLogColumn, ServicingRow>;
  * the end of that day. `dueAt` is the date as read (`parseLogTime`).
  */
 export function dueDeadline(dueText: string, dueAt: number): number {
-  const dateOnly = !hasTimeOfDay(dueText) || /[T ]0{1,2}:00(:00(\.0+)?)?$/i.test(dueText.trim());
+  // Exactly midnight with no zone, whatever its form: 00:00, 0:00:00, or 12:00:00 AM (what .NET and SQL Server write for a date).
+  const zoned = /\d\s*(?:Z|[+-]\d{2}:?\d{2})$/i.test(dueText.trim());
+  const dateOnly = !hasTimeOfDay(dueText) || (!zoned && dueAt % 86_400_000 === 0);
   return dateOnly ? dueAt + 86_400_000 - 1 : dueAt;
 }
 

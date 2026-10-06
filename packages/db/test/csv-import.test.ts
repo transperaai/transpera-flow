@@ -30,6 +30,7 @@ import {
   type TimeLogRow,
 } from "../src/csv-import";
 import { detectDateOrder, detectDelimiter, hasTimeOfDay, parseLogTime, splitCsv } from "../src/calibration";
+import { parseServicingLog } from "../src/client-calibration";
 
 // The import wizard's pure core (issue #40): suggesting a mapping, reading eight kinds of file, converting them into the
 // shapes calibration reads, and what may be stored. No database.
@@ -561,6 +562,46 @@ describe("parseAmount", () => {
   });
   it("refuses what isn't an amount", () => {
     for (const s of ["", "abc", "1.2.3", "12abc", "£", "--5", "1,23,456.7", "12 34"]) expect(parseAmount(s), s).toBeNull();
+  });
+});
+
+describe("a due date with no time, or exactly midnight, is due at the end of its day", () => {
+  const end = (y: number, m: number, day: number) => d(y, m, day) + 86_400_000 - 1;
+  const log = (due: string, order: "dmy" | "mdy" = "mdy") =>
+    parseServicingLog(`task,client,due,done\nReport,C1,${due},`, { dateOrder: order }).rows[0]!.due;
+
+  it("keeps what C2 read before this change, to the same millisecond", () => {
+    // Each input and its due, as read before 12:00 AM and month names were accepted.
+    const before: [string, number][] = [
+      ["2026-03-06", end(2026, 3, 6)],
+      ["2026-03-06 00:00", end(2026, 3, 6)],
+      ["2026-03-06 0:00", end(2026, 3, 6)],
+      ["2026-03-06 00:00:00", end(2026, 3, 6)],
+      ["2026-03-06T00:00:00", end(2026, 3, 6)],
+      ["2026-03-06 00:00:00.000", end(2026, 3, 6)],
+      ["2026-03-06 17:00", d(2026, 3, 6, 17)],
+      ["2026-03-06 00:01", d(2026, 3, 6, 0, 1)],
+      ["2026-03-06T00:00:00Z", d(2026, 3, 6)],
+      ["2026-03-06T00:00:00+10:00", d(2026, 3, 5, 14)],
+      ["2026-03-06T10:00:00+10:00", d(2026, 3, 6)],
+      ["06/03/2026", end(2026, 3, 6)],
+      ["06/03/2026 00:00", end(2026, 3, 6)],
+      ["06/03/2026 09:30", d(2026, 3, 6, 9, 30)],
+    ];
+    for (const [text, due] of before) expect(log(text, "dmy"), text).toBe(due);
+  });
+
+  it("treats 12:00:00 AM and 12:00 AM as the start of the date, and 12:00 PM as noon", () => {
+    expect(log("06/13/2026 12:00:00 AM")).toBe(end(2026, 6, 13));
+    expect(log("06/13/2026 12:00 AM")).toBe(end(2026, 6, 13));
+    expect(log("13 Jun 2026 12:00 AM")).toBe(end(2026, 6, 13));
+    expect(log("13 Jun 2026")).toBe(end(2026, 6, 13));
+    expect(log("06/13/2026 12:00 PM")).toBe(d(2026, 6, 13, 12));
+    expect(log("06/13/2026 3:00 PM")).toBe(d(2026, 6, 13, 15));
+    // So work done on its due day is on time, for a servicing log and for jobs.
+    const jobs = readImport(splitCsv("type,client,due,closed\nReport,C1,06/13/2026 12:00:00 AM,06/13/2026 03:00 PM"), "jobs", { type: 0, client: 1, due: 2, closed: 3 }, { dateOrder: "mdy" });
+    const row = jobs.rows[0] as { due: number; done: number };
+    expect(row.done).toBeLessThanOrEqual(row.due);
   });
 });
 
