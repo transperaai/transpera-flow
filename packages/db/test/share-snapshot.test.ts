@@ -19,6 +19,8 @@ import {
   type ShareToggles,
   type SolutionRow,
 } from "../src";
+import { SHARE_FREE_TEXT_KEYS } from "../src/share";
+import { EMAIL, nameTokenIndex, normaliseView, tokens } from "../src/share-text";
 
 // Share links, the pure half (issue #32, B3): the Db a snapshot is read through, the redaction of every kind of snapshot under
 // every toggle combination, its checker, and the proof that a redacted view's numbers are the unredacted run's.
@@ -447,23 +449,57 @@ describe("text is matched on its normalised view (the second review's examples)"
     expect(redact("Ann O’Neil said").out).toBe("Team member 99 said");
   });
 
-  it("a name as a JSON key is replaced and flagged too", () => {
+  it("JSON keys are never touched or looked at, whatever they hold", () => {
     const base = raw("process", w, off);
-    const input = { ...base, liveRevisions: { [`${first} ${surname}`]: "r1" } } as unknown as ShareSnapshot;
+    const input = { ...base, liveRevisions: { [`${first} ${surname}`]: "r1", [surname.toLowerCase()]: "r2" } } as unknown as ShareSnapshot;
     const out = redactShareSnapshot(input, off, secrets) as unknown as { liveRevisions: Record<string, string> };
-    expect(Object.keys(out.liveRevisions)).toEqual(["Team member 1"]);
-    expect(shareSnapshotLeaks(input, secrets, off)).toContain("person");
+    expect(Object.keys(out.liveRevisions)).toEqual([`${first} ${surname}`, surname.toLowerCase()]);
+    expect(shareSnapshotLeaks(out, secrets, off)).toEqual([]);
   });
 
-  it("the check refuses a name word next to a label, however the name was written", () => {
+  const review: [string, string][] = [
+    ["a hyphen", "linkedin.com/in/priya-shah"],
+    ["a dot and an @", "@priya.shah on Slack"],
+    ["an underscore", "priya_shah"],
+    ["a plus", "priya+shah"],
+    ["upper case with a hyphen", "PRIYA-SHAH"],
+    ["a bracket", "priya (Shah)"],
+    ["an address with no top-level domain", "priya.shah@northbeam"],
+    ["%20 between the words", "/Priya%20Shah%20contract.pdf"],
+    ["%20 in lower case", "/priya%20shah.pdf"],
+    ["a combining grapheme joiner U+034F", "Priya Sh͏ah"],
+    ["a variation selector U+FE00", "Priya Sh︀ah"],
+    ["a Hangul filler U+3164 between the words", "priyaㅤshah"],
+    ["a Hangul filler U+3164 inside a word", "priㅤya shah"],
+    ["a word joiner U+2060", "Priya⁠Shah"],
+    ["a combining mark", "Priya Sháh"],
+  ];
+  for (const [what, text] of review) {
+    it(`the third review: ${what} (${JSON.stringify(text)}) leaves no name token, and the raw text is flagged`, () => {
+      const { out, snap, input } = redact(text);
+      const seen = out.normalize("NFKC").replace(/[\p{Default_Ignorable_Code_Point}\p{M}]/gu, "").toLowerCase();
+      for (const p of ["priya", "shah"]) expect(seen, `${p} in ${JSON.stringify(out)}`).not.toContain(p);
+      expect(out).toContain("Team member 1");
+      expect(shareSnapshotLeaks(snap, secrets, off), JSON.stringify(out)).toEqual([]);
+      expect(shareSnapshotLeaks(input, secrets, off), text).toContain("person");
+    });
+  }
+
+  it("the check refuses a name token wherever it sits, next to a label or not, however it was written", () => {
     const base = raw("process", w, off);
     const snap = (title: string) => redactShareSnapshot({ ...base, issues: [{ ...w.issue, title, evidence: null }] } as ShareSnapshot, off, secrets);
     const clean = snap("fine");
     const withTitle = (title: string) => ({ ...clean, issues: [{ ...(clean as unknown as { issues: IssueRow[] }).issues[0]!, title }] });
-    for (const bad of [`Team member 1 ${surname}`, `${first} Team member 1`, `${surname.toUpperCase()} Team member 12`, `Team member 3 ${first.toLowerCase()}`]) {
+    for (const bad of [
+      `Team member 1 ${surname}`, `${first} Team member 1`, `${surname.toUpperCase()} Team member 12`, `Team member 3 ${first.toLowerCase()}`,
+      "priya-Team member 1", "@priya.", "priya_", "priya+", "priya (Team member 1)", "%20priya", "priya%20shah", "priya͏", "priya︀", "priyaㅤ",
+    ]) {
       expect(shareSnapshotLeaks(withTitle(bad), secrets, off), bad).toContain("person");
     }
     expect(shareSnapshotLeaks(withTitle("Team member 1 and Team member 2"), secrets, off)).toEqual([]);
+    // Labels are never names, even for a person called Team or Member.
+    const odd: ShareSecrets = { ...secrets, people: [...secrets.people, { id: "00000000-0000-4000-8000-0000000000e2", name: "Team Member", label: "Team member 98" }] };
+    expect(shareSnapshotLeaks(withTitle("Team member 1 and Client 2"), odd, off)).toEqual([]);
   });
 });
 
@@ -505,12 +541,22 @@ describe("scenario selectors, money forms and a step's own cost", () => {
       ["£4.1k", "[amount hidden]"],
       ["4,100 pounds", "[amount hidden]"],
       ["1.2m GBP", "[amount hidden]"],
+      ["1.5 k GBP", "[amount hidden]"],
+      ["4,100 quid", "[amount hidden]"],
+      ["4,100 sterling", "[amount hidden]"],
+      ["Rs 4,100", "[amount hidden]"],
+      ["¥4100", "[amount hidden]"],
+      ["x5£", "x[amount hidden]"],
+      ["ABCD$5", "ABCD[amount hidden]"],
+      ["CAD 3D renders", "CAD 3D renders"],
+      ["%C2%A34,100", "[amount hidden]"],
     ] as const) {
       const base = raw("process", w, off);
       const input = { ...base, issues: [{ ...w.issue, title: text, evidence: null }] } as ShareSnapshot;
       const out = redactShareSnapshot(input, off, w.secrets) as unknown as { issues: IssueRow[] };
       expect(out.issues[0]!.title, text).toBe(expected);
-      expect(shareSnapshotLeaks(input, w.secrets, off), text).toContain("money");
+      if (expected === text) expect(shareSnapshotLeaks({ v: SHARE_SNAPSHOT_VERSION, kind: "overview", toggles: off, note: text }, w.secrets, off), text).not.toContain("money");
+      else expect(shareSnapshotLeaks(input, w.secrets, off), text).toContain("money");
       expect(shareSnapshotLeaks(out, w.secrets, off), text).toEqual([]);
     }
   });
@@ -540,9 +586,9 @@ describe("shareSnapshotLeaks on a hand-made leaky copy", () => {
       [{ x: { cost_rate: 40 } }, "pay"],
       [{ x: [{ provenance: { source: "interview" } }] }, "evidence"],
       [{ x: `mail ${w.personFirst[0]!.toLowerCase()}@${w.name}.example` }, "email"],
-      [{ x: `at ${w.clientNames[0]}` }, "client"],
-      [{ x: `ask ${w.personFull[0]}` }, "person"],
-      [{ x: `ask ${w.personFirst[0]}` }, "person"],
+      [{ note: `at ${w.clientNames[0]}` }, "client"],
+      [{ note: `ask ${w.personFull[0]}` }, "person"],
+      [{ note: `ask ${w.personFirst[0]}` }, "person"],
       [{ x: { default_cost_rate: 50 } }, "costs"],
       [{ x: { margin: 0.2 } }, "costs"],
       [{ x: { overhead_monthly: 1 } }, "costs"],
@@ -560,7 +606,7 @@ describe("shareSnapshotLeaks on a hand-made leaky copy", () => {
     expect(shareSnapshotLeaks(snap({ x: `ask ${w.personFull[0]}`, y: "£4,100", z: { default_cost_rate: 50, margin: 0.2, overhead_monthly: 1 } }), w.secrets, on)).toEqual([]);
     expect(shareSnapshotLeaks(snap({ x: { cost_rate: 1 } }), w.secrets, on)).toEqual(["pay"]);
     expect(shareSnapshotLeaks(snap({ x: "a@b.example" }), w.secrets, on)).toEqual(["email"]);
-    expect(shareSnapshotLeaks(snap({ x: w.clientNames[0] }), w.secrets, on)).toEqual(["client"]);
+    expect(shareSnapshotLeaks(snap({ note: w.clientNames[0] }), w.secrets, on)).toEqual(["client"]);
     expect(shareSnapshotLeaks(snap({ x: { provenance: { a: 1 } } }), w.secrets, on)).toEqual(["evidence"]);
   });
 });
@@ -624,6 +670,62 @@ describe("a redacted view's numbers are the unredacted run's", () => {
         }
       });
     }
+  }
+});
+
+describe("people whose names are also field names (the third review): the engine's numbers don't move", () => {
+  const opts = { startDate: "2026-10-05" };
+  const extra = ["Tom Price", "Jo Weeks", "Ann Kind", "Sarah Day", "Lee Retainer", "Max Horizon", "Pat Type", "Una Status"].map((name, i) => ({
+    id: `00000000-0000-4000-8000-00000000ff${i}0`.slice(0, 36),
+    name,
+    label: `Team member ${90 + i}`,
+  }));
+  const keyPaths = (v: unknown, at = ""): string[] =>
+    Array.isArray(v) ? v.flatMap((x) => keyPaths(x, at + "[]")) : v && typeof v === "object" ? Object.entries(v).flatMap(([k, x]) => [`${at}.${k}`, ...keyPaths(x, `${at}.${k}`)]) : [];
+  const enums = (v: unknown, at = ""): string[] =>
+    Array.isArray(v) ? v.flatMap((x) => enums(x, at)) : v && typeof v === "object" ? Object.entries(v).flatMap(([k, x]) => enums(x, `${at}.${k}`)) : typeof v === "string" && /^[a-z_]{3,24}$/.test(v) ? [`${at}=${v}`] : [];
+
+  for (const w of worlds) {
+    for (const toggles of TOGGLES) {
+      it(`${w.name}, ${label(toggles)}: keys, enums and every number equal the unredacted run, with Price, Weeks, Kind, Day, Retainer, Horizon, Type and Status on the team`, () => {
+        const secrets: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, ...extra] };
+        const plain = redactShareSnapshot(raw("process", w, toggles), toggles, w.secrets) as unknown as { bundle: ProcessBundle };
+        const snap = redactShareSnapshot(raw("process", w, toggles), toggles, secrets) as unknown as { bundle: ProcessBundle };
+        // No key and no identifier-like value changed because of the extra names.
+        expect(keyPaths(snap)).toEqual(keyPaths(plain));
+        expect(enums(snap)).toEqual(enums(plain));
+        expect(shareSnapshotLeaks(snap, secrets, toggles)).toEqual([]);
+        const a = simulate(toEngineModel(w.bundle, opts), 30, 1);
+        const b = simulate(toEngineModel(snap.bundle, opts), 30, 1);
+        expect(b.bnRole).toEqual(a.bnRole);
+        for (const k of ["mrrAdded", "billed", "ltvAdded", "lostRevenue"] as const) expect(b.kpi[k], k).toEqual(a.kpi[k]);
+        expect(b.kpi.clientsAtRisk).toEqual(a.kpi.clientsAtRisk);
+        const keys = (m: ReturnType<typeof toEngineModel>, r: SimulationResult) => detectIssues(m, r).map((i) => i.key).sort();
+        expect(keys(toEngineModel(snap.bundle, opts), b)).toEqual(keys(toEngineModel(w.bundle, opts), a));
+      });
+    }
+  }
+});
+
+describe("the free-text allow-list covers every place a name sits", () => {
+  const FREE = new Set(SHARE_FREE_TEXT_KEYS);
+  for (const w of worlds) {
+    it(`${w.name}: in the raw snapshots of every kind, no name token is in a string under a key that isn't on the list`, () => {
+      const index = nameTokenIndex([
+        { kind: "client", entries: w.secrets.clients },
+        { kind: "person", entries: w.secrets.people },
+      ]);
+      const stray: string[] = [];
+      const walk = (v: unknown, key: string) => {
+        if (typeof v === "string") {
+          if (FREE.has(key) || new RegExp(EMAIL.source, "iu").test(v)) return;
+          for (const t of tokens(normaliseView(v))) if (index.get(t.text) && !index.get(t.text)!.glue) stray.push(`${key}: ${v.slice(0, 60)}`);
+        } else if (Array.isArray(v)) v.forEach((x) => walk(x, key));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+      };
+      for (const kind of ["overview", "process", "issue", "solution"] as const) walk(raw(kind, w, TOGGLES[0]!), "");
+      expect(stray).toEqual([]);
+    });
   }
 });
 

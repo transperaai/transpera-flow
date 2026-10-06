@@ -18,11 +18,22 @@ export const MONEY_SOURCE = source(NUMBER);
 /** A new global matcher for money amounts (a regex with the `g` flag keeps state, so each use gets its own). */
 export const moneyRegex = (): RegExp => new RegExp(MONEY_SOURCE, "g");
 
-// French and similar grouping with a space ("4 512 €"): a share link's text is normalised first, so every space is a plain one.
-const SPACED_NUMBER = String.raw`\d{1,3}(?: \d{3})+(?:[.,]\d+)?|${NUMBER}`;
+// A share link's text is normalised first (every space a plain one, lower case), and its money check must refuse at least what the
+// database's does (`private.share_snapshot_problem`), so this is B20's idea widened: any symbol next to a digit, an amount in
+// words, a space before the magnitude, French thousands ("4 512 €"), and no left boundary on an amount that ends in a code.
+const SPACED = String.raw`\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d[\d.,]*`;
+const SIGNS = String.raw`[£$€¥₹]`;
+const MAG = String.raw`(?:\s*(?:bn|[km])\b)?`;
+const ISO = String.raw`(?:gbp|usd|eur|aud|nzd|cad)`;
 
-/** Amounts written in words after a number ("4,100 pounds", "40 euros"): not part of B20's check, added for share links. */
-const WORD_AMOUNT = String.raw`(?<![A-Za-z0-9])(?:${SPACED_NUMBER})${SUFFIX}\s?(?:pounds?|dollars?|euros?)(?![A-Za-z])`;
-
-/** Money in a share link's (normalised) text: B20's pattern, in any case, with spaces allowed as thousands separators and any gap, plus amounts in words. */
-export const shareMoneyRegex = (): RegExp => new RegExp(`${source(SPACED_NUMBER).replaceAll("\\s?", "\\s*")}|${WORD_AMOUNT}`, "gi");
+/** Money in a share link's normalised text: a symbol or code before a number, a number before a symbol, code or amount in words (pounds, dollars, euros, quid, sterling). */
+export const shareMoneyRegex = (): RegExp =>
+  new RegExp(
+    [
+      String.raw`(?<![a-z0-9])(?:[a-z]{1,3}\$|${SIGNS}|${ISO}|rs\.?)\s*(?:${SPACED})${MAG}(?![a-z0-9])`,
+      String.raw`${SIGNS}\s*\d[\d.,]*`,
+      String.raw`(?:${SPACED})${MAG}\s*(?:${ISO}(?![a-z])|[£€¥₹])`,
+      String.raw`(?:${SPACED})${MAG}\s*(?:pounds?|dollars?|euros?|quid|sterling)(?![a-z])`,
+    ].join("|"),
+    "giu",
+  );

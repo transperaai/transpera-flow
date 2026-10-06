@@ -13,7 +13,7 @@ import { loadFindings } from "./findings";
 import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
 import { nameFinding } from "./person-labels";
-import { EMAIL, normaliseView, pickSpans, replaceSpans, spansOf, escapeRe, wholeWords, wordsOf, type Span, type View } from "./share-text";
+import { EMAIL, MIN_TOKEN, nameSpans, nameTokenIndex, normaliseView, pickSpans, replaceSpans, spansOf, tokens, type NameToken, type Span, type View } from "./share-text";
 import {
   isUnpublished,
   listProcesses,
@@ -168,84 +168,53 @@ export function shareReaderDb(db: Db, toggles: ShareToggles): Db {
 
 const EMAIL_HIDDEN = "[email hidden]";
 const AMOUNT_HIDDEN = "[amount hidden]";
-const MIN_NAME = 3;
-
-interface Item {
-  re: RegExp;
-  label: string;
-}
-
-/** Whole names (any case): the words of each, 3+ characters in all, longest first. Words are matched on the normalised view. */
-function fullNameItems(entries: readonly SecretName[]): Item[] {
-  return entries
-    .map((e) => ({ words: wordsOf(e.name), label: e.label }))
-    .filter((e) => e.words.join(" ").length >= MIN_NAME)
-    .sort((a, b) => b.words.join(" ").length - a.words.join(" ").length)
-    .map((e) => ({ re: wholeWords(e.words, "giu"), label: e.label }));
-}
+const MIN_NAME = MIN_TOKEN;
 
 /**
- * The last word of a person's name (3+ characters, the name having two or more words), on its own, any case. A surname one person
- * holds becomes their label; a surname two people share becomes "a team member".
+ * The keys whose string values are free text a person wrote or a name: the only places names are looked for (and scrubbed), in
+ * the app and in the database (`private.share_free_text`, same list; a test keeps them equal). A string under any other key
+ * is an id, a date, an enum, a path or a selector the engine reads, and is never touched: a person called "Tom Price" must not
+ * turn the `price` key, a `kind` value or `horizon_weeks` into a label. An array of strings takes its parent's key. Emails and
+ * money are looked for in every string value (never in keys).
  */
-function surnameItems(people: readonly SecretName[]): Item[] {
-  const bySurname = new Map<string, SecretName[]>();
-  for (const p of people) {
-    const words = wordsOf(p.name);
-    const last = words[words.length - 1];
-    if (words.length > 1 && last && last.length >= MIN_NAME) bySurname.set(last.toLowerCase(), [...(bySurname.get(last.toLowerCase()) ?? []), p]);
-  }
-  return [...bySurname].map(([surname, who]) => ({ re: wholeWords([surname], "giu"), label: who.length === 1 ? who[0]!.label : "a team member" }));
-}
-
-/** First names of 3+ letters, as written (case-sensitive: "will" and "mark" are words): one person's becomes their label, two people's "a team member". */
-function firstNameItems(people: readonly SecretName[]): Item[] {
-  const by = new Map<string, SecretName[]>();
-  for (const p of people) {
-    const f = wordsOf(p.name)[0] ?? "";
-    if (f.length >= MIN_NAME) by.set(f, [...(by.get(f) ?? []), p]);
-  }
-  return [...by].map(([first, who]) => ({ re: wholeWords([first], "gu"), label: who.length === 1 ? who[0]!.label : "a team member" }));
-}
-
-/**
- * Every word of every person's name (3+ characters) next to a "Team member N" label, on either side: after redaction that would
- * tie the label to the name, whatever way the name was written.
- */
-function adjacentToLabel(people: readonly SecretName[]): RegExp | null {
-  const words = [...new Set(people.flatMap((p) => wordsOf(p.name)).filter((w) => w.length >= MIN_NAME))];
-  if (!words.length) return null;
-  const alt = words.map(escapeRe).join("|");
-  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${alt}) Team member \\d+(?!\\d)|Team member \\d+ (?:${alt})(?![\\p{L}\\p{N}])`, "iu");
-}
+export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
+  "actor", "agreed_by", "auto_note", "body", "breaks_if_removed", "message", "owner_text", "source", "statement", "test", "horizon", "description", "detail", "domain", "evidence", "example", "excerpt", "expect", "job_done",
+  "job_progress", "job_situation", "job_who", "label", "movedOn", "name", "note", "notes", "proposer_name", "reason", "review_note",
+  "resolution_note", "root_cause", "speaker", "speakers", "summary", "target_goal", "target_measure", "target_now", "text", "title", "tool",
+  "user_name", "user_notes", "why", "why_problem", "workspaceName",
+];
+const FREE_TEXT = new Set(SHARE_FREE_TEXT_KEYS);
 
 /** Ids, dates and plain numbers hold nothing to hide: skipped, for speed. */
 const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[\d\-:.TZ+ ]*)$/i;
 
-interface Scrubber {
-  text(s: string): string;
-}
-
-/** What a share link hides, as the spans to replace in a text. Shared by the scrub and the check, so they can't disagree. */
+/** What a share link hides, as the spans of one string's original text. Shared by the scrub and the check, so they can't disagree. */
 function spansFor(toggles: ShareToggles, secrets: ShareSecrets) {
-  const clients = fullNameItems(secrets.clients);
-  const people = [...fullNameItems(secrets.people), ...surnameItems(secrets.people), ...firstNameItems(secrets.people)];
+  const index = nameTokenIndex([
+    { kind: "client", entries: secrets.clients },
+    { kind: "person", entries: secrets.people },
+  ]);
   const email = [{ re: EMAIL, label: EMAIL_HIDDEN }];
   const money = [{ re: shareMoneyRegex(), label: AMOUNT_HIDDEN }];
-  return (view: View): Span[] => [
+  const names = (t: NameToken) => t.clients || !toggles.people;
+  return (view: View, free: boolean): Span[] => [
     ...spansOf(view, email),
-    ...spansOf(view, clients),
-    ...(toggles.people ? [] : spansOf(view, people)),
     ...(toggles.financials ? [] : spansOf(view, money)),
+    ...(free ? nameSpans(view, index, names) : []),
   ];
+}
+
+interface Scrubber {
+  /** `free`: the string is free text (its key is on `SHARE_FREE_TEXT_KEYS`), so names are looked for in it too. */
+  text(s: string, free: boolean): string;
 }
 
 function scrubber(toggles: ShareToggles, secrets: ShareSecrets): Scrubber {
   const spans = spansFor(toggles, secrets);
   return {
-    text(s) {
+    text(s, free) {
       if (s.length < MIN_NAME || QUIET.test(s)) return s;
-      return replaceSpans(s, pickSpans(spans(normaliseView(s))));
+      return replaceSpans(s, pickSpans(spans(normaliseView(s), free)));
     },
   };
 }
@@ -313,9 +282,9 @@ const BLANKED: Record<string, unknown> = {
  */
 export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
   const scrub = scrubber(toggles, secrets);
-  const walk = (value: unknown): unknown => {
-    if (typeof value === "string") return scrub.text(value);
-    if (Array.isArray(value)) return value.map(walk);
+  const walk = (value: unknown, key = ""): unknown => {
+    if (typeof value === "string") return scrub.text(value, FREE_TEXT.has(key));
+    if (Array.isArray(value)) return value.map((x) => walk(x, key));
     if (!isObj(value)) return value;
     const src = isBundleLike(value) ? redactBundle(value, toggles, secrets) : value;
     const out: Obj = {};
@@ -324,15 +293,15 @@ export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, s
       // A step's own cost figure: a money field, hidden with Financials off.
       else if (k === "cost_override" && !toggles.financials) out[k] = null;
       // Word-for-word quotes from sources never go out (they name people and clients as the speaker said them).
-      else if (k === "facts" && Array.isArray(v)) out[k] = v.filter((f) => !isQuoteFact(f)).map(walk);
+      else if (k === "facts" && Array.isArray(v)) out[k] = v.filter((f) => !isQuoteFact(f)).map((x) => walk(x, k));
       // With Financials off, no role-rate change in a scenario's patch or a solution's lever changes.
-      else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isRatePatch(p)).map(walk);
-      else out[scrub.text(k)] = walk(v);
+      else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isRatePatch(p)).map((x) => walk(x, k));
+      else out[k] = walk(v, k);
     }
     return out;
   };
   const redacted = walk(raw) as Obj;
-  return { ...redacted, v: SHARE_SNAPSHOT_VERSION, kind: raw.kind, toggles: { people: toggles.people, financials: toggles.financials }, workspaceName: scrub.text(raw.workspaceName) } as unknown as ShareSnapshot;
+  return { ...redacted, v: SHARE_SNAPSHOT_VERSION, kind: raw.kind, toggles: { people: toggles.people, financials: toggles.financials }, workspaceName: scrub.text(raw.workspaceName, true) } as unknown as ShareSnapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,10 +329,11 @@ export type ShareLeak = keyof typeof SHARE_LEAKS;
 export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, toggles: ShareToggles): ShareLeak[] {
   const found = new Set<ShareLeak>();
   const email = [{ re: EMAIL, label: "" }];
-  const clients = fullNameItems(secrets.clients);
-  const people = [...fullNameItems(secrets.people), ...surnameItems(secrets.people), ...firstNameItems(secrets.people)];
   const money = [{ re: shareMoneyRegex(), label: "" }];
-  const adjacent = adjacentToLabel(secrets.people);
+  const index = nameTokenIndex([
+    { kind: "client", entries: secrets.clients },
+    { kind: "person", entries: secrets.people },
+  ]);
   const s = snapshot as Obj;
   if (
     !isObj(s) ||
@@ -375,21 +345,26 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
   ) {
     found.add("mismatch");
   }
-  // Every string is checked on its normalised view, the same one the scrub matched on; keys are strings too.
-  const text = (value: string) => {
+  // Emails and money: every string value. Names: the free-text values only, token by token on the same normalised view the
+  // scrub used, so any name token left (next to a label or not) is a leak. Keys are never looked at for text.
+  const text = (value: string, free: boolean) => {
     if (value.length < MIN_NAME) return;
     const view = normaliseView(value);
     if (spansOf(view, email).length) found.add("email");
-    if (spansOf(view, clients).length) found.add("client");
-    if (!toggles.people && (spansOf(view, people).length || (adjacent && adjacent.test(view.n)))) found.add("person");
     if (!toggles.financials && spansOf(view, money).length) found.add("money");
+    if (!free) return;
+    for (const t of tokens(view)) {
+      const name = index.get(t.text);
+      if (!name || name.glue) continue;
+      if (name.clients) found.add("client");
+      if (name.people && !toggles.people) found.add("person");
+    }
   };
-  const walk = (value: unknown) => {
-    if (typeof value === "string") return text(value);
-    if (Array.isArray(value)) return void value.forEach((x) => walk(x));
+  const walk = (value: unknown, key = "") => {
+    if (typeof value === "string") return text(value, FREE_TEXT.has(key));
+    if (Array.isArray(value)) return void value.forEach((x) => walk(x, key));
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {
-      text(k);
       if (k === "cost_rate" && v !== null && v !== undefined) found.add("pay");
       // Evidence notes of any JSON type: only an empty object (or null) is clean.
       if (k === "provenance" && v !== null && v !== undefined && !(isObj(v) && Object.keys(v).length === 0)) found.add("evidence");
@@ -401,7 +376,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
         if ((k === "overhead_monthly" || k === "target_margin") && v !== undefined) found.add("costs");
         if ((k === "patch" || k === "lever_changes") && Array.isArray(v) && v.some(isRatePatch)) found.add("costs");
       }
-      walk(v);
+      walk(v, k);
     }
   };
   walk(snapshot);
@@ -526,6 +501,8 @@ export async function loadShareData(
     const issues = await loadIssuesForReader(rdb, ws);
     const issue = issues.find((i) => i.id === target.id && i.number != null);
     if (!issue) throw new ShareBuildError("That issue isn't here any more.");
+    // Any process the issue is on (its own or a link) being archived refuses the link, before anything else is loaded.
+    await refuseArchived(db, ws, [issue.process_id, ...issue.links.map((l) => l.process_id)]);
     // Only a published version is ever shared, never a draft.
     const probe = await loadProcessBySlug(rdb, workspace.slug, { draft: false });
     if (!probe) throw new ShareBuildError("Publish a process first.");
@@ -535,7 +512,6 @@ export async function loadShareData(
     if (processId && processId !== probe.live.process.id && !own) throw new ShareBuildError("Publish this process first: a link shows the published version.");
     const bundle = (own ?? probe).live;
     if (isUnpublished(bundle)) throw new ShareBuildError("Publish this process first: a link shows the published version.");
-    await refuseArchived(db, ws, [processId, bundle.process.id]);
     const [processes, liveRevisions, solutions] = await Promise.all([
       listProcesses(rdb, ws).then((ps) => ps.map((p) => ({ id: p.id, name: p.name }))),
       loadLiveRevisionIds(rdb, ws),
@@ -546,11 +522,11 @@ export async function loadShareData(
     const all = await loadSolutionsData(rdb, ws);
     const solution = all.solutions.find((s) => s.id === target.id);
     if (!solution) throw new ShareBuildError("That solution isn't here any more.");
+    await refuseArchived(db, ws, [solution.process_id]);
     const [issues, processes] = await Promise.all([loadIssuesForReader(rdb, ws), listProcesses(rdb, ws).then((ps) => ps.map((p) => ({ id: p.id, name: p.name })))]);
     const loaded = (await loadProcessBySlug(rdb, workspace.slug, { draft: false, processId: solution.process_id })) ?? (await loadProcessBySlug(rdb, workspace.slug, { draft: false }));
     if (!loaded) throw new ShareBuildError("Publish a process first.");
     const live = loaded.live;
-    await refuseArchived(db, ws, [solution.process_id, live.process.id]);
     let compareBase: SolutionShare["compareBase"] = null;
     let movedOn: string | null = null;
     try {
