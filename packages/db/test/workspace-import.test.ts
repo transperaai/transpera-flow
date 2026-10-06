@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { simulate } from "@transpera-flow/engine";
 import { timeSplitOf, workingShare } from "../../../apps/web/src/lib/overview/time-split";
@@ -726,6 +727,16 @@ describe("SQL and TS agree", () => {
     const tsRefs = Object.entries(IMPORT_REFS).flatMap(([s, refs]) => refs.map((r) => `${s}.${r.col}`));
     expect(list("ref_cols").sort()).toEqual([...tsRefs, "market_schedule.condition_id", "suggestions.target_id"].sort());
     expect(list("step_ref_cols").sort()).toEqual(IMPORT_STEP_REFS.map((r) => r.col).sort());
+  });
+
+  it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
+    const dir = new URL("../", import.meta.url);
+    const mig = readFileSync(new URL("supabase/migrations/20261207000000_import_workspace_bundle.sql", dir), "utf8").trimEnd();
+    const apply = readFileSync(new URL("scripts/apply/20261207000000_import_workspace_bundle.sql", dir), "utf8");
+    expect(apply).toContain("\nbegin;\nset local lock_timeout");
+    expect(apply.split(mig).length - 1).toBe(2);
+    expect(apply).toContain("insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261207000000', 'import_workspace_bundle', array[$mig$" + mig);
+    expect(apply.trimEnd().endsWith("$mig$]);\n\ncommit;")).toBe(true);
   });
 
   it("restores a plan that carries every allowed column of the tables that take them (the columns exist)", async () => {

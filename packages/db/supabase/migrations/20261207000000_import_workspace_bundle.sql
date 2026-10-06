@@ -67,10 +67,12 @@
 --
 -- STRICTLY ADDITIVE: one function and one grant. It doesn't redefine `save_fields` or any existing function or trigger.
 --
--- ORDER: apply after 20261206000000 (B1 slice 1, row 53, applied to production on 6 Oct 2026). Nothing later may be applied.
+-- ORDER: apply after 20261206000000 (B1 slice 1, row 53, applied to production on 6 Oct 2026). Nothing later may be applied,
+-- except possibly 20261207500000 (B1 2/3a, built in parallel, independent of this).
 --
 -- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
---   0. B1 (1/3) (row 53, 20261206000000) is applied, and nothing is later. Expect 1, then 0 rows:
+--   0. B1 (1/3) (row 53, 20261206000000) is applied, and nothing is later (but possibly 20261207500000). Expect 1, then 0 rows
+--      or only 20261207500000:
 --        select count(*) from supabase_migrations.schema_migrations where version = '20261206000000';
 --        select version from supabase_migrations.schema_migrations where version > '20261206000000' order by 1;
 --   1. Not created yet. Expect null:
