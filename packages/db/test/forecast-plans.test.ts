@@ -49,6 +49,9 @@ beforeAll(async () => {
     await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[r]!.id, r]);
   }
   users.stranger = await createUser(db, "stranger@plans.example.com");
+  users.agencyFlag = await createUser(db, "agency-flag@plans.example.com", { agency_admin: true });
+  users.agencyMember = await createUser(db, "agency-member@plans.example.com");
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'agency_admin')", [ws, users.agencyMember!.id]);
   otherWs = (await db.client.query("insert into workspaces (name, slug) values ('Other', 'other-plans') returning id")).rows[0].id;
   otherRole = (await db.client.query("insert into roles (workspace_id, name) values ($1, 'Theirs') returning id", [otherWs])).rows[0].id;
   otherPerson = (await db.client.query("insert into people (workspace_id, name) values ($1, 'Them') returning id", [otherWs])).rows[0].id;
@@ -100,6 +103,19 @@ describe("forecast plans: editors", () => {
       expect(r.rows[0].moved).toBe(true);
     } finally {
       await db.client.query("rollback");
+    }
+  });
+});
+
+describe("forecast plans: agency admins", () => {
+  it("read and write plans, by the JWT flag and by membership", async () => {
+    for (const r of ["agencyFlag", "agencyMember"]) {
+      await db.as(users[r]!.claims, async (c) => {
+        const id = (await insert(c, `By ${r}`, [hire()])).rows[0].id;
+        expect((await c.query("select id from forecast_plans where id = $1", [id])).rowCount, r).toBe(1);
+        expect((await c.query("update forecast_plans set name = 'Renamed' where id = $1", [id])).rowCount, r).toBe(1);
+        expect((await c.query("delete from forecast_plans where id = $1", [id])).rowCount, r).toBe(1);
+      });
     }
   });
 });
@@ -173,6 +189,10 @@ describe("forecast plans: what the database refuses", () => {
     ["0 weeks of leave", () => [leave({ weeks: 0 })], /1 to 52 whole weeks/],
     ["53 weeks of leave", () => [leave({ weeks: 53 })], /1 to 52 whole weeks/],
     ["1.5 weeks of leave", () => [leave({ weeks: 1.5 })], /1 to 52 whole weeks/],
+    ["99999999999 weeks of leave", () => [leave({ weeks: 99999999999 })], /1 to 52 whole weeks/],
+    ["a hire dated mid-month", () => [hire({ date: "2027-01-16" })], /starts on the 1st of a month/],
+    ["a solution dated mid-month", () => [sol({ date: "2027-04-16" })], /starts on the 1st of a month/],
+    ["leave starting on a Wednesday", () => [leave({ date: "2027-03-03", weeks: 1 })], /leave starts on a Monday/],
     ["5 solution markers", () => Array.from({ length: 5 }, () => sol()), /at most 4 solutions/],
   ];
   for (const [what, markers, pattern] of cases) {

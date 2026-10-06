@@ -132,6 +132,12 @@ begin
     if d < date '2000-01-01' or d > date '2100-12-31' then
       raise exception 'forecast_plans: a marker''s date is not valid' using errcode = '23514';
     end if;
+    if k in ('hire', 'solution') and pg_catalog.date_part('day', d) <> 1 then
+      raise exception 'forecast_plans: a hire or solution marker starts on the 1st of a month' using errcode = '23514';
+    end if;
+    if k = 'leave' and pg_catalog.date_part('isodow', d) <> 1 then
+      raise exception 'forecast_plans: leave starts on a Monday' using errcode = '23514';
+    end if;
     if k = 'hire' then
       if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in ('id', 'kind', 'date', 'role_id', 'fte', 'name')) then
         raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
@@ -162,7 +168,7 @@ begin
         or not exists (select 1 from public.people p where p.id = (m ->> 'person_id')::uuid and p.workspace_id = new.workspace_id) then
         raise exception 'forecast_plans: leave needs a person of this workspace' using errcode = '23514';
       end if;
-      if pg_catalog.jsonb_typeof(m -> 'weeks') is distinct from 'number' or (m ->> 'weeks') !~ '^[0-9]+$' then
+      if pg_catalog.jsonb_typeof(m -> 'weeks') is distinct from 'number' or (m ->> 'weeks') !~ '^[0-9]{1,2}$' then
         raise exception 'forecast_plans: leave lasts 1 to 52 whole weeks' using errcode = '23514';
       end if;
       if (m ->> 'weeks')::integer not between 1 and 52 then

@@ -43,6 +43,9 @@ function parseMarker(raw: unknown): { ok: true; marker: ForecastPlanMarker } | {
   if (typeof m.id !== "string" || !UUID.test(m.id)) return fail(NOT_VALID);
   if (!isPlanDate(m.date)) return fail("A marker's date isn't valid.");
   const only = (...keys: string[]) => Object.keys(m).every((k) => keys.includes(k));
+  const day = new Date(`${m.date}T00:00:00Z`);
+  if ((m.kind === "hire" || m.kind === "solution") && day.getUTCDate() !== 1) return fail("A hire or solution starts on the 1st of a month.");
+  if (m.kind === "leave" && day.getUTCDay() !== 1) return fail("Leave starts on a Monday.");
   if (m.kind === "hire") {
     if (!only("id", "kind", "date", "role_id", "fte", "name")) return fail(NOT_VALID);
     if (typeof m.role_id !== "string" || !UUID.test(m.role_id)) return fail("A hire needs a role.");
