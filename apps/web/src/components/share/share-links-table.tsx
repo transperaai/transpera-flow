@@ -5,12 +5,13 @@
 // shown either, so the list holds no names or figures a toggle hides.
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { refreshShareLink, revokeShareLink, type ShareResult } from "@/app/w/[slug]/share-actions";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { STATUS_LABELS, openedText, shareDate, showsFinancials, showsPeople, whoText } from "@/lib/share/format";
+import { STATUS_LABELS, ideasText, openedText, shareDate, showsFinancials, showsPeople, showsTryChanges, whoText } from "@/lib/share/format";
 import type { ShareLinkRow } from "@/lib/share/list";
 
 /** The (i) texts: what each action does, in plain words, with an example. */
@@ -19,6 +20,11 @@ export const SHARE_LIST_HELP = {
     label: "Update copy",
     description: "The link shows the page as it was when you made it. Update it to show today's version. The link stays the same.",
     example: "You fixed three issues since sharing the Overview: Update copy, and the same link shows them.",
+  },
+  ideas: {
+    label: "Ideas",
+    description: "How many ideas people have sent from a link that lets them try changes. They arrive in Suggestions, and nothing changes unless you build one.",
+    example: "3 sent: open Suggestions to build or dismiss each one.",
   },
   off: {
     label: "Turn off",
@@ -78,6 +84,12 @@ export function ShareLinksTable({ slug, links, refresh, revoke }: ShareLinksTabl
               <TableHead>What</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Shows</TableHead>
+              <TableHead>
+                <span className="inline-flex items-center">
+                  Ideas
+                  <Help {...SHARE_LIST_HELP.ideas} />
+                </span>
+              </TableHead>
               <TableHead>Who</TableHead>
               <TableHead>Works until</TableHead>
               <TableHead>Opened</TableHead>
@@ -96,6 +108,20 @@ export function ShareLinksTable({ slug, links, refresh, revoke }: ShareLinksTabl
                 <TableCell className="text-xs">
                   <span className="block">{showsPeople(l.showPeople)}</span>
                   <span className="block text-fg-2">{showsFinancials(l.showFinancials)}</span>
+                  {l.mode === "play" && (
+                    <span className="block font-medium" data-share-play>
+                      {showsTryChanges}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs" data-share-ideas>
+                  {l.ideas === null ? (
+                    <span className="text-fg-3">—</span>
+                  ) : (
+                    <Link href={`/w/${slug}/suggestions`} className="underline">
+                      {ideasText(l.ideas)}
+                    </Link>
+                  )}
                 </TableCell>
                 <TableCell title={l.emails.join(", ") || undefined}>{whoText(l.emails)}</TableCell>
                 <TableCell>{l.expiresAt ? shareDate(l.expiresAt) : "No end date"}</TableCell>

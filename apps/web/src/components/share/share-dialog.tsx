@@ -44,6 +44,11 @@ export const SHARE_HELP = {
     description: "The link stops working at the end of this day.",
     example: "30 days from today.",
   },
+  play: {
+    label: "Let people try changes",
+    description: "Visitors can move the levers you show (Settings → Levers) and see what would change. Nothing they do is saved. They can send you what they tried: it arrives in Suggestions, and nothing changes unless you build it.",
+    example: "A client tries one more strategist and sends it as “Hire for onboarding”.",
+  },
   name: {
     label: "Name",
     description: "Only you and other editors see this, on Share links.",
@@ -104,6 +109,7 @@ function Form({ slug, kind, targetId, what, create, onClose }: ShareButtonProps 
   const [emails, setEmails] = useState("");
   const [expiresOn, setExpiresOn] = useState(() => daysFromNow(DEFAULT_DAYS));
   const [noEnd, setNoEnd] = useState(false);
+  const [play, setPlay] = useState(false);
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -112,7 +118,7 @@ function Form({ slug, kind, targetId, what, create, onClose }: ShareButtonProps 
   const restricted = people || financials;
   const make = create ?? ((input: ShareInput) => createShareLink(slug, input));
 
-  const input: ShareInput = { kind, targetId, people, financials, emails, expiresOn: noEnd && !restricted ? null : expiresOn || null, label };
+  const input: ShareInput = { kind, targetId, people, financials, emails, expiresOn: noEnd && !restricted ? null : expiresOn || null, label, play: kind === "process" && play };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,6 +165,11 @@ function Form({ slug, kind, targetId, what, create, onClose }: ShareButtonProps 
           </Link>
           .
         </p>
+        {input.play && (
+          <p className="text-sm text-fg-2" data-share-play-done>
+            People who open it can send you ideas. You&apos;ll find them in Suggestions.
+          </p>
+        )}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
             Done
@@ -194,6 +205,17 @@ function Form({ slug, kind, targetId, what, create, onClose }: ShareButtonProps 
           </div>
           <Switch id="share-financials" checked={financials} onCheckedChange={setFinancials} data-share-financials />
         </div>
+        {kind === "process" && (
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center">
+              <label htmlFor="share-play" className="text-sm font-medium">
+                Let people try changes
+              </label>
+              <Help {...SHARE_HELP.play} />
+            </div>
+            <Switch id="share-play" checked={play} onCheckedChange={setPlay} data-share-play />
+          </div>
+        )}
       </div>
       {restricted && (
         <Field label="Who can open it" htmlFor="share-emails" help={SHARE_HELP.who}>
