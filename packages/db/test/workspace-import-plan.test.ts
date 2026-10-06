@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { ENGINE_VERSION } from "@transpera-flow/engine";
-import { IMPORT_COLUMNS, IMPORT_REFS, IMPORT_STEP_REFS, PLACEHOLDER_PREFIX, WORKSPACE_IMPORT_LIMITS, checkWorkspaceBundle, planWorkspaceImport, type Row, type WorkspaceBundle } from "../src";
+import { exportWorkspaceBundle, restoreSizeWarning, IMPORT_COLUMNS, IMPORT_REFS, IMPORT_STEP_REFS, PLACEHOLDER_PREFIX, WORKSPACE_IMPORT_LIMITS, checkWorkspaceBundle, planWorkspaceImport, type Row, type WorkspaceBundle } from "../src";
 import { ACCOUNT_KEY } from "../src/workspace-bundle";
 
 // Checking and planning a workspace restore (issue #39, B10 2a): pure, no database. A real export is checked in
@@ -282,6 +282,11 @@ describe("checkWorkspaceBundle: limits", () => {
     { name: "sources", max: L.sources, add: (b, n) => b.sources.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, body: "" }))), message: `The backup has ${n(L.sources + 1)} sources; a restore takes at most ${n(L.sources)}.` },
     { name: "suggestions", max: L.suggestions, add: (b, n) => b.suggestions.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", target_id: null }))), message: `The backup has ${n(L.suggestions + 1)} pending suggestions; a restore takes at most ${n(L.suggestions)}.` },
     { name: "proposals", max: L.proposals, add: (b, n) => b.suggestion_proposals.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", issue_id: null }))), message: `The backup has ${n(L.proposals + 1)} pending proposals; a restore takes at most ${n(L.proposals)}.` },
+    // The link tables. The fixture already restores 1 role assignment, 1 skill, 0 client assignments and 2 source links.
+    { name: "personRoles", max: L.personRoles, add: (b, n) => b.company_model.person_roles!.push(...filler(n - 1, () => ({ person_id: b.company_model.people![0]!.id, role_id: b.company_model.roles![0]!.id }))), message: `The backup has ${n(L.personRoles + 1)} role assignments; a restore takes at most ${n(L.personRoles)}.` },
+    { name: "personSkills", max: L.personSkills, add: (b, n) => b.company_model.person_skills!.push(...filler(n - 1, () => ({ person_id: b.company_model.people![0]!.id, step_id: b.company_model.person_skills![0]!.step_id }))), message: `The backup has ${n(L.personSkills + 1)} skills; a restore takes at most ${n(L.personSkills)}.` },
+    { name: "clientAssignments", max: L.clientAssignments, add: (b, n) => b.company_model.client_assignments!.push(...filler(n, () => ({ client_id: b.company_model.clients![0]!.id, role_id: b.company_model.roles![0]!.id, person_id: b.company_model.people![0]!.id }))), message: `The backup has ${n(L.clientAssignments + 1)} client assignments; a restore takes at most ${n(L.clientAssignments)}.` },
+    { name: "sourceLinks", max: L.sourceLinks, add: (b, n) => b.source_links.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, source_id: b.sources[0]!.id, kind: "process", process_id: b.processes[1]!.id }))), message: `The backup has ${n(L.sourceLinks + 1)} source links; a restore takes at most ${n(L.sourceLinks)}.` },
     {
       name: "processes",
       max: L.processes,
@@ -300,6 +305,13 @@ describe("checkWorkspaceBundle: limits", () => {
       expect(run(c.add, c.max + 1).errors).toContain(c.message);
     });
   }
+
+  it("tells an editor the settings go to Suggestions, and an owner or agency admin that they are applied", () => {
+    const b = makeBundle().bundle;
+    expect(checkWorkspaceBundle(b).summary.settings).toBe("applied");
+    expect(checkWorkspaceBundle(b, { canManage: true }).summary.settings).toBe("applied");
+    expect(checkWorkspaceBundle(b, { canManage: false }).summary.settings).toBe("suggested");
+  });
 
   it("steps and edges in the restored versions", () => {
     const build = (steps: number, edges: number) => {
@@ -332,6 +344,43 @@ describe("checkWorkspaceBundle: limits", () => {
     const b = clone(makeBundle().bundle);
     (b.company_model.roles as Row[])[0]!.provenance = { note: "y".repeat(L.planBytes) };
     expect(checkWorkspaceBundle(b).errors.join(" ")).toMatch(/too big to restore in one go/);
+  });
+});
+
+describe("an export of a workspace bigger than a restore takes", () => {
+  it("names every count over its limit, and says nothing for a workspace that fits", () => {
+    const L = WORKSPACE_IMPORT_LIMITS;
+    const fits = makeBundle().bundle;
+    expect(restoreSizeWarning(fits)).toBeNull();
+    const big = clone(fits);
+    for (let i = 0; i < L.processes; i++) big.processes.push({ id: id(), name: "p", is_company: false, workspace_id: big.workspace.id, parent_process_id: null, versions: [{ id: id(), live: true, draft: false, steps: [], edges: [], workspace_id: big.workspace.id }] } as Row);
+    big.company_model.person_roles!.push(...Array.from({ length: L.personRoles }, () => ({ person_id: big.company_model.people![0]!.id, role_id: big.company_model.roles![0]!.id })));
+    const warning = restoreSizeWarning(recount(big))!;
+    expect(warning).toContain(`This workspace is bigger than a backup can restore in one go (${L.processes + 3} processes; the limit is ${L.processes}`);
+    expect(warning).toContain(`${(L.personRoles + 1).toLocaleString("en-US")} role assignments; the limit is ${L.personRoles.toLocaleString("en-US")}`);
+    expect(warning).toContain("Keep the file; restoring a workspace this size isn't supported yet.");
+  });
+
+  it("is still exported, with the warning in `about` and as `restore_warning`; a small one has neither", async () => {
+    const L = WORKSPACE_IMPORT_LIMITS;
+    const ws = id();
+    const make = (processes: number) => {
+      const pids = Array.from({ length: processes }, () => id());
+      const rids = Array.from({ length: processes }, () => id());
+      return async (table: string): Promise<Row[]> => {
+        if (table === "processes") return pids.map((pid, i) => ({ id: pid, workspace_id: ws, name: `P${i}`, kind: "pipeline", is_company: false, live_revision_id: rids[i], draft_revision_id: null, archived_at: null }));
+        if (table === "process_revisions") return rids.map((rid, i) => ({ id: rid, workspace_id: ws, process_id: pids[i], status: "published", number: 1 }));
+        return [];
+      };
+    };
+    const readWorkspace = async () => ({ id: ws, name: "Big Co", slug: "big", plan: null, settings: {}, provenance: {} });
+    const over = await exportWorkspaceBundle(ws, readWorkspace, make(L.processes + 1), { canEdit: true });
+    expect(over!.processes.length).toBe(L.processes + 1);
+    expect(over!.about).toContain(`This workspace is bigger than a backup can restore in one go (${L.processes + 1} processes; the limit is ${L.processes})`);
+    expect(over!.restore_warning).toBe(over!.about.slice(over!.about.indexOf("This workspace is bigger")));
+    const small = await exportWorkspaceBundle(ws, readWorkspace, make(3), { canEdit: true });
+    expect(small!.restore_warning).toBeUndefined();
+    expect(small!.about).not.toContain("bigger than a backup");
   });
 });
 

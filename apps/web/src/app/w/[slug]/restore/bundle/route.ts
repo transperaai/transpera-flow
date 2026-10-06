@@ -93,10 +93,10 @@ export async function POST(request: Request, ctx: RouteContext<"/w/[slug]/restor
   } catch {
     return reply({ message: "That file isn't valid JSON." }, 400);
   }
-  const check = checkWorkspaceBundle(parsed);
+  const { data: canManage } = await supabase.rpc("can_manage_workspace", { ws: workspace.id });
+  const check = checkWorkspaceBundle(parsed, { canManage: canManage === true });
   if (!check.ok) return reply({ message: check.errors[0] ?? "This backup can't be restored.", errors: check.errors }, 400);
 
-  const { data: canManage } = await supabase.rpc("can_manage_workspace", { ws: workspace.id });
   const { plan, summary } = planWorkspaceImport(parsed as WorkspaceBundle, { canManage: canManage === true });
   const { data, error: failed } = await supabase.rpc("import_workspace_bundle", { p_workspace: workspace.id, p_plan: plan as never, p_label: backupName(request.headers.get("x-backup-name")) ?? undefined });
   if (failed) {

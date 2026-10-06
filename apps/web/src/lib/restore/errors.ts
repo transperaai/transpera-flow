@@ -5,6 +5,7 @@
 export const ROLE_MESSAGE = "Only owners, editors and agency admins can restore a backup.";
 export const NOT_EMPTY_MESSAGE = "Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there.";
 export const TOO_BIG_MESSAGE = "This backup is too big to restore in one go (the database ran out of time). Nothing was restored.";
+export const REFUSED_PLAN_MESSAGE = "This backup can't be restored as it is.";
 export const FAILED_MESSAGE = "The restore failed. Nothing was restored. Try again.";
 
 /** The plan sections, in words ("Couldn't restore <words>"). */
@@ -33,6 +34,15 @@ function databaseSentence(message: string): string {
   return sentence;
 }
 
+/**
+ * What to add when the database refused the plan's shape or size (22023). Only the limits sentence is plain enough to show; the
+ * other refusals (a wrong format, a list that isn't one, an id that isn't a placeholder) are about the plan, not the person's file.
+ */
+function planDetail(message: string): string {
+  const m = /the plan is (over a limit|too big) \((.+)\)$/.exec(message);
+  return m ? ` It is over a limit of a restore (${m[2]}).` : "";
+}
+
 export interface RestoreFailure {
   status: number;
   message: string;
@@ -47,5 +57,6 @@ export function restoreFailure(error: { code?: string | null; message?: string |
     return { status: 422, message: `Couldn't restore ${words}: ${databaseSentence(error.message ?? "")}. Nothing was restored.` };
   }
   if (error.code === "42501") return { status: 403, message: ROLE_MESSAGE };
+  if (error.code === "22023") return { status: 400, message: `${REFUSED_PLAN_MESSAGE}${planDetail(error.message ?? "")}` };
   return { status: 500, message: FAILED_MESSAGE };
 }

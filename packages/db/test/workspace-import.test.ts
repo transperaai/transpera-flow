@@ -250,12 +250,12 @@ describe("a restore is a round trip", () => {
       // different random numbers at the same seed. What must hold is that the restored run is within ordinary run-to-run variation
       // (decision recorded on #39): |restored@42 - source@42| <= 3 x spread, per headline metric the Overview shows, where the
       // spread is how far the SOURCE moves when only the seed changes. One other seed (43) estimates that from a single pair and
-      // was too noisy (3 x a lucky small gap failed a faithful restore), so the source is run at 43 to 46 and the spread is the
-      // largest |source@seed - source@42|. A small absolute floor (1% of the source's value, or 0.01) stops a zero spread making
+      // was too noisy (3 x a lucky small gap failed a faithful restore), so the source is run at 43 to 54 (the restore's ids are new at every run, so its draws differ at every run and the check must hold
+      // for any of them) and the spread is the largest |source@seed - source@42|. A small absolute floor (1% of the source's value, or 0.01) stops a zero spread making
       // the check impossible.
       const modelAfterNew = toEngineModel(after, opts);
       const src42 = simulate(modelBefore, 30, 42);
-      const others = [43, 44, 45, 46].map((seed) => simulate(modelBefore, 30, seed));
+      const others = [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54].map((seed) => simulate(modelBefore, 30, seed));
       const res42 = simulate(modelAfterNew, 30, 42);
       const headline = (m: typeof modelBefore, r: ReturnType<typeof simulate>) => ({
         flowEfficiency: workingShare(timeSplitOf(m, r) ?? { handsOn: 0, waitingForPerson: 0, waitingOnOthers: 0 }) ?? 0,
@@ -623,6 +623,13 @@ describe("only into an empty workspace", () => {
     const a = await newWorkspace();
     await q("insert into scenarios (workspace_id, name, patch) values ($1, 'Mine', '[]')", [a]);
     expect(await failure(() => restoreAs(admin, a, plan))).toMatchObject({ hint: "not_empty" });
+    // An archived process counts: it is a process, and restoring would give its name to a second one.
+    const b = await newWorkspace();
+    await q("insert into processes (workspace_id, name, kind, entity_name) values ($1, 'Old thing', 'pipeline', 'item')", [b]);
+    await q("update processes set archived_at = now() where workspace_id = $1 and name = 'Old thing'", [b]);
+    const before = await snapshot(b);
+    expect(await failure(() => restoreAs(admin, b, plan))).toMatchObject({ hint: "not_empty" });
+    expect(await snapshot(b)).toEqual(before);
   });
 });
 
@@ -774,9 +781,29 @@ describe("limits", () => {
     ["blocks", (p: ImportPlan) => { p.blocks = rows(L.blocks + 1); }],
     ["suggestions", (p: ImportPlan) => { p.suggestions = rows(L.suggestions + 1); }],
     ["proposals", (p: ImportPlan) => { p.proposals = rows(L.proposals + 1); }],
+    ["role assignments", (p: ImportPlan) => { p.person_roles = rows(L.personRoles + 1); }],
+    ["skills", (p: ImportPlan) => { p.person_skills = rows(L.personSkills + 1); }],
+    ["client assignments", (p: ImportPlan) => { p.client_assignments = rows(L.clientAssignments + 1); }],
+    ["source links", (p: ImportPlan) => { p.source_links = rows(L.sourceLinks + 1); }],
   ])("refuses one more than the limit of %s", async (label, mutate) => {
     await over(label, mutate);
   });
+  it("refuses a scenario with no id (null or missing), writing nothing, rather than reporting success with nothing written", async () => {
+    const { plan } = await miniPlan();
+    for (const mutate of [(sc: Row) => { sc.id = null; }, (sc: Row) => { delete sc.id; }]) {
+      const copy: ImportPlan = structuredClone(plan);
+      // One that equals a library scenario: the case where the replacement of a skipped one would have returned null.
+      const library = copy.scenarios.find((sc) => sc.name === "Downturn")!;
+      mutate(library);
+      const ws = await newWorkspace();
+      const before = await snapshot(ws);
+      const e = await failure(() => restoreAs(admin, ws, copy));
+      expect(e.code).toBe("22023");
+      expect(e.message).toMatch(/every scenario needs an id/);
+      expect(await snapshot(ws)).toEqual(before);
+    }
+  });
+
   it("refuses a plan that isn't a plan", async () => {
     const ws = await newWorkspace();
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/2" }))).code).toBe("22023");
@@ -791,7 +818,7 @@ function syntheticPlan(L: Record<keyof typeof WORKSPACE_IMPORT_LIMITS, number>) 
     const mk = () => id(next++);
     const when = "2026-01-01T00:00:00Z";
     const role = mk();
-    const roles = [{ id: role, name: "Role", color: "#336699", created_at: when }];
+    const roles = [{ id: role, name: "Role", color: "#336699", created_at: when }, ...[1, 2].map((i) => ({ id: mk(), name: `Role ${i}`, color: "#336699", created_at: when }))];
     const people = Array.from({ length: L.people }, (_, i) => ({ id: mk(), name: `Person ${i}`, created_at: when }));
     const clients = Array.from({ length: L.clients }, (_, i) => ({ id: mk(), name: `Client ${i}`, created_at: when }));
     const stepsPer = Math.floor(L.steps / L.processes);
@@ -816,10 +843,16 @@ function syntheticPlan(L: Record<keyof typeof WORKSPACE_IMPORT_LIMITS, number>) 
     const blocks = Array.from({ length: L.blocks }, (_, i) => ({ id: mk(), name: `Block ${i}`, type: "manual", steps: { steps: [], edges: [] }, created_at: when }));
     const suggestions = Array.from({ length: L.suggestions }, (_, i) => ({ id: mk(), target_table: "people", target_id: people[i % people.length]!.id, patch: { set: { notes: `n${i}` } }, evidence: [], note: null, created_at: when }));
     const proposals = Array.from({ length: L.proposals }, (_, i) => ({ id: mk(), kind: "issue", title: `Proposal ${i}`, detail: "d", payload: {}, evidence: [], created_at: when }));
+    // The link tables, each at its limit: 3 roles a person, 10 skills a person, one assignment a client, 2,000 source links.
+    const person_roles = people.flatMap((p) => roles.map((r) => ({ person_id: p.id, role_id: r.id, created_at: when }))).slice(0, L.personRoles);
+    const allSteps = processes.flatMap((p) => p.steps.map((st) => st.id));
+    const person_skills = people.flatMap((p, i) => Array.from({ length: 10 }, (_, k) => ({ person_id: p.id, step_id: allSteps[(i * 10 + k) % allSteps.length], efficiency: 1, created_at: when }))).slice(0, L.personSkills);
+    const client_assignments = clients.map((c, i) => ({ client_id: c.id, role_id: role, person_id: people[i % people.length]!.id, created_at: when })).slice(0, L.clientAssignments);
+    const source_links = sourceIds.flatMap((sid) => processes.map((p) => ({ id: mk(), source_id: sid, kind: "process", process_id: p.id }))).slice(0, L.sourceLinks);
     const plan = {
-      format: "transpera-workspace-import/1", settings: null, roles, people, person_roles: [], person_leave: [], lead_sources: [], seasonality: [], demand_settings: null, churn_drivers: [],
+      format: "transpera-workspace-import/1", settings: null, roles, people, person_roles, person_leave: [], lead_sources: [], seasonality: [], demand_settings: null, churn_drivers: [],
       market_conditions: [], market_schedule: [], lever_settings: null, analysis_rules: null, clients, sources, processes, scenarios, blocks, issues, services: [], service_servicing: [],
-      client_groups: [], client_services: [], client_assignments: [], person_skills: [], source_links: [], suggestions, proposals,
+      client_groups: [], client_services: [], client_assignments, person_skills, source_links, suggestions, proposals,
     };
   return plan;
 }
@@ -836,6 +869,7 @@ describe("performance", () => {
     console.log(`restore at every limit: ${ms} ms, ${JSON.stringify(plan).length} bytes of plan`);
     expect(ms).toBeLessThan(3000);
     expect(result.processes.length).toBe(L.processes);
-    expect(await count("steps", ws, "process_id in (select id from processes where not is_company)")).toBe(L.steps - 0);
+    expect(await count("steps", ws, "process_id in (select id from processes where not is_company)")).toBe(L.steps);
+    for (const [t, n] of [["person_roles", L.personRoles], ["person_skills", L.personSkills], ["client_assignments", L.clientAssignments], ["source_links", L.sourceLinks]] as const) expect(await count(t, ws, t === "source_links" ? "kind = 'process'" : "true"), t).toBe(n);
   }, 60_000);
 });

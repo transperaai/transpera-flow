@@ -29459,7 +29459,7 @@ create trigger keep_an_owner before update or delete on public.workspace_access_
 --    on), then the archived processes are archived and each process's import is logged (`log_process_import`).
 --    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 75 processes, 750 steps, 1,500 edges, 200 sources and
 --    3,000,000 characters of their text, 600 issues, 500 people, 2,000 clients, 300 scenarios, 300 blocks, 500
---    suggestions, 300 proposals, and a plan of 10 MB (lower than the brief's starting values, which took 6 s at every limit at
+--    suggestions, 300 proposals, 1,500 role assignments, 5,000 skills, 2,000 client assignments, 2,000 source links, and a plan of 10 MB (lower than the brief's starting values, which took 6 s at every limit at
 --    once, over the 3 s budget; see the comment on WORKSPACE_IMPORT_LIMITS) (measured as the compact JSON the app sends; the database measures the
 --    jsonb text, which carries a space after each colon and comma, so it allows 13,107,200 characters of it). Supabase gives
 --    `authenticated` an 8 s `statement_timeout`: one restore is one statement, and the performance test in
@@ -29496,6 +29496,9 @@ create trigger keep_an_owner before update or delete on public.workspace_access_
 --   5. The library and presets it compares against. Expect 4 and 4:
 --        select count(*) from private.scenario_library();
 --        select count(*) from private.market_presets();
+--   6. Authenticated can't execute the library yet. Expect false (this migration grants it). If it is TRUE, production already had
+--      that grant: do NOT revoke it in the rollback below (leave that line out).
+--        select has_function_privilege('authenticated', 'private.scenario_library()', 'execute');
 --
 -- POST-APPLY CHECK (authenticated may execute it; anon and PUBLIC may not; it is not SECURITY DEFINER and has an empty search_path):
 --   1. Expect one row, authenticated EXECUTE:
@@ -29510,7 +29513,7 @@ create trigger keep_an_owner before update or delete on public.workspace_access_
 -- Rollback (nothing existing was changed):
 --   begin;
 --   drop function if exists public.import_workspace_bundle(uuid, jsonb, text);
---   revoke execute on function private.scenario_library() from authenticated;
+--   revoke execute on function private.scenario_library() from authenticated;   -- only if preflight 6 said false
 --   delete from supabase_migrations.schema_migrations where version = '20261207000000';
 --   commit;
 -- Roll the app back first (it calls the function). Workspaces already restored stay as they are.
@@ -29616,8 +29619,14 @@ begin
     or jsonb_array_length(p_plan -> 'issues') > 600 or jsonb_array_length(p_plan -> 'people') > 500
     or jsonb_array_length(p_plan -> 'clients') > 2000 or jsonb_array_length(p_plan -> 'scenarios') > 300
     or jsonb_array_length(p_plan -> 'blocks') > 300 or jsonb_array_length(p_plan -> 'suggestions') > 500
-    or jsonb_array_length(p_plan -> 'proposals') > 300 then
-    raise exception 'import_workspace_bundle: the plan is over a limit (75 processes, 750 steps, 1500 edges, 200 sources of 3,000,000 characters, 600 issues, 500 people, 2000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals)' using errcode = '22023';
+    or jsonb_array_length(p_plan -> 'proposals') > 300
+    or jsonb_array_length(p_plan -> 'person_roles') > 1500 or jsonb_array_length(p_plan -> 'person_skills') > 5000
+    or jsonb_array_length(p_plan -> 'client_assignments') > 2000 or jsonb_array_length(p_plan -> 'source_links') > 2000 then
+    raise exception 'import_workspace_bundle: the plan is over a limit (75 processes, 750 steps, 1500 edges, 200 sources of 3,000,000 characters, 600 issues, 500 people, 2000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 1500 role assignments, 5000 skills, 2000 client assignments, 2000 source links)' using errcode = '22023';
+  end if;
+  -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+  if exists (select 1 from jsonb_array_elements(p_plan -> 'scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
+    raise exception 'import_workspace_bundle: every scenario needs an id' using errcode = '22023';
   end if;
 
   -- 3. Lock: one restore (or upload) at a time per workspace.
@@ -29976,7 +29985,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --    on), then the archived processes are archived and each process''s import is logged (`log_process_import`).
 --    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 75 processes, 750 steps, 1,500 edges, 200 sources and
 --    3,000,000 characters of their text, 600 issues, 500 people, 2,000 clients, 300 scenarios, 300 blocks, 500
---    suggestions, 300 proposals, and a plan of 10 MB (lower than the brief''s starting values, which took 6 s at every limit at
+--    suggestions, 300 proposals, 1,500 role assignments, 5,000 skills, 2,000 client assignments, 2,000 source links, and a plan of 10 MB (lower than the brief''s starting values, which took 6 s at every limit at
 --    once, over the 3 s budget; see the comment on WORKSPACE_IMPORT_LIMITS) (measured as the compact JSON the app sends; the database measures the
 --    jsonb text, which carries a space after each colon and comma, so it allows 13,107,200 characters of it). Supabase gives
 --    `authenticated` an 8 s `statement_timeout`: one restore is one statement, and the performance test in
@@ -30013,6 +30022,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   5. The library and presets it compares against. Expect 4 and 4:
 --        select count(*) from private.scenario_library();
 --        select count(*) from private.market_presets();
+--   6. Authenticated can''t execute the library yet. Expect false (this migration grants it). If it is TRUE, production already had
+--      that grant: do NOT revoke it in the rollback below (leave that line out).
+--        select has_function_privilege(''authenticated'', ''private.scenario_library()'', ''execute'');
 --
 -- POST-APPLY CHECK (authenticated may execute it; anon and PUBLIC may not; it is not SECURITY DEFINER and has an empty search_path):
 --   1. Expect one row, authenticated EXECUTE:
@@ -30027,7 +30039,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- Rollback (nothing existing was changed):
 --   begin;
 --   drop function if exists public.import_workspace_bundle(uuid, jsonb, text);
---   revoke execute on function private.scenario_library() from authenticated;
+--   revoke execute on function private.scenario_library() from authenticated;   -- only if preflight 6 said false
 --   delete from supabase_migrations.schema_migrations where version = ''20261207000000'';
 --   commit;
 -- Roll the app back first (it calls the function). Workspaces already restored stay as they are.
@@ -30133,8 +30145,14 @@ begin
     or jsonb_array_length(p_plan -> ''issues'') > 600 or jsonb_array_length(p_plan -> ''people'') > 500
     or jsonb_array_length(p_plan -> ''clients'') > 2000 or jsonb_array_length(p_plan -> ''scenarios'') > 300
     or jsonb_array_length(p_plan -> ''blocks'') > 300 or jsonb_array_length(p_plan -> ''suggestions'') > 500
-    or jsonb_array_length(p_plan -> ''proposals'') > 300 then
-    raise exception ''import_workspace_bundle: the plan is over a limit (75 processes, 750 steps, 1500 edges, 200 sources of 3,000,000 characters, 600 issues, 500 people, 2000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals)'' using errcode = ''22023'';
+    or jsonb_array_length(p_plan -> ''proposals'') > 300
+    or jsonb_array_length(p_plan -> ''person_roles'') > 1500 or jsonb_array_length(p_plan -> ''person_skills'') > 5000
+    or jsonb_array_length(p_plan -> ''client_assignments'') > 2000 or jsonb_array_length(p_plan -> ''source_links'') > 2000 then
+    raise exception ''import_workspace_bundle: the plan is over a limit (75 processes, 750 steps, 1500 edges, 200 sources of 3,000,000 characters, 600 issues, 500 people, 2000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 1500 role assignments, 5000 skills, 2000 client assignments, 2000 source links)'' using errcode = ''22023'';
+  end if;
+  -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+  if exists (select 1 from jsonb_array_elements(p_plan -> ''scenarios'') s where jsonb_typeof(s.value -> ''id'') is distinct from ''string'') then
+    raise exception ''import_workspace_bundle: every scenario needs an id'' using errcode = ''22023'';
   end if;
 
   -- 3. Lock: one restore (or upload) at a time per workspace.

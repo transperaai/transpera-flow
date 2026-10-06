@@ -44,6 +44,11 @@ export const WORKSPACE_IMPORT_LIMITS = {
   blocks: 300,
   suggestions: 500,
   proposals: 300,
+  /** The link tables, sized from the limits above (2 role assignments a person, 5 skills a person, one assignment for every other client, 5 links a source). */
+  personRoles: 1000,
+  personSkills: 2500,
+  clientAssignments: 1000,
+  sourceLinks: 1000,
 } as const;
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;
@@ -139,7 +144,7 @@ export interface ImportSummary {
   /** Whether the workspace settings would be written (an owner or agency admin), suggested (an editor), or aren't in the file. */
   settings: "applied" | "suggested" | "none";
   /** The numbers the limits are checked against. */
-  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; planBytes: number };
+  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; clientAssignments: number; sourceLinks: number; planBytes: number };
 }
 
 export interface BundleCheck {
@@ -323,12 +328,12 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
 
 const L_ = WORKSPACE_IMPORT_LIMITS;
 
-export function checkWorkspaceBundle(value: unknown): BundleCheck {
+export function checkWorkspaceBundle(value: unknown, options: { canManage?: boolean } = {}): BundleCheck {
   const empty: ImportSummary = {
     restored: [],
     leftOut: [],
     settings: "none",
-    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, planBytes: 0 },
+    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, clientAssignments: 0, sourceLinks: 0, planBytes: 0 },
   };
   const stop = (message: string): BundleCheck => ({ ok: false, errors: [message], warnings: [], summary: empty });
 
@@ -389,15 +394,29 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
 
   let planned: ReturnType<typeof planWorkspaceImport>;
   try {
-    planned = planWorkspaceImport(bundle, { canManage: true });
+    // The preview says what this person's restore would do with the workspace settings: an owner or agency admin applies them, an editor leaves them as a suggestion.
+    planned = planWorkspaceImport(bundle, { canManage: options.canManage ?? true });
   } catch {
     return { ok: false, errors: [...errors, "The backup is damaged: its rows don't fit together, so nothing was restored."], warnings, summary: empty };
   }
   const { summary } = planned;
-  const m = summary.measures;
+  errors.push(...limitProblems(summary.measures));
+
+  if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${typeof bundle.engine_version === "string" ? bundle.engine_version : "unknown"}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
+  if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts and no pending suggestions.");
+  for (const line of summary.leftOut) if (line.count > 0 && !QUIET_LEFT_OUT.has(line.key)) warnings.push(`Stays in the file: ${num(line.count)} ${line.label}.`);
+  warnings.push(...planned.warnings);
+
+  return { ok: errors.length === 0, errors, warnings, summary };
+}
+
+
+/** What a restore takes, against what the plan measured: one plain sentence per limit that is passed. */
+function limitProblems(m: ImportSummary["measures"]): string[] {
   const L = WORKSPACE_IMPORT_LIMITS;
+  const out: string[] = [];
   const over = (n: number, max: number, what: string, suffix = "") => {
-    if (n > max) errors.push(`The backup has ${num(n)} ${what}${suffix}; a restore takes at most ${num(max)}.`);
+    if (n > max) out.push(`The backup has ${num(n)} ${what}${suffix}; a restore takes at most ${num(max)}.`);
   };
   over(m.processes, L.processes, "processes");
   over(m.steps, L.steps, "steps", " in the versions it would restore");
@@ -411,14 +430,37 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
   over(m.blocks, L.blocks, "blocks");
   over(m.suggestions, L.suggestions, "pending suggestions");
   over(m.proposals, L.proposals, "pending proposals");
-  if (m.planBytes > L.planBytes) errors.push(`The backup is too big to restore in one go: it comes to ${num(m.planBytes)} bytes once prepared, and a restore takes at most ${num(L.planBytes)}.`);
+  over(m.personRoles, L.personRoles, "role assignments");
+  over(m.personSkills, L.personSkills, "skills");
+  over(m.clientAssignments, L.clientAssignments, "client assignments");
+  over(m.sourceLinks, L.sourceLinks, "source links");
+  if (m.planBytes > L.planBytes) out.push(`The backup is too big to restore in one go: it comes to ${num(m.planBytes)} bytes once prepared, and a restore takes at most ${num(L.planBytes)}.`);
+  return out;
+}
 
-  if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${typeof bundle.engine_version === "string" ? bundle.engine_version : "unknown"}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
-  if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts and no pending suggestions.");
-  for (const line of summary.leftOut) if (line.count > 0 && !QUIET_LEFT_OUT.has(line.key)) warnings.push(`Stays in the file: ${num(line.count)} ${line.label}.`);
-  warnings.push(...planned.warnings);
-
-  return { ok: errors.length === 0, errors, warnings, summary };
+/**
+ * The sentence an export carries when the workspace is bigger than a restore takes (null when it fits), so the file is kept
+ * knowing it can't be restored in one go yet. It names each count over its limit, from the same measures the checker uses.
+ */
+export function restoreSizeWarning(bundle: WorkspaceBundle): string | null {
+  let measures: ImportSummary["measures"];
+  try {
+    measures = planWorkspaceImport(bundle, { canManage: true }).summary.measures;
+  } catch {
+    return null;
+  }
+  const L = WORKSPACE_IMPORT_LIMITS;
+  const m = measures;
+  const parts: [number, number, string][] = [
+    [m.processes, L.processes, "processes"], [m.steps, L.steps, "steps"], [m.edges, L.edges, "edges"], [m.sources, L.sources, "sources"],
+    [m.sourceChars, L.sourceChars, "characters of source text"], [m.issues, L.issues, "issues"], [m.people, L.people, "people"], [m.clients, L.clients, "clients"],
+    [m.scenarios, L.scenarios, "scenarios"], [m.blocks, L.blocks, "blocks"], [m.suggestions, L.suggestions, "pending suggestions"], [m.proposals, L.proposals, "pending proposals"],
+    [m.personRoles, L.personRoles, "role assignments"], [m.personSkills, L.personSkills, "skills"], [m.clientAssignments, L.clientAssignments, "client assignments"],
+    [m.sourceLinks, L.sourceLinks, "source links"], [m.planBytes, L.planBytes, "bytes once prepared"],
+  ];
+  const over = parts.filter(([n, max]) => n > max).map(([n, max, what]) => `${num(n)} ${what}; the limit is ${num(max)}`);
+  if (over.length === 0) return null;
+  return `This workspace is bigger than a backup can restore in one go (${over.join("; ")}). Keep the file; restoring a workspace this size isn't supported yet.`;
 }
 
 /** Left-out lines that are the design, not a loss worth a warning. */
@@ -773,6 +815,10 @@ export function planWorkspaceImport(
       blocks: plan.blocks.length,
       suggestions: plan.suggestions.length,
       proposals: plan.proposals.length,
+      personRoles: plan.person_roles.length,
+      personSkills: plan.person_skills.length,
+      clientAssignments: plan.client_assignments.length,
+      sourceLinks: plan.source_links.length,
       planBytes,
     },
   };

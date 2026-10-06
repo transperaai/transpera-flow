@@ -39,7 +39,7 @@ function Lines({ lines }: { lines: SummaryLine[] }) {
   );
 }
 
-export function RestoreBackup({ slug, post }: { slug: string; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
+export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** An owner or agency admin applies the backup's workspace settings; an editor leaves them as a suggestion. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
   const router = useRouter();
   const inputId = useId();
   const [step, setStep] = useState<Step>({ kind: "choose" });
@@ -64,7 +64,7 @@ export function RestoreBackup({ slug, post }: { slug: string; /** Replaces `fetc
       setStep({ kind: "problem", message: "That file isn't valid JSON." });
       return;
     }
-    setStep({ kind: "ready", fileName: file.name, text, check: checkWorkspaceBundle(value) });
+    setStep({ kind: "ready", fileName: file.name, text, check: checkWorkspaceBundle(value, { canManage }) });
   }
 
   async function restore(fileName: string, text: string, check: BundleCheck) {

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Page } from "@/components/shell/page";
 import { RestoreBackup } from "@/components/restore/restore-backup";
-import { canEditWorkspace } from "@/lib/access-data";
+import { canEditWorkspace, canManageWorkspace } from "@/lib/access-data";
 import { loadWorkspaceHead } from "@/lib/data";
 import { NOT_EMPTY_MESSAGE, ROLE_MESSAGE } from "@/lib/restore/errors";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
@@ -30,7 +30,7 @@ export default async function RestorePage(props: PageProps<"/w/[slug]/restore">)
   if (!(await workspaceIsEmpty(await createClient(), head.id))) return refused(NOT_EMPTY_MESSAGE);
   return (
     <Page title="Restore a backup" eyebrow="Workspace" description={description} width="max-w-3xl">
-      <RestoreBackup slug={slug} />
+      <RestoreBackup slug={slug} canManage={await canManageWorkspace(head.id)} />
     </Page>
   );
 }
