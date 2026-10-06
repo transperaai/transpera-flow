@@ -13,13 +13,8 @@ import { signInToOpen } from "./actions";
 // has is what `public.open_share_link` returns for the token; it imports no loader that reads the workspace's tables (a source-text
 // test checks it). Expired, turned-off, unknown and malformed links all look the same: not found.
 
-export const metadata: Metadata = {
-  title: "Shared view",
-  robots: { index: false, follow: false },
-};
-
 export async function generateMetadata(): Promise<Metadata> {
-  return metadata;
+  return { title: "Shared view", robots: { index: false, follow: false } };
 }
 
 interface Opened {
