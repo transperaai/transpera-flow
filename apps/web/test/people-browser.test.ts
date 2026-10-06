@@ -230,10 +230,14 @@ describe("Horizon picker", { timeout: 120_000 }, () => {
     const before = await kai();
     // Kai's December leave is inside the 26-week run and outside a 1-month one.
     expect(before).not.toBe("—");
+    // Hold the new run's request in the harness, so the page stays mid-run until we release it (no race with the worker).
+    await page.evaluate(() => (window.holdSimulations = true));
     await page.getByRole("button", { name: "1 month" }).click();
     await page.waitForSelector("[data-how-busy][aria-busy='true']", { timeout: 90_000 });
     // Still the old run's numbers: the new (shorter) model's leave isn't counted against them.
     expect(await kai()).toBe(before);
+    expect(await page.locator("[data-how-busy]").getAttribute("aria-busy")).toBe("true");
+    await page.evaluate(() => window.releaseSimulations());
     await page.waitForSelector("[data-how-busy][aria-busy='false']", { timeout: 90_000 });
     expect(await kai()).toBe("—");
     expect(errors).toEqual([]);
@@ -245,12 +249,14 @@ describe("Horizon picker", { timeout: 120_000 }, () => {
     await absenceDone(page);
     const absenceBefore = await page.locator("[data-absence]").innerText();
     await page.waitForSelector(".grid[aria-busy='false']");
+    // Hold the new run's request so the page stays mid-run until released (the old table is there meanwhile, so wait on the run, not the table).
+    await page.evaluate(() => (window.holdSimulations = true));
     await page.getByRole("button", { name: "12 months" }).click();
     await page.waitForSelector("button[aria-label='12 months'][aria-pressed='true']");
-    // The old table is still there while the new run goes; wait for the run itself (busy, then done), not for the table.
     await page.waitForSelector(".grid[aria-busy='true']", { timeout: 90_000 });
     // The absence test is over the workspace's own length (Q2): the picker doesn't restart it.
     expect(await page.locator("[data-absence] [role=status]").count()).toBe(0);
+    await page.evaluate(() => window.releaseSimulations());
     await page.waitForSelector(".grid[aria-busy='false']", { timeout: 90_000 });
     expect(await busyRows(page).count()).toBeGreaterThan(1);
     expect(await page.locator("[data-absence] [role=status]").count()).toBe(0);
