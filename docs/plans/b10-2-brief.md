@@ -620,3 +620,23 @@ written in a second pass (steps inserted into the draft). Issues, scenarios, blo
 admin to delete this workspace, then create a new one and try again." The round-trip and role tests stay the same; the
 all-or-nothing test becomes "a failure leaves the workspace marked as not empty and says so". The orchestrator re-scopes
 2b in detail if Austin picks this.
+
+---
+
+## Amendments from the 2a review
+
+Recorded for the 2b builder. Where these differ from the text above, these win.
+
+(a) **`planWorkspaceImport` also returns `warnings`** (`{ plan, summary, placeholderOf, warnings }`): dropped or cleared references and unknown settings. `checkWorkspaceBundle` appends them to its own warnings.
+
+(b) **uuids are checked only in id and reference columns**, not in free text (a uuid typed into a note or a source's body stays as it is). The lists are exported as `IMPORT_REFS` (flat sections, plus `id`) and `IMPORT_STEP_REFS` (steps); `IMPORT_COLUMNS` has the allow-lists. The RPC's check, and its test, must use these lists. Issues also carry `links[].process_id`, `links[].step_id`, `owner_ids` and `source_ids`; suggestions carry `target_id`; market-schedule rows carry `condition_id`. The plan drops `number`, `resolved_at`, `dismissed_revision_id` and `resolved_solution_id` from issues, and `process_id` and `revision_id` from steps and edges; the RPC sets those itself.
+
+(c) **Skipped scenarios need re-pointing.** The plan carries every scenario, including ones equal to the seeded library. When the RPC skips a scenario equal (name and patch) to one the new workspace already has, it must re-point `scenarios.parent_scenario_id` of its children and `issues.scenario_id` at the existing row. Otherwise the insert fails on a foreign key or leaves references dangling. The summary's scenario count is therefore an upper bound.
+
+(d) **Placeholder rank 0 is `workspace.id`** (`00000000-0000-4000-8000-000000000000`); every other id takes rank 1, 2, 3 ... in its order. The RPC replaces rank 0 with `p_workspace`, so a pending suggestion with `target_table 'workspaces'` points at the real workspace. Its fresh-prefix substitution must leave rank 0 alone (or map it to `p_workspace` first), and the "no uuid other than placeholders" check must accept it.
+
+(e) **Test `market_conditions` order in the round-trip.** Restored custom conditions keep their old `created_at`, which sorts before the new workspace's freshly seeded presets (the loader orders by `created_at`, then id). Decide the intended order and assert it, comparing engine models before simulating.
+
+(f) **Real member against the export route.** 2a tests the real role answer (`packages/db/test/export-roles.test.ts`: `can_edit_workspace` is true for owner, editor and agency admin, not true for member, viewer and non-member) and the route's 403 with a mocked answer. A request-level test with a real member needs the app and Supabase; add one in 2b if the harness allows, otherwise live-check on a preview deploy.
+
+Also from the review: the checker refuses a list more than twice its limit before any other work (a size cap, not the exact limit, because the lists also hold the company map, detections and processes with no version), and the exact limits are checked after planning. The nesting checks are linear.
