@@ -309,3 +309,12 @@ Verified only against plain Postgres 16 (`packages/db/test/access.test.ts`, "kee
 - [ ] **Demote the only owner** of a throwaway workspace from the app: refused with "A workspace needs at least one owner."; with a second owner, allowed.
 - [ ] **Delete an auth user** (Dashboard) who is the last owner of a workspace: allowed (the cascade runs as `supabase_auth_admin` or `postgres`, not `authenticated`).
 - [ ] **Remove the last owner's pre-assigned email** from Settings → Access: refused; remove a workspace that has one: allowed.
+
+## Per-person privacy (issue #30, migration 20261207500000)
+
+Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`, `team-capacity.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-roles.test.ts`), not against a Supabase project. The select policies, `can_see_person`, `team_capacity` and `revision_history` rely on `auth.uid()` and `auth.jwt()` reading the request's claims, including inside the SECURITY DEFINER functions (the same as `workspace_role`). Check on the real project:
+
+- [ ] **As a linked member** (Settings → Access links the membership to a person), Settings → People shows exactly one person, and the Overview's numbers match an editor's (apart from overtime cost).
+- [ ] **As an editor**, People and Settings → People show everyone with real names and rates.
+- [ ] **Smoke test** (post-apply check in the migration header) as an agency admin: `team_capacity` returns `sees_everyone` true and Northbeam's head count.
+- [ ] **A member's version history** shows "A team member" for other people's versions and their own name for their own.
