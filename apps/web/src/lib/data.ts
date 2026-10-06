@@ -44,6 +44,8 @@ import {
   type ServiceServicingRow,
   type BlockRow,
   type ChurnDriverRow,
+  type ForecastPlanRow,
+  loadForecastPlans,
   type ClientGroupRow,
   type DemandSettingsRow,
   type IssueEventRow,
@@ -103,10 +105,10 @@ export async function listAgencyWorkspaces(): Promise<AgencyWorkspaceRow[]> {
   }));
 }
 
-/** A workspace's id, name and slug by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
-export const loadWorkspaceHead = cache(async (slug: string): Promise<Pick<WorkspaceRow, "id" | "name" | "slug"> | null> => {
+/** A workspace's id, name, slug and branding by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
+export const loadWorkspaceHead = cache(async (slug: string): Promise<(Pick<WorkspaceRow, "id" | "name" | "slug"> & { branding: unknown }) | null> => {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("workspaces").select("id, name, slug").eq("slug", slug).maybeSingle();
+  const { data, error } = await supabase.from("workspaces").select("id, name, slug, branding").eq("slug", slug).maybeSingle();
   if (error) throw error;
   return data;
 });
@@ -213,6 +215,19 @@ export async function loadWorkspaceSolutions(workspaceId: string, processId?: st
   } catch (err) {
     console.error("Couldn't load the solutions; showing none.", err instanceof Error ? err.message : err);
     return { solutions: [], links: [] };
+  }
+}
+
+/**
+ * The workspace's forecast plans by name (B7). RLS: only owners, editors and agency admins read them, so anyone else gets
+ * none. If they can't be read (say the table isn't there yet), the page shows none rather than break.
+ */
+export async function loadWorkspaceForecastPlans(workspaceId: string): Promise<ForecastPlanRow[]> {
+  try {
+    return await loadForecastPlans(await createClient(), workspaceId);
+  } catch (err) {
+    console.error("Couldn't load the forecast plans; showing none.", err instanceof Error ? err.message : err);
+    return [];
   }
 }
 

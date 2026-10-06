@@ -1,8 +1,9 @@
 # Handover
 
-Updated 6 Oct 2026 (overnight run, in progress). The token works again. #205, #207 and #206 are applied (rows 56–58) and
-merged, closing #30 and #41; #209 made the restore round-trip test robust. The overnight tickets are being scoped and
-built in parallel (status table under "Next steps"). Start a new session with:
+Updated 6 Oct 2026 (overnight run, 20:30 UTC). All agents hit the usage limit at about 13:50 UTC and the container
+restarted; work resumed at 19:18 UTC from what was pushed. Merged tonight: #205, #207, #206, #209, #212 (B20), #214, #211
+(B2), #213 (B5), #216 (B21), #220 (C4), #221, #218 (C1), #222, #217 (B7). Production is at row 63 (`20261219000000`).
+Open: B3 (#215, fourth review round), then B4. Status table under "Next steps". Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -33,7 +34,7 @@ checks, logged in `docs/production-migrations.md`):
 Production had no saved AI text or overtime issues, so row 56's clean-up changed no rows. `database.types.ts` still holds
 the hand edits from #205–#207 (they match the generator); regenerate when a linked machine is available.
 
-**Production database:** applied up to `20261209000000` (row 58).
+**Production database:** applied up to `20261219000000` (row 63).
 
 **Briefs** (in `docs/plans/`): `b1-brief.md` (all slices built; 2b's section has the leak fixes and "Changes after the
 review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets one before building.
@@ -185,20 +186,29 @@ password to `postgres`.
 **Overnight status** (update after every merge). Reserved migration versions follow the planned merge order; renumber
 at merge time if the order changes.
 
-| Ticket | Branch | Brief | Build | Review | Migration | State |
-|---|---|---|---|---|---|---|
-| B2 People page (#31) | `claude/b2-people-page` | done | building | | none | |
-| B3 Share links (#32) | `claude/b3-share-links` | done | building | | `20261211000000` | |
-| B20 MCP proposes findings (#197) | `claude/b20-mcp-findings` | done | building | | `20261212000000` | |
-| B7 Forecast planning (#36) | `claude/b7-forecast-planning` | done | building | | `20261213000000` | |
-| B5 Client branding (#34) | `claude/b5-client-branding` | done | building | | `20261214000000` | |
-| B21 Bigger restores (#203) | `claude/b21-bigger-restores` | scoping | | | `20261215000000` | |
-| C1 CSV import wizard (#40) | | | | | | queued |
-| B4 Play links (#33) | | | | | | after B3 |
-| C4 Storybook (#43) | | | | | | queued |
+| Ticket | Branch / PR | State | Migration (row) |
+|---|---|---|---|
+| B20 MCP proposes findings (#197) | #212 | **merged**, applied | `20261212000000` (59) |
+| B2 People page (#31) | #211 | **merged** | none |
+| B5 Client branding (#34) | #213 | **merged**, applied | `20261214000000` (60) |
+| B21 Bigger restores (#203) | #216 | **merged**, applied (limits 3x, not 4x) | `20261215000000` (61) |
+| C1 CSV import wizard (#40) | #218 | **merged**, applied | `20261216000000` (62) |
+| C4 Storybook (#43) | #220 | **merged** (new `visual` CI job; `[visual-update]` approves baselines) | none |
+| B7 Forecast planning (#36) | #217 | **merged**, applied; ENGINE 1.9.0 | `20261219000000` (63) |
+| B3 Share links (#32) | #215 `claude/b3-share-links` | fourth review round: redaction redesigned (free-text keys, token matching); fixing uuid-vs-currency false positives, first-principles keys, client whole-name matching; PRD D47 | `20261220000000` (64) |
+| B4 Play links (#33) | `claude/b4-play-links` (brief only) | build after B3 merges; renumber to follow B3 | `20261221000000` (65) |
 
-Still for Austin from the evening PRs:
+B3 must stay security-reviewed until a verification round finds nothing blocking: it is the only public, unauthenticated surface. Each review comment and fix list is on its PR.
+
+**Tooling:** `prod-sql.sh -f` now sends the file through `jq --rawfile` (#216); a 140 KB apply file overflowed `--arg`.
+**Bug found (not ticketed):** deleting any workspace fails, even as superuser, on `steps_role_id_workspace_id_fkey` (found
+while scoping B21).
+
+Still for Austin (live checks and confirmations):
 - Re-run Analyse in each workspace and check accepted AI findings (#205, Q11).
+- B5: upload a logo on the real project (storage). B21: a preview restore at the limits (the 40 s function timeout is
+  verified only on plain PostgREST).
+- Defaults taken overnight are listed on each issue (#31, #34, #197, #203); confirm or change them.
 - On the live site, an editor changes a client health rule and the owner's change log names them (#206).
 
 ### Overnight run (Austin, 6 Oct): finish everything that doesn't need him

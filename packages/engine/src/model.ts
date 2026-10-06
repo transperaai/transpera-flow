@@ -623,6 +623,17 @@ export interface MonthlyReplication {
   lateTasks: number[];
   /** Active clients per service id (the first service a client takes; "" for none, and for the pooled count), averaged over the month's weekly ticks. */
   clients: Record<string, number[]>;
+  /**
+   * Monthly recurring revenue of the active clients at each weekly tick, averaged over the month's ticks: with a client
+   * roster (named clients or client groups), each retainer client's monthly fee as it bills (`weeklyBill × 4.33`); without
+   * one, what the interim clients pay (their count × `pooledMonthlyFee`) plus each retainer won since at its price at the market's, less churn. One-off and hourly services add nothing.
+   */
+  mrr: number[];
+  /**
+   * With a client roster only: active clients whose health is below 50 (`AT_RISK_HEALTH`), per service key (the same keys
+   * as `clients`, each present even when 0), averaged over the month's ticks. Empty without a roster.
+   */
+  atRisk: Record<string, number[]>;
 }
 
 /** One month of a role's or person's busy share across replications. */
@@ -653,6 +664,10 @@ export interface MonthlyResult {
   lateTasks: Stat[];
   /** Active clients per service id per month ("" for none, and for the pooled count). */
   clients: Record<string, Stat[]>;
+  /** Monthly recurring revenue per month (see `MonthlyReplication.mrr`). */
+  mrr: Stat[];
+  /** Clients at risk (health below 50) per service key and month; empty without a client roster. */
+  atRisk: Record<string, Stat[]>;
 }
 
 export interface ReplicationResult {

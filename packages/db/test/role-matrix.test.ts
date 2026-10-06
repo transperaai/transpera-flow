@@ -144,6 +144,14 @@ const TABLES: TableCase[] = [
     delete: ["delete from runs where workspace_id = $1 and name = 'x seed'", [ws]],
     reads: "editors",
   },
+  // Forecast plans (B7) can name a person on leave: only callers who see everyone read them, and only they write.
+  {
+    table: "forecast_plans",
+    insert: (tag) => ["insert into forecast_plans (workspace_id, name, markers) values ($1, $2, '[]')", [ws, `x ${tag}`]],
+    update: ["update forecast_plans set name = name where workspace_id = $1 and name = 'x seed'", [ws]],
+    delete: ["delete from forecast_plans where workspace_id = $1 and name = 'x seed'", [ws]],
+    reads: "editors",
+  },
   {
     table: "robustness_results",
     insert: (tag) => [
@@ -542,7 +550,7 @@ describe("writes", () => {
 
   it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions, clients and headlines are never deleted", async () => {
     await db.as(callers.owner!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });
@@ -578,6 +586,26 @@ describe("workspace name and currency", () => {
       });
     }
   });
+});
+
+describe("branding", () => {
+  // Client branding (#34, B5): the same rule as the name and currency, in a jsonb column of its own.
+  const rebrand = (c: pg.Client) => c.query("update workspaces set branding = jsonb_set(branding, '{accent}', '\"#0b6e8a\"') where id = $1", [ws]);
+
+  for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner"] as const) {
+    it(`${role} changes it`, async () => {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect(await refused(c, () => rebrand(c))).toBe(1);
+      });
+    });
+  }
+  for (const role of ["editor", "member", "viewer", "signed in, no membership"] as const) {
+    it(`${role} does not`, async () => {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect(await refused(c, () => rebrand(c))).toMatch(/refused|no rows/);
+      });
+    });
+  }
 });
 
 describe("functions", () => {

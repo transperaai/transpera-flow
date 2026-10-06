@@ -55,58 +55,87 @@ interface Parsed<C extends string, R> {
   dateProblem: "ambiguous" | "mixed" | null;
 }
 
-/** Shared reader: finds the columns, settles the date order, then hands each data row to `readRow`. */
-function readTable<C extends string, R>(
-  text: string,
-  options: { dateOrder?: DateOrder },
-  spec: {
-    columns: readonly C[];
-    required: readonly C[];
-    headers: Headers<C>;
-    dateColumns: readonly C[];
-    readRow: (cell: (c: C) => string, order: DateOrder) => R | string;
-  },
-): Parsed<C, R> {
-  const table = splitCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
-  const header = table[0] ?? [];
-  const columns: Partial<Record<C, string>> = {};
+/** Finds each column's header by name (after normalising), each header used at most once. */
+export function matchHeaders<C extends string>(
+  header: readonly string[],
+  columns: readonly C[],
+  headers: Headers<C>,
+): { index: Partial<Record<C, number>>; columns: Partial<Record<C, string>> } {
+  const found: Partial<Record<C, string>> = {};
   const index: Partial<Record<C, number>> = {};
   const normalised = header.map(normHeader);
-  for (const col of spec.columns) {
-    for (const name of spec.headers[col]) {
+  for (const col of columns) {
+    for (const name of headers[col]) {
       const i = normalised.findIndex((h, j) => h === name && !Object.values(index).includes(j));
       if (i >= 0) {
         index[col] = i;
-        columns[col] = header[i]!.trim();
+        found[col] = header[i]!.trim();
         break;
       }
     }
   }
+  return { index, columns: found };
+}
+
+export interface MappedSpec<C extends string, R> {
+  columns: readonly C[];
+  required: readonly C[];
+  dateColumns: readonly C[];
+  readRow: (cell: (c: C) => string, order: DateOrder) => R | string;
+}
+
+export interface MappedOptions {
+  dateOrder?: DateOrder;
+  /** Which non-blank record holds the column names (1-based, default 1). Records before it are skipped. */
+  headerRow?: number;
+  /** Called every 5,000 data rows with the rows done and the total. */
+  onProgress?: (done: number, total: number) => void;
+}
+
+export const PROGRESS_EVERY = 5000;
+
+export type MappedResult<C extends string, R> = Omit<Parsed<C, R>, "columns">;
+
+/**
+ * Reads the data rows of a table (`splitCsv`'s records, blank ones included) from the columns in `index`: settles the date
+ * order, then hands each data row to `spec.readRow`. Line numbers count every record from the file's first, as in the file.
+ */
+export function readMappedRows<C extends string, R>(
+  table: readonly string[][],
+  index: Partial<Record<C, number>>,
+  spec: MappedSpec<C, R>,
+  options: MappedOptions = {},
+): MappedResult<C, R> {
+  const blank = (r: readonly string[]) => !r.some((c) => c.trim() !== "");
+  const headerRow = Math.max(1, options.headerRow ?? 1);
+  // Which record holds the names: the headerRow-th non-blank one.
+  let headerAt = -1;
+  for (let i = 0, seen = 0; i < table.length; i++) {
+    if (blank(table[i]!)) continue;
+    if (++seen === headerRow) {
+      headerAt = i;
+      break;
+    }
+  }
+  const data: { r: readonly string[]; line: number }[] = [];
+  if (headerAt >= 0) for (let i = headerAt + 1; i < table.length; i++) if (!blank(table[i]!)) data.push({ r: table[i]!, line: i + 1 });
+  const lines = data.length;
   const missing = spec.required.filter((c) => index[c] === undefined);
-  const lines = Math.max(0, table.length - 1);
-  if (missing.length) return { rows: [], columns, missing, errors: [], lines, dateOrder: null, dateProblem: null };
+  if (missing.length) return { rows: [], missing, errors: [], lines, dateOrder: null, dateProblem: null };
 
   const dateCells = (function* () {
-    for (const r of table.slice(1)) for (const c of spec.dateColumns) if (index[c] !== undefined) yield r[index[c]!] ?? "";
+    for (const { r } of data) for (const c of spec.dateColumns) if (index[c] !== undefined) yield r[index[c]!] ?? "";
   })();
   const detected = detectDateOrder(dateCells);
   if (detected === "mixed" || (detected === "ambiguous" && !options.dateOrder)) {
-    return { rows: [], columns, missing, errors: [], lines, dateOrder: null, dateProblem: detected };
+    return { rows: [], missing, errors: [], lines, dateOrder: null, dateProblem: detected };
   }
   const dateOrder: DateOrder | null = detected === "dmy" || detected === "mdy" ? detected : detected === "ambiguous" ? options.dateOrder! : null;
 
   const rows: R[] = [];
   const errors: StepLogError[] = [];
-  // Line numbers count blank lines too, so they match the file.
-  let line = 0;
-  let headerSeen = false;
-  for (const r of splitCsv(text)) {
-    line++;
-    if (!r.some((c) => c.trim() !== "")) continue;
-    if (!headerSeen) {
-      headerSeen = true;
-      continue;
-    }
+  let done = 0;
+  for (const { r, line } of data) {
     if (rows.length >= MAX_STEP_LOG_ROWS) {
       errors.push({ line, message: `Only the first ${MAX_STEP_LOG_ROWS.toLocaleString("en-GB")} rows are read.` });
       break;
@@ -115,8 +144,21 @@ function readTable<C extends string, R>(
     const out = spec.readRow(cell, dateOrder ?? "dmy");
     if (typeof out === "string") errors.push({ line, message: out });
     else rows.push(out);
+    if (options.onProgress && ++done % PROGRESS_EVERY === 0) options.onProgress(done, lines);
   }
-  return { rows, columns, missing, errors, lines, dateOrder, dateProblem: null };
+  return { rows, missing, errors, lines, dateOrder, dateProblem: null };
+}
+
+/** Shared reader: finds the columns by their header names, then reads the rows (`readMappedRows`). */
+function readTable<C extends string, R>(
+  text: string,
+  options: { dateOrder?: DateOrder },
+  spec: MappedSpec<C, R> & { headers: Headers<C> },
+): Parsed<C, R> {
+  const table = splitCsv(text);
+  const header = table.find((r) => r.some((c) => c.trim() !== "")) ?? [];
+  const { index, columns } = matchHeaders(header, spec.columns, spec.headers);
+  return { ...readMappedRows(table, index, spec, options), columns };
 }
 
 const CLIENT_HEADERS = ["client", "client id", "client name", "customer", "customer id", "account", "account id", "company"] as const;
@@ -140,6 +182,24 @@ export const CLIENTS_HEADERS: Record<ClientsColumn, readonly string[]> = {
 
 export type ParsedClients = Parsed<ClientsColumn, ClientRow>;
 
+/** Reads one row of a clients file from a cell reader and the date order: the row, or why it can't be read. */
+export function readClientRow(cell: (c: ClientsColumn) => string, order: DateOrder): ClientRow | string {
+  const client = cell("client");
+  const service = cell("service");
+  const startedText = cell("started");
+  if (!client || !service || !startedText) {
+    return `Missing ${[!client && "client", !service && "service", !startedText && "started"].filter(Boolean).join(", ")}.`;
+  }
+  if (client.length > 200 || service.length > 200) return "A client or service name is over 200 characters.";
+  const started = parseLogTime(startedText, order);
+  if (started === null) return `Can't read the start "${startedText.slice(0, 40)}". Use 2026-03-02, or one order of day and month for every date.`;
+  const endedText = cell("ended");
+  const ended = endedText ? parseLogTime(endedText, order) : null;
+  if (endedText && ended === null) return `Can't read the end "${endedText.slice(0, 40)}".`;
+  if (ended !== null && ended < started) return "They left before they started.";
+  return { client, service, started, ended };
+}
+
 /** Reads a clients file. Bad rows are reported and left out; slashed dates as for `parseStepLog`. */
 export function parseClientsFile(text: string, options: { dateOrder?: DateOrder } = {}): ParsedClients {
   return readTable<ClientsColumn, ClientRow>(text, options, {
@@ -147,22 +207,7 @@ export function parseClientsFile(text: string, options: { dateOrder?: DateOrder 
     required: REQUIRED_CLIENTS_COLUMNS,
     headers: CLIENTS_HEADERS,
     dateColumns: ["started", "ended"],
-    readRow: (cell, order) => {
-      const client = cell("client");
-      const service = cell("service");
-      const startedText = cell("started");
-      if (!client || !service || !startedText) {
-        return `Missing ${[!client && "client", !service && "service", !startedText && "started"].filter(Boolean).join(", ")}.`;
-      }
-      if (client.length > 200 || service.length > 200) return "A client or service name is over 200 characters.";
-      const started = parseLogTime(startedText, order);
-      if (started === null) return `Can't read the start "${startedText.slice(0, 40)}". Use 2026-03-02, or one order of day and month for every date.`;
-      const endedText = cell("ended");
-      const ended = endedText ? parseLogTime(endedText, order) : null;
-      if (endedText && ended === null) return `Can't read the end "${endedText.slice(0, 40)}".`;
-      if (ended !== null && ended < started) return "They left before they started.";
-      return { client, service, started, ended };
-    },
+    readRow: readClientRow,
   });
 }
 
@@ -197,6 +242,39 @@ export const SERVICING_LOG_HEADERS: Record<ServicingLogColumn, readonly string[]
 export type ParsedServicingLog = Parsed<ServicingLogColumn, ServicingRow>;
 
 /**
+ * A due date as a deadline: a date alone, or exactly midnight with no zone (what spreadsheets write for a date), is due at
+ * the end of that day. `dueAt` is the date as read (`parseLogTime`).
+ */
+export function dueDeadline(dueText: string, dueAt: number): number {
+  // Exactly midnight with no zone, whatever its form: 00:00, 0:00:00, or 12:00:00 AM (what .NET and SQL Server write for a date).
+  const zoned = /\d\s*(?:Z|[+-]\d{2}:?\d{2})$/i.test(dueText.trim());
+  const dateOnly = !hasTimeOfDay(dueText) || (!zoned && dueAt % 86_400_000 === 0);
+  return dateOnly ? dueAt + 86_400_000 - 1 : dueAt;
+}
+
+/** Reads one row of a servicing log from a cell reader and the date order: the row, or why it can't be read. */
+export function readServicingRow(cell: (c: ServicingLogColumn) => string, order: DateOrder): ServicingRow | string {
+  const task = cell("task");
+  const client = cell("client");
+  const dueText = cell("due");
+  if (!task || !client || !dueText) {
+    return `Missing ${[!task && "task", !client && "client", !dueText && "due"].filter(Boolean).join(", ")}.`;
+  }
+  if (task.length > 200 || client.length > 200) return "A task or client name is over 200 characters.";
+  const dueAt = parseLogTime(dueText, order);
+  if (dueAt === null) return `Can't read the due date "${dueText.slice(0, 40)}". Use 2026-03-02 09:30, or one order of day and month for every date.`;
+  const due = dueDeadline(dueText, dueAt);
+  const doneText = cell("done");
+  const done = doneText ? parseLogTime(doneText, order) : null;
+  if (doneText && done === null) return `Can't read the done date "${doneText.slice(0, 40)}".`;
+  const requestedText = cell("requested");
+  const requested = requestedText ? parseLogTime(requestedText, order) : null;
+  if (requestedText && requested === null) return `Can't read the requested date "${requestedText.slice(0, 40)}".`;
+  if (done !== null && requested !== null && done < requested) return "It was done before it was requested.";
+  return { task, client, due, done, requested };
+}
+
+/**
  * Reads a servicing log. A `due` with no time of day, or exactly midnight with no zone (spreadsheets write a date that way),
  * is the end of that day, so work done any time on its due day is
  * on time. Done before due is fine (early); done before requested is a row error.
@@ -207,28 +285,7 @@ export function parseServicingLog(text: string, options: { dateOrder?: DateOrder
     required: REQUIRED_SERVICING_LOG_COLUMNS,
     headers: SERVICING_LOG_HEADERS,
     dateColumns: ["due", "done", "requested"],
-    readRow: (cell, order) => {
-      const task = cell("task");
-      const client = cell("client");
-      const dueText = cell("due");
-      if (!task || !client || !dueText) {
-        return `Missing ${[!task && "task", !client && "client", !dueText && "due"].filter(Boolean).join(", ")}.`;
-      }
-      if (task.length > 200 || client.length > 200) return "A task or client name is over 200 characters.";
-      const dueAt = parseLogTime(dueText, order);
-      if (dueAt === null) return `Can't read the due date "${dueText.slice(0, 40)}". Use 2026-03-02 09:30, or one order of day and month for every date.`;
-      // A date alone, or exactly midnight with no zone (what spreadsheets write for a date), is due at the end of that day.
-      const dateOnly = !hasTimeOfDay(dueText) || /[T ]0{1,2}:00(:00(\.0+)?)?$/i.test(dueText.trim());
-      const due = dateOnly ? dueAt + 86_400_000 - 1 : dueAt;
-      const doneText = cell("done");
-      const done = doneText ? parseLogTime(doneText, order) : null;
-      if (doneText && done === null) return `Can't read the done date "${doneText.slice(0, 40)}".`;
-      const requestedText = cell("requested");
-      const requested = requestedText ? parseLogTime(requestedText, order) : null;
-      if (requestedText && requested === null) return `Can't read the requested date "${requestedText.slice(0, 40)}".`;
-      if (done !== null && requested !== null && done < requested) return "It was done before it was requested.";
-      return { task, client, due, done, requested };
-    },
+    readRow: readServicingRow,
   });
 }
 

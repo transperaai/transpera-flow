@@ -1,7 +1,7 @@
 {
   "model": "northbeam-seeded",
   "description": "Northbeam with its 26 named clients: SEO and PPC services, named people, the roster with assignments, 10% overtime cap and two servicing processes. The seed now counts clients per service (northbeam-groups); this stays the reference for named rosters.",
-  "engineVersion": "1.8.0",
+  "engineVersion": "1.9.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

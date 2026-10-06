@@ -20,7 +20,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function open(mode: "demo" | "readonly" = "demo", width = 1280, member = false): Promise<{ page: Page; errors: string[] }> {
+async function open(mode: "demo" | "readonly" = "demo", width = 1280, member = false, connector = false): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -28,7 +28,7 @@ async function open(mode: "demo" | "readonly" = "demo", width = 1280, member = f
   await page.route("https://findings.test/", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><div id="root"></div>` }));
   await page.goto("https://findings.test/");
   await page.addScriptTag({ content: script });
-  await page.evaluate(([m, who]) => window.mountFindings({ mode: m as "demo" | "readonly", member: who as boolean }), [mode, member] as const);
+  await page.evaluate(([m, who, via]) => window.mountFindings({ mode: m as "demo" | "readonly", member: who as boolean, connector: via as boolean }), [mode, member, connector] as const);
   await page.waitForSelector("[data-analysis]");
   return { page, errors };
 }
@@ -54,6 +54,32 @@ describe("AI text saved with labels, read by a member (B1 2b)", { timeout: 60_00
     expect(editor.errors).toEqual([]);
     await page.close();
     await editor.page.close();
+  });
+});
+
+describe("findings Claude proposed over the connector (B20)", { timeout: 60_000 }, () => {
+  it("marks a connector proposal in the review list, words the header for both, and accepts it like any AI proposal", async () => {
+    const { page, errors } = await open("demo", 1280, false, true);
+    const title = "Proposals wait about a week for the Strategist";
+    expect(await page.locator("[data-via-connector]").count()).toBe(1);
+    expect(await row(page, title).locator("[data-via-connector]").innerText()).toMatch(/^From Claude \(connector\) · 30 Sept? 2026$/);
+    expect(await page.locator("[data-review]").innerText()).toContain("AI in the app or Claude (connector) proposed these. Only the ones you accept show on the pages.");
+    await row(page, title).getByRole("button", { name: "Accept" }).click();
+    await expect.poll(() => listed(page)).toEqual([title]);
+    // Listed with where it came from; the others stay in review, unmarked.
+    expect(await page.locator("[data-insight] [data-source]").first().innerText()).toBe("Claude (connector)");
+    expect(await page.locator("[data-via-connector]").count()).toBe(0);
+    expect(await page.locator("[data-review]").innerText()).toContain("AI proposed these. Only the ones you accept show on the pages.");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("says 'AI proposed these' and marks nothing when every proposal came from the app", async () => {
+    const { page, errors } = await open();
+    expect(await page.locator("[data-via-connector]").count()).toBe(0);
+    expect(await page.locator("[data-review]").innerText()).toContain("AI proposed these. Only the ones you accept show on the pages.");
+    expect(errors).toEqual([]);
+    await page.close();
   });
 });
 

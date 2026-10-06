@@ -22,7 +22,8 @@ import { demoBundle } from "@/lib/sources/demo";
 declare global {
   interface Window {
     /** `member`: the AI text is stored with labels and shown to a member linked to no one (B1 2b), named through `nameAnalysisRow` and `nameFinding`. */
-    mountFindings: (options: { mode: "demo" | "readonly"; member?: boolean }) => void;
+    mountFindings: (options: { mode: "demo" | "readonly"; member?: boolean; connector?: boolean }) => void;
+    /** `connector`: the first proposed finding came from Claude over the MCP connector (B20). */
   }
 }
 
@@ -77,6 +78,7 @@ function savedWithLabels(processId: string, workspaceId: string) {
     analysis_id: analysis.id,
     run_id: analysis.run_id,
     edited: false,
+    proposed_via: null,
     created_by: null,
     created_at: AT,
     updated_by: null,
@@ -87,10 +89,11 @@ function savedWithLabels(processId: string, workspaceId: string) {
   return { view: aiViewFromRow(nameAnalysisRow(analysis, MEMBER)), finding: nameFinding(finding, MEMBER) };
 }
 
-function Harness({ mode, member }: { mode: "demo" | "readonly"; member: boolean }) {
+function Harness({ mode, member, connector }: { mode: "demo" | "readonly"; member: boolean; connector: boolean }) {
   const bundle = useMemo(() => demoBundle(), []);
   const labelled = useMemo(() => savedWithLabels(bundle.process.id, bundle.workspace.id), [bundle]);
-  const findings = useFindings(bundle.workspace.id, member ? [labelled.finding] : demoFindings(NORTHBEAM_PROCESS_ID), mode);
+  const initial = useMemo(() => demoFindings(NORTHBEAM_PROCESS_ID).map((f, i) => (connector && i === 0 ? { ...f, proposed_via: "connector" as const } : f)), [connector]);
+  const findings = useFindings(bundle.workspace.id, member ? [labelled.finding] : initial, mode);
   const issues = useIssues(bundle.workspace.id, [], mode);
   const steps = useMemo(() => processSteps(bundle).filter((s) => s.kind !== "start" && s.kind !== "end"), [bundle]);
   const options: FindingDialogOptions = { processes: [{ id: bundle.process.id, name: bundle.process.name }], company: false, steps: steps.map((s) => ({ id: s.id, name: s.name, processId: bundle.process.id })) };
@@ -127,6 +130,6 @@ function Harness({ mode, member }: { mode: "demo" | "readonly"; member: boolean 
   );
 }
 
-window.mountFindings = ({ mode, member = false }) => {
-  createRoot(document.getElementById("root")!).render(<Harness mode={mode} member={member} />);
+window.mountFindings = ({ mode, member = false, connector = false }) => {
+  createRoot(document.getElementById("root")!).render(<Harness mode={mode} member={member} connector={connector} />);
 };

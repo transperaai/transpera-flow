@@ -697,6 +697,7 @@ export type Database = {
           column_map: Json
           created_at: string
           created_by: string | null
+          details: Json
           file_name: string
           id: string
           imported_at: string
@@ -709,6 +710,7 @@ export type Database = {
           column_map?: Json
           created_at?: string
           created_by?: string | null
+          details?: Json
           file_name: string
           id?: string
           imported_at?: string
@@ -721,6 +723,7 @@ export type Database = {
           column_map?: Json
           created_at?: string
           created_by?: string | null
+          details?: Json
           file_name?: string
           id?: string
           imported_at?: string
@@ -863,6 +866,7 @@ export type Database = {
           origin: string
           person_labels: Json
           process_id: string | null
+          proposed_via: string | null
           rating: string
           run_id: string | null
           source_ids: string[]
@@ -889,6 +893,7 @@ export type Database = {
           origin: string
           person_labels?: Json
           process_id?: string | null
+          proposed_via?: string | null
           rating: string
           run_id?: string | null
           source_ids?: string[]
@@ -915,6 +920,7 @@ export type Database = {
           origin?: string
           person_labels?: Json
           process_id?: string | null
+          proposed_via?: string | null
           rating?: string
           run_id?: string | null
           source_ids?: string[]
@@ -1032,6 +1038,44 @@ export type Database = {
           },
           {
             foreignKeyName: "first_principles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      forecast_plans: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          markers: Json
+          name: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          markers?: Json
+          name: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          markers?: Json
+          name?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forecast_plans_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -3182,6 +3226,7 @@ export type Database = {
       }
       workspaces: {
         Row: {
+          branding: Json
           created_at: string
           created_by: string | null
           id: string
@@ -3193,6 +3238,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          branding?: Json
           created_at?: string
           created_by?: string | null
           id?: string
@@ -3204,6 +3250,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          branding?: Json
           created_at?: string
           created_by?: string | null
           id?: string
@@ -3350,6 +3397,20 @@ export type Database = {
         }
         Returns: Json
       }
+      record_calibration_import: {
+        Args: {
+          p_column_map: Json
+          p_details: Json
+          p_file_name: string
+          p_keys: string[]
+          p_kind: string
+          p_process: string
+          p_results: Json
+          p_row_count: number
+          p_workspace: string
+        }
+        Returns: Json
+      }
       record_client_calibration: {
         Args: {
           p_clients: Json
@@ -3359,6 +3420,17 @@ export type Database = {
           p_workspace: string
         }
         Returns: Json
+      }
+      record_dataset: {
+        Args: {
+          p_column_map: Json
+          p_details: Json
+          p_file_name: string
+          p_kind: string
+          p_row_count: number
+          p_workspace: string
+        }
+        Returns: string
       }
       reserve_ai_run: {
         Args: { p_process: string; p_trigger: string; p_workspace: string }

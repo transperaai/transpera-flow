@@ -4,13 +4,21 @@
 // known fields only, so nothing from the files (a client id, a name that matched nothing) is stored by accident (D27).
 // Framework-free for tests.
 
-import { CLIENTS_COLUMNS, SERVICING_LOG_COLUMNS } from "@transpera-flow/db/calibration";
+import type { ImportDetails } from "@transpera-flow/db/csv-import";
 import { knownMessage } from "./client-messages";
+import { parseColumnMap, parseDetails } from "./import-request";
+
+/** The kinds of file a servicing log may be: a servicing log, or jobs or tickets read as one. */
+export type LogKind = "servicing_log" | "jobs";
 
 export interface FileRecord {
+  /** For the servicing log: what was imported (a missing kind is a servicing log). The clients file is always `clients`. */
+  kind?: LogKind;
   fileName: string;
   columnMap: Record<string, string>;
   rowCount: number;
+  /** Counts only, rebuilt from known fields; null when the page sent none. */
+  details: ImportDetails | null;
 }
 
 export interface ClientApplyRequest {
@@ -166,14 +174,23 @@ export function storedClientResults(results: Record<string, unknown>, knownNames
   };
 }
 
-function fileRecord(input: unknown, columns: readonly string[]): FileRecord | null | "bad" {
+function fileRecord(input: unknown, which: "clients" | "log"): FileRecord | null | "bad" {
   if (input === null || input === undefined) return null;
   if (!isObject(input)) return "bad";
   const { fileName, columnMap, rowCount } = input;
+  let kind: LogKind | undefined;
+  if (which === "log") {
+    const k = input.kind === undefined || input.kind === null ? "servicing_log" : input.kind;
+    if (k !== "servicing_log" && k !== "jobs") return "bad";
+    kind = k;
+  }
   if (typeof fileName !== "string" || !fileName.trim() || fileName.length > 300) return "bad";
-  if (!isObject(columnMap) || !Object.entries(columnMap).every(([k, v]) => columns.includes(k) && typeof v === "string" && v.length <= 200)) return "bad";
+  const map = parseColumnMap(which === "clients" ? "clients" : (kind ?? "servicing_log"), columnMap);
+  if (!map) return "bad";
   if (typeof rowCount !== "number" || !Number.isInteger(rowCount) || rowCount < 0 || rowCount > 1_000_000) return "bad";
-  return { fileName: fileName.trim(), columnMap: columnMap as Record<string, string>, rowCount };
+  const details = parseDetails(input.details);
+  if (!details.ok) return "bad";
+  return { ...(kind ? { kind } : {}), fileName: fileName.trim(), columnMap: map, rowCount, details: details.details };
 }
 
 /** `knownNames`: the workspace's service (and so client group) names, the only names that are stored. */
@@ -181,8 +198,8 @@ export function parseClientApplyRequest(input: unknown, knownNames: readonly str
   if (!isObject(input)) return { ok: false, message: "Nothing to save." };
   const { workspaceId, results, keys } = input;
   if (!isId(workspaceId)) return { ok: false, message: "That workspace isn't valid." };
-  const clients = fileRecord(input.clients, CLIENTS_COLUMNS);
-  const log = fileRecord(input.log, SERVICING_LOG_COLUMNS);
+  const clients = fileRecord(input.clients, "clients");
+  const log = fileRecord(input.log, "log");
   if (clients === "bad") return { ok: false, message: "The clients file's name or columns aren't valid." };
   if (log === "bad") return { ok: false, message: "The servicing log's name or columns aren't valid." };
   if (!clients && !log) return { ok: false, message: "Add a clients file or a servicing log first." };

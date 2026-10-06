@@ -33245,6 +33245,4072 @@ revoke execute on function public.save_health_rules(uuid, jsonb, jsonb) from pub
 grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authenticated;
 ']);
 
+-- 20261212000000_connector_findings.sql
+-- Claude outside the app proposes findings (issue #197, B20; Austin's decision 3 on #175, 6 Oct 2026; the MCP tool
+-- `propose_finding`, docs/adr/0015-analysis-findings.md addendum).
+--
+-- Claude connected over MCP may PROPOSE a finding into the analysis review list. It is stored as an AI finding (origin 'ai':
+-- Claude is AI) that is proposed, with no analysis or run, and `proposed_via = 'connector'`. A person still accepts, edits or
+-- dismisses it in the app, exactly as they do an AI finding; Accept, "AI, edited", Acknowledge as issue and the map feed all
+-- work unchanged.
+--
+-- STRICTLY ADDITIVE: one nullable column, one partial index, and one function redefined (`private.findings_before_write`).
+-- No data is rewritten; no table, grant, policy or trigger is created or dropped (the trigger `findings_before_write` keeps
+-- pointing at the function by name).
+--
+--   * `public.findings.proposed_via` (text, nullable, check: null or 'connector'). Null for everything that exists. The
+--     trigger stamps it on insert from the request's JWT claims (an API token's request carries `api_token_id`, as
+--     `private.api_token_claims` reads it), never from what the client sent, and it never changes afterwards.
+--   * `findings_connector_recent` (workspace_id, created_at) where proposed_via = 'connector': the caps below count recent
+--     connector proposals per workspace.
+--   * `private.findings_before_write`: the 20261205000000 body plus these rules, which apply only to a request made with an
+--     API token (a session is unaffected, except that it can't forge the key prefix):
+--       - a token may only INSERT a connector proposal: origin 'ai', status 'proposed', no analysis, no run. It can't add a
+--         finding by hand (born accepted), can't write an analysis-backed AI finding and can't UPDATE any finding (no
+--         accept, dismiss or edit over the API). The check uses pg_trigger_depth() = 1, as `suggestions` does, so foreign-key
+--         actions (created_by set to null when a user is deleted) still pass;
+--       - the key is computed here: 'ai:connector:' + sha256 of the place and the normalised title (Unicode NFKC, curly
+--         quotes straightened, lower case, any run of white space (a no-break space too) one space, trailing punctuation
+--         and spaces dropped), so the unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its
+--         status: a dismissal stands, and a trailing full stop, a no-break space or a curly apostrophe doesn't beat it;
+--       - at most 100 connector proposals per workspace in 24 hours and 50 waiting for review (54000), counted under an
+--         advisory lock (as `reserve_ai_run`);
+--       - the 15-minute "analysis you ran" rule is skipped for a connector insert; a connector finding is never "proposed
+--         again" by a later in-app run; `proposed_via` can't change;
+--       - a session can't send a key with the connector prefix (23514).
+--   The insert branch already records who (`created_by`, the token's owner) and when (`created_at`).
+--
+-- Roles need no new code: `insert findings` is `can_edit_workspace` (agency admin, owner, editor); members and viewers get
+-- 42501 from row-level security. Members and viewers read connector findings as they read every finding (the app names people
+-- by labels, B1 2b, #30).
+--
+-- Applies after row 58 (20261209000000, B1 3/3, #30), the latest when this was written; it touches nothing they do. The previous definition of the function is the one in
+-- 20261205000000_analysis_findings.sql (B1 2b only disabled and re-enabled the trigger). Its md5 (prosrc) on a database built
+-- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
+--
+-- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -f <file>`, one query per file):
+--   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, and
+--      the highest to be 20261209000000 (row 58, the previous row of docs/production-migrations.md) unless something later
+--      than it has been applied and logged since:
+--        select version from supabase_migrations.schema_migrations where version >= '20261205000000' order by 1;
+--   2. The column doesn't exist yet. Expect 0:
+--        select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'findings' and column_name = 'proposed_via';
+--   3. The function body is the one this migration copied. Expect (psql prints proconfig this way)
+--      8f5d4dc6a13d64841a9c2611a9889241|f|{"search_path=\"\""}:
+--        select md5(prosrc), prosecdef, proconfig from pg_proc where proname = 'findings_before_write';
+--   4. No key uses the new prefix. Expect 0:
+--        select count(*) from public.findings where ai_key like 'ai:connector:%';
+--   5. The two triggers are there and enabled. Expect 2 rows, both O:
+--        select tgname, tgenabled::text from pg_trigger where tgrelid = 'public.findings'::regclass and not tgisinternal order by 1;
+--   6. The helpers exist. Expect one row, both non-null:
+--        select to_regprocedure('auth.jwt()'), to_regprocedure('pg_catalog.hashtextextended(text, bigint)');
+--
+-- POST-APPLY CHECKS:
+--   1. Preflight 2 returns 1, and:
+--        select data_type, is_nullable from information_schema.columns where table_name = 'findings' and column_name = 'proposed_via';
+--      Expect: text, YES.
+--   2. select pg_get_constraintdef(oid) from pg_constraint where conname = 'findings_proposed_via';
+--      Expect: the check (proposed_via IS NULL OR proposed_via = 'connector').
+--   3. select indexdef from pg_indexes where indexname = 'findings_connector_recent';   -- present, partial
+--   4. select prosecdef, proconfig, prosrc like '%ai:connector:%' and prosrc like '%api_token_id%' from pg_proc where proname = 'findings_before_write';
+--      Expect: f, {search_path=""}, t.
+--   5. Preflight 5 unchanged (2 rows, both O).
+--   6. select count(*) from public.findings where proposed_via is not null;   -- 0
+--   7. The schema_migrations row for 20261212000000 is present.
+--
+-- ROLLBACK (one transaction; redeploy the app from before B20 first, since it selects `proposed_via`):
+--
+--   begin;
+--   -- The 20261205000000 body of private.findings_before_write, in full:
+--   create or replace function private.findings_before_write() returns trigger
+--   language plpgsql
+--   set search_path = ''
+--   as $$
+--   declare
+--     uid uuid := auth.uid();
+--     -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+--     again boolean := false;
+--   begin
+--     if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+--       raise exception 'findings: the process must be one of the workspace''s' using errcode = '23514';
+--     end if;
+--     -- Every source it cites is one of its workspace's (read under the caller's RLS, so another workspace's never counts).
+--     if cardinality(new.source_ids) > 0 and (tg_op = 'INSERT' or new.source_ids is distinct from old.source_ids) and exists (
+--       select 1 from unnest(new.source_ids) as c (id)
+--       where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+--     ) then
+--       raise exception 'findings: every source cited must be one of the workspace''s' using errcode = '23514';
+--     end if;
+--   
+--     if tg_op = 'UPDATE' then
+--       again := old.origin = 'ai' and new.origin = 'ai' and new.status = 'proposed' and old.status in ('proposed', 'superseded')
+--         and new.run_id is not null and new.run_id is distinct from old.run_id;
+--     end if;
+--   
+--     -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+--     -- analysis's run. Signed-in callers only; the system (uid null) is trusted.
+--     if (tg_op = 'INSERT' and new.origin = 'ai') or again then
+--       if new.status <> 'proposed' then
+--         raise exception 'findings: an AI finding starts as proposed' using errcode = '23514';
+--       end if;
+--       if uid is not null and not exists (
+--         select 1 from public.ai_analyses a
+--         where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+--           and a.run_id = new.run_id and a.updated_at > now() - interval '15 minutes'
+--       ) then
+--         raise exception 'findings: an AI finding must come from an analysis you ran in the last 15 minutes' using errcode = '42501';
+--       end if;
+--     end if;
+--   
+--     if tg_op = 'INSERT' then
+--       new.created_by := coalesce(uid, new.created_by);
+--       new.created_at := now();
+--       new.updated_by := uid;
+--       new.updated_at := now();
+--       new.edited := false;
+--       if new.origin = 'ai' then
+--         new.decided_by := null;
+--         new.decided_at := null;
+--       else
+--         if new.status <> 'accepted' or new.analysis_id is not null or new.run_id is not null then
+--           raise exception 'findings: a finding added by hand starts accepted and cites no analysis' using errcode = '23514';
+--         end if;
+--         new.decided_by := uid;
+--         new.decided_at := now();
+--       end if;
+--       return new;
+--     end if;
+--   
+--     -- UPDATE
+--     if new.workspace_id is distinct from old.workspace_id
+--       or new.origin is distinct from old.origin
+--       or new.ai_key is distinct from old.ai_key
+--       or new.created_at is distinct from old.created_at
+--       or (new.created_by is distinct from old.created_by and new.created_by is not null)
+--       or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+--       or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+--       raise exception 'findings: workspace, origin, key, analysis, run and creator cannot be changed' using errcode = '23514';
+--     end if;
+--   
+--     if again then
+--       -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+--       new.edited := false;
+--       new.decided_by := null;
+--       new.decided_at := null;
+--     else
+--       if new.origin = 'ai' and new.facts is distinct from old.facts then
+--         raise exception 'findings: the facts an AI finding cites stay as they were cited' using errcode = '23514';
+--       end if;
+--       if new.status is distinct from old.status then
+--         if new.status = 'proposed' then
+--           raise exception 'findings: a finding cannot go back to proposed' using errcode = '23514';
+--         end if;
+--         if old.status = 'superseded' then
+--           raise exception 'findings: a later analysis replaced this proposal, so it can''t be decided; analyse again' using errcode = '23514';
+--         end if;
+--         if new.status = 'superseded' and (old.status <> 'proposed' or old.origin <> 'ai') then
+--           raise exception 'findings: only a proposed AI finding is superseded' using errcode = '23514';
+--         end if;
+--         new.decided_by := coalesce(uid, new.decided_by);
+--         new.decided_at := now();
+--       else
+--         new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+--         new.decided_at := old.decided_at;
+--       end if;
+--       -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+--       new.edited := old.edited or (old.origin = 'ai' and (
+--         new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+--         or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+--         or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+--     end if;
+--     if uid is not null then
+--       new.updated_by := uid;
+--     end if;
+--     return new;
+--   end;
+--   $$;
+--   revoke all on function private.findings_before_write() from public, anon, authenticated;
+--   drop index if exists public.findings_connector_recent;
+--   alter table public.findings drop column if exists proposed_via;
+--   delete from supabase_migrations.schema_migrations where version = '20261212000000';
+--   commit;
+--
+-- Rolled back, connector proposals stay as ordinary AI proposals (ai_key 'ai:connector:...', no analysis); people can still
+-- accept or dismiss them. (`create or replace` keeps the trigger and its grants.)
+
+alter table public.findings
+  add column proposed_via text constraint findings_proposed_via check (proposed_via is null or proposed_via = 'connector');
+
+-- The connector's caps count recent proposals per workspace.
+create index findings_connector_recent on public.findings (workspace_id, created_at) where proposed_via = 'connector';
+
+create or replace function private.findings_before_write() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  -- An API token's request carries api_token_id in its claims (private.api_token_claims); the client can't set claims.
+  via_token boolean := coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id';
+  -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+  again boolean := false;
+  -- The title as the key reads it (connector proposals).
+  norm text;
+begin
+  -- Over the API a person reviews findings in the app: no accept, dismiss or edit. (Depth 1 lets foreign-key actions through.)
+  if tg_op = 'UPDATE' and via_token and pg_catalog.pg_trigger_depth() = 1 then
+    raise exception 'findings: a person reviews findings in the app, not over the API' using errcode = '42501';
+  end if;
+
+  if tg_op = 'INSERT' then
+    -- The database says whether it came through the connector, never the client.
+    new.proposed_via := case when via_token then 'connector' end;
+    if via_token then
+      if new.origin <> 'ai' or new.status <> 'proposed' or new.analysis_id is not null or new.run_id is not null then
+        raise exception 'findings: over the connector a finding can only be proposed; a person accepts it in the app' using errcode = '42501';
+      end if;
+      -- One proposal per place and title: the unique index findings_ai_key refuses it again, whatever its status. The title is
+      -- normalised so punctuation, a no-break space or curly quotes can't make a new key: NFKC (a no-break space becomes a
+      -- space), curly quotes straight, lower case, white space to one space, trailing punctuation and spaces dropped. Labels,
+      -- never names (B1 2b). The tool's own check (titleKey in packages/mcp/src/finding-proposal.ts) does the same.
+      norm := pg_catalog.btrim(pg_catalog.lower(pg_catalog.translate(normalize(new.title, NFKC), '‘’“”', '''''""')));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, '[[:space:]]+', ' ', 'g'));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, '[]).!?,;:''"–—-]+$', ''));
+      new.ai_key := 'ai:connector:' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(new.process_id::text, 'company') || '|' || norm,
+        'UTF8')), 'hex');
+      perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('findings_connector:' || new.workspace_id::text, 0));
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = 'connector'
+          and f.created_at > pg_catalog.now() - interval '24 hours') >= 100 then
+        raise exception 'findings: this workspace has had 100 findings proposed over the connector in the last 24 hours' using errcode = '54000';
+      end if;
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = 'connector'
+          and f.status = 'proposed') >= 50 then
+        raise exception 'findings: 50 findings proposed over the connector are waiting for review; review them in the app first' using errcode = '54000';
+      end if;
+    elsif new.ai_key like 'ai:connector:%' then
+      raise exception 'findings: that key is kept for findings proposed over the connector' using errcode = '23514';
+    end if;
+  end if;
+
+  if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+    raise exception 'findings: the process must be one of the workspace''s' using errcode = '23514';
+  end if;
+  -- Every source it cites is one of its workspace's (read under the caller's RLS, so another workspace's never counts).
+  if cardinality(new.source_ids) > 0 and (tg_op = 'INSERT' or new.source_ids is distinct from old.source_ids) and exists (
+    select 1 from unnest(new.source_ids) as c (id)
+    where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+  ) then
+    raise exception 'findings: every source cited must be one of the workspace''s' using errcode = '23514';
+  end if;
+
+  if tg_op = 'UPDATE' then
+    again := old.origin = 'ai' and new.origin = 'ai' and new.status = 'proposed' and old.status in ('proposed', 'superseded')
+      and new.run_id is not null and new.run_id is distinct from old.run_id and old.proposed_via is null;
+  end if;
+
+  -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+  -- analysis's run. Signed-in callers only; the system (uid null) is trusted. A connector proposal has no analysis.
+  if (tg_op = 'INSERT' and new.origin = 'ai' and not via_token) or again then
+    if new.status <> 'proposed' then
+      raise exception 'findings: an AI finding starts as proposed' using errcode = '23514';
+    end if;
+    if uid is not null and not exists (
+      select 1 from public.ai_analyses a
+      where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+        and a.run_id = new.run_id and a.updated_at > now() - interval '15 minutes'
+    ) then
+      raise exception 'findings: an AI finding must come from an analysis you ran in the last 15 minutes' using errcode = '42501';
+    end if;
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.created_by := coalesce(uid, new.created_by);
+    new.created_at := now();
+    new.updated_by := uid;
+    new.updated_at := now();
+    new.edited := false;
+    if new.origin = 'ai' then
+      new.decided_by := null;
+      new.decided_at := null;
+    else
+      if new.status <> 'accepted' or new.analysis_id is not null or new.run_id is not null then
+        raise exception 'findings: a finding added by hand starts accepted and cites no analysis' using errcode = '23514';
+      end if;
+      new.decided_by := uid;
+      new.decided_at := now();
+    end if;
+    return new;
+  end if;
+
+  -- UPDATE
+  if new.workspace_id is distinct from old.workspace_id
+    or new.origin is distinct from old.origin
+    or new.ai_key is distinct from old.ai_key
+    or new.proposed_via is distinct from old.proposed_via
+    or new.created_at is distinct from old.created_at
+    or (new.created_by is distinct from old.created_by and new.created_by is not null)
+    or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+    or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+    raise exception 'findings: workspace, origin, key, how it was proposed, analysis, run and creator cannot be changed' using errcode = '23514';
+  end if;
+
+  if again then
+    -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+    new.edited := false;
+    new.decided_by := null;
+    new.decided_at := null;
+  else
+    if new.origin = 'ai' and new.facts is distinct from old.facts then
+      raise exception 'findings: the facts an AI finding cites stay as they were cited' using errcode = '23514';
+    end if;
+    if new.status is distinct from old.status then
+      if new.status = 'proposed' then
+        raise exception 'findings: a finding cannot go back to proposed' using errcode = '23514';
+      end if;
+      if old.status = 'superseded' then
+        raise exception 'findings: a later analysis replaced this proposal, so it can''t be decided; analyse again' using errcode = '23514';
+      end if;
+      if new.status = 'superseded' and (old.status <> 'proposed' or old.origin <> 'ai') then
+        raise exception 'findings: only a proposed AI finding is superseded' using errcode = '23514';
+      end if;
+      new.decided_by := coalesce(uid, new.decided_by);
+      new.decided_at := now();
+    else
+      new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+      new.decided_at := old.decided_at;
+    end if;
+    -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+    new.edited := old.edited or (old.origin = 'ai' and (
+      new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+      or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+      or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+  end if;
+  if uid is not null then
+    new.updated_by := uid;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.findings_before_write() from public, anon, authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261212000000', 'connector_findings', array['-- Claude outside the app proposes findings (issue #197, B20; Austin''s decision 3 on #175, 6 Oct 2026; the MCP tool
+-- `propose_finding`, docs/adr/0015-analysis-findings.md addendum).
+--
+-- Claude connected over MCP may PROPOSE a finding into the analysis review list. It is stored as an AI finding (origin ''ai'':
+-- Claude is AI) that is proposed, with no analysis or run, and `proposed_via = ''connector''`. A person still accepts, edits or
+-- dismisses it in the app, exactly as they do an AI finding; Accept, "AI, edited", Acknowledge as issue and the map feed all
+-- work unchanged.
+--
+-- STRICTLY ADDITIVE: one nullable column, one partial index, and one function redefined (`private.findings_before_write`).
+-- No data is rewritten; no table, grant, policy or trigger is created or dropped (the trigger `findings_before_write` keeps
+-- pointing at the function by name).
+--
+--   * `public.findings.proposed_via` (text, nullable, check: null or ''connector''). Null for everything that exists. The
+--     trigger stamps it on insert from the request''s JWT claims (an API token''s request carries `api_token_id`, as
+--     `private.api_token_claims` reads it), never from what the client sent, and it never changes afterwards.
+--   * `findings_connector_recent` (workspace_id, created_at) where proposed_via = ''connector'': the caps below count recent
+--     connector proposals per workspace.
+--   * `private.findings_before_write`: the 20261205000000 body plus these rules, which apply only to a request made with an
+--     API token (a session is unaffected, except that it can''t forge the key prefix):
+--       - a token may only INSERT a connector proposal: origin ''ai'', status ''proposed'', no analysis, no run. It can''t add a
+--         finding by hand (born accepted), can''t write an analysis-backed AI finding and can''t UPDATE any finding (no
+--         accept, dismiss or edit over the API). The check uses pg_trigger_depth() = 1, as `suggestions` does, so foreign-key
+--         actions (created_by set to null when a user is deleted) still pass;
+--       - the key is computed here: ''ai:connector:'' + sha256 of the place and the normalised title (Unicode NFKC, curly
+--         quotes straightened, lower case, any run of white space (a no-break space too) one space, trailing punctuation
+--         and spaces dropped), so the unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its
+--         status: a dismissal stands, and a trailing full stop, a no-break space or a curly apostrophe doesn''t beat it;
+--       - at most 100 connector proposals per workspace in 24 hours and 50 waiting for review (54000), counted under an
+--         advisory lock (as `reserve_ai_run`);
+--       - the 15-minute "analysis you ran" rule is skipped for a connector insert; a connector finding is never "proposed
+--         again" by a later in-app run; `proposed_via` can''t change;
+--       - a session can''t send a key with the connector prefix (23514).
+--   The insert branch already records who (`created_by`, the token''s owner) and when (`created_at`).
+--
+-- Roles need no new code: `insert findings` is `can_edit_workspace` (agency admin, owner, editor); members and viewers get
+-- 42501 from row-level security. Members and viewers read connector findings as they read every finding (the app names people
+-- by labels, B1 2b, #30).
+--
+-- Applies after row 58 (20261209000000, B1 3/3, #30), the latest when this was written; it touches nothing they do. The previous definition of the function is the one in
+-- 20261205000000_analysis_findings.sql (B1 2b only disabled and re-enabled the trigger). Its md5 (prosrc) on a database built
+-- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
+--
+-- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -f <file>`, one query per file):
+--   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, and
+--      the highest to be 20261209000000 (row 58, the previous row of docs/production-migrations.md) unless something later
+--      than it has been applied and logged since:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261205000000'' order by 1;
+--   2. The column doesn''t exist yet. Expect 0:
+--        select count(*) from information_schema.columns where table_schema = ''public'' and table_name = ''findings'' and column_name = ''proposed_via'';
+--   3. The function body is the one this migration copied. Expect (psql prints proconfig this way)
+--      8f5d4dc6a13d64841a9c2611a9889241|f|{"search_path=\"\""}:
+--        select md5(prosrc), prosecdef, proconfig from pg_proc where proname = ''findings_before_write'';
+--   4. No key uses the new prefix. Expect 0:
+--        select count(*) from public.findings where ai_key like ''ai:connector:%'';
+--   5. The two triggers are there and enabled. Expect 2 rows, both O:
+--        select tgname, tgenabled::text from pg_trigger where tgrelid = ''public.findings''::regclass and not tgisinternal order by 1;
+--   6. The helpers exist. Expect one row, both non-null:
+--        select to_regprocedure(''auth.jwt()''), to_regprocedure(''pg_catalog.hashtextextended(text, bigint)'');
+--
+-- POST-APPLY CHECKS:
+--   1. Preflight 2 returns 1, and:
+--        select data_type, is_nullable from information_schema.columns where table_name = ''findings'' and column_name = ''proposed_via'';
+--      Expect: text, YES.
+--   2. select pg_get_constraintdef(oid) from pg_constraint where conname = ''findings_proposed_via'';
+--      Expect: the check (proposed_via IS NULL OR proposed_via = ''connector'').
+--   3. select indexdef from pg_indexes where indexname = ''findings_connector_recent'';   -- present, partial
+--   4. select prosecdef, proconfig, prosrc like ''%ai:connector:%'' and prosrc like ''%api_token_id%'' from pg_proc where proname = ''findings_before_write'';
+--      Expect: f, {search_path=""}, t.
+--   5. Preflight 5 unchanged (2 rows, both O).
+--   6. select count(*) from public.findings where proposed_via is not null;   -- 0
+--   7. The schema_migrations row for 20261212000000 is present.
+--
+-- ROLLBACK (one transaction; redeploy the app from before B20 first, since it selects `proposed_via`):
+--
+--   begin;
+--   -- The 20261205000000 body of private.findings_before_write, in full:
+--   create or replace function private.findings_before_write() returns trigger
+--   language plpgsql
+--   set search_path = ''''
+--   as $$
+--   declare
+--     uid uuid := auth.uid();
+--     -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+--     again boolean := false;
+--   begin
+--     if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+--       raise exception ''findings: the process must be one of the workspace''''s'' using errcode = ''23514'';
+--     end if;
+--     -- Every source it cites is one of its workspace''s (read under the caller''s RLS, so another workspace''s never counts).
+--     if cardinality(new.source_ids) > 0 and (tg_op = ''INSERT'' or new.source_ids is distinct from old.source_ids) and exists (
+--       select 1 from unnest(new.source_ids) as c (id)
+--       where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+--     ) then
+--       raise exception ''findings: every source cited must be one of the workspace''''s'' using errcode = ''23514'';
+--     end if;
+--   
+--     if tg_op = ''UPDATE'' then
+--       again := old.origin = ''ai'' and new.origin = ''ai'' and new.status = ''proposed'' and old.status in (''proposed'', ''superseded'')
+--         and new.run_id is not null and new.run_id is distinct from old.run_id;
+--     end if;
+--   
+--     -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+--     -- analysis''s run. Signed-in callers only; the system (uid null) is trusted.
+--     if (tg_op = ''INSERT'' and new.origin = ''ai'') or again then
+--       if new.status <> ''proposed'' then
+--         raise exception ''findings: an AI finding starts as proposed'' using errcode = ''23514'';
+--       end if;
+--       if uid is not null and not exists (
+--         select 1 from public.ai_analyses a
+--         where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+--           and a.run_id = new.run_id and a.updated_at > now() - interval ''15 minutes''
+--       ) then
+--         raise exception ''findings: an AI finding must come from an analysis you ran in the last 15 minutes'' using errcode = ''42501'';
+--       end if;
+--     end if;
+--   
+--     if tg_op = ''INSERT'' then
+--       new.created_by := coalesce(uid, new.created_by);
+--       new.created_at := now();
+--       new.updated_by := uid;
+--       new.updated_at := now();
+--       new.edited := false;
+--       if new.origin = ''ai'' then
+--         new.decided_by := null;
+--         new.decided_at := null;
+--       else
+--         if new.status <> ''accepted'' or new.analysis_id is not null or new.run_id is not null then
+--           raise exception ''findings: a finding added by hand starts accepted and cites no analysis'' using errcode = ''23514'';
+--         end if;
+--         new.decided_by := uid;
+--         new.decided_at := now();
+--       end if;
+--       return new;
+--     end if;
+--   
+--     -- UPDATE
+--     if new.workspace_id is distinct from old.workspace_id
+--       or new.origin is distinct from old.origin
+--       or new.ai_key is distinct from old.ai_key
+--       or new.created_at is distinct from old.created_at
+--       or (new.created_by is distinct from old.created_by and new.created_by is not null)
+--       or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+--       or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+--       raise exception ''findings: workspace, origin, key, analysis, run and creator cannot be changed'' using errcode = ''23514'';
+--     end if;
+--   
+--     if again then
+--       -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+--       new.edited := false;
+--       new.decided_by := null;
+--       new.decided_at := null;
+--     else
+--       if new.origin = ''ai'' and new.facts is distinct from old.facts then
+--         raise exception ''findings: the facts an AI finding cites stay as they were cited'' using errcode = ''23514'';
+--       end if;
+--       if new.status is distinct from old.status then
+--         if new.status = ''proposed'' then
+--           raise exception ''findings: a finding cannot go back to proposed'' using errcode = ''23514'';
+--         end if;
+--         if old.status = ''superseded'' then
+--           raise exception ''findings: a later analysis replaced this proposal, so it can''''t be decided; analyse again'' using errcode = ''23514'';
+--         end if;
+--         if new.status = ''superseded'' and (old.status <> ''proposed'' or old.origin <> ''ai'') then
+--           raise exception ''findings: only a proposed AI finding is superseded'' using errcode = ''23514'';
+--         end if;
+--         new.decided_by := coalesce(uid, new.decided_by);
+--         new.decided_at := now();
+--       else
+--         new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+--         new.decided_at := old.decided_at;
+--       end if;
+--       -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+--       new.edited := old.edited or (old.origin = ''ai'' and (
+--         new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+--         or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+--         or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+--     end if;
+--     if uid is not null then
+--       new.updated_by := uid;
+--     end if;
+--     return new;
+--   end;
+--   $$;
+--   revoke all on function private.findings_before_write() from public, anon, authenticated;
+--   drop index if exists public.findings_connector_recent;
+--   alter table public.findings drop column if exists proposed_via;
+--   delete from supabase_migrations.schema_migrations where version = ''20261212000000'';
+--   commit;
+--
+-- Rolled back, connector proposals stay as ordinary AI proposals (ai_key ''ai:connector:...'', no analysis); people can still
+-- accept or dismiss them. (`create or replace` keeps the trigger and its grants.)
+
+alter table public.findings
+  add column proposed_via text constraint findings_proposed_via check (proposed_via is null or proposed_via = ''connector'');
+
+-- The connector''s caps count recent proposals per workspace.
+create index findings_connector_recent on public.findings (workspace_id, created_at) where proposed_via = ''connector'';
+
+create or replace function private.findings_before_write() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+declare
+  uid uuid := auth.uid();
+  -- An API token''s request carries api_token_id in its claims (private.api_token_claims); the client can''t set claims.
+  via_token boolean := coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'';
+  -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+  again boolean := false;
+  -- The title as the key reads it (connector proposals).
+  norm text;
+begin
+  -- Over the API a person reviews findings in the app: no accept, dismiss or edit. (Depth 1 lets foreign-key actions through.)
+  if tg_op = ''UPDATE'' and via_token and pg_catalog.pg_trigger_depth() = 1 then
+    raise exception ''findings: a person reviews findings in the app, not over the API'' using errcode = ''42501'';
+  end if;
+
+  if tg_op = ''INSERT'' then
+    -- The database says whether it came through the connector, never the client.
+    new.proposed_via := case when via_token then ''connector'' end;
+    if via_token then
+      if new.origin <> ''ai'' or new.status <> ''proposed'' or new.analysis_id is not null or new.run_id is not null then
+        raise exception ''findings: over the connector a finding can only be proposed; a person accepts it in the app'' using errcode = ''42501'';
+      end if;
+      -- One proposal per place and title: the unique index findings_ai_key refuses it again, whatever its status. The title is
+      -- normalised so punctuation, a no-break space or curly quotes can''t make a new key: NFKC (a no-break space becomes a
+      -- space), curly quotes straight, lower case, white space to one space, trailing punctuation and spaces dropped. Labels,
+      -- never names (B1 2b). The tool''s own check (titleKey in packages/mcp/src/finding-proposal.ts) does the same.
+      norm := pg_catalog.btrim(pg_catalog.lower(pg_catalog.translate(normalize(new.title, NFKC), ''‘’“”'', ''''''''''""'')));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, ''[[:space:]]+'', '' '', ''g''));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, ''[]).!?,;:''''"–—-]+$'', ''''));
+      new.ai_key := ''ai:connector:'' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(new.process_id::text, ''company'') || ''|'' || norm,
+        ''UTF8'')), ''hex'');
+      perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''findings_connector:'' || new.workspace_id::text, 0));
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = ''connector''
+          and f.created_at > pg_catalog.now() - interval ''24 hours'') >= 100 then
+        raise exception ''findings: this workspace has had 100 findings proposed over the connector in the last 24 hours'' using errcode = ''54000'';
+      end if;
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = ''connector''
+          and f.status = ''proposed'') >= 50 then
+        raise exception ''findings: 50 findings proposed over the connector are waiting for review; review them in the app first'' using errcode = ''54000'';
+      end if;
+    elsif new.ai_key like ''ai:connector:%'' then
+      raise exception ''findings: that key is kept for findings proposed over the connector'' using errcode = ''23514'';
+    end if;
+  end if;
+
+  if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+    raise exception ''findings: the process must be one of the workspace''''s'' using errcode = ''23514'';
+  end if;
+  -- Every source it cites is one of its workspace''s (read under the caller''s RLS, so another workspace''s never counts).
+  if cardinality(new.source_ids) > 0 and (tg_op = ''INSERT'' or new.source_ids is distinct from old.source_ids) and exists (
+    select 1 from unnest(new.source_ids) as c (id)
+    where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+  ) then
+    raise exception ''findings: every source cited must be one of the workspace''''s'' using errcode = ''23514'';
+  end if;
+
+  if tg_op = ''UPDATE'' then
+    again := old.origin = ''ai'' and new.origin = ''ai'' and new.status = ''proposed'' and old.status in (''proposed'', ''superseded'')
+      and new.run_id is not null and new.run_id is distinct from old.run_id and old.proposed_via is null;
+  end if;
+
+  -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+  -- analysis''s run. Signed-in callers only; the system (uid null) is trusted. A connector proposal has no analysis.
+  if (tg_op = ''INSERT'' and new.origin = ''ai'' and not via_token) or again then
+    if new.status <> ''proposed'' then
+      raise exception ''findings: an AI finding starts as proposed'' using errcode = ''23514'';
+    end if;
+    if uid is not null and not exists (
+      select 1 from public.ai_analyses a
+      where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+        and a.run_id = new.run_id and a.updated_at > now() - interval ''15 minutes''
+    ) then
+      raise exception ''findings: an AI finding must come from an analysis you ran in the last 15 minutes'' using errcode = ''42501'';
+    end if;
+  end if;
+
+  if tg_op = ''INSERT'' then
+    new.created_by := coalesce(uid, new.created_by);
+    new.created_at := now();
+    new.updated_by := uid;
+    new.updated_at := now();
+    new.edited := false;
+    if new.origin = ''ai'' then
+      new.decided_by := null;
+      new.decided_at := null;
+    else
+      if new.status <> ''accepted'' or new.analysis_id is not null or new.run_id is not null then
+        raise exception ''findings: a finding added by hand starts accepted and cites no analysis'' using errcode = ''23514'';
+      end if;
+      new.decided_by := uid;
+      new.decided_at := now();
+    end if;
+    return new;
+  end if;
+
+  -- UPDATE
+  if new.workspace_id is distinct from old.workspace_id
+    or new.origin is distinct from old.origin
+    or new.ai_key is distinct from old.ai_key
+    or new.proposed_via is distinct from old.proposed_via
+    or new.created_at is distinct from old.created_at
+    or (new.created_by is distinct from old.created_by and new.created_by is not null)
+    or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+    or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+    raise exception ''findings: workspace, origin, key, how it was proposed, analysis, run and creator cannot be changed'' using errcode = ''23514'';
+  end if;
+
+  if again then
+    -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+    new.edited := false;
+    new.decided_by := null;
+    new.decided_at := null;
+  else
+    if new.origin = ''ai'' and new.facts is distinct from old.facts then
+      raise exception ''findings: the facts an AI finding cites stay as they were cited'' using errcode = ''23514'';
+    end if;
+    if new.status is distinct from old.status then
+      if new.status = ''proposed'' then
+        raise exception ''findings: a finding cannot go back to proposed'' using errcode = ''23514'';
+      end if;
+      if old.status = ''superseded'' then
+        raise exception ''findings: a later analysis replaced this proposal, so it can''''t be decided; analyse again'' using errcode = ''23514'';
+      end if;
+      if new.status = ''superseded'' and (old.status <> ''proposed'' or old.origin <> ''ai'') then
+        raise exception ''findings: only a proposed AI finding is superseded'' using errcode = ''23514'';
+      end if;
+      new.decided_by := coalesce(uid, new.decided_by);
+      new.decided_at := now();
+    else
+      new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+      new.decided_at := old.decided_at;
+    end if;
+    -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+    new.edited := old.edited or (old.origin = ''ai'' and (
+      new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+      or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+      or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+  end if;
+  if uid is not null then
+    new.updated_by := uid;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.findings_before_write() from public, anon, authenticated;
+']);
+
+-- 20261214000000_client_branding.sql
+-- Client branding (issue #34, B5; PRD §8.1 "Client branding"): a workspace's logo and accent colour.
+--
+--   * `workspaces.branding` jsonb, not null, default '{}', with a shape check (`workspaces_branding_shape`): at most the keys
+--     `accent` (the light-theme accent, lower-case #rrggbb), `accent_dark` (an optional dark-theme accent; null: the app derives
+--     it) and `logo_path` (`<this workspace's id>/<uuid>.<png|jpg|webp>`, the object's name in the `branding` bucket).
+--   * `private.branding_logo_guard` and its trigger `branding_logo_guard` (before insert, or update of `branding`, on
+--     `workspaces`): for anyone signed in, a new `logo_path` must name an object of the `branding` bucket whose stored
+--     metadata says a PNG, JPEG or WebP (matching the name's extension) of 1 byte to 512 KB. It does not compare `owner_id`
+--     (unconfirmed on production, docs/HANDOVER.md); the upload policy already limits the folder to the workspace's owners
+--     and agency admins.
+--   * ACCEPTED LIMIT: Postgres can't read the bytes, so the 16 to 2048 pixel limit (the guard against a small file that
+--     declares a huge image) and the check that the bytes really are that type are made by the app only (browser, then
+--     `attachWorkspaceLogo` on the server). An owner or agency admin who skips the app, uploading through the Storage API and
+--     saving `branding.logo_path` through `save_fields`, can keep an unchecked file of the declared type and size; the sidebar
+--     decodes images asynchronously. Only owners and agency admins can do this, in their own workspace's folder.
+--   * Supabase Storage: a PUBLIC bucket `branding` (512 KB a file; PNG, JPEG and WebP only) and three policies on
+--     `storage.objects` (read, upload, delete) for owners and agency admins of the workspace in the object's first folder.
+--     No update: a logo is replaced by a new name. Anon: nothing through the API (the public URL doesn't use the policies).
+--   * Contrast is NOT checked in Postgres: the app refuses a failing accent at save time and ignores one at render time.
+--
+-- STRICTLY ADDITIVE: one new column with a constant default (no table rewrite on PG >= 11), one validated check (every row is
+-- '{}', which passes; `workspaces` is tiny), one function and trigger, one bucket row, three storage policies. No existing
+-- column, policy, grant or function changes. `save_fields` is NOT redefined (it already accepts `workspaces` and any column).
+--
+-- ORDER: apply after the migration before it in packages/db/supabase/migrations at merge time (renumber if anything numbered
+-- later merges first).
+--
+-- PREFLIGHT (read-only, one file at a time with prod-sql.sh -f; it returns only the last statement):
+--   0. The previous migration in the repo at merge time is the latest applied, and nothing later is. Expect its version, then 0:
+--        select max(version) from supabase_migrations.schema_migrations;
+--        select count(*) from supabase_migrations.schema_migrations where version >= '20261214000000';
+--   1. Nothing this creates exists yet. Expect 0 rows from each:
+--        select column_name from information_schema.columns where table_schema = 'public' and table_name = 'workspaces' and column_name = 'branding';
+--        select conname from pg_constraint where conname = 'workspaces_branding_shape';
+--        select proname from pg_proc where pronamespace = 'private'::regnamespace and proname = 'branding_logo_guard';
+--        select id from storage.buckets where id = 'branding';
+--        select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'branding:%';
+--   2. The policies already on storage.objects are only B19's three (anything else could widen access to the new bucket).
+--      Expect exactly `sources: editors delete`, `sources: editors upload`, `sources: members read`:
+--        select policyname, cmd, roles from pg_policies where schemaname = 'storage' and tablename = 'objects' order by 1;
+--   3. What the policies call is there. Expect 1 row (authenticated), then 2 rows:
+--        select grantee from information_schema.routine_privileges where routine_schema = 'private' and routine_name = 'storage_workspace' and grantee = 'authenticated';
+--        select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in ('can_manage_workspace', 'save_fields');
+--   4. Storage has RLS on, and the bucket table takes the columns we insert. Expect true, then 5 rows:
+--        select relrowsecurity from pg_class where oid = 'storage.objects'::regclass;
+--        select column_name from information_schema.columns where table_schema = 'storage' and table_name = 'buckets' and column_name in ('id', 'name', 'public', 'file_size_limit', 'allowed_mime_types');
+--   5. The triggers on workspaces are the eight known ones (audit_company, company_map_new_workspace, needs_review,
+--      needs_review_insert, seed_market_presets, seed_scenario_library, set_updated_at, stamp_settings_provenance):
+--        select tgname from pg_trigger where tgrelid = 'public.workspaces'::regclass and not tgisinternal order by 1;
+--
+-- POST-APPLY CHECK:
+--   1. Column: jsonb, not null, default '{}'::jsonb; every workspace unbranded. Expect 1 row, then 0:
+--        select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'workspaces' and column_name = 'branding';
+--        select count(*) from public.workspaces where branding <> '{}'::jsonb;
+--   2. Check validated. Expect t:
+--        select convalidated from pg_constraint where conname = 'workspaces_branding_shape';
+--   3. Trigger enabled. Expect 1 row, O:
+--        select tgname, tgenabled::text from pg_trigger where tgname = 'branding_logo_guard';
+--   4. Bucket. Expect 1 row: true, 524288, 3:
+--        select public, file_size_limit, cardinality(allowed_mime_types) from storage.buckets where id = 'branding';
+--   5. Three policies for {authenticated}: SELECT, INSERT, DELETE (no UPDATE):
+--        select policyname, cmd, roles from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'branding:%' order by cmd;
+--   6. The function: empty search_path; no EXECUTE for anon, authenticated or PUBLIC. Expect {search_path=""}, then 0 rows:
+--        select proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname = 'branding_logo_guard';
+--        select grantee from information_schema.routine_privileges where routine_schema = 'private' and routine_name = 'branding_logo_guard' and grantee in ('anon', 'authenticated', 'PUBLIC');
+--   7. The row:
+--        select version, name from supabase_migrations.schema_migrations where version = '20261214000000';
+--
+-- ROLLBACK ORDER: B19's rollback (20261204000000, process_admin_source_files) drops private.storage_workspace, which the three
+-- policies below use, so it needs THIS rollback done first.
+--
+-- ROLLBACK (redeploy a build from before it FIRST; one transaction. Saved branding is lost; logos stay in the bucket until it
+-- is emptied from the Storage dashboard, because a bucket with objects can't be deleted from SQL):
+--
+--   begin;
+--   drop policy if exists "branding: managers read" on storage.objects;
+--   drop policy if exists "branding: managers upload" on storage.objects;
+--   drop policy if exists "branding: managers delete" on storage.objects;
+--   -- Only once the bucket is empty (empty it from the dashboard first): delete from storage.buckets where id = 'branding';
+--   drop trigger if exists branding_logo_guard on public.workspaces;
+--   drop function if exists private.branding_logo_guard();
+--   alter table public.workspaces drop constraint if exists workspaces_branding_shape;
+--   alter table public.workspaces drop column if exists branding;
+--   delete from supabase_migrations.schema_migrations where version = '20261214000000';
+--   commit;
+
+-- Branding (issue #34): the light-theme accent, an optional dark-theme accent (null: derived by the app), and the logo's
+-- object name in the `branding` bucket. Hex is lower case; the app normalises before saving.
+alter table public.workspaces add column branding jsonb not null default '{}'::jsonb;
+
+alter table public.workspaces add constraint workspaces_branding_shape check (
+  jsonb_typeof(branding) = 'object'
+  and branding - array['accent', 'accent_dark', 'logo_path'] = '{}'::jsonb
+  and coalesce(jsonb_typeof(branding -> 'accent'), 'null') in ('null', 'string')
+  and coalesce(branding ->> 'accent' ~ '^#[0-9a-f]{6}$', true)
+  and coalesce(jsonb_typeof(branding -> 'accent_dark'), 'null') in ('null', 'string')
+  and coalesce(branding ->> 'accent_dark' ~ '^#[0-9a-f]{6}$', true)
+  and coalesce(jsonb_typeof(branding -> 'logo_path'), 'null') in ('null', 'string')
+  -- `<this workspace's id>/<uuid>.<png|jpg|webp>`: only a logo in the workspace's own folder.
+  and coalesce(branding ->> 'logo_path' ~ ('^' || id::text || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$'), true)
+);
+
+-- A workspace keeps only a logo that is in the bucket, whose stored metadata is a PNG, JPEG or WebP of up to 512 KB that
+-- matches the name's extension: nobody points it at a name with nothing behind it. (Pixel size and the real bytes are the
+-- app's check: see the accepted limit in the header.) Unlike B19's
+-- source guard this does NOT compare `owner_id` (unconfirmed on production; HANDOVER): the upload policy already limits
+-- the folder to the workspace's owners and agency admins. Security definer: it reads `storage.objects`.
+create function private.branding_logo_guard() returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  path text := new.branding ->> 'logo_path';
+  meta jsonb;
+  want text;
+  size bigint;
+begin
+  if path is null or (tg_op = 'UPDATE' and path is not distinct from (old.branding ->> 'logo_path')) then
+    return new;
+  end if;
+  -- Only for someone signed in (or anon): the operator and the migrations pass (as in private.source_file_guard).
+  if auth.uid() is null and coalesce(current_setting('role', true), '') not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  select o.metadata into meta from storage.objects o where o.bucket_id = 'branding' and o.name = path;
+  if not found then
+    raise exception 'Upload the logo first: the workspace keeps only a logo uploaded for it' using errcode = '42501';
+  end if;
+  -- Storage records the type it was sent and the size it stored (a number; some versions write it as text).
+  want := case substring(path from '\.([a-z]+)$') when 'png' then 'image/png' when 'jpg' then 'image/jpeg' else 'image/webp' end;
+  size := case when meta ->> 'size' ~ '^[0-9]+$' then (meta ->> 'size')::bigint else 0 end;
+  if coalesce(meta ->> 'mimetype', '') <> want or size not between 1 and 524288 then
+    raise exception 'The logo must be a PNG, JPEG or WebP image of up to 512 KB' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.branding_logo_guard() from public, anon, authenticated;
+
+create trigger branding_logo_guard before insert or update of branding on public.workspaces
+  for each row execute function private.branding_logo_guard();
+
+-- A PUBLIC bucket (Q4): a logo is shown to everyone in the workspace and, later, to share-link visitors (B3) who aren't
+-- signed in, so it's read by its public URL, never through row-level security. Names are `<workspace id>/<random uuid>.<ext>`,
+-- never reused, so a cached copy never goes stale. Storage refuses a file over 512 KB or with another declared type; the
+-- app checks the real content on the server and deletes anything else.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('branding', 'branding', true, 524288, array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do nothing;
+
+-- Owners and agency admins of the workspace in the object's first folder: read through the API (the server reads an upload
+-- back to check it; `remove` needs it), upload, delete. No update: a logo is replaced by a new name. Anon: nothing through
+-- the API (the public URL doesn't go through these).
+create policy "branding: managers read" on storage.objects for select to authenticated
+  using (bucket_id = 'branding' and private.storage_workspace(objects.name) is not null
+    and public.can_manage_workspace(private.storage_workspace(objects.name)));
+
+create policy "branding: managers upload" on storage.objects for insert to authenticated
+  with check (bucket_id = 'branding' and private.storage_workspace(objects.name) is not null
+    and public.can_manage_workspace(private.storage_workspace(objects.name))
+    and objects.name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$');
+
+create policy "branding: managers delete" on storage.objects for delete to authenticated
+  using (bucket_id = 'branding' and private.storage_workspace(objects.name) is not null
+    and public.can_manage_workspace(private.storage_workspace(objects.name)));
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261214000000', 'client_branding', array['-- Client branding (issue #34, B5; PRD §8.1 "Client branding"): a workspace''s logo and accent colour.
+--
+--   * `workspaces.branding` jsonb, not null, default ''{}'', with a shape check (`workspaces_branding_shape`): at most the keys
+--     `accent` (the light-theme accent, lower-case #rrggbb), `accent_dark` (an optional dark-theme accent; null: the app derives
+--     it) and `logo_path` (`<this workspace''s id>/<uuid>.<png|jpg|webp>`, the object''s name in the `branding` bucket).
+--   * `private.branding_logo_guard` and its trigger `branding_logo_guard` (before insert, or update of `branding`, on
+--     `workspaces`): for anyone signed in, a new `logo_path` must name an object of the `branding` bucket whose stored
+--     metadata says a PNG, JPEG or WebP (matching the name''s extension) of 1 byte to 512 KB. It does not compare `owner_id`
+--     (unconfirmed on production, docs/HANDOVER.md); the upload policy already limits the folder to the workspace''s owners
+--     and agency admins.
+--   * ACCEPTED LIMIT: Postgres can''t read the bytes, so the 16 to 2048 pixel limit (the guard against a small file that
+--     declares a huge image) and the check that the bytes really are that type are made by the app only (browser, then
+--     `attachWorkspaceLogo` on the server). An owner or agency admin who skips the app, uploading through the Storage API and
+--     saving `branding.logo_path` through `save_fields`, can keep an unchecked file of the declared type and size; the sidebar
+--     decodes images asynchronously. Only owners and agency admins can do this, in their own workspace''s folder.
+--   * Supabase Storage: a PUBLIC bucket `branding` (512 KB a file; PNG, JPEG and WebP only) and three policies on
+--     `storage.objects` (read, upload, delete) for owners and agency admins of the workspace in the object''s first folder.
+--     No update: a logo is replaced by a new name. Anon: nothing through the API (the public URL doesn''t use the policies).
+--   * Contrast is NOT checked in Postgres: the app refuses a failing accent at save time and ignores one at render time.
+--
+-- STRICTLY ADDITIVE: one new column with a constant default (no table rewrite on PG >= 11), one validated check (every row is
+-- ''{}'', which passes; `workspaces` is tiny), one function and trigger, one bucket row, three storage policies. No existing
+-- column, policy, grant or function changes. `save_fields` is NOT redefined (it already accepts `workspaces` and any column).
+--
+-- ORDER: apply after the migration before it in packages/db/supabase/migrations at merge time (renumber if anything numbered
+-- later merges first).
+--
+-- PREFLIGHT (read-only, one file at a time with prod-sql.sh -f; it returns only the last statement):
+--   0. The previous migration in the repo at merge time is the latest applied, and nothing later is. Expect its version, then 0:
+--        select max(version) from supabase_migrations.schema_migrations;
+--        select count(*) from supabase_migrations.schema_migrations where version >= ''20261214000000'';
+--   1. Nothing this creates exists yet. Expect 0 rows from each:
+--        select column_name from information_schema.columns where table_schema = ''public'' and table_name = ''workspaces'' and column_name = ''branding'';
+--        select conname from pg_constraint where conname = ''workspaces_branding_shape'';
+--        select proname from pg_proc where pronamespace = ''private''::regnamespace and proname = ''branding_logo_guard'';
+--        select id from storage.buckets where id = ''branding'';
+--        select policyname from pg_policies where schemaname = ''storage'' and tablename = ''objects'' and policyname like ''branding:%'';
+--   2. The policies already on storage.objects are only B19''s three (anything else could widen access to the new bucket).
+--      Expect exactly `sources: editors delete`, `sources: editors upload`, `sources: members read`:
+--        select policyname, cmd, roles from pg_policies where schemaname = ''storage'' and tablename = ''objects'' order by 1;
+--   3. What the policies call is there. Expect 1 row (authenticated), then 2 rows:
+--        select grantee from information_schema.routine_privileges where routine_schema = ''private'' and routine_name = ''storage_workspace'' and grantee = ''authenticated'';
+--        select proname from pg_proc where pronamespace = ''public''::regnamespace and proname in (''can_manage_workspace'', ''save_fields'');
+--   4. Storage has RLS on, and the bucket table takes the columns we insert. Expect true, then 5 rows:
+--        select relrowsecurity from pg_class where oid = ''storage.objects''::regclass;
+--        select column_name from information_schema.columns where table_schema = ''storage'' and table_name = ''buckets'' and column_name in (''id'', ''name'', ''public'', ''file_size_limit'', ''allowed_mime_types'');
+--   5. The triggers on workspaces are the eight known ones (audit_company, company_map_new_workspace, needs_review,
+--      needs_review_insert, seed_market_presets, seed_scenario_library, set_updated_at, stamp_settings_provenance):
+--        select tgname from pg_trigger where tgrelid = ''public.workspaces''::regclass and not tgisinternal order by 1;
+--
+-- POST-APPLY CHECK:
+--   1. Column: jsonb, not null, default ''{}''::jsonb; every workspace unbranded. Expect 1 row, then 0:
+--        select data_type, is_nullable, column_default from information_schema.columns where table_schema = ''public'' and table_name = ''workspaces'' and column_name = ''branding'';
+--        select count(*) from public.workspaces where branding <> ''{}''::jsonb;
+--   2. Check validated. Expect t:
+--        select convalidated from pg_constraint where conname = ''workspaces_branding_shape'';
+--   3. Trigger enabled. Expect 1 row, O:
+--        select tgname, tgenabled::text from pg_trigger where tgname = ''branding_logo_guard'';
+--   4. Bucket. Expect 1 row: true, 524288, 3:
+--        select public, file_size_limit, cardinality(allowed_mime_types) from storage.buckets where id = ''branding'';
+--   5. Three policies for {authenticated}: SELECT, INSERT, DELETE (no UPDATE):
+--        select policyname, cmd, roles from pg_policies where schemaname = ''storage'' and tablename = ''objects'' and policyname like ''branding:%'' order by cmd;
+--   6. The function: empty search_path; no EXECUTE for anon, authenticated or PUBLIC. Expect {search_path=""}, then 0 rows:
+--        select proconfig from pg_proc where pronamespace = ''private''::regnamespace and proname = ''branding_logo_guard'';
+--        select grantee from information_schema.routine_privileges where routine_schema = ''private'' and routine_name = ''branding_logo_guard'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'');
+--   7. The row:
+--        select version, name from supabase_migrations.schema_migrations where version = ''20261214000000'';
+--
+-- ROLLBACK ORDER: B19''s rollback (20261204000000, process_admin_source_files) drops private.storage_workspace, which the three
+-- policies below use, so it needs THIS rollback done first.
+--
+-- ROLLBACK (redeploy a build from before it FIRST; one transaction. Saved branding is lost; logos stay in the bucket until it
+-- is emptied from the Storage dashboard, because a bucket with objects can''t be deleted from SQL):
+--
+--   begin;
+--   drop policy if exists "branding: managers read" on storage.objects;
+--   drop policy if exists "branding: managers upload" on storage.objects;
+--   drop policy if exists "branding: managers delete" on storage.objects;
+--   -- Only once the bucket is empty (empty it from the dashboard first): delete from storage.buckets where id = ''branding'';
+--   drop trigger if exists branding_logo_guard on public.workspaces;
+--   drop function if exists private.branding_logo_guard();
+--   alter table public.workspaces drop constraint if exists workspaces_branding_shape;
+--   alter table public.workspaces drop column if exists branding;
+--   delete from supabase_migrations.schema_migrations where version = ''20261214000000'';
+--   commit;
+
+-- Branding (issue #34): the light-theme accent, an optional dark-theme accent (null: derived by the app), and the logo''s
+-- object name in the `branding` bucket. Hex is lower case; the app normalises before saving.
+alter table public.workspaces add column branding jsonb not null default ''{}''::jsonb;
+
+alter table public.workspaces add constraint workspaces_branding_shape check (
+  jsonb_typeof(branding) = ''object''
+  and branding - array[''accent'', ''accent_dark'', ''logo_path''] = ''{}''::jsonb
+  and coalesce(jsonb_typeof(branding -> ''accent''), ''null'') in (''null'', ''string'')
+  and coalesce(branding ->> ''accent'' ~ ''^#[0-9a-f]{6}$'', true)
+  and coalesce(jsonb_typeof(branding -> ''accent_dark''), ''null'') in (''null'', ''string'')
+  and coalesce(branding ->> ''accent_dark'' ~ ''^#[0-9a-f]{6}$'', true)
+  and coalesce(jsonb_typeof(branding -> ''logo_path''), ''null'') in (''null'', ''string'')
+  -- `<this workspace''s id>/<uuid>.<png|jpg|webp>`: only a logo in the workspace''s own folder.
+  and coalesce(branding ->> ''logo_path'' ~ (''^'' || id::text || ''/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$''), true)
+);
+
+-- A workspace keeps only a logo that is in the bucket, whose stored metadata is a PNG, JPEG or WebP of up to 512 KB that
+-- matches the name''s extension: nobody points it at a name with nothing behind it. (Pixel size and the real bytes are the
+-- app''s check: see the accepted limit in the header.) Unlike B19''s
+-- source guard this does NOT compare `owner_id` (unconfirmed on production; HANDOVER): the upload policy already limits
+-- the folder to the workspace''s owners and agency admins. Security definer: it reads `storage.objects`.
+create function private.branding_logo_guard() returns trigger
+language plpgsql security definer
+set search_path = ''''
+as $$
+declare
+  path text := new.branding ->> ''logo_path'';
+  meta jsonb;
+  want text;
+  size bigint;
+begin
+  if path is null or (tg_op = ''UPDATE'' and path is not distinct from (old.branding ->> ''logo_path'')) then
+    return new;
+  end if;
+  -- Only for someone signed in (or anon): the operator and the migrations pass (as in private.source_file_guard).
+  if auth.uid() is null and coalesce(current_setting(''role'', true), '''') not in (''authenticated'', ''anon'') then
+    return new;
+  end if;
+  select o.metadata into meta from storage.objects o where o.bucket_id = ''branding'' and o.name = path;
+  if not found then
+    raise exception ''Upload the logo first: the workspace keeps only a logo uploaded for it'' using errcode = ''42501'';
+  end if;
+  -- Storage records the type it was sent and the size it stored (a number; some versions write it as text).
+  want := case substring(path from ''\.([a-z]+)$'') when ''png'' then ''image/png'' when ''jpg'' then ''image/jpeg'' else ''image/webp'' end;
+  size := case when meta ->> ''size'' ~ ''^[0-9]+$'' then (meta ->> ''size'')::bigint else 0 end;
+  if coalesce(meta ->> ''mimetype'', '''') <> want or size not between 1 and 524288 then
+    raise exception ''The logo must be a PNG, JPEG or WebP image of up to 512 KB'' using errcode = ''42501'';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.branding_logo_guard() from public, anon, authenticated;
+
+create trigger branding_logo_guard before insert or update of branding on public.workspaces
+  for each row execute function private.branding_logo_guard();
+
+-- A PUBLIC bucket (Q4): a logo is shown to everyone in the workspace and, later, to share-link visitors (B3) who aren''t
+-- signed in, so it''s read by its public URL, never through row-level security. Names are `<workspace id>/<random uuid>.<ext>`,
+-- never reused, so a cached copy never goes stale. Storage refuses a file over 512 KB or with another declared type; the
+-- app checks the real content on the server and deletes anything else.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (''branding'', ''branding'', true, 524288, array[''image/png'', ''image/jpeg'', ''image/webp''])
+on conflict (id) do nothing;
+
+-- Owners and agency admins of the workspace in the object''s first folder: read through the API (the server reads an upload
+-- back to check it; `remove` needs it), upload, delete. No update: a logo is replaced by a new name. Anon: nothing through
+-- the API (the public URL doesn''t go through these).
+create policy "branding: managers read" on storage.objects for select to authenticated
+  using (bucket_id = ''branding'' and private.storage_workspace(objects.name) is not null
+    and public.can_manage_workspace(private.storage_workspace(objects.name)));
+
+create policy "branding: managers upload" on storage.objects for insert to authenticated
+  with check (bucket_id = ''branding'' and private.storage_workspace(objects.name) is not null
+    and public.can_manage_workspace(private.storage_workspace(objects.name))
+    and objects.name ~ ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$'');
+
+create policy "branding: managers delete" on storage.objects for delete to authenticated
+  using (bucket_id = ''branding'' and private.storage_workspace(objects.name) is not null
+    and public.can_manage_workspace(private.storage_workspace(objects.name)));
+']);
+
+-- 20261215000000_bigger_restores.sql
+-- B21 (issue #203): restore bigger workspaces, in the same one call.
+--
+-- B10 part 2b (migration 20261207000000, row 54) restores a workspace backup in one all-or-nothing call, kept inside a 3 s budget
+-- because Supabase stops any statement by `authenticated` at 8 s. That limited a restore to 50 processes, 500 steps, 1,000 edges,
+-- 300 issues, 1,000 clients and so on. This migration keeps the single call and makes it bigger and faster.
+--
+-- Austin's decisions on #39 (6 Oct 2026), which still bind the restore:
+--   Q1: "yes to the migration `import_workspace_bundle`. It is one SECURITY INVOKER function: not privileged, additive only, and it
+--       creates drafts only. It makes the restore all-or-nothing."
+--   Decision 1: "Import: (b). Each process is imported as a draft of its latest published version. History isn't restored, and no
+--       privileged restore migration is added."
+-- So the restore stays ONE SECURITY INVOKER FUNCTION in ONE TRANSACTION: no SECURITY DEFINER helper and no multi-call restore (a
+-- half-filled workspace can't be undone as the signed-in user: `never_delete_clients`, no delete policy on suggestions, append-only
+-- history).
+--
+-- What changes (`public.import_workspace_bundle(uuid, jsonb, text)`, same signature, same refusals in the same order, same sections,
+-- same result), measured on the container's Postgres 16 with a synthetic plan:
+--   1. `set statement_timeout = '40s'` on this function only. PostgREST applies a function's own settings after the role's, so this
+--      call gets 40 s and every other request by `authenticated` keeps Supabase's 8 s. Verified with PostgREST 14.1 locally; see
+--      `docs/supabase-notes.md`. The app's route allows 60 s and won't start the call after 15 s.
+--   2. The id remap is two plain `replace` calls instead of one `regexp_replace` over the whole plan text (13 times faster on a 22 MB
+--      plan: 1.30 s down to 0.10 s). The result is the same for every plan the planner makes.
+--   3. A new index `audit_log (target_id)`: `log_process_import`'s "already logged?" query grows with the size of the workspace
+--      (every company-model row the restore writes adds an audit row). With the index it is a lookup: 1.07 s down to 0.02 s at
+--      250 processes.
+--   4. Three times the limits, sized from the measurements (the brief's audit: every limit at once 1.84 s at today's size, 6.6 to 7.3 s
+--      at four times, after both speedups, for a plan without leave, client services and the small company tables; the builder's
+--      fuller plan, every table filled, took 14.9 to 17.7 s at four times, over the 15 s local budget, so the limits were lowered by
+--      a quarter): 150 processes, 1,500 steps, 3,000 edges, 600 sources and 4,500,000 characters of their text, 900 issues, 1,500
+--      people, 3,000 clients, 900 scenarios, 900 blocks, 1,500 suggestions, 900 proposals, 1,200 role assignments, 3,000 skills,
+--      1,200 client assignments, 3,000 source links, and a plan of 15 MB (the database measures the jsonb text, which has a space
+--      after each colon and comma, so it allows 19,660,800 characters of it).
+--   5. New caps on sections that had none: 3,000 client services, 1,500 leave entries, and 1,500 rows of the small company-model
+--      tables together (lead sources, seasonality, churn drivers, market conditions, market schedule, services, servicing rules,
+--      client groups).
+--   6. A second restore into the same workspace while one runs is refused at once (`55P03`, hint `busy`, "already running") by a
+--      try-lock on `import_workspace_bundle:<workspace>`, instead of waiting for the first (up to 40 s) and then being told "too
+--      big". The second lock (`import_new_process:`) still blocks, as uploads are short.
+-- Everything else in the function is copied unchanged.
+--
+-- STRICTLY ADDITIVE: one index and one `create or replace` of `public.import_workspace_bundle` with the same signature, the same
+-- refusals, sections and result. It doesn't redefine `save_fields` or any other function, trigger or policy. The grant on
+-- `private.scenario_library()` (row 54) is untouched.
+--
+-- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 59. Apply BEFORE deploying the app: the app's new limits
+-- need the function's.
+--
+-- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Row 54 is applied, and this one isn't. Expect 1, then 0:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261207000000';
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261215000000';
+--   1. The function is still exactly the one 20261207000000 made (nothing later replaced it).
+--      Expect 968cbd0034a0bb1479b8ee0c9eaf7962, false, {search_path=""}:
+--        select md5(prosrc), prosecdef, proconfig from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure;
+--   2. The index doesn't exist yet. Expect null:
+--        select to_regclass('public.audit_log_target_id_idx');
+--   3. How big audit_log is (the index is built under a lock that blocks audit writes while it builds; the apply file sets
+--      lock_timeout = 5s). Expect well under a million rows; record the numbers:
+--        select count(*), pg_size_pretty(pg_total_relation_size('public.audit_log')) from public.audit_log;
+--   4. Nobody restoring right now (no running call of the function; an idle pooled connection still holds its last query, so only
+--      backends that aren't idle count). Expect 0:
+--        select count(*) from pg_stat_activity where query ilike '%import_workspace_bundle%' and state <> 'idle' and pid <> pg_backend_pid();
+--
+-- POST-APPLY CHECKS:
+--   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:
+--        select prosecdef, proconfig, md5(prosrc) from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure;
+--   2. Only authenticated may execute it (as row 54's post-apply checks 1 and 2). Expect one row, authenticated EXECUTE:
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges
+--         where routine_schema = 'public' and routine_name = 'import_workspace_bundle' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 2;
+--   3. The index. Expect CREATE INDEX audit_log_target_id_idx ON public.audit_log USING btree (target_id):
+--        select indexdef from pg_indexes where schemaname = 'public' and indexname = 'audit_log_target_id_idx';
+--   4. The row. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261215000000';
+--
+-- ROLLBACK (one transaction; the function part is the whole `create function` statement of 20261207000000 with `create or replace`,
+-- which restores its body and drops `statement_timeout` from its settings, because `create or replace` replaces them all):
+-- begin;
+-- drop index if exists public.audit_log_target_id_idx;
+-- create or replace function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text default null) returns jsonb
+-- language plpgsql
+-- security invoker
+-- set search_path = ''
+-- as $$
+-- declare
+--   -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
+--   -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
+--   allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"scenarios":["id","parent_scenario_id","name","description","patch","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"],"suggestions":["id","target_table","target_id","patch","evidence","note","created_at"],"proposals":["id","kind","title","detail","payload","evidence","note","issue_id","created_at"]}'::jsonb;
+--   -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
+--   -- column in `allow` is checked on `id` too.
+--   ref_cols constant text[] := array['person_roles.person_id','person_roles.role_id','person_leave.person_id','services.entry_process_id','service_servicing.service_id','service_servicing.process_id','client_groups.service_id','client_services.client_id','client_services.service_id','client_assignments.client_id','client_assignments.role_id','client_assignments.person_id','person_skills.person_id','person_skills.step_id','scenarios.parent_scenario_id','issues.client_id','issues.owner_person_id','issues.person_id','issues.process_id','issues.role_id','issues.scenario_id','issues.step_id','source_links.source_id','source_links.issue_id','source_links.process_id','source_links.step_id','proposals.issue_id','market_schedule.condition_id','suggestions.target_id'];
+--   step_ref_cols constant text[] := array['parent_step_id','entry_step_id','rework_to_step_id','person_id','role_id','child_process_id'];
+--   -- The order the sections are written in.
+--   sections constant text[] := array['settings','roles','people','person_roles','person_leave','lead_sources','seasonality','demand_settings','churn_drivers','market_conditions','market_schedule','lever_settings','analysis_rules','clients','sources','processes','scenarios','blocks','issues','steps','services','service_servicing','client_groups','client_services','client_assignments','person_skills','source_links','suggestions','proposals','archive','log'];
+--   list_sections constant text[] := array['roles','people','person_roles','person_leave','lead_sources','seasonality','churn_drivers','market_conditions','market_schedule','clients','sources','processes','scenarios','blocks','issues','services','service_servicing','client_groups','client_services','client_assignments','person_skills','source_links','suggestions','proposals'];
+--   one_sections constant text[] := array['settings','demand_settings','lever_settings','analysis_rules'];
+--   placeholder constant text := '00000000-0000-4000-8000-';
+--   placeholder_re constant text := '^00000000-0000-4000-8000-[0-9a-f]{12}$';
+--   max_plan_chars constant integer := 13107200;
+-- 
+--   pl jsonb;
+--   txt text;
+--   prefix text;
+--   label text := left(nullif(btrim(coalesce(p_label, '')), ''), 300);
+--   sec text;
+--   col text;
+--   tbl text;
+--   rows jsonb;
+--   node jsonb;
+--   sc jsonb;
+--   cols text;
+--   sets text;
+--   n integer;
+--   total integer;
+--   existing uuid;
+--   skip_ids uuid[] := '{}';
+--   skipped jsonb := '{}';
+--   counts jsonb := '{}';
+--   proc uuid;
+--   rev uuid;
+--   draft jsonb;
+--   revs jsonb := '{}';
+--   made jsonb := '[]';
+--   arch uuid[] := '{}';
+--   step_total integer := 0;
+--   edge_total integer := 0;
+--   settings_result text := 'none';
+--   what text;
+--   has_rows boolean;
+--   bad integer;
+--   chars bigint;
+-- begin
+--   -- 1. Who. Before the plan is read, so a refusal says nothing about it.
+--   if coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id' then
+--     raise exception 'Backups are restored in the app.' using errcode = '42501';
+--   end if;
+--   if p_workspace is null or not coalesce(public.can_edit_workspace(p_workspace), false) then
+--     raise exception 'Only owners, editors and agency admins can restore a backup.' using errcode = '42501';
+--   end if;
+-- 
+--   -- 2. Shape and limits.
+--   if p_plan is null or jsonb_typeof(p_plan) is distinct from 'object' or p_plan ->> 'format' is distinct from 'transpera-workspace-import/1' then
+--     raise exception 'import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan' using errcode = '22023';
+--   end if;
+--   if char_length(p_plan::text) > max_plan_chars then
+--     raise exception 'import_workspace_bundle: the plan is too big (at most 10 MB)' using errcode = '22023';
+--   end if;
+--   foreach sec in array list_sections loop
+--     if jsonb_typeof(p_plan -> sec) is distinct from 'array' then
+--       raise exception 'import_workspace_bundle: % must be a list', sec using errcode = '22023';
+--     end if;
+--     if exists (select 1 from jsonb_array_elements(p_plan -> sec) e where jsonb_typeof(e.value) is distinct from 'object') then
+--       raise exception 'import_workspace_bundle: every row of % must be an object', sec using errcode = '22023';
+--     end if;
+--   end loop;
+--   foreach sec in array one_sections loop
+--     if p_plan -> sec is not null and jsonb_typeof(p_plan -> sec) not in ('object', 'null') then
+--       raise exception 'import_workspace_bundle: % must be an object or null', sec using errcode = '22023';
+--     end if;
+--   end loop;
+--   if exists (
+--     select 1 from jsonb_array_elements(p_plan -> 'processes') p
+--     where jsonb_typeof(p.value -> 'steps') is distinct from 'array' or jsonb_typeof(p.value -> 'edges') is distinct from 'array'
+--       or exists (select 1 from jsonb_array_elements(p.value -> 'steps') e where jsonb_typeof(e.value) is distinct from 'object')
+--       or exists (select 1 from jsonb_array_elements(p.value -> 'edges') e where jsonb_typeof(e.value) is distinct from 'object')
+--       or (p.value -> 'first_principles' is not null and jsonb_typeof(p.value -> 'first_principles') not in ('object', 'null'))
+--       or (p.value -> 'layout' is not null and jsonb_typeof(p.value -> 'layout') not in ('object', 'null'))
+--   ) then
+--     raise exception 'import_workspace_bundle: every process needs lists of steps and edges' using errcode = '22023';
+--   end if;
+--   select coalesce(sum(jsonb_array_length(p.value -> 'steps')), 0), coalesce(sum(jsonb_array_length(p.value -> 'edges')), 0)
+--     into step_total, edge_total from jsonb_array_elements(p_plan -> 'processes') p;
+--   select coalesce(sum(char_length(coalesce(s.value ->> 'body', ''))), 0) into chars from jsonb_array_elements(p_plan -> 'sources') s;
+--   if jsonb_array_length(p_plan -> 'processes') > 50 or step_total > 500 or edge_total > 1000
+--     or jsonb_array_length(p_plan -> 'sources') > 200 or chars > 3000000
+--     or jsonb_array_length(p_plan -> 'issues') > 300 or jsonb_array_length(p_plan -> 'people') > 500
+--     or jsonb_array_length(p_plan -> 'clients') > 1000 or jsonb_array_length(p_plan -> 'scenarios') > 300
+--     or jsonb_array_length(p_plan -> 'blocks') > 300 or jsonb_array_length(p_plan -> 'suggestions') > 500
+--     or jsonb_array_length(p_plan -> 'proposals') > 300
+--     or jsonb_array_length(p_plan -> 'person_roles') > 400 or jsonb_array_length(p_plan -> 'person_skills') > 1000
+--     or jsonb_array_length(p_plan -> 'client_assignments') > 400 or jsonb_array_length(p_plan -> 'source_links') > 400 then
+--     raise exception 'import_workspace_bundle: the plan is over a limit (50 processes, 500 steps, 1000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 400 role assignments, 1000 skills, 400 client assignments, 400 source links)' using errcode = '22023';
+--   end if;
+--   -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+--   if exists (select 1 from jsonb_array_elements(p_plan -> 'scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
+--     raise exception 'import_workspace_bundle: every scenario needs an id' using errcode = '22023';
+--   end if;
+-- 
+--   -- 3. Lock: one restore (or upload) at a time per workspace.
+--   perform pg_advisory_xact_lock(hashtextextended('import_workspace_bundle:' || p_workspace::text, 0));
+--   perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || p_workspace::text, 0));
+-- 
+--   -- 4. Empty.
+--   for tbl, col in
+--     select t.a, t.b from (values
+--       ('processes', 'not is_company'), ('roles', 'true'), ('people', 'true'), ('services', 'true'), ('client_groups', 'true'),
+--       ('clients', 'true'), ('lead_sources', 'true'), ('churn_drivers', 'true'), ('market_schedule', 'true'), ('issues', 'true'),
+--       ('sources', 'true'), ('blocks', 'true'), ('solutions', 'true'), ('suggestions', 'true'), ('suggestion_proposals', 'true'),
+--       ('market_conditions', 'preset is null')
+--     ) as t(a, b)
+--   loop
+--     execute format('select exists (select 1 from public.%I where workspace_id = $1 and %s)', tbl, col) into has_rows using p_workspace;
+--     if has_rows then
+--       what := replace(tbl, '_', ' ');
+--       exit;
+--     end if;
+--   end loop;
+--   if what is null and exists (
+--     select 1 from public.scenarios s where s.workspace_id = p_workspace
+--       and not exists (select 1 from private.scenario_library() l where l.name = s.name and l.patch = s.patch)
+--   ) then
+--     what := 'scenarios of its own';
+--   end if;
+--   if what is not null then
+--     raise exception 'This workspace isn''t empty: it already has %. Backups restore only into a new, empty workspace.', what
+--       using errcode = '23514', hint = 'not_empty';
+--   end if;
+-- 
+--   -- 5. Ids: every id and reference column of the plan holds a placeholder (or null) before anything is replaced.
+--   foreach sec in array list_sections loop
+--     if sec = 'processes' then continue; end if;
+--     for col in
+--       select c from (
+--         select 'id' as c where allow -> sec ? 'id'
+--         union all select split_part(r, '.', 2) from unnest(ref_cols) r where split_part(r, '.', 1) = sec
+--       ) q
+--     loop
+--       select count(*) into bad from jsonb_array_elements(p_plan -> sec) r
+--       where r.value -> col is not null and jsonb_typeof(r.value -> col) <> 'null'
+--         and (jsonb_typeof(r.value -> col) <> 'string' or (r.value ->> col) !~ placeholder_re);
+--       if bad > 0 then
+--         raise exception 'import_workspace_bundle: % holds an id that is not a placeholder in %', col, sec using errcode = '22023';
+--       end if;
+--     end loop;
+--   end loop;
+--   select count(*) into bad from jsonb_array_elements(p_plan -> 'issues') i
+--   where exists (
+--       select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'owner_ids') = 'array' then i.value -> 'owner_ids' else '[]'::jsonb end) x
+--       where jsonb_typeof(x.value) <> 'string' or (x.value #>> '{}') !~ placeholder_re)
+--     or exists (
+--       select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'source_ids') = 'array' then i.value -> 'source_ids' else '[]'::jsonb end) x
+--       where jsonb_typeof(x.value) <> 'string' or (x.value #>> '{}') !~ placeholder_re)
+--     or exists (
+--       select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'links') = 'array' then i.value -> 'links' else '[]'::jsonb end) l
+--       where jsonb_typeof(l.value) <> 'object'
+--         or (l.value ->> 'process_id') !~ placeholder_re
+--         or (jsonb_typeof(l.value -> 'step_id') <> 'null' and l.value ->> 'step_id' is not null and (l.value ->> 'step_id') !~ placeholder_re));
+--   if bad > 0 then
+--     raise exception 'import_workspace_bundle: an issue link, owner or source holds an id that is not a placeholder' using errcode = '22023';
+--   end if;
+--   select count(*) into bad from jsonb_array_elements(p_plan -> 'processes') p
+--   where (p.value ->> 'id') is null or (p.value ->> 'id') !~ placeholder_re
+--     or (jsonb_typeof(p.value -> 'parent_process_id') <> 'null' and p.value ->> 'parent_process_id' is not null and (p.value ->> 'parent_process_id') !~ placeholder_re)
+--     or exists (
+--       select 1 from jsonb_array_elements(p.value -> 'steps') s, unnest(array['id'] || step_ref_cols) c
+--       where s.value -> c is not null and jsonb_typeof(s.value -> c) <> 'null' and (jsonb_typeof(s.value -> c) <> 'string' or (s.value ->> c) !~ placeholder_re))
+--     or exists (
+--       select 1 from jsonb_array_elements(p.value -> 'edges') e, unnest(array['id', 'from_step_id', 'to_step_id']) c
+--       where e.value -> c is not null and jsonb_typeof(e.value -> c) <> 'null' and (jsonb_typeof(e.value -> c) <> 'string' or (e.value ->> c) !~ placeholder_re));
+--   if bad > 0 then
+--     raise exception 'import_workspace_bundle: a process, step or edge holds an id that is not a placeholder' using errcode = '22023';
+--   end if;
+-- 
+--   -- The real ids: one random prefix per restore replaces the placeholder prefix (rank 0, the old workspace, is left for the next
+--   -- replace so a workspace id that happens to look like a placeholder can't be hit twice).
+--   loop
+--     prefix := substr(md5(gen_random_uuid()::text), 1, 20);
+--     exit when prefix <> '00000000000000000000';
+--   end loop;
+--   prefix := substr(prefix, 1, 8) || '-' || substr(prefix, 9, 4) || '-' || substr(prefix, 13, 4) || '-' || substr(prefix, 17, 4) || '-';
+--   txt := regexp_replace(p_plan::text, '00000000-0000-4000-8000-(?!000000000000)([0-9a-f]{12})', prefix || '\1', 'g');
+--   txt := replace(txt, placeholder || '000000000000', p_workspace::text);
+-- 
+--   -- A scenario equal (name and patch) to one the workspace already has (the seeded library) is skipped: its children and the
+--   -- issues that use it are re-pointed at the existing row.
+--   for sc in select value from jsonb_array_elements((txt::jsonb) -> 'scenarios') loop
+--     select s.id into existing from public.scenarios s
+--     where s.workspace_id = p_workspace and s.name = sc ->> 'name' and s.patch = sc -> 'patch'
+--     order by s.id limit 1;
+--     if found then
+--       txt := replace(txt, sc ->> 'id', existing::text);
+--       skip_ids := skip_ids || existing;
+--     end if;
+--   end loop;
+--   pl := txt::jsonb;
+--   txt := null;
+--   skipped := jsonb_build_object('scenarios', cardinality(skip_ids));
+-- 
+--   -- 6. Write.
+--   foreach sec in array sections loop
+--     begin
+--       n := 0;
+--       if sec = 'settings' then
+--         if jsonb_typeof(pl -> 'settings') = 'object' and pl -> 'settings' <> '{}'::jsonb then
+--           if public.can_manage_workspace(p_workspace) then
+--             update public.workspaces set settings = settings || (pl -> 'settings') where id = p_workspace;
+--             settings_result := 'applied';
+--           else
+--             -- An editor can't write workspace-wide settings: one pending suggestion for an owner (the shape packages/mcp/src/suggesting.ts makes).
+--             perform set_config('transpera.importing', 'on', true);
+--             insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, import_source)
+--             values (p_workspace, 'workspaces', null, jsonb_build_object('set', pl -> 'settings'), '[]'::jsonb, 'Workspace settings from a backup.', label);
+--             perform set_config('transpera.importing', '', true);
+--             settings_result := 'suggested';
+--           end if;
+--         end if;
+--         continue;
+--       end if;
+-- 
+--       if sec in ('demand_settings', 'lever_settings', 'analysis_rules') then
+--         -- One row per workspace: written over any row the workspace already has.
+--         if jsonb_typeof(pl -> sec) = 'object' then
+--           select string_agg(quote_ident(c), ', '), string_agg(format('%1$I = excluded.%1$I', c), ', ') into cols, sets
+--           from jsonb_array_elements_text(allow -> sec) c where (pl -> sec) ? c;
+--           if cols is not null then
+--             execute format('insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_record(null::public.%1$I, $1) on conflict (workspace_id) do update set %3$s', sec, cols, sets)
+--               using pl -> sec, p_workspace;
+--             n := 1;
+--           end if;
+--         end if;
+-- 
+--       elsif sec = 'market_schedule' then
+--         -- A row that points at one of the backup's presets points at this workspace's preset with the same key.
+--         insert into public.market_schedule (workspace_id, id, condition_id, from_month, to_month, created_at)
+--         select p_workspace, coalesce(x.id, gen_random_uuid()),
+--           coalesce(x.condition_id, (select m.id from public.market_conditions m where m.workspace_id = p_workspace and m.preset = r.value ->> 'condition_preset')),
+--           x.from_month, x.to_month, coalesce(x.created_at, now())
+--         from jsonb_array_elements(pl -> 'market_schedule') with ordinality r(value, ord)
+--         cross join lateral jsonb_populate_record(null::public.market_schedule, r.value) x
+--         order by r.ord;
+--         get diagnostics n = row_count;
+-- 
+--       elsif sec = 'processes' then
+--         -- Every process first (parents first, as the plan is ordered), each opened as a draft, so a holder step can point at any of them.
+--         for node in select value from jsonb_array_elements(pl -> 'processes') loop
+--           proc := (node ->> 'id')::uuid;
+--           insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+--           values (proc, p_workspace, node ->> 'name', node ->> 'kind', node ->> 'entity_name', node ->> 'description', 'import', (node ->> 'parent_process_id')::uuid);
+--           draft := public.open_draft(proc);
+--           if draft ->> 'status' is distinct from 'ok' then
+--             raise exception 'could not open a draft of %', node ->> 'name' using errcode = '42501';
+--           end if;
+--           rev := (draft ->> 'revision_id')::uuid;
+--           revs := revs || jsonb_build_object(proc::text, rev);
+--           if jsonb_typeof(node -> 'layout') = 'object' then
+--             update public.process_revisions set layout = node -> 'layout' where id = rev;
+--           end if;
+--           if coalesce((node ->> 'archived')::boolean, false) then
+--             arch := arch || proc;
+--           end if;
+--           made := made || jsonb_build_object('id', proc, 'name', node ->> 'name', 'revision_id', rev, 'archived', coalesce((node ->> 'archived')::boolean, false));
+--           n := n + 1;
+--         end loop;
+-- 
+--       elsif sec = 'scenarios' then
+--         select coalesce(jsonb_agg(r.value order by r.ord), '[]'::jsonb) into rows
+--         from jsonb_array_elements(pl -> 'scenarios') with ordinality r(value, ord)
+--         where not ((r.value ->> 'id')::uuid = any (skip_ids));
+--         n := jsonb_array_length(rows);
+--         if n > 0 then
+--           select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+--           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+--           execute format('insert into public.scenarios (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.scenarios, $1)', cols) using rows, p_workspace;
+--         end if;
+-- 
+--       elsif sec = 'issues' then
+--         rows := pl -> 'issues';
+--         n := jsonb_array_length(rows);
+--         if n > 0 then
+--           select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+--           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+--           -- In plan order: the trigger numbers them 1, 2, 3 ... in the old order.
+--           execute format('insert into public.issues (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.issues, $1)', cols) using rows, p_workspace;
+--           -- `issue_seed_links` and `link_issue_source` may have added some already.
+--           insert into public.issue_links (issue_id, workspace_id, process_id, step_id)
+--           select (i.value ->> 'id')::uuid, p_workspace, (l.value ->> 'process_id')::uuid, (l.value ->> 'step_id')::uuid
+--           from jsonb_array_elements(rows) i
+--           cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'links') = 'array' then i.value -> 'links' else '[]'::jsonb end) l
+--           on conflict do nothing;
+--           insert into public.issue_owners (issue_id, person_id, workspace_id)
+--           select (i.value ->> 'id')::uuid, (o.value #>> '{}')::uuid, p_workspace
+--           from jsonb_array_elements(rows) i
+--           cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'owner_ids') = 'array' then i.value -> 'owner_ids' else '[]'::jsonb end) o
+--           on conflict do nothing;
+--           insert into public.issue_sources (issue_id, source_id, workspace_id)
+--           select (i.value ->> 'id')::uuid, (o.value #>> '{}')::uuid, p_workspace
+--           from jsonb_array_elements(rows) i
+--           cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'source_ids') = 'array' then i.value -> 'source_ids' else '[]'::jsonb end) o
+--           on conflict do nothing;
+--         end if;
+-- 
+--       elsif sec = 'steps' then
+--         -- The steps and edges of each draft (an entry step is set once all the steps are in), then its first principles.
+--         for node in select value from jsonb_array_elements(pl -> 'processes') loop
+--           proc := (node ->> 'id')::uuid;
+--           rev := (revs ->> proc::text)::uuid;
+--           select coalesce(jsonb_agg(s.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'entry_step_id', null, 'created_by', auth.uid())), '[]'::jsonb)
+--             into rows from jsonb_array_elements(node -> 'steps') s;
+--           if jsonb_array_length(rows) > 0 then
+--             select string_agg(quote_ident(k), ', ') into cols from (
+--               select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+--               where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'steps') ? k
+--             ) q;
+--             execute format('insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)', cols) using rows;
+--             update public.steps st set entry_step_id = (s.value ->> 'entry_step_id')::uuid
+--             from jsonb_array_elements(node -> 'steps') s
+--             where st.revision_id = rev and st.id = (s.value ->> 'id')::uuid and s.value ->> 'entry_step_id' is not null;
+--             n := n + jsonb_array_length(rows);
+--           end if;
+--           select coalesce(jsonb_agg(e.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'created_by', auth.uid())), '[]'::jsonb)
+--             into rows from jsonb_array_elements(node -> 'edges') e;
+--           if jsonb_array_length(rows) > 0 then
+--             select string_agg(quote_ident(k), ', ') into cols from (
+--               select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+--               where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'edges') ? k
+--             ) q;
+--             execute format('insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)', cols) using rows;
+--           end if;
+--           if jsonb_typeof(node -> 'first_principles') = 'object' then
+--             select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> 'first_principles') c where (node -> 'first_principles') ? c;
+--             if cols is not null then
+--               execute format('insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)', cols)
+--                 using node -> 'first_principles', p_workspace, proc, rev;
+--             end if;
+--           end if;
+--         end loop;
+--         counts := counts || jsonb_build_object('edges', edge_total);
+-- 
+--       elsif sec = 'archive' then
+--         if cardinality(arch) > 0 then
+--           update public.processes set archived_at = now() where id = any (arch);
+--           get diagnostics n = row_count;
+--         end if;
+-- 
+--       elsif sec = 'log' then
+--         for node in select value from jsonb_array_elements(made) loop
+--           perform public.log_process_import((node ->> 'id')::uuid, 'Restored from a workspace backup' || coalesce(' (' || label || ')', ''));
+--           n := n + 1;
+--         end loop;
+-- 
+--       else
+--         -- A flat section: one insert, the plan's order, only the columns of the allow-list that the rows carry.
+--         tbl := case sec when 'proposals' then 'suggestion_proposals' else sec end;
+--         rows := pl -> sec;
+--         if sec = 'market_conditions' then
+--           -- The presets are read-only and the workspace has them already: the plan carries custom conditions only, and no `preset`.
+--           null;
+--         elsif sec = 'source_links' then
+--           -- A step link needs its step in the process's restored draft (the trigger refuses it otherwise).
+--           select coalesce(jsonb_agg(r.value order by r.ord), '[]'::jsonb) into rows
+--           from jsonb_array_elements(rows) with ordinality r(value, ord)
+--           where r.value ->> 'kind' is distinct from 'step' or exists (
+--             select 1 from public.steps s where s.workspace_id = p_workspace and s.process_id = (r.value ->> 'process_id')::uuid and s.id = (r.value ->> 'step_id')::uuid);
+--           skipped := skipped || jsonb_build_object('step_links', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
+--         end if;
+--         n := jsonb_array_length(rows);
+--         if n > 0 then
+--           -- A source link's id can't be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
+--           -- and `created_at` out): the database makes it.
+--           select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+--           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c) and not (sec = 'source_links' and c = 'id');
+--           if cols is null then
+--             raise exception 'the rows have none of the columns a restore accepts' using errcode = '22023';
+--           end if;
+--           if sec in ('suggestions', 'proposals') then
+--             perform set_config('transpera.importing', 'on', true);
+--             execute format('insert into public.%1$I (workspace_id, %2$s, import_source) select $2, %2$s, $3 from jsonb_populate_recordset(null::public.%1$I, $1)', tbl, cols)
+--               using rows, p_workspace, label;
+--             perform set_config('transpera.importing', '', true);
+--           else
+--             execute format('insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_recordset(null::public.%1$I, $1)%3$s', tbl, cols,
+--               case when sec = 'source_links' then ' on conflict do nothing' else '' end)
+--               using rows, p_workspace;
+--           end if;
+--         end if;
+--       end if;
+--       counts := counts || jsonb_build_object(sec, n);
+--     exception when others then
+--       raise exception 'import_workspace_bundle: % could not be restored: %', sec, sqlerrm using errcode = sqlstate, hint = 'section:' || sec;
+--     end;
+--   end loop;
+-- 
+--   return jsonb_build_object('id_prefix', prefix, 'processes', made, 'counts', counts, 'skipped', skipped, 'settings', settings_result);
+-- end;
+-- $$;
+-- delete from supabase_migrations.schema_migrations where version = '20261215000000';
+-- commit;
+-- Then check: md5(prosrc) = '968cbd0034a0bb1479b8ee0c9eaf7962' and proconfig = {search_path=""}.
+-- Roll the app back first: the app's limits must not be above the function's.
+--
+-- Production data: none needed.
+
+create index if not exists audit_log_target_id_idx on public.audit_log (target_id);
+
+create or replace function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text default null) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+set statement_timeout = '40s'
+as $$
+declare
+  -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
+  -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
+  allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"scenarios":["id","parent_scenario_id","name","description","patch","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"],"suggestions":["id","target_table","target_id","patch","evidence","note","created_at"],"proposals":["id","kind","title","detail","payload","evidence","note","issue_id","created_at"]}'::jsonb;
+  -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
+  -- column in `allow` is checked on `id` too.
+  ref_cols constant text[] := array['person_roles.person_id','person_roles.role_id','person_leave.person_id','services.entry_process_id','service_servicing.service_id','service_servicing.process_id','client_groups.service_id','client_services.client_id','client_services.service_id','client_assignments.client_id','client_assignments.role_id','client_assignments.person_id','person_skills.person_id','person_skills.step_id','scenarios.parent_scenario_id','issues.client_id','issues.owner_person_id','issues.person_id','issues.process_id','issues.role_id','issues.scenario_id','issues.step_id','source_links.source_id','source_links.issue_id','source_links.process_id','source_links.step_id','proposals.issue_id','market_schedule.condition_id','suggestions.target_id'];
+  step_ref_cols constant text[] := array['parent_step_id','entry_step_id','rework_to_step_id','person_id','role_id','child_process_id'];
+  -- The order the sections are written in.
+  sections constant text[] := array['settings','roles','people','person_roles','person_leave','lead_sources','seasonality','demand_settings','churn_drivers','market_conditions','market_schedule','lever_settings','analysis_rules','clients','sources','processes','scenarios','blocks','issues','steps','services','service_servicing','client_groups','client_services','client_assignments','person_skills','source_links','suggestions','proposals','archive','log'];
+  list_sections constant text[] := array['roles','people','person_roles','person_leave','lead_sources','seasonality','churn_drivers','market_conditions','market_schedule','clients','sources','processes','scenarios','blocks','issues','services','service_servicing','client_groups','client_services','client_assignments','person_skills','source_links','suggestions','proposals'];
+  one_sections constant text[] := array['settings','demand_settings','lever_settings','analysis_rules'];
+  placeholder constant text := '00000000-0000-4000-8000-';
+  placeholder_re constant text := '^00000000-0000-4000-8000-[0-9a-f]{12}$';
+  max_plan_chars constant integer := 19660800;
+
+  pl jsonb;
+  txt text;
+  prefix text;
+  label text := left(nullif(btrim(coalesce(p_label, '')), ''), 300);
+  sec text;
+  col text;
+  tbl text;
+  rows jsonb;
+  node jsonb;
+  sc jsonb;
+  cols text;
+  sets text;
+  n integer;
+  total integer;
+  existing uuid;
+  skip_ids uuid[] := '{}';
+  skipped jsonb := '{}';
+  counts jsonb := '{}';
+  proc uuid;
+  rev uuid;
+  draft jsonb;
+  revs jsonb := '{}';
+  made jsonb := '[]';
+  arch uuid[] := '{}';
+  step_total integer := 0;
+  edge_total integer := 0;
+  settings_result text := 'none';
+  what text;
+  has_rows boolean;
+  bad integer;
+  chars bigint;
+begin
+  -- 1. Who. Before the plan is read, so a refusal says nothing about it.
+  if coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id' then
+    raise exception 'Backups are restored in the app.' using errcode = '42501';
+  end if;
+  if p_workspace is null or not coalesce(public.can_edit_workspace(p_workspace), false) then
+    raise exception 'Only owners, editors and agency admins can restore a backup.' using errcode = '42501';
+  end if;
+
+  -- 2. Shape and limits.
+  if p_plan is null or jsonb_typeof(p_plan) is distinct from 'object' or p_plan ->> 'format' is distinct from 'transpera-workspace-import/1' then
+    raise exception 'import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan' using errcode = '22023';
+  end if;
+  if char_length(p_plan::text) > max_plan_chars then
+    raise exception 'import_workspace_bundle: the plan is too big (at most 15 MB)' using errcode = '22023';
+  end if;
+  foreach sec in array list_sections loop
+    if jsonb_typeof(p_plan -> sec) is distinct from 'array' then
+      raise exception 'import_workspace_bundle: % must be a list', sec using errcode = '22023';
+    end if;
+    if exists (select 1 from jsonb_array_elements(p_plan -> sec) e where jsonb_typeof(e.value) is distinct from 'object') then
+      raise exception 'import_workspace_bundle: every row of % must be an object', sec using errcode = '22023';
+    end if;
+  end loop;
+  foreach sec in array one_sections loop
+    if p_plan -> sec is not null and jsonb_typeof(p_plan -> sec) not in ('object', 'null') then
+      raise exception 'import_workspace_bundle: % must be an object or null', sec using errcode = '22023';
+    end if;
+  end loop;
+  if exists (
+    select 1 from jsonb_array_elements(p_plan -> 'processes') p
+    where jsonb_typeof(p.value -> 'steps') is distinct from 'array' or jsonb_typeof(p.value -> 'edges') is distinct from 'array'
+      or exists (select 1 from jsonb_array_elements(p.value -> 'steps') e where jsonb_typeof(e.value) is distinct from 'object')
+      or exists (select 1 from jsonb_array_elements(p.value -> 'edges') e where jsonb_typeof(e.value) is distinct from 'object')
+      or (p.value -> 'first_principles' is not null and jsonb_typeof(p.value -> 'first_principles') not in ('object', 'null'))
+      or (p.value -> 'layout' is not null and jsonb_typeof(p.value -> 'layout') not in ('object', 'null'))
+  ) then
+    raise exception 'import_workspace_bundle: every process needs lists of steps and edges' using errcode = '22023';
+  end if;
+  select coalesce(sum(jsonb_array_length(p.value -> 'steps')), 0), coalesce(sum(jsonb_array_length(p.value -> 'edges')), 0)
+    into step_total, edge_total from jsonb_array_elements(p_plan -> 'processes') p;
+  select coalesce(sum(char_length(coalesce(s.value ->> 'body', ''))), 0) into chars from jsonb_array_elements(p_plan -> 'sources') s;
+  if jsonb_array_length(p_plan -> 'processes') > 150 or step_total > 1500 or edge_total > 3000
+    or jsonb_array_length(p_plan -> 'sources') > 600 or chars > 4500000
+    or jsonb_array_length(p_plan -> 'issues') > 900 or jsonb_array_length(p_plan -> 'people') > 1500
+    or jsonb_array_length(p_plan -> 'clients') > 3000 or jsonb_array_length(p_plan -> 'scenarios') > 900
+    or jsonb_array_length(p_plan -> 'blocks') > 900 or jsonb_array_length(p_plan -> 'suggestions') > 1500
+    or jsonb_array_length(p_plan -> 'proposals') > 900
+    or jsonb_array_length(p_plan -> 'person_roles') > 1200 or jsonb_array_length(p_plan -> 'person_skills') > 3000
+    or jsonb_array_length(p_plan -> 'client_assignments') > 1200 or jsonb_array_length(p_plan -> 'source_links') > 3000
+    or jsonb_array_length(p_plan -> 'client_services') > 3000 or jsonb_array_length(p_plan -> 'person_leave') > 1500
+    or jsonb_array_length(p_plan -> 'lead_sources') + jsonb_array_length(p_plan -> 'seasonality') + jsonb_array_length(p_plan -> 'churn_drivers')
+      + jsonb_array_length(p_plan -> 'market_conditions') + jsonb_array_length(p_plan -> 'market_schedule') + jsonb_array_length(p_plan -> 'services')
+      + jsonb_array_length(p_plan -> 'service_servicing') + jsonb_array_length(p_plan -> 'client_groups') > 1500 then
+    raise exception 'import_workspace_bundle: the plan is over a limit (150 processes, 1500 steps, 3000 edges, 600 sources of 4,500,000 characters, 900 issues, 1500 people, 3000 clients, 900 scenarios, 900 blocks, 1500 suggestions, 900 proposals, 1200 role assignments, 3000 skills, 1200 client assignments, 3000 source links, 3000 client services, 1500 leave entries, 1500 other company settings rows)' using errcode = '22023';
+  end if;
+  -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+  if exists (select 1 from jsonb_array_elements(p_plan -> 'scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
+    raise exception 'import_workspace_bundle: every scenario needs an id' using errcode = '22023';
+  end if;
+
+  -- 3. Lock: one restore (or upload) at a time per workspace.
+  if not pg_try_advisory_xact_lock(hashtextextended('import_workspace_bundle:' || p_workspace::text, 0)) then
+    raise exception 'A restore into this workspace is already running.' using errcode = '55P03', hint = 'busy';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('import_new_process:' || p_workspace::text, 0));
+
+  -- 4. Empty.
+  for tbl, col in
+    select t.a, t.b from (values
+      ('processes', 'not is_company'), ('roles', 'true'), ('people', 'true'), ('services', 'true'), ('client_groups', 'true'),
+      ('clients', 'true'), ('lead_sources', 'true'), ('churn_drivers', 'true'), ('market_schedule', 'true'), ('issues', 'true'),
+      ('sources', 'true'), ('blocks', 'true'), ('solutions', 'true'), ('suggestions', 'true'), ('suggestion_proposals', 'true'),
+      ('market_conditions', 'preset is null')
+    ) as t(a, b)
+  loop
+    execute format('select exists (select 1 from public.%I where workspace_id = $1 and %s)', tbl, col) into has_rows using p_workspace;
+    if has_rows then
+      what := replace(tbl, '_', ' ');
+      exit;
+    end if;
+  end loop;
+  if what is null and exists (
+    select 1 from public.scenarios s where s.workspace_id = p_workspace
+      and not exists (select 1 from private.scenario_library() l where l.name = s.name and l.patch = s.patch)
+  ) then
+    what := 'scenarios of its own';
+  end if;
+  if what is not null then
+    raise exception 'This workspace isn''t empty: it already has %. Backups restore only into a new, empty workspace.', what
+      using errcode = '23514', hint = 'not_empty';
+  end if;
+
+  -- 5. Ids: every id and reference column of the plan holds a placeholder (or null) before anything is replaced.
+  foreach sec in array list_sections loop
+    if sec = 'processes' then continue; end if;
+    for col in
+      select c from (
+        select 'id' as c where allow -> sec ? 'id'
+        union all select split_part(r, '.', 2) from unnest(ref_cols) r where split_part(r, '.', 1) = sec
+      ) q
+    loop
+      select count(*) into bad from jsonb_array_elements(p_plan -> sec) r
+      where r.value -> col is not null and jsonb_typeof(r.value -> col) <> 'null'
+        and (jsonb_typeof(r.value -> col) <> 'string' or (r.value ->> col) !~ placeholder_re);
+      if bad > 0 then
+        raise exception 'import_workspace_bundle: % holds an id that is not a placeholder in %', col, sec using errcode = '22023';
+      end if;
+    end loop;
+  end loop;
+  select count(*) into bad from jsonb_array_elements(p_plan -> 'issues') i
+  where exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'owner_ids') = 'array' then i.value -> 'owner_ids' else '[]'::jsonb end) x
+      where jsonb_typeof(x.value) <> 'string' or (x.value #>> '{}') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'source_ids') = 'array' then i.value -> 'source_ids' else '[]'::jsonb end) x
+      where jsonb_typeof(x.value) <> 'string' or (x.value #>> '{}') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> 'links') = 'array' then i.value -> 'links' else '[]'::jsonb end) l
+      where jsonb_typeof(l.value) <> 'object'
+        or (l.value ->> 'process_id') !~ placeholder_re
+        or (jsonb_typeof(l.value -> 'step_id') <> 'null' and l.value ->> 'step_id' is not null and (l.value ->> 'step_id') !~ placeholder_re));
+  if bad > 0 then
+    raise exception 'import_workspace_bundle: an issue link, owner or source holds an id that is not a placeholder' using errcode = '22023';
+  end if;
+  select count(*) into bad from jsonb_array_elements(p_plan -> 'processes') p
+  where (p.value ->> 'id') is null or (p.value ->> 'id') !~ placeholder_re
+    or (jsonb_typeof(p.value -> 'parent_process_id') <> 'null' and p.value ->> 'parent_process_id' is not null and (p.value ->> 'parent_process_id') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> 'steps') s, unnest(array['id'] || step_ref_cols) c
+      where s.value -> c is not null and jsonb_typeof(s.value -> c) <> 'null' and (jsonb_typeof(s.value -> c) <> 'string' or (s.value ->> c) !~ placeholder_re))
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> 'edges') e, unnest(array['id', 'from_step_id', 'to_step_id']) c
+      where e.value -> c is not null and jsonb_typeof(e.value -> c) <> 'null' and (jsonb_typeof(e.value -> c) <> 'string' or (e.value ->> c) !~ placeholder_re));
+  if bad > 0 then
+    raise exception 'import_workspace_bundle: a process, step or edge holds an id that is not a placeholder' using errcode = '22023';
+  end if;
+
+  -- The real ids: one random prefix per restore replaces the placeholder prefix.
+  loop
+    prefix := substr(md5(gen_random_uuid()::text), 1, 20);
+    exit when prefix <> '00000000000000000000';
+  end loop;
+  prefix := substr(prefix, 1, 8) || '-' || substr(prefix, 9, 4) || '-' || substr(prefix, 13, 4) || '-' || substr(prefix, 17, 4) || '-';
+  -- Two plain replacements (a regular expression took 13 times as long on a big plan): every placeholder gets the fresh
+  -- prefix, then rank 0 (the old workspace), now `<prefix>000000000000`, becomes the real workspace. The prefix is never
+  -- all zeros (the loop above), so no other id can take rank 0's place.
+  txt := replace(p_plan::text, placeholder, prefix);
+  txt := replace(txt, prefix || '000000000000', p_workspace::text);
+
+  -- A scenario equal (name and patch) to one the workspace already has (the seeded library) is skipped: its children and the
+  -- issues that use it are re-pointed at the existing row.
+  for sc in select value from jsonb_array_elements((txt::jsonb) -> 'scenarios') loop
+    select s.id into existing from public.scenarios s
+    where s.workspace_id = p_workspace and s.name = sc ->> 'name' and s.patch = sc -> 'patch'
+    order by s.id limit 1;
+    if found then
+      txt := replace(txt, sc ->> 'id', existing::text);
+      skip_ids := skip_ids || existing;
+    end if;
+  end loop;
+  pl := txt::jsonb;
+  txt := null;
+  skipped := jsonb_build_object('scenarios', cardinality(skip_ids));
+
+  -- 6. Write.
+  foreach sec in array sections loop
+    begin
+      n := 0;
+      if sec = 'settings' then
+        if jsonb_typeof(pl -> 'settings') = 'object' and pl -> 'settings' <> '{}'::jsonb then
+          if public.can_manage_workspace(p_workspace) then
+            update public.workspaces set settings = settings || (pl -> 'settings') where id = p_workspace;
+            settings_result := 'applied';
+          else
+            -- An editor can't write workspace-wide settings: one pending suggestion for an owner (the shape packages/mcp/src/suggesting.ts makes).
+            perform set_config('transpera.importing', 'on', true);
+            insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, import_source)
+            values (p_workspace, 'workspaces', null, jsonb_build_object('set', pl -> 'settings'), '[]'::jsonb, 'Workspace settings from a backup.', label);
+            perform set_config('transpera.importing', '', true);
+            settings_result := 'suggested';
+          end if;
+        end if;
+        continue;
+      end if;
+
+      if sec in ('demand_settings', 'lever_settings', 'analysis_rules') then
+        -- One row per workspace: written over any row the workspace already has.
+        if jsonb_typeof(pl -> sec) = 'object' then
+          select string_agg(quote_ident(c), ', '), string_agg(format('%1$I = excluded.%1$I', c), ', ') into cols, sets
+          from jsonb_array_elements_text(allow -> sec) c where (pl -> sec) ? c;
+          if cols is not null then
+            execute format('insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_record(null::public.%1$I, $1) on conflict (workspace_id) do update set %3$s', sec, cols, sets)
+              using pl -> sec, p_workspace;
+            n := 1;
+          end if;
+        end if;
+
+      elsif sec = 'market_schedule' then
+        -- A row that points at one of the backup's presets points at this workspace's preset with the same key.
+        insert into public.market_schedule (workspace_id, id, condition_id, from_month, to_month, created_at)
+        select p_workspace, coalesce(x.id, gen_random_uuid()),
+          coalesce(x.condition_id, (select m.id from public.market_conditions m where m.workspace_id = p_workspace and m.preset = r.value ->> 'condition_preset')),
+          x.from_month, x.to_month, coalesce(x.created_at, now())
+        from jsonb_array_elements(pl -> 'market_schedule') with ordinality r(value, ord)
+        cross join lateral jsonb_populate_record(null::public.market_schedule, r.value) x
+        order by r.ord;
+        get diagnostics n = row_count;
+
+      elsif sec = 'processes' then
+        -- Every process first (parents first, as the plan is ordered), each opened as a draft, so a holder step can point at any of them.
+        for node in select value from jsonb_array_elements(pl -> 'processes') loop
+          proc := (node ->> 'id')::uuid;
+          insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+          values (proc, p_workspace, node ->> 'name', node ->> 'kind', node ->> 'entity_name', node ->> 'description', 'import', (node ->> 'parent_process_id')::uuid);
+          draft := public.open_draft(proc);
+          if draft ->> 'status' is distinct from 'ok' then
+            raise exception 'could not open a draft of %', node ->> 'name' using errcode = '42501';
+          end if;
+          rev := (draft ->> 'revision_id')::uuid;
+          revs := revs || jsonb_build_object(proc::text, rev);
+          if jsonb_typeof(node -> 'layout') = 'object' then
+            update public.process_revisions set layout = node -> 'layout' where id = rev;
+          end if;
+          if coalesce((node ->> 'archived')::boolean, false) then
+            arch := arch || proc;
+          end if;
+          made := made || jsonb_build_object('id', proc, 'name', node ->> 'name', 'revision_id', rev, 'archived', coalesce((node ->> 'archived')::boolean, false));
+          n := n + 1;
+        end loop;
+
+      elsif sec = 'scenarios' then
+        select coalesce(jsonb_agg(r.value order by r.ord), '[]'::jsonb) into rows
+        from jsonb_array_elements(pl -> 'scenarios') with ordinality r(value, ord)
+        where not ((r.value ->> 'id')::uuid = any (skip_ids));
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          execute format('insert into public.scenarios (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.scenarios, $1)', cols) using rows, p_workspace;
+        end if;
+
+      elsif sec = 'issues' then
+        rows := pl -> 'issues';
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          -- In plan order: the trigger numbers them 1, 2, 3 ... in the old order.
+          execute format('insert into public.issues (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.issues, $1)', cols) using rows, p_workspace;
+          -- `issue_seed_links` and `link_issue_source` may have added some already.
+          insert into public.issue_links (issue_id, workspace_id, process_id, step_id)
+          select (i.value ->> 'id')::uuid, p_workspace, (l.value ->> 'process_id')::uuid, (l.value ->> 'step_id')::uuid
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'links') = 'array' then i.value -> 'links' else '[]'::jsonb end) l
+          on conflict do nothing;
+          insert into public.issue_owners (issue_id, person_id, workspace_id)
+          select (i.value ->> 'id')::uuid, (o.value #>> '{}')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'owner_ids') = 'array' then i.value -> 'owner_ids' else '[]'::jsonb end) o
+          on conflict do nothing;
+          insert into public.issue_sources (issue_id, source_id, workspace_id)
+          select (i.value ->> 'id')::uuid, (o.value #>> '{}')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> 'source_ids') = 'array' then i.value -> 'source_ids' else '[]'::jsonb end) o
+          on conflict do nothing;
+        end if;
+
+      elsif sec = 'steps' then
+        -- The steps and edges of each draft (an entry step is set once all the steps are in), then its first principles.
+        for node in select value from jsonb_array_elements(pl -> 'processes') loop
+          proc := (node ->> 'id')::uuid;
+          rev := (revs ->> proc::text)::uuid;
+          select coalesce(jsonb_agg(s.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'entry_step_id', null, 'created_by', auth.uid())), '[]'::jsonb)
+            into rows from jsonb_array_elements(node -> 'steps') s;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), ', ') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'steps') ? k
+            ) q;
+            execute format('insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)', cols) using rows;
+            update public.steps st set entry_step_id = (s.value ->> 'entry_step_id')::uuid
+            from jsonb_array_elements(node -> 'steps') s
+            where st.revision_id = rev and st.id = (s.value ->> 'id')::uuid and s.value ->> 'entry_step_id' is not null;
+            n := n + jsonb_array_length(rows);
+          end if;
+          select coalesce(jsonb_agg(e.value || jsonb_build_object('revision_id', rev, 'workspace_id', p_workspace, 'process_id', proc, 'created_by', auth.uid())), '[]'::jsonb)
+            into rows from jsonb_array_elements(node -> 'edges') e;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), ', ') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'edges') ? k
+            ) q;
+            execute format('insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)', cols) using rows;
+          end if;
+          if jsonb_typeof(node -> 'first_principles') = 'object' then
+            select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> 'first_principles') c where (node -> 'first_principles') ? c;
+            if cols is not null then
+              execute format('insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)', cols)
+                using node -> 'first_principles', p_workspace, proc, rev;
+            end if;
+          end if;
+        end loop;
+        counts := counts || jsonb_build_object('edges', edge_total);
+
+      elsif sec = 'archive' then
+        if cardinality(arch) > 0 then
+          update public.processes set archived_at = now() where id = any (arch);
+          get diagnostics n = row_count;
+        end if;
+
+      elsif sec = 'log' then
+        for node in select value from jsonb_array_elements(made) loop
+          perform public.log_process_import((node ->> 'id')::uuid, 'Restored from a workspace backup' || coalesce(' (' || label || ')', ''));
+          n := n + 1;
+        end loop;
+
+      else
+        -- A flat section: one insert, the plan's order, only the columns of the allow-list that the rows carry.
+        tbl := case sec when 'proposals' then 'suggestion_proposals' else sec end;
+        rows := pl -> sec;
+        if sec = 'market_conditions' then
+          -- The presets are read-only and the workspace has them already: the plan carries custom conditions only, and no `preset`.
+          null;
+        elsif sec = 'source_links' then
+          -- A step link needs its step in the process's restored draft (the trigger refuses it otherwise).
+          select coalesce(jsonb_agg(r.value order by r.ord), '[]'::jsonb) into rows
+          from jsonb_array_elements(rows) with ordinality r(value, ord)
+          where r.value ->> 'kind' is distinct from 'step' or exists (
+            select 1 from public.steps s where s.workspace_id = p_workspace and s.process_id = (r.value ->> 'process_id')::uuid and s.id = (r.value ->> 'step_id')::uuid);
+          skipped := skipped || jsonb_build_object('step_links', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
+        end if;
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          -- A source link's id can't be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
+          -- and `created_at` out): the database makes it.
+          select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c) and not (sec = 'source_links' and c = 'id');
+          if cols is null then
+            raise exception 'the rows have none of the columns a restore accepts' using errcode = '22023';
+          end if;
+          if sec in ('suggestions', 'proposals') then
+            perform set_config('transpera.importing', 'on', true);
+            execute format('insert into public.%1$I (workspace_id, %2$s, import_source) select $2, %2$s, $3 from jsonb_populate_recordset(null::public.%1$I, $1)', tbl, cols)
+              using rows, p_workspace, label;
+            perform set_config('transpera.importing', '', true);
+          else
+            execute format('insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_recordset(null::public.%1$I, $1)%3$s', tbl, cols,
+              case when sec = 'source_links' then ' on conflict do nothing' else '' end)
+              using rows, p_workspace;
+          end if;
+        end if;
+      end if;
+      counts := counts || jsonb_build_object(sec, n);
+    exception when others then
+      raise exception 'import_workspace_bundle: % could not be restored: %', sec, sqlerrm using errcode = sqlstate, hint = 'section:' || sec;
+    end;
+  end loop;
+
+  return jsonb_build_object('id_prefix', prefix, 'processes', made, 'counts', counts, 'skipped', skipped, 'settings', settings_result);
+end;
+$$;
+
+revoke all on function public.import_workspace_bundle(uuid, jsonb, text) from public, anon, authenticated;
+grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261215000000', 'bigger_restores', array['-- B21 (issue #203): restore bigger workspaces, in the same one call.
+--
+-- B10 part 2b (migration 20261207000000, row 54) restores a workspace backup in one all-or-nothing call, kept inside a 3 s budget
+-- because Supabase stops any statement by `authenticated` at 8 s. That limited a restore to 50 processes, 500 steps, 1,000 edges,
+-- 300 issues, 1,000 clients and so on. This migration keeps the single call and makes it bigger and faster.
+--
+-- Austin''s decisions on #39 (6 Oct 2026), which still bind the restore:
+--   Q1: "yes to the migration `import_workspace_bundle`. It is one SECURITY INVOKER function: not privileged, additive only, and it
+--       creates drafts only. It makes the restore all-or-nothing."
+--   Decision 1: "Import: (b). Each process is imported as a draft of its latest published version. History isn''t restored, and no
+--       privileged restore migration is added."
+-- So the restore stays ONE SECURITY INVOKER FUNCTION in ONE TRANSACTION: no SECURITY DEFINER helper and no multi-call restore (a
+-- half-filled workspace can''t be undone as the signed-in user: `never_delete_clients`, no delete policy on suggestions, append-only
+-- history).
+--
+-- What changes (`public.import_workspace_bundle(uuid, jsonb, text)`, same signature, same refusals in the same order, same sections,
+-- same result), measured on the container''s Postgres 16 with a synthetic plan:
+--   1. `set statement_timeout = ''40s''` on this function only. PostgREST applies a function''s own settings after the role''s, so this
+--      call gets 40 s and every other request by `authenticated` keeps Supabase''s 8 s. Verified with PostgREST 14.1 locally; see
+--      `docs/supabase-notes.md`. The app''s route allows 60 s and won''t start the call after 15 s.
+--   2. The id remap is two plain `replace` calls instead of one `regexp_replace` over the whole plan text (13 times faster on a 22 MB
+--      plan: 1.30 s down to 0.10 s). The result is the same for every plan the planner makes.
+--   3. A new index `audit_log (target_id)`: `log_process_import`''s "already logged?" query grows with the size of the workspace
+--      (every company-model row the restore writes adds an audit row). With the index it is a lookup: 1.07 s down to 0.02 s at
+--      250 processes.
+--   4. Three times the limits, sized from the measurements (the brief''s audit: every limit at once 1.84 s at today''s size, 6.6 to 7.3 s
+--      at four times, after both speedups, for a plan without leave, client services and the small company tables; the builder''s
+--      fuller plan, every table filled, took 14.9 to 17.7 s at four times, over the 15 s local budget, so the limits were lowered by
+--      a quarter): 150 processes, 1,500 steps, 3,000 edges, 600 sources and 4,500,000 characters of their text, 900 issues, 1,500
+--      people, 3,000 clients, 900 scenarios, 900 blocks, 1,500 suggestions, 900 proposals, 1,200 role assignments, 3,000 skills,
+--      1,200 client assignments, 3,000 source links, and a plan of 15 MB (the database measures the jsonb text, which has a space
+--      after each colon and comma, so it allows 19,660,800 characters of it).
+--   5. New caps on sections that had none: 3,000 client services, 1,500 leave entries, and 1,500 rows of the small company-model
+--      tables together (lead sources, seasonality, churn drivers, market conditions, market schedule, services, servicing rules,
+--      client groups).
+--   6. A second restore into the same workspace while one runs is refused at once (`55P03`, hint `busy`, "already running") by a
+--      try-lock on `import_workspace_bundle:<workspace>`, instead of waiting for the first (up to 40 s) and then being told "too
+--      big". The second lock (`import_new_process:`) still blocks, as uploads are short.
+-- Everything else in the function is copied unchanged.
+--
+-- STRICTLY ADDITIVE: one index and one `create or replace` of `public.import_workspace_bundle` with the same signature, the same
+-- refusals, sections and result. It doesn''t redefine `save_fields` or any other function, trigger or policy. The grant on
+-- `private.scenario_library()` (row 54) is untouched.
+--
+-- ORDER: applies after 20261207000000 (row 54). Independent of rows 55 to 59. Apply BEFORE deploying the app: the app''s new limits
+-- need the function''s.
+--
+-- PREFLIGHT (read-only; run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Row 54 is applied, and this one isn''t. Expect 1, then 0:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261207000000'';
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261215000000'';
+--   1. The function is still exactly the one 20261207000000 made (nothing later replaced it).
+--      Expect 968cbd0034a0bb1479b8ee0c9eaf7962, false, {search_path=""}:
+--        select md5(prosrc), prosecdef, proconfig from pg_proc where oid = ''public.import_workspace_bundle(uuid, jsonb, text)''::regprocedure;
+--   2. The index doesn''t exist yet. Expect null:
+--        select to_regclass(''public.audit_log_target_id_idx'');
+--   3. How big audit_log is (the index is built under a lock that blocks audit writes while it builds; the apply file sets
+--      lock_timeout = 5s). Expect well under a million rows; record the numbers:
+--        select count(*), pg_size_pretty(pg_total_relation_size(''public.audit_log'')) from public.audit_log;
+--   4. Nobody restoring right now (no running call of the function; an idle pooled connection still holds its last query, so only
+--      backends that aren''t idle count). Expect 0:
+--        select count(*) from pg_stat_activity where query ilike ''%import_workspace_bundle%'' and state <> ''idle'' and pid <> pg_backend_pid();
+--
+-- POST-APPLY CHECKS:
+--   1. Expect false, {search_path="",statement_timeout=40s}, 32b64f2ad9be79d0044f640e4a4d2ed2:
+--        select prosecdef, proconfig, md5(prosrc) from pg_proc where oid = ''public.import_workspace_bundle(uuid, jsonb, text)''::regprocedure;
+--   2. Only authenticated may execute it (as row 54''s post-apply checks 1 and 2). Expect one row, authenticated EXECUTE:
+--        select routine_name, grantee, privilege_type from information_schema.routine_privileges
+--         where routine_schema = ''public'' and routine_name = ''import_workspace_bundle'' and grantee in (''anon'', ''authenticated'', ''PUBLIC'') order by 2;
+--   3. The index. Expect CREATE INDEX audit_log_target_id_idx ON public.audit_log USING btree (target_id):
+--        select indexdef from pg_indexes where schemaname = ''public'' and indexname = ''audit_log_target_id_idx'';
+--   4. The row. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261215000000'';
+--
+-- ROLLBACK (one transaction; the function part is the whole `create function` statement of 20261207000000 with `create or replace`,
+-- which restores its body and drops `statement_timeout` from its settings, because `create or replace` replaces them all):
+-- begin;
+-- drop index if exists public.audit_log_target_id_idx;
+-- create or replace function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text default null) returns jsonb
+-- language plpgsql
+-- security invoker
+-- set search_path = ''''
+-- as $$
+-- declare
+--   -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
+--   -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
+--   allow constant jsonb := ''{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"scenarios":["id","parent_scenario_id","name","description","patch","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"],"suggestions":["id","target_table","target_id","patch","evidence","note","created_at"],"proposals":["id","kind","title","detail","payload","evidence","note","issue_id","created_at"]}''::jsonb;
+--   -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
+--   -- column in `allow` is checked on `id` too.
+--   ref_cols constant text[] := array[''person_roles.person_id'',''person_roles.role_id'',''person_leave.person_id'',''services.entry_process_id'',''service_servicing.service_id'',''service_servicing.process_id'',''client_groups.service_id'',''client_services.client_id'',''client_services.service_id'',''client_assignments.client_id'',''client_assignments.role_id'',''client_assignments.person_id'',''person_skills.person_id'',''person_skills.step_id'',''scenarios.parent_scenario_id'',''issues.client_id'',''issues.owner_person_id'',''issues.person_id'',''issues.process_id'',''issues.role_id'',''issues.scenario_id'',''issues.step_id'',''source_links.source_id'',''source_links.issue_id'',''source_links.process_id'',''source_links.step_id'',''proposals.issue_id'',''market_schedule.condition_id'',''suggestions.target_id''];
+--   step_ref_cols constant text[] := array[''parent_step_id'',''entry_step_id'',''rework_to_step_id'',''person_id'',''role_id'',''child_process_id''];
+--   -- The order the sections are written in.
+--   sections constant text[] := array[''settings'',''roles'',''people'',''person_roles'',''person_leave'',''lead_sources'',''seasonality'',''demand_settings'',''churn_drivers'',''market_conditions'',''market_schedule'',''lever_settings'',''analysis_rules'',''clients'',''sources'',''processes'',''scenarios'',''blocks'',''issues'',''steps'',''services'',''service_servicing'',''client_groups'',''client_services'',''client_assignments'',''person_skills'',''source_links'',''suggestions'',''proposals'',''archive'',''log''];
+--   list_sections constant text[] := array[''roles'',''people'',''person_roles'',''person_leave'',''lead_sources'',''seasonality'',''churn_drivers'',''market_conditions'',''market_schedule'',''clients'',''sources'',''processes'',''scenarios'',''blocks'',''issues'',''services'',''service_servicing'',''client_groups'',''client_services'',''client_assignments'',''person_skills'',''source_links'',''suggestions'',''proposals''];
+--   one_sections constant text[] := array[''settings'',''demand_settings'',''lever_settings'',''analysis_rules''];
+--   placeholder constant text := ''00000000-0000-4000-8000-'';
+--   placeholder_re constant text := ''^00000000-0000-4000-8000-[0-9a-f]{12}$'';
+--   max_plan_chars constant integer := 13107200;
+-- 
+--   pl jsonb;
+--   txt text;
+--   prefix text;
+--   label text := left(nullif(btrim(coalesce(p_label, '''')), ''''), 300);
+--   sec text;
+--   col text;
+--   tbl text;
+--   rows jsonb;
+--   node jsonb;
+--   sc jsonb;
+--   cols text;
+--   sets text;
+--   n integer;
+--   total integer;
+--   existing uuid;
+--   skip_ids uuid[] := ''{}'';
+--   skipped jsonb := ''{}'';
+--   counts jsonb := ''{}'';
+--   proc uuid;
+--   rev uuid;
+--   draft jsonb;
+--   revs jsonb := ''{}'';
+--   made jsonb := ''[]'';
+--   arch uuid[] := ''{}'';
+--   step_total integer := 0;
+--   edge_total integer := 0;
+--   settings_result text := ''none'';
+--   what text;
+--   has_rows boolean;
+--   bad integer;
+--   chars bigint;
+-- begin
+--   -- 1. Who. Before the plan is read, so a refusal says nothing about it.
+--   if coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'' then
+--     raise exception ''Backups are restored in the app.'' using errcode = ''42501'';
+--   end if;
+--   if p_workspace is null or not coalesce(public.can_edit_workspace(p_workspace), false) then
+--     raise exception ''Only owners, editors and agency admins can restore a backup.'' using errcode = ''42501'';
+--   end if;
+-- 
+--   -- 2. Shape and limits.
+--   if p_plan is null or jsonb_typeof(p_plan) is distinct from ''object'' or p_plan ->> ''format'' is distinct from ''transpera-workspace-import/1'' then
+--     raise exception ''import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan'' using errcode = ''22023'';
+--   end if;
+--   if char_length(p_plan::text) > max_plan_chars then
+--     raise exception ''import_workspace_bundle: the plan is too big (at most 10 MB)'' using errcode = ''22023'';
+--   end if;
+--   foreach sec in array list_sections loop
+--     if jsonb_typeof(p_plan -> sec) is distinct from ''array'' then
+--       raise exception ''import_workspace_bundle: % must be a list'', sec using errcode = ''22023'';
+--     end if;
+--     if exists (select 1 from jsonb_array_elements(p_plan -> sec) e where jsonb_typeof(e.value) is distinct from ''object'') then
+--       raise exception ''import_workspace_bundle: every row of % must be an object'', sec using errcode = ''22023'';
+--     end if;
+--   end loop;
+--   foreach sec in array one_sections loop
+--     if p_plan -> sec is not null and jsonb_typeof(p_plan -> sec) not in (''object'', ''null'') then
+--       raise exception ''import_workspace_bundle: % must be an object or null'', sec using errcode = ''22023'';
+--     end if;
+--   end loop;
+--   if exists (
+--     select 1 from jsonb_array_elements(p_plan -> ''processes'') p
+--     where jsonb_typeof(p.value -> ''steps'') is distinct from ''array'' or jsonb_typeof(p.value -> ''edges'') is distinct from ''array''
+--       or exists (select 1 from jsonb_array_elements(p.value -> ''steps'') e where jsonb_typeof(e.value) is distinct from ''object'')
+--       or exists (select 1 from jsonb_array_elements(p.value -> ''edges'') e where jsonb_typeof(e.value) is distinct from ''object'')
+--       or (p.value -> ''first_principles'' is not null and jsonb_typeof(p.value -> ''first_principles'') not in (''object'', ''null''))
+--       or (p.value -> ''layout'' is not null and jsonb_typeof(p.value -> ''layout'') not in (''object'', ''null''))
+--   ) then
+--     raise exception ''import_workspace_bundle: every process needs lists of steps and edges'' using errcode = ''22023'';
+--   end if;
+--   select coalesce(sum(jsonb_array_length(p.value -> ''steps'')), 0), coalesce(sum(jsonb_array_length(p.value -> ''edges'')), 0)
+--     into step_total, edge_total from jsonb_array_elements(p_plan -> ''processes'') p;
+--   select coalesce(sum(char_length(coalesce(s.value ->> ''body'', ''''))), 0) into chars from jsonb_array_elements(p_plan -> ''sources'') s;
+--   if jsonb_array_length(p_plan -> ''processes'') > 50 or step_total > 500 or edge_total > 1000
+--     or jsonb_array_length(p_plan -> ''sources'') > 200 or chars > 3000000
+--     or jsonb_array_length(p_plan -> ''issues'') > 300 or jsonb_array_length(p_plan -> ''people'') > 500
+--     or jsonb_array_length(p_plan -> ''clients'') > 1000 or jsonb_array_length(p_plan -> ''scenarios'') > 300
+--     or jsonb_array_length(p_plan -> ''blocks'') > 300 or jsonb_array_length(p_plan -> ''suggestions'') > 500
+--     or jsonb_array_length(p_plan -> ''proposals'') > 300
+--     or jsonb_array_length(p_plan -> ''person_roles'') > 400 or jsonb_array_length(p_plan -> ''person_skills'') > 1000
+--     or jsonb_array_length(p_plan -> ''client_assignments'') > 400 or jsonb_array_length(p_plan -> ''source_links'') > 400 then
+--     raise exception ''import_workspace_bundle: the plan is over a limit (50 processes, 500 steps, 1000 edges, 200 sources of 3,000,000 characters, 300 issues, 500 people, 1000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals, 400 role assignments, 1000 skills, 400 client assignments, 400 source links)'' using errcode = ''22023'';
+--   end if;
+--   -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+--   if exists (select 1 from jsonb_array_elements(p_plan -> ''scenarios'') s where jsonb_typeof(s.value -> ''id'') is distinct from ''string'') then
+--     raise exception ''import_workspace_bundle: every scenario needs an id'' using errcode = ''22023'';
+--   end if;
+-- 
+--   -- 3. Lock: one restore (or upload) at a time per workspace.
+--   perform pg_advisory_xact_lock(hashtextextended(''import_workspace_bundle:'' || p_workspace::text, 0));
+--   perform pg_advisory_xact_lock(hashtextextended(''import_new_process:'' || p_workspace::text, 0));
+-- 
+--   -- 4. Empty.
+--   for tbl, col in
+--     select t.a, t.b from (values
+--       (''processes'', ''not is_company''), (''roles'', ''true''), (''people'', ''true''), (''services'', ''true''), (''client_groups'', ''true''),
+--       (''clients'', ''true''), (''lead_sources'', ''true''), (''churn_drivers'', ''true''), (''market_schedule'', ''true''), (''issues'', ''true''),
+--       (''sources'', ''true''), (''blocks'', ''true''), (''solutions'', ''true''), (''suggestions'', ''true''), (''suggestion_proposals'', ''true''),
+--       (''market_conditions'', ''preset is null'')
+--     ) as t(a, b)
+--   loop
+--     execute format(''select exists (select 1 from public.%I where workspace_id = $1 and %s)'', tbl, col) into has_rows using p_workspace;
+--     if has_rows then
+--       what := replace(tbl, ''_'', '' '');
+--       exit;
+--     end if;
+--   end loop;
+--   if what is null and exists (
+--     select 1 from public.scenarios s where s.workspace_id = p_workspace
+--       and not exists (select 1 from private.scenario_library() l where l.name = s.name and l.patch = s.patch)
+--   ) then
+--     what := ''scenarios of its own'';
+--   end if;
+--   if what is not null then
+--     raise exception ''This workspace isn''''t empty: it already has %. Backups restore only into a new, empty workspace.'', what
+--       using errcode = ''23514'', hint = ''not_empty'';
+--   end if;
+-- 
+--   -- 5. Ids: every id and reference column of the plan holds a placeholder (or null) before anything is replaced.
+--   foreach sec in array list_sections loop
+--     if sec = ''processes'' then continue; end if;
+--     for col in
+--       select c from (
+--         select ''id'' as c where allow -> sec ? ''id''
+--         union all select split_part(r, ''.'', 2) from unnest(ref_cols) r where split_part(r, ''.'', 1) = sec
+--       ) q
+--     loop
+--       select count(*) into bad from jsonb_array_elements(p_plan -> sec) r
+--       where r.value -> col is not null and jsonb_typeof(r.value -> col) <> ''null''
+--         and (jsonb_typeof(r.value -> col) <> ''string'' or (r.value ->> col) !~ placeholder_re);
+--       if bad > 0 then
+--         raise exception ''import_workspace_bundle: % holds an id that is not a placeholder in %'', col, sec using errcode = ''22023'';
+--       end if;
+--     end loop;
+--   end loop;
+--   select count(*) into bad from jsonb_array_elements(p_plan -> ''issues'') i
+--   where exists (
+--       select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''owner_ids'') = ''array'' then i.value -> ''owner_ids'' else ''[]''::jsonb end) x
+--       where jsonb_typeof(x.value) <> ''string'' or (x.value #>> ''{}'') !~ placeholder_re)
+--     or exists (
+--       select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''source_ids'') = ''array'' then i.value -> ''source_ids'' else ''[]''::jsonb end) x
+--       where jsonb_typeof(x.value) <> ''string'' or (x.value #>> ''{}'') !~ placeholder_re)
+--     or exists (
+--       select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''links'') = ''array'' then i.value -> ''links'' else ''[]''::jsonb end) l
+--       where jsonb_typeof(l.value) <> ''object''
+--         or (l.value ->> ''process_id'') !~ placeholder_re
+--         or (jsonb_typeof(l.value -> ''step_id'') <> ''null'' and l.value ->> ''step_id'' is not null and (l.value ->> ''step_id'') !~ placeholder_re));
+--   if bad > 0 then
+--     raise exception ''import_workspace_bundle: an issue link, owner or source holds an id that is not a placeholder'' using errcode = ''22023'';
+--   end if;
+--   select count(*) into bad from jsonb_array_elements(p_plan -> ''processes'') p
+--   where (p.value ->> ''id'') is null or (p.value ->> ''id'') !~ placeholder_re
+--     or (jsonb_typeof(p.value -> ''parent_process_id'') <> ''null'' and p.value ->> ''parent_process_id'' is not null and (p.value ->> ''parent_process_id'') !~ placeholder_re)
+--     or exists (
+--       select 1 from jsonb_array_elements(p.value -> ''steps'') s, unnest(array[''id''] || step_ref_cols) c
+--       where s.value -> c is not null and jsonb_typeof(s.value -> c) <> ''null'' and (jsonb_typeof(s.value -> c) <> ''string'' or (s.value ->> c) !~ placeholder_re))
+--     or exists (
+--       select 1 from jsonb_array_elements(p.value -> ''edges'') e, unnest(array[''id'', ''from_step_id'', ''to_step_id'']) c
+--       where e.value -> c is not null and jsonb_typeof(e.value -> c) <> ''null'' and (jsonb_typeof(e.value -> c) <> ''string'' or (e.value ->> c) !~ placeholder_re));
+--   if bad > 0 then
+--     raise exception ''import_workspace_bundle: a process, step or edge holds an id that is not a placeholder'' using errcode = ''22023'';
+--   end if;
+-- 
+--   -- The real ids: one random prefix per restore replaces the placeholder prefix (rank 0, the old workspace, is left for the next
+--   -- replace so a workspace id that happens to look like a placeholder can''t be hit twice).
+--   loop
+--     prefix := substr(md5(gen_random_uuid()::text), 1, 20);
+--     exit when prefix <> ''00000000000000000000'';
+--   end loop;
+--   prefix := substr(prefix, 1, 8) || ''-'' || substr(prefix, 9, 4) || ''-'' || substr(prefix, 13, 4) || ''-'' || substr(prefix, 17, 4) || ''-'';
+--   txt := regexp_replace(p_plan::text, ''00000000-0000-4000-8000-(?!000000000000)([0-9a-f]{12})'', prefix || ''\1'', ''g'');
+--   txt := replace(txt, placeholder || ''000000000000'', p_workspace::text);
+-- 
+--   -- A scenario equal (name and patch) to one the workspace already has (the seeded library) is skipped: its children and the
+--   -- issues that use it are re-pointed at the existing row.
+--   for sc in select value from jsonb_array_elements((txt::jsonb) -> ''scenarios'') loop
+--     select s.id into existing from public.scenarios s
+--     where s.workspace_id = p_workspace and s.name = sc ->> ''name'' and s.patch = sc -> ''patch''
+--     order by s.id limit 1;
+--     if found then
+--       txt := replace(txt, sc ->> ''id'', existing::text);
+--       skip_ids := skip_ids || existing;
+--     end if;
+--   end loop;
+--   pl := txt::jsonb;
+--   txt := null;
+--   skipped := jsonb_build_object(''scenarios'', cardinality(skip_ids));
+-- 
+--   -- 6. Write.
+--   foreach sec in array sections loop
+--     begin
+--       n := 0;
+--       if sec = ''settings'' then
+--         if jsonb_typeof(pl -> ''settings'') = ''object'' and pl -> ''settings'' <> ''{}''::jsonb then
+--           if public.can_manage_workspace(p_workspace) then
+--             update public.workspaces set settings = settings || (pl -> ''settings'') where id = p_workspace;
+--             settings_result := ''applied'';
+--           else
+--             -- An editor can''t write workspace-wide settings: one pending suggestion for an owner (the shape packages/mcp/src/suggesting.ts makes).
+--             perform set_config(''transpera.importing'', ''on'', true);
+--             insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, import_source)
+--             values (p_workspace, ''workspaces'', null, jsonb_build_object(''set'', pl -> ''settings''), ''[]''::jsonb, ''Workspace settings from a backup.'', label);
+--             perform set_config(''transpera.importing'', '''', true);
+--             settings_result := ''suggested'';
+--           end if;
+--         end if;
+--         continue;
+--       end if;
+-- 
+--       if sec in (''demand_settings'', ''lever_settings'', ''analysis_rules'') then
+--         -- One row per workspace: written over any row the workspace already has.
+--         if jsonb_typeof(pl -> sec) = ''object'' then
+--           select string_agg(quote_ident(c), '', ''), string_agg(format(''%1$I = excluded.%1$I'', c), '', '') into cols, sets
+--           from jsonb_array_elements_text(allow -> sec) c where (pl -> sec) ? c;
+--           if cols is not null then
+--             execute format(''insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_record(null::public.%1$I, $1) on conflict (workspace_id) do update set %3$s'', sec, cols, sets)
+--               using pl -> sec, p_workspace;
+--             n := 1;
+--           end if;
+--         end if;
+-- 
+--       elsif sec = ''market_schedule'' then
+--         -- A row that points at one of the backup''s presets points at this workspace''s preset with the same key.
+--         insert into public.market_schedule (workspace_id, id, condition_id, from_month, to_month, created_at)
+--         select p_workspace, coalesce(x.id, gen_random_uuid()),
+--           coalesce(x.condition_id, (select m.id from public.market_conditions m where m.workspace_id = p_workspace and m.preset = r.value ->> ''condition_preset'')),
+--           x.from_month, x.to_month, coalesce(x.created_at, now())
+--         from jsonb_array_elements(pl -> ''market_schedule'') with ordinality r(value, ord)
+--         cross join lateral jsonb_populate_record(null::public.market_schedule, r.value) x
+--         order by r.ord;
+--         get diagnostics n = row_count;
+-- 
+--       elsif sec = ''processes'' then
+--         -- Every process first (parents first, as the plan is ordered), each opened as a draft, so a holder step can point at any of them.
+--         for node in select value from jsonb_array_elements(pl -> ''processes'') loop
+--           proc := (node ->> ''id'')::uuid;
+--           insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+--           values (proc, p_workspace, node ->> ''name'', node ->> ''kind'', node ->> ''entity_name'', node ->> ''description'', ''import'', (node ->> ''parent_process_id'')::uuid);
+--           draft := public.open_draft(proc);
+--           if draft ->> ''status'' is distinct from ''ok'' then
+--             raise exception ''could not open a draft of %'', node ->> ''name'' using errcode = ''42501'';
+--           end if;
+--           rev := (draft ->> ''revision_id'')::uuid;
+--           revs := revs || jsonb_build_object(proc::text, rev);
+--           if jsonb_typeof(node -> ''layout'') = ''object'' then
+--             update public.process_revisions set layout = node -> ''layout'' where id = rev;
+--           end if;
+--           if coalesce((node ->> ''archived'')::boolean, false) then
+--             arch := arch || proc;
+--           end if;
+--           made := made || jsonb_build_object(''id'', proc, ''name'', node ->> ''name'', ''revision_id'', rev, ''archived'', coalesce((node ->> ''archived'')::boolean, false));
+--           n := n + 1;
+--         end loop;
+-- 
+--       elsif sec = ''scenarios'' then
+--         select coalesce(jsonb_agg(r.value order by r.ord), ''[]''::jsonb) into rows
+--         from jsonb_array_elements(pl -> ''scenarios'') with ordinality r(value, ord)
+--         where not ((r.value ->> ''id'')::uuid = any (skip_ids));
+--         n := jsonb_array_length(rows);
+--         if n > 0 then
+--           select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+--           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+--           execute format(''insert into public.scenarios (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.scenarios, $1)'', cols) using rows, p_workspace;
+--         end if;
+-- 
+--       elsif sec = ''issues'' then
+--         rows := pl -> ''issues'';
+--         n := jsonb_array_length(rows);
+--         if n > 0 then
+--           select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+--           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+--           -- In plan order: the trigger numbers them 1, 2, 3 ... in the old order.
+--           execute format(''insert into public.issues (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.issues, $1)'', cols) using rows, p_workspace;
+--           -- `issue_seed_links` and `link_issue_source` may have added some already.
+--           insert into public.issue_links (issue_id, workspace_id, process_id, step_id)
+--           select (i.value ->> ''id'')::uuid, p_workspace, (l.value ->> ''process_id'')::uuid, (l.value ->> ''step_id'')::uuid
+--           from jsonb_array_elements(rows) i
+--           cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''links'') = ''array'' then i.value -> ''links'' else ''[]''::jsonb end) l
+--           on conflict do nothing;
+--           insert into public.issue_owners (issue_id, person_id, workspace_id)
+--           select (i.value ->> ''id'')::uuid, (o.value #>> ''{}'')::uuid, p_workspace
+--           from jsonb_array_elements(rows) i
+--           cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''owner_ids'') = ''array'' then i.value -> ''owner_ids'' else ''[]''::jsonb end) o
+--           on conflict do nothing;
+--           insert into public.issue_sources (issue_id, source_id, workspace_id)
+--           select (i.value ->> ''id'')::uuid, (o.value #>> ''{}'')::uuid, p_workspace
+--           from jsonb_array_elements(rows) i
+--           cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''source_ids'') = ''array'' then i.value -> ''source_ids'' else ''[]''::jsonb end) o
+--           on conflict do nothing;
+--         end if;
+-- 
+--       elsif sec = ''steps'' then
+--         -- The steps and edges of each draft (an entry step is set once all the steps are in), then its first principles.
+--         for node in select value from jsonb_array_elements(pl -> ''processes'') loop
+--           proc := (node ->> ''id'')::uuid;
+--           rev := (revs ->> proc::text)::uuid;
+--           select coalesce(jsonb_agg(s.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''entry_step_id'', null, ''created_by'', auth.uid())), ''[]''::jsonb)
+--             into rows from jsonb_array_elements(node -> ''steps'') s;
+--           if jsonb_array_length(rows) > 0 then
+--             select string_agg(quote_ident(k), '', '') into cols from (
+--               select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+--               where k in (''revision_id'', ''workspace_id'', ''process_id'', ''created_by'') or (allow -> ''steps'') ? k
+--             ) q;
+--             execute format(''insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)'', cols) using rows;
+--             update public.steps st set entry_step_id = (s.value ->> ''entry_step_id'')::uuid
+--             from jsonb_array_elements(node -> ''steps'') s
+--             where st.revision_id = rev and st.id = (s.value ->> ''id'')::uuid and s.value ->> ''entry_step_id'' is not null;
+--             n := n + jsonb_array_length(rows);
+--           end if;
+--           select coalesce(jsonb_agg(e.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''created_by'', auth.uid())), ''[]''::jsonb)
+--             into rows from jsonb_array_elements(node -> ''edges'') e;
+--           if jsonb_array_length(rows) > 0 then
+--             select string_agg(quote_ident(k), '', '') into cols from (
+--               select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+--               where k in (''revision_id'', ''workspace_id'', ''process_id'', ''created_by'') or (allow -> ''edges'') ? k
+--             ) q;
+--             execute format(''insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)'', cols) using rows;
+--           end if;
+--           if jsonb_typeof(node -> ''first_principles'') = ''object'' then
+--             select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> ''first_principles'') c where (node -> ''first_principles'') ? c;
+--             if cols is not null then
+--               execute format(''insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)'', cols)
+--                 using node -> ''first_principles'', p_workspace, proc, rev;
+--             end if;
+--           end if;
+--         end loop;
+--         counts := counts || jsonb_build_object(''edges'', edge_total);
+-- 
+--       elsif sec = ''archive'' then
+--         if cardinality(arch) > 0 then
+--           update public.processes set archived_at = now() where id = any (arch);
+--           get diagnostics n = row_count;
+--         end if;
+-- 
+--       elsif sec = ''log'' then
+--         for node in select value from jsonb_array_elements(made) loop
+--           perform public.log_process_import((node ->> ''id'')::uuid, ''Restored from a workspace backup'' || coalesce('' ('' || label || '')'', ''''));
+--           n := n + 1;
+--         end loop;
+-- 
+--       else
+--         -- A flat section: one insert, the plan''s order, only the columns of the allow-list that the rows carry.
+--         tbl := case sec when ''proposals'' then ''suggestion_proposals'' else sec end;
+--         rows := pl -> sec;
+--         if sec = ''market_conditions'' then
+--           -- The presets are read-only and the workspace has them already: the plan carries custom conditions only, and no `preset`.
+--           null;
+--         elsif sec = ''source_links'' then
+--           -- A step link needs its step in the process''s restored draft (the trigger refuses it otherwise).
+--           select coalesce(jsonb_agg(r.value order by r.ord), ''[]''::jsonb) into rows
+--           from jsonb_array_elements(rows) with ordinality r(value, ord)
+--           where r.value ->> ''kind'' is distinct from ''step'' or exists (
+--             select 1 from public.steps s where s.workspace_id = p_workspace and s.process_id = (r.value ->> ''process_id'')::uuid and s.id = (r.value ->> ''step_id'')::uuid);
+--           skipped := skipped || jsonb_build_object(''step_links'', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
+--         end if;
+--         n := jsonb_array_length(rows);
+--         if n > 0 then
+--           -- A source link''s id can''t be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
+--           -- and `created_at` out): the database makes it.
+--           select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+--           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c) and not (sec = ''source_links'' and c = ''id'');
+--           if cols is null then
+--             raise exception ''the rows have none of the columns a restore accepts'' using errcode = ''22023'';
+--           end if;
+--           if sec in (''suggestions'', ''proposals'') then
+--             perform set_config(''transpera.importing'', ''on'', true);
+--             execute format(''insert into public.%1$I (workspace_id, %2$s, import_source) select $2, %2$s, $3 from jsonb_populate_recordset(null::public.%1$I, $1)'', tbl, cols)
+--               using rows, p_workspace, label;
+--             perform set_config(''transpera.importing'', '''', true);
+--           else
+--             execute format(''insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_recordset(null::public.%1$I, $1)%3$s'', tbl, cols,
+--               case when sec = ''source_links'' then '' on conflict do nothing'' else '''' end)
+--               using rows, p_workspace;
+--           end if;
+--         end if;
+--       end if;
+--       counts := counts || jsonb_build_object(sec, n);
+--     exception when others then
+--       raise exception ''import_workspace_bundle: % could not be restored: %'', sec, sqlerrm using errcode = sqlstate, hint = ''section:'' || sec;
+--     end;
+--   end loop;
+-- 
+--   return jsonb_build_object(''id_prefix'', prefix, ''processes'', made, ''counts'', counts, ''skipped'', skipped, ''settings'', settings_result);
+-- end;
+-- $$;
+-- delete from supabase_migrations.schema_migrations where version = ''20261215000000'';
+-- commit;
+-- Then check: md5(prosrc) = ''968cbd0034a0bb1479b8ee0c9eaf7962'' and proconfig = {search_path=""}.
+-- Roll the app back first: the app''s limits must not be above the function''s.
+--
+-- Production data: none needed.
+
+create index if not exists audit_log_target_id_idx on public.audit_log (target_id);
+
+create or replace function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text default null) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+set statement_timeout = ''40s''
+as $$
+declare
+  -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
+  -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
+  allow constant jsonb := ''{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"scenarios":["id","parent_scenario_id","name","description","patch","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"],"suggestions":["id","target_table","target_id","patch","evidence","note","created_at"],"proposals":["id","kind","title","detail","payload","evidence","note","issue_id","created_at"]}''::jsonb;
+  -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
+  -- column in `allow` is checked on `id` too.
+  ref_cols constant text[] := array[''person_roles.person_id'',''person_roles.role_id'',''person_leave.person_id'',''services.entry_process_id'',''service_servicing.service_id'',''service_servicing.process_id'',''client_groups.service_id'',''client_services.client_id'',''client_services.service_id'',''client_assignments.client_id'',''client_assignments.role_id'',''client_assignments.person_id'',''person_skills.person_id'',''person_skills.step_id'',''scenarios.parent_scenario_id'',''issues.client_id'',''issues.owner_person_id'',''issues.person_id'',''issues.process_id'',''issues.role_id'',''issues.scenario_id'',''issues.step_id'',''source_links.source_id'',''source_links.issue_id'',''source_links.process_id'',''source_links.step_id'',''proposals.issue_id'',''market_schedule.condition_id'',''suggestions.target_id''];
+  step_ref_cols constant text[] := array[''parent_step_id'',''entry_step_id'',''rework_to_step_id'',''person_id'',''role_id'',''child_process_id''];
+  -- The order the sections are written in.
+  sections constant text[] := array[''settings'',''roles'',''people'',''person_roles'',''person_leave'',''lead_sources'',''seasonality'',''demand_settings'',''churn_drivers'',''market_conditions'',''market_schedule'',''lever_settings'',''analysis_rules'',''clients'',''sources'',''processes'',''scenarios'',''blocks'',''issues'',''steps'',''services'',''service_servicing'',''client_groups'',''client_services'',''client_assignments'',''person_skills'',''source_links'',''suggestions'',''proposals'',''archive'',''log''];
+  list_sections constant text[] := array[''roles'',''people'',''person_roles'',''person_leave'',''lead_sources'',''seasonality'',''churn_drivers'',''market_conditions'',''market_schedule'',''clients'',''sources'',''processes'',''scenarios'',''blocks'',''issues'',''services'',''service_servicing'',''client_groups'',''client_services'',''client_assignments'',''person_skills'',''source_links'',''suggestions'',''proposals''];
+  one_sections constant text[] := array[''settings'',''demand_settings'',''lever_settings'',''analysis_rules''];
+  placeholder constant text := ''00000000-0000-4000-8000-'';
+  placeholder_re constant text := ''^00000000-0000-4000-8000-[0-9a-f]{12}$'';
+  max_plan_chars constant integer := 19660800;
+
+  pl jsonb;
+  txt text;
+  prefix text;
+  label text := left(nullif(btrim(coalesce(p_label, '''')), ''''), 300);
+  sec text;
+  col text;
+  tbl text;
+  rows jsonb;
+  node jsonb;
+  sc jsonb;
+  cols text;
+  sets text;
+  n integer;
+  total integer;
+  existing uuid;
+  skip_ids uuid[] := ''{}'';
+  skipped jsonb := ''{}'';
+  counts jsonb := ''{}'';
+  proc uuid;
+  rev uuid;
+  draft jsonb;
+  revs jsonb := ''{}'';
+  made jsonb := ''[]'';
+  arch uuid[] := ''{}'';
+  step_total integer := 0;
+  edge_total integer := 0;
+  settings_result text := ''none'';
+  what text;
+  has_rows boolean;
+  bad integer;
+  chars bigint;
+begin
+  -- 1. Who. Before the plan is read, so a refusal says nothing about it.
+  if coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'' then
+    raise exception ''Backups are restored in the app.'' using errcode = ''42501'';
+  end if;
+  if p_workspace is null or not coalesce(public.can_edit_workspace(p_workspace), false) then
+    raise exception ''Only owners, editors and agency admins can restore a backup.'' using errcode = ''42501'';
+  end if;
+
+  -- 2. Shape and limits.
+  if p_plan is null or jsonb_typeof(p_plan) is distinct from ''object'' or p_plan ->> ''format'' is distinct from ''transpera-workspace-import/1'' then
+    raise exception ''import_workspace_bundle: p_plan is not a transpera-workspace-import/1 plan'' using errcode = ''22023'';
+  end if;
+  if char_length(p_plan::text) > max_plan_chars then
+    raise exception ''import_workspace_bundle: the plan is too big (at most 15 MB)'' using errcode = ''22023'';
+  end if;
+  foreach sec in array list_sections loop
+    if jsonb_typeof(p_plan -> sec) is distinct from ''array'' then
+      raise exception ''import_workspace_bundle: % must be a list'', sec using errcode = ''22023'';
+    end if;
+    if exists (select 1 from jsonb_array_elements(p_plan -> sec) e where jsonb_typeof(e.value) is distinct from ''object'') then
+      raise exception ''import_workspace_bundle: every row of % must be an object'', sec using errcode = ''22023'';
+    end if;
+  end loop;
+  foreach sec in array one_sections loop
+    if p_plan -> sec is not null and jsonb_typeof(p_plan -> sec) not in (''object'', ''null'') then
+      raise exception ''import_workspace_bundle: % must be an object or null'', sec using errcode = ''22023'';
+    end if;
+  end loop;
+  if exists (
+    select 1 from jsonb_array_elements(p_plan -> ''processes'') p
+    where jsonb_typeof(p.value -> ''steps'') is distinct from ''array'' or jsonb_typeof(p.value -> ''edges'') is distinct from ''array''
+      or exists (select 1 from jsonb_array_elements(p.value -> ''steps'') e where jsonb_typeof(e.value) is distinct from ''object'')
+      or exists (select 1 from jsonb_array_elements(p.value -> ''edges'') e where jsonb_typeof(e.value) is distinct from ''object'')
+      or (p.value -> ''first_principles'' is not null and jsonb_typeof(p.value -> ''first_principles'') not in (''object'', ''null''))
+      or (p.value -> ''layout'' is not null and jsonb_typeof(p.value -> ''layout'') not in (''object'', ''null''))
+  ) then
+    raise exception ''import_workspace_bundle: every process needs lists of steps and edges'' using errcode = ''22023'';
+  end if;
+  select coalesce(sum(jsonb_array_length(p.value -> ''steps'')), 0), coalesce(sum(jsonb_array_length(p.value -> ''edges'')), 0)
+    into step_total, edge_total from jsonb_array_elements(p_plan -> ''processes'') p;
+  select coalesce(sum(char_length(coalesce(s.value ->> ''body'', ''''))), 0) into chars from jsonb_array_elements(p_plan -> ''sources'') s;
+  if jsonb_array_length(p_plan -> ''processes'') > 150 or step_total > 1500 or edge_total > 3000
+    or jsonb_array_length(p_plan -> ''sources'') > 600 or chars > 4500000
+    or jsonb_array_length(p_plan -> ''issues'') > 900 or jsonb_array_length(p_plan -> ''people'') > 1500
+    or jsonb_array_length(p_plan -> ''clients'') > 3000 or jsonb_array_length(p_plan -> ''scenarios'') > 900
+    or jsonb_array_length(p_plan -> ''blocks'') > 900 or jsonb_array_length(p_plan -> ''suggestions'') > 1500
+    or jsonb_array_length(p_plan -> ''proposals'') > 900
+    or jsonb_array_length(p_plan -> ''person_roles'') > 1200 or jsonb_array_length(p_plan -> ''person_skills'') > 3000
+    or jsonb_array_length(p_plan -> ''client_assignments'') > 1200 or jsonb_array_length(p_plan -> ''source_links'') > 3000
+    or jsonb_array_length(p_plan -> ''client_services'') > 3000 or jsonb_array_length(p_plan -> ''person_leave'') > 1500
+    or jsonb_array_length(p_plan -> ''lead_sources'') + jsonb_array_length(p_plan -> ''seasonality'') + jsonb_array_length(p_plan -> ''churn_drivers'')
+      + jsonb_array_length(p_plan -> ''market_conditions'') + jsonb_array_length(p_plan -> ''market_schedule'') + jsonb_array_length(p_plan -> ''services'')
+      + jsonb_array_length(p_plan -> ''service_servicing'') + jsonb_array_length(p_plan -> ''client_groups'') > 1500 then
+    raise exception ''import_workspace_bundle: the plan is over a limit (150 processes, 1500 steps, 3000 edges, 600 sources of 4,500,000 characters, 900 issues, 1500 people, 3000 clients, 900 scenarios, 900 blocks, 1500 suggestions, 900 proposals, 1200 role assignments, 3000 skills, 1200 client assignments, 3000 source links, 3000 client services, 1500 leave entries, 1500 other company settings rows)'' using errcode = ''22023'';
+  end if;
+  -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
+  if exists (select 1 from jsonb_array_elements(p_plan -> ''scenarios'') s where jsonb_typeof(s.value -> ''id'') is distinct from ''string'') then
+    raise exception ''import_workspace_bundle: every scenario needs an id'' using errcode = ''22023'';
+  end if;
+
+  -- 3. Lock: one restore (or upload) at a time per workspace.
+  if not pg_try_advisory_xact_lock(hashtextextended(''import_workspace_bundle:'' || p_workspace::text, 0)) then
+    raise exception ''A restore into this workspace is already running.'' using errcode = ''55P03'', hint = ''busy'';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended(''import_new_process:'' || p_workspace::text, 0));
+
+  -- 4. Empty.
+  for tbl, col in
+    select t.a, t.b from (values
+      (''processes'', ''not is_company''), (''roles'', ''true''), (''people'', ''true''), (''services'', ''true''), (''client_groups'', ''true''),
+      (''clients'', ''true''), (''lead_sources'', ''true''), (''churn_drivers'', ''true''), (''market_schedule'', ''true''), (''issues'', ''true''),
+      (''sources'', ''true''), (''blocks'', ''true''), (''solutions'', ''true''), (''suggestions'', ''true''), (''suggestion_proposals'', ''true''),
+      (''market_conditions'', ''preset is null'')
+    ) as t(a, b)
+  loop
+    execute format(''select exists (select 1 from public.%I where workspace_id = $1 and %s)'', tbl, col) into has_rows using p_workspace;
+    if has_rows then
+      what := replace(tbl, ''_'', '' '');
+      exit;
+    end if;
+  end loop;
+  if what is null and exists (
+    select 1 from public.scenarios s where s.workspace_id = p_workspace
+      and not exists (select 1 from private.scenario_library() l where l.name = s.name and l.patch = s.patch)
+  ) then
+    what := ''scenarios of its own'';
+  end if;
+  if what is not null then
+    raise exception ''This workspace isn''''t empty: it already has %. Backups restore only into a new, empty workspace.'', what
+      using errcode = ''23514'', hint = ''not_empty'';
+  end if;
+
+  -- 5. Ids: every id and reference column of the plan holds a placeholder (or null) before anything is replaced.
+  foreach sec in array list_sections loop
+    if sec = ''processes'' then continue; end if;
+    for col in
+      select c from (
+        select ''id'' as c where allow -> sec ? ''id''
+        union all select split_part(r, ''.'', 2) from unnest(ref_cols) r where split_part(r, ''.'', 1) = sec
+      ) q
+    loop
+      select count(*) into bad from jsonb_array_elements(p_plan -> sec) r
+      where r.value -> col is not null and jsonb_typeof(r.value -> col) <> ''null''
+        and (jsonb_typeof(r.value -> col) <> ''string'' or (r.value ->> col) !~ placeholder_re);
+      if bad > 0 then
+        raise exception ''import_workspace_bundle: % holds an id that is not a placeholder in %'', col, sec using errcode = ''22023'';
+      end if;
+    end loop;
+  end loop;
+  select count(*) into bad from jsonb_array_elements(p_plan -> ''issues'') i
+  where exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''owner_ids'') = ''array'' then i.value -> ''owner_ids'' else ''[]''::jsonb end) x
+      where jsonb_typeof(x.value) <> ''string'' or (x.value #>> ''{}'') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''source_ids'') = ''array'' then i.value -> ''source_ids'' else ''[]''::jsonb end) x
+      where jsonb_typeof(x.value) <> ''string'' or (x.value #>> ''{}'') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(case when jsonb_typeof(i.value -> ''links'') = ''array'' then i.value -> ''links'' else ''[]''::jsonb end) l
+      where jsonb_typeof(l.value) <> ''object''
+        or (l.value ->> ''process_id'') !~ placeholder_re
+        or (jsonb_typeof(l.value -> ''step_id'') <> ''null'' and l.value ->> ''step_id'' is not null and (l.value ->> ''step_id'') !~ placeholder_re));
+  if bad > 0 then
+    raise exception ''import_workspace_bundle: an issue link, owner or source holds an id that is not a placeholder'' using errcode = ''22023'';
+  end if;
+  select count(*) into bad from jsonb_array_elements(p_plan -> ''processes'') p
+  where (p.value ->> ''id'') is null or (p.value ->> ''id'') !~ placeholder_re
+    or (jsonb_typeof(p.value -> ''parent_process_id'') <> ''null'' and p.value ->> ''parent_process_id'' is not null and (p.value ->> ''parent_process_id'') !~ placeholder_re)
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> ''steps'') s, unnest(array[''id''] || step_ref_cols) c
+      where s.value -> c is not null and jsonb_typeof(s.value -> c) <> ''null'' and (jsonb_typeof(s.value -> c) <> ''string'' or (s.value ->> c) !~ placeholder_re))
+    or exists (
+      select 1 from jsonb_array_elements(p.value -> ''edges'') e, unnest(array[''id'', ''from_step_id'', ''to_step_id'']) c
+      where e.value -> c is not null and jsonb_typeof(e.value -> c) <> ''null'' and (jsonb_typeof(e.value -> c) <> ''string'' or (e.value ->> c) !~ placeholder_re));
+  if bad > 0 then
+    raise exception ''import_workspace_bundle: a process, step or edge holds an id that is not a placeholder'' using errcode = ''22023'';
+  end if;
+
+  -- The real ids: one random prefix per restore replaces the placeholder prefix.
+  loop
+    prefix := substr(md5(gen_random_uuid()::text), 1, 20);
+    exit when prefix <> ''00000000000000000000'';
+  end loop;
+  prefix := substr(prefix, 1, 8) || ''-'' || substr(prefix, 9, 4) || ''-'' || substr(prefix, 13, 4) || ''-'' || substr(prefix, 17, 4) || ''-'';
+  -- Two plain replacements (a regular expression took 13 times as long on a big plan): every placeholder gets the fresh
+  -- prefix, then rank 0 (the old workspace), now `<prefix>000000000000`, becomes the real workspace. The prefix is never
+  -- all zeros (the loop above), so no other id can take rank 0''s place.
+  txt := replace(p_plan::text, placeholder, prefix);
+  txt := replace(txt, prefix || ''000000000000'', p_workspace::text);
+
+  -- A scenario equal (name and patch) to one the workspace already has (the seeded library) is skipped: its children and the
+  -- issues that use it are re-pointed at the existing row.
+  for sc in select value from jsonb_array_elements((txt::jsonb) -> ''scenarios'') loop
+    select s.id into existing from public.scenarios s
+    where s.workspace_id = p_workspace and s.name = sc ->> ''name'' and s.patch = sc -> ''patch''
+    order by s.id limit 1;
+    if found then
+      txt := replace(txt, sc ->> ''id'', existing::text);
+      skip_ids := skip_ids || existing;
+    end if;
+  end loop;
+  pl := txt::jsonb;
+  txt := null;
+  skipped := jsonb_build_object(''scenarios'', cardinality(skip_ids));
+
+  -- 6. Write.
+  foreach sec in array sections loop
+    begin
+      n := 0;
+      if sec = ''settings'' then
+        if jsonb_typeof(pl -> ''settings'') = ''object'' and pl -> ''settings'' <> ''{}''::jsonb then
+          if public.can_manage_workspace(p_workspace) then
+            update public.workspaces set settings = settings || (pl -> ''settings'') where id = p_workspace;
+            settings_result := ''applied'';
+          else
+            -- An editor can''t write workspace-wide settings: one pending suggestion for an owner (the shape packages/mcp/src/suggesting.ts makes).
+            perform set_config(''transpera.importing'', ''on'', true);
+            insert into public.suggestions (workspace_id, target_table, target_id, patch, evidence, note, import_source)
+            values (p_workspace, ''workspaces'', null, jsonb_build_object(''set'', pl -> ''settings''), ''[]''::jsonb, ''Workspace settings from a backup.'', label);
+            perform set_config(''transpera.importing'', '''', true);
+            settings_result := ''suggested'';
+          end if;
+        end if;
+        continue;
+      end if;
+
+      if sec in (''demand_settings'', ''lever_settings'', ''analysis_rules'') then
+        -- One row per workspace: written over any row the workspace already has.
+        if jsonb_typeof(pl -> sec) = ''object'' then
+          select string_agg(quote_ident(c), '', ''), string_agg(format(''%1$I = excluded.%1$I'', c), '', '') into cols, sets
+          from jsonb_array_elements_text(allow -> sec) c where (pl -> sec) ? c;
+          if cols is not null then
+            execute format(''insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_record(null::public.%1$I, $1) on conflict (workspace_id) do update set %3$s'', sec, cols, sets)
+              using pl -> sec, p_workspace;
+            n := 1;
+          end if;
+        end if;
+
+      elsif sec = ''market_schedule'' then
+        -- A row that points at one of the backup''s presets points at this workspace''s preset with the same key.
+        insert into public.market_schedule (workspace_id, id, condition_id, from_month, to_month, created_at)
+        select p_workspace, coalesce(x.id, gen_random_uuid()),
+          coalesce(x.condition_id, (select m.id from public.market_conditions m where m.workspace_id = p_workspace and m.preset = r.value ->> ''condition_preset'')),
+          x.from_month, x.to_month, coalesce(x.created_at, now())
+        from jsonb_array_elements(pl -> ''market_schedule'') with ordinality r(value, ord)
+        cross join lateral jsonb_populate_record(null::public.market_schedule, r.value) x
+        order by r.ord;
+        get diagnostics n = row_count;
+
+      elsif sec = ''processes'' then
+        -- Every process first (parents first, as the plan is ordered), each opened as a draft, so a holder step can point at any of them.
+        for node in select value from jsonb_array_elements(pl -> ''processes'') loop
+          proc := (node ->> ''id'')::uuid;
+          insert into public.processes (id, workspace_id, name, kind, entity_name, description, source, parent_process_id)
+          values (proc, p_workspace, node ->> ''name'', node ->> ''kind'', node ->> ''entity_name'', node ->> ''description'', ''import'', (node ->> ''parent_process_id'')::uuid);
+          draft := public.open_draft(proc);
+          if draft ->> ''status'' is distinct from ''ok'' then
+            raise exception ''could not open a draft of %'', node ->> ''name'' using errcode = ''42501'';
+          end if;
+          rev := (draft ->> ''revision_id'')::uuid;
+          revs := revs || jsonb_build_object(proc::text, rev);
+          if jsonb_typeof(node -> ''layout'') = ''object'' then
+            update public.process_revisions set layout = node -> ''layout'' where id = rev;
+          end if;
+          if coalesce((node ->> ''archived'')::boolean, false) then
+            arch := arch || proc;
+          end if;
+          made := made || jsonb_build_object(''id'', proc, ''name'', node ->> ''name'', ''revision_id'', rev, ''archived'', coalesce((node ->> ''archived'')::boolean, false));
+          n := n + 1;
+        end loop;
+
+      elsif sec = ''scenarios'' then
+        select coalesce(jsonb_agg(r.value order by r.ord), ''[]''::jsonb) into rows
+        from jsonb_array_elements(pl -> ''scenarios'') with ordinality r(value, ord)
+        where not ((r.value ->> ''id'')::uuid = any (skip_ids));
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          execute format(''insert into public.scenarios (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.scenarios, $1)'', cols) using rows, p_workspace;
+        end if;
+
+      elsif sec = ''issues'' then
+        rows := pl -> ''issues'';
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
+          -- In plan order: the trigger numbers them 1, 2, 3 ... in the old order.
+          execute format(''insert into public.issues (workspace_id, %1$s) select $2, %1$s from jsonb_populate_recordset(null::public.issues, $1)'', cols) using rows, p_workspace;
+          -- `issue_seed_links` and `link_issue_source` may have added some already.
+          insert into public.issue_links (issue_id, workspace_id, process_id, step_id)
+          select (i.value ->> ''id'')::uuid, p_workspace, (l.value ->> ''process_id'')::uuid, (l.value ->> ''step_id'')::uuid
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''links'') = ''array'' then i.value -> ''links'' else ''[]''::jsonb end) l
+          on conflict do nothing;
+          insert into public.issue_owners (issue_id, person_id, workspace_id)
+          select (i.value ->> ''id'')::uuid, (o.value #>> ''{}'')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''owner_ids'') = ''array'' then i.value -> ''owner_ids'' else ''[]''::jsonb end) o
+          on conflict do nothing;
+          insert into public.issue_sources (issue_id, source_id, workspace_id)
+          select (i.value ->> ''id'')::uuid, (o.value #>> ''{}'')::uuid, p_workspace
+          from jsonb_array_elements(rows) i
+          cross join lateral jsonb_array_elements(case when jsonb_typeof(i.value -> ''source_ids'') = ''array'' then i.value -> ''source_ids'' else ''[]''::jsonb end) o
+          on conflict do nothing;
+        end if;
+
+      elsif sec = ''steps'' then
+        -- The steps and edges of each draft (an entry step is set once all the steps are in), then its first principles.
+        for node in select value from jsonb_array_elements(pl -> ''processes'') loop
+          proc := (node ->> ''id'')::uuid;
+          rev := (revs ->> proc::text)::uuid;
+          select coalesce(jsonb_agg(s.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''entry_step_id'', null, ''created_by'', auth.uid())), ''[]''::jsonb)
+            into rows from jsonb_array_elements(node -> ''steps'') s;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), '', '') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in (''revision_id'', ''workspace_id'', ''process_id'', ''created_by'') or (allow -> ''steps'') ? k
+            ) q;
+            execute format(''insert into public.steps (%1$s) select %1$s from jsonb_populate_recordset(null::public.steps, $1)'', cols) using rows;
+            update public.steps st set entry_step_id = (s.value ->> ''entry_step_id'')::uuid
+            from jsonb_array_elements(node -> ''steps'') s
+            where st.revision_id = rev and st.id = (s.value ->> ''id'')::uuid and s.value ->> ''entry_step_id'' is not null;
+            n := n + jsonb_array_length(rows);
+          end if;
+          select coalesce(jsonb_agg(e.value || jsonb_build_object(''revision_id'', rev, ''workspace_id'', p_workspace, ''process_id'', proc, ''created_by'', auth.uid())), ''[]''::jsonb)
+            into rows from jsonb_array_elements(node -> ''edges'') e;
+          if jsonb_array_length(rows) > 0 then
+            select string_agg(quote_ident(k), '', '') into cols from (
+              select distinct k from jsonb_array_elements(rows) r, jsonb_object_keys(r.value) k
+              where k in (''revision_id'', ''workspace_id'', ''process_id'', ''created_by'') or (allow -> ''edges'') ? k
+            ) q;
+            execute format(''insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)'', cols) using rows;
+          end if;
+          if jsonb_typeof(node -> ''first_principles'') = ''object'' then
+            select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> ''first_principles'') c where (node -> ''first_principles'') ? c;
+            if cols is not null then
+              execute format(''insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)'', cols)
+                using node -> ''first_principles'', p_workspace, proc, rev;
+            end if;
+          end if;
+        end loop;
+        counts := counts || jsonb_build_object(''edges'', edge_total);
+
+      elsif sec = ''archive'' then
+        if cardinality(arch) > 0 then
+          update public.processes set archived_at = now() where id = any (arch);
+          get diagnostics n = row_count;
+        end if;
+
+      elsif sec = ''log'' then
+        for node in select value from jsonb_array_elements(made) loop
+          perform public.log_process_import((node ->> ''id'')::uuid, ''Restored from a workspace backup'' || coalesce('' ('' || label || '')'', ''''));
+          n := n + 1;
+        end loop;
+
+      else
+        -- A flat section: one insert, the plan''s order, only the columns of the allow-list that the rows carry.
+        tbl := case sec when ''proposals'' then ''suggestion_proposals'' else sec end;
+        rows := pl -> sec;
+        if sec = ''market_conditions'' then
+          -- The presets are read-only and the workspace has them already: the plan carries custom conditions only, and no `preset`.
+          null;
+        elsif sec = ''source_links'' then
+          -- A step link needs its step in the process''s restored draft (the trigger refuses it otherwise).
+          select coalesce(jsonb_agg(r.value order by r.ord), ''[]''::jsonb) into rows
+          from jsonb_array_elements(rows) with ordinality r(value, ord)
+          where r.value ->> ''kind'' is distinct from ''step'' or exists (
+            select 1 from public.steps s where s.workspace_id = p_workspace and s.process_id = (r.value ->> ''process_id'')::uuid and s.id = (r.value ->> ''step_id'')::uuid);
+          skipped := skipped || jsonb_build_object(''step_links'', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
+        end if;
+        n := jsonb_array_length(rows);
+        if n > 0 then
+          -- A source link''s id can''t be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
+          -- and `created_at` out): the database makes it.
+          select string_agg(quote_ident(c), '', '') into cols from jsonb_array_elements_text(allow -> sec) c
+          where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c) and not (sec = ''source_links'' and c = ''id'');
+          if cols is null then
+            raise exception ''the rows have none of the columns a restore accepts'' using errcode = ''22023'';
+          end if;
+          if sec in (''suggestions'', ''proposals'') then
+            perform set_config(''transpera.importing'', ''on'', true);
+            execute format(''insert into public.%1$I (workspace_id, %2$s, import_source) select $2, %2$s, $3 from jsonb_populate_recordset(null::public.%1$I, $1)'', tbl, cols)
+              using rows, p_workspace, label;
+            perform set_config(''transpera.importing'', '''', true);
+          else
+            execute format(''insert into public.%1$I (workspace_id, %2$s) select $2, %2$s from jsonb_populate_recordset(null::public.%1$I, $1)%3$s'', tbl, cols,
+              case when sec = ''source_links'' then '' on conflict do nothing'' else '''' end)
+              using rows, p_workspace;
+          end if;
+        end if;
+      end if;
+      counts := counts || jsonb_build_object(sec, n);
+    exception when others then
+      raise exception ''import_workspace_bundle: % could not be restored: %'', sec, sqlerrm using errcode = sqlstate, hint = ''section:'' || sec;
+    end;
+  end loop;
+
+  return jsonb_build_object(''id_prefix'', prefix, ''processes'', made, ''counts'', counts, ''skipped'', skipped, ''settings'', settings_result);
+end;
+$$;
+
+revoke all on function public.import_workspace_bundle(uuid, jsonb, text) from public, anon, authenticated;
+grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to authenticated;
+']);
+
+-- 20261216000000_dataset_imports.sql
+-- Import wizard with column mapping (issue #40, C1; PRD §4.1 Company model, §5 `datasets`, §6.6, D45; docs/plans/c1-brief.md).
+--
+-- A person imports a file of historical data on Settings → Historical data: a stage history, deals, time logs, leads, a clients
+-- file, a servicing log, jobs or tickets, or invoices. The app parses it in a Web Worker, lets the person match its columns to
+-- the kind's columns and check the rows, converts deals and time logs into a step log and jobs into a servicing log (C2's
+-- calibrations), and records the import under its own kind. Rows, files, client ids, person names, amounts and unmatched names
+-- never reach the database: the page sends header names, counts and model ids (D27, #30). Records are insert-only, so a second
+-- import of a kind adds a record and the first stays listed.
+--
+-- ADDITIVE: it adds one column, two public functions, three `private` helper functions and two check constraints, and replaces
+-- `record_client_calibration` (row 57) with a full copy of its
+-- latest definition that takes a kind and `details`, signature unchanged (the same rule as `save_fields`: the latest definition,
+-- copied; the added lines are marked `-- C1`). It does NOT touch `save_fields`, `record_calibration`, `apply_calibration`,
+-- `calibration_payload_problem`, the `calibrations` trigger, `datasets_kind` (it already allows the eight kinds; row 50 reserved
+-- five for C1 and row 57 added two), or any policy or grant on the tables.
+--
+--   * `datasets.details` (jsonb object, at most 20,000 bytes, default `{}`): counts only: the delimiter, encoding, header row,
+--     date order, lines, rows kept and left out, how many rows matched a name in the model, the window, and for leads and
+--     invoices a summary (lead source ids and numbers; counts). No string from the file. Table grants are table-level
+--     (select, insert), so the column is covered; it is insert-only like the rest of the row (no update grant).
+--   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (whole counts up to 10
+--     million, dates up to the year 2100, the delimiter, encoding and date-order enums, uuid lead source ids). So a client's name, a person's or an amount can't be stored even by a
+--     caller that skips the app. The app's own rebuild (`storedImportDetails`) is the first line; this is the second.
+--   * `datasets.column_map` holds short labels: `private.column_map_ok(jsonb)` allows only the kinds' column ids as keys (lower-case
+--     letters, at most 20) and text of up to 60 characters as values. The page stores a position (`Column 4`) unless the header is the
+--     column's own name or alias, because a file with no header row makes its first data row the "headers". Added NOT VALID (as
+--     `datasets_column_map_labels`): records made before it are not checked.
+--   * New objects: `private.column_map_ok(jsonb)`, `private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)` and
+--     `private.import_details_ok(jsonb)` (execute for `authenticated` only: a check constraint runs as the inserting role), and the
+--     constraints `datasets_details`, `datasets_details_known` and `datasets_column_map_labels` (the first of them with the column).
+--   * `public.record_dataset(p_workspace, p_kind, p_file_name, p_column_map, p_row_count, p_details)` (SECURITY INVOKER): records
+--     an import that has no calibration: `leads` or `invoices`, with no process. Refuses an API token (42501) and any other kind
+--     (22023). Row-level security refuses viewers, members and strangers (insert policy `can_edit_workspace`). Returns the id.
+--   * `public.record_calibration_import(p_workspace, p_process, p_kind, p_file_name, p_column_map, p_row_count, p_details,
+--     p_results, p_keys)` (SECURITY INVOKER): row 50's `record_calibration` with the kind and `details` passed in. `step_log`,
+--     `deals` and `time_logs` are calibrated against a process; any other kind is refused (22023). The dataset, the
+--     calibration and the apply (which refuses an API token) are one transaction, as before. `record_calibration` stays as it is.
+--   * `public.record_client_calibration(p_workspace, p_clients, p_log, p_results, p_keys)`: row 57's, plus `p_log.kind`
+--     (`servicing_log`, the default, or `jobs`; anything else is 22023) and `details` on both files. The clients file's kind
+--     stays `clients`. `results.datasets` and the return value keep the key `servicing_log` for the log's dataset id, even for a
+--     jobs file, because `apps/web/src/lib/calibration/client-data.ts` reads it.
+-- Row-level security and grants are row 50's: everyone in the workspace reads; owners and editors insert.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Nothing at or past this version. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= '20261216000000';
+--   1. Rows 50 and 57 are applied. Expect 2:
+--        select count(*) from supabase_migrations.schema_migrations where version in ('20261202000000', '20261208000000');
+--   2. record_client_calibration is row 57's, unchanged. Expect md5 bfe7a2c887fe6251c9ea41aa4c021c97 (computed on a local
+--      database migrated to origin/main; no later migration touches it):
+--        select md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--        where n.nspname = 'public' and p.proname = 'record_client_calibration';
+--   3. No details column yet. Expect 0:
+--        select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'datasets' and column_name = 'details';
+--   4. The new functions don't exist. Expect five nulls:
+--        select to_regprocedure('public.record_dataset(uuid, text, text, jsonb, integer, jsonb)'),
+--               to_regprocedure('public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])'),
+--               to_regprocedure('private.column_map_ok(jsonb)'),
+--               to_regprocedure('private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)'),
+--               to_regprocedure('private.import_details_ok(jsonb)');
+--      And neither new constraint exists. Expect 0:
+--        select count(*) from pg_constraint where conname in ('datasets_details', 'datasets_details_known', 'datasets_column_map_labels');
+--   5. datasets_kind already allows the eight kinds. Expect one row listing step_log, clients, servicing_log, leads, deals, jobs, time_logs, invoices:
+--        select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_kind';
+--   6. For the record (the column add is metadata-only with a constant default): select count(*) from public.datasets;
+--
+-- POST-APPLY:
+--   select column_name, data_type, is_nullable, column_default from information_schema.columns
+--     where table_schema = 'public' and table_name = 'datasets' and column_name = 'details';   -- jsonb, NO, '{}'::jsonb
+--   select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_details';    -- the check
+--   select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_column_map_labels';  -- the check (not validated)
+--   select p.proname, p.prosecdef, p.proconfig, has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = 'public' and p.proname in ('record_dataset', 'record_calibration_import', 'record_client_calibration') order by 1;
+--     -- each: f, {search_path=""}, f, t
+--   select conname from pg_constraint where conname in ('datasets_details', 'datasets_details_known', 'datasets_column_map_labels') order by 1;  -- 3 rows
+--   The three private functions refuse anon and allow authenticated. Expect f, t for each:
+--   select p.proname, has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = 'private' and p.proname in ('column_map_ok', 'import_numbers_ok', 'import_details_ok') order by 1;
+--   select version from supabase_migrations.schema_migrations where version = '20261216000000';  -- 1 row
+--
+-- ROLLBACK (one transaction; roll the app back first):
+--   begin;
+--   drop function if exists public.record_dataset(uuid, text, text, jsonb, integer, jsonb);
+--   drop function if exists public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]);
+--   -- Put back row 57's record_client_calibration: re-run its `create function ... $$;` block from
+--   -- 20261208000000_client_calibration.sql as `create or replace`, with its revoke and grant.
+--   alter table public.datasets drop constraint if exists datasets_details_known;
+--   alter table public.datasets drop constraint if exists datasets_column_map_labels;
+--   drop function if exists private.import_details_ok(jsonb);
+--   drop function if exists private.import_numbers_ok(jsonb, text[], text[], numeric, numeric);
+--   drop function if exists private.column_map_ok(jsonb);
+--   alter table public.datasets drop column if exists details;
+--   delete from supabase_migrations.schema_migrations where version = '20261216000000';
+--   commit;
+-- Records of the new kinds stay: datasets_kind always allowed them. Only their `details` go with the column. Measured
+-- values from them keep their numbers and their dataset_id.
+--
+-- Production data: none needed.
+
+-- 1. What an import holds: counts and model ids only.
+alter table public.datasets add column details jsonb not null default '{}'
+  constraint datasets_details check (jsonb_typeof(details) = 'object' and octet_length(details::text) <= 20000);
+
+-- Counts only: an object whose keys are among `allowed` and whose values are numbers from lo to hi (whole numbers for `whole_keys`).
+create function private.import_numbers_ok(o jsonb, allowed text[], whole_keys text[], lo numeric, hi numeric) returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select jsonb_typeof(o) = 'object' and not exists (
+    select 1 from jsonb_each(o) e
+    where e.key <> all (allowed)
+       or jsonb_typeof(e.value) <> 'number'
+       or (e.value #>> '{}')::numeric not between lo and hi
+       or (e.key = any (whole_keys) and (e.value #>> '{}')::numeric <> trunc((e.value #>> '{}')::numeric)));
+$$;
+
+-- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields). Counts are whole numbers
+-- up to 10 million; dates are epoch milliseconds up to the year 2100; a lead source is a uuid. So it can't carry text, even as digits.
+create function private.import_details_ok(d jsonb) returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  k text;
+  v jsonb;
+  s jsonb;
+  src jsonb;
+begin
+  if jsonb_typeof(d) <> 'object' then
+    return false;
+  end if;
+  for k, v in select e.key, e.value from jsonb_each(d) e loop
+    if k in ('headerRow', 'lines', 'rows', 'leftOut') then
+      if not private.import_numbers_ok(jsonb_build_object(k, v), array[k], array[k], 0, 10000000) then return false; end if;
+    elsif k = 'delimiter' then
+      if jsonb_typeof(v) <> 'string' or (v #>> '{}') not in (',', ';', E'\t', '|') then return false; end if;
+    elsif k = 'encoding' then
+      if jsonb_typeof(v) <> 'string' or (v #>> '{}') not in ('utf-8', 'utf-16', 'windows-1252') then return false; end if;
+    elsif k = 'dateOrder' then
+      if jsonb_typeof(v) <> 'null' and (jsonb_typeof(v) <> 'string' or (v #>> '{}') not in ('dmy', 'mdy')) then return false; end if;
+    elsif k = 'nameMatches' then
+      if not private.import_numbers_ok(v, array['matched', 'leftOut'], array['matched', 'leftOut'], 0, 10000000) then return false; end if;
+    elsif k = 'window' then
+      if jsonb_typeof(v) <> 'null' and not private.import_numbers_ok(v, array['from', 'to'], array['from', 'to'], 0, 4200000000000) then return false; end if;
+    elsif k = 'summary' then
+      if jsonb_typeof(v) = 'null' then continue; end if;
+      if jsonb_typeof(v) <> 'object' then return false; end if;
+      s := v - 'sources' - 'blocked' - 'paidLate' - 'kind';
+      if not private.import_numbers_ok(
+        s,
+        array['weeks', 'leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount'],
+        array['leads', 'unmatched', 'invoices', 'clients', 'withDue', 'unpaidPastDue', 'withAmount'],
+        0,
+        10000000) then
+        return false;
+      end if;
+      if coalesce(v ->> 'kind', '') not in ('leads', 'invoices') then return false; end if;
+      if v ? 'blocked' and jsonb_typeof(v -> 'blocked') <> 'boolean' then return false; end if;
+      if v ? 'paidLate' and not (jsonb_typeof(v -> 'paidLate') = 'null' or private.import_numbers_ok(jsonb_build_object('paidLate', v -> 'paidLate'), array['paidLate'], array[]::text[], 0, 1)) then
+        return false;
+      end if;
+      if v ? 'sources' then
+        if jsonb_typeof(v -> 'sources') <> 'array' or jsonb_array_length(v -> 'sources') > 500 then return false; end if;
+        for src in select x from jsonb_array_elements(v -> 'sources') x loop
+          if jsonb_typeof(src) <> 'object'
+             or jsonb_typeof(src -> 'leadSourceId') <> 'string'
+             or (src ->> 'leadSourceId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+             or not private.import_numbers_ok(src - 'leadSourceId', array['leads', 'perWeek', 'current'], array['leads'], 0, 10000000) then
+            return false;
+          end if;
+        end loop;
+      end if;
+    else
+      return false;
+    end if;
+  end loop;
+  return true;
+end;
+$$;
+
+revoke all on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) from public, anon;
+grant execute on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) to authenticated;
+revoke all on function private.import_details_ok(jsonb) from public, anon;
+grant execute on function private.import_details_ok(jsonb) to authenticated;
+
+alter table public.datasets add constraint datasets_details_known check (private.import_details_ok(details));
+
+-- A column map holds short labels (a header name, or a position such as `Column 4`) under the kinds' column ids (lower-case letters,
+-- at most 20), never a long value from a file.
+create function private.column_map_ok(m jsonb) returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select jsonb_typeof(m) = 'object' and not exists (
+    select 1 from jsonb_each(m) e
+    where e.key !~ '^[a-z]{1,20}$' or jsonb_typeof(e.value) <> 'string' or char_length(e.value #>> '{}') > 60);
+$$;
+
+revoke all on function private.column_map_ok(jsonb) from public, anon;
+grant execute on function private.column_map_ok(jsonb) to authenticated;
+
+alter table public.datasets add constraint datasets_column_map_labels check (private.column_map_ok(column_map)) not valid;
+
+-- ---------------------------------------------------------------------------
+-- 2. record_dataset: an import with no calibration (leads, invoices)
+-- ---------------------------------------------------------------------------
+
+create function public.record_dataset(
+  p_workspace uuid,
+  p_kind text,
+  p_file_name text,
+  p_column_map jsonb,
+  p_row_count integer,
+  p_details jsonb
+) returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  ds uuid;
+begin
+  if coalesce(auth.jwt(), '{}') ? 'api_token_id' then
+    raise exception 'Data is imported by a person in the app, not over the API' using errcode = '42501';
+  end if;
+  if p_kind is null or p_kind not in ('leads', 'invoices') then
+    raise exception 'Stage histories, deals, time logs, clients files, servicing logs and jobs are recorded with their calibration' using errcode = '22023';
+  end if;
+  -- Row-level security refuses a viewer's, a member's or a stranger's insert.
+  insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details)
+  values (
+    p_workspace,
+    p_kind,
+    null,
+    p_file_name,
+    coalesce(p_column_map, '{}'),
+    p_row_count,
+    coalesce(case when jsonb_typeof(p_details) = 'object' then p_details end, '{}'))
+  returning id into ds;
+  return ds;
+end;
+$$;
+
+revoke all on function public.record_dataset(uuid, text, text, jsonb, integer, jsonb) from public, anon, authenticated;
+grant execute on function public.record_dataset(uuid, text, text, jsonb, integer, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. record_calibration_import: row 50's record_calibration, with the kind and details passed in
+-- ---------------------------------------------------------------------------
+
+create function public.record_calibration_import(
+  p_workspace uuid,
+  p_process uuid,
+  p_kind text,
+  p_file_name text,
+  p_column_map jsonb,
+  p_row_count integer,
+  p_details jsonb,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  ds uuid;
+  cal uuid;
+  out jsonb;
+begin
+  if p_kind is null or p_kind not in ('step_log', 'deals', 'time_logs') then
+    raise exception 'That kind of file isn''t calibrated against a process' using errcode = '22023';
+  end if;
+  -- Row-level security refuses a viewer's or a stranger's insert; apply_calibration refuses an API token. Either way
+  -- the whole call rolls back, records included.
+  insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details)
+  values (
+    p_workspace,
+    p_kind,
+    p_process,
+    p_file_name,
+    coalesce(p_column_map, '{}'),
+    p_row_count,
+    coalesce(case when jsonb_typeof(p_details) = 'object' then p_details end, '{}'))
+  returning id into ds;
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (p_workspace, ds, p_process, p_results)
+  returning id into cal;
+  out := public.apply_calibration(cal, p_keys);
+  return out || jsonb_build_object('calibration_id', cal, 'dataset_id', ds);
+end;
+$$;
+
+revoke all on function public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. record_client_calibration: row 57's function, with a kind for the log and details on both files (C1 lines marked)
+-- ---------------------------------------------------------------------------
+
+create or replace function public.record_client_calibration(
+  p_workspace uuid,
+  p_clients jsonb,
+  p_log jsonb,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  clients_ds uuid := null;
+  log_ds uuid := null;
+  cal uuid;
+  out jsonb;
+  log_kind text := coalesce(p_log ->> 'kind', 'servicing_log'); -- C1
+begin
+  -- With no keys apply_calibration isn't called, so the API-token refusal is repeated here.
+  if coalesce(auth.jwt(), '{}') ? 'api_token_id' then
+    raise exception 'Calibration is applied by a person in the app, not over the API' using errcode = '42501';
+  end if;
+  if p_clients is null and p_log is null then
+    raise exception 'Give a clients file or a servicing log' using errcode = '22023';
+  end if;
+  -- C1: a servicing log is a servicing log or a file of jobs or tickets read as one.
+  if p_log is not null and log_kind not in ('servicing_log', 'jobs') then
+    raise exception 'That kind of file isn''t a servicing log' using errcode = '22023';
+  end if;
+  -- Row-level security refuses a viewer's or a stranger's insert, and apply_calibration an API token. Either way the whole
+  -- call rolls back, records included.
+  if p_clients is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details) -- C1: details
+    values (
+      p_workspace,
+      'clients',
+      null,
+      p_clients ->> 'file_name',
+      coalesce(p_clients -> 'column_map', '{}'),
+      (p_clients ->> 'row_count')::integer,
+      coalesce(case when jsonb_typeof(p_clients -> 'details') = 'object' then p_clients -> 'details' end, '{}')) -- C1
+    returning id into clients_ds;
+  end if;
+  if p_log is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details) -- C1: kind and details
+    values (
+      p_workspace,
+      log_kind, -- C1
+      null,
+      p_log ->> 'file_name',
+      coalesce(p_log -> 'column_map', '{}'),
+      (p_log ->> 'row_count')::integer,
+      coalesce(case when jsonb_typeof(p_log -> 'details') = 'object' then p_log -> 'details' end, '{}')) -- C1
+    returning id into log_ds;
+  end if;
+  -- C1: the key stays `servicing_log` for the log's dataset id, even for a jobs file: client-data.ts reads it.
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (
+    p_workspace,
+    coalesce(clients_ds, log_ds),
+    null,
+    p_results || jsonb_build_object('datasets', jsonb_build_object('clients', clients_ds, 'servicing_log', log_ds)))
+  returning id into cal;
+  if coalesce(cardinality(p_keys), 0) > 0 then
+    out := public.apply_calibration(cal, p_keys);
+  else
+    -- The checks are recorded without applying anything.
+    out := jsonb_build_object('status', 'ok', 'draft', null, 'results', '[]'::jsonb);
+  end if;
+  return out || jsonb_build_object('calibration_id', cal, 'datasets', jsonb_build_object('clients', clients_ds, 'servicing_log', log_ds));
+end;
+$$;
+
+revoke all on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261216000000', 'dataset_imports', array['-- Import wizard with column mapping (issue #40, C1; PRD §4.1 Company model, §5 `datasets`, §6.6, D45; docs/plans/c1-brief.md).
+--
+-- A person imports a file of historical data on Settings → Historical data: a stage history, deals, time logs, leads, a clients
+-- file, a servicing log, jobs or tickets, or invoices. The app parses it in a Web Worker, lets the person match its columns to
+-- the kind''s columns and check the rows, converts deals and time logs into a step log and jobs into a servicing log (C2''s
+-- calibrations), and records the import under its own kind. Rows, files, client ids, person names, amounts and unmatched names
+-- never reach the database: the page sends header names, counts and model ids (D27, #30). Records are insert-only, so a second
+-- import of a kind adds a record and the first stays listed.
+--
+-- ADDITIVE: it adds one column, two public functions, three `private` helper functions and two check constraints, and replaces
+-- `record_client_calibration` (row 57) with a full copy of its
+-- latest definition that takes a kind and `details`, signature unchanged (the same rule as `save_fields`: the latest definition,
+-- copied; the added lines are marked `-- C1`). It does NOT touch `save_fields`, `record_calibration`, `apply_calibration`,
+-- `calibration_payload_problem`, the `calibrations` trigger, `datasets_kind` (it already allows the eight kinds; row 50 reserved
+-- five for C1 and row 57 added two), or any policy or grant on the tables.
+--
+--   * `datasets.details` (jsonb object, at most 20,000 bytes, default `{}`): counts only: the delimiter, encoding, header row,
+--     date order, lines, rows kept and left out, how many rows matched a name in the model, the window, and for leads and
+--     invoices a summary (lead source ids and numbers; counts). No string from the file. Table grants are table-level
+--     (select, insert), so the column is covered; it is insert-only like the rest of the row (no update grant).
+--   * `datasets.details` holds only the known keys, in the known types: `private.import_details_ok(jsonb)` (whole counts up to 10
+--     million, dates up to the year 2100, the delimiter, encoding and date-order enums, uuid lead source ids). So a client''s name, a person''s or an amount can''t be stored even by a
+--     caller that skips the app. The app''s own rebuild (`storedImportDetails`) is the first line; this is the second.
+--   * `datasets.column_map` holds short labels: `private.column_map_ok(jsonb)` allows only the kinds'' column ids as keys (lower-case
+--     letters, at most 20) and text of up to 60 characters as values. The page stores a position (`Column 4`) unless the header is the
+--     column''s own name or alias, because a file with no header row makes its first data row the "headers". Added NOT VALID (as
+--     `datasets_column_map_labels`): records made before it are not checked.
+--   * New objects: `private.column_map_ok(jsonb)`, `private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)` and
+--     `private.import_details_ok(jsonb)` (execute for `authenticated` only: a check constraint runs as the inserting role), and the
+--     constraints `datasets_details`, `datasets_details_known` and `datasets_column_map_labels` (the first of them with the column).
+--   * `public.record_dataset(p_workspace, p_kind, p_file_name, p_column_map, p_row_count, p_details)` (SECURITY INVOKER): records
+--     an import that has no calibration: `leads` or `invoices`, with no process. Refuses an API token (42501) and any other kind
+--     (22023). Row-level security refuses viewers, members and strangers (insert policy `can_edit_workspace`). Returns the id.
+--   * `public.record_calibration_import(p_workspace, p_process, p_kind, p_file_name, p_column_map, p_row_count, p_details,
+--     p_results, p_keys)` (SECURITY INVOKER): row 50''s `record_calibration` with the kind and `details` passed in. `step_log`,
+--     `deals` and `time_logs` are calibrated against a process; any other kind is refused (22023). The dataset, the
+--     calibration and the apply (which refuses an API token) are one transaction, as before. `record_calibration` stays as it is.
+--   * `public.record_client_calibration(p_workspace, p_clients, p_log, p_results, p_keys)`: row 57''s, plus `p_log.kind`
+--     (`servicing_log`, the default, or `jobs`; anything else is 22023) and `details` on both files. The clients file''s kind
+--     stays `clients`. `results.datasets` and the return value keep the key `servicing_log` for the log''s dataset id, even for a
+--     jobs file, because `apps/web/src/lib/calibration/client-data.ts` reads it.
+-- Row-level security and grants are row 50''s: everyone in the workspace reads; owners and editors insert.
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Nothing at or past this version. Expect 0 rows:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261216000000'';
+--   1. Rows 50 and 57 are applied. Expect 2:
+--        select count(*) from supabase_migrations.schema_migrations where version in (''20261202000000'', ''20261208000000'');
+--   2. record_client_calibration is row 57''s, unchanged. Expect md5 bfe7a2c887fe6251c9ea41aa4c021c97 (computed on a local
+--      database migrated to origin/main; no later migration touches it):
+--        select md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--        where n.nspname = ''public'' and p.proname = ''record_client_calibration'';
+--   3. No details column yet. Expect 0:
+--        select count(*) from information_schema.columns where table_schema = ''public'' and table_name = ''datasets'' and column_name = ''details'';
+--   4. The new functions don''t exist. Expect five nulls:
+--        select to_regprocedure(''public.record_dataset(uuid, text, text, jsonb, integer, jsonb)''),
+--               to_regprocedure(''public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])''),
+--               to_regprocedure(''private.column_map_ok(jsonb)''),
+--               to_regprocedure(''private.import_numbers_ok(jsonb, text[], text[], numeric, numeric)''),
+--               to_regprocedure(''private.import_details_ok(jsonb)'');
+--      And neither new constraint exists. Expect 0:
+--        select count(*) from pg_constraint where conname in (''datasets_details'', ''datasets_details_known'', ''datasets_column_map_labels'');
+--   5. datasets_kind already allows the eight kinds. Expect one row listing step_log, clients, servicing_log, leads, deals, jobs, time_logs, invoices:
+--        select pg_get_constraintdef(oid) from pg_constraint where conname = ''datasets_kind'';
+--   6. For the record (the column add is metadata-only with a constant default): select count(*) from public.datasets;
+--
+-- POST-APPLY:
+--   select column_name, data_type, is_nullable, column_default from information_schema.columns
+--     where table_schema = ''public'' and table_name = ''datasets'' and column_name = ''details'';   -- jsonb, NO, ''{}''::jsonb
+--   select pg_get_constraintdef(oid) from pg_constraint where conname = ''datasets_details'';    -- the check
+--   select pg_get_constraintdef(oid) from pg_constraint where conname = ''datasets_column_map_labels'';  -- the check (not validated)
+--   select p.proname, p.prosecdef, p.proconfig, has_function_privilege(''anon'', p.oid, ''execute''), has_function_privilege(''authenticated'', p.oid, ''execute'')
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = ''public'' and p.proname in (''record_dataset'', ''record_calibration_import'', ''record_client_calibration'') order by 1;
+--     -- each: f, {search_path=""}, f, t
+--   select conname from pg_constraint where conname in (''datasets_details'', ''datasets_details_known'', ''datasets_column_map_labels'') order by 1;  -- 3 rows
+--   The three private functions refuse anon and allow authenticated. Expect f, t for each:
+--   select p.proname, has_function_privilege(''anon'', p.oid, ''execute''), has_function_privilege(''authenticated'', p.oid, ''execute'')
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = ''private'' and p.proname in (''column_map_ok'', ''import_numbers_ok'', ''import_details_ok'') order by 1;
+--   select version from supabase_migrations.schema_migrations where version = ''20261216000000'';  -- 1 row
+--
+-- ROLLBACK (one transaction; roll the app back first):
+--   begin;
+--   drop function if exists public.record_dataset(uuid, text, text, jsonb, integer, jsonb);
+--   drop function if exists public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]);
+--   -- Put back row 57''s record_client_calibration: re-run its `create function ... $$;` block from
+--   -- 20261208000000_client_calibration.sql as `create or replace`, with its revoke and grant.
+--   alter table public.datasets drop constraint if exists datasets_details_known;
+--   alter table public.datasets drop constraint if exists datasets_column_map_labels;
+--   drop function if exists private.import_details_ok(jsonb);
+--   drop function if exists private.import_numbers_ok(jsonb, text[], text[], numeric, numeric);
+--   drop function if exists private.column_map_ok(jsonb);
+--   alter table public.datasets drop column if exists details;
+--   delete from supabase_migrations.schema_migrations where version = ''20261216000000'';
+--   commit;
+-- Records of the new kinds stay: datasets_kind always allowed them. Only their `details` go with the column. Measured
+-- values from them keep their numbers and their dataset_id.
+--
+-- Production data: none needed.
+
+-- 1. What an import holds: counts and model ids only.
+alter table public.datasets add column details jsonb not null default ''{}''
+  constraint datasets_details check (jsonb_typeof(details) = ''object'' and octet_length(details::text) <= 20000);
+
+-- Counts only: an object whose keys are among `allowed` and whose values are numbers from lo to hi (whole numbers for `whole_keys`).
+create function private.import_numbers_ok(o jsonb, allowed text[], whole_keys text[], lo numeric, hi numeric) returns boolean
+language sql
+immutable
+set search_path = ''''
+as $$
+  select jsonb_typeof(o) = ''object'' and not exists (
+    select 1 from jsonb_each(o) e
+    where e.key <> all (allowed)
+       or jsonb_typeof(e.value) <> ''number''
+       or (e.value #>> ''{}'')::numeric not between lo and hi
+       or (e.key = any (whole_keys) and (e.value #>> ''{}'')::numeric <> trunc((e.value #>> ''{}'')::numeric)));
+$$;
+
+-- What `details` may hold (apps/web/src/lib/calibration/import-request.ts rebuilds it from the same fields). Counts are whole numbers
+-- up to 10 million; dates are epoch milliseconds up to the year 2100; a lead source is a uuid. So it can''t carry text, even as digits.
+create function private.import_details_ok(d jsonb) returns boolean
+language plpgsql
+immutable
+set search_path = ''''
+as $$
+declare
+  k text;
+  v jsonb;
+  s jsonb;
+  src jsonb;
+begin
+  if jsonb_typeof(d) <> ''object'' then
+    return false;
+  end if;
+  for k, v in select e.key, e.value from jsonb_each(d) e loop
+    if k in (''headerRow'', ''lines'', ''rows'', ''leftOut'') then
+      if not private.import_numbers_ok(jsonb_build_object(k, v), array[k], array[k], 0, 10000000) then return false; end if;
+    elsif k = ''delimiter'' then
+      if jsonb_typeof(v) <> ''string'' or (v #>> ''{}'') not in ('','', '';'', E''\t'', ''|'') then return false; end if;
+    elsif k = ''encoding'' then
+      if jsonb_typeof(v) <> ''string'' or (v #>> ''{}'') not in (''utf-8'', ''utf-16'', ''windows-1252'') then return false; end if;
+    elsif k = ''dateOrder'' then
+      if jsonb_typeof(v) <> ''null'' and (jsonb_typeof(v) <> ''string'' or (v #>> ''{}'') not in (''dmy'', ''mdy'')) then return false; end if;
+    elsif k = ''nameMatches'' then
+      if not private.import_numbers_ok(v, array[''matched'', ''leftOut''], array[''matched'', ''leftOut''], 0, 10000000) then return false; end if;
+    elsif k = ''window'' then
+      if jsonb_typeof(v) <> ''null'' and not private.import_numbers_ok(v, array[''from'', ''to''], array[''from'', ''to''], 0, 4200000000000) then return false; end if;
+    elsif k = ''summary'' then
+      if jsonb_typeof(v) = ''null'' then continue; end if;
+      if jsonb_typeof(v) <> ''object'' then return false; end if;
+      s := v - ''sources'' - ''blocked'' - ''paidLate'' - ''kind'';
+      if not private.import_numbers_ok(
+        s,
+        array[''weeks'', ''leads'', ''unmatched'', ''invoices'', ''clients'', ''withDue'', ''unpaidPastDue'', ''withAmount''],
+        array[''leads'', ''unmatched'', ''invoices'', ''clients'', ''withDue'', ''unpaidPastDue'', ''withAmount''],
+        0,
+        10000000) then
+        return false;
+      end if;
+      if coalesce(v ->> ''kind'', '''') not in (''leads'', ''invoices'') then return false; end if;
+      if v ? ''blocked'' and jsonb_typeof(v -> ''blocked'') <> ''boolean'' then return false; end if;
+      if v ? ''paidLate'' and not (jsonb_typeof(v -> ''paidLate'') = ''null'' or private.import_numbers_ok(jsonb_build_object(''paidLate'', v -> ''paidLate''), array[''paidLate''], array[]::text[], 0, 1)) then
+        return false;
+      end if;
+      if v ? ''sources'' then
+        if jsonb_typeof(v -> ''sources'') <> ''array'' or jsonb_array_length(v -> ''sources'') > 500 then return false; end if;
+        for src in select x from jsonb_array_elements(v -> ''sources'') x loop
+          if jsonb_typeof(src) <> ''object''
+             or jsonb_typeof(src -> ''leadSourceId'') <> ''string''
+             or (src ->> ''leadSourceId'') !~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''
+             or not private.import_numbers_ok(src - ''leadSourceId'', array[''leads'', ''perWeek'', ''current''], array[''leads''], 0, 10000000) then
+            return false;
+          end if;
+        end loop;
+      end if;
+    else
+      return false;
+    end if;
+  end loop;
+  return true;
+end;
+$$;
+
+revoke all on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) from public, anon;
+grant execute on function private.import_numbers_ok(jsonb, text[], text[], numeric, numeric) to authenticated;
+revoke all on function private.import_details_ok(jsonb) from public, anon;
+grant execute on function private.import_details_ok(jsonb) to authenticated;
+
+alter table public.datasets add constraint datasets_details_known check (private.import_details_ok(details));
+
+-- A column map holds short labels (a header name, or a position such as `Column 4`) under the kinds'' column ids (lower-case letters,
+-- at most 20), never a long value from a file.
+create function private.column_map_ok(m jsonb) returns boolean
+language sql
+immutable
+set search_path = ''''
+as $$
+  select jsonb_typeof(m) = ''object'' and not exists (
+    select 1 from jsonb_each(m) e
+    where e.key !~ ''^[a-z]{1,20}$'' or jsonb_typeof(e.value) <> ''string'' or char_length(e.value #>> ''{}'') > 60);
+$$;
+
+revoke all on function private.column_map_ok(jsonb) from public, anon;
+grant execute on function private.column_map_ok(jsonb) to authenticated;
+
+alter table public.datasets add constraint datasets_column_map_labels check (private.column_map_ok(column_map)) not valid;
+
+-- ---------------------------------------------------------------------------
+-- 2. record_dataset: an import with no calibration (leads, invoices)
+-- ---------------------------------------------------------------------------
+
+create function public.record_dataset(
+  p_workspace uuid,
+  p_kind text,
+  p_file_name text,
+  p_column_map jsonb,
+  p_row_count integer,
+  p_details jsonb
+) returns uuid
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  ds uuid;
+begin
+  if coalesce(auth.jwt(), ''{}'') ? ''api_token_id'' then
+    raise exception ''Data is imported by a person in the app, not over the API'' using errcode = ''42501'';
+  end if;
+  if p_kind is null or p_kind not in (''leads'', ''invoices'') then
+    raise exception ''Stage histories, deals, time logs, clients files, servicing logs and jobs are recorded with their calibration'' using errcode = ''22023'';
+  end if;
+  -- Row-level security refuses a viewer''s, a member''s or a stranger''s insert.
+  insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details)
+  values (
+    p_workspace,
+    p_kind,
+    null,
+    p_file_name,
+    coalesce(p_column_map, ''{}''),
+    p_row_count,
+    coalesce(case when jsonb_typeof(p_details) = ''object'' then p_details end, ''{}''))
+  returning id into ds;
+  return ds;
+end;
+$$;
+
+revoke all on function public.record_dataset(uuid, text, text, jsonb, integer, jsonb) from public, anon, authenticated;
+grant execute on function public.record_dataset(uuid, text, text, jsonb, integer, jsonb) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. record_calibration_import: row 50''s record_calibration, with the kind and details passed in
+-- ---------------------------------------------------------------------------
+
+create function public.record_calibration_import(
+  p_workspace uuid,
+  p_process uuid,
+  p_kind text,
+  p_file_name text,
+  p_column_map jsonb,
+  p_row_count integer,
+  p_details jsonb,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  ds uuid;
+  cal uuid;
+  out jsonb;
+begin
+  if p_kind is null or p_kind not in (''step_log'', ''deals'', ''time_logs'') then
+    raise exception ''That kind of file isn''''t calibrated against a process'' using errcode = ''22023'';
+  end if;
+  -- Row-level security refuses a viewer''s or a stranger''s insert; apply_calibration refuses an API token. Either way
+  -- the whole call rolls back, records included.
+  insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details)
+  values (
+    p_workspace,
+    p_kind,
+    p_process,
+    p_file_name,
+    coalesce(p_column_map, ''{}''),
+    p_row_count,
+    coalesce(case when jsonb_typeof(p_details) = ''object'' then p_details end, ''{}''))
+  returning id into ds;
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (p_workspace, ds, p_process, p_results)
+  returning id into cal;
+  out := public.apply_calibration(cal, p_keys);
+  return out || jsonb_build_object(''calibration_id'', cal, ''dataset_id'', ds);
+end;
+$$;
+
+revoke all on function public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. record_client_calibration: row 57''s function, with a kind for the log and details on both files (C1 lines marked)
+-- ---------------------------------------------------------------------------
+
+create or replace function public.record_client_calibration(
+  p_workspace uuid,
+  p_clients jsonb,
+  p_log jsonb,
+  p_results jsonb,
+  p_keys text[]
+) returns jsonb
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  clients_ds uuid := null;
+  log_ds uuid := null;
+  cal uuid;
+  out jsonb;
+  log_kind text := coalesce(p_log ->> ''kind'', ''servicing_log''); -- C1
+begin
+  -- With no keys apply_calibration isn''t called, so the API-token refusal is repeated here.
+  if coalesce(auth.jwt(), ''{}'') ? ''api_token_id'' then
+    raise exception ''Calibration is applied by a person in the app, not over the API'' using errcode = ''42501'';
+  end if;
+  if p_clients is null and p_log is null then
+    raise exception ''Give a clients file or a servicing log'' using errcode = ''22023'';
+  end if;
+  -- C1: a servicing log is a servicing log or a file of jobs or tickets read as one.
+  if p_log is not null and log_kind not in (''servicing_log'', ''jobs'') then
+    raise exception ''That kind of file isn''''t a servicing log'' using errcode = ''22023'';
+  end if;
+  -- Row-level security refuses a viewer''s or a stranger''s insert, and apply_calibration an API token. Either way the whole
+  -- call rolls back, records included.
+  if p_clients is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details) -- C1: details
+    values (
+      p_workspace,
+      ''clients'',
+      null,
+      p_clients ->> ''file_name'',
+      coalesce(p_clients -> ''column_map'', ''{}''),
+      (p_clients ->> ''row_count'')::integer,
+      coalesce(case when jsonb_typeof(p_clients -> ''details'') = ''object'' then p_clients -> ''details'' end, ''{}'')) -- C1
+    returning id into clients_ds;
+  end if;
+  if p_log is not null then
+    insert into public.datasets (workspace_id, kind, process_id, file_name, column_map, row_count, details) -- C1: kind and details
+    values (
+      p_workspace,
+      log_kind, -- C1
+      null,
+      p_log ->> ''file_name'',
+      coalesce(p_log -> ''column_map'', ''{}''),
+      (p_log ->> ''row_count'')::integer,
+      coalesce(case when jsonb_typeof(p_log -> ''details'') = ''object'' then p_log -> ''details'' end, ''{}'')) -- C1
+    returning id into log_ds;
+  end if;
+  -- C1: the key stays `servicing_log` for the log''s dataset id, even for a jobs file: client-data.ts reads it.
+  insert into public.calibrations (workspace_id, dataset_id, process_id, results)
+  values (
+    p_workspace,
+    coalesce(clients_ds, log_ds),
+    null,
+    p_results || jsonb_build_object(''datasets'', jsonb_build_object(''clients'', clients_ds, ''servicing_log'', log_ds)))
+  returning id into cal;
+  if coalesce(cardinality(p_keys), 0) > 0 then
+    out := public.apply_calibration(cal, p_keys);
+  else
+    -- The checks are recorded without applying anything.
+    out := jsonb_build_object(''status'', ''ok'', ''draft'', null, ''results'', ''[]''::jsonb);
+  end if;
+  return out || jsonb_build_object(''calibration_id'', cal, ''datasets'', jsonb_build_object(''clients'', clients_ds, ''servicing_log'', log_ds));
+end;
+$$;
+
+revoke all on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) from public, anon, authenticated;
+grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) to authenticated;
+']);
+
+-- 20261219000000_forecast_plans.sql
+-- Forecast plans (issue #36, ticket B7; docs/plans/b7-brief.md).
+--
+-- A plan is a named set of forecast markers: hires, leave and solutions going live from a month. It never changes the live
+-- model; the forecast re-runs with the markers in it. This adds ONE table, `public.forecast_plans`, with its indexes (the
+-- primary key, `unique (id, workspace_id)` and a unique name per workspace ignoring case and spaces), one trigger
+-- function (`private.forecast_plans_before_write`), two triggers (`set_updated_at` and `forecast_plans_before_write`),
+-- four policies and its grants.
+--
+-- STRICTLY ADDITIVE: no existing table, column, function, policy or grant changes. `save_fields` is untouched (plans are
+-- written whole, by their own policies).
+--
+-- Who reads and writes: owners, editors and agency admins (`public.can_edit_workspace`) read and write plans (select,
+-- insert, update of `name` and `markers`, delete). Members and viewers read nothing and write nothing: a hypothetical
+-- leave names a person, which is per-person data they don't see (B1). `anon` has no access.
+--
+-- Marker shape (`markers`, a jsonb array of at most 40, at most 20000 characters; at most 4 solution markers; dates are
+-- absolute ISO dates):
+--   { "id": uuid, "kind": "hire",     "date": "YYYY-MM-DD", "role_id": uuid,     "fte": 0.1 to 2, "name"?: text up to 120 }
+--   { "id": uuid, "kind": "leave",    "date": "YYYY-MM-DD", "person_id": uuid,   "weeks": 1 to 52 whole weeks }
+--   { "id": uuid, "kind": "solution", "date": "YYYY-MM-DD", "solution_id": uuid }
+-- The ids inside `markers` (role, person, solution) are checked against the plan's workspace at write time, but they are
+-- NOT foreign keys: a role, person or solution deleted later leaves its marker "needs attention" in the app, never an
+-- error. A workspace keeps at most 50 plans; the count is not locked, so two concurrent inserts can reach 51 (a soft cap,
+-- accepted).
+--
+-- Preflight (run one file at a time with `prod-sql.sh -f`):
+--
+--     -- 0. Nothing at or past this version. Expect 0:
+--     select count(*) from supabase_migrations.schema_migrations where version >= '20261219000000';
+--     -- 1. The table doesn't exist. Expect null:
+--     select pg_catalog.to_regclass('public.forecast_plans');
+--     -- 2. The trigger function doesn't exist. Expect 0:
+--     select count(*) from pg_proc where proname = 'forecast_plans_before_write';
+--     -- 3. Helpers present. Expect 2 rows:
+--     select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in ('can_edit_workspace', 'set_updated_at');
+--     -- 4. Referenced tables have id and workspace_id. Expect 6 rows:
+--     select table_name, column_name from information_schema.columns
+--      where table_schema = 'public' and table_name in ('roles', 'people', 'solutions') and column_name in ('id', 'workspace_id');
+--
+-- Post-apply checks:
+--
+--     -- RLS on. Expect t:
+--     select relrowsecurity from pg_class where oid = 'public.forecast_plans'::regclass;
+--     -- Four policies, each on can_edit_workspace. Expect 4 rows (r, a, w, d):
+--     select polname, polcmd, pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) from pg_policy where polrelid = 'public.forecast_plans'::regclass order by polcmd;
+--     -- Grants: authenticated DELETE, INSERT, SELECT only; anon nothing. Expect 3 rows:
+--     select grantee, privilege_type from information_schema.role_table_grants where table_schema = 'public' and table_name = 'forecast_plans' and grantee in ('anon', 'authenticated') order by 1, 2;
+--     -- Column UPDATE: markers and name for authenticated. Expect 2 rows:
+--     select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'forecast_plans' and privilege_type = 'UPDATE' and grantee = 'authenticated' order by 1;
+--     -- Triggers enabled. Expect forecast_plans_before_write O, set_updated_at O:
+--     select tgname, tgenabled::text from pg_trigger where tgrelid = 'public.forecast_plans'::regclass and not tgisinternal order by 1;
+--     -- Function: not SECURITY DEFINER, empty search_path, no client EXECUTE. Expect f, t, f, f:
+--     select p.prosecdef, p.proconfig = array['search_path=""'],
+--            has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
+--       from pg_proc p where p.proname = 'forecast_plans_before_write';
+--     -- The version row. Expect 1:
+--     select count(*) from supabase_migrations.schema_migrations where version = '20261219000000';
+--
+-- Rollback (one transaction; roll the app back first). Rolling back loses every saved plan. Production data: none needed.
+--
+--     begin;
+--     drop table if exists public.forecast_plans;   -- its triggers, policies and indexes go with it
+--     drop function if exists private.forecast_plans_before_write();
+--     delete from supabase_migrations.schema_migrations where version = '20261219000000';
+--     commit;
+
+create table public.forecast_plans (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces (id) on delete cascade,
+  name text not null check (pg_catalog.length(pg_catalog.btrim(name)) between 1 and 120),
+  markers jsonb not null default '[]'
+    check (
+      pg_catalog.jsonb_typeof(markers) = 'array'
+      and pg_catalog.jsonb_array_length(markers) <= 40
+      and pg_catalog.octet_length(markers::text) <= 20000
+    ),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references auth.users (id) on delete set null default auth.uid(),
+  unique (id, workspace_id)
+);
+
+create unique index forecast_plans_workspace_name_key on public.forecast_plans (workspace_id, pg_catalog.lower(pg_catalog.btrim(name)));
+
+create trigger set_updated_at before update on public.forecast_plans
+  for each row execute function public.set_updated_at();
+
+-- Checks every writer meets, with plain messages. Security invoker: a caller who can't edit the workspace gets a plain
+-- permission error first (a plain database connection, as in migrations and tests, has no user and is not asked).
+-- Fires only on the columns a person writes, so the foreign key's `on delete set null` of created_by passes untouched.
+create function private.forecast_plans_before_write() returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  m jsonb;
+  k text;
+  d date;
+  seen text[] := '{}';
+  solutions integer := 0;
+  uuid_re constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+begin
+  if auth.uid() is not null and not coalesce(public.can_edit_workspace(new.workspace_id), false) then
+    raise exception 'forecast_plans: you cannot edit this workspace' using errcode = '42501';
+  end if;
+  if tg_op = 'INSERT' then
+    new.created_by := coalesce(auth.uid(), new.created_by);
+    if (select pg_catalog.count(*) from public.forecast_plans p where p.workspace_id = new.workspace_id) >= 50 then
+      raise exception 'forecast_plans: a workspace keeps at most 50 plans' using errcode = '23514';
+    end if;
+  elsif new.workspace_id is distinct from old.workspace_id then
+    raise exception 'forecast_plans: a plan stays in its workspace' using errcode = '23514';
+  end if;
+  for m in select e.value from pg_catalog.jsonb_array_elements(new.markers) e loop
+    if pg_catalog.jsonb_typeof(m) is distinct from 'object' then
+      raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+    end if;
+    k := m ->> 'kind';
+    if coalesce(m ->> 'id', '') !~ uuid_re or (m ->> 'id') = any (seen) then
+      raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+    end if;
+    seen := seen || (m ->> 'id');
+    if coalesce(m ->> 'date', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+      raise exception 'forecast_plans: a marker''s date is not valid' using errcode = '23514';
+    end if;
+    begin
+      d := (m ->> 'date')::date;
+    exception when others then
+      raise exception 'forecast_plans: a marker''s date is not valid' using errcode = '23514';
+    end;
+    if d < date '2000-01-01' or d > date '2100-12-31' then
+      raise exception 'forecast_plans: a marker''s date is not valid' using errcode = '23514';
+    end if;
+    if k in ('hire', 'solution') and pg_catalog.date_part('day', d) <> 1 then
+      raise exception 'forecast_plans: a hire or solution marker starts on the 1st of a month' using errcode = '23514';
+    end if;
+    if k = 'leave' and pg_catalog.date_part('isodow', d) <> 1 then
+      raise exception 'forecast_plans: leave starts on a Monday' using errcode = '23514';
+    end if;
+    if k = 'hire' then
+      if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in ('id', 'kind', 'date', 'role_id', 'fte', 'name')) then
+        raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+      end if;
+      if coalesce(m ->> 'role_id', '') !~ uuid_re
+        or not exists (select 1 from public.roles r where r.id = (m ->> 'role_id')::uuid and r.workspace_id = new.workspace_id) then
+        raise exception 'forecast_plans: a hire needs a role of this workspace' using errcode = '23514';
+      end if;
+      if pg_catalog.jsonb_typeof(m -> 'fte') is distinct from 'number' then
+        raise exception 'forecast_plans: a hire''s FTE must be between 0.1 and 2' using errcode = '23514';
+      end if;
+      if (m ->> 'fte')::numeric < 0.1 or (m ->> 'fte')::numeric > 2 then
+        raise exception 'forecast_plans: a hire''s FTE must be between 0.1 and 2' using errcode = '23514';
+      end if;
+      if m ? 'name' then
+        if pg_catalog.jsonb_typeof(m -> 'name') is distinct from 'string' then
+          raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+        end if;
+        if pg_catalog.length(m ->> 'name') > 120 then
+          raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+        end if;
+      end if;
+    elsif k = 'leave' then
+      if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in ('id', 'kind', 'date', 'person_id', 'weeks')) then
+        raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+      end if;
+      if coalesce(m ->> 'person_id', '') !~ uuid_re
+        or not exists (select 1 from public.people p where p.id = (m ->> 'person_id')::uuid and p.workspace_id = new.workspace_id) then
+        raise exception 'forecast_plans: leave needs a person of this workspace' using errcode = '23514';
+      end if;
+      if pg_catalog.jsonb_typeof(m -> 'weeks') is distinct from 'number' or (m ->> 'weeks') !~ '^[0-9]{1,2}$' then
+        raise exception 'forecast_plans: leave lasts 1 to 52 whole weeks' using errcode = '23514';
+      end if;
+      if (m ->> 'weeks')::integer not between 1 and 52 then
+        raise exception 'forecast_plans: leave lasts 1 to 52 whole weeks' using errcode = '23514';
+      end if;
+    elsif k = 'solution' then
+      if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in ('id', 'kind', 'date', 'solution_id')) then
+        raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+      end if;
+      if coalesce(m ->> 'solution_id', '') !~ uuid_re
+        or not exists (select 1 from public.solutions s where s.id = (m ->> 'solution_id')::uuid and s.workspace_id = new.workspace_id) then
+        raise exception 'forecast_plans: a solution marker needs a solution of this workspace' using errcode = '23514';
+      end if;
+      solutions := solutions + 1;
+    else
+      raise exception 'forecast_plans: a marker is not valid' using errcode = '23514';
+    end if;
+  end loop;
+  if solutions > 4 then
+    raise exception 'forecast_plans: a plan has at most 4 solutions' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function private.forecast_plans_before_write() from public, anon, authenticated;
+
+create trigger forecast_plans_before_write before insert or update of name, markers, workspace_id on public.forecast_plans
+  for each row execute function private.forecast_plans_before_write();
+
+alter table public.forecast_plans enable row level security;
+
+-- Supabase gives every new public table full privileges for anon, authenticated and service_role, so revoke first; a
+-- column grant only restricts anything once the table-level UPDATE is gone (as 20261122000000 does).
+revoke all on public.forecast_plans from anon, authenticated;
+grant select, insert, delete on public.forecast_plans to authenticated;
+grant update (name, markers) on public.forecast_plans to authenticated;
+
+-- Plans are planning by the people who run the workspace (Q1): a hypothetical leave names a person, which is per-person
+-- data members and viewers don't see (B1). Owners, editors and agency admins read and write; nobody else reads.
+create policy "read forecast_plans" on public.forecast_plans for select to authenticated
+  using (public.can_edit_workspace(workspace_id));
+create policy "insert forecast_plans" on public.forecast_plans for insert to authenticated
+  with check (public.can_edit_workspace(workspace_id));
+create policy "update forecast_plans" on public.forecast_plans for update to authenticated
+  using (public.can_edit_workspace(workspace_id)) with check (public.can_edit_workspace(workspace_id));
+create policy "delete forecast_plans" on public.forecast_plans for delete to authenticated
+  using (public.can_edit_workspace(workspace_id));
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261219000000', 'forecast_plans', array['-- Forecast plans (issue #36, ticket B7; docs/plans/b7-brief.md).
+--
+-- A plan is a named set of forecast markers: hires, leave and solutions going live from a month. It never changes the live
+-- model; the forecast re-runs with the markers in it. This adds ONE table, `public.forecast_plans`, with its indexes (the
+-- primary key, `unique (id, workspace_id)` and a unique name per workspace ignoring case and spaces), one trigger
+-- function (`private.forecast_plans_before_write`), two triggers (`set_updated_at` and `forecast_plans_before_write`),
+-- four policies and its grants.
+--
+-- STRICTLY ADDITIVE: no existing table, column, function, policy or grant changes. `save_fields` is untouched (plans are
+-- written whole, by their own policies).
+--
+-- Who reads and writes: owners, editors and agency admins (`public.can_edit_workspace`) read and write plans (select,
+-- insert, update of `name` and `markers`, delete). Members and viewers read nothing and write nothing: a hypothetical
+-- leave names a person, which is per-person data they don''t see (B1). `anon` has no access.
+--
+-- Marker shape (`markers`, a jsonb array of at most 40, at most 20000 characters; at most 4 solution markers; dates are
+-- absolute ISO dates):
+--   { "id": uuid, "kind": "hire",     "date": "YYYY-MM-DD", "role_id": uuid,     "fte": 0.1 to 2, "name"?: text up to 120 }
+--   { "id": uuid, "kind": "leave",    "date": "YYYY-MM-DD", "person_id": uuid,   "weeks": 1 to 52 whole weeks }
+--   { "id": uuid, "kind": "solution", "date": "YYYY-MM-DD", "solution_id": uuid }
+-- The ids inside `markers` (role, person, solution) are checked against the plan''s workspace at write time, but they are
+-- NOT foreign keys: a role, person or solution deleted later leaves its marker "needs attention" in the app, never an
+-- error. A workspace keeps at most 50 plans; the count is not locked, so two concurrent inserts can reach 51 (a soft cap,
+-- accepted).
+--
+-- Preflight (run one file at a time with `prod-sql.sh -f`):
+--
+--     -- 0. Nothing at or past this version. Expect 0:
+--     select count(*) from supabase_migrations.schema_migrations where version >= ''20261219000000'';
+--     -- 1. The table doesn''t exist. Expect null:
+--     select pg_catalog.to_regclass(''public.forecast_plans'');
+--     -- 2. The trigger function doesn''t exist. Expect 0:
+--     select count(*) from pg_proc where proname = ''forecast_plans_before_write'';
+--     -- 3. Helpers present. Expect 2 rows:
+--     select proname from pg_proc where pronamespace = ''public''::regnamespace and proname in (''can_edit_workspace'', ''set_updated_at'');
+--     -- 4. Referenced tables have id and workspace_id. Expect 6 rows:
+--     select table_name, column_name from information_schema.columns
+--      where table_schema = ''public'' and table_name in (''roles'', ''people'', ''solutions'') and column_name in (''id'', ''workspace_id'');
+--
+-- Post-apply checks:
+--
+--     -- RLS on. Expect t:
+--     select relrowsecurity from pg_class where oid = ''public.forecast_plans''::regclass;
+--     -- Four policies, each on can_edit_workspace. Expect 4 rows (r, a, w, d):
+--     select polname, polcmd, pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) from pg_policy where polrelid = ''public.forecast_plans''::regclass order by polcmd;
+--     -- Grants: authenticated DELETE, INSERT, SELECT only; anon nothing. Expect 3 rows:
+--     select grantee, privilege_type from information_schema.role_table_grants where table_schema = ''public'' and table_name = ''forecast_plans'' and grantee in (''anon'', ''authenticated'') order by 1, 2;
+--     -- Column UPDATE: markers and name for authenticated. Expect 2 rows:
+--     select column_name from information_schema.column_privileges where table_schema = ''public'' and table_name = ''forecast_plans'' and privilege_type = ''UPDATE'' and grantee = ''authenticated'' order by 1;
+--     -- Triggers enabled. Expect forecast_plans_before_write O, set_updated_at O:
+--     select tgname, tgenabled::text from pg_trigger where tgrelid = ''public.forecast_plans''::regclass and not tgisinternal order by 1;
+--     -- Function: not SECURITY DEFINER, empty search_path, no client EXECUTE. Expect f, t, f, f:
+--     select p.prosecdef, p.proconfig = array[''search_path=""''],
+--            has_function_privilege(''anon'', p.oid, ''execute''), has_function_privilege(''authenticated'', p.oid, ''execute'')
+--       from pg_proc p where p.proname = ''forecast_plans_before_write'';
+--     -- The version row. Expect 1:
+--     select count(*) from supabase_migrations.schema_migrations where version = ''20261219000000'';
+--
+-- Rollback (one transaction; roll the app back first). Rolling back loses every saved plan. Production data: none needed.
+--
+--     begin;
+--     drop table if exists public.forecast_plans;   -- its triggers, policies and indexes go with it
+--     drop function if exists private.forecast_plans_before_write();
+--     delete from supabase_migrations.schema_migrations where version = ''20261219000000'';
+--     commit;
+
+create table public.forecast_plans (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces (id) on delete cascade,
+  name text not null check (pg_catalog.length(pg_catalog.btrim(name)) between 1 and 120),
+  markers jsonb not null default ''[]''
+    check (
+      pg_catalog.jsonb_typeof(markers) = ''array''
+      and pg_catalog.jsonb_array_length(markers) <= 40
+      and pg_catalog.octet_length(markers::text) <= 20000
+    ),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references auth.users (id) on delete set null default auth.uid(),
+  unique (id, workspace_id)
+);
+
+create unique index forecast_plans_workspace_name_key on public.forecast_plans (workspace_id, pg_catalog.lower(pg_catalog.btrim(name)));
+
+create trigger set_updated_at before update on public.forecast_plans
+  for each row execute function public.set_updated_at();
+
+-- Checks every writer meets, with plain messages. Security invoker: a caller who can''t edit the workspace gets a plain
+-- permission error first (a plain database connection, as in migrations and tests, has no user and is not asked).
+-- Fires only on the columns a person writes, so the foreign key''s `on delete set null` of created_by passes untouched.
+create function private.forecast_plans_before_write() returns trigger
+language plpgsql
+security invoker
+set search_path = ''''
+as $$
+declare
+  m jsonb;
+  k text;
+  d date;
+  seen text[] := ''{}'';
+  solutions integer := 0;
+  uuid_re constant text := ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'';
+begin
+  if auth.uid() is not null and not coalesce(public.can_edit_workspace(new.workspace_id), false) then
+    raise exception ''forecast_plans: you cannot edit this workspace'' using errcode = ''42501'';
+  end if;
+  if tg_op = ''INSERT'' then
+    new.created_by := coalesce(auth.uid(), new.created_by);
+    if (select pg_catalog.count(*) from public.forecast_plans p where p.workspace_id = new.workspace_id) >= 50 then
+      raise exception ''forecast_plans: a workspace keeps at most 50 plans'' using errcode = ''23514'';
+    end if;
+  elsif new.workspace_id is distinct from old.workspace_id then
+    raise exception ''forecast_plans: a plan stays in its workspace'' using errcode = ''23514'';
+  end if;
+  for m in select e.value from pg_catalog.jsonb_array_elements(new.markers) e loop
+    if pg_catalog.jsonb_typeof(m) is distinct from ''object'' then
+      raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+    end if;
+    k := m ->> ''kind'';
+    if coalesce(m ->> ''id'', '''') !~ uuid_re or (m ->> ''id'') = any (seen) then
+      raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+    end if;
+    seen := seen || (m ->> ''id'');
+    if coalesce(m ->> ''date'', '''') !~ ''^[0-9]{4}-[0-9]{2}-[0-9]{2}$'' then
+      raise exception ''forecast_plans: a marker''''s date is not valid'' using errcode = ''23514'';
+    end if;
+    begin
+      d := (m ->> ''date'')::date;
+    exception when others then
+      raise exception ''forecast_plans: a marker''''s date is not valid'' using errcode = ''23514'';
+    end;
+    if d < date ''2000-01-01'' or d > date ''2100-12-31'' then
+      raise exception ''forecast_plans: a marker''''s date is not valid'' using errcode = ''23514'';
+    end if;
+    if k in (''hire'', ''solution'') and pg_catalog.date_part(''day'', d) <> 1 then
+      raise exception ''forecast_plans: a hire or solution marker starts on the 1st of a month'' using errcode = ''23514'';
+    end if;
+    if k = ''leave'' and pg_catalog.date_part(''isodow'', d) <> 1 then
+      raise exception ''forecast_plans: leave starts on a Monday'' using errcode = ''23514'';
+    end if;
+    if k = ''hire'' then
+      if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in (''id'', ''kind'', ''date'', ''role_id'', ''fte'', ''name'')) then
+        raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+      end if;
+      if coalesce(m ->> ''role_id'', '''') !~ uuid_re
+        or not exists (select 1 from public.roles r where r.id = (m ->> ''role_id'')::uuid and r.workspace_id = new.workspace_id) then
+        raise exception ''forecast_plans: a hire needs a role of this workspace'' using errcode = ''23514'';
+      end if;
+      if pg_catalog.jsonb_typeof(m -> ''fte'') is distinct from ''number'' then
+        raise exception ''forecast_plans: a hire''''s FTE must be between 0.1 and 2'' using errcode = ''23514'';
+      end if;
+      if (m ->> ''fte'')::numeric < 0.1 or (m ->> ''fte'')::numeric > 2 then
+        raise exception ''forecast_plans: a hire''''s FTE must be between 0.1 and 2'' using errcode = ''23514'';
+      end if;
+      if m ? ''name'' then
+        if pg_catalog.jsonb_typeof(m -> ''name'') is distinct from ''string'' then
+          raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+        end if;
+        if pg_catalog.length(m ->> ''name'') > 120 then
+          raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+        end if;
+      end if;
+    elsif k = ''leave'' then
+      if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in (''id'', ''kind'', ''date'', ''person_id'', ''weeks'')) then
+        raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+      end if;
+      if coalesce(m ->> ''person_id'', '''') !~ uuid_re
+        or not exists (select 1 from public.people p where p.id = (m ->> ''person_id'')::uuid and p.workspace_id = new.workspace_id) then
+        raise exception ''forecast_plans: leave needs a person of this workspace'' using errcode = ''23514'';
+      end if;
+      if pg_catalog.jsonb_typeof(m -> ''weeks'') is distinct from ''number'' or (m ->> ''weeks'') !~ ''^[0-9]{1,2}$'' then
+        raise exception ''forecast_plans: leave lasts 1 to 52 whole weeks'' using errcode = ''23514'';
+      end if;
+      if (m ->> ''weeks'')::integer not between 1 and 52 then
+        raise exception ''forecast_plans: leave lasts 1 to 52 whole weeks'' using errcode = ''23514'';
+      end if;
+    elsif k = ''solution'' then
+      if exists (select 1 from pg_catalog.jsonb_object_keys(m) x where x not in (''id'', ''kind'', ''date'', ''solution_id'')) then
+        raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+      end if;
+      if coalesce(m ->> ''solution_id'', '''') !~ uuid_re
+        or not exists (select 1 from public.solutions s where s.id = (m ->> ''solution_id'')::uuid and s.workspace_id = new.workspace_id) then
+        raise exception ''forecast_plans: a solution marker needs a solution of this workspace'' using errcode = ''23514'';
+      end if;
+      solutions := solutions + 1;
+    else
+      raise exception ''forecast_plans: a marker is not valid'' using errcode = ''23514'';
+    end if;
+  end loop;
+  if solutions > 4 then
+    raise exception ''forecast_plans: a plan has at most 4 solutions'' using errcode = ''23514'';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function private.forecast_plans_before_write() from public, anon, authenticated;
+
+create trigger forecast_plans_before_write before insert or update of name, markers, workspace_id on public.forecast_plans
+  for each row execute function private.forecast_plans_before_write();
+
+alter table public.forecast_plans enable row level security;
+
+-- Supabase gives every new public table full privileges for anon, authenticated and service_role, so revoke first; a
+-- column grant only restricts anything once the table-level UPDATE is gone (as 20261122000000 does).
+revoke all on public.forecast_plans from anon, authenticated;
+grant select, insert, delete on public.forecast_plans to authenticated;
+grant update (name, markers) on public.forecast_plans to authenticated;
+
+-- Plans are planning by the people who run the workspace (Q1): a hypothetical leave names a person, which is per-person
+-- data members and viewers don''t see (B1). Owners, editors and agency admins read and write; nobody else reads.
+create policy "read forecast_plans" on public.forecast_plans for select to authenticated
+  using (public.can_edit_workspace(workspace_id));
+create policy "insert forecast_plans" on public.forecast_plans for insert to authenticated
+  with check (public.can_edit_workspace(workspace_id));
+create policy "update forecast_plans" on public.forecast_plans for update to authenticated
+  using (public.can_edit_workspace(workspace_id)) with check (public.can_edit_workspace(workspace_id));
+create policy "delete forecast_plans" on public.forecast_plans for delete to authenticated
+  using (public.can_edit_workspace(workspace_id));
+']);
+
 -- seed.sql
 -- Generated by `pnpm --filter @transpera-flow/db gen:seed`. Do not edit by hand.
 

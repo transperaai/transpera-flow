@@ -203,21 +203,34 @@ const busyRows = (
     .filter(([id]) => series[id]?.some((m) => m && m.p90 > 0.005) || uncovered?.[id]?.some((h) => h !== null))
     .map(([id, name]) => ({ id, name, series: series[id]!, ...(uncovered?.[id]?.some((h) => h !== null) ? { uncovered: uncovered[id]! } : {}), markers: markersOf(id) }));
 
+/** Options for a run that has a plan in it (B7). */
+export interface TimelineOptions {
+  /**
+   * The model whose people's start dates, end dates and leave are drawn as markers (default `model`). With a plan, pass the
+   * model without it, so Settings' hires and leave are drawn per row as always and the plan's are not drawn twice (the plan
+   * lane draws them).
+   */
+  markersModel?: EngineModel;
+  /** Ids of the people a plan added: their "By person" rows are named "<name> (plan)". */
+  planPeople?: ReadonlySet<string>;
+}
+
 /** Everything the timeline draws, from a month-by-month run of `model` that starts on `startDate`. */
 export function timelineData(
   model: EngineModel,
   result: SimulationResult,
   bundle: Pick<ProcessBundle, "marketSchedule" | "marketConditions" | "services" | "viewer">,
   startDate: string,
+  options: TimelineOptions = {},
 ): TimelineData | null {
   const monthly = result.monthly;
   if (!monthly) return null;
   const months = timelineMonths(startDate, monthly.months, model.hoursPerWeek);
-  const markers = plannedMarkers(model, monthly, startDate);
+  const markers = plannedMarkers(options.markersModel ?? model, monthly, startDate);
   const roleNames = Object.entries(model.roles).map(([id, r]): [string, string] => [id, r.name]);
   // A member or viewer sees their own person's row only (B1 2b); the roles and the clients stay.
   const people = ownRowsOnly(viewerOf(bundle), Object.entries(result.resolvedPeople), ([id]) => id)
-    .map(([id, p]): [string, string] => [id, p.name])
+    .map(([id, p]): [string, string] => [id, options.planPeople?.has(id) ? `${p.name} (plan)` : p.name])
     .sort((a, b) => a[1].localeCompare(b[1]));
   const serviceName = new Map(bundle.services.map((s) => [s.id, s.name]));
   return {

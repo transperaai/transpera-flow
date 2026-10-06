@@ -16,7 +16,7 @@
 // from the run. Where a what-if would test the obvious fix, the issue carries
 // it as scenario patches (`fix`), which the app can run and compare.
 
-import { eligible, type AbsenceTest } from "./absence";
+import { eligible, type AbsenceFinding, type AbsenceTest } from "./absence";
 import type { EngineModel, EngineStep, SimulationResult } from "./model";
 import { pct as percentile } from "./simulate";
 import { checkSuccessMeasures, NO_SUCCESS_MEASURES, type SuccessMeasureSource } from "./success";
@@ -141,6 +141,24 @@ export interface DetectOptions {
    * until A54 stores first principles, so nothing is rated.
    */
   successMeasures?: SuccessMeasureSource;
+}
+
+/**
+ * Rule 8's rating of one absence result (docs/analysis-rules.md, "Only one person can do it"): the worse of the work lost
+ * (the rule's cut-offs for this subject) and the weeks to recover (`config.absence.recoveryCutoffs`); Operational risk
+ * when the queues never got back to normal within the run, or a client deadline is missed. Null when the rule is
+ * switched off for this subject. `detectIssues` raises nothing for a Great.
+ */
+export function absenceRating(config: RatingConfig, finding: AbsenceFinding, subject: RatingSubject): Rating | null {
+  const resolved = resolveRule(config, "spof", subject);
+  if (!resolved.enabled) return null;
+  const lost = rateRule(config, "spof", resolved, { average: finding.workLost });
+  // A queue that never got back to normal is Operational risk whatever the run's length: on a short run it is "not within the weeks we could see".
+  const recovery = finding.recovered
+    ? rateValue(config.absence.recoveryCutoffs, { average: finding.recoveryWeeks }, { upperInclusive: true, badMonth: false, bottleneck: false }).rating
+    : "risk";
+  const rating = worseRating(lost.rating, recovery);
+  return finding.clientDeadlineMissed ? "risk" : rating;
 }
 
 /**
@@ -596,13 +614,8 @@ export function detectIssues(
       const subject: RatingSubject = { stepId: s.id, roleId: main, personId: named ? f.personId : null, ...stepContext(s.id) };
       const resolved = resolveRule(config, "spof", subject);
       if (!resolved.enabled) continue;
-      const lost = rateRule(config, "spof", resolved, { average: f.workLost });
-      // A queue that never got back to normal is Operational risk whatever the run's length: on a short run it is "not within the weeks we could see".
-      const recovery = f.recovered
-        ? rateValue(config.absence.recoveryCutoffs, { average: f.recoveryWeeks }, { upperInclusive: true, badMonth: false, bottleneck: false }).rating
-        : "risk";
-      let rating = worseRating(lost.rating, recovery);
-      if (f.clientDeadlineMissed) rating = "risk";
+      const rating = absenceRating(config, f, subject);
+      if (rating === null) continue;
       if (rating === "great") continue;
       const away = options.absence!.weeksAway;
       const others = soleSteps.filter((o) => o.id !== s.id).map((o) => o.name);

@@ -81,3 +81,28 @@ assessment of what is actually wrong, and he wants to add his own findings.
   while the run still finds it). Unacknowledged rule insights are not converted: they are the facts now.
 - AI findings carry no cost per month of their own (a finding is a judgement); the facts it cites show theirs.
 - An analysis runs only when someone asks, so a page can show an out-of-date analysis until someone does.
+
+**Connector proposals (B20, #197, migration 20261212000000).** Claude outside the app may propose a finding with the
+MCP tool `propose_finding` (Austin, 6 Oct 2026, question 3 on #175): it arrives in the same review list as the app's AI
+findings, and an owner or editor accepts, edits or dismisses it in the app. Nothing over the connector can accept,
+dismiss or edit.
+- **Storage.** A connector proposal is an AI finding (`origin = 'ai'`, `status = 'proposed'`, no analysis or run) with
+  `findings.proposed_via = 'connector'`. The trigger stamps `proposed_via` from the request's JWT claims (an API token's
+  request carries `api_token_id`), never from what the client sent; it never changes. `created_by` and `created_at`
+  record who and when; the token itself is not stored.
+- **A token can only propose.** Over an API token the trigger lets an insert through only as a proposed AI finding with no
+  analysis or run, and refuses every update (`pg_trigger_depth() = 1`, so foreign-key actions still pass). A token
+  therefore can't add a finding by hand (born accepted), can't write an analysis-backed AI finding, and can't accept or
+  dismiss anything, even straight against PostgREST. The role rule needs no new code: `insert findings` is
+  `can_edit_workspace`, so members, viewers and strangers are refused.
+- **Key and caps.** The trigger sets the key `ai:connector:<sha256 of place and lower-cased, space-squeezed title>`, so
+  the unique index refuses the same proposal twice, including after a person dismissed it (their decision stands). At most
+  100 connector proposals per workspace in 24 hours and 50 waiting for review (error 54000, `rate_limited` in the tool).
+- **Privacy (#30).** Stored text holds labels, not names (`labelNames` and `person_labels`, as in B1 2b); each reader gets
+  the names they may see. The cited facts are recomputed from the pay-free model, so they hold no pay; a money figure in
+  Claude's own words is refused unless a cited fact states it. The tool refuses text that already holds a "Team member"
+  label.
+- **Evidence.** A proposal must cite at least one fact key of the live run (checked against a fresh run), or a source of
+  the same workspace (a quote must be a passage of its source, word for word).
+- **In the app.** The review list marks it "From Claude (connector)" with the date, and the finding lists name its source
+  "Claude (connector)" (or "Claude (connector), edited"). A later in-app analysis never supersedes it.

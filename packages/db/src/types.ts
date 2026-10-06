@@ -529,6 +529,8 @@ export interface FindingRow {
   analysis_id: string | null;
   /** The run that last proposed it (analyses are kept one per version; each run has its own id). */
   run_id: string | null;
+  /** 'connector' when Claude proposed it over the MCP connector (B20); null otherwise. Set by the database. */
+  proposed_via: "connector" | null;
   /** An AI finding a person has changed (set by the database only): its words are no longer only AI's. */
   edited: boolean;
   created_by: string | null;
@@ -851,6 +853,29 @@ export interface SolutionRow {
   created_by: string | null;
 }
 
+/**
+ * One marker of a forecast plan (B7, #36). Dates are absolute ISO dates, never month offsets. The ids are checked at write
+ * time but are not foreign keys: a role, person or solution deleted later leaves its marker "needs attention" in the app.
+ */
+export type ForecastPlanMarker =
+  /** A new person in a role from `date` (the 1st of a month). `fte` 0.1-2. `name` optional; the app shows "New <role>". */
+  | { id: string; kind: "hire"; date: string; role_id: string; fte: number; name?: string }
+  /** An existing person away for `weeks` whole weeks from `date` (a Monday). */
+  | { id: string; kind: "leave"; date: string; person_id: string; weeks: number }
+  /** A saved solution live from `date` (the 1st of a month). */
+  | { id: string; kind: "solution"; date: string; solution_id: string };
+
+/** A named set of forecast markers: hires, leave and solutions going live. It never changes the live model. */
+export interface ForecastPlanRow {
+  id: string;
+  workspace_id: string;
+  name: string;
+  markers: ForecastPlanMarker[];
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+}
+
 /** One issue a solution solves: the automatic verdict against the issue's target, and the user's own. */
 export interface SolutionIssueRow {
   solution_id: string;
@@ -1149,8 +1174,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<FirstPrinciplesRow, "first_principles">>,
   Assert<Matches<AiSettingsRow, "ai_settings">>,
   Assert<Matches<AiAnalysisRow, "ai_analyses">>,
-  // origin, status, rating and type are check-constrained.
-  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type">, "findings">>,
+  // origin, status, rating, type and proposed_via are check-constrained.
+  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type" | "proposed_via">, "findings">>,
   // trigger is check-constrained to the three triggers.
   Assert<Matches<Omit<AiRunRow, "trigger">, "ai_runs">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.
@@ -1179,6 +1204,8 @@ export type _SchemaDriftChecks = [
   // steps, changed_step_ids and lever_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
   Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes">, "solutions">>,
   Assert<Matches<Omit<SolutionIssueRow, "auto_verdict" | "user_verdict">, "solution_issues">>,
+  // markers is jsonb; ForecastPlanRow has its checked shape.
+  Assert<Matches<Omit<ForecastPlanRow, "markers">, "forecast_plans">>,
   // patch, evidence and applied are jsonb; the check constraints limit the text columns.
   Assert<Matches<Omit<SuggestionRow, "patch" | "evidence" | "applied">, "suggestions">>,
   // payload, evidence and applied are jsonb; the check constraints limit the text columns.
