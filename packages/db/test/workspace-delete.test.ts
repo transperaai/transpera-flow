@@ -2,6 +2,7 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID, northbeamPersonIds, northbeamRoleIds, northbeamStepIds } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
+import { headerRollback } from "./header-rollback";
 
 // Deleting a workspace takes everything in it (bug found while scoping B21: every workspace delete failed on
 // `steps_role_id_workspace_id_fkey`). Migration 20261222000000_workspace_delete_cascade.
@@ -9,6 +10,7 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 let db: TestDb;
 const ws = NORTHBEAM_WORKSPACE_ID;
 const sam = northbeamPersonIds["Sam Patel"]!;
+const MIGRATION = "20261222000000_workspace_delete_cascade.sql";
 
 beforeAll(async () => {
   db = await createTestDb();
@@ -18,12 +20,15 @@ afterAll(async () => {
   await db?.close();
 });
 
-/** Every public table with a `workspace_id` column, and how many of its rows belong to `workspace`. */
+/**
+ * Every public table with a `workspace_id` column, and how many of its rows belong to `workspace`. `audit_log` is left out: it
+ * is history, has no foreign key, and keeps its entries (including the delete's own) after the workspace goes.
+ */
 async function leftovers(c: pg.Client, workspace: string) {
   const tables = (
     await c.query(
       `select c.table_name from information_schema.columns c join information_schema.tables t using (table_schema, table_name)
-       where c.table_schema = 'public' and c.column_name = 'workspace_id' and t.table_type = 'BASE TABLE' order by 1`,
+       where c.table_schema = 'public' and c.column_name = 'workspace_id' and t.table_type = 'BASE TABLE' and c.table_name <> 'audit_log' order by 1`,
     )
   ).rows.map((r) => r.table_name as string);
   expect(tables.length).toBeGreaterThan(40);
@@ -83,5 +88,86 @@ describe("deleting a workspace", () => {
     expect(await leftovers(db.client, other)).toEqual({});
     // Northbeam is untouched.
     expect((await db.client.query("select count(*)::int as n from steps where workspace_id = $1", [ws])).rows[0].n).toBeGreaterThan(0);
+  });
+});
+
+/** Run `fn` in a transaction as the superuser, and roll it back. */
+async function rolledBack(fn: (c: pg.Client) => Promise<void>) {
+  await db.client.query("begin");
+  try {
+    await fn(db.client);
+  } finally {
+    await db.client.query("rollback");
+  }
+}
+
+const stepsNaming = async (c: pg.Client, column: "role_id" | "person_id", id: string) =>
+  (await c.query(`select count(*)::int as n from steps where ${column} = $1`, [id])).rows[0].n as number;
+
+describe("deleting one role or person keeps its guards", () => {
+  it("an unused role is deleted", async () => {
+    await rolledBack(async (c) => {
+      const id = (await c.query("insert into roles (workspace_id, name) values ($1, 'Spare') returning id", [ws])).rows[0].id;
+      expect((await c.query("delete from roles where id = $1", [id])).rowCount).toBe(1);
+      await c.query("set constraints all immediate");
+    });
+  });
+
+  it("a role a step uses is refused at once by the in_use trigger, and the step keeps it", async () => {
+    const role = northbeamRoleIds.seo;
+    const before = await stepsNaming(db.client, "role_id", role);
+    expect(before).toBeGreaterThan(0);
+    await expect(db.client.query("delete from roles where id = $1", [role])).rejects.toMatchObject({ code: "23503", message: expect.stringMatching(/still used by steps/) });
+    expect(await stepsNaming(db.client, "role_id", role)).toBe(before);
+  });
+
+  it("with in_use bypassed, the foreign key still refuses a role a step uses (at commit)", async () => {
+    await rolledBack(async (c) => {
+      await c.query("alter table roles disable trigger in_use");
+      expect((await c.query("delete from roles where id = $1", [northbeamRoleIds.seo])).rowCount).toBe(1);
+      await expect(c.query("set constraints all immediate")).rejects.toMatchObject({ code: "23503", constraint: "steps_role_id_workspace_id_fkey" });
+    });
+  });
+
+  it("a person a step names is still refused, at commit, and the step keeps them", async () => {
+    expect(await stepsNaming(db.client, "person_id", sam)).toBe(1);
+    await expect(db.client.query("delete from people where id = $1", [sam])).rejects.toMatchObject({ code: "23503", constraint: "steps_person_id_workspace_id_fkey" });
+    expect((await db.client.query("select count(*)::int as n from people where id = $1", [sam])).rows[0].n).toBe(1);
+    expect(await stepsNaming(db.client, "person_id", sam)).toBe(1);
+  });
+
+  it("the two constraints are deferred, still NO ACTION and validated; the other two NO ACTION ones stay immediate", async () => {
+    const rows = (
+      await db.client.query(
+        `select conname, confdeltype, condeferrable, condeferred, convalidated from pg_constraint
+         where contype = 'f' and confdeltype in ('a', 'r') and connamespace = 'public'::regnamespace order by 1`,
+      )
+    ).rows;
+    expect(rows).toEqual([
+      { conname: "market_schedule_condition_id_workspace_id_fkey", confdeltype: "a", condeferrable: false, condeferred: false, convalidated: true },
+      { conname: "solutions_base_revision_id_process_id_workspace_id_fkey", confdeltype: "a", condeferrable: false, condeferred: false, convalidated: true },
+      { conname: "steps_person_id_workspace_id_fkey", confdeltype: "a", condeferrable: true, condeferred: true, convalidated: true },
+      { conname: "steps_role_id_workspace_id_fkey", confdeltype: "a", condeferrable: true, condeferred: true, convalidated: true },
+    ]);
+  });
+});
+
+describe("the header", () => {
+  it("rolls back: both constraints immediate again, and the workspace delete fails as before", async () => {
+    // The ledger line needs Supabase's schema_migrations, which the plain database doesn't have.
+    const sql = headerRollback(MIGRATION)
+      .replace(/^begin;$/m, "")
+      .replace(/^commit;$/m, "")
+      .replace("delete from supabase_migrations.schema_migrations where version = '20261222000000';", "");
+    await rolledBack(async (c) => {
+      await c.query(sql);
+      const flags = (
+        await c.query(
+          "select bool_or(condeferrable) as d from pg_constraint where conname in ('steps_role_id_workspace_id_fkey', 'steps_person_id_workspace_id_fkey')",
+        )
+      ).rows[0].d;
+      expect(flags).toBe(false);
+      await expect(c.query("delete from workspaces where id = $1", [ws])).rejects.toMatchObject({ code: "23503" });
+    });
   });
 });
