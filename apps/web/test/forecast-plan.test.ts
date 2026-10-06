@@ -305,6 +305,23 @@ describe("spliceMonthly", () => {
     expect(down.clients.svc!.every((x) => x.p10 >= 0)).toBe(true);
   });
 
+  it("keeps p10 <= mean <= p90 across a splice, including in a month where the floor at 0 applies", () => {
+    const a = fake(4, 0.5, 5, 100, { clients: { svc: Array.from({ length: 4 }, () => stat(5, 1)) } });
+    // The solution's run is 4 clients higher at the month before, then falls to a wide range near 2.
+    const b = fake(4, 0.5, 9, 100, { clients: { svc: [stat(9, 1), stat(9, 1), stat(2, 3), stat(6, 1)] } });
+    const s = spliceMonthly([{ from: 0, monthly: a }, { from: 2, monthly: b }]);
+    // Offset is 5 - 9 = -4: month 2 is mean -2, p10 -5, p90 1 before the floor; month 3 is 2 / 1 / 3.
+    expect(s.clients.svc![2]).toEqual({ mean: 0, p10: 0, p90: 1 });
+    expect(s.clients.svc![3]).toEqual({ mean: 2, p10: 1, p90: 3 });
+    for (const series of [s.clients.svc!, s.mrr, s.atRisk.svc!]) {
+      for (const x of series) {
+        expect(x.p10).toBeLessThanOrEqual(x.mean);
+        expect(x.mean).toBeLessThanOrEqual(x.p90);
+        expect(x.p10).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
   it("counts a key missing on either side as 0 and keeps the union of keys", () => {
     const a = fake(4, 0.5, 10, 100);
     const b = fake(4, 0.7, 10, 100, { clients: { other: [stat(5), stat(5), stat(5), stat(5)] }, roles: { r2: Array.from({ length: 4 }, () => busy(0.7)) }, atRisk: {} });

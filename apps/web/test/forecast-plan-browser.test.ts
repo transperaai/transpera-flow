@@ -29,7 +29,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(width: number, mode: "demo" | "readonly" = "demo", url?: string): Promise<{ page: Page; errors: string[] }> {
+async function mount(width: number, mode: "demo" | "readonly" = "demo", url?: string, broken = false, many = false): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 1000 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -37,7 +37,7 @@ async function mount(width: number, mode: "demo" | "readonly" = "demo", url?: st
   await page.setContent(`<style>${CSS}</style><div id="root"></div>`);
   await page.evaluate((w) => (window.workerScripts = w), workers);
   await page.addScriptTag({ content: script });
-  await page.evaluate((o) => window.mountForecast(o), { mode, url });
+  await page.evaluate((o) => window.mountForecast(o), { mode, url, broken, many });
   try {
     await page.waitForSelector("[data-forecast-timeline]", { timeout: 90_000 });
   } catch (e) {
@@ -191,6 +191,26 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
+      it("ignores a release over another month after Escape: nothing moves and no dialog opens", async () => {
+        const { page, errors } = await mount(width);
+        await addHire(page);
+        await waitRuns(page, 1);
+        const m = marker(page, "hire");
+        const before = await valuetext(m);
+        await dragTo(page, m, 8, { release: false });
+        await page.keyboard.press("Escape");
+        // Back over a different month than the marker's own, then let go.
+        const svg = (await page.locator(`${TIMELINE} > svg`).boundingBox())!;
+        await page.mouse.move(svg.x + svg.width * 0.7, (await m.boundingBox())!.y + 10);
+        await page.mouse.up();
+        expect(await page.locator("[data-plan-dialog]").count()).toBe(0);
+        expect(await valuetext(m)).toBe(before);
+        await page.waitForTimeout(600);
+        expect(await runs(page)).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
       it("adds leave as a bar that moves by whole weeks, always to a Monday", async () => {
         const { page, errors } = await mount(width);
         await addFromMenu(page, "Add leave");
@@ -269,6 +289,45 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.locator("[data-plan-confirm] button", { hasText: "Delete" }).click();
         await page.waitForFunction(() => !document.querySelector("[data-plan-select]")?.textContent?.includes("Hire early"));
         expect(await options()).toEqual(["No changes", "Hire in March"]);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("runs a plan's segments once and reuses the ones a change leaves alone", async () => {
+        const { page, errors } = await mount(width, "demo", undefined, false, true);
+        const simRuns = () => page.evaluate(() => window.__simRuns ?? 0);
+        const before = await simRuns();
+        await page.locator("[data-plan-select]").selectOption({ label: "Many runs" });
+        await waitRuns(page, 1);
+        // Four go-live months: five runs, one for each.
+        expect((await simRuns()) - before).toBe(5);
+        const m = page.locator("[data-plan-marker]").last();
+        await m.focus();
+        await page.keyboard.press("ArrowRight");
+        await waitRuns(page, 2);
+        // The last solution moved a month: every segment's model is the same as before, so nothing runs again.
+        expect((await simRuns()) - before).toBe(5);
+        // Moving the first one changes what the later segments have live: only those whose models changed run.
+        await page.locator("[data-plan-marker]").first().focus();
+        await page.keyboard.press("ArrowRight");
+        await waitRuns(page, 3);
+        expect((await simRuns()) - before).toBeLessThan(10);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows the failure, not the previous plan's numbers, when a plan can't be run", async () => {
+        const { page, errors } = await mount(width, "demo", undefined, true);
+        const select = page.locator("[data-plan-select]");
+        const live = await busyCell(page, "PPC specialist", "February 2027");
+        await select.selectOption({ label: "Hire in January" });
+        await waitRuns(page, 1);
+        expect(await busyCell(page, "PPC specialist", "February 2027")).toBeLessThan(live);
+        await select.selectOption({ label: "Broken plan" });
+        await page.waitForFunction(() => document.querySelector("[data-forecast-timeline]")?.getAttribute("data-plan-status") === "error");
+        expect(await page.locator("[data-with-this-plan]").innerText()).toContain("couldn't be worked out");
+        // The chart is the live forecast's again: nothing of the January plan is left on it.
+        expect(await busyCell(page, "PPC specialist", "February 2027")).toBe(live);
         expect(errors).toEqual([]);
         await page.close();
       });

@@ -14,7 +14,19 @@ import { planSegments, type MarkerProblem } from "./plan";
 import { monthBounds } from "./positions";
 import { spliceMonthly } from "./splice";
 
-const DEBOUNCE_MS = 40;
+/** Re-runs wait this long after the last change, so a key held down or markers moved one after another run once. */
+const DEBOUNCE_MS = 150;
+/** The most workers a plan's runs are spread over. */
+const POOL_SIZE = 3;
+/** Finished segment runs, by what they were run from, kept so a change that leaves a segment's model alone doesn't run it again. */
+const CACHE_LIMIT = 24;
+const segmentCache = new Map<string, SimulationResult>();
+const cacheKey = (model: EngineModel, monthStarts: readonly number[]) => `${JSON.stringify(model)}|${monthStarts.join(",")}|${REPS}|${SEED}`;
+function remember(key: string, result: SimulationResult) {
+  segmentCache.delete(key);
+  segmentCache.set(key, result);
+  while (segmentCache.size > CACHE_LIMIT) segmentCache.delete(segmentCache.keys().next().value!);
+}
 const REPS = 30;
 const SEED = 1;
 
@@ -97,7 +109,7 @@ export function usePlanForecast({
     };
   }, [bundle, markers, solutions, months, startDate]);
 
-  const clientRef = useRef<SimulationClient | null>(null);
+  const poolRef = useRef<SimulationClient[]>([]);
   const [state, setState] = useState<{ status: PlanForecast["status"]; run: PlanRun | null; error: string | null; progress: [number, number]; finished: number }>({
     status: "idle",
     run: null,
@@ -107,16 +119,18 @@ export function usePlanForecast({
   });
 
   useEffect(() => {
-    const client = new SimulationClient(
-      () => new Worker(new URL("../../workers/simulate.worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike,
+    // Workers start when a client first runs something, so a page with no plan costs none.
+    const pool = Array.from(
+      { length: POOL_SIZE },
+      () => new SimulationClient(() => new Worker(new URL("../../workers/simulate.worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike),
     );
-    clientRef.current = client;
-    return () => client.dispose();
+    poolRef.current = pool;
+    return () => pool.forEach((c) => c.dispose());
   }, []);
 
   useEffect(() => {
     if (!prepared) {
-      clientRef.current?.cancel();
+      poolRef.current.forEach((c) => c.cancel());
       setState((s) => (s.status === "idle" && !s.run ? s : { ...s, status: "idle", run: null, error: null, progress: [0, 0] }));
       return;
     }
@@ -129,13 +143,30 @@ export function usePlanForecast({
     const timer = setTimeout(async () => {
       setState((s) => ({ ...s, status: "running", error: null, progress: [0, total] }));
       try {
-        const runs: { from: number; result: SimulationResult }[] = [];
-        for (const seg of prepared.segments) {
-          const run = await clientRef.current!.run(seg.model, { reps: REPS, seed: SEED, monthly: true, monthStarts: prepared.monthStarts });
+        const results: SimulationResult[] = new Array<SimulationResult>(total);
+        let finishedRuns = 0;
+        const one = async (i: number, client: SimulationClient) => {
+          const seg = prepared.segments[i]!;
+          const key = cacheKey(seg.model, prepared.monthStarts);
+          let result = segmentCache.get(key);
+          if (result) remember(key, result);
+          else {
+            result = (await client.run(seg.model, { reps: REPS, seed: SEED, monthly: true, monthStarts: prepared.monthStarts })).result;
+            remember(key, result);
+          }
           if (!active) return;
-          runs.push({ from: seg.from, result: run.result });
-          setState((s) => ({ ...s, progress: [runs.length, total] }));
-        }
+          results[i] = result;
+          setState((s) => ({ ...s, progress: [++finishedRuns, total] }));
+        };
+        // Each worker takes every POOL_SIZE-th segment, one after another; the workers run side by side.
+        const workers = Math.min(POOL_SIZE, total);
+        await Promise.all(
+          Array.from({ length: workers }, async (_, w) => {
+            for (let i = w; i < total && active; i += workers) await one(i, poolRef.current[w]!);
+          }),
+        );
+        if (!active) return;
+        const runs = prepared.segments.map((seg, i) => ({ from: seg.from, result: results[i]! }));
         const first = runs[0]!.result;
         const monthly = spliceMonthly(runs.map((r) => ({ from: r.from, monthly: r.result.monthly! })));
         const run: PlanRun = { model: prepared.segments[0]!.model, result: { ...first, monthly }, markersModel: prepared.markersModel, planPeople: prepared.planPeople };
@@ -147,9 +178,13 @@ export function usePlanForecast({
     return () => {
       active = false;
       clearTimeout(timer);
+      // A newer input cancels what is running: its results are dropped.
+      poolRef.current.forEach((c) => c.cancel());
     };
   }, [prepared]);
 
   if (!prepared) return IDLE;
-  return { status: state.status === "idle" ? "running" : state.status, run: state.run, problems: prepared.problems, later: prepared.later, error: state.error, progress: state.progress, finished: state.finished };
+  // A plan that fails has no numbers: the page shows the failure, never the previous plan's numbers under this plan's name.
+  const status = prepared.error !== null ? "error" : state.status === "idle" ? "running" : state.status;
+  return { status, run: status === "error" ? null : state.run, problems: prepared.problems, later: prepared.later, error: prepared.error ?? state.error, progress: state.progress, finished: state.finished };
 }
