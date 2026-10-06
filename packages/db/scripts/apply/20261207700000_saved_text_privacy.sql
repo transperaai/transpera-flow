@@ -1,10 +1,12 @@
 -- Production apply file for 20261207700000_saved_text_privacy (B1 part 2 of 3, slice 2b, issue #30). Two new columns
 -- (`ai_analyses.person_labels`, `findings.person_labels`), a one-off clean-up of saved text (every issue loses the overtime money
 -- clause and `overtime_cost`; every AI analysis, of any revision, and every AI finding loses the clause and gets "Team member N"
--- labels where full names were, with the labels written to `person_labels`), and three temporary helper functions that are
--- dropped again; applies after row 55 (20261207500000, B1 2a); this is row 56. Preflight, post-apply checks and rollback are in
--- the migration's own header, repeated below. Apply BEFORE deploying the app (the app selects `person_labels`), and deploy
--- straight after. Sets `lock_timeout` to 5 s: each `disable trigger` takes a brief lock on its table.
+-- labels where full names were, with the labels written to `person_labels`), a re-keying so no key holds a name (every AI
+-- finding's `ai_key`, every `ai:insight:` issue key with its source links, and each saved insight's key become ids), and four
+-- temporary helper functions that are dropped again; applies after row 55 (20261207500000, B1 2a); this is row 56. Preflight,
+-- post-apply checks and rollback are in the migration's own header, repeated below. Apply BEFORE deploying the app (the app
+-- selects `person_labels`), deploy straight after, and run post-apply check 7 before the deploy. Sets `lock_timeout` to 5 s:
+-- each `disable trigger` takes a brief lock on its table.
 
 begin;
 set local lock_timeout = '5s';
@@ -61,6 +63,8 @@ set local lock_timeout = '5s';
 --     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
 --     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
 --     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
+--   * An `insight` source link whose insight nobody acknowledged is not re-pointed at anything: it gets `ai:insight:<link id>`,
+--     which matches no insight, so the link is orphaned (it holds no name, and can be deleted).
 --   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
 --     check 4.
 --
@@ -135,7 +139,8 @@ set local lock_timeout = '5s';
 --                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
---   7. No key is derived from a name any more. Expect 0, 0, 0, 0:
+--   7. No key is derived from a name any more. Run it BEFORE deploying the app (an analysis run by the new app writes
+--      hashed keys of the labelled title, which this check reads as names; so it only holds until the deploy). Expect 0, 0, 0, 0:
 --        select (select count(*) from public.findings where origin = 'ai' and ai_key <> 'ai:insight:' || id),
 --               (select count(*) from public.issues where detected_key like 'ai:insight:%' and detected_key <> 'ai:insight:' || id),
 --               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%'
@@ -369,6 +374,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
 --     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
 --     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
+--   * An `insight` source link whose insight nobody acknowledged is not re-pointed at anything: it gets `ai:insight:<link id>`,
+--     which matches no insight, so the link is orphaned (it holds no name, and can be deleted).
 --   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
 --     check 4.
 --
@@ -443,7 +450,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
---   7. No key is derived from a name any more. Expect 0, 0, 0, 0:
+--   7. No key is derived from a name any more. Run it BEFORE deploying the app (an analysis run by the new app writes
+--      hashed keys of the labelled title, which this check reads as names; so it only holds until the deploy). Expect 0, 0, 0, 0:
 --        select (select count(*) from public.findings where origin = 'ai' and ai_key <> 'ai:insight:' || id),
 --               (select count(*) from public.issues where detected_key like 'ai:insight:%' and detected_key <> 'ai:insight:' || id),
 --               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%'

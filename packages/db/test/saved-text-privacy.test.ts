@@ -278,8 +278,9 @@ describe("saved AI text", () => {
 
   it("has a post-apply check 7 that finds no name-derived key left, and sees one that is", async () => {
     const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
-    const lines = header.split("--   7. No key is derived from a name any more.")[1]!.split("\n").slice(1);
-    const sql = lines.slice(0, lines.findIndex((l) => !l.startsWith("--        "))).map((l) => l.replace(/^--        /, "")).join("\n");
+    const lines = header.split("--   7. No key is derived from a name any more.")[1]!.split("\n");
+    const from = lines.slice(lines.findIndex((l) => l.startsWith("--        select")));
+    const sql = from.slice(0, from.findIndex((l) => !l.startsWith("--        "))).map((l) => l.replace(/^--        /, "")).join("\n");
     const counts = async () => (await client.query({ text: sql, rowMode: "array" })).rows[0]!.map(Number);
     expect(await counts()).toEqual([0, 0, 0, 0]);
     await client.query("begin");
@@ -327,7 +328,7 @@ describe("saved AI text", () => {
 });
 
 describe("the migration", () => {
-  it("drops its three helper functions", async () => {
+  it("drops its four helper functions", async () => {
     const r = await one(
       "select to_regprocedure('private.b1_2b_relabel(text, uuid)') as a, to_regprocedure('private.b1_2b_labels(text, uuid)') as b, to_regprocedure('private.b1_2b_people(uuid)') as c, to_regprocedure('private.b1_2b_rekey(jsonb, uuid)') as d",
       [],
@@ -367,10 +368,10 @@ describe("the migration", () => {
     }
   });
 
-  it("defaults person_labels to an empty object, and runs a second time without changing anything", async () => {
+  it("defaults person_labels to an empty object, and leaves no issue holding the clause or the metric", async () => {
     expect((await one("select person_labels from findings where id = $1", [handFinding])).person_labels).toEqual({});
-    // The clean-up is not meant to run twice, but what it matched is gone: its patterns find nothing more in the issues.
-    const left = await one("select count(*)::int as n from issues where detected_key like 'overtime:%' and (evidence_metrics ? 'overtime_cost' or evidence ~ ', costing about')", []);
+    // What the clean-up matched is gone: its patterns find nothing more in the issues.
+    const left = await one("select count(*)::int as n from issues where (evidence_metrics ? 'overtime_cost' or evidence ~ ', costing about')", []);
     expect(left.n).toBe(0);
   });
 

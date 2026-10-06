@@ -50,6 +50,8 @@
 --     the whole company (every stored analysis reads as out of date anyway, from the prompt-version bump). That replaces the
 --     analysis of LIVE revisions only, and members can read analyses of earlier revisions: for those, and for findings
 --     already accepted, an editor should read the accepted AI findings and dismiss or edit any that quote overtime money.
+--   * An `insight` source link whose insight nobody acknowledged is not re-pointed at anything: it gets `ai:insight:<link id>`,
+--     which matches no insight, so the link is orphaned (it holds no name, and can be deleted).
 --   * Analyses run between apply and deploy (old app) keep real names. Deploy straight after apply, then re-run post-apply
 --     check 4.
 --
@@ -124,7 +126,8 @@
 --                      ~ ('(?:(?<![[:alnum:]_])|(?<=\\[nrtbf]))' || regexp_replace(btrim(p.name), '([.^$*+?(){}|\[\]\\-])', '\\\1', 'g') || '(?![[:alnum:]_])'));
 --   5. For the log: select count(*) from public.ai_analyses where person_labels <> '{}';  and the same for public.findings.
 --   6. The schema_migrations row is present.
---   7. No key is derived from a name any more. Expect 0, 0, 0, 0:
+--   7. No key is derived from a name any more. Run it BEFORE deploying the app (an analysis run by the new app writes
+--      hashed keys of the labelled title, which this check reads as names; so it only holds until the deploy). Expect 0, 0, 0, 0:
 --        select (select count(*) from public.findings where origin = 'ai' and ai_key <> 'ai:insight:' || id),
 --               (select count(*) from public.issues where detected_key like 'ai:insight:%' and detected_key <> 'ai:insight:' || id),
 --               (select count(*) from public.source_links where kind = 'insight' and insight_key like 'ai:insight:%'

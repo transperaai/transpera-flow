@@ -1231,6 +1231,8 @@ Preflight 6 checks the jsonb columns have room.
   holds a name. Accepted: a finding proposed before may be proposed once more, and pre-B17 insights lose their acknowledged
   link. The read-time masking (`hideAiIssueKey`, opaque `ai_key` in `nameFinding`, opaque insight keys in `nameAnalysisRow`) is
   kept as defence in depth: an old app run between apply and deploy, and a restored old backup, can still write hashed keys.
+- Post-apply check 7 (no name-derived key left) is run BEFORE deploying the app: a new analysis writes hashed keys of the
+  labelled title, which it reads as names. An `insight` source link nobody acknowledged is orphaned by the re-key (accepted).
 - Preflight 3, preflight 4 and the post-apply checks cover the wider clean-up.
 
 **Accepted limits (in the header and the PR):**
