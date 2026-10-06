@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { simulate } from "@transpera-flow/engine";
+import { timeSplitOf, workingShare } from "../../../apps/web/src/lib/overview/time-split";
 import type pg from "pg";
 import {
   BUNDLE_TABLES,
@@ -208,7 +209,7 @@ describe("a restore is a round trip", () => {
     ["Northbeam", NORTHBEAM_WORKSPACE_ID],
     ["Larkspur", LARKSPUR_WORKSPACE_ID],
   ])("%s", (_name, source) => {
-    it("is restored, published, and simulates to the same numbers at seed 42", async () => {
+    it("is restored, published, and simulates to the same model and headline results within run-to-run variation", async () => {
       const bundle = await bundleOf(source);
       const check = checkWorkspaceBundle(bundle);
       expect(check.errors).toEqual([]);
@@ -243,9 +244,35 @@ describe("a restore is a round trip", () => {
       const modelBefore = toEngineModel(before, opts);
       const modelAfter = JSON.parse(backToOld(toEngineModel(after, opts), restored, ws, planned.placeholderOf, source));
       expect(modelAfter).toEqual(JSON.parse(JSON.stringify(modelBefore)));
-      const runBefore = simulate(modelBefore, 30, 42);
-      const runAfter = JSON.parse(backToOld(simulate(toEngineModel(after, opts), 30, 42), restored, ws, planned.placeholderOf, source));
-      expect(runAfter).toEqual(JSON.parse(JSON.stringify(runBefore)));
+      // (2) Headline results. The engine seeds its random streams by hashing step, service and client ids into their labels
+      // (packages/engine/src/simulate.ts, `streams.get(labels.join("work", s.id))`), so a restore, whose ids are all new, draws
+      // different random numbers at the same seed. What must hold is that the restored run is within ordinary run-to-run variation
+      // (decision recorded on #39): |restored@42 - source@42| <= 3 x spread, per headline metric the Overview shows, where the
+      // spread is how far the SOURCE moves when only the seed changes. One other seed (43) estimates that from a single pair and
+      // was too noisy (3 x a lucky small gap failed a faithful restore), so the source is run at 43 to 46 and the spread is the
+      // largest |source@seed - source@42|. A small absolute floor (1% of the source's value, or 0.01) stops a zero spread making
+      // the check impossible.
+      const modelAfterNew = toEngineModel(after, opts);
+      const src42 = simulate(modelBefore, 30, 42);
+      const others = [43, 44, 45, 46].map((seed) => simulate(modelBefore, 30, seed));
+      const res42 = simulate(modelAfterNew, 30, 42);
+      const headline = (m: typeof modelBefore, r: ReturnType<typeof simulate>) => ({
+        flowEfficiency: workingShare(timeSplitOf(m, r) ?? { handsOn: 0, waitingForPerson: 0, waitingOnOthers: 0 }) ?? 0,
+        throughputDone: r.kpi.done.mean,
+        throughputWon: r.kpi.won.mean,
+        leadTime: r.kpi.cycle.mean,
+        costPerWin: r.kpi.costPerWin.mean,
+        labour: r.kpi.labour.mean,
+      });
+      const a = headline(modelBefore, src42);
+      const others_ = others.map((r) => headline(modelBefore, r));
+      const c = headline(modelAfterNew, res42);
+      for (const k of Object.keys(a) as (keyof typeof a)[]) {
+        const spread = Math.max(...others_.map((o) => Math.abs(a[k] - o[k])));
+        const floor = Math.max(0.01, Math.abs(a[k]) * 0.01);
+        const tolerance = Math.max(3 * spread, floor);
+        expect(Math.abs(c[k] - a[k]), `${k}: restored ${c[k]}, source ${a[k]}, tolerance ${tolerance}`).toBeLessThanOrEqual(tolerance);
+      }
     });
   });
 });
