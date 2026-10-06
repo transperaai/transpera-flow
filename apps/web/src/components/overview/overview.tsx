@@ -60,6 +60,8 @@ import { useSimulation } from "@/lib/sim/use-simulation";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { NO_SOLUTIONS_DATA, type SolutionsData } from "@/lib/solutions/cards";
 import { analyseCompany } from "@/app/w/[slug]/ai-actions";
+import { recordHeadline } from "@/app/w/[slug]/headline-actions";
+import { headlineNumbers } from "@/lib/overview/headline";
 import { AnalysisPanel } from "@/components/findings/analysis-panel";
 import { FactsList } from "@/components/findings/facts-list";
 import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
@@ -337,6 +339,22 @@ export function Overview({
   const [now] = useState(() => new Date());
   // Each process as the map and the Processes table rate it: by its confirmed open issues (D24).
   const health = useMemo(() => (groups ? processHealth(groups.filter((g) => g.id !== COMPANY_GROUP).map((g) => g.rating)) : null), [groups]);
+  // The agency list's headline numbers (B1 3/3): once the run at the workspace's own horizon and the ratings are in, an editor's
+  // browser records them (the server skips it when the stored ones are for the same engine and revisions and under an hour old).
+  // Once per set of numbers, so a re-render or a change of horizon and back doesn't ask again.
+  const recorded = useRef("");
+  useEffect(() => {
+    if (mode !== "live" || error || !groups || !horizonModel || !horizonResult) return;
+    if (weeks !== live.workspace.settings.horizon_weeks) return;
+    const numbers = headlineNumbers(horizonModel, horizonResult, groups.filter((g) => g.id !== COMPANY_GROUP));
+    const revisionIds = parts.map((p) => p.revision.id).sort();
+    const key = JSON.stringify([live.workspace.id, weeks, revisionIds, numbers]);
+    if (recorded.current === key) return;
+    recorded.current = key;
+    void recordHeadline(live.workspace.id, revisionIds, weeks, numbers).catch(() => {
+      recorded.current = "";
+    });
+  }, [mode, error, groups, horizonModel, horizonResult, weeks, parts, live.workspace.id, live.workspace.settings.horizon_weeks]);
   // Months in the browser's time zone (workspaces have none of their own yet), for this card and the chart alike.
   const open = useMemo(() => openIssues(state.issues, now), [state.issues, now]);
   const flowShare = useMemo(() => {

@@ -186,7 +186,9 @@ export function AnalysisPanel({
           <div className="mt-1 flex flex-col gap-2 border-t pt-3" data-review>
             <p className="text-xs font-medium text-muted-foreground uppercase">
               To review · {review.length}
-              <span className="ml-1 font-normal normal-case">AI proposed these. Only the ones you accept show on the pages.</span>
+              <span className="ml-1 font-normal normal-case">
+                {review.some((f) => f.proposed_via === "connector") ? "AI in the app or Claude (connector) proposed these." : "AI proposed these."} Only the ones you accept show on the pages.
+              </span>
             </p>
             <ul className="flex flex-col gap-2">
               {review.map((f) => {
@@ -200,6 +202,7 @@ export function AnalysisPanel({
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                         <RatingPill rating={f.rating} />
                         {step && <span className="break-words">{step}</span>}
+                        {f.proposed_via === "connector" && <span data-via-connector>From Claude (connector) · {when(f.created_at)}</span>}
                       </span>
                       {f.evidence && <p className="text-xs break-words text-muted-foreground">{f.evidence}</p>}
                       {cited.length > 0 ? (

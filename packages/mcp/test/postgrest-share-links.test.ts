@@ -20,7 +20,7 @@ import {
 import { generateApiToken } from "../src";
 import { signJwt } from "./helpers";
 
-// Share links over PostgREST (issue #32, B3; migration 20261211000000): the acceptance test "tests inspect the raw payload". An
+// Share links over PostgREST (issue #32, B3; migration 20261218000000): the acceptance test "tests inspect the raw payload". An
 // editor builds a snapshot of each kind under each toggle combination on Larkspur (which has pay rates; here it also gets emails and
 // notes on people and clients), saves it, and an anonymous or allowed visitor opens it through `open_share_link`. Every assertion is on
 // the raw JSON PostgREST returned. Skipped unless POSTGREST_URL is set (see postgrest-db.ts).

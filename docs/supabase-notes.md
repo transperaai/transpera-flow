@@ -346,8 +346,31 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 | Companion rows | The company map's sync adds each new top-level process's card in one system version (cards show once a process is published); `link_cited_sources`, `issue_seed_links` and `log_perception_gaps` run as for any write. | Restore, publish every process: the map shows each top-level process once; a process held by a link is not also on the map; no duplicate perception-gap issue. |
 | Notice | A cookie set in the browser (`tf-restore-notice`) carries the sentence to the Overview. | The notice shows once after a restore, and the drafts list shows every process. |
 
+## Editors change Client health rules (issue #30, B1 3/3, migration 20261209000000)
 
-## Share links (issue #32, B3, migration 20261211000000)
+`public.save_health_rules(ws, base, changes)` is SECURITY DEFINER with an empty `search_path`. It checks `can_edit_workspace(ws)` itself, writes only the four `settings.health_*` keys of `public.workspaces`, and lets the existing triggers do their jobs. The agency list is `public.agency_workspace_list()` (SECURITY INVOKER) over the new `public.workspace_headlines`. Verified on plain Postgres only (the role-matrix tests; the PostgREST ones run in CI).
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| `auth.uid()` in a SECURITY DEFINER function | It still reads the request's `request.jwt.claims`, so `stamp_settings_provenance` records the editor as `by` and `audit_company` logs the editor as the actor (`actor_kind` `user`). | As an editor, change "Task on time" on Settings -> Client health: the owner's change log names the editor, and `provenance -> 'settings.health_recover'` is `entered` by them. |
+| `needs_review` at trigger depth 1 | The UPDATE inside the function fires `needs_review` at `pg_trigger_depth() = 1`, and `auth.jwt()` there carries `api_token_id`, so an API token is refused ("The company model changes only by review") even though the function is SECURITY DEFINER. | An MCP token's `rpc/save_health_rules` call is refused; a session's is not. |
+| Null edit check | `can_edit_workspace` returns null (not false) for a caller with no membership; the function wraps it in `coalesce(..., false)` so a stranger gets `not_found`, not a write. | A signed-in user outside the workspace gets `{"status": "not_found"}`. |
+| Grants | `revoke all ... from anon, authenticated` then `grant select, insert, update` on `workspace_headlines` is what keeps Supabase's default privileges off the table. | `anon` holds nothing on the table or the two functions (post-apply check in the migration header). |
+
+## Findings proposed over the connector (issue #197, B20, migration 20261212000000)
+
+`private.findings_before_write` reads `auth.jwt() ? 'api_token_id'` to tell an API token's request from a session's, takes
+`pg_advisory_xact_lock(hashtextextended(...))` before counting a workspace's recent connector proposals, and refuses a
+token's update when `pg_trigger_depth() = 1`.
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Token claims in a BEFORE trigger | `auth.jwt()` inside the trigger carries `api_token_id`, as `private.api_token_claims` sets it in the pre-request hook (the same read the `suggestions` and `review_proposals` triggers make). Verified on plain Postgres (claims set with `set_config('request.jwt.claims', ...)`) and on a local PostgREST v14.18 (the CI version) only. | An editor's MCP token proposes a finding on the Supabase project; the row has `proposed_via = 'connector'`. |
+| Update refusal | A token's PATCH of a finding answers 42501 ("not over the API"). PostgREST answered 401 in the e2e test (PostgREST v14.18, plain Postgres) (the request's JWT role is anon until the hook runs), as for the suggestions guard. | An editor's token PATCHing `findings` over the Data API is refused. |
+| Advisory lock and caps | The transaction-level lock serialises the two count checks per workspace. Verified on plain Postgres only. | Two concurrent proposals at 49 waiting: one succeeds, one gets 54000. |
+
+
+## Share links (issue #32, B3, migration 20261218000000)
 
 Verified only against plain Postgres 16 (`packages/db/test/share-links.test.ts`, with Supabase's default privileges on new tables, and the role matrix) and PostgREST v14 (`packages/mcp/test/postgrest-share-links.test.ts`; run locally on v14.1, CI uses its pinned image). Nothing here has run on a Supabase project.
 

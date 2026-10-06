@@ -88,11 +88,15 @@ interface Loaded {
   startDate: string;
 }
 
-/** The live revision as an engine model, run from `start_date` (default today). */
+/**
+ * The live revision as an engine model, run from `start_date` (default today). With `payFree`, the model is built as a
+ * member's browser builds it (the engine's `payHidden`: no pay, and nothing derived from it), whoever is asking (B20).
+ */
 export async function loadLiveModel(
   ctx: ToolContext,
   args: { workspace?: string; process?: string; start_date?: string },
   assumptions: string[],
+  { payFree = false }: { payFree?: boolean } = {},
 ): Promise<Loaded> {
   const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
   const proc = await resolveProcess(ctx, ws, args.process, assumptions);
@@ -100,7 +104,9 @@ export async function loadLiveModel(
   if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
   const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, "live"));
   try {
-    return { ws, proc, bundle, model: toEngineModel(bundle, { startDate }), startDate };
+    // Same as `payFreeBundle` in apps/web/src/lib/ai/neutral.ts (this package doesn't import from the app).
+    const readAs = payFree ? { ...bundle, viewer: { seesEveryone: false, ownPersonId: null } } : bundle;
+    return { ws, proc, bundle, model: toEngineModel(readAs, { startDate }), startDate };
   } catch (err) {
     if (err instanceof ModelError) throw new ToolError("invalid_model", `This process can't be simulated yet: ${err.message}`);
     throw err;

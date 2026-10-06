@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { A_TEAM_MEMBER, hideAiIssueKey, labelNames, labelsUsed, nameAnalysisRow, nameFinding, nameLabels, readPersonLabels, type PersonLabels } from "../src";
+import { A_TEAM_MEMBER, hideAiIssueKey, labelNames, labelsForPeople, labelsUsed, nameAnalysisRow, nameFinding, nameLabels, readPersonLabels, type PersonLabels } from "../src";
 
 // AI text saved with labels and named at render (B1 2b, issue #30): pure, no database.
 
@@ -254,5 +254,18 @@ describe("hideAiIssueKey", () => {
       const row = { ...issue, detected_key: key };
       expect(hideAiIssueKey(row, false)).toBe(row);
     }
+  });
+});
+
+describe("labelsForPeople", () => {
+  it("gives Team member A to Z, then 27, 28 for 28 people, label to id", () => {
+    const many = Array.from({ length: 28 }, (_, i) => ({ id: `id-${i}`, name: `Person ${i}` }));
+    const out = labelsForPeople(many);
+    expect(Object.keys(out)).toHaveLength(28);
+    expect(out["Team member A"]).toBe("id-0");
+    expect(out["Team member Z"]).toBe("id-25");
+    expect(out["Team member 27"]).toBe("id-26");
+    expect(out["Team member 28"]).toBe("id-27");
+    expect(labelsForPeople([])).toEqual({});
   });
 });

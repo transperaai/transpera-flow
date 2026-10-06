@@ -32685,7 +32685,1267 @@ revoke all on function public.record_client_calibration(uuid, jsonb, jsonb, json
 grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, jsonb, text[]) to authenticated;
 ']);
 
--- 20261211000000_share_links.sql
+-- 20261209000000_agency_list.sql
+-- Agency workspace list, and editors change the Client health rules (issue #30, B1 part 3 of 3; docs/plans/b1-brief.md).
+--
+-- ORDER: apply this migration AFTER 20261207700000 (PR #205, saved_text_privacy) and 20261208000000 (C2 part 2). It is row 58 of
+-- docs/production-migrations.md, and its version sorts after both.
+--
+-- Strictly additive: one table, one trigger function and two functions. Nothing existing is changed. `save_fields`, the `workspaces` update policy
+-- and every grant on an existing table stay exactly as they are.
+--
+--   * `public.workspace_headlines`: one row per workspace holding the headline numbers the agency list shows (flow
+--     efficiency, processes needing attention, client groups at risk). The Overview computes them from its simulation run and
+--     an editor's browser records them (`recordHeadline`); the list only reads them. Every reader of the workspace reads the
+--     row; owners and editors insert and update it; nobody deletes (it goes with its workspace). The numbers hold exactly the
+--     five keys below and nothing else (members read this table). A BEFORE INSERT OR UPDATE trigger
+--     (`private.workspace_headlines_stamp`) sets `computed_by` to the caller and `computed_at` to now(), so neither can be forged.
+--   * `public.agency_workspace_list()` (SECURITY INVOKER, stable): one row per workspace the caller can read, with its open
+--     Operational risk issues, its last activity and its stored headline numbers. RLS decides which workspaces and rows the
+--     caller sees; `audit_log` is manage-only, so a caller who doesn't manage gets "last activity" without it.
+--   * `public.save_health_rules(ws, base, changes)` (SECURITY DEFINER, empty search_path): owners AND editors save the four
+--     Client health rules (`settings.health_initial`, `health_recover`, `health_late_penalty`, `health_missed_penalty`; each a
+--     number 0 to 100, or null for the estimated default). Today these save through `save_fields('workspaces', ...)`, whose
+--     update runs under the manage-only `update workspaces` policy, so an editor gets `not_found`. This function checks
+--     `can_edit_workspace` itself and can write nothing but those four keys: any other key is refused (42501), so the name,
+--     the currency and every other setting stay owner-only (Q9: widening the list later is one line here). It applies
+--     `save_fields`' per-key rule (20261111000000): stored differs from base and from the new value -> a conflict, nothing
+--     written for that key; stored differs from the new value -> patch; else nothing. The UPDATE still fires the workspaces
+--     triggers: `stamp_settings_provenance` marks `settings.<key>` entered by `auth.uid()`, `audit_company` logs the caller as
+--     actor, and `needs_review` refuses an API token at trigger depth 1, so MCP still can't change the company model
+--     directly (D19). `auth.uid()` and `auth.jwt()` read the request's claims inside a SECURITY DEFINER function.
+--
+-- Returns `{"status": "saved" | "conflict" | "not_found", "row": {"settings": {<the keys asked for>}}, "conflicts": {...}}`;
+-- `not_found` is what `save_fields` returns under RLS for a caller who can't write, so the app's handling carries over.
+-- Errors: 22023 (`changes` empty or not an object, `base` not an object, a key with no base value), 42501 (a key that is not
+-- one of the four), 23514 (a value that is not null or a number from 0 to 100).
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Rows 53 to 57 are applied and nothing is later. Expect exactly these five versions: 20261206000000, 20261207000000,
+--      20261207500000, 20261207700000 (#205) and 20261208000000 (C2 part 2):
+--        select version from supabase_migrations.schema_migrations where version >= '20261206000000' order by 1;
+--   1. Nothing created yet. Expect null, null, null:
+--        select to_regclass('public.workspace_headlines'), to_regprocedure('public.agency_workspace_list()'),
+--               to_regprocedure('public.save_health_rules(uuid, jsonb, jsonb)');
+--   2. The workspaces triggers the health-rule function relies on exist and are enabled. Expect 3 rows, all 'O':
+--        select tgname, tgenabled::text from pg_trigger where tgrelid = 'public.workspaces'::regclass
+--          and tgname in ('stamp_settings_provenance', 'audit_company', 'needs_review');
+--   3. The update policy is still manage-only (why the function is needed). Expect qual can_manage_workspace(id):
+--        select qual from pg_policies where tablename = 'workspaces' and policyname = 'update workspaces';
+--   4. The three helpers the table's policies call exist. Expect 3 rows:
+--        select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'
+--          and proname in ('can_read_workspace', 'can_edit_workspace', 'set_updated_at');
+--
+-- POST-APPLY CHECK:
+--   1. RLS on, and three policies on the table. Expect t, 3:
+--        select relrowsecurity from pg_class where oid = 'public.workspace_headlines'::regclass;
+--        select count(*) from pg_policies where schemaname = 'public' and tablename = 'workspace_headlines';
+--   2. anon holds nothing on the table or either function; authenticated has SELECT, INSERT, UPDATE only. Expect no anon
+--      rows, then f, f, t, t:
+--        select grantee, privilege_type from information_schema.role_table_grants where table_schema = 'public'
+--          and table_name = 'workspace_headlines' and grantee in ('anon', 'authenticated') order by 1, 2;
+--        select has_function_privilege('anon', 'public.agency_workspace_list()', 'execute'),
+--               has_function_privilege('anon', 'public.save_health_rules(uuid, jsonb, jsonb)', 'execute'),
+--               has_function_privilege('authenticated', 'public.agency_workspace_list()', 'execute'),
+--               has_function_privilege('authenticated', 'public.save_health_rules(uuid, jsonb, jsonb)', 'execute');
+--   3. `save_health_rules` is SECURITY DEFINER with an empty search_path; `agency_workspace_list` is not (both have an empty search_path). Expect
+--      (agency_workspace_list, f, {search_path=""}), (save_health_rules, t, {search_path=""}):
+--        select proname, prosecdef, proconfig from pg_proc where proname in ('save_health_rules', 'agency_workspace_list')
+--          and pronamespace = 'public'::regnamespace order by 1;
+--   4. Then, on the real project: as an editor, change "Task on time" on Settings -> Client health, and check the change shows
+--      in the owner's change log.
+--
+-- ROLLBACK (one transaction; nothing existing was changed, so nothing to put back):
+--
+--   begin;
+--   drop function if exists public.save_health_rules(uuid, jsonb, jsonb);
+--   drop function if exists public.agency_workspace_list();
+--   drop table if exists public.workspace_headlines;
+--   drop function if exists private.workspace_headlines_stamp();
+--   delete from supabase_migrations.schema_migrations where version = '20261209000000';
+--   commit;
+
+-- ---------------------------------------------------------------------------
+-- Headline numbers per workspace
+-- ---------------------------------------------------------------------------
+
+create table public.workspace_headlines (
+  workspace_id uuid primary key references public.workspaces (id) on delete cascade,
+  computed_at timestamptz not null default now(),
+  computed_by uuid references auth.users (id) on delete set null default auth.uid(),
+  -- What the numbers were computed from: the engine, the published revisions of every process, and the horizon.
+  engine_version text not null,
+  revision_ids uuid[] not null,
+  horizon_weeks integer not null check (horizon_weeks > 0),
+  -- {"flow_efficiency": 0..1 or null, "processes_attention": n, "processes_total": n, "client_groups_at_risk": n,
+  --  "client_groups_total": n}, the counts non-negative integers. The CASEs keep a wrong type a check failure (23514), not a
+  -- cast error.
+  numbers jsonb not null,
+  constraint workspace_headlines_numbers check (
+    jsonb_typeof(numbers) = 'object'
+    and numbers - array['flow_efficiency', 'processes_attention', 'processes_total', 'client_groups_at_risk', 'client_groups_total'] = '{}'::jsonb
+    and numbers ?& array['flow_efficiency', 'processes_attention', 'processes_total', 'client_groups_at_risk', 'client_groups_total']
+    and case jsonb_typeof(numbers -> 'flow_efficiency')
+      when 'null' then true
+      when 'number' then (numbers ->> 'flow_efficiency')::numeric between 0 and 1
+      else false
+    end
+    and case jsonb_typeof(numbers -> 'processes_attention')
+      when 'number' then (numbers ->> 'processes_attention')::numeric >= 0
+        and (numbers ->> 'processes_attention')::numeric = trunc((numbers ->> 'processes_attention')::numeric)
+      else false
+    end
+    and case jsonb_typeof(numbers -> 'processes_total')
+      when 'number' then (numbers ->> 'processes_total')::numeric >= 0
+        and (numbers ->> 'processes_total')::numeric = trunc((numbers ->> 'processes_total')::numeric)
+      else false
+    end
+    and case jsonb_typeof(numbers -> 'client_groups_at_risk')
+      when 'number' then (numbers ->> 'client_groups_at_risk')::numeric >= 0
+        and (numbers ->> 'client_groups_at_risk')::numeric = trunc((numbers ->> 'client_groups_at_risk')::numeric)
+      else false
+    end
+    and case jsonb_typeof(numbers -> 'client_groups_total')
+      when 'number' then (numbers ->> 'client_groups_total')::numeric >= 0
+        and (numbers ->> 'client_groups_total')::numeric = trunc((numbers ->> 'client_groups_total')::numeric)
+      else false
+    end
+  )
+);
+
+-- Who computed the numbers and when are the server's word, not the client's.
+create function private.workspace_headlines_stamp() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.computed_by := auth.uid();
+  new.computed_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function private.workspace_headlines_stamp() from public, anon, authenticated;
+
+create trigger workspace_headlines_stamp before insert or update on public.workspace_headlines
+  for each row execute function private.workspace_headlines_stamp();
+
+alter table public.workspace_headlines enable row level security;
+
+create policy "read workspace headlines" on public.workspace_headlines for select to authenticated
+  using (public.can_read_workspace(workspace_id));
+create policy "insert workspace headlines" on public.workspace_headlines for insert to authenticated
+  with check (public.can_edit_workspace(workspace_id));
+create policy "update workspace headlines" on public.workspace_headlines for update to authenticated
+  using (public.can_edit_workspace(workspace_id)) with check (public.can_edit_workspace(workspace_id));
+
+-- Supabase gives a new table every right to anon and authenticated: take them all back, then grant what the policies use.
+revoke all on public.workspace_headlines from anon, authenticated;
+grant select, insert, update on public.workspace_headlines to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- The agency's list of workspaces
+-- ---------------------------------------------------------------------------
+
+create function public.agency_workspace_list() returns table (
+  id uuid,
+  name text,
+  slug text,
+  open_risk_issues bigint,
+  last_activity timestamptz,
+  numbers jsonb,
+  computed_at timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select
+    w.id,
+    w.name,
+    w.slug,
+    (select count(*) from public.issues i
+      where i.workspace_id = w.id and i.severity = 'critical' and i.status in ('open', 'in_progress')),
+    -- greatest() ignores nulls; null only when the workspace has no activity at all.
+    greatest(
+      (select max(greatest(r.updated_at, r.created_at)) from public.process_revisions r where r.workspace_id = w.id),
+      (select max(greatest(i.updated_at, i.created_at)) from public.issues i where i.workspace_id = w.id),
+      (select max(greatest(f.updated_at, f.created_at)) from public.findings f where f.workspace_id = w.id),
+      (select max(greatest(s.updated_at, s.created_at)) from public.sources s where s.workspace_id = w.id),
+      (select max(greatest(o.updated_at, o.created_at)) from public.solutions o where o.workspace_id = w.id),
+      (select max(a.created_at) from public.audit_log a where a.workspace_id = w.id)
+    ),
+    h.numbers,
+    h.computed_at
+  from public.workspaces w
+  left join public.workspace_headlines h on h.workspace_id = w.id
+  where public.can_read_workspace(w.id)
+  order by w.name, w.id;
+$$;
+
+revoke execute on function public.agency_workspace_list() from public, anon;
+grant execute on function public.agency_workspace_list() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Editors change the Client health rules
+-- ---------------------------------------------------------------------------
+
+create function public.save_health_rules(ws uuid, base jsonb, changes jsonb) returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  allowed constant text[] := array['health_initial', 'health_recover', 'health_late_penalty', 'health_missed_penalty'];
+  k text;
+  v jsonb;
+  stored jsonb;
+  theirs jsonb;
+  seen jsonb;
+  patch jsonb := '{}';
+  conflicts jsonb := '{}';
+  result jsonb := '{}';
+begin
+  if base is null or jsonb_typeof(base) <> 'object' then
+    raise exception 'save_health_rules: base must be a json object' using errcode = '22023';
+  end if;
+  if changes is null or jsonb_typeof(changes) <> 'object' or changes = '{}' then
+    raise exception 'save_health_rules: changes must be a non-empty json object' using errcode = '22023';
+  end if;
+
+  for k, v in select * from jsonb_each(changes) loop
+    if not (k = any (allowed)) then
+      raise exception 'save_health_rules: % cannot be saved', k using errcode = '42501';
+    end if;
+    if not base ? k then
+      raise exception 'save_health_rules: % has no base value', k using errcode = '22023';
+    end if;
+    if not (jsonb_typeof(v) = 'null' or (jsonb_typeof(v) = 'number' and (v #>> '{}')::numeric between 0 and 100)) then
+      raise exception 'save_health_rules: % must be null or a number from 0 to 100', k using errcode = '23514';
+    end if;
+  end loop;
+
+  -- The same answer save_fields gives under RLS to a caller who can't write.
+  if ws is null or not coalesce(public.can_edit_workspace(ws), false) then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+
+  select w.settings into stored from public.workspaces w where w.id = ws for update;
+  if not found then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+  stored := coalesce(stored, '{}');
+
+  for k, v in select * from jsonb_each(changes) loop
+    seen := base -> k;
+    theirs := coalesce(stored -> k, 'null');
+    if theirs is distinct from seen and theirs is distinct from v then
+      conflicts := conflicts || jsonb_build_object(k, theirs);
+    elsif theirs is distinct from v then
+      patch := patch || jsonb_build_object(k, v);
+    end if;
+  end loop;
+
+  if patch <> '{}' then
+    update public.workspaces w set settings = coalesce(w.settings, '{}') || patch where w.id = ws returning w.settings into stored;
+  end if;
+
+  for k in select jsonb_object_keys(changes) loop
+    result := result || jsonb_build_object(k, coalesce(stored -> k, 'null'));
+  end loop;
+
+  return jsonb_build_object(
+    'status', case when conflicts <> '{}' then 'conflict' else 'saved' end,
+    'row', jsonb_build_object('settings', result),
+    'conflicts', conflicts);
+end;
+$$;
+
+revoke execute on function public.save_health_rules(uuid, jsonb, jsonb) from public, anon;
+grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261209000000', 'agency_list', array['-- Agency workspace list, and editors change the Client health rules (issue #30, B1 part 3 of 3; docs/plans/b1-brief.md).
+--
+-- ORDER: apply this migration AFTER 20261207700000 (PR #205, saved_text_privacy) and 20261208000000 (C2 part 2). It is row 58 of
+-- docs/production-migrations.md, and its version sorts after both.
+--
+-- Strictly additive: one table, one trigger function and two functions. Nothing existing is changed. `save_fields`, the `workspaces` update policy
+-- and every grant on an existing table stay exactly as they are.
+--
+--   * `public.workspace_headlines`: one row per workspace holding the headline numbers the agency list shows (flow
+--     efficiency, processes needing attention, client groups at risk). The Overview computes them from its simulation run and
+--     an editor''s browser records them (`recordHeadline`); the list only reads them. Every reader of the workspace reads the
+--     row; owners and editors insert and update it; nobody deletes (it goes with its workspace). The numbers hold exactly the
+--     five keys below and nothing else (members read this table). A BEFORE INSERT OR UPDATE trigger
+--     (`private.workspace_headlines_stamp`) sets `computed_by` to the caller and `computed_at` to now(), so neither can be forged.
+--   * `public.agency_workspace_list()` (SECURITY INVOKER, stable): one row per workspace the caller can read, with its open
+--     Operational risk issues, its last activity and its stored headline numbers. RLS decides which workspaces and rows the
+--     caller sees; `audit_log` is manage-only, so a caller who doesn''t manage gets "last activity" without it.
+--   * `public.save_health_rules(ws, base, changes)` (SECURITY DEFINER, empty search_path): owners AND editors save the four
+--     Client health rules (`settings.health_initial`, `health_recover`, `health_late_penalty`, `health_missed_penalty`; each a
+--     number 0 to 100, or null for the estimated default). Today these save through `save_fields(''workspaces'', ...)`, whose
+--     update runs under the manage-only `update workspaces` policy, so an editor gets `not_found`. This function checks
+--     `can_edit_workspace` itself and can write nothing but those four keys: any other key is refused (42501), so the name,
+--     the currency and every other setting stay owner-only (Q9: widening the list later is one line here). It applies
+--     `save_fields`'' per-key rule (20261111000000): stored differs from base and from the new value -> a conflict, nothing
+--     written for that key; stored differs from the new value -> patch; else nothing. The UPDATE still fires the workspaces
+--     triggers: `stamp_settings_provenance` marks `settings.<key>` entered by `auth.uid()`, `audit_company` logs the caller as
+--     actor, and `needs_review` refuses an API token at trigger depth 1, so MCP still can''t change the company model
+--     directly (D19). `auth.uid()` and `auth.jwt()` read the request''s claims inside a SECURITY DEFINER function.
+--
+-- Returns `{"status": "saved" | "conflict" | "not_found", "row": {"settings": {<the keys asked for>}}, "conflicts": {...}}`;
+-- `not_found` is what `save_fields` returns under RLS for a caller who can''t write, so the app''s handling carries over.
+-- Errors: 22023 (`changes` empty or not an object, `base` not an object, a key with no base value), 42501 (a key that is not
+-- one of the four), 23514 (a value that is not null or a number from 0 to 100).
+--
+-- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
+--   0. Rows 53 to 57 are applied and nothing is later. Expect exactly these five versions: 20261206000000, 20261207000000,
+--      20261207500000, 20261207700000 (#205) and 20261208000000 (C2 part 2):
+--        select version from supabase_migrations.schema_migrations where version >= ''20261206000000'' order by 1;
+--   1. Nothing created yet. Expect null, null, null:
+--        select to_regclass(''public.workspace_headlines''), to_regprocedure(''public.agency_workspace_list()''),
+--               to_regprocedure(''public.save_health_rules(uuid, jsonb, jsonb)'');
+--   2. The workspaces triggers the health-rule function relies on exist and are enabled. Expect 3 rows, all ''O'':
+--        select tgname, tgenabled::text from pg_trigger where tgrelid = ''public.workspaces''::regclass
+--          and tgname in (''stamp_settings_provenance'', ''audit_company'', ''needs_review'');
+--   3. The update policy is still manage-only (why the function is needed). Expect qual can_manage_workspace(id):
+--        select qual from pg_policies where tablename = ''workspaces'' and policyname = ''update workspaces'';
+--   4. The three helpers the table''s policies call exist. Expect 3 rows:
+--        select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = ''public''
+--          and proname in (''can_read_workspace'', ''can_edit_workspace'', ''set_updated_at'');
+--
+-- POST-APPLY CHECK:
+--   1. RLS on, and three policies on the table. Expect t, 3:
+--        select relrowsecurity from pg_class where oid = ''public.workspace_headlines''::regclass;
+--        select count(*) from pg_policies where schemaname = ''public'' and tablename = ''workspace_headlines'';
+--   2. anon holds nothing on the table or either function; authenticated has SELECT, INSERT, UPDATE only. Expect no anon
+--      rows, then f, f, t, t:
+--        select grantee, privilege_type from information_schema.role_table_grants where table_schema = ''public''
+--          and table_name = ''workspace_headlines'' and grantee in (''anon'', ''authenticated'') order by 1, 2;
+--        select has_function_privilege(''anon'', ''public.agency_workspace_list()'', ''execute''),
+--               has_function_privilege(''anon'', ''public.save_health_rules(uuid, jsonb, jsonb)'', ''execute''),
+--               has_function_privilege(''authenticated'', ''public.agency_workspace_list()'', ''execute''),
+--               has_function_privilege(''authenticated'', ''public.save_health_rules(uuid, jsonb, jsonb)'', ''execute'');
+--   3. `save_health_rules` is SECURITY DEFINER with an empty search_path; `agency_workspace_list` is not (both have an empty search_path). Expect
+--      (agency_workspace_list, f, {search_path=""}), (save_health_rules, t, {search_path=""}):
+--        select proname, prosecdef, proconfig from pg_proc where proname in (''save_health_rules'', ''agency_workspace_list'')
+--          and pronamespace = ''public''::regnamespace order by 1;
+--   4. Then, on the real project: as an editor, change "Task on time" on Settings -> Client health, and check the change shows
+--      in the owner''s change log.
+--
+-- ROLLBACK (one transaction; nothing existing was changed, so nothing to put back):
+--
+--   begin;
+--   drop function if exists public.save_health_rules(uuid, jsonb, jsonb);
+--   drop function if exists public.agency_workspace_list();
+--   drop table if exists public.workspace_headlines;
+--   drop function if exists private.workspace_headlines_stamp();
+--   delete from supabase_migrations.schema_migrations where version = ''20261209000000'';
+--   commit;
+
+-- ---------------------------------------------------------------------------
+-- Headline numbers per workspace
+-- ---------------------------------------------------------------------------
+
+create table public.workspace_headlines (
+  workspace_id uuid primary key references public.workspaces (id) on delete cascade,
+  computed_at timestamptz not null default now(),
+  computed_by uuid references auth.users (id) on delete set null default auth.uid(),
+  -- What the numbers were computed from: the engine, the published revisions of every process, and the horizon.
+  engine_version text not null,
+  revision_ids uuid[] not null,
+  horizon_weeks integer not null check (horizon_weeks > 0),
+  -- {"flow_efficiency": 0..1 or null, "processes_attention": n, "processes_total": n, "client_groups_at_risk": n,
+  --  "client_groups_total": n}, the counts non-negative integers. The CASEs keep a wrong type a check failure (23514), not a
+  -- cast error.
+  numbers jsonb not null,
+  constraint workspace_headlines_numbers check (
+    jsonb_typeof(numbers) = ''object''
+    and numbers - array[''flow_efficiency'', ''processes_attention'', ''processes_total'', ''client_groups_at_risk'', ''client_groups_total''] = ''{}''::jsonb
+    and numbers ?& array[''flow_efficiency'', ''processes_attention'', ''processes_total'', ''client_groups_at_risk'', ''client_groups_total'']
+    and case jsonb_typeof(numbers -> ''flow_efficiency'')
+      when ''null'' then true
+      when ''number'' then (numbers ->> ''flow_efficiency'')::numeric between 0 and 1
+      else false
+    end
+    and case jsonb_typeof(numbers -> ''processes_attention'')
+      when ''number'' then (numbers ->> ''processes_attention'')::numeric >= 0
+        and (numbers ->> ''processes_attention'')::numeric = trunc((numbers ->> ''processes_attention'')::numeric)
+      else false
+    end
+    and case jsonb_typeof(numbers -> ''processes_total'')
+      when ''number'' then (numbers ->> ''processes_total'')::numeric >= 0
+        and (numbers ->> ''processes_total'')::numeric = trunc((numbers ->> ''processes_total'')::numeric)
+      else false
+    end
+    and case jsonb_typeof(numbers -> ''client_groups_at_risk'')
+      when ''number'' then (numbers ->> ''client_groups_at_risk'')::numeric >= 0
+        and (numbers ->> ''client_groups_at_risk'')::numeric = trunc((numbers ->> ''client_groups_at_risk'')::numeric)
+      else false
+    end
+    and case jsonb_typeof(numbers -> ''client_groups_total'')
+      when ''number'' then (numbers ->> ''client_groups_total'')::numeric >= 0
+        and (numbers ->> ''client_groups_total'')::numeric = trunc((numbers ->> ''client_groups_total'')::numeric)
+      else false
+    end
+  )
+);
+
+-- Who computed the numbers and when are the server''s word, not the client''s.
+create function private.workspace_headlines_stamp() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+begin
+  new.computed_by := auth.uid();
+  new.computed_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function private.workspace_headlines_stamp() from public, anon, authenticated;
+
+create trigger workspace_headlines_stamp before insert or update on public.workspace_headlines
+  for each row execute function private.workspace_headlines_stamp();
+
+alter table public.workspace_headlines enable row level security;
+
+create policy "read workspace headlines" on public.workspace_headlines for select to authenticated
+  using (public.can_read_workspace(workspace_id));
+create policy "insert workspace headlines" on public.workspace_headlines for insert to authenticated
+  with check (public.can_edit_workspace(workspace_id));
+create policy "update workspace headlines" on public.workspace_headlines for update to authenticated
+  using (public.can_edit_workspace(workspace_id)) with check (public.can_edit_workspace(workspace_id));
+
+-- Supabase gives a new table every right to anon and authenticated: take them all back, then grant what the policies use.
+revoke all on public.workspace_headlines from anon, authenticated;
+grant select, insert, update on public.workspace_headlines to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- The agency''s list of workspaces
+-- ---------------------------------------------------------------------------
+
+create function public.agency_workspace_list() returns table (
+  id uuid,
+  name text,
+  slug text,
+  open_risk_issues bigint,
+  last_activity timestamptz,
+  numbers jsonb,
+  computed_at timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = ''''
+as $$
+  select
+    w.id,
+    w.name,
+    w.slug,
+    (select count(*) from public.issues i
+      where i.workspace_id = w.id and i.severity = ''critical'' and i.status in (''open'', ''in_progress'')),
+    -- greatest() ignores nulls; null only when the workspace has no activity at all.
+    greatest(
+      (select max(greatest(r.updated_at, r.created_at)) from public.process_revisions r where r.workspace_id = w.id),
+      (select max(greatest(i.updated_at, i.created_at)) from public.issues i where i.workspace_id = w.id),
+      (select max(greatest(f.updated_at, f.created_at)) from public.findings f where f.workspace_id = w.id),
+      (select max(greatest(s.updated_at, s.created_at)) from public.sources s where s.workspace_id = w.id),
+      (select max(greatest(o.updated_at, o.created_at)) from public.solutions o where o.workspace_id = w.id),
+      (select max(a.created_at) from public.audit_log a where a.workspace_id = w.id)
+    ),
+    h.numbers,
+    h.computed_at
+  from public.workspaces w
+  left join public.workspace_headlines h on h.workspace_id = w.id
+  where public.can_read_workspace(w.id)
+  order by w.name, w.id;
+$$;
+
+revoke execute on function public.agency_workspace_list() from public, anon;
+grant execute on function public.agency_workspace_list() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Editors change the Client health rules
+-- ---------------------------------------------------------------------------
+
+create function public.save_health_rules(ws uuid, base jsonb, changes jsonb) returns jsonb
+language plpgsql
+security definer
+set search_path = ''''
+as $$
+declare
+  allowed constant text[] := array[''health_initial'', ''health_recover'', ''health_late_penalty'', ''health_missed_penalty''];
+  k text;
+  v jsonb;
+  stored jsonb;
+  theirs jsonb;
+  seen jsonb;
+  patch jsonb := ''{}'';
+  conflicts jsonb := ''{}'';
+  result jsonb := ''{}'';
+begin
+  if base is null or jsonb_typeof(base) <> ''object'' then
+    raise exception ''save_health_rules: base must be a json object'' using errcode = ''22023'';
+  end if;
+  if changes is null or jsonb_typeof(changes) <> ''object'' or changes = ''{}'' then
+    raise exception ''save_health_rules: changes must be a non-empty json object'' using errcode = ''22023'';
+  end if;
+
+  for k, v in select * from jsonb_each(changes) loop
+    if not (k = any (allowed)) then
+      raise exception ''save_health_rules: % cannot be saved'', k using errcode = ''42501'';
+    end if;
+    if not base ? k then
+      raise exception ''save_health_rules: % has no base value'', k using errcode = ''22023'';
+    end if;
+    if not (jsonb_typeof(v) = ''null'' or (jsonb_typeof(v) = ''number'' and (v #>> ''{}'')::numeric between 0 and 100)) then
+      raise exception ''save_health_rules: % must be null or a number from 0 to 100'', k using errcode = ''23514'';
+    end if;
+  end loop;
+
+  -- The same answer save_fields gives under RLS to a caller who can''t write.
+  if ws is null or not coalesce(public.can_edit_workspace(ws), false) then
+    return jsonb_build_object(''status'', ''not_found'');
+  end if;
+
+  select w.settings into stored from public.workspaces w where w.id = ws for update;
+  if not found then
+    return jsonb_build_object(''status'', ''not_found'');
+  end if;
+  stored := coalesce(stored, ''{}'');
+
+  for k, v in select * from jsonb_each(changes) loop
+    seen := base -> k;
+    theirs := coalesce(stored -> k, ''null'');
+    if theirs is distinct from seen and theirs is distinct from v then
+      conflicts := conflicts || jsonb_build_object(k, theirs);
+    elsif theirs is distinct from v then
+      patch := patch || jsonb_build_object(k, v);
+    end if;
+  end loop;
+
+  if patch <> ''{}'' then
+    update public.workspaces w set settings = coalesce(w.settings, ''{}'') || patch where w.id = ws returning w.settings into stored;
+  end if;
+
+  for k in select jsonb_object_keys(changes) loop
+    result := result || jsonb_build_object(k, coalesce(stored -> k, ''null''));
+  end loop;
+
+  return jsonb_build_object(
+    ''status'', case when conflicts <> ''{}'' then ''conflict'' else ''saved'' end,
+    ''row'', jsonb_build_object(''settings'', result),
+    ''conflicts'', conflicts);
+end;
+$$;
+
+revoke execute on function public.save_health_rules(uuid, jsonb, jsonb) from public, anon;
+grant execute on function public.save_health_rules(uuid, jsonb, jsonb) to authenticated;
+']);
+
+-- 20261212000000_connector_findings.sql
+-- Claude outside the app proposes findings (issue #197, B20; Austin's decision 3 on #175, 6 Oct 2026; the MCP tool
+-- `propose_finding`, docs/adr/0015-analysis-findings.md addendum).
+--
+-- Claude connected over MCP may PROPOSE a finding into the analysis review list. It is stored as an AI finding (origin 'ai':
+-- Claude is AI) that is proposed, with no analysis or run, and `proposed_via = 'connector'`. A person still accepts, edits or
+-- dismisses it in the app, exactly as they do an AI finding; Accept, "AI, edited", Acknowledge as issue and the map feed all
+-- work unchanged.
+--
+-- STRICTLY ADDITIVE: one nullable column, one partial index, and one function redefined (`private.findings_before_write`).
+-- No data is rewritten; no table, grant, policy or trigger is created or dropped (the trigger `findings_before_write` keeps
+-- pointing at the function by name).
+--
+--   * `public.findings.proposed_via` (text, nullable, check: null or 'connector'). Null for everything that exists. The
+--     trigger stamps it on insert from the request's JWT claims (an API token's request carries `api_token_id`, as
+--     `private.api_token_claims` reads it), never from what the client sent, and it never changes afterwards.
+--   * `findings_connector_recent` (workspace_id, created_at) where proposed_via = 'connector': the caps below count recent
+--     connector proposals per workspace.
+--   * `private.findings_before_write`: the 20261205000000 body plus these rules, which apply only to a request made with an
+--     API token (a session is unaffected, except that it can't forge the key prefix):
+--       - a token may only INSERT a connector proposal: origin 'ai', status 'proposed', no analysis, no run. It can't add a
+--         finding by hand (born accepted), can't write an analysis-backed AI finding and can't UPDATE any finding (no
+--         accept, dismiss or edit over the API). The check uses pg_trigger_depth() = 1, as `suggestions` does, so foreign-key
+--         actions (created_by set to null when a user is deleted) still pass;
+--       - the key is computed here: 'ai:connector:' + sha256 of the place and the normalised title (Unicode NFKC, curly
+--         quotes straightened, lower case, any run of white space (a no-break space too) one space, trailing punctuation
+--         and spaces dropped), so the unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its
+--         status: a dismissal stands, and a trailing full stop, a no-break space or a curly apostrophe doesn't beat it;
+--       - at most 100 connector proposals per workspace in 24 hours and 50 waiting for review (54000), counted under an
+--         advisory lock (as `reserve_ai_run`);
+--       - the 15-minute "analysis you ran" rule is skipped for a connector insert; a connector finding is never "proposed
+--         again" by a later in-app run; `proposed_via` can't change;
+--       - a session can't send a key with the connector prefix (23514).
+--   The insert branch already records who (`created_by`, the token's owner) and when (`created_at`).
+--
+-- Roles need no new code: `insert findings` is `can_edit_workspace` (agency admin, owner, editor); members and viewers get
+-- 42501 from row-level security. Members and viewers read connector findings as they read every finding (the app names people
+-- by labels, B1 2b, #30).
+--
+-- Applies after row 58 (20261209000000, B1 3/3, #30), the latest when this was written; it touches nothing they do. The previous definition of the function is the one in
+-- 20261205000000_analysis_findings.sql (B1 2b only disabled and re-enabled the trigger). Its md5 (prosrc) on a database built
+-- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
+--
+-- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -f <file>`, one query per file):
+--   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, and
+--      the highest to be 20261209000000 (row 58, the previous row of docs/production-migrations.md) unless something later
+--      than it has been applied and logged since:
+--        select version from supabase_migrations.schema_migrations where version >= '20261205000000' order by 1;
+--   2. The column doesn't exist yet. Expect 0:
+--        select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'findings' and column_name = 'proposed_via';
+--   3. The function body is the one this migration copied. Expect (psql prints proconfig this way)
+--      8f5d4dc6a13d64841a9c2611a9889241|f|{"search_path=\"\""}:
+--        select md5(prosrc), prosecdef, proconfig from pg_proc where proname = 'findings_before_write';
+--   4. No key uses the new prefix. Expect 0:
+--        select count(*) from public.findings where ai_key like 'ai:connector:%';
+--   5. The two triggers are there and enabled. Expect 2 rows, both O:
+--        select tgname, tgenabled::text from pg_trigger where tgrelid = 'public.findings'::regclass and not tgisinternal order by 1;
+--   6. The helpers exist. Expect one row, both non-null:
+--        select to_regprocedure('auth.jwt()'), to_regprocedure('pg_catalog.hashtextextended(text, bigint)');
+--
+-- POST-APPLY CHECKS:
+--   1. Preflight 2 returns 1, and:
+--        select data_type, is_nullable from information_schema.columns where table_name = 'findings' and column_name = 'proposed_via';
+--      Expect: text, YES.
+--   2. select pg_get_constraintdef(oid) from pg_constraint where conname = 'findings_proposed_via';
+--      Expect: the check (proposed_via IS NULL OR proposed_via = 'connector').
+--   3. select indexdef from pg_indexes where indexname = 'findings_connector_recent';   -- present, partial
+--   4. select prosecdef, proconfig, prosrc like '%ai:connector:%' and prosrc like '%api_token_id%' from pg_proc where proname = 'findings_before_write';
+--      Expect: f, {search_path=""}, t.
+--   5. Preflight 5 unchanged (2 rows, both O).
+--   6. select count(*) from public.findings where proposed_via is not null;   -- 0
+--   7. The schema_migrations row for 20261212000000 is present.
+--
+-- ROLLBACK (one transaction; redeploy the app from before B20 first, since it selects `proposed_via`):
+--
+--   begin;
+--   -- The 20261205000000 body of private.findings_before_write, in full:
+--   create or replace function private.findings_before_write() returns trigger
+--   language plpgsql
+--   set search_path = ''
+--   as $$
+--   declare
+--     uid uuid := auth.uid();
+--     -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+--     again boolean := false;
+--   begin
+--     if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+--       raise exception 'findings: the process must be one of the workspace''s' using errcode = '23514';
+--     end if;
+--     -- Every source it cites is one of its workspace's (read under the caller's RLS, so another workspace's never counts).
+--     if cardinality(new.source_ids) > 0 and (tg_op = 'INSERT' or new.source_ids is distinct from old.source_ids) and exists (
+--       select 1 from unnest(new.source_ids) as c (id)
+--       where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+--     ) then
+--       raise exception 'findings: every source cited must be one of the workspace''s' using errcode = '23514';
+--     end if;
+--   
+--     if tg_op = 'UPDATE' then
+--       again := old.origin = 'ai' and new.origin = 'ai' and new.status = 'proposed' and old.status in ('proposed', 'superseded')
+--         and new.run_id is not null and new.run_id is distinct from old.run_id;
+--     end if;
+--   
+--     -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+--     -- analysis's run. Signed-in callers only; the system (uid null) is trusted.
+--     if (tg_op = 'INSERT' and new.origin = 'ai') or again then
+--       if new.status <> 'proposed' then
+--         raise exception 'findings: an AI finding starts as proposed' using errcode = '23514';
+--       end if;
+--       if uid is not null and not exists (
+--         select 1 from public.ai_analyses a
+--         where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+--           and a.run_id = new.run_id and a.updated_at > now() - interval '15 minutes'
+--       ) then
+--         raise exception 'findings: an AI finding must come from an analysis you ran in the last 15 minutes' using errcode = '42501';
+--       end if;
+--     end if;
+--   
+--     if tg_op = 'INSERT' then
+--       new.created_by := coalesce(uid, new.created_by);
+--       new.created_at := now();
+--       new.updated_by := uid;
+--       new.updated_at := now();
+--       new.edited := false;
+--       if new.origin = 'ai' then
+--         new.decided_by := null;
+--         new.decided_at := null;
+--       else
+--         if new.status <> 'accepted' or new.analysis_id is not null or new.run_id is not null then
+--           raise exception 'findings: a finding added by hand starts accepted and cites no analysis' using errcode = '23514';
+--         end if;
+--         new.decided_by := uid;
+--         new.decided_at := now();
+--       end if;
+--       return new;
+--     end if;
+--   
+--     -- UPDATE
+--     if new.workspace_id is distinct from old.workspace_id
+--       or new.origin is distinct from old.origin
+--       or new.ai_key is distinct from old.ai_key
+--       or new.created_at is distinct from old.created_at
+--       or (new.created_by is distinct from old.created_by and new.created_by is not null)
+--       or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+--       or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+--       raise exception 'findings: workspace, origin, key, analysis, run and creator cannot be changed' using errcode = '23514';
+--     end if;
+--   
+--     if again then
+--       -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+--       new.edited := false;
+--       new.decided_by := null;
+--       new.decided_at := null;
+--     else
+--       if new.origin = 'ai' and new.facts is distinct from old.facts then
+--         raise exception 'findings: the facts an AI finding cites stay as they were cited' using errcode = '23514';
+--       end if;
+--       if new.status is distinct from old.status then
+--         if new.status = 'proposed' then
+--           raise exception 'findings: a finding cannot go back to proposed' using errcode = '23514';
+--         end if;
+--         if old.status = 'superseded' then
+--           raise exception 'findings: a later analysis replaced this proposal, so it can''t be decided; analyse again' using errcode = '23514';
+--         end if;
+--         if new.status = 'superseded' and (old.status <> 'proposed' or old.origin <> 'ai') then
+--           raise exception 'findings: only a proposed AI finding is superseded' using errcode = '23514';
+--         end if;
+--         new.decided_by := coalesce(uid, new.decided_by);
+--         new.decided_at := now();
+--       else
+--         new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+--         new.decided_at := old.decided_at;
+--       end if;
+--       -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+--       new.edited := old.edited or (old.origin = 'ai' and (
+--         new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+--         or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+--         or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+--     end if;
+--     if uid is not null then
+--       new.updated_by := uid;
+--     end if;
+--     return new;
+--   end;
+--   $$;
+--   revoke all on function private.findings_before_write() from public, anon, authenticated;
+--   drop index if exists public.findings_connector_recent;
+--   alter table public.findings drop column if exists proposed_via;
+--   delete from supabase_migrations.schema_migrations where version = '20261212000000';
+--   commit;
+--
+-- Rolled back, connector proposals stay as ordinary AI proposals (ai_key 'ai:connector:...', no analysis); people can still
+-- accept or dismiss them. (`create or replace` keeps the trigger and its grants.)
+
+alter table public.findings
+  add column proposed_via text constraint findings_proposed_via check (proposed_via is null or proposed_via = 'connector');
+
+-- The connector's caps count recent proposals per workspace.
+create index findings_connector_recent on public.findings (workspace_id, created_at) where proposed_via = 'connector';
+
+create or replace function private.findings_before_write() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  -- An API token's request carries api_token_id in its claims (private.api_token_claims); the client can't set claims.
+  via_token boolean := coalesce(auth.jwt(), '{}'::jsonb) ? 'api_token_id';
+  -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+  again boolean := false;
+  -- The title as the key reads it (connector proposals).
+  norm text;
+begin
+  -- Over the API a person reviews findings in the app: no accept, dismiss or edit. (Depth 1 lets foreign-key actions through.)
+  if tg_op = 'UPDATE' and via_token and pg_catalog.pg_trigger_depth() = 1 then
+    raise exception 'findings: a person reviews findings in the app, not over the API' using errcode = '42501';
+  end if;
+
+  if tg_op = 'INSERT' then
+    -- The database says whether it came through the connector, never the client.
+    new.proposed_via := case when via_token then 'connector' end;
+    if via_token then
+      if new.origin <> 'ai' or new.status <> 'proposed' or new.analysis_id is not null or new.run_id is not null then
+        raise exception 'findings: over the connector a finding can only be proposed; a person accepts it in the app' using errcode = '42501';
+      end if;
+      -- One proposal per place and title: the unique index findings_ai_key refuses it again, whatever its status. The title is
+      -- normalised so punctuation, a no-break space or curly quotes can't make a new key: NFKC (a no-break space becomes a
+      -- space), curly quotes straight, lower case, white space to one space, trailing punctuation and spaces dropped. Labels,
+      -- never names (B1 2b). The tool's own check (titleKey in packages/mcp/src/finding-proposal.ts) does the same.
+      norm := pg_catalog.btrim(pg_catalog.lower(pg_catalog.translate(normalize(new.title, NFKC), '‘’“”', '''''""')));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, '[[:space:]]+', ' ', 'g'));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, '[]).!?,;:''"–—-]+$', ''));
+      new.ai_key := 'ai:connector:' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(new.process_id::text, 'company') || '|' || norm,
+        'UTF8')), 'hex');
+      perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('findings_connector:' || new.workspace_id::text, 0));
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = 'connector'
+          and f.created_at > pg_catalog.now() - interval '24 hours') >= 100 then
+        raise exception 'findings: this workspace has had 100 findings proposed over the connector in the last 24 hours' using errcode = '54000';
+      end if;
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = 'connector'
+          and f.status = 'proposed') >= 50 then
+        raise exception 'findings: 50 findings proposed over the connector are waiting for review; review them in the app first' using errcode = '54000';
+      end if;
+    elsif new.ai_key like 'ai:connector:%' then
+      raise exception 'findings: that key is kept for findings proposed over the connector' using errcode = '23514';
+    end if;
+  end if;
+
+  if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+    raise exception 'findings: the process must be one of the workspace''s' using errcode = '23514';
+  end if;
+  -- Every source it cites is one of its workspace's (read under the caller's RLS, so another workspace's never counts).
+  if cardinality(new.source_ids) > 0 and (tg_op = 'INSERT' or new.source_ids is distinct from old.source_ids) and exists (
+    select 1 from unnest(new.source_ids) as c (id)
+    where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+  ) then
+    raise exception 'findings: every source cited must be one of the workspace''s' using errcode = '23514';
+  end if;
+
+  if tg_op = 'UPDATE' then
+    again := old.origin = 'ai' and new.origin = 'ai' and new.status = 'proposed' and old.status in ('proposed', 'superseded')
+      and new.run_id is not null and new.run_id is distinct from old.run_id and old.proposed_via is null;
+  end if;
+
+  -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+  -- analysis's run. Signed-in callers only; the system (uid null) is trusted. A connector proposal has no analysis.
+  if (tg_op = 'INSERT' and new.origin = 'ai' and not via_token) or again then
+    if new.status <> 'proposed' then
+      raise exception 'findings: an AI finding starts as proposed' using errcode = '23514';
+    end if;
+    if uid is not null and not exists (
+      select 1 from public.ai_analyses a
+      where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+        and a.run_id = new.run_id and a.updated_at > now() - interval '15 minutes'
+    ) then
+      raise exception 'findings: an AI finding must come from an analysis you ran in the last 15 minutes' using errcode = '42501';
+    end if;
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.created_by := coalesce(uid, new.created_by);
+    new.created_at := now();
+    new.updated_by := uid;
+    new.updated_at := now();
+    new.edited := false;
+    if new.origin = 'ai' then
+      new.decided_by := null;
+      new.decided_at := null;
+    else
+      if new.status <> 'accepted' or new.analysis_id is not null or new.run_id is not null then
+        raise exception 'findings: a finding added by hand starts accepted and cites no analysis' using errcode = '23514';
+      end if;
+      new.decided_by := uid;
+      new.decided_at := now();
+    end if;
+    return new;
+  end if;
+
+  -- UPDATE
+  if new.workspace_id is distinct from old.workspace_id
+    or new.origin is distinct from old.origin
+    or new.ai_key is distinct from old.ai_key
+    or new.proposed_via is distinct from old.proposed_via
+    or new.created_at is distinct from old.created_at
+    or (new.created_by is distinct from old.created_by and new.created_by is not null)
+    or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+    or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+    raise exception 'findings: workspace, origin, key, how it was proposed, analysis, run and creator cannot be changed' using errcode = '23514';
+  end if;
+
+  if again then
+    -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+    new.edited := false;
+    new.decided_by := null;
+    new.decided_at := null;
+  else
+    if new.origin = 'ai' and new.facts is distinct from old.facts then
+      raise exception 'findings: the facts an AI finding cites stay as they were cited' using errcode = '23514';
+    end if;
+    if new.status is distinct from old.status then
+      if new.status = 'proposed' then
+        raise exception 'findings: a finding cannot go back to proposed' using errcode = '23514';
+      end if;
+      if old.status = 'superseded' then
+        raise exception 'findings: a later analysis replaced this proposal, so it can''t be decided; analyse again' using errcode = '23514';
+      end if;
+      if new.status = 'superseded' and (old.status <> 'proposed' or old.origin <> 'ai') then
+        raise exception 'findings: only a proposed AI finding is superseded' using errcode = '23514';
+      end if;
+      new.decided_by := coalesce(uid, new.decided_by);
+      new.decided_at := now();
+    else
+      new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+      new.decided_at := old.decided_at;
+    end if;
+    -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+    new.edited := old.edited or (old.origin = 'ai' and (
+      new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+      or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+      or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+  end if;
+  if uid is not null then
+    new.updated_by := uid;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.findings_before_write() from public, anon, authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261212000000', 'connector_findings', array['-- Claude outside the app proposes findings (issue #197, B20; Austin''s decision 3 on #175, 6 Oct 2026; the MCP tool
+-- `propose_finding`, docs/adr/0015-analysis-findings.md addendum).
+--
+-- Claude connected over MCP may PROPOSE a finding into the analysis review list. It is stored as an AI finding (origin ''ai'':
+-- Claude is AI) that is proposed, with no analysis or run, and `proposed_via = ''connector''`. A person still accepts, edits or
+-- dismisses it in the app, exactly as they do an AI finding; Accept, "AI, edited", Acknowledge as issue and the map feed all
+-- work unchanged.
+--
+-- STRICTLY ADDITIVE: one nullable column, one partial index, and one function redefined (`private.findings_before_write`).
+-- No data is rewritten; no table, grant, policy or trigger is created or dropped (the trigger `findings_before_write` keeps
+-- pointing at the function by name).
+--
+--   * `public.findings.proposed_via` (text, nullable, check: null or ''connector''). Null for everything that exists. The
+--     trigger stamps it on insert from the request''s JWT claims (an API token''s request carries `api_token_id`, as
+--     `private.api_token_claims` reads it), never from what the client sent, and it never changes afterwards.
+--   * `findings_connector_recent` (workspace_id, created_at) where proposed_via = ''connector'': the caps below count recent
+--     connector proposals per workspace.
+--   * `private.findings_before_write`: the 20261205000000 body plus these rules, which apply only to a request made with an
+--     API token (a session is unaffected, except that it can''t forge the key prefix):
+--       - a token may only INSERT a connector proposal: origin ''ai'', status ''proposed'', no analysis, no run. It can''t add a
+--         finding by hand (born accepted), can''t write an analysis-backed AI finding and can''t UPDATE any finding (no
+--         accept, dismiss or edit over the API). The check uses pg_trigger_depth() = 1, as `suggestions` does, so foreign-key
+--         actions (created_by set to null when a user is deleted) still pass;
+--       - the key is computed here: ''ai:connector:'' + sha256 of the place and the normalised title (Unicode NFKC, curly
+--         quotes straightened, lower case, any run of white space (a no-break space too) one space, trailing punctuation
+--         and spaces dropped), so the unique index `findings_ai_key` refuses the same proposal twice (23505), whatever its
+--         status: a dismissal stands, and a trailing full stop, a no-break space or a curly apostrophe doesn''t beat it;
+--       - at most 100 connector proposals per workspace in 24 hours and 50 waiting for review (54000), counted under an
+--         advisory lock (as `reserve_ai_run`);
+--       - the 15-minute "analysis you ran" rule is skipped for a connector insert; a connector finding is never "proposed
+--         again" by a later in-app run; `proposed_via` can''t change;
+--       - a session can''t send a key with the connector prefix (23514).
+--   The insert branch already records who (`created_by`, the token''s owner) and when (`created_at`).
+--
+-- Roles need no new code: `insert findings` is `can_edit_workspace` (agency admin, owner, editor); members and viewers get
+-- 42501 from row-level security. Members and viewers read connector findings as they read every finding (the app names people
+-- by labels, B1 2b, #30).
+--
+-- Applies after row 58 (20261209000000, B1 3/3, #30), the latest when this was written; it touches nothing they do. The previous definition of the function is the one in
+-- 20261205000000_analysis_findings.sql (B1 2b only disabled and re-enabled the trigger). Its md5 (prosrc) on a database built
+-- from every migration before this one: 8f5d4dc6a13d64841a9c2611a9889241.
+--
+-- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -f <file>`, one query per file):
+--   1. Nothing at or past this version, and the previous row is the latest. Expect only versions below 20261212000000, and
+--      the highest to be 20261209000000 (row 58, the previous row of docs/production-migrations.md) unless something later
+--      than it has been applied and logged since:
+--        select version from supabase_migrations.schema_migrations where version >= ''20261205000000'' order by 1;
+--   2. The column doesn''t exist yet. Expect 0:
+--        select count(*) from information_schema.columns where table_schema = ''public'' and table_name = ''findings'' and column_name = ''proposed_via'';
+--   3. The function body is the one this migration copied. Expect (psql prints proconfig this way)
+--      8f5d4dc6a13d64841a9c2611a9889241|f|{"search_path=\"\""}:
+--        select md5(prosrc), prosecdef, proconfig from pg_proc where proname = ''findings_before_write'';
+--   4. No key uses the new prefix. Expect 0:
+--        select count(*) from public.findings where ai_key like ''ai:connector:%'';
+--   5. The two triggers are there and enabled. Expect 2 rows, both O:
+--        select tgname, tgenabled::text from pg_trigger where tgrelid = ''public.findings''::regclass and not tgisinternal order by 1;
+--   6. The helpers exist. Expect one row, both non-null:
+--        select to_regprocedure(''auth.jwt()''), to_regprocedure(''pg_catalog.hashtextextended(text, bigint)'');
+--
+-- POST-APPLY CHECKS:
+--   1. Preflight 2 returns 1, and:
+--        select data_type, is_nullable from information_schema.columns where table_name = ''findings'' and column_name = ''proposed_via'';
+--      Expect: text, YES.
+--   2. select pg_get_constraintdef(oid) from pg_constraint where conname = ''findings_proposed_via'';
+--      Expect: the check (proposed_via IS NULL OR proposed_via = ''connector'').
+--   3. select indexdef from pg_indexes where indexname = ''findings_connector_recent'';   -- present, partial
+--   4. select prosecdef, proconfig, prosrc like ''%ai:connector:%'' and prosrc like ''%api_token_id%'' from pg_proc where proname = ''findings_before_write'';
+--      Expect: f, {search_path=""}, t.
+--   5. Preflight 5 unchanged (2 rows, both O).
+--   6. select count(*) from public.findings where proposed_via is not null;   -- 0
+--   7. The schema_migrations row for 20261212000000 is present.
+--
+-- ROLLBACK (one transaction; redeploy the app from before B20 first, since it selects `proposed_via`):
+--
+--   begin;
+--   -- The 20261205000000 body of private.findings_before_write, in full:
+--   create or replace function private.findings_before_write() returns trigger
+--   language plpgsql
+--   set search_path = ''''
+--   as $$
+--   declare
+--     uid uuid := auth.uid();
+--     -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+--     again boolean := false;
+--   begin
+--     if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+--       raise exception ''findings: the process must be one of the workspace''''s'' using errcode = ''23514'';
+--     end if;
+--     -- Every source it cites is one of its workspace''s (read under the caller''s RLS, so another workspace''s never counts).
+--     if cardinality(new.source_ids) > 0 and (tg_op = ''INSERT'' or new.source_ids is distinct from old.source_ids) and exists (
+--       select 1 from unnest(new.source_ids) as c (id)
+--       where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+--     ) then
+--       raise exception ''findings: every source cited must be one of the workspace''''s'' using errcode = ''23514'';
+--     end if;
+--   
+--     if tg_op = ''UPDATE'' then
+--       again := old.origin = ''ai'' and new.origin = ''ai'' and new.status = ''proposed'' and old.status in (''proposed'', ''superseded'')
+--         and new.run_id is not null and new.run_id is distinct from old.run_id;
+--     end if;
+--   
+--     -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+--     -- analysis''s run. Signed-in callers only; the system (uid null) is trusted.
+--     if (tg_op = ''INSERT'' and new.origin = ''ai'') or again then
+--       if new.status <> ''proposed'' then
+--         raise exception ''findings: an AI finding starts as proposed'' using errcode = ''23514'';
+--       end if;
+--       if uid is not null and not exists (
+--         select 1 from public.ai_analyses a
+--         where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+--           and a.run_id = new.run_id and a.updated_at > now() - interval ''15 minutes''
+--       ) then
+--         raise exception ''findings: an AI finding must come from an analysis you ran in the last 15 minutes'' using errcode = ''42501'';
+--       end if;
+--     end if;
+--   
+--     if tg_op = ''INSERT'' then
+--       new.created_by := coalesce(uid, new.created_by);
+--       new.created_at := now();
+--       new.updated_by := uid;
+--       new.updated_at := now();
+--       new.edited := false;
+--       if new.origin = ''ai'' then
+--         new.decided_by := null;
+--         new.decided_at := null;
+--       else
+--         if new.status <> ''accepted'' or new.analysis_id is not null or new.run_id is not null then
+--           raise exception ''findings: a finding added by hand starts accepted and cites no analysis'' using errcode = ''23514'';
+--         end if;
+--         new.decided_by := uid;
+--         new.decided_at := now();
+--       end if;
+--       return new;
+--     end if;
+--   
+--     -- UPDATE
+--     if new.workspace_id is distinct from old.workspace_id
+--       or new.origin is distinct from old.origin
+--       or new.ai_key is distinct from old.ai_key
+--       or new.created_at is distinct from old.created_at
+--       or (new.created_by is distinct from old.created_by and new.created_by is not null)
+--       or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+--       or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+--       raise exception ''findings: workspace, origin, key, analysis, run and creator cannot be changed'' using errcode = ''23514'';
+--     end if;
+--   
+--     if again then
+--       -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+--       new.edited := false;
+--       new.decided_by := null;
+--       new.decided_at := null;
+--     else
+--       if new.origin = ''ai'' and new.facts is distinct from old.facts then
+--         raise exception ''findings: the facts an AI finding cites stay as they were cited'' using errcode = ''23514'';
+--       end if;
+--       if new.status is distinct from old.status then
+--         if new.status = ''proposed'' then
+--           raise exception ''findings: a finding cannot go back to proposed'' using errcode = ''23514'';
+--         end if;
+--         if old.status = ''superseded'' then
+--           raise exception ''findings: a later analysis replaced this proposal, so it can''''t be decided; analyse again'' using errcode = ''23514'';
+--         end if;
+--         if new.status = ''superseded'' and (old.status <> ''proposed'' or old.origin <> ''ai'') then
+--           raise exception ''findings: only a proposed AI finding is superseded'' using errcode = ''23514'';
+--         end if;
+--         new.decided_by := coalesce(uid, new.decided_by);
+--         new.decided_at := now();
+--       else
+--         new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+--         new.decided_at := old.decided_at;
+--       end if;
+--       -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+--       new.edited := old.edited or (old.origin = ''ai'' and (
+--         new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+--         or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+--         or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+--     end if;
+--     if uid is not null then
+--       new.updated_by := uid;
+--     end if;
+--     return new;
+--   end;
+--   $$;
+--   revoke all on function private.findings_before_write() from public, anon, authenticated;
+--   drop index if exists public.findings_connector_recent;
+--   alter table public.findings drop column if exists proposed_via;
+--   delete from supabase_migrations.schema_migrations where version = ''20261212000000'';
+--   commit;
+--
+-- Rolled back, connector proposals stay as ordinary AI proposals (ai_key ''ai:connector:...'', no analysis); people can still
+-- accept or dismiss them. (`create or replace` keeps the trigger and its grants.)
+
+alter table public.findings
+  add column proposed_via text constraint findings_proposed_via check (proposed_via is null or proposed_via = ''connector'');
+
+-- The connector''s caps count recent proposals per workspace.
+create index findings_connector_recent on public.findings (workspace_id, created_at) where proposed_via = ''connector'';
+
+create or replace function private.findings_before_write() returns trigger
+language plpgsql
+set search_path = ''''
+as $$
+declare
+  uid uuid := auth.uid();
+  -- An API token''s request carries api_token_id in its claims (private.api_token_claims); the client can''t set claims.
+  via_token boolean := coalesce(auth.jwt(), ''{}''::jsonb) ? ''api_token_id'';
+  -- An update where a later run proposes a proposed or superseded AI finding again (new text, facts, analysis and run).
+  again boolean := false;
+  -- The title as the key reads it (connector proposals).
+  norm text;
+begin
+  -- Over the API a person reviews findings in the app: no accept, dismiss or edit. (Depth 1 lets foreign-key actions through.)
+  if tg_op = ''UPDATE'' and via_token and pg_catalog.pg_trigger_depth() = 1 then
+    raise exception ''findings: a person reviews findings in the app, not over the API'' using errcode = ''42501'';
+  end if;
+
+  if tg_op = ''INSERT'' then
+    -- The database says whether it came through the connector, never the client.
+    new.proposed_via := case when via_token then ''connector'' end;
+    if via_token then
+      if new.origin <> ''ai'' or new.status <> ''proposed'' or new.analysis_id is not null or new.run_id is not null then
+        raise exception ''findings: over the connector a finding can only be proposed; a person accepts it in the app'' using errcode = ''42501'';
+      end if;
+      -- One proposal per place and title: the unique index findings_ai_key refuses it again, whatever its status. The title is
+      -- normalised so punctuation, a no-break space or curly quotes can''t make a new key: NFKC (a no-break space becomes a
+      -- space), curly quotes straight, lower case, white space to one space, trailing punctuation and spaces dropped. Labels,
+      -- never names (B1 2b). The tool''s own check (titleKey in packages/mcp/src/finding-proposal.ts) does the same.
+      norm := pg_catalog.btrim(pg_catalog.lower(pg_catalog.translate(normalize(new.title, NFKC), ''‘’“”'', ''''''''''""'')));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, ''[[:space:]]+'', '' '', ''g''));
+      norm := pg_catalog.btrim(pg_catalog.regexp_replace(norm, ''[]).!?,;:''''"–—-]+$'', ''''));
+      new.ai_key := ''ai:connector:'' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+        coalesce(new.process_id::text, ''company'') || ''|'' || norm,
+        ''UTF8'')), ''hex'');
+      perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''findings_connector:'' || new.workspace_id::text, 0));
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = ''connector''
+          and f.created_at > pg_catalog.now() - interval ''24 hours'') >= 100 then
+        raise exception ''findings: this workspace has had 100 findings proposed over the connector in the last 24 hours'' using errcode = ''54000'';
+      end if;
+      if (select pg_catalog.count(*) from public.findings f where f.workspace_id = new.workspace_id and f.proposed_via = ''connector''
+          and f.status = ''proposed'') >= 50 then
+        raise exception ''findings: 50 findings proposed over the connector are waiting for review; review them in the app first'' using errcode = ''54000'';
+      end if;
+    elsif new.ai_key like ''ai:connector:%'' then
+      raise exception ''findings: that key is kept for findings proposed over the connector'' using errcode = ''23514'';
+    end if;
+  end if;
+
+  if new.process_id is not null and not exists (select 1 from public.processes p where p.id = new.process_id and p.workspace_id = new.workspace_id) then
+    raise exception ''findings: the process must be one of the workspace''''s'' using errcode = ''23514'';
+  end if;
+  -- Every source it cites is one of its workspace''s (read under the caller''s RLS, so another workspace''s never counts).
+  if cardinality(new.source_ids) > 0 and (tg_op = ''INSERT'' or new.source_ids is distinct from old.source_ids) and exists (
+    select 1 from unnest(new.source_ids) as c (id)
+    where not exists (select 1 from public.sources s where s.id = c.id and s.workspace_id = new.workspace_id)
+  ) then
+    raise exception ''findings: every source cited must be one of the workspace''''s'' using errcode = ''23514'';
+  end if;
+
+  if tg_op = ''UPDATE'' then
+    again := old.origin = ''ai'' and new.origin = ''ai'' and new.status = ''proposed'' and old.status in (''proposed'', ''superseded'')
+      and new.run_id is not null and new.run_id is distinct from old.run_id and old.proposed_via is null;
+  end if;
+
+  -- An AI finding (proposed now, or again) comes from an analysis the caller wrote in the last 15 minutes, by that
+  -- analysis''s run. Signed-in callers only; the system (uid null) is trusted. A connector proposal has no analysis.
+  if (tg_op = ''INSERT'' and new.origin = ''ai'' and not via_token) or again then
+    if new.status <> ''proposed'' then
+      raise exception ''findings: an AI finding starts as proposed'' using errcode = ''23514'';
+    end if;
+    if uid is not null and not exists (
+      select 1 from public.ai_analyses a
+      where a.id = new.analysis_id and a.workspace_id = new.workspace_id and a.created_by = uid
+        and a.run_id = new.run_id and a.updated_at > now() - interval ''15 minutes''
+    ) then
+      raise exception ''findings: an AI finding must come from an analysis you ran in the last 15 minutes'' using errcode = ''42501'';
+    end if;
+  end if;
+
+  if tg_op = ''INSERT'' then
+    new.created_by := coalesce(uid, new.created_by);
+    new.created_at := now();
+    new.updated_by := uid;
+    new.updated_at := now();
+    new.edited := false;
+    if new.origin = ''ai'' then
+      new.decided_by := null;
+      new.decided_at := null;
+    else
+      if new.status <> ''accepted'' or new.analysis_id is not null or new.run_id is not null then
+        raise exception ''findings: a finding added by hand starts accepted and cites no analysis'' using errcode = ''23514'';
+      end if;
+      new.decided_by := uid;
+      new.decided_at := now();
+    end if;
+    return new;
+  end if;
+
+  -- UPDATE
+  if new.workspace_id is distinct from old.workspace_id
+    or new.origin is distinct from old.origin
+    or new.ai_key is distinct from old.ai_key
+    or new.proposed_via is distinct from old.proposed_via
+    or new.created_at is distinct from old.created_at
+    or (new.created_by is distinct from old.created_by and new.created_by is not null)
+    or (not again and new.analysis_id is distinct from old.analysis_id and new.analysis_id is not null)
+    or (not again and new.run_id is distinct from old.run_id and new.run_id is not null) then
+    raise exception ''findings: workspace, origin, key, how it was proposed, analysis, run and creator cannot be changed'' using errcode = ''23514'';
+  end if;
+
+  if again then
+    -- What the later run wrote replaces the proposal; nobody has decided it, and nobody has edited it (an edit accepts).
+    new.edited := false;
+    new.decided_by := null;
+    new.decided_at := null;
+  else
+    if new.origin = ''ai'' and new.facts is distinct from old.facts then
+      raise exception ''findings: the facts an AI finding cites stay as they were cited'' using errcode = ''23514'';
+    end if;
+    if new.status is distinct from old.status then
+      if new.status = ''proposed'' then
+        raise exception ''findings: a finding cannot go back to proposed'' using errcode = ''23514'';
+      end if;
+      if old.status = ''superseded'' then
+        raise exception ''findings: a later analysis replaced this proposal, so it can''''t be decided; analyse again'' using errcode = ''23514'';
+      end if;
+      if new.status = ''superseded'' and (old.status <> ''proposed'' or old.origin <> ''ai'') then
+        raise exception ''findings: only a proposed AI finding is superseded'' using errcode = ''23514'';
+      end if;
+      new.decided_by := coalesce(uid, new.decided_by);
+      new.decided_at := now();
+    else
+      new.decided_by := case when uid is null then new.decided_by else old.decided_by end;
+      new.decided_at := old.decided_at;
+    end if;
+    -- Set here only: an AI finding whose words, rating, kind, place or sources a person changed reads as edited.
+    new.edited := old.edited or (old.origin = ''ai'' and (
+      new.title is distinct from old.title or new.evidence is distinct from old.evidence or new.why is distinct from old.why
+      or new.rating is distinct from old.rating or new.type is distinct from old.type or new.step_id is distinct from old.step_id
+      or new.process_id is distinct from old.process_id or new.source_ids is distinct from old.source_ids));
+  end if;
+  if uid is not null then
+    new.updated_by := uid;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.findings_before_write() from public, anon, authenticated;
+']);
+
+-- 20261218000000_share_links.sql
 -- View-only share links with redacted snapshots (issue #32, B3; docs/plans/b3-brief.md, docs/adr/0016-share-links.md).
 --
 -- Owners and editors make a token link to a frozen, redacted copy ("snapshot") of the Overview, a process, an issue or a
@@ -32709,12 +33969,11 @@ grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, j
 --   * `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated).
 -- No `audit` trigger: it would copy the multi-megabyte snapshot into `audit_log`; `created_by` and `revoked_by` record who.
 --
--- ORDER: after whatever B2 (#31) adds (expected 20261210000000), 20261209000000 (#206) and 20261208000000 (#207). If any of
--- those lands with a later version, this one is renumbered. It depends only on `can_edit_workspace` and the base tables.
+-- ORDER: after 20261212000000 (connector_findings, B20, row 59) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. Latest applied versions; expect nothing >= '20261211000000':
---        select version from supabase_migrations.schema_migrations where version >= '20261207500000' order by 1;
+--   0. Latest applied versions; expect the latest to be 20261212000000 and nothing >= '20261218000000':
+--        select version from supabase_migrations.schema_migrations where version >= '20261209000000' order by 1;
 --   1. Nothing created yet. Expect null x5:
 --        select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'),
 --               to_regprocedure('public.share_team_capacity(uuid, boolean)'),
@@ -32740,9 +33999,14 @@ grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, j
 --        select relrowsecurity, (select count(*) from pg_policies where schemaname = 'public' and tablename = 'share_links')
 --        from pg_class where oid = 'public.share_links'::regclass;
 --   2. anon holds nothing on the table; authenticated has column-level SELECT/INSERT/UPDATE only (list them):
---        select grantee, privilege_type from information_schema.role_table_grants where table_name = 'share_links' ...;
+--        select grantee, privilege_type from information_schema.role_table_grants
+--        where table_schema = 'public' and table_name = 'share_links' and grantee in ('anon', 'authenticated');
+--        Expect no row for anon, and none for authenticated (its grants are on columns only). Then:
 --        select grantee, privilege_type, column_name from information_schema.column_privileges
---        where table_schema = 'public' and table_name = 'share_links' and grantee in ('anon', 'authenticated') order by 1, 2, 3;
+--        where table_schema = 'public' and table_name = 'share_links' and grantee in ('anon', 'authenticated')
+--        order by 1, 2, 3;
+--        Expect rows for authenticated only: SELECT on 18 columns (not token_hash, not snapshot), INSERT on 11 (not mode),
+--        UPDATE on 4 (label, snapshot, engine_version, revoked_at); none for anon.
 --   3. Function privileges. Expect t, t, f, t, f, f:
 --        has_function_privilege('anon', 'public.open_share_link(text)', 'execute'), ('authenticated', same),
 --        ('anon', 'public.share_team_capacity(uuid, boolean)', 'execute'), ('authenticated', same),
@@ -32765,7 +34029,7 @@ grant execute on function public.record_client_calibration(uuid, jsonb, jsonb, j
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
 --   drop function if exists private.share_emails_ok(text[]);
---   delete from supabase_migrations.schema_migrations where version = '20261211000000';
+--   delete from supabase_migrations.schema_migrations where version = '20261218000000';
 --   commit;
 --
 -- Production data: none needed.
@@ -32861,6 +34125,13 @@ declare
   nm record;
   escaped text;
   pat text;
+  parts text[];
+  -- Between the words of a name: any white space (a no-break space, several spaces, a line break), or the JSON escape of one.
+  sep constant text := '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4}|[' || chr(160) || chr(8192) || '-' || chr(8203) || chr(8239) || chr(12288) || chr(65279) || '])+';
+  -- Before a name: the start, a character that is not a letter or digit, or a JSON escape (`jsonb::text` writes a line break as
+  -- the two characters \n and a control character as \u001f, so a name after one is preceded by a letter).
+  lb constant text := '(^|[^[:alnum:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})';
+  rb constant text := '($|[^[:alnum:]])';
 begin
   -- 1. The snapshot is the link's.
   if snap is null or jsonb_typeof(snap) <> 'object'
@@ -32878,46 +34149,60 @@ begin
     return 'The snapshot contains an email address.';
   end if;
 
-  -- 3. No pay, for anyone, whatever the toggles (Austin, 6 Oct: no pay data).
+  -- 3. No pay, for anyone, whatever the toggles (Austin, 6 Oct: no pay data). A string counts as a value.
   if jsonb_path_exists(snap, 'lax $.**.cost_rate ? (@ != null)') then
     return 'The snapshot contains a person''s pay.';
   end if;
 
-  -- 4. No evidence notes (provenance holds quotes that can name people and clients).
-  if jsonb_path_exists(snap, 'lax $.**.provenance.*') then
+  -- 4. No evidence notes: provenance of any JSON type (an empty object or null is fine), and quotes from sources cited as facts.
+  if jsonb_path_exists(snap, 'lax $.**.provenance.*')
+     or jsonb_path_exists(snap, 'strict $.**.provenance ? (@.type() != "object" && @.type() != "null")')
+     or jsonb_path_exists(snap, 'lax $.**.facts ? (@.kind == "quote")') then
     return 'The snapshot contains evidence notes.';
   end if;
 
-  -- 5. Clients are always anonymised. Names under 3 characters are not checked (same floor as the app's `labelNames`).
-  -- Boundary: no letter or digit either side. `jsonb::text` writes a line break as the two characters \n (and \t, \r, ...), so
-  -- a name straight after one is preceded by the letter n; the extra alternative below treats that escape as a boundary.
+  -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
+  -- are not checked (same floor as the app's `labelNames`).
   for nm in select btrim(c.name) as name from public.clients c
             where c.workspace_id = ws and char_length(btrim(c.name)) >= 3 loop
-    escaped := regexp_replace(nm.name, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
-    pat := '(^|[^[:alnum:]]|\\[nrtbf])' || escaped || '($|[^[:alnum:]])';
-    if (nm.name !~ '\s' and txt ~ pat) or (nm.name ~ '\s' and txt ~* pat) then
+    parts := array_remove(regexp_split_to_array(nm.name, '[[:space:]]+|' || chr(160)), '');
+    select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
+    pat := lb || escaped || rb;
+    if txt ~* pat then
       return 'The snapshot names a client.';
     end if;
   end loop;
 
-  -- 6. People are labels unless People is on.
+  -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
+  -- own. A first name alone is left to the app's check (it would refuse links over words like "Will" and "Mark").
   if not show_people then
     for nm in select btrim(p.name) as name from public.people p
               where p.workspace_id = ws and char_length(btrim(p.name)) >= 3 loop
-      escaped := regexp_replace(nm.name, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
-      pat := '(^|[^[:alnum:]]|\\[nrtbf])' || escaped || '($|[^[:alnum:]])';
-      if (nm.name !~ '\s' and txt ~ pat) or (nm.name ~ '\s' and txt ~* pat) then
+      parts := array_remove(regexp_split_to_array(nm.name, '[[:space:]]+|' || chr(160)), '');
+      select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
+      pat := lb || escaped || rb;
+      if txt ~* pat then
         return 'The snapshot names a person.';
+      end if;
+      if array_length(parts, 1) > 1 and char_length(parts[array_length(parts, 1)]) >= 3 then
+        escaped := regexp_replace(parts[array_length(parts, 1)], '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
+        pat := lb || escaped || rb;
+        if txt ~* pat then
+          return 'The snapshot names a person.';
+        end if;
       end if;
     end loop;
   end if;
 
-  -- 7. Financials off: no costs, margins or overhead.
+  -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
+  -- scenario or a solution's lever changes (the visitor's browser would price work at the real rate); so does money in text.
   if not show_financials and (
-       jsonb_path_exists(snap, 'lax $.**.default_cost_rate ? (@ != 0)')
-    or jsonb_path_exists(snap, 'lax $.**.margin ? (@ != 0)')
+       jsonb_path_exists(snap, 'lax $.**.default_cost_rate ? (@.type() == "string" || (@.type() == "number" && @ != 0))')
+    or jsonb_path_exists(snap, 'lax $.**.margin ? (@.type() == "string" || (@.type() == "number" && @ != 0))')
     or jsonb_path_exists(snap, 'lax $.**.overhead_monthly')
-    or jsonb_path_exists(snap, 'lax $.**.target_margin')) then
+    or jsonb_path_exists(snap, 'lax $.**.target_margin')
+    or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
+    or txt ~* ('[£$€][[:space:]]*[0-9]|[0-9][[:space:]]*[£€]|(GBP|USD|EUR|AUD|NZD|CAD)[[:space:]]*[0-9]|[0-9][[:space:]]*(k|m|bn)?[[:space:]]*(GBP|USD|EUR|AUD|NZD|CAD|pounds?|dollars?|euros?)([^a-z]|$)')) then
     return 'The snapshot contains costs or margins.';
   end if;
 
@@ -33112,7 +34397,10 @@ begin
     if auth.uid() is null then
       return jsonb_build_object('status', 'sign_in');
     end if;
-    select lower(u.email) into e from auth.users u where u.id = auth.uid() and u.email_confirmed_at is not null;
+    -- A confirmed address AND a Google identity: a password sign-up with a listed address is not the person it names.
+    select lower(u.email) into e from auth.users u
+      where u.id = auth.uid() and u.email_confirmed_at is not null
+        and exists (select 1 from auth.identities i where i.user_id = u.id and i.provider = 'google');
     if e is null or not (e = any (l.allowed_emails)) then
       return jsonb_build_object('status', 'not_allowed');
     end if;
@@ -33126,7 +34414,7 @@ $$;
 revoke execute on function public.open_share_link(text) from public;
 grant execute on function public.open_share_link(text) to anon, authenticated;
 
-insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261211000000', 'share_links', array['-- View-only share links with redacted snapshots (issue #32, B3; docs/plans/b3-brief.md, docs/adr/0016-share-links.md).
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261218000000', 'share_links', array['-- View-only share links with redacted snapshots (issue #32, B3; docs/plans/b3-brief.md, docs/adr/0016-share-links.md).
 --
 -- Owners and editors make a token link to a frozen, redacted copy ("snapshot") of the Overview, a process, an issue or a
 -- solution. The Next.js server builds the snapshot from the existing loaders (through the same redacted team-input shape
@@ -33149,12 +34437,11 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   * `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated).
 -- No `audit` trigger: it would copy the multi-megabyte snapshot into `audit_log`; `created_by` and `revoked_by` record who.
 --
--- ORDER: after whatever B2 (#31) adds (expected 20261210000000), 20261209000000 (#206) and 20261208000000 (#207). If any of
--- those lands with a later version, this one is renumbered. It depends only on `can_edit_workspace` and the base tables.
+-- ORDER: after 20261212000000 (connector_findings, B20, row 59) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. Latest applied versions; expect nothing >= ''20261211000000'':
---        select version from supabase_migrations.schema_migrations where version >= ''20261207500000'' order by 1;
+--   0. Latest applied versions; expect the latest to be 20261212000000 and nothing >= ''20261218000000'':
+--        select version from supabase_migrations.schema_migrations where version >= ''20261209000000'' order by 1;
 --   1. Nothing created yet. Expect null x5:
 --        select to_regclass(''public.share_links''), to_regprocedure(''public.open_share_link(text)''),
 --               to_regprocedure(''public.share_team_capacity(uuid, boolean)''),
@@ -33180,9 +34467,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        select relrowsecurity, (select count(*) from pg_policies where schemaname = ''public'' and tablename = ''share_links'')
 --        from pg_class where oid = ''public.share_links''::regclass;
 --   2. anon holds nothing on the table; authenticated has column-level SELECT/INSERT/UPDATE only (list them):
---        select grantee, privilege_type from information_schema.role_table_grants where table_name = ''share_links'' ...;
+--        select grantee, privilege_type from information_schema.role_table_grants
+--        where table_schema = ''public'' and table_name = ''share_links'' and grantee in (''anon'', ''authenticated'');
+--        Expect no row for anon, and none for authenticated (its grants are on columns only). Then:
 --        select grantee, privilege_type, column_name from information_schema.column_privileges
---        where table_schema = ''public'' and table_name = ''share_links'' and grantee in (''anon'', ''authenticated'') order by 1, 2, 3;
+--        where table_schema = ''public'' and table_name = ''share_links'' and grantee in (''anon'', ''authenticated'')
+--        order by 1, 2, 3;
+--        Expect rows for authenticated only: SELECT on 18 columns (not token_hash, not snapshot), INSERT on 11 (not mode),
+--        UPDATE on 4 (label, snapshot, engine_version, revoked_at); none for anon.
 --   3. Function privileges. Expect t, t, f, t, f, f:
 --        has_function_privilege(''anon'', ''public.open_share_link(text)'', ''execute''), (''authenticated'', same),
 --        (''anon'', ''public.share_team_capacity(uuid, boolean)'', ''execute''), (''authenticated'', same),
@@ -33205,7 +34497,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
 --   drop function if exists private.share_emails_ok(text[]);
---   delete from supabase_migrations.schema_migrations where version = ''20261211000000'';
+--   delete from supabase_migrations.schema_migrations where version = ''20261218000000'';
 --   commit;
 --
 -- Production data: none needed.
@@ -33301,6 +34593,13 @@ declare
   nm record;
   escaped text;
   pat text;
+  parts text[];
+  -- Between the words of a name: any white space (a no-break space, several spaces, a line break), or the JSON escape of one.
+  sep constant text := ''([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4}|['' || chr(160) || chr(8192) || ''-'' || chr(8203) || chr(8239) || chr(12288) || chr(65279) || ''])+'';
+  -- Before a name: the start, a character that is not a letter or digit, or a JSON escape (`jsonb::text` writes a line break as
+  -- the two characters \n and a control character as \u001f, so a name after one is preceded by a letter).
+  lb constant text := ''(^|[^[:alnum:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})'';
+  rb constant text := ''($|[^[:alnum:]])'';
 begin
   -- 1. The snapshot is the link''s.
   if snap is null or jsonb_typeof(snap) <> ''object''
@@ -33318,46 +34617,60 @@ begin
     return ''The snapshot contains an email address.'';
   end if;
 
-  -- 3. No pay, for anyone, whatever the toggles (Austin, 6 Oct: no pay data).
+  -- 3. No pay, for anyone, whatever the toggles (Austin, 6 Oct: no pay data). A string counts as a value.
   if jsonb_path_exists(snap, ''lax $.**.cost_rate ? (@ != null)'') then
     return ''The snapshot contains a person''''s pay.'';
   end if;
 
-  -- 4. No evidence notes (provenance holds quotes that can name people and clients).
-  if jsonb_path_exists(snap, ''lax $.**.provenance.*'') then
+  -- 4. No evidence notes: provenance of any JSON type (an empty object or null is fine), and quotes from sources cited as facts.
+  if jsonb_path_exists(snap, ''lax $.**.provenance.*'')
+     or jsonb_path_exists(snap, ''strict $.**.provenance ? (@.type() != "object" && @.type() != "null")'')
+     or jsonb_path_exists(snap, ''lax $.**.facts ? (@.kind == "quote")'') then
     return ''The snapshot contains evidence notes.'';
   end if;
 
-  -- 5. Clients are always anonymised. Names under 3 characters are not checked (same floor as the app''s `labelNames`).
-  -- Boundary: no letter or digit either side. `jsonb::text` writes a line break as the two characters \n (and \t, \r, ...), so
-  -- a name straight after one is preceded by the letter n; the extra alternative below treats that escape as a boundary.
+  -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
+  -- are not checked (same floor as the app''s `labelNames`).
   for nm in select btrim(c.name) as name from public.clients c
             where c.workspace_id = ws and char_length(btrim(c.name)) >= 3 loop
-    escaped := regexp_replace(nm.name, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g'');
-    pat := ''(^|[^[:alnum:]]|\\[nrtbf])'' || escaped || ''($|[^[:alnum:]])'';
-    if (nm.name !~ ''\s'' and txt ~ pat) or (nm.name ~ ''\s'' and txt ~* pat) then
+    parts := array_remove(regexp_split_to_array(nm.name, ''[[:space:]]+|'' || chr(160)), '''');
+    select string_agg(regexp_replace(w, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), sep) into escaped from unnest(parts) as w;
+    pat := lb || escaped || rb;
+    if txt ~* pat then
       return ''The snapshot names a client.'';
     end if;
   end loop;
 
-  -- 6. People are labels unless People is on.
+  -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
+  -- own. A first name alone is left to the app''s check (it would refuse links over words like "Will" and "Mark").
   if not show_people then
     for nm in select btrim(p.name) as name from public.people p
               where p.workspace_id = ws and char_length(btrim(p.name)) >= 3 loop
-      escaped := regexp_replace(nm.name, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g'');
-      pat := ''(^|[^[:alnum:]]|\\[nrtbf])'' || escaped || ''($|[^[:alnum:]])'';
-      if (nm.name !~ ''\s'' and txt ~ pat) or (nm.name ~ ''\s'' and txt ~* pat) then
+      parts := array_remove(regexp_split_to_array(nm.name, ''[[:space:]]+|'' || chr(160)), '''');
+      select string_agg(regexp_replace(w, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), sep) into escaped from unnest(parts) as w;
+      pat := lb || escaped || rb;
+      if txt ~* pat then
         return ''The snapshot names a person.'';
+      end if;
+      if array_length(parts, 1) > 1 and char_length(parts[array_length(parts, 1)]) >= 3 then
+        escaped := regexp_replace(parts[array_length(parts, 1)], ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g'');
+        pat := lb || escaped || rb;
+        if txt ~* pat then
+          return ''The snapshot names a person.'';
+        end if;
       end if;
     end loop;
   end if;
 
-  -- 7. Financials off: no costs, margins or overhead.
+  -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
+  -- scenario or a solution''s lever changes (the visitor''s browser would price work at the real rate); so does money in text.
   if not show_financials and (
-       jsonb_path_exists(snap, ''lax $.**.default_cost_rate ? (@ != 0)'')
-    or jsonb_path_exists(snap, ''lax $.**.margin ? (@ != 0)'')
+       jsonb_path_exists(snap, ''lax $.**.default_cost_rate ? (@.type() == "string" || (@.type() == "number" && @ != 0))'')
+    or jsonb_path_exists(snap, ''lax $.**.margin ? (@.type() == "string" || (@.type() == "number" && @ != 0))'')
     or jsonb_path_exists(snap, ''lax $.**.overhead_monthly'')
-    or jsonb_path_exists(snap, ''lax $.**.target_margin'')) then
+    or jsonb_path_exists(snap, ''lax $.**.target_margin'')
+    or jsonb_path_exists(snap, ''lax $.**.path ? (@ like_regex "cost_rate$")'')
+    or txt ~* (''[£$€][[:space:]]*[0-9]|[0-9][[:space:]]*[£€]|(GBP|USD|EUR|AUD|NZD|CAD)[[:space:]]*[0-9]|[0-9][[:space:]]*(k|m|bn)?[[:space:]]*(GBP|USD|EUR|AUD|NZD|CAD|pounds?|dollars?|euros?)([^a-z]|$)'')) then
     return ''The snapshot contains costs or margins.'';
   end if;
 
@@ -33552,7 +34865,10 @@ begin
     if auth.uid() is null then
       return jsonb_build_object(''status'', ''sign_in'');
     end if;
-    select lower(u.email) into e from auth.users u where u.id = auth.uid() and u.email_confirmed_at is not null;
+    -- A confirmed address AND a Google identity: a password sign-up with a listed address is not the person it names.
+    select lower(u.email) into e from auth.users u
+      where u.id = auth.uid() and u.email_confirmed_at is not null
+        and exists (select 1 from auth.identities i where i.user_id = u.id and i.provider = ''google'');
     if e is null or not (e = any (l.allowed_emails)) then
       return jsonb_build_object(''status'', ''not_allowed'');
     end if;

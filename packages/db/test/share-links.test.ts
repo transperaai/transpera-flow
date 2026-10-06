@@ -397,46 +397,57 @@ describe("the leak check", () => {
     await accepted({ ...clean(), a: [{ provenance: {} }] });
   });
 
-  it("5. a client's name, always: one word is case-sensitive, several words are not; the word inside another is fine", async () => {
+  it("5. a client's name, always, any case and any white space; the word inside another is fine", async () => {
     const msg = "The snapshot names a client.";
     await refused({ ...clean(), note: `Churn risk at ${multiWordClient}.` }, {}, msg);
     await refused({ ...clean("overview", true, true), note: `Churn risk at ${multiWordClient}.` }, both, msg);
     await refused({ ...clean("overview", true, true), arr: [{ n: multiWordClient }] }, both, msg);
     await refused({ ...clean(), note: `x ${multiWordClient.toUpperCase()}` }, {}, msg);
     await refused({ ...clean(), note: `first line\n${multiWordClient}` }, {}, msg);
-    // A one-word client ("Blue") is matched as written, so a common word in lower case is fine.
+    // White space between the words: a no-break space (pasted from a document), two spaces, a line break.
+    const words = multiWordClient.split(" ");
+    for (const gap of ["\u00a0", "  ", "\n", " \u200b "]) await refused({ ...clean(), note: `at ${words.join(gap)}` }, {}, msg);
+    // A one-word client ("Blue") is matched in any case, so the word is refused; inside another word it is fine.
     await db.client.query("begin");
     try {
       await db.client.query("insert into clients (workspace_id, name) values ($1, 'Blue')", [ws]);
       const tryNote = (note: string) => attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note }, tok: randomUUID() }));
       expect(await tryNote("Churn risk at Blue.")).toMatchObject({ ok: false, code: "23514", message: msg });
       expect(await tryNote("line one\nBlue")).toMatchObject({ ok: false, message: msg });
-      expect((await tryNote("the blue sky")).ok).toBe(true);
+      expect(await tryNote("the blue sky")).toMatchObject({ ok: false, message: msg });
+      expect(await tryNote("BLUE")).toMatchObject({ ok: false, message: msg });
       expect((await tryNote("Bluebird and xBlue")).ok).toBe(true);
     } finally {
       await db.client.query("rollback");
     }
   });
 
-  it("6. a person's full name with People off (any case for two words), allowed with People on", async () => {
+  it("6. a person's full name with People off (any case, any white space), their surname on its own, allowed with People on", async () => {
     const msg = "The snapshot names a person.";
     await refused({ ...clean(), note: `Ask ${personName}` }, {}, msg);
     await refused({ ...clean(), note: `ask ${personName.toUpperCase()}` }, {}, msg);
     await refused({ ...clean(), note: `Ask\n${personName}` }, {}, msg);
     await refused({ ...clean(), a: { b: [personName] } }, { financials: false }, msg);
-    // A first name alone is the app's job (shared first names), not the database's.
+    const words = personName.split(" ");
+    for (const gap of ["\u00a0", "  ", "\n", "\t", " \u200b "]) await refused({ ...clean(), note: `Ask ${words.join(gap)}` }, {}, msg);
+    // A control character before the name: jsonb writes it as \u001f, so the character before the name is the letter f.
+    await refused({ ...clean(), note: `x\u001f${personName}` }, {}, msg);
+    // The surname alone (3+ letters), in any case.
+    await refused({ ...clean(), note: `${words[words.length - 1]} is slow` }, {}, msg);
+    await refused({ ...clean(), note: `${words[words.length - 1]!.toUpperCase()} is slow` }, {}, msg);
+    // A first name alone is the app's job (an accepted limit here), not the database's.
     await accepted({ ...clean(), note: `Ask ${personFirst}` });
     await accepted({ ...clean("overview", true, false), note: `Ask ${personName}` }, { people: true });
   });
 
-  it("6b. one-word person names are case-sensitive; names shorter than 3 characters aren't checked; regex characters in a name are literal", async () => {
+  it("6b. one-word person names match in any case; names shorter than 3 characters aren't checked; regex characters in a name are literal", async () => {
     await db.client.query("begin");
     try {
       await db.client.query("insert into people (workspace_id, name) values ($1, 'Cher'), ($1, 'Li'), ($1, 'A.B (x)')", [ws]);
       const msg = "The snapshot names a person.";
       const tryNote = (note: string, over: Made = {}) => attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note }, tok: randomUUID(), ...over }));
       expect(await tryNote("see Cher today")).toMatchObject({ ok: false, message: msg });
-      expect((await tryNote("see cher today")).ok).toBe(true);
+      expect(await tryNote("see cher today")).toMatchObject({ ok: false, message: msg });
       expect((await tryNote("Li is here")).ok).toBe(true);
       expect(await tryNote("see A.B (x) now")).toMatchObject({ ok: false, message: msg });
       expect((await tryNote("see AxB x now")).ok).toBe(true);
@@ -456,6 +467,28 @@ describe("the leak check", () => {
       { ...clean("overview", false, true), roles: [{ default_cost_rate: 50 }], services: [{ margin: 0.3 }], settings: { overhead_monthly: 9000, target_margin: 0.2 } },
       { financials: true },
     );
+  });
+
+  it("7b. Financials off: numbers stored as strings, role-rate patches in scenarios and lever changes, and money in text, are refused", async () => {
+    const msg = "The snapshot contains costs or margins.";
+    await refused({ ...clean(), services: [{ margin: "0.4" }] }, {}, msg);
+    await refused({ ...clean(), roles: [{ default_cost_rate: "95" }] }, {}, msg);
+    await refused({ ...clean(), scenarios: [{ patch: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }] }, {}, msg);
+    await refused({ ...clean(), solutions: { solutions: [{ lever_changes: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }] } }, {}, msg);
+    for (const text of ["costs £4,100 a month", "about $ 5k", "4,100 GBP", "GBP 4,100", "4.1k pounds", "EUR 40", "40 euros", "4,512€"]) await refused({ ...clean(), note: text }, {}, msg);
+    // Other patches, and the same things with Financials on, are fine.
+    await accepted({ ...clean(), scenarios: [{ patch: [{ path: "steps.s1.work_hours", op: "set", value: 2 }] }], note: "12 hours a week, 3 pages of notes" });
+    await accepted({ ...clean("overview", false, true), scenarios: [{ patch: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }], services: [{ margin: "0.4" }], note: "£4,100" }, { financials: true });
+  });
+
+  it("4b. evidence notes of any JSON type, and quotes from sources, are refused", async () => {
+    const msg = "The snapshot contains evidence notes.";
+    await refused({ ...clean(), a: { provenance: ["x"] } }, {}, msg);
+    await refused({ ...clean(), a: { provenance: "a note" } }, {}, msg);
+    await refused({ ...clean(), a: { provenance: 5 } }, {}, msg);
+    await refused({ ...clean(), a: { provenance: true } }, {}, msg);
+    await refused({ ...clean(), findings: [{ facts: [{ kind: "quote", key: "q", text: "word for word" }] }] }, {}, msg);
+    await accepted({ ...clean(), findings: [{ facts: [{ kind: "fact", key: "k", text: "a figure" }] }], a: { provenance: null } });
   });
 
   it("a snapshot over 5 MB is refused", async () => {
@@ -578,9 +611,11 @@ describe("open_share_link", () => {
 
   it("a restricted link: anon gets only sign_in; a signed-in unlisted user not_allowed; a listed one ok", async () => {
     const t = token("restricted");
-    const listed = await createUser(db, "Sam@Share.example");
-    const unconfirmed = await createUser(db, "pending@share.example", {}, { unconfirmed: true });
-    const m: Made = { people: true, emails: ["sam@share.example", "pending@share.example"], expires: future() };
+    const listed = await createUser(db, "Sam@Share.example", {}, { google: {} });
+    const unconfirmed = await createUser(db, "pending@share.example", {}, { unconfirmed: true, google: {} });
+    // Confirmed and listed, but a password sign-up: no Google identity, so it is not the person the address names.
+    const password = await createUser(db, "ana@share.example");
+    const m: Made = { people: true, emails: ["sam@share.example", "pending@share.example", "ana@share.example"], expires: future() };
     await asAnon(seed(t, m), async (c) => {
       expect(await open(c, t)).toEqual({ status: "sign_in" });
     });
@@ -596,6 +631,7 @@ describe("open_share_link", () => {
       };
       // Signed in, not listed (and a workspace member, who gets no member view here).
       expect(await as(who.member!.claims)).toEqual({ status: "not_allowed" });
+      expect(await as(password.claims)).toEqual({ status: "not_allowed" });
       // Listed but the address isn't confirmed.
       expect(await as(unconfirmed.claims)).toEqual({ status: "not_allowed" });
       // Listed `sam@share.example`, signed in as `Sam@Share.example`: the comparison is case-insensitive.

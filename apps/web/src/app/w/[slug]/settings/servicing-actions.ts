@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { MAX_SLA_HOURS, parseRecurrence, type Json, type RecurrenceJson } from "@transpera-flow/db";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
-import { saveField, saveFields } from "@/lib/fields/server";
+import { saveField, saveFields, saveHealthRule } from "@/lib/fields/server";
 import { HEALTH_SETTINGS, type HealthSetting } from "@/lib/servicing";
 import { isId } from "@/lib/services";
 import { createClient } from "@/lib/supabase/server";
@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 // Client servicing settings (issue #19): which servicing processes each
 // service's clients run, how often and within what SLA, and the workspace's
 // health rules. Owners and editors change links (RLS); health rules are
-// workspace settings, which owners change. Every write runs as the signed-in
+// workspace settings, which owners and editors change (`save_health_rules`). Every write runs as the signed-in
 // user; these checks only reject malformed input early.
 
 const invalid = { status: "error", message: "That value isn't valid." } as const;
@@ -89,5 +89,5 @@ export async function saveHealthSetting(
   const ok = (v: unknown) => v === null || (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= (rule?.max ?? 0));
   if (!isId(workspaceId) || !rule || !ok(value) || !(base === null || typeof base === "number")) return invalid;
   if (!(await signedIn())) return signedOut;
-  return saveField("workspaces", { id: workspaceId }, `settings.${key}`, base, value);
+  return saveHealthRule(workspaceId, key, base, value);
 }

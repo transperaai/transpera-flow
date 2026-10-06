@@ -21,12 +21,11 @@
 --   * `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated).
 -- No `audit` trigger: it would copy the multi-megabyte snapshot into `audit_log`; `created_by` and `revoked_by` record who.
 --
--- ORDER: after whatever B2 (#31) adds (expected 20261210000000), 20261209000000 (#206) and 20261208000000 (#207). If any of
--- those lands with a later version, this one is renumbered. It depends only on `can_edit_workspace` and the base tables.
+-- ORDER: after 20261212000000 (connector_findings, B20, row 59) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. Latest applied versions; expect nothing >= '20261211000000':
---        select version from supabase_migrations.schema_migrations where version >= '20261207500000' order by 1;
+--   0. Latest applied versions; expect the latest to be 20261212000000 and nothing >= '20261218000000':
+--        select version from supabase_migrations.schema_migrations where version >= '20261209000000' order by 1;
 --   1. Nothing created yet. Expect null x5:
 --        select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'),
 --               to_regprocedure('public.share_team_capacity(uuid, boolean)'),
@@ -52,9 +51,14 @@
 --        select relrowsecurity, (select count(*) from pg_policies where schemaname = 'public' and tablename = 'share_links')
 --        from pg_class where oid = 'public.share_links'::regclass;
 --   2. anon holds nothing on the table; authenticated has column-level SELECT/INSERT/UPDATE only (list them):
---        select grantee, privilege_type from information_schema.role_table_grants where table_name = 'share_links' ...;
+--        select grantee, privilege_type from information_schema.role_table_grants
+--        where table_schema = 'public' and table_name = 'share_links' and grantee in ('anon', 'authenticated');
+--        Expect no row for anon, and none for authenticated (its grants are on columns only). Then:
 --        select grantee, privilege_type, column_name from information_schema.column_privileges
---        where table_schema = 'public' and table_name = 'share_links' and grantee in ('anon', 'authenticated') order by 1, 2, 3;
+--        where table_schema = 'public' and table_name = 'share_links' and grantee in ('anon', 'authenticated')
+--        order by 1, 2, 3;
+--        Expect rows for authenticated only: SELECT on 18 columns (not token_hash, not snapshot), INSERT on 11 (not mode),
+--        UPDATE on 4 (label, snapshot, engine_version, revoked_at); none for anon.
 --   3. Function privileges. Expect t, t, f, t, f, f:
 --        has_function_privilege('anon', 'public.open_share_link(text)', 'execute'), ('authenticated', same),
 --        ('anon', 'public.share_team_capacity(uuid, boolean)', 'execute'), ('authenticated', same),
@@ -77,7 +81,7 @@
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
 --   drop function if exists private.share_emails_ok(text[]);
---   delete from supabase_migrations.schema_migrations where version = '20261211000000';
+--   delete from supabase_migrations.schema_migrations where version = '20261218000000';
 --   commit;
 --
 -- Production data: none needed.
@@ -173,6 +177,13 @@ declare
   nm record;
   escaped text;
   pat text;
+  parts text[];
+  -- Between the words of a name: any white space (a no-break space, several spaces, a line break), or the JSON escape of one.
+  sep constant text := '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4}|[' || chr(160) || chr(8192) || '-' || chr(8203) || chr(8239) || chr(12288) || chr(65279) || '])+';
+  -- Before a name: the start, a character that is not a letter or digit, or a JSON escape (`jsonb::text` writes a line break as
+  -- the two characters \n and a control character as \u001f, so a name after one is preceded by a letter).
+  lb constant text := '(^|[^[:alnum:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})';
+  rb constant text := '($|[^[:alnum:]])';
 begin
   -- 1. The snapshot is the link's.
   if snap is null or jsonb_typeof(snap) <> 'object'
@@ -190,46 +201,60 @@ begin
     return 'The snapshot contains an email address.';
   end if;
 
-  -- 3. No pay, for anyone, whatever the toggles (Austin, 6 Oct: no pay data).
+  -- 3. No pay, for anyone, whatever the toggles (Austin, 6 Oct: no pay data). A string counts as a value.
   if jsonb_path_exists(snap, 'lax $.**.cost_rate ? (@ != null)') then
     return 'The snapshot contains a person''s pay.';
   end if;
 
-  -- 4. No evidence notes (provenance holds quotes that can name people and clients).
-  if jsonb_path_exists(snap, 'lax $.**.provenance.*') then
+  -- 4. No evidence notes: provenance of any JSON type (an empty object or null is fine), and quotes from sources cited as facts.
+  if jsonb_path_exists(snap, 'lax $.**.provenance.*')
+     or jsonb_path_exists(snap, 'strict $.**.provenance ? (@.type() != "object" && @.type() != "null")')
+     or jsonb_path_exists(snap, 'lax $.**.facts ? (@.kind == "quote")') then
     return 'The snapshot contains evidence notes.';
   end if;
 
-  -- 5. Clients are always anonymised. Names under 3 characters are not checked (same floor as the app's `labelNames`).
-  -- Boundary: no letter or digit either side. `jsonb::text` writes a line break as the two characters \n (and \t, \r, ...), so
-  -- a name straight after one is preceded by the letter n; the extra alternative below treats that escape as a boundary.
+  -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
+  -- are not checked (same floor as the app's `labelNames`).
   for nm in select btrim(c.name) as name from public.clients c
             where c.workspace_id = ws and char_length(btrim(c.name)) >= 3 loop
-    escaped := regexp_replace(nm.name, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
-    pat := '(^|[^[:alnum:]]|\\[nrtbf])' || escaped || '($|[^[:alnum:]])';
-    if (nm.name !~ '\s' and txt ~ pat) or (nm.name ~ '\s' and txt ~* pat) then
+    parts := array_remove(regexp_split_to_array(nm.name, '[[:space:]]+|' || chr(160)), '');
+    select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
+    pat := lb || escaped || rb;
+    if txt ~* pat then
       return 'The snapshot names a client.';
     end if;
   end loop;
 
-  -- 6. People are labels unless People is on.
+  -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
+  -- own. A first name alone is left to the app's check (it would refuse links over words like "Will" and "Mark").
   if not show_people then
     for nm in select btrim(p.name) as name from public.people p
               where p.workspace_id = ws and char_length(btrim(p.name)) >= 3 loop
-      escaped := regexp_replace(nm.name, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
-      pat := '(^|[^[:alnum:]]|\\[nrtbf])' || escaped || '($|[^[:alnum:]])';
-      if (nm.name !~ '\s' and txt ~ pat) or (nm.name ~ '\s' and txt ~* pat) then
+      parts := array_remove(regexp_split_to_array(nm.name, '[[:space:]]+|' || chr(160)), '');
+      select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
+      pat := lb || escaped || rb;
+      if txt ~* pat then
         return 'The snapshot names a person.';
+      end if;
+      if array_length(parts, 1) > 1 and char_length(parts[array_length(parts, 1)]) >= 3 then
+        escaped := regexp_replace(parts[array_length(parts, 1)], '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
+        pat := lb || escaped || rb;
+        if txt ~* pat then
+          return 'The snapshot names a person.';
+        end if;
       end if;
     end loop;
   end if;
 
-  -- 7. Financials off: no costs, margins or overhead.
+  -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
+  -- scenario or a solution's lever changes (the visitor's browser would price work at the real rate); so does money in text.
   if not show_financials and (
-       jsonb_path_exists(snap, 'lax $.**.default_cost_rate ? (@ != 0)')
-    or jsonb_path_exists(snap, 'lax $.**.margin ? (@ != 0)')
+       jsonb_path_exists(snap, 'lax $.**.default_cost_rate ? (@.type() == "string" || (@.type() == "number" && @ != 0))')
+    or jsonb_path_exists(snap, 'lax $.**.margin ? (@.type() == "string" || (@.type() == "number" && @ != 0))')
     or jsonb_path_exists(snap, 'lax $.**.overhead_monthly')
-    or jsonb_path_exists(snap, 'lax $.**.target_margin')) then
+    or jsonb_path_exists(snap, 'lax $.**.target_margin')
+    or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
+    or txt ~* ('[£$€][[:space:]]*[0-9]|[0-9][[:space:]]*[£€]|(GBP|USD|EUR|AUD|NZD|CAD)[[:space:]]*[0-9]|[0-9][[:space:]]*(k|m|bn)?[[:space:]]*(GBP|USD|EUR|AUD|NZD|CAD|pounds?|dollars?|euros?)([^a-z]|$)')) then
     return 'The snapshot contains costs or margins.';
   end if;
 
@@ -424,7 +449,10 @@ begin
     if auth.uid() is null then
       return jsonb_build_object('status', 'sign_in');
     end if;
-    select lower(u.email) into e from auth.users u where u.id = auth.uid() and u.email_confirmed_at is not null;
+    -- A confirmed address AND a Google identity: a password sign-up with a listed address is not the person it names.
+    select lower(u.email) into e from auth.users u
+      where u.id = auth.uid() and u.email_confirmed_at is not null
+        and exists (select 1 from auth.identities i where i.user_id = u.id and i.provider = 'google');
     if e is null or not (e = any (l.allowed_emails)) then
       return jsonb_build_object('status', 'not_allowed');
     end if;
