@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
@@ -179,21 +179,21 @@ describe("demoNav", () => {
 });
 
 describe("the live shell's workspace tile (client branding, issue #34)", () => {
-  const shell = (logoUrl: string | null) =>
-    renderToStaticMarkup(
-      createElement(WorkspaceShell, {
-        mode: "live",
-        defaultOpen: true,
-        slug: "s",
-        workspaceName: "Northbeam Digital",
-        logoUrl,
-        workspaces: [{ name: "Northbeam Digital", href: "/w/s" }],
-        canManage: true,
-        counts: {},
-        viewer: null,
-      }),
-      null,
-    );
+  const shell = (logoUrl: string | null) => {
+    const props: ComponentProps<typeof WorkspaceShell> = {
+      mode: "live",
+      defaultOpen: true,
+      slug: "s",
+      workspaceName: "Northbeam Digital",
+      logoUrl,
+      workspaces: [{ name: "Northbeam Digital", href: "/w/s" }],
+      canManage: true,
+      counts: {},
+      viewer: null,
+      children: null,
+    };
+    return renderToStaticMarkup(createElement(WorkspaceShell, props));
+  };
   it("passes the logo through to the tile: an <img> on the white tile, decorative, no monogram", () => {
     const html = shell("https://abc.supabase.co/storage/v1/object/public/branding/x.png");
     expect(html).toContain('<img src="https://abc.supabase.co/storage/v1/object/public/branding/x.png" alt=""');
