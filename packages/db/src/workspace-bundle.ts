@@ -1,5 +1,6 @@
 // The JSON workspace bundle (issue #39, B10 part 1: export only; PRD §9): everything one workspace holds, as the backup and
-// migration format `transpera-workspace/1`. A future import reads this; nothing here writes.
+// migration format `transpera-workspace/1`. A future import
+// reads this; nothing here writes.
 //
 // What it holds: the workspace and its settings; the company model (roles, people, services, client groups, named clients
 // flagged hidden, demand, market, churn drivers, levers, analysis rules); every process with ALL its versions (published,
@@ -13,6 +14,7 @@
 // checks, the old reports). Every read is as the signed-in user (RLS decides what a viewer may read) and filtered to the
 // one workspace as well, so a policy mistake could not leak another workspace's rows into the file.
 
+import { restoreSizeWarning } from "./workspace-import";
 import { ENGINE_VERSION } from "@transpera-flow/engine";
 import type { Db } from "./queries";
 
@@ -180,6 +182,8 @@ export interface WorkspaceBundle {
   scope: "everything" | "published";
   /** What the file is, for a person opening it. */
   about: string;
+  /** Present only when the workspace is bigger than a restore takes: the same sentence as the end of `about`. */
+  restore_warning?: string;
   workspace: { id: string; name: string; slug: string; plan: string | null; settings: unknown; provenance: unknown };
   company_model: Record<string, Row[]>;
   /** Every process, the company map included, each with all of its versions. */
@@ -302,7 +306,7 @@ export async function exportWorkspaceBundle(
   counts.edges = data.edges.length;
   for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) counts[k] = data[k].length;
 
-  return {
+  const bundle: WorkspaceBundle = {
     format: WORKSPACE_BUNDLE_FORMAT,
     exported_at: now.toISOString(),
     engine_version: ENGINE_VERSION,
@@ -330,6 +334,14 @@ export async function exportWorkspaceBundle(
     suggestion_proposals: data.suggestion_proposals,
     counts,
   };
+  // Export allows far more than a restore takes (MAX_TABLE_ROWS against WORKSPACE_IMPORT_LIMITS). A workspace over a restore limit is
+  // still exported, and the file says so in plain words, so it is kept knowing it can't be restored in one go yet.
+  const warning = restoreSizeWarning(bundle);
+  if (warning) {
+    bundle.about = `${bundle.about} ${warning}`;
+    bundle.restore_warning = warning;
+  }
+  return bundle;
 }
 
 /** The reader of the `workspaces` row, as the signed-in user. */

@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 // #39): a member or viewer gets 403 and nothing else is read. Read as the signed-in user, so row-level security decides what
 // can be read: a non-member gets a 404 (the same answer as for a workspace that doesn't exist). The tables are read one
 // after another, so a bundle taken during edits can mix moments (`exported_at` says when reading began). The file is sent
-// in pieces without indentation. Nothing is cached, and it is a download, never rendered.
+// in pieces without indentation. One too big for a restore to take (see `restore_warning`) is still sent, with the warning in
+// the `X-Backup-Warning` header. Nothing is cached, and it is a download, never rendered.
 
 export const maxDuration = 60;
 
@@ -55,6 +56,8 @@ export async function GET(_request: Request, ctx: RouteContext<"/w/[slug]/export
         "Content-Disposition": `attachment; filename="${fileName(slug, now)}"`,
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
+        // A workspace bigger than a restore takes is still exported; the file and this header say so (workspace-bundle.ts).
+        ...(bundle.restore_warning ? { "X-Backup-Warning": bundle.restore_warning.replace(/[^\x20-\x7e]/g, " ") } : {}),
       },
     });
   } catch (e) {

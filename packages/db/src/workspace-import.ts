@@ -17,7 +17,14 @@ import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./works
 
 export const PLAN_FORMAT = "transpera-workspace-import/1";
 
-/** What a restore will take. These are starting values; the 2b performance test is the arbiter. */
+/**
+ * What a restore will take. The brief's starting values (200 processes, 2,000 steps, 4,000 edges, 300 sources of 5,000,000
+ * characters, 2,000 issues, 1,000 people, 5,000 clients, 500 scenarios, 500 blocks, 1,000 suggestions, 500 proposals) took 6 s on
+ * the test Postgres with every limit reached at once (200 processes alone 2.6 s, growing faster than linearly because the
+ * company map's sync runs for each new process; 2,000 issues 2.7 s). That is over the 3 s budget of the performance test in
+ * packages/db/test/workspace-import.test.ts (Supabase's `authenticated` role stops a statement at 8 s), so the counts below are
+ * lower: they restore in about 2 s there. The SQL function checks the same numbers.
+ */
 export const WORKSPACE_IMPORT_LIMITS = {
   /** The file as read, and decompressed on the server. */
   backupBytes: 25 * 1024 * 1024,
@@ -25,18 +32,23 @@ export const WORKSPACE_IMPORT_LIMITS = {
   compressedBytes: 4 * 1024 * 1024,
   /** The serialised plan. */
   planBytes: 10 * 1024 * 1024,
-  processes: 200,
-  steps: 2000,
-  edges: 4000,
-  sources: 300,
-  sourceChars: 5_000_000,
-  issues: 2000,
-  people: 1000,
-  clients: 5000,
-  scenarios: 500,
-  blocks: 500,
-  suggestions: 1000,
-  proposals: 500,
+  processes: 50,
+  steps: 500,
+  edges: 1000,
+  sources: 200,
+  sourceChars: 3_000_000,
+  issues: 300,
+  people: 500,
+  clients: 1000,
+  scenarios: 300,
+  blocks: 300,
+  suggestions: 500,
+  proposals: 300,
+  /** The link tables, each row about 0.2 ms: sized with the limits above so that every limit at once restores in about 2 s (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, 2 links a source). */
+  personRoles: 400,
+  personSkills: 1000,
+  clientAssignments: 400,
+  sourceLinks: 400,
 } as const;
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;
@@ -132,7 +144,7 @@ export interface ImportSummary {
   /** Whether the workspace settings would be written (an owner or agency admin), suggested (an editor), or aren't in the file. */
   settings: "applied" | "suggested" | "none";
   /** The numbers the limits are checked against. */
-  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; planBytes: number };
+  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; clientAssignments: number; sourceLinks: number; planBytes: number };
 }
 
 export interface BundleCheck {
@@ -316,12 +328,12 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
 
 const L_ = WORKSPACE_IMPORT_LIMITS;
 
-export function checkWorkspaceBundle(value: unknown): BundleCheck {
+export function checkWorkspaceBundle(value: unknown, options: { canManage?: boolean } = {}): BundleCheck {
   const empty: ImportSummary = {
     restored: [],
     leftOut: [],
     settings: "none",
-    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, planBytes: 0 },
+    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, clientAssignments: 0, sourceLinks: 0, planBytes: 0 },
   };
   const stop = (message: string): BundleCheck => ({ ok: false, errors: [message], warnings: [], summary: empty });
 
@@ -382,15 +394,29 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
 
   let planned: ReturnType<typeof planWorkspaceImport>;
   try {
-    planned = planWorkspaceImport(bundle, { canManage: true });
+    // The preview says what this person's restore would do with the workspace settings: an owner or agency admin applies them, an editor leaves them as a suggestion.
+    planned = planWorkspaceImport(bundle, { canManage: options.canManage ?? true });
   } catch {
     return { ok: false, errors: [...errors, "The backup is damaged: its rows don't fit together, so nothing was restored."], warnings, summary: empty };
   }
   const { summary } = planned;
-  const m = summary.measures;
+  errors.push(...limitProblems(summary.measures));
+
+  if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${typeof bundle.engine_version === "string" ? bundle.engine_version : "unknown"}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
+  if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts and no pending suggestions.");
+  for (const line of summary.leftOut) if (line.count > 0 && !QUIET_LEFT_OUT.has(line.key)) warnings.push(`Stays in the file: ${num(line.count)} ${line.label}.`);
+  warnings.push(...planned.warnings);
+
+  return { ok: errors.length === 0, errors, warnings, summary };
+}
+
+
+/** What a restore takes, against what the plan measured: one plain sentence per limit that is passed. */
+function limitProblems(m: ImportSummary["measures"]): string[] {
   const L = WORKSPACE_IMPORT_LIMITS;
+  const out: string[] = [];
   const over = (n: number, max: number, what: string, suffix = "") => {
-    if (n > max) errors.push(`The backup has ${num(n)} ${what}${suffix}; a restore takes at most ${num(max)}.`);
+    if (n > max) out.push(`The backup has ${num(n)} ${what}${suffix}; a restore takes at most ${num(max)}.`);
   };
   over(m.processes, L.processes, "processes");
   over(m.steps, L.steps, "steps", " in the versions it would restore");
@@ -404,14 +430,37 @@ export function checkWorkspaceBundle(value: unknown): BundleCheck {
   over(m.blocks, L.blocks, "blocks");
   over(m.suggestions, L.suggestions, "pending suggestions");
   over(m.proposals, L.proposals, "pending proposals");
-  if (m.planBytes > L.planBytes) errors.push(`The backup is too big to restore in one go: it comes to ${num(m.planBytes)} bytes once prepared, and a restore takes at most ${num(L.planBytes)}.`);
+  over(m.personRoles, L.personRoles, "role assignments");
+  over(m.personSkills, L.personSkills, "skills");
+  over(m.clientAssignments, L.clientAssignments, "client assignments");
+  over(m.sourceLinks, L.sourceLinks, "source links");
+  if (m.planBytes > L.planBytes) out.push(`The backup is too big to restore in one go: it comes to ${num(m.planBytes)} bytes once prepared, and a restore takes at most ${num(L.planBytes)}.`);
+  return out;
+}
 
-  if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${typeof bundle.engine_version === "string" ? bundle.engine_version : "unknown"}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
-  if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts and no pending suggestions.");
-  for (const line of summary.leftOut) if (line.count > 0 && !QUIET_LEFT_OUT.has(line.key)) warnings.push(`Stays in the file: ${num(line.count)} ${line.label}.`);
-  warnings.push(...planned.warnings);
-
-  return { ok: errors.length === 0, errors, warnings, summary };
+/**
+ * The sentence an export carries when the workspace is bigger than a restore takes (null when it fits), so the file is kept
+ * knowing it can't be restored in one go yet. It names each count over its limit, from the same measures the checker uses.
+ */
+export function restoreSizeWarning(bundle: WorkspaceBundle): string | null {
+  let measures: ImportSummary["measures"];
+  try {
+    measures = planWorkspaceImport(bundle, { canManage: true }).summary.measures;
+  } catch {
+    return null;
+  }
+  const L = WORKSPACE_IMPORT_LIMITS;
+  const m = measures;
+  const parts: [number, number, string][] = [
+    [m.processes, L.processes, "processes"], [m.steps, L.steps, "steps"], [m.edges, L.edges, "edges"], [m.sources, L.sources, "sources"],
+    [m.sourceChars, L.sourceChars, "characters of source text"], [m.issues, L.issues, "issues"], [m.people, L.people, "people"], [m.clients, L.clients, "clients"],
+    [m.scenarios, L.scenarios, "scenarios"], [m.blocks, L.blocks, "blocks"], [m.suggestions, L.suggestions, "pending suggestions"], [m.proposals, L.proposals, "pending proposals"],
+    [m.personRoles, L.personRoles, "role assignments"], [m.personSkills, L.personSkills, "skills"], [m.clientAssignments, L.clientAssignments, "client assignments"],
+    [m.sourceLinks, L.sourceLinks, "source links"], [m.planBytes, L.planBytes, "bytes once prepared"],
+  ];
+  const over = parts.filter(([n, max]) => n > max).map(([n, max, what]) => `${num(n)} ${what}; the limit is ${num(max)}`);
+  if (over.length === 0) return null;
+  return `This workspace is bigger than a backup can restore in one go (${over.join("; ")}). Keep the file; restoring a workspace this size isn't supported yet.`;
 }
 
 /** Left-out lines that are the design, not a loss worth a warning. */
@@ -766,6 +815,10 @@ export function planWorkspaceImport(
       blocks: plan.blocks.length,
       suggestions: plan.suggestions.length,
       proposals: plan.proposals.length,
+      personRoles: plan.person_roles.length,
+      personSkills: plan.person_skills.length,
+      clientAssignments: plan.client_assignments.length,
+      sourceLinks: plan.source_links.length,
       planBytes,
     },
   };
