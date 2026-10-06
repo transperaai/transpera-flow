@@ -12,7 +12,8 @@ import { compareRatingsDesc, type FirstPrinciples, type Rating } from "@transper
 import { loadFindings } from "./findings";
 import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
-import { labelNames, nameFinding, type PersonLabels } from "./person-labels";
+import { nameFinding } from "./person-labels";
+import { EMAIL, normaliseView, pickSpans, replaceSpans, spansOf, escapeRe, wholeWords, wordsOf, type Span, type View } from "./share-text";
 import {
   isUnpublished,
   listProcesses,
@@ -165,126 +166,86 @@ export function shareReaderDb(db: Db, toggles: ShareToggles): Db {
 // Names and money
 // ---------------------------------------------------------------------------
 
-const NOT_LETTER_OR_DIGIT_BEFORE = "(?<![\\p{L}\\p{N}])";
-const NOT_LETTER_OR_DIGIT_AFTER = "(?![\\p{L}\\p{N}])";
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 const EMAIL_HIDDEN = "[email hidden]";
 const AMOUNT_HIDDEN = "[amount hidden]";
 const MIN_NAME = 3;
 
-// Money in text: B20's pattern (src/money.ts), in any case, plus amounts written in words.
-const MONEY = shareMoneyRegex();
-
-/**
- * White space between the words of a name: any `\s` (a no-break space pasted from a document, several spaces, a line break, a
- * tab) and the zero-width space, which `\s` leaves out.
- */
-const GAP = "[\\s\\u200b]+";
-
-/** A name as a pattern: its words, each escaped, with any white space between them (and none required inside a word). */
-const wordsOf = (name: string) => name.trim().split(/\s+/).filter(Boolean);
-const namePattern = (words: readonly string[]) => words.map(escapeRe).join(GAP);
-
-/** The name, any case, whole (no letter or digit either side). Surnames and one-word names use the same pattern. */
-const nameRe = (words: readonly string[], flags = "giu") => new RegExp(`${NOT_LETTER_OR_DIGIT_BEFORE}${namePattern(words)}${NOT_LETTER_OR_DIGIT_AFTER}`, flags);
-/** A first name as written: a whole word, case-sensitive (`labelNames`' rule; "will" and "mark" are words). */
-const wordRe = (name: string, flags: string) => new RegExp(`${NOT_LETTER_OR_DIGIT_BEFORE}${escapeRe(name)}${NOT_LETTER_OR_DIGIT_AFTER}`, flags);
-const firstNameOf = (name: string) => name.trim().split(/\s+/)[0] ?? "";
-
-interface NameMatcher {
-  /** Replace each name with its label. */
-  replace(text: string): string;
-  /** True when a name occurs. */
-  has(text: string): boolean;
-}
-
-interface NameItem {
+interface Item {
   re: RegExp;
   label: string;
-  /** Lower-case first word: a cheap test before the full pattern. */
-  head: string;
 }
 
-function matcherOf(items: readonly NameItem[]): NameMatcher {
-  return {
-    replace(text) {
-      const lower = text.toLowerCase();
-      let out = text;
-      for (const i of items) if (lower.includes(i.head)) out = out.replace(i.re, i.label);
-      return out;
-    },
-    has(text) {
-      const lower = text.toLowerCase();
-      return items.some((i) => lower.includes(i.head) && (i.re.lastIndex = 0, i.re.test(text)));
-    },
-  };
-}
-
-/** Full names, longest first: any case, any white space between the words. Names under three characters are not checked (the floor `labelNames` has). */
-function nameMatcher(entries: readonly SecretName[]): NameMatcher {
-  return matcherOf(
-    entries
-      .map((e) => ({ words: wordsOf(e.name), label: e.label }))
-      .filter((e) => e.words.join(" ").length >= MIN_NAME)
-      .sort((a, b) => b.words.join(" ").length - a.words.join(" ").length)
-      .map((e) => ({ re: nameRe(e.words), label: e.label, head: e.words[0]!.toLowerCase() })),
-  );
+/** Whole names (any case): the words of each, 3+ characters in all, longest first. Words are matched on the normalised view. */
+function fullNameItems(entries: readonly SecretName[]): Item[] {
+  return entries
+    .map((e) => ({ words: wordsOf(e.name), label: e.label }))
+    .filter((e) => e.words.join(" ").length >= MIN_NAME)
+    .sort((a, b) => b.words.join(" ").length - a.words.join(" ").length)
+    .map((e) => ({ re: wholeWords(e.words, "giu"), label: e.label }));
 }
 
 /**
  * The last word of a person's name (3+ characters, the name having two or more words), on its own, any case. A surname one person
  * holds becomes their label; a surname two people share becomes "a team member".
  */
-function surnameMatcher(people: readonly SecretName[]): NameMatcher {
+function surnameItems(people: readonly SecretName[]): Item[] {
   const bySurname = new Map<string, SecretName[]>();
   for (const p of people) {
     const words = wordsOf(p.name);
     const last = words[words.length - 1];
     if (words.length > 1 && last && last.length >= MIN_NAME) bySurname.set(last.toLowerCase(), [...(bySurname.get(last.toLowerCase()) ?? []), p]);
   }
-  return matcherOf(
-    [...bySurname].map(([surname, who]) => ({ re: nameRe([surname]), label: who.length === 1 ? who[0]!.label : "a team member", head: surname })),
-  );
+  return [...bySurname].map(([surname, who]) => ({ re: wholeWords([surname], "giu"), label: who.length === 1 ? who[0]!.label : "a team member" }));
 }
 
-/** First names of 3+ letters, as written. `shared` are the ones two or more people have (`labelNames` leaves those alone). */
-function firstNames(people: readonly SecretName[]): { all: string[]; shared: string[] } {
-  const count = new Map<string, number>();
+/** First names of 3+ letters, as written (case-sensitive: "will" and "mark" are words): one person's becomes their label, two people's "a team member". */
+function firstNameItems(people: readonly SecretName[]): Item[] {
+  const by = new Map<string, SecretName[]>();
   for (const p of people) {
-    const f = firstNameOf(p.name);
-    if (f.length >= MIN_NAME) count.set(f, (count.get(f) ?? 0) + 1);
+    const f = wordsOf(p.name)[0] ?? "";
+    if (f.length >= MIN_NAME) by.set(f, [...(by.get(f) ?? []), p]);
   }
-  return { all: [...count.keys()], shared: [...count].filter(([, n]) => n > 1).map(([f]) => f) };
+  return [...by].map(([first, who]) => ({ re: wholeWords([first], "gu"), label: who.length === 1 ? who[0]!.label : "a team member" }));
 }
+
+/**
+ * Every word of every person's name (3+ characters) next to a "Team member N" label, on either side: after redaction that would
+ * tie the label to the name, whatever way the name was written.
+ */
+function adjacentToLabel(people: readonly SecretName[]): RegExp | null {
+  const words = [...new Set(people.flatMap((p) => wordsOf(p.name)).filter((w) => w.length >= MIN_NAME))];
+  if (!words.length) return null;
+  const alt = words.map(escapeRe).join("|");
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${alt}) Team member \\d+(?!\\d)|Team member \\d+ (?:${alt})(?![\\p{L}\\p{N}])`, "iu");
+}
+
+/** Ids, dates and plain numbers hold nothing to hide: skipped, for speed. */
+const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[\d\-:.TZ+ ]*)$/i;
 
 interface Scrubber {
   text(s: string): string;
 }
 
+/** What a share link hides, as the spans to replace in a text. Shared by the scrub and the check, so they can't disagree. */
+function spansFor(toggles: ShareToggles, secrets: ShareSecrets) {
+  const clients = fullNameItems(secrets.clients);
+  const people = [...fullNameItems(secrets.people), ...surnameItems(secrets.people), ...firstNameItems(secrets.people)];
+  const email = [{ re: EMAIL, label: EMAIL_HIDDEN }];
+  const money = [{ re: shareMoneyRegex(), label: AMOUNT_HIDDEN }];
+  return (view: View): Span[] => [
+    ...spansOf(view, email),
+    ...spansOf(view, clients),
+    ...(toggles.people ? [] : spansOf(view, people)),
+    ...(toggles.financials ? [] : spansOf(view, money)),
+  ];
+}
+
 function scrubber(toggles: ShareToggles, secrets: ShareSecrets): Scrubber {
-  const clients = nameMatcher(secrets.clients);
-  const fullNames = nameMatcher(secrets.people);
-  const surnames = surnameMatcher(secrets.people);
-  const labels: PersonLabels = Object.fromEntries(secrets.people.map((p) => [p.label, p.id]));
-  const people = secrets.people.map((p) => ({ id: p.id, name: p.name }));
-  const { shared } = firstNames(secrets.people);
-  const sharedRes = shared.map((f) => wordRe(f, "gu"));
+  const spans = spansFor(toggles, secrets);
   return {
     text(s) {
-      if (s.length < MIN_NAME) return s;
-      let t = s;
-      if (t.includes("@")) t = t.replace(EMAIL, EMAIL_HIDDEN);
-      t = clients.replace(t);
-      if (!toggles.people && secrets.people.length) {
-        // Full names first (any case, any white space), then a surname alone, then first names as written (`labelNames`: a
-        // first name one person has becomes their label) and a first name two people share becomes "a team member" (Q11).
-        t = surnames.replace(fullNames.replace(t));
-        t = labelNames(t, labels, people);
-        for (const re of sharedRes) t = t.replace(re, "a team member");
-      }
-      if (!toggles.financials) t = t.replace(MONEY, AMOUNT_HIDDEN);
-      return t;
+      if (s.length < MIN_NAME || QUIET.test(s)) return s;
+      return replaceSpans(s, pickSpans(spans(normaliseView(s))));
     },
   };
 }
@@ -360,11 +321,13 @@ export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, s
     const out: Obj = {};
     for (const [k, v] of Object.entries(src)) {
       if (Object.hasOwn(BLANKED, k)) out[k] = structuredClone(BLANKED[k]);
+      // A step's own cost figure: a money field, hidden with Financials off.
+      else if (k === "cost_override" && !toggles.financials) out[k] = null;
       // Word-for-word quotes from sources never go out (they name people and clients as the speaker said them).
       else if (k === "facts" && Array.isArray(v)) out[k] = v.filter((f) => !isQuoteFact(f)).map(walk);
       // With Financials off, no role-rate change in a scenario's patch or a solution's lever changes.
       else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isRatePatch(p)).map(walk);
-      else out[k] = walk(v);
+      else out[scrub.text(k)] = walk(v);
     }
     return out;
   };
@@ -396,10 +359,11 @@ export type ShareLeak = keyof typeof SHARE_LEAKS;
  */
 export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, toggles: ShareToggles): ShareLeak[] {
   const found = new Set<ShareLeak>();
-  const clients = nameMatcher(secrets.clients);
-  const people = nameMatcher(secrets.people);
-  const surnames = surnameMatcher(secrets.people);
-  const firsts = firstNames(secrets.people).all.map((f) => wordRe(f, "u"));
+  const email = [{ re: EMAIL, label: "" }];
+  const clients = fullNameItems(secrets.clients);
+  const people = [...fullNameItems(secrets.people), ...surnameItems(secrets.people), ...firstNameItems(secrets.people)];
+  const money = [{ re: shareMoneyRegex(), label: "" }];
+  const adjacent = adjacentToLabel(secrets.people);
   const s = snapshot as Obj;
   if (
     !isObj(s) ||
@@ -411,22 +375,21 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
   ) {
     found.add("mismatch");
   }
-  const hasMoney = (t: string) => {
-    MONEY.lastIndex = 0;
-    return MONEY.test(t);
+  // Every string is checked on its normalised view, the same one the scrub matched on; keys are strings too.
+  const text = (value: string) => {
+    if (value.length < MIN_NAME) return;
+    const view = normaliseView(value);
+    if (spansOf(view, email).length) found.add("email");
+    if (spansOf(view, clients).length) found.add("client");
+    if (!toggles.people && (spansOf(view, people).length || (adjacent && adjacent.test(view.n)))) found.add("person");
+    if (!toggles.financials && spansOf(view, money).length) found.add("money");
   };
   const walk = (value: unknown) => {
-    if (typeof value === "string") {
-      if (value.includes("@") && (EMAIL.lastIndex = 0, EMAIL.test(value))) found.add("email");
-      EMAIL.lastIndex = 0;
-      if (clients.has(value)) found.add("client");
-      if (!toggles.people && (people.has(value) || surnames.has(value) || firsts.some((re) => re.test(value)))) found.add("person");
-      if (!toggles.financials && hasMoney(value)) found.add("money");
-      return;
-    }
+    if (typeof value === "string") return text(value);
     if (Array.isArray(value)) return void value.forEach((x) => walk(x));
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {
+      text(k);
       if (k === "cost_rate" && v !== null && v !== undefined) found.add("pay");
       // Evidence notes of any JSON type: only an empty object (or null) is clean.
       if (k === "provenance" && v !== null && v !== undefined && !(isObj(v) && Object.keys(v).length === 0)) found.add("evidence");
@@ -434,6 +397,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
       if (!toggles.financials) {
         if (k === "default_cost_rate" && v !== 0 && v != null) found.add("costs");
         if (k === "margin" && v !== 0 && v != null) found.add("costs");
+        if (k === "cost_override" && v !== null && v !== undefined) found.add("costs");
         if ((k === "overhead_monthly" || k === "target_margin") && v !== undefined) found.add("costs");
         if ((k === "patch" || k === "lever_changes") && Array.isArray(v) && v.some(isRatePatch)) found.add("costs");
       }

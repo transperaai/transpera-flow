@@ -40,6 +40,7 @@ import {
 import { demoNav, workspaceNav, type CountTone, type NavCounts, type NavIcon, type NavItem } from "@/lib/shell/nav";
 import { cn } from "@/lib/utils";
 import { useMapPanelRequest } from "./map-panel-request";
+import { TransperaMark } from "./transpera-mark";
 import { WorkspaceSwitcher, type SwitcherWorkspace } from "./workspace-switcher";
 
 const ICONS: Record<NavIcon, LucideIcon> = {
@@ -68,6 +69,8 @@ export type ShellProps =
       mode: "live";
       slug: string;
       workspaceName: string;
+      /** The workspace's logo (a public URL), or null: the monogram stays (client branding, issue #34). */
+      logoUrl: string | null;
       workspaces: SwitcherWorkspace[];
       canManage: boolean;
       /** Owners, editors and agency admins: they see Share links. */
@@ -128,11 +131,11 @@ export function AppSidebar(props: ShellProps) {
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-3">
         <div className="flex items-center gap-2.5 px-2 pt-1">
-          <span aria-hidden className="size-[22px] shrink-0 rounded-md bg-[conic-gradient(from_200deg,var(--accent),var(--chart-1),var(--chart-5),var(--accent))]" />
+          <TransperaMark />
           <span className="truncate font-display text-base font-bold tracking-tight group-data-[collapsible=icon]:hidden">Transpera Flow</span>
         </div>
         {props.mode === "live" ? (
-          <WorkspaceSwitcher current={props.workspaceName} subtitle="Workspace" workspaces={props.workspaces} />
+          <WorkspaceSwitcher current={props.workspaceName} subtitle="Workspace" workspaces={props.workspaces} logo={props.logoUrl} />
         ) : (
           <WorkspaceSwitcher
             current={larkspur ? "Larkspur Creative" : "Northbeam Digital"}

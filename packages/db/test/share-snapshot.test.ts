@@ -1,4 +1,4 @@
-import { detectIssues, simulate, type DetectedIssue, type SimulationResult } from "@transpera-flow/engine";
+import { detectIssues, parsePatchPath, simulate, type DetectedIssue, type SimulationResult } from "@transpera-flow/engine";
 import { describe, expect, it, vi } from "vitest";
 import {
   SHARE_SNAPSHOT_VERSION,
@@ -396,6 +396,134 @@ describe("names with unusual white space, surnames and case, quotes, and role-ra
       const out = redactShareSnapshot(make(toggles), toggles, w.secrets) as unknown as { scenarios: { patch: unknown[] }[] };
       expect(out.scenarios[0]!.patch).toEqual([rate, hours]);
       expect(shareSnapshotLeaks(make(toggles), w.secrets, toggles)).not.toContain("costs");
+    }
+  });
+});
+
+describe("text is matched on its normalised view (the second review's examples)", () => {
+  const w = worlds[0]!;
+  const off = TOGGLES[0]!;
+  const ann = { id: "00000000-0000-4000-8000-0000000000e1", name: "Ann O'Neil", label: "Team member 99" };
+  const secrets: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, ann] };
+  const [first, surname] = w.personFull[0]!.split(" ") as [string, string];
+  const redact = (note: string, s: ShareSecrets = secrets, toggles: ShareToggles = off) => {
+    const base = raw("process", w, toggles);
+    const input = { ...base, issues: [{ ...w.issue, title: note, evidence: null }] } as ShareSnapshot;
+    const snap = redactShareSnapshot(input, toggles, s) as { issues: IssueRow[] };
+    return { out: snap.issues[0]!.title, snap: snap as unknown as ShareSnapshot, input };
+  };
+  /** The words of every name that must not survive next to a label, with invisible characters taken out. */
+  const parts = ["Priya", "Shah", "Ann", "O'Neil", "Neil"];
+  const invisible = (s: string) => s.replace(/[\p{Cf}­]/gu, "").normalize("NFKC").replace(/[’‘ʼ]/g, "'").toLowerCase();
+
+  const rows: [string, string][] = [
+    ["a curly apostrophe", "Ann O’Neil said"],
+    ["a soft hyphen in the first name", `Pri­ya ${surname} said`],
+    ["a soft hyphen in the surname", `${first} Sh­ah said`],
+    ["a zero-width space between the words", `${first}​${surname}`],
+    ["a no-break space and a normal one", `${first}  ${surname}`],
+    ["two no-break spaces", `${first}  ${surname}`],
+    ["a literal backslash-n before the name", `x\\n${first} ${surname}`],
+    ["a literal backslash-n between the words", `${first}\\n${surname}`],
+    ["a literal backslash-t", `${first}\\t${surname}`],
+    ["a possessive", `${surname}’s desk`],
+    ["a full-width letter (NFKC)", `Ａnn O'Neil`],
+  ];
+  for (const [what, text] of rows) {
+    it(`${what}: no part of a name is left next to a label, and the raw text is flagged`, () => {
+      const { out, snap, input } = redact(text);
+      const seen = invisible(out);
+      for (const p of parts) expect(seen, `${p} in ${JSON.stringify(out)}`).not.toContain(p.toLowerCase());
+      expect(shareSnapshotLeaks(snap, secrets, off), JSON.stringify(out)).toEqual([]);
+      expect(shareSnapshotLeaks(input, secrets, off), text).toContain("person");
+    });
+  }
+
+  it("a name stored with a curly apostrophe is found when the text has a straight one, and the other way round", () => {
+    const curly: ShareSecrets = { ...w.secrets, people: [...w.secrets.people, { ...ann, name: "Ann O’Neil" }] };
+    const { out, snap } = redact("Ann O'Neil said", curly);
+    expect(out).toBe("Team member 99 said");
+    expect(shareSnapshotLeaks(snap, curly, off)).toEqual([]);
+    expect(redact("Ann O’Neil said").out).toBe("Team member 99 said");
+  });
+
+  it("a name as a JSON key is replaced and flagged too", () => {
+    const base = raw("process", w, off);
+    const input = { ...base, liveRevisions: { [`${first} ${surname}`]: "r1" } } as unknown as ShareSnapshot;
+    const out = redactShareSnapshot(input, off, secrets) as unknown as { liveRevisions: Record<string, string> };
+    expect(Object.keys(out.liveRevisions)).toEqual(["Team member 1"]);
+    expect(shareSnapshotLeaks(input, secrets, off)).toContain("person");
+  });
+
+  it("the check refuses a name word next to a label, however the name was written", () => {
+    const base = raw("process", w, off);
+    const snap = (title: string) => redactShareSnapshot({ ...base, issues: [{ ...w.issue, title, evidence: null }] } as ShareSnapshot, off, secrets);
+    const clean = snap("fine");
+    const withTitle = (title: string) => ({ ...clean, issues: [{ ...(clean as unknown as { issues: IssueRow[] }).issues[0]!, title }] });
+    for (const bad of [`Team member 1 ${surname}`, `${first} Team member 1`, `${surname.toUpperCase()} Team member 12`, `Team member 3 ${first.toLowerCase()}`]) {
+      expect(shareSnapshotLeaks(withTitle(bad), secrets, off), bad).toContain("person");
+    }
+    expect(shareSnapshotLeaks(withTitle("Team member 1 and Team member 2"), secrets, off)).toEqual([]);
+  });
+});
+
+describe("scenario selectors, money forms and a step's own cost", () => {
+  const w = worlds[1]!;
+
+  it("a scenario's patch paths with @busiest and @heaviest are not emails: unchanged in every toggle combination, and the engine still reads them", () => {
+    const patch = [
+      { path: "roles.@busiest.headcount", op: "set", value: 3 },
+      { path: "steps.@heaviest.work_hours", op: "set", value: 2 },
+    ];
+    for (const toggles of TOGGLES) {
+      const input = { ...raw("process", w, toggles), scenarios: [{ id: "sc", workspace_id: "w", name: "What if", description: null, parent_scenario_id: null, patch }] } as unknown as ShareSnapshot;
+      const out = redactShareSnapshot(input, toggles, w.secrets) as unknown as { scenarios: { patch: { path: string }[] }[] };
+      expect(out.scenarios[0]!.patch.map((p) => p.path), label(toggles)).toEqual(patch.map((p) => p.path));
+      for (const p of out.scenarios[0]!.patch) expect(parsePatchPath(p.path), p.path).not.toBeNull();
+      expect(shareSnapshotLeaks(out, w.secrets, toggles), label(toggles)).toEqual([]);
+      // The redacted snapshot with only the scenario put back as it was: still no email found in the paths.
+      const patched = { ...out, scenarios: (input as unknown as { scenarios: unknown[] }).scenarios };
+      expect(shareSnapshotLeaks(patched, w.secrets, toggles), label(toggles)).toEqual([]);
+    }
+  });
+
+  it("real emails are still replaced, wherever they sit", () => {
+    const base = raw("process", w, TOGGLES[0]!);
+    const out = redactShareSnapshot({ ...base, issues: [{ ...w.issue, title: "write to sam.k@acme.example or a_b@x.example now", evidence: null }] } as ShareSnapshot, TOGGLES[0]!, w.secrets) as unknown as { issues: IssueRow[] };
+    expect(out.issues[0]!.title).toBe("write to [email hidden] or [email hidden] now");
+  });
+
+  it("money in any of these forms is replaced whole, and flagged when left", () => {
+    const off = TOGGLES[0]!;
+    for (const [text, expected] of [
+      ["GBP  4,100 a month", "[amount hidden] a month"],
+      ["GBP 4,100", "[amount hidden]"],
+      ["4 512 €", "[amount hidden]"],
+      ["4 512 €", "[amount hidden]"],
+      ["£ 4,100", "[amount hidden]"],
+      ["£  4,100", "[amount hidden]"],
+      ["£4.1k", "[amount hidden]"],
+      ["4,100 pounds", "[amount hidden]"],
+      ["1.2m GBP", "[amount hidden]"],
+    ] as const) {
+      const base = raw("process", w, off);
+      const input = { ...base, issues: [{ ...w.issue, title: text, evidence: null }] } as ShareSnapshot;
+      const out = redactShareSnapshot(input, off, w.secrets) as unknown as { issues: IssueRow[] };
+      expect(out.issues[0]!.title, text).toBe(expected);
+      expect(shareSnapshotLeaks(input, w.secrets, off), text).toContain("money");
+      expect(shareSnapshotLeaks(out, w.secrets, off), text).toEqual([]);
+    }
+  });
+
+  it("a step's cost_override is nulled with Financials off, flagged when left, and kept with it on", () => {
+    for (const toggles of TOGGLES) {
+      const input = raw("process", w, toggles) as unknown as { bundle: ProcessBundle };
+      const stepped = { ...input, bundle: { ...input.bundle, steps: input.bundle.steps.map((s, i) => (i === 0 ? { ...s, cost_override: 120 } : s)) } } as unknown as ShareSnapshot;
+      const out = redactShareSnapshot(stepped, toggles, w.secrets) as unknown as { bundle: ProcessBundle };
+      const v = (out.bundle.steps[0] as unknown as { cost_override: number | null }).cost_override;
+      expect(v, label(toggles)).toBe(toggles.financials ? 120 : null);
+      expect(shareSnapshotLeaks(stepped, w.secrets, toggles).includes("costs"), label(toggles)).toBe(!toggles.financials);
+      expect(shareSnapshotLeaks(out, w.secrets, toggles)).toEqual([]);
     }
   });
 });

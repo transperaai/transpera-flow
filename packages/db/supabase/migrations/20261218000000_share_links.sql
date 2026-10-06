@@ -21,11 +21,11 @@
 --   * `public.open_share_link(token)`: the only way a visitor reads anything (anon and authenticated).
 -- No `audit` trigger: it would copy the multi-megabyte snapshot into `audit_log`; `created_by` and `revoked_by` record who.
 --
--- ORDER: after 20261212000000 (connector_findings, B20, row 59) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
+-- ORDER: after 20261216000000 (C1, row 62: B5 is row 60, B21 row 61) and every earlier row. It depends only on `can_edit_workspace` and the base tables.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. Latest applied versions; expect the latest to be 20261212000000 and nothing >= '20261218000000':
---        select version from supabase_migrations.schema_migrations where version >= '20261209000000' order by 1;
+--   0. Latest applied versions; expect the latest to be 20261216000000 and nothing >= '20261218000000':
+--        select version from supabase_migrations.schema_migrations where version >= '20261212000000' order by 1;
 --   1. Nothing created yet. Expect null x5:
 --        select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'),
 --               to_regprocedure('public.share_team_capacity(uuid, boolean)'),

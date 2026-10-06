@@ -9,14 +9,20 @@ const SYMBOL = String.raw`(?:[A-Z]{1,3}\$|[£$€])`;
 const SIGN = String.raw`[£$€]`;
 const CODE = String.raw`(?:GBP|USD|EUR|AUD|NZD|CAD)`;
 
+const source = (number: string) =>
+  String.raw`(?<![A-Za-z0-9])(?:${SYMBOL}|${CODE})\s?(?:${number})${SUFFIX}|(?<![\d,.A-Za-z$£€])(?:${number})${SUFFIX}\s?(?:${CODE}(?![A-Za-z])|${SIGN})`;
+
 /** A symbol or code before the number ("£1,234", "US$12.5k", "EUR 40"), or a symbol or code after it ("4,512€", "1,200 GBP"). */
-export const MONEY_SOURCE = String.raw`(?<![A-Za-z0-9])(?:${SYMBOL}|${CODE})\s?(?:${NUMBER})${SUFFIX}|(?<![\d,.A-Za-z$£€])(?:${NUMBER})${SUFFIX}\s?(?:${CODE}(?![A-Za-z])|${SIGN})`;
+export const MONEY_SOURCE = source(NUMBER);
 
 /** A new global matcher for money amounts (a regex with the `g` flag keeps state, so each use gets its own). */
 export const moneyRegex = (): RegExp => new RegExp(MONEY_SOURCE, "g");
 
-/** Amounts written in words after a number ("4,100 pounds", "40 euros"): not part of B20's check, added for share links. */
-const WORD_AMOUNT = String.raw`(?<![A-Za-z0-9])(?:${NUMBER})${SUFFIX}\s?(?:pounds?|dollars?|euros?)(?![A-Za-z])`;
+// French and similar grouping with a space ("4 512 €"): a share link's text is normalised first, so every space is a plain one.
+const SPACED_NUMBER = String.raw`\d{1,3}(?: \d{3})+(?:[.,]\d+)?|${NUMBER}`;
 
-/** Money in a share link's text: B20's pattern, in any case, plus amounts written in words. */
-export const shareMoneyRegex = (): RegExp => new RegExp(`${MONEY_SOURCE}|${WORD_AMOUNT}`, "gi");
+/** Amounts written in words after a number ("4,100 pounds", "40 euros"): not part of B20's check, added for share links. */
+const WORD_AMOUNT = String.raw`(?<![A-Za-z0-9])(?:${SPACED_NUMBER})${SUFFIX}\s?(?:pounds?|dollars?|euros?)(?![A-Za-z])`;
+
+/** Money in a share link's (normalised) text: B20's pattern, in any case, with spaces allowed as thousands separators and any gap, plus amounts in words. */
+export const shareMoneyRegex = (): RegExp => new RegExp(`${source(SPACED_NUMBER).replaceAll("\\s?", "\\s*")}|${WORD_AMOUNT}`, "gi");
