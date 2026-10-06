@@ -175,6 +175,15 @@ describe("nameFinding", () => {
     expect(nameFinding(byHand, member)).toBe(byHand);
   });
 
+  it("gives a member the finding's row id as its ai_key, not the hash of its real-name title; an editor keeps the stored key", () => {
+    const keyed = { ...finding, ai_key: "ai:insight:9f3a" };
+    expect(nameFinding(keyed, member).ai_key).toBe(keyed.id);
+    expect(nameFinding(keyed, stranger).ai_key).toBe(keyed.id);
+    expect(nameFinding({ ...keyed, person_labels: {} }, member).ai_key).toBe(keyed.id);
+    expect(nameFinding(keyed, editor).ai_key).toBe("ai:insight:9f3a");
+    expect(nameFinding({ ...finding, ai_key: null }, member).ai_key).toBeNull();
+  });
+
   it("round trips every stored text through labelNames for an editor", () => {
     const named = nameFinding(finding, editor);
     for (const k of ["title", "evidence", "why"] as const) expect(labelNames(named[k], readPersonLabels(finding.person_labels), people), k).toBe(finding[k]);
@@ -183,6 +192,7 @@ describe("nameFinding", () => {
 
 describe("nameAnalysisRow", () => {
   const row = {
+    id: "00000000-0000-4000-8000-0000000000a1",
     summary: ["Team member A is overloaded.", "Team member B is not."],
     insights: [{ key: "ai:insight:x", title: "Team member A at the cap", evidence: "Team member A works late.", why: "Team member B can't cover.", stepId: null, facts: [{ kind: "fact", key: "k", text: "Team member A: 4 h" }] }],
     review: [{ step: "job", level: "note", text: "Team member B owns it." }],
@@ -196,12 +206,21 @@ describe("nameAnalysisRow", () => {
     const out = nameAnalysisRow(row, member);
     expect(out.summary).toEqual(["Maya Collins is overloaded.", "A team member is not."]);
     expect(out.insights).toEqual([
-      { key: "ai:insight:x", title: "Maya Collins at the cap", evidence: "Maya Collins works late.", why: "A team member can't cover.", stepId: null, facts: [{ kind: "fact", key: "k", text: "Maya Collins: 4 h" }] },
+      { key: "ai:insight:00000000-0000-4000-8000-0000000000a1:0", title: "Maya Collins at the cap", evidence: "Maya Collins works late.", why: "A team member can't cover.", stepId: null, facts: [{ kind: "fact", key: "k", text: "Maya Collins: 4 h" }] },
     ]);
     expect(out.review).toEqual([{ step: "job", level: "note", text: "A team member owns it." }]);
     expect(out.reason).toBe("Rejected: “Maya Collins earns more”");
     expect(out.status).toBe("ok");
     expect(out.checked).toBe(3);
+  });
+
+  it("gives a member an opaque insight key, not the stored hash of a real-name title; an editor keeps the stored key", () => {
+    const two = { ...row, insights: [...row.insights, { ...row.insights[0]!, key: "ai:insight:def456" }] };
+    expect((nameAnalysisRow(two, member).insights as { key: string }[]).map((i) => i.key)).toEqual([`ai:insight:${row.id}:0`, `ai:insight:${row.id}:1`]);
+    expect((nameAnalysisRow(two, stranger).insights as { key: string }[]).map((i) => i.key)).toEqual([`ai:insight:${row.id}:0`, `ai:insight:${row.id}:1`]);
+    expect((nameAnalysisRow(two, editor).insights as { key: string }[]).map((i) => i.key)).toEqual(["ai:insight:x", "ai:insight:def456"]);
+    // Also where the row uses no labels.
+    expect((nameAnalysisRow({ ...two, person_labels: {} }, member).insights as { key: string }[])[0]!.key).toBe(`ai:insight:${row.id}:0`);
   });
 
   it("gives an editor the names, and keeps a null reason null", () => {
@@ -211,7 +230,8 @@ describe("nameAnalysisRow", () => {
 
   it("returns the row as it is when it uses no labels", () => {
     const plain = { ...row, person_labels: {} };
-    expect(nameAnalysisRow(plain, member)).toBe(plain);
+    expect(nameAnalysisRow(plain, editor)).toBe(plain);
+    expect(nameAnalysisRow(plain, member)).toEqual({ ...plain, insights: [{ ...plain.insights[0]!, key: `ai:insight:${plain.id}:0` }] });
   });
 
   it("never shows a label's letters: a reader sees a name or 'A team member'", () => {

@@ -130,26 +130,43 @@ function nameFacts(facts: Json, name: (s: string) => string): Json {
   return facts.map((f) => (isObject(f) && typeof f.text === "string" ? { ...f, text: name(f.text) } : f)) as Json;
 }
 
-/** A finding with its title, evidence, why and every fact's text named for this reader. Other fields unchanged. */
-export function nameFinding<T extends Pick<FindingRow, "title" | "evidence" | "why" | "facts" | "person_labels">>(row: T, who: NameSource): T {
-  const labels = readPersonLabels(row.person_labels);
-  if (!Object.keys(labels).length) return row;
+/** True for a reader who does not see everyone: a member or viewer. */
+const readsLess = (who: NameSource): boolean => !!who.viewer && !who.viewer.seesEveryone;
+
+/**
+ * A finding with its title, evidence, why and every fact's text named for this reader. Other fields unchanged, except
+ * `ai_key` for a reader who doesn't see everyone: the stored key is a hash of the real-name title, so a member could hash
+ * a guessed name and check it against the finding. They get the finding's row id instead (nothing a member can do sends
+ * it back: members are read-only, and the key is used only to avoid listing the same proposal twice).
+ */
+export function nameFinding<T extends Pick<FindingRow, "id" | "title" | "evidence" | "why" | "facts" | "person_labels"> & Partial<Pick<FindingRow, "ai_key">>>(row: T, who: NameSource): T {
+  const base: T = readsLess(who) && row.ai_key ? { ...row, ai_key: row.id } : row;
+  const labels = readPersonLabels(base.person_labels);
+  if (!Object.keys(labels).length) return base;
   const name = (s: string) => nameLabels(s, labels, who);
-  return { ...row, title: name(row.title), evidence: name(row.evidence), why: name(row.why), facts: nameFacts(row.facts, name) };
+  return { ...base, title: name(base.title), evidence: name(base.evidence), why: name(base.why), facts: nameFacts(base.facts, name) };
 }
 
-/** An analysis row with summary paragraphs, insights (title, evidence, why, facts[].text), review texts and reason named. */
-export function nameAnalysisRow<T extends Pick<AiAnalysisRow, "summary" | "insights" | "review" | "reason" | "person_labels">>(row: T, who: NameSource): T {
-  const labels = readPersonLabels(row.person_labels);
-  if (!Object.keys(labels).length) return row;
+/**
+ * An analysis row with summary paragraphs, insights (title, evidence, why, facts[].text), review texts and reason named.
+ * For a reader who doesn't see everyone, an insight's stored `key` (pre-B17 analyses; a hash of its real-name title, so a
+ * guessed name could be checked against it) becomes `ai:insight:<analysis id>:<position>`: stable, and not derived from the text.
+ */
+export function nameAnalysisRow<T extends Pick<AiAnalysisRow, "id" | "summary" | "insights" | "review" | "reason" | "person_labels">>(row: T, who: NameSource): T {
+  const base: T =
+    readsLess(who) && Array.isArray(row.insights)
+      ? { ...row, insights: row.insights.map((x, i) => (isObject(x) && typeof x.key === "string" ? { ...x, key: `ai:insight:${row.id}:${i}` } : x)) as Json }
+      : row;
+  const labels = readPersonLabels(base.person_labels);
+  if (!Object.keys(labels).length) return base;
   const name = (s: string) => nameLabels(s, labels, who);
   const each = (json: Json, f: (o: Record<string, unknown>) => Record<string, unknown>): Json => (Array.isArray(json) ? (json.map((x) => (isObject(x) ? f(x) : x)) as Json) : json);
   const text = (o: Record<string, unknown>, key: string) => (typeof o[key] === "string" ? { [key]: name(o[key] as string) } : {});
   return {
-    ...row,
-    summary: Array.isArray(row.summary) ? (row.summary.map((p) => (typeof p === "string" ? name(p) : p)) as Json) : row.summary,
-    insights: each(row.insights, (o) => ({ ...o, ...text(o, "title"), ...text(o, "evidence"), ...text(o, "why"), ...(Array.isArray(o.facts) ? { facts: nameFacts(o.facts as Json, name) } : {}) })),
-    review: each(row.review, (o) => ({ ...o, ...text(o, "text") })),
-    reason: row.reason === null ? null : name(row.reason),
+    ...base,
+    summary: Array.isArray(base.summary) ? (base.summary.map((p) => (typeof p === "string" ? name(p) : p)) as Json) : base.summary,
+    insights: each(base.insights, (o) => ({ ...o, ...text(o, "title"), ...text(o, "evidence"), ...text(o, "why"), ...(Array.isArray(o.facts) ? { facts: nameFacts(o.facts as Json, name) } : {}) })),
+    review: each(base.review, (o) => ({ ...o, ...text(o, "text") })),
+    reason: base.reason === null ? null : name(base.reason),
   };
 }
