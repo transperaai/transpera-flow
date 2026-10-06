@@ -3300,6 +3300,16 @@ export type Database = {
         }
         Returns: Json
       }
+      record_client_calibration: {
+        Args: {
+          p_clients: Json
+          p_keys: string[]
+          p_log: Json
+          p_results: Json
+          p_workspace: string
+        }
+        Returns: Json
+      }
       reserve_ai_run: {
         Args: { p_process: string; p_trigger: string; p_workspace: string }
         Returns: Json

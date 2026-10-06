@@ -84,6 +84,7 @@ _Avoid_: Proposal (a visitor's proposal arrives as a suggestion)
 
 **Client group**:
 The clients of one service, counted but not named: how many, the fee, normal churn, typical stay and starting health. Example: "34 SEO clients paying $2,000 a month". A process whose services have clients counted simulates the groups, and named clients (Settings, Clients) are a record only there; any other process simulates the active named clients; a client who leaves is made inactive, never deleted (PRD D42).
+Normal churn can be measured from a clients file (Settings, Historical data), back-solved through today's churn drivers so late work isn't counted twice (PRD D44).
 _Avoid_: Client roster, client list, account
 Not to be confused with a **group**, which is a box of steps inside a process (above): a group holds steps, a client group counts clients.
 
