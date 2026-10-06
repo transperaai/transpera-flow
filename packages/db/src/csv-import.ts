@@ -630,6 +630,8 @@ function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: Da
     out.due = dueDeadline(cell("due"), out.due as number);
     if (out.closed !== null && out.opened !== null && (out.closed as number) < (out.opened as number)) return "It was closed before it was opened.";
   }
+  // A date-only due, or exactly midnight, is the end of its day (as for jobs and a servicing log): paying on the due day is on time.
+  if (spec.kind === "invoices" && out.due !== null) out.due = dueDeadline(cell("due"), out.due as number);
   if (spec.kind === "deals" && out.left !== null && (out.left as number) < (out.entered as number)) return "It left the stage before it entered it.";
   return out as unknown as KindRow;
 }
@@ -782,7 +784,7 @@ export interface InvoicesSummary {
   withDue: number;
   /** Of the invoices with a due and a paid date, the share paid after the due date (0-1); null when there are none. */
   paidLate: number | null;
-  /** Invoices due on or before `asOf` with no paid date. */
+  /** Invoices due on or before `asOf` with no paid date (a due date alone is due at the end of that day). */
   unpaidPastDue: number;
   withAmount: number;
 }

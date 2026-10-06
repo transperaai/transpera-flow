@@ -557,6 +557,27 @@ describe("conversions", () => {
     });
   });
 
+  it("treats an invoice due on a date alone as due at the end of that day", () => {
+    const text = [
+      "invoice,client,issued,due,paid",
+      "I1,C1,2026-03-01,2026-03-30,2026-03-30 15:00", // paid on the due day: on time
+      "I2,C2,2026-03-01,2026-03-30 00:00,2026-03-30 09:00", // midnight is a date
+      "I3,C3,2026-03-01,03/30/2026 12:00:00 AM,03/30/2026 03:00 PM",
+      "I4,C4,2026-03-01,2026-03-30 17:00,2026-03-30 18:00", // a time: late
+      "I5,C5,2026-03-01,2026-03-30,", // unpaid, due today
+    ].join("\n");
+    const r = readImport(splitCsv(text), "invoices", { invoice: 0, client: 1, issued: 2, due: 3, paid: 4 }, { dateOrder: "mdy" });
+    expect(r.errors).toEqual([]);
+    const rows = r.rows as InvoiceRow[];
+    expect(rows[0]!.due).toBe(d(2026, 3, 30) + 86_400_000 - 1);
+    expect(rows[3]!.due).toBe(d(2026, 3, 30, 17));
+    // Midday on the due day is not past due; the next morning is.
+    const s = invoicesSummary(rows, d(2026, 3, 30, 12));
+    expect(s.paidLate).toBeCloseTo(1 / 4, 6);
+    expect(s.unpaidPastDue).toBe(0);
+    expect(invoicesSummary(rows, d(2026, 3, 31, 9)).unpaidPastDue).toBe(1);
+  });
+
   it("summarises invoices without summing amounts", () => {
     const inv = (client: string, issued: number, due: number | null, paid: number | null, amount: number | null): InvoiceRow => ({ invoice: null, client, issued, due, paid, amount });
     const asOf = d(2026, 6, 1);
