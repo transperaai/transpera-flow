@@ -67,7 +67,7 @@ export interface ParsedStepLog {
 /** Day first (02/03/2026 is 2 March) or month first (02/03/2026 is 3 February). */
 export type DateOrder = "dmy" | "mdy";
 
-const normHeader = (h: string) =>
+export const normHeader = (h: string) =>
   h
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
@@ -135,6 +135,13 @@ export function detectDateOrder(texts: Iterable<string>): DateOrder | "ambiguous
   if (dayFirst) return "dmy";
   if (monthFirst) return "mdy";
   return any ? "ambiguous" : null;
+}
+
+/** Whether a date cell carries a time of day (2026-03-02 09:30), as opposed to a date alone (2026-03-02). */
+export function hasTimeOfDay(text: string): boolean {
+  const s = text.trim();
+  const m = ISO.exec(s) ?? SLASHED.exec(s);
+  return m !== null && m[4] !== undefined;
 }
 
 /** A date or date-time as epoch milliseconds, or null. Slashed dates are read in `order` (day first unless told). */
@@ -410,3 +417,5 @@ export function calibrationInput(stored: CalibrationRows, rows: readonly StepLog
     seasonality,
   };
 }
+
+export * from "./client-calibration";
