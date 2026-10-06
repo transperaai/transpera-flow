@@ -57,6 +57,12 @@ PostgREST; it is skipped locally unless `POSTGREST_URL` and
 `.github/workflows/ci.yml`). To run it beside another checkout, set
 `POSTGREST_DATABASE` to a database name of your own for both steps.
 
+## Storybook and visual tests
+
+`pnpm storybook` opens Storybook (stories in `apps/web/stories/`). Playwright screenshots every story in both themes and
+CI compares them with committed baselines; to approve an intended visual change, push a commit whose subject contains
+`[visual-update]`. See [`docs/visual-regression.md`](docs/visual-regression.md).
+
 ## MCP server
 
 `/api/mcp` is a Streamable HTTP MCP endpoint (PRD §7.1). Create a personal
