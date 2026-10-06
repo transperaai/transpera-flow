@@ -17,7 +17,14 @@ import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./works
 
 export const PLAN_FORMAT = "transpera-workspace-import/1";
 
-/** What a restore will take. These are starting values; the 2b performance test is the arbiter. */
+/**
+ * What a restore will take. The brief's starting values (200 processes, 2,000 steps, 4,000 edges, 300 sources of 5,000,000
+ * characters, 2,000 issues, 1,000 people, 5,000 clients, 500 scenarios, 500 blocks, 1,000 suggestions, 500 proposals) took 6 s on
+ * the test Postgres with every limit reached at once (200 processes alone 2.6 s, growing faster than linearly because the
+ * company map's sync runs for each new process; 2,000 issues 2.7 s). That is over the 3 s budget of the performance test in
+ * packages/db/test/workspace-import.test.ts (Supabase's `authenticated` role stops a statement at 8 s), so the counts below are
+ * lower: they restore in about 2 s there. The SQL function checks the same numbers.
+ */
 export const WORKSPACE_IMPORT_LIMITS = {
   /** The file as read, and decompressed on the server. */
   backupBytes: 25 * 1024 * 1024,
@@ -25,18 +32,18 @@ export const WORKSPACE_IMPORT_LIMITS = {
   compressedBytes: 4 * 1024 * 1024,
   /** The serialised plan. */
   planBytes: 10 * 1024 * 1024,
-  processes: 200,
-  steps: 2000,
-  edges: 4000,
-  sources: 300,
-  sourceChars: 5_000_000,
-  issues: 2000,
-  people: 1000,
-  clients: 5000,
-  scenarios: 500,
-  blocks: 500,
-  suggestions: 1000,
-  proposals: 500,
+  processes: 75,
+  steps: 750,
+  edges: 1500,
+  sources: 200,
+  sourceChars: 3_000_000,
+  issues: 600,
+  people: 500,
+  clients: 2000,
+  scenarios: 300,
+  blocks: 300,
+  suggestions: 500,
+  proposals: 300,
 } as const;
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;

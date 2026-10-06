@@ -49,9 +49,10 @@
 --    draft (all processes exist first, so holder steps resolve whichever process they point at), services and everything that
 --    points at processes, source links, pending suggestions and proposals (recorded as uploads while `transpera.importing` is
 --    on), then the archived processes are archived and each process's import is logged (`log_process_import`).
---    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 200 processes, 2,000 steps, 4,000 edges, 300 sources and
---    5,000,000 characters of their text, 2,000 issues, 1,000 people, 5,000 clients, 500 scenarios, 500 blocks, 1,000
---    suggestions, 500 proposals, and a plan of 10 MB (measured as the compact JSON the app sends; the database measures the
+--    Limits (the same numbers as `WORKSPACE_IMPORT_LIMITS`): 75 processes, 750 steps, 1,500 edges, 200 sources and
+--    3,000,000 characters of their text, 600 issues, 500 people, 2,000 clients, 300 scenarios, 300 blocks, 500
+--    suggestions, 300 proposals, and a plan of 10 MB (lower than the brief's starting values, which took 6 s at every limit at
+--    once, over the 3 s budget; see the comment on WORKSPACE_IMPORT_LIMITS) (measured as the compact JSON the app sends; the database measures the
 --    jsonb text, which carries a space after each colon and comma, so it allows 13,107,200 characters of it). Supabase gives
 --    `authenticated` an 8 s `statement_timeout`: one restore is one statement, and the performance test in
 --    packages/db/test/workspace-import.test.ts keeps every limit well inside it.
@@ -200,13 +201,13 @@ begin
   select coalesce(sum(jsonb_array_length(p.value -> 'steps')), 0), coalesce(sum(jsonb_array_length(p.value -> 'edges')), 0)
     into step_total, edge_total from jsonb_array_elements(p_plan -> 'processes') p;
   select coalesce(sum(char_length(coalesce(s.value ->> 'body', ''))), 0) into chars from jsonb_array_elements(p_plan -> 'sources') s;
-  if jsonb_array_length(p_plan -> 'processes') > 200 or step_total > 2000 or edge_total > 4000
-    or jsonb_array_length(p_plan -> 'sources') > 300 or chars > 5000000
-    or jsonb_array_length(p_plan -> 'issues') > 2000 or jsonb_array_length(p_plan -> 'people') > 1000
-    or jsonb_array_length(p_plan -> 'clients') > 5000 or jsonb_array_length(p_plan -> 'scenarios') > 500
-    or jsonb_array_length(p_plan -> 'blocks') > 500 or jsonb_array_length(p_plan -> 'suggestions') > 1000
-    or jsonb_array_length(p_plan -> 'proposals') > 500 then
-    raise exception 'import_workspace_bundle: the plan is over a limit (200 processes, 2000 steps, 4000 edges, 300 sources of 5,000,000 characters, 2000 issues, 1000 people, 5000 clients, 500 scenarios, 500 blocks, 1000 suggestions, 500 proposals)' using errcode = '22023';
+  if jsonb_array_length(p_plan -> 'processes') > 75 or step_total > 750 or edge_total > 1500
+    or jsonb_array_length(p_plan -> 'sources') > 200 or chars > 3000000
+    or jsonb_array_length(p_plan -> 'issues') > 600 or jsonb_array_length(p_plan -> 'people') > 500
+    or jsonb_array_length(p_plan -> 'clients') > 2000 or jsonb_array_length(p_plan -> 'scenarios') > 300
+    or jsonb_array_length(p_plan -> 'blocks') > 300 or jsonb_array_length(p_plan -> 'suggestions') > 500
+    or jsonb_array_length(p_plan -> 'proposals') > 300 then
+    raise exception 'import_workspace_bundle: the plan is over a limit (75 processes, 750 steps, 1500 edges, 200 sources of 3,000,000 characters, 600 issues, 500 people, 2000 clients, 300 scenarios, 300 blocks, 500 suggestions, 300 proposals)' using errcode = '22023';
   end if;
 
   -- 3. Lock: one restore (or upload) at a time per workspace.

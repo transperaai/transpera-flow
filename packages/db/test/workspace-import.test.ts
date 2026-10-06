@@ -523,3 +523,308 @@ describe("what is left out stays out", () => {
     expect(result.processes.length).toBe(await n("processes", ws, "not is_company"));
   });
 });
+
+describe("who may restore", () => {
+  it("lets an editor restore, with the workspace settings as one pending suggestion an owner accepts", async () => {
+    const m = await mini();
+    const bundle = await bundleOf(m.ws);
+    const { ws, result } = await restoreInto(bundle, "editor", { canManage: false, label: "mini.json" });
+    expect(result.settings).toBe("suggested");
+    const [row] = await q("select settings from workspaces where id = $1", [ws]);
+    expect(row!.settings).not.toMatchObject({ hours_per_week: 37 });
+    const pending = await q("select id, patch, created_via, import_source, status from suggestions where workspace_id = $1 and note = 'Workspace settings from a backup.'", [ws]);
+    expect(pending.length).toBe(1);
+    expect(pending[0]).toMatchObject({ created_via: "upload", import_source: "mini.json", status: "pending" });
+    const owner = await member(ws, "owner");
+    const reply = await as(owner.claims, async (c) => (await c.query("select public.review_suggestions($1::uuid[], 'accept') as r", [[pending[0]!.id]])).rows[0].r);
+    expect(JSON.stringify(reply)).not.toContain("error");
+    const [after] = await q("select settings from workspaces where id = $1", [ws]);
+    expect(after!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
+  });
+
+  const ok: [string, (ws: string) => Promise<User>][] = [
+    ["an agency admin (JWT flag)", async () => admin],
+    ["an agency_admin membership", async (ws) => member(ws, "agency_admin")],
+    ["an owner", async (ws) => member(ws, "owner")],
+    ["an editor", async (ws) => member(ws, "editor")],
+  ];
+  it.each(ok)("lets %s restore", async (_who, make) => {
+    const ws = await newWorkspace();
+    const user = await make(ws);
+    const { plan } = await miniPlan();
+    const result = await restoreAs(user, ws, plan);
+    expect(result.processes.length).toBe(5);
+  });
+
+  const refused: [string, (ws: string) => Promise<User>][] = [
+    ["a member", async (ws) => member(ws, "member")],
+    ["a viewer", async (ws) => member(ws, "viewer")],
+    ["a signed-in non-member", async () => createUser(db, `stranger${++seq}@elsewhere.example.com`)],
+  ];
+  it.each(refused)("refuses %s with 42501 and writes nothing", async (_who, make) => {
+    const ws = await newWorkspace();
+    const user = await make(ws);
+    const { plan } = await miniPlan();
+    const before = await snapshot(ws);
+    const e = await failure(() => restoreAs(user, ws, plan));
+    expect(e.code).toBe("42501");
+    expect(e.message).toMatch(/Only owners, editors and agency admins/);
+    expect(await snapshot(ws)).toEqual(before);
+  });
+
+  it("refuses an API token, and anon can't execute the function", async () => {
+    const ws = await newWorkspace();
+    const owner = await member(ws, "owner");
+    const { plan } = await miniPlan();
+    const e = await failure(() => restoreAs({ id: owner.id, claims: { ...owner.claims, api_token_id: "t-1" } }, ws, plan));
+    expect(e.code).toBe("42501");
+    expect(e.message).toBe("Backups are restored in the app.");
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      const a = await failure(() => callRestore(db.client, ws, plan));
+      expect(a.code).toBe("42501");
+    } finally {
+      await db.client.query("rollback");
+    }
+    expect(Number((await q("select count(*) from roles where workspace_id = $1", [ws]))[0]!.count)).toBe(0);
+  });
+});
+
+describe("only into an empty workspace", () => {
+  it("refuses Northbeam, writing nothing", async () => {
+    const { plan } = await miniPlan();
+    const before = await snapshot(NORTHBEAM_WORKSPACE_ID);
+    const e = await failure(() => restoreAs(admin, NORTHBEAM_WORKSPACE_ID, plan));
+    expect(e).toMatchObject({ code: "23514", hint: "not_empty" });
+    expect(e.message).toMatch(/isn't empty/);
+    expect(await snapshot(NORTHBEAM_WORKSPACE_ID)).toEqual(before);
+  });
+
+  it("refuses a new workspace with one role added", async () => {
+    const ws = await newWorkspace();
+    await q("insert into roles (workspace_id, name, color) values ($1, 'Lonely', '#000000')", [ws]);
+    const { plan } = await miniPlan();
+    const before = await snapshot(ws);
+    expect(await failure(() => restoreAs(admin, ws, plan))).toMatchObject({ hint: "not_empty" });
+    expect(await snapshot(ws)).toEqual(before);
+  });
+
+  it("refuses the second of two restores in a row, and accepts a new workspace's own scenario library and map", async () => {
+    const ws = await newWorkspace();
+    const { plan } = await miniPlan();
+    await restoreAs(admin, ws, plan);
+    expect(await failure(() => restoreAs(admin, ws, plan))).toMatchObject({ hint: "not_empty" });
+  });
+
+  it("refuses a workspace with a scenario of its own, and with an archived process", async () => {
+    const { plan } = await miniPlan();
+    const a = await newWorkspace();
+    await q("insert into scenarios (workspace_id, name, patch) values ($1, 'Mine', '[]')", [a]);
+    expect(await failure(() => restoreAs(admin, a, plan))).toMatchObject({ hint: "not_empty" });
+  });
+});
+
+describe("all or nothing", () => {
+  it("leaves nothing behind when the last section fails (processes, map versions and the audit log included)", async () => {
+    const { plan } = await miniPlan();
+    const bad: ImportPlan = structuredClone(plan);
+    bad.suggestions.push({ id: `${PLACEHOLDER_PREFIX}ffffffffff01`, target_table: "not_a_table", target_id: null, patch: { set: {} }, evidence: [], note: null } as Row);
+    const ws = await newWorkspace();
+    const before = await snapshot(ws);
+    const e = await failure(() => restoreAs(admin, ws, bad));
+    expect(e.hint).toBe("section:suggestions");
+    expect(e.message).toMatch(/suggestions could not be restored/);
+    expect(await snapshot(ws)).toEqual(before);
+  });
+});
+
+describe("ids", () => {
+  it("refuses a real uuid in an id or reference column (22023), for every column the lists name", async () => {
+    const { plan } = await planWorkspaceImport(await bundleOf(NORTHBEAM_WORKSPACE_ID), { canManage: true });
+    const ws = await newWorkspace();
+    const real = "11111111-2222-4333-8444-555555555555";
+    const attempts: { where: string; mutate: (p: ImportPlan) => boolean }[] = [];
+    const flat = plan as unknown as Record<string, Row[]>;
+    for (const [section, refs] of Object.entries(IMPORT_REFS)) {
+      for (const col of ["id", ...refs.map((r) => r.col)]) {
+        attempts.push({
+          where: `${section}.${col}`,
+          mutate: (p) => {
+            const row = (p as unknown as Record<string, Row[]>)[section]!.find((r) => r[col] != null);
+            if (!row) return false;
+            row[col] = real;
+            return true;
+          },
+        });
+      }
+    }
+    for (const col of IMPORT_STEP_REFS.map((r) => r.col)) {
+      attempts.push({ where: `steps.${col}`, mutate: (p) => { const row = p.processes.flatMap((x) => x.steps).find((r) => r[col] != null); if (!row) return false; row[col] = real; return true; } });
+    }
+    attempts.push({ where: "processes.id", mutate: (p) => { p.processes[0]!.id = real; return true; } });
+    attempts.push({ where: "edges.from_step_id", mutate: (p) => { const e = p.processes.flatMap((x) => x.edges)[0]; if (!e) return false; e.from_step_id = real; return true; } });
+    attempts.push({ where: "issues.owner_ids", mutate: (p) => { const i = p.issues.find((r) => Array.isArray(r.owner_ids) && r.owner_ids.length > 0); if (!i) return false; (i.owner_ids as string[])[0] = real; return true; } });
+    attempts.push({ where: "issues.links", mutate: (p) => { const i = p.issues.find((r) => Array.isArray(r.links) && r.links.length > 0); if (!i) return false; (i.links as Row[])[0]!.process_id = real; return true; } });
+    attempts.push({ where: "market_schedule.condition_id", mutate: (p) => { const r = p.market_schedule.find((x) => x.condition_id != null); if (!r) return false; r.condition_id = real; return true; } });
+    attempts.push({ where: "suggestions.target_id", mutate: (p) => { const r = p.suggestions.find((x) => x.target_id != null); if (!r) return false; r.target_id = real; return true; } });
+    void flat;
+    let tried = 0;
+    for (const a of attempts) {
+      const copy: ImportPlan = structuredClone(plan);
+      if (!a.mutate(copy)) continue;
+      tried++;
+      const e = await failure(() => restoreAs(admin, ws, copy));
+      expect(e.code, a.where).toBe("22023");
+    }
+    // Northbeam has rows for most columns; the few without (no suggestions, say) are covered by the Mini plan below.
+    expect(tried).toBeGreaterThan(25);
+    expect(Number((await q("select count(*) from roles where workspace_id = $1", [ws]))[0]!.count)).toBe(0);
+  });
+
+  it("refuses a real uuid in the Mini plan's suggestion target and issue links", async () => {
+    const { plan } = await miniPlan();
+    const ws = await newWorkspace();
+    const copy: ImportPlan = structuredClone(plan);
+    copy.suggestions[0]!.target_id = "11111111-2222-4333-8444-555555555555";
+    expect((await failure(() => restoreAs(admin, ws, copy))).code).toBe("22023");
+  });
+
+  it("leaves a uuid typed into free text alone", async () => {
+    const { plan } = await miniPlan();
+    const free = "99999999-8888-4777-8666-555555555555";
+    const copy: ImportPlan = structuredClone(plan);
+    copy.sources[0]!.body = `see ${free}`;
+    const ws = await newWorkspace();
+    await restoreAs(admin, ws, copy);
+    expect((await q("select body from sources where workspace_id = $1", [ws]))[0]!.body).toBe(`see ${free}`);
+  });
+
+  it("makes new ids for each restore of one backup, in the old order", async () => {
+    const m = await mini();
+    const bundle = await bundleOf(m.ws);
+    const a = await restoreInto(bundle);
+    const b = await restoreInto(bundle);
+    expect(a.result.id_prefix).not.toBe(b.result.id_prefix);
+    const ids = async (ws: string) => (await q("select id from steps where workspace_id = $1 and process_id in (select id from processes where not is_company) order by id", [ws])).map((r) => String(r.id));
+    const ia = await ids(a.ws);
+    const ib = await ids(b.ws);
+    expect(ia.length).toBeGreaterThan(0);
+    expect(ia.some((x) => ib.includes(x))).toBe(false);
+    // The same order as the source's ids: the rank is the last 12 digits.
+    const ranks = ia.map((x) => x.slice(-12));
+    expect(ranks).toEqual([...ranks].sort());
+  });
+});
+
+describe("SQL and TS agree", () => {
+  it("has the allow-list and reference lists of the planner", async () => {
+    const src = String((await q("select prosrc from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_workspace_bundle'"))[0]!.prosrc);
+    const allow = JSON.parse(/allow constant jsonb := '(.*?)'::jsonb;/s.exec(src)![1]!) as Record<string, string[]>;
+    expect(allow).toEqual(JSON.parse(JSON.stringify(IMPORT_COLUMNS)));
+    const list = (name: string) => [...(new RegExp(`${name} constant text\\[\\] := array\\[(.*?)\\];`, "s").exec(src)![1]!.matchAll(/'([^']+)'/g))].map((m) => m[1]!);
+    const tsRefs = Object.entries(IMPORT_REFS).flatMap(([s, refs]) => refs.map((r) => `${s}.${r.col}`));
+    expect(list("ref_cols").sort()).toEqual([...tsRefs, "market_schedule.condition_id", "suggestions.target_id"].sort());
+    expect(list("step_ref_cols").sort()).toEqual(IMPORT_STEP_REFS.map((r) => r.col).sort());
+  });
+
+  it("restores a plan that carries every allowed column of the tables that take them (the columns exist)", async () => {
+    // Each allowed column of each flat table exists in that table (so the dynamic insert can name it).
+    const tables: Record<string, string> = { proposals: "suggestion_proposals" };
+    for (const [section, columns] of Object.entries(IMPORT_COLUMNS)) {
+      const table = tables[section] ?? section;
+      const have = (await q("select column_name from information_schema.columns where table_schema = 'public' and table_name = $1", [table])).map((r) => r.column_name);
+      for (const c of columns) expect(have, `${table}.${c}`).toContain(c);
+    }
+  });
+});
+
+describe("limits", () => {
+  const over = async (label: string, mutate: (p: ImportPlan) => void) => {
+    const { plan } = await miniPlan();
+    const copy: ImportPlan = structuredClone(plan);
+    mutate(copy);
+    const ws = await newWorkspace();
+    const e = await failure(() => restoreAs(admin, ws, copy));
+    expect(e.code, label).toBe("22023");
+  };
+  const L = WORKSPACE_IMPORT_LIMITS;
+  const rows = (n: number): Row[] => Array.from({ length: n }, () => ({}));
+  it.each([
+    ["processes", (p: ImportPlan) => { p.processes = rows(L.processes + 1).map(() => ({ id: "", parent_process_id: null, name: "", kind: "", entity_name: "", description: "", archived: false, layout: {}, steps: [], edges: [], first_principles: null })); }],
+    ["steps", (p: ImportPlan) => { p.processes[0]!.steps = rows(L.steps + 1); }],
+    ["edges", (p: ImportPlan) => { p.processes[0]!.edges = rows(L.edges + 1); }],
+    ["sources", (p: ImportPlan) => { p.sources = rows(L.sources + 1); }],
+    ["source text", (p: ImportPlan) => { p.sources = [{ body: "x".repeat(L.sourceChars + 1) }]; }],
+    ["issues", (p: ImportPlan) => { p.issues = rows(L.issues + 1); }],
+    ["people", (p: ImportPlan) => { p.people = rows(L.people + 1); }],
+    ["clients", (p: ImportPlan) => { p.clients = rows(L.clients + 1); }],
+    ["scenarios", (p: ImportPlan) => { p.scenarios = rows(L.scenarios + 1); }],
+    ["blocks", (p: ImportPlan) => { p.blocks = rows(L.blocks + 1); }],
+    ["suggestions", (p: ImportPlan) => { p.suggestions = rows(L.suggestions + 1); }],
+    ["proposals", (p: ImportPlan) => { p.proposals = rows(L.proposals + 1); }],
+  ])("refuses one more than the limit of %s", async (label, mutate) => {
+    await over(label, mutate);
+  });
+  it("refuses a plan that isn't a plan", async () => {
+    const ws = await newWorkspace();
+    expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/2" }))).code).toBe("22023");
+    expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/1" }))).code).toBe("22023");
+  });
+});
+
+/** A synthetic plan with `L` rows of everything (the limits, or fewer). */
+function syntheticPlan(L: Record<keyof typeof WORKSPACE_IMPORT_LIMITS, number>) {
+    const id = (n: number) => `${PLACEHOLDER_PREFIX}${n.toString(16).padStart(12, "0")}`;
+    let next = 1;
+    const mk = () => id(next++);
+    const when = "2026-01-01T00:00:00Z";
+    const role = mk();
+    const roles = [{ id: role, name: "Role", color: "#336699", created_at: when }];
+    const people = Array.from({ length: L.people }, (_, i) => ({ id: mk(), name: `Person ${i}`, created_at: when }));
+    const clients = Array.from({ length: L.clients }, (_, i) => ({ id: mk(), name: `Client ${i}`, created_at: when }));
+    const stepsPer = Math.floor(L.steps / L.processes);
+    const processes = Array.from({ length: L.processes }, (_, p) => {
+      const stepIds = Array.from({ length: stepsPer }, () => mk());
+      const steps = stepIds.map((sid, i) => ({ id: sid, name: `S${i}`, kind: i === 0 ? "start" : i === stepsPer - 1 ? "end" : "task", outcome: i === stepsPer - 1 ? "done" : null, work_hours: 1, wait_hours: 0, rework_rate: 0, x: i * 10, y: 0, role_id: i > 0 && i < stepsPer - 1 ? role : null }));
+      // 9 chain edges and 11 more, 20 per process: 4,000 in all.
+      const edges: Row[] = [];
+      for (let i = 0; i + 1 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 1], probability: 1 });
+      for (let i = 0; edges.length < L.edges / L.processes && i + 2 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 2], probability: 0 });
+      for (let i = 0; edges.length < L.edges / L.processes && i + 3 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 3], probability: 0 });
+      for (let i = 0; edges.length < L.edges / L.processes && i + 4 < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + 4], probability: 0 });
+      return { id: mk(), parent_process_id: null, name: `Process ${p}`, kind: "pipeline", entity_name: "item", description: null, archived: p % 20 === 0, layout: {}, steps, edges, first_principles: null };
+    });
+    const sourceIds = Array.from({ length: L.sources }, () => mk());
+    const sources = sourceIds.map((sid, i) => ({ id: sid, kind: "notes", title: `Source ${i}`, body: "x".repeat(Math.floor(L.sourceChars / L.sources)), created_at: when }));
+    const issues = Array.from({ length: L.issues }, (_, i) => ({
+      id: mk(), type: "idea", title: `Issue ${i}`, created_at: when, source: "manual", status: "open",
+      links: [{ process_id: processes[i % processes.length]!.id, step_id: processes[i % processes.length]!.steps[1]!.id }], owner_ids: [people[i % people.length]!.id], source_ids: [sourceIds[i % sourceIds.length]],
+    }));
+    const scenarios = Array.from({ length: L.scenarios }, (_, i) => ({ id: mk(), name: `Scenario ${i}`, patch: [{ path: "demand.leads_per_week", op: "multiply", value: 1 + i / 1000 }], created_at: when }));
+    const blocks = Array.from({ length: L.blocks }, (_, i) => ({ id: mk(), name: `Block ${i}`, type: "manual", steps: { steps: [], edges: [] }, created_at: when }));
+    const suggestions = Array.from({ length: L.suggestions }, (_, i) => ({ id: mk(), target_table: "people", target_id: people[i % people.length]!.id, patch: { set: { notes: `n${i}` } }, evidence: [], note: null, created_at: when }));
+    const proposals = Array.from({ length: L.proposals }, (_, i) => ({ id: mk(), kind: "issue", title: `Proposal ${i}`, detail: "d", payload: {}, evidence: [], created_at: when }));
+    const plan = {
+      format: "transpera-workspace-import/1", settings: null, roles, people, person_roles: [], person_leave: [], lead_sources: [], seasonality: [], demand_settings: null, churn_drivers: [],
+      market_conditions: [], market_schedule: [], lever_settings: null, analysis_rules: null, clients, sources, processes, scenarios, blocks, issues, services: [], service_servicing: [],
+      client_groups: [], client_services: [], client_assignments: [], person_skills: [], source_links: [], suggestions, proposals,
+    };
+  return plan;
+}
+
+describe("performance", () => {
+  it("restores a synthetic plan at every limit well inside the 8 s statement timeout (budget 3 s)", async () => {
+    const L = WORKSPACE_IMPORT_LIMITS;
+    const plan = syntheticPlan(L);
+    expect(JSON.stringify(plan).length).toBeLessThan(L.planBytes);
+    const ws = await newWorkspace();
+    const t0 = Date.now();
+    const result = await restoreAs(admin, ws, plan);
+    const ms = Date.now() - t0;
+    console.log(`restore at every limit: ${ms} ms, ${JSON.stringify(plan).length} bytes of plan`);
+    expect(ms).toBeLessThan(3000);
+    expect(result.processes.length).toBe(L.processes);
+    expect(await count("steps", ws, "process_id in (select id from processes where not is_company)")).toBe(L.steps - 0);
+  }, 60_000);
+});

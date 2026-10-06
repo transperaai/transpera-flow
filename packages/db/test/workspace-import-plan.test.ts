@@ -265,6 +265,7 @@ describe("checkWorkspaceBundle: what is refused, in order", () => {
 
 describe("checkWorkspaceBundle: limits", () => {
   const L = WORKSPACE_IMPORT_LIMITS;
+  const n = (v: number) => v.toLocaleString("en-US");
   const filler = (n: number, make: () => Row): Row[] => Array.from({ length: n }, make);
   const run = (add: (b: WorkspaceBundle, n: number) => void, n: number) => {
     const b = clone(makeBundle().bundle);
@@ -273,14 +274,14 @@ describe("checkWorkspaceBundle: limits", () => {
   };
   const cases: { name: string; max: number; add: (b: WorkspaceBundle, n: number) => void; message: string }[] = [
     // The fixture already holds 2 issues that restore (and 1 detection), 1 person, 1 client, 2 scenarios, 1 block, 2 sources, 1 pending suggestion and 1 pending proposal.
-    { name: "issues", max: L.issues, add: (b, n) => b.issues.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, number: null, source: "manual", status: "open", links: [], owner_ids: [], source_ids: [], events: [] }))), message: "The backup has 2,001 issues; a restore takes at most 2,000." },
-    { name: "people", max: L.people, add: (b, n) => b.company_model.people!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: "The backup has 1,001 people; a restore takes at most 1,000." },
-    { name: "clients", max: L.clients, add: (b, n) => b.company_model.clients!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: "The backup has 5,001 clients; a restore takes at most 5,000." },
-    { name: "scenarios", max: L.scenarios, add: (b, n) => b.scenarios.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, parent_scenario_id: null }))), message: "The backup has 501 scenarios; a restore takes at most 500." },
-    { name: "blocks", max: L.blocks, add: (b, n) => b.blocks.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: "The backup has 501 blocks; a restore takes at most 500." },
-    { name: "sources", max: L.sources, add: (b, n) => b.sources.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, body: "" }))), message: "The backup has 301 sources; a restore takes at most 300." },
-    { name: "suggestions", max: L.suggestions, add: (b, n) => b.suggestions.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", target_id: null }))), message: "The backup has 1,001 pending suggestions; a restore takes at most 1,000." },
-    { name: "proposals", max: L.proposals, add: (b, n) => b.suggestion_proposals.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", issue_id: null }))), message: "The backup has 501 pending proposals; a restore takes at most 500." },
+    { name: "issues", max: L.issues, add: (b, n) => b.issues.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, number: null, source: "manual", status: "open", links: [], owner_ids: [], source_ids: [], events: [] }))), message: `The backup has ${n(L.issues + 1)} issues; a restore takes at most ${n(L.issues)}.` },
+    { name: "people", max: L.people, add: (b, n) => b.company_model.people!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.people + 1)} people; a restore takes at most ${n(L.people)}.` },
+    { name: "clients", max: L.clients, add: (b, n) => b.company_model.clients!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.clients + 1)} clients; a restore takes at most ${n(L.clients)}.` },
+    { name: "scenarios", max: L.scenarios, add: (b, n) => b.scenarios.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, parent_scenario_id: null }))), message: `The backup has ${n(L.scenarios + 1)} scenarios; a restore takes at most ${n(L.scenarios)}.` },
+    { name: "blocks", max: L.blocks, add: (b, n) => b.blocks.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.blocks + 1)} blocks; a restore takes at most ${n(L.blocks)}.` },
+    { name: "sources", max: L.sources, add: (b, n) => b.sources.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, body: "" }))), message: `The backup has ${n(L.sources + 1)} sources; a restore takes at most ${n(L.sources)}.` },
+    { name: "suggestions", max: L.suggestions, add: (b, n) => b.suggestions.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", target_id: null }))), message: `The backup has ${n(L.suggestions + 1)} pending suggestions; a restore takes at most ${n(L.suggestions)}.` },
+    { name: "proposals", max: L.proposals, add: (b, n) => b.suggestion_proposals.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", issue_id: null }))), message: `The backup has ${n(L.proposals + 1)} pending proposals; a restore takes at most ${n(L.proposals)}.` },
     {
       name: "processes",
       max: L.processes,
@@ -290,7 +291,7 @@ describe("checkWorkspaceBundle: limits", () => {
           b.processes.push({ id: id(), name: "p", is_company: false, workspace_id: b.workspace.id, parent_process_id: null, versions: [{ id: id(), live: true, draft: false, steps: [], edges: [], workspace_id: b.workspace.id }] } as Row);
         }
       },
-      message: "The backup has 201 processes; a restore takes at most 200.",
+      message: `The backup has ${n(L.processes + 1)} processes; a restore takes at most ${n(L.processes)}.`,
     },
   ];
   for (const c of cases) {
@@ -312,10 +313,10 @@ describe("checkWorkspaceBundle: limits", () => {
       return checkWorkspaceBundle(recount(b));
     };
     expect(build(L.steps, 10).errors).toEqual([]);
-    expect(build(L.steps + 1, 10).errors).toContain("The backup has 2,001 steps in the versions it would restore; a restore takes at most 2,000.");
+    expect(build(L.steps + 1, 10).errors).toContain(`The backup has ${n(L.steps + 1)} steps in the versions it would restore; a restore takes at most ${n(L.steps)}.`);
     // Alpha's live version has 1 edge.
     expect(build(10, L.edges - 1).errors).toEqual([]);
-    expect(build(10, L.edges).errors).toContain("The backup has 4,001 edges in the versions it would restore; a restore takes at most 4,000.");
+    expect(build(10, L.edges).errors).toContain(`The backup has ${n(L.edges + 1)} edges in the versions it would restore; a restore takes at most ${n(L.edges)}.`);
   });
 
   it("source text, in characters", () => {
@@ -324,7 +325,7 @@ describe("checkWorkspaceBundle: limits", () => {
     (b.sources[1] as Row).body = "x";
     expect(checkWorkspaceBundle(b).errors).toEqual([]);
     (b.sources[1] as Row).body = "xx";
-    expect(checkWorkspaceBundle(b).errors).toContain("The backup has 5,000,001 characters of source text; a restore takes at most 5,000,000.");
+    expect(checkWorkspaceBundle(b).errors).toContain(`The backup has ${n(L.sourceChars + 1)} characters of source text; a restore takes at most ${n(L.sourceChars)}.`);
   });
 
   it("the serialised plan", () => {
@@ -357,7 +358,7 @@ describe("checkWorkspaceBundle: deep nesting and oversized lists", () => {
     const t2 = Date.now();
     const c = checkWorkspaceBundle(deep);
     expect(Date.now() - t2).toBeLessThan(1000);
-    expect(c.errors.join(" ")).toContain("a restore takes at most 200");
+    expect(c.errors.join(" ")).toContain(`a restore takes at most ${WORKSPACE_IMPORT_LIMITS.processes}`);
   });
 
   it("plans a 5,000-deep chain, parents first, in under a second", () => {
@@ -371,7 +372,7 @@ describe("checkWorkspaceBundle: deep nesting and oversized lists", () => {
 
   it("still finds a loop in a long chain, in linear time", () => {
     // Deeper than a restore takes would stop at the size cap first; the loop is found within it.
-    const b = chain(390);
+    const b = chain(WORKSPACE_IMPORT_LIMITS.processes * 2 - 10);
     (b.processes[4]!.parent_process_id as unknown) = b.processes[b.processes.length - 1]!.id;
     const t = Date.now();
     expect(checkWorkspaceBundle(b).errors.join(" ")).toMatch(/nested in a loop/);
@@ -384,15 +385,15 @@ describe("checkWorkspaceBundle: deep nesting and oversized lists", () => {
     b.issues = Array.from({ length: L.issues * 2 + 1 }, () => ({ id: id(), workspace_id: b.workspace.id })) as Row[];
     const t = Date.now();
     const c = checkWorkspaceBundle(b);
-    expect(c.errors).toEqual(["The backup has 4,001 issues; a restore takes at most 2,000."]);
+    expect(c.errors).toEqual([`The backup has ${(L.issues * 2 + 1).toLocaleString("en-US")} issues; a restore takes at most ${L.issues.toLocaleString("en-US")}.`]);
     expect(Date.now() - t).toBeLessThan(200);
     // Not even a shape check: rows of the wrong kind in an oversized list are not read.
     const sloppy = clone(makeBundle().bundle);
     sloppy.sources = Array.from({ length: L.sources * 2 + 1 }, () => 5) as unknown as Row[];
-    expect(checkWorkspaceBundle(sloppy).errors).toEqual(["The backup has 601 sources; a restore takes at most 300."]);
+    expect(checkWorkspaceBundle(sloppy).errors).toEqual([`The backup has ${L.sources * 2 + 1} sources; a restore takes at most ${L.sources}.`]);
     const people = clone(makeBundle().bundle);
     people.company_model.people = Array.from({ length: L.people * 2 + 1 }, () => 5) as unknown as Row[];
-    expect(checkWorkspaceBundle(people).errors).toEqual(["The backup has 2,001 people; a restore takes at most 1,000."]);
+    expect(checkWorkspaceBundle(people).errors).toEqual([`The backup has ${(L.people * 2 + 1).toLocaleString("en-US")} people; a restore takes at most ${L.people}.`]);
   });
 });
 
