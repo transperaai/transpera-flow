@@ -310,6 +310,16 @@ Verified only against plain Postgres 16 (`packages/db/test/access.test.ts`, "kee
 - [ ] **Delete an auth user** (Dashboard) who is the last owner of a workspace: allowed (the cascade runs as `supabase_auth_admin` or `postgres`, not `authenticated`).
 - [ ] **Remove the last owner's pre-assigned email** from Settings → Access: refused; remove a workspace that has one: allowed.
 
+## Per-person privacy (issue #30, migration 20261207500000)
+
+Verified only against plain Postgres 16 (`packages/db/test/role-matrix.test.ts`, `team-capacity.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-roles.test.ts`), not against a Supabase project. The select policies, `can_see_person`, `team_capacity` and `revision_history` rely on `auth.uid()` and `auth.jwt()` reading the request's claims, including inside the SECURITY DEFINER functions (the same as `workspace_role`). Check on the real project:
+
+- [ ] **As a linked member** (Settings → Access links the membership to a person), Settings → People shows exactly one person, and the Overview's numbers match an editor's, except the overtime cost, which shows "—" with an (i).
+- [ ] **As an editor**, People and Settings → People show everyone with real names and rates.
+- [ ] **As a member**, no cost rate of anyone else's appears anywhere (People, the network tab's `team_capacity` response, MCP): only their own.
+- [ ] **Smoke test** (post-apply check in the migration header) as an agency admin: `team_capacity` returns `sees_everyone` true and Northbeam's head count.
+- [ ] **A member's version history** shows "A team member" for other people's versions and their own name for their own.
+
 ## Restoring a backup (issue #39, B10 2b, migration 20261207000000)
 
 `public.import_workspace_bundle(p_workspace, p_plan, p_label)` restores a `transpera-workspace/1` backup into a new, empty workspace in one call: SECURITY INVOKER, drafts only, nothing published, no history, all or nothing. It also grants EXECUTE on `private.scenario_library()` to `authenticated` (the "empty" check compares scenarios with the seeded library). **Verified on plain Postgres 16 and PostgREST 14.18 only** (`packages/db/test/workspace-import.test.ts`, `packages/mcp/test/postgrest-restore.test.ts`), not on Supabase.

@@ -1,7 +1,7 @@
 {
   "model": "larkspur",
   "description": "Larkspur Creative, the messier agency: overloaded designers, a copywriter on overtime, an 18-client roster with health-driven churn, starting from WIP.",
-  "engineVersion": "1.6.0",
+  "engineVersion": "1.7.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

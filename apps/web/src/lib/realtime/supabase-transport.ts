@@ -137,7 +137,8 @@ function parseViewer(v: unknown): Viewer | null {
   const userId = text(o.userId, 100);
   const name = text(o.name, 200);
   if (!userId || !name) return null;
-  return { userId, name, email: text(o.email, 320) };
+  // Never read an email from presence (B1 2/3): older tabs may still send one.
+  return { userId, name, email: null };
 }
 
 /** A note from another tab: untrusted input, so only well-formed notes are used. */

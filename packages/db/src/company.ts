@@ -3,6 +3,7 @@
 // named and shown; and snapshots of it, so a saved run can say what has
 // changed since it ran (decision D19, issue #25). Pure: no I/O, no clock.
 
+import type { Viewer } from "./queries";
 import type {
   ClientAssignmentRow,
   ClientRow,
@@ -22,6 +23,8 @@ import type {
 
 /** Everything the company model holds, as the app and MCP server load it (a ProcessBundle has all of it). */
 export interface CompanyModel {
+  /** Who loaded it (B1 2/3). Absent means "sees everyone" (demo fixtures, tests, the golden models). */
+  viewer?: Viewer;
   workspace: WorkspaceRow;
   roles: RoleRow[];
   people: PersonRow[];

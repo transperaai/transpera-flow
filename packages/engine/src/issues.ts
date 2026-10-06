@@ -30,6 +30,7 @@ import {
   compareCostsDesc,
   lossValueAtStep,
   noCost,
+  payHiddenCost,
   serviceMix,
   resolveCostConfig,
   type CostConfig,
@@ -205,8 +206,10 @@ export function detectIssues(
   const overtimeCovered = (roleId: string | null, personId: string | null) =>
     overtimeFound.some((o) => (personId ? o.personId === personId : o.roleId === roleId));
   /** Rule 1: the wins one more person would bring × deal value, plus overtime unless it has its own insight. */
-  const busyCost = (roleId: string | null, overtimeHoursWeek: number, rate: number, ownOvertime: boolean): IssueCost => {
-    const overtime = ownOvertime ? 0 : overtimeHoursWeek * rate * WEEKS_PER_MONTH;
+  const busyCost = (roleId: string | null, overtimeHoursWeek: number, rate: number | null, ownOvertime: boolean): IssueCost => {
+    // A null rate is a person's pay, hidden from this caller: the cost needs it only when overtime is added here.
+    if (rate === null && !ownOvertime && overtimeHoursWeek > 0) return payHiddenCost();
+    const overtime = ownOvertime ? 0 : overtimeHoursWeek * (rate ?? 0) * WEEKS_PER_MONTH;
     const note = ownOvertime && overtimeHoursWeek > 0 ? " Overtime is costed in its own insight, so it isn't counted here." : "";
     const extraWins = roleId !== null && roleId in shadow ? (Math.max(0, shadow[roleId]!) * WEEKS_PER_MONTH) / WEEKS_PER_QUARTER : null;
     if (extraWins === null) {
@@ -348,7 +351,7 @@ export function detectIssues(
       key: `capacity:person:${pid}`,
       type: "capacity",
       ...ratingFields(outcome),
-      cost: busyCost(main, r.overtimeHours, p.cost ?? (p.roles.length ? p.roles.reduce((sum, rid) => sum + roleCost(rid), 0) / p.roles.length : 0), overtimeCovered(main, named ? pid : null)),
+      cost: busyCost(main, r.overtimeHours, named && model.payHidden ? null : p.cost ?? (p.roles.length ? p.roles.reduce((sum, rid) => sum + roleCost(rid), 0) / p.roles.length : 0), overtimeCovered(main, named ? pid : null)),
       title: alone ? `${who}: client work alone exceeds capacity${overCap}` : `${who} at ${pct(r.util)} utilisation`,
       evidence: (
         `Simulated: ${num(r.ongoingHours + r.servicingHours)} h/wk client work + ${num(r.pipelineHours)} h/wk pipeline work against ` +
@@ -476,6 +479,7 @@ export function detectIssues(
           type: "failure",
           ...ratingFields(outcome),
           cost: (() => {
+            if (model.payHidden && s.person && people[s.person]) return payHiddenCost();
             const rate = s.person ? (people[s.person]?.cost ?? roleCost(roleOf(s))) : roleCost(roleOf(s));
             const hours = ((st.reworks * s.work) / model.horizonWeeks) * WEEKS_PER_MONTH;
             return {
@@ -733,6 +737,7 @@ export function detectIssues(
       ...ratingFields(outcome),
       cost: (() => {
         const person = subject.personId ? people[subject.personId] : undefined;
+        if (model.payHidden && person) return payHiddenCost();
         const rate = person
           ? (person.cost ?? (person.roles.length ? person.roles.reduce((sum, rid) => sum + roleCost(rid), 0) / person.roles.length : 0))
           : roleCost(subject.roleId);

@@ -88,7 +88,7 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
     cycleHours: { mean: k.cycle.mean, p50: k.cycle.p50, p90: k.cycle.p90 },
     revenue: { newMrr: stat(k.mrrAdded), billed: stat(k.billed), ltvAdded: stat(k.ltvAdded), lostRevenue: stat(k.lostRevenue) },
     labour: stat(k.labour),
-    overtime: { hours: stat(k.overtimeHours), cost: stat(k.overtimeCost) },
+    overtime: { hours: stat(k.overtimeHours), cost: stat(k.overtimeCost!) },
     clients: k.clientsAtRisk && k.clientsChurned ? { atRisk: stat(k.clientsAtRisk), churned: stat(k.clientsChurned) } : null,
     touchpoints: k.touchpoints ? { onTime: stat(k.touchpoints.onTime), late: stat(k.touchpoints.late), missed: stat(k.touchpoints.missed) } : null,
     bottleneck: { role: r.bnRole, step: r.bnStep, person: r.bnPerson },

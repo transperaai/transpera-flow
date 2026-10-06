@@ -163,7 +163,7 @@ describe("robustness cache", () => {
       JSON.stringify({ baseline: { won: [1], mrrAdded: [0], util: {} }, scenario: { won: [2], mrrAdded: [0], util: {} } }),
     ]);
 
-  it("editors write cached jobs; everyone in the workspace reads them; others can't", async () => {
+  it("editors write cached jobs; owners and editors read them (B1 2/3: results hold per-person utilisation); others can't", async () => {
     await db.as(users.editor!.claims, async (c) => {
       expect((await insertJob(c)).rowCount).toBe(1);
       // One row per job and workspace.
@@ -173,7 +173,8 @@ describe("robustness cache", () => {
       await expect(db.as(users[role]!.claims, (c) => insertJob(c)), role).rejects.toThrow(/row-level security/);
     }
     await insertJob(db.client);
-    expect(await db.as(users.viewer!.claims, (c) => count(c, "robustness_results"))).toBe(1);
+    expect(await db.as(users.editor!.claims, (c) => count(c, "robustness_results"))).toBe(1);
+    expect(await db.as(users.viewer!.claims, (c) => count(c, "robustness_results"))).toBe(0);
     expect(await db.as(users.stranger!.claims, (c) => count(c, "robustness_results"))).toBe(0);
     await db.client.query("delete from robustness_results");
   });

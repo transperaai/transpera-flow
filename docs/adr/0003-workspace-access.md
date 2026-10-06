@@ -66,3 +66,37 @@ giving the app the service-role key.
 - `public.my_person_id(ws)` returns the person record linked to the caller's active membership. Any member can be linked to
   a person on the Access page (not only people on the pre-assigned list). One membership per person is a rule of the page,
   not the database: a unique constraint would make `resolve_my_access` fail at sign-in on existing duplicates.
+
+## Addendum: per-person privacy (migration 20261207500000)
+
+Austin's decision of 6 Oct 2026 (issue #30, option A').
+
+- **The rule.** Agency admins (the JWT flag), `agency_admin` members, owners and editors see every person, as before
+  (`public.can_see_people(ws)` is `can_edit_workspace(ws)`). A member or viewer sees only the person their membership is
+  linked to (`public.can_see_person(ws, person)`, using `my_person_id`). The select policies on `people`, `person_roles`,
+  `person_skills`, `person_leave` and `client_assignments` use `can_see_person`. Saved runs and robustness results (which
+  hold per-person utilisation) are read by those who see everyone only. A suggestion about a person is hidden from those who
+  can't see that person, and `ai_runs` (which stores who ran an analysis) is read by those who see people, or by the runner.
+  `revision_history` shows a person's name only to those who can see that person; the app says "A team member" for null.
+  Writes are unchanged: members and viewers never wrote.
+- **`team_capacity(ws)`** (SECURITY DEFINER) is how a caller gets the whole team's simulation inputs: people, roles held,
+  skills, leave and client assignments, with the real ids. Callers who see everyone get the stored values. Everyone else gets
+  "Team member N" labels (their own person keeps their name), `provenance` `{}`, and **no cost rates: `cost_rate` is null for
+  everyone but their own person**. It never returns email, notes, leave notes or skill efficiency. `loadProcessBundle`,
+  `loadClients` and `loadCompanyModel` read the team only through it.
+- **Pay is hidden from members and viewers (Austin, 6 Oct; it replaced a role-average rule decided earlier that day).** The
+  first version replaced each rate with the average for the person's role (weighted by hours, only for roles of three or more
+  rated people, otherwise a company-wide average). Review showed that overlapping averages leak an exact rate by
+  subtraction (an average over four people and one over three of them give the fourth's rate: 4 x 76.3625 - 3 x 60.6667 =
+  123.45), and that any average gives a rate away over time as people join or leave. So nothing derived from rates is
+  returned. The figures that need individual pay are unavailable for those callers: the engine takes `payHidden` on the
+  model (set when the viewer doesn't see everyone) and then leaves out the KPI "Overtime cost" (null, not 0) and the costs
+  of detected issues that use a person's rate (`cost.payHidden`), and never substitutes a role's default rate for a hidden
+  one. The screens show "—" with an (i), "Only owners and editors see costs that depend on people's pay." Labour cost uses
+  the roles' default rates, which every member reads, so it, and every other number, equals an editor's. Without the flag
+  (everyone who sees everyone, the demo, the golden models) the engine's output is unchanged.
+- **Labels** are the person's rank by `(created_at, id)` over all people, active or not: adding a person appends a number,
+  deactivating one changes nothing. Deleting a person renumbers those created after them (people are normally deactivated).
+- **Accepted limit.** A member using browser dev tools can still read anonymous hours and leave dates, because the browser
+  simulates. Option C, a per-workspace "no simulated numbers for members" setting, is a possible follow-up, not part of this.
+- An unlinked member or viewer sees no person rows and all labels. MCP needs no code: tokens run as their owner under RLS.

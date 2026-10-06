@@ -1,7 +1,7 @@
 {
   "model": "northbeam",
   "description": "Northbeam Digital, the prototype's model re-baselined after the §6.8 fixes: pooled head-counts, one implicit retainer, automatic warm-up.",
-  "engineVersion": "1.6.0",
+  "engineVersion": "1.7.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

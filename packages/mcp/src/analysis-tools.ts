@@ -388,6 +388,10 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
     (args) =>
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
+        // Refuse before any name lookup: a caller who can't edit may not read other people, so a lookup would answer not_found (B1 2/3).
+        const { data: canEdit, error: accessError } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
+        if (accessError) throw writeError(accessError, "log issues");
+        if (canEdit !== true) throw writeError({ code: "42501" }, "log issues");
         const client = args.client
           ? matchNamed(check(await ctx.db.from("clients").select("id, name").eq("workspace_id", ws.id).order("name")), args.client, "client", ` in '${ws.name}'`)
           : null;

@@ -29,6 +29,7 @@ import type { IssuesState } from "@/lib/issues/use-issues";
 import { ISSUE_STATUSES, type IssueField } from "@/lib/issues/validate";
 import { draftFromIssue, emptyDraft, toSaveInput, type IssueDraft, type IssueFormOptions } from "@/lib/issues/draft";
 import { buttonVariants } from "@/components/ui/button";
+import { PayHidden } from "@/components/pay-hidden";
 import { NativeSelect } from "@/components/ui/native-select";
 import { AcknowledgeDialog } from "./acknowledge-dialog";
 import { SelectField, TextField, type SelectOption } from "./fields";
@@ -371,8 +372,8 @@ function IssueItem({
       {v.evidence && <p className="mt-0.5 text-xs text-fg-2">{v.evidence}</p>}
       {entry.kind === "detected" || entry.detection ? (
         <p className="mt-0.5 text-xs text-fg-2" data-cost title={v.cost?.method}>
-          <span className="font-medium">{formatIssueCost(v.cost, currency)}</span>
-          {v.cost?.method ? <span className="text-fg-3"> · {v.cost.method}</span> : null}
+          {v.cost?.payHidden ? <PayHidden /> : <span className="font-medium">{formatIssueCost(v.cost, currency)}</span>}
+          {v.cost?.method && !v.cost.payHidden ? <span className="text-fg-3"> · {v.cost.method}</span> : null}
         </p>
       ) : null}
       {where.length > 0 && <p className="mt-0.5 text-xs text-fg-3">{where.join(" · ")}</p>}
