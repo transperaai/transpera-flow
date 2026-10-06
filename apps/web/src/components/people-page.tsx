@@ -398,7 +398,7 @@ function HowBusy({
                           <button
                             type="button"
                             aria-expanded={open}
-                            aria-controls={`person-detail-${p.id}`}
+                            aria-controls={open ? `person-detail-${p.id}` : undefined}
                             onClick={() => setOpenId(open ? null : p.id)}
                             className="rounded-sm text-left underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                           >

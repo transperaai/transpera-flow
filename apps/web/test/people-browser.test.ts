@@ -186,6 +186,13 @@ describe("Person detail", { timeout: 120_000 }, () => {
     expect(text).not.toContain("Every step of their roles");
     expect(text).toContain("Change in Settings");
     expect(await busyRows(page).getByRole("button", { name: "Freya Walsh" }).getAttribute("aria-expanded")).toBe("true");
+    // aria-controls is set only while there is something to point at, and then it resolves.
+    const resolves = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll("[data-how-busy] button[aria-controls]")].every((b) => document.getElementById(b.getAttribute("aria-controls")!) !== null),
+      );
+    expect(await resolves()).toBe(true);
+    expect(await page.locator("[data-how-busy] button[aria-controls]").count()).toBe(1);
     // Opening another closes it.
     await busyRows(page).getByRole("button", { name: "Jess Monroe" }).click();
     expect(await detail.count()).toBe(1);
