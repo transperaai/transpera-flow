@@ -5,6 +5,7 @@
 // (splice.ts) joins their month-by-month numbers.
 
 import { workingDaysBetween, type ForecastPlanMarker, type PersonLeaveRow, type PersonRoleRow, type PersonRow, type ProcessBundle, type ProcessPart, type SolutionRow } from "@transpera-flow/db";
+import type { ScenarioPatch } from "@transpera-flow/engine";
 import { bundleFromSolution } from "@/lib/solutions/bundle";
 import { addDays, hoursToDate } from "./positions";
 
@@ -225,6 +226,8 @@ export interface PlanSegment {
   from: number;
   bundle: ProcessBundle;
   solutionIds: string[];
+  /** The lever changes of the solutions live by then, in go-live order (a later one for the same lever wins). */
+  levers: ScenarioPatch[];
 }
 
 /**
@@ -274,12 +277,14 @@ export function planSegments(
   const segments = starts.map((from): PlanSegment => {
     let b = withPeople;
     const solutionIds: string[] = [];
+    const levers: ScenarioPatch[] = [];
     for (const l of live) {
       if (l.month > from) continue;
       b = withSolution(b, l.solution)!;
       solutionIds.push(l.solution.id);
+      levers.push(...(l.solution.lever_changes ?? []));
     }
-    return { from, bundle: b, solutionIds };
+    return { from, bundle: b, solutionIds, levers };
   });
   return { segments, problems, later };
 }

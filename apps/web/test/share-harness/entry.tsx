@@ -119,7 +119,7 @@ function snapshotOf(kind: ShareKind, toggles: ShareToggles): { snapshot: ShareSn
       raw = { ...base, kind, live, parts: [partOf(live), ...(live.otherProcesses ?? [])], company: null, issues, solutions, solutionBases: {}, findings: [], firstPrinciples: null };
       break;
     case "process":
-      raw = { ...base, kind, bundle: live, processes, scenarios: [], issues, liveRevisions: { [live.process.id]: live.revision.id }, solutions, findings: [], firstPrinciples: null };
+      raw = { ...base, kind, bundle: live, hiddenLevers: ["process.rework"], processes, scenarios: [], issues, liveRevisions: { [live.process.id]: live.revision.id }, solutions, findings: [], firstPrinciples: null };
       break;
     case "issue":
       raw = { ...base, kind, issueId: issue.id, bundle: live, issues, processes: processes.map(({ id, name }) => ({ id, name })), liveRevisions: { [live.process.id]: live.revision.id }, solutions };

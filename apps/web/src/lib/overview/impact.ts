@@ -5,6 +5,7 @@
 
 import { bundleForProcess, toEngineModel, type EdgeRow, type IssueRow, type ProcessBundle, type SolutionRow, type StepRow } from "@transpera-flow/db";
 import { bundleFromSolution } from "@/lib/solutions/bundle";
+import { withLeverChanges } from "@/lib/solutions/levers";
 import { effectiveVerdict, type SolutionsData } from "@/lib/solutions/cards";
 import { hoursAMonth, type ImpactPair, type SolutionImpact } from "./impact-run";
 
@@ -49,7 +50,7 @@ export function impactPairs(live: ProcessBundle, chosen: readonly { solution: So
           processName: current.process.name,
           baseRevisionId: solution.base_revision_id,
           base: { ...toEngineModel(base), horizonWeeks },
-          solved: { ...toEngineModel(bundleFromSolution(base, solution)), horizonWeeks },
+          solved: { ...withLeverChanges(toEngineModel(bundleFromSolution(base, solution)), solution.lever_changes ?? []).model, horizonWeeks },
         },
       ];
     } catch {

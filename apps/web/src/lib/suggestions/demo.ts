@@ -113,6 +113,7 @@ export function demoProposals(): ProposalRow[] {
     created_via: "mcp" as const,
     import_source: null,
     proposer_name: null,
+    share_link_id: null,
     applied: null,
     review_note: null,
     reviewed_by: null,
