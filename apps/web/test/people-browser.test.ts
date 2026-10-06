@@ -26,7 +26,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean }, width = 1440): Promise<{ page: Page; errors: string[] }> {
+async function mount(options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later" }, width = 1440): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 1000 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -121,6 +121,22 @@ describe("If someone is away", { timeout: 180_000 }, () => {
     expect(errors).toEqual([]);
     await page.close();
   });
+});
+
+describe("A linked member who isn't in the run", { timeout: 180_000 }, () => {
+  for (const ownRecord of ["inactive", "starts-later"] as const) {
+    it(`says so (${ownRecord}), not that their sign-in isn't linked`, async () => {
+      const { page, errors } = await mount({ viewer: "own", own: "jess", ownRecord });
+      await absenceDone(page);
+      expect(await busyRows(page).count()).toBe(0);
+      expect(await page.locator("[data-not-in-run]").innerText()).toContain("You aren't in this simulation: your record is inactive or starts later.");
+      expect(await page.locator("[data-no-own-row]").count()).toBe(0);
+      expect(await absenceRows(page).count()).toBe(0);
+      expect(await page.locator("[data-absence]").innerText()).toContain("You aren't the only one who can do any step, so you weren't tested.");
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+  }
 });
 
 /** What the page posted to the absence worker, as the harness recorded it. */

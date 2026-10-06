@@ -14,7 +14,7 @@ declare global {
     /** Every message the page posted to a worker: which worker, and the absence request's `personIds` (undefined when none). */
     workerRequests?: { file: string; hasPersonIds: boolean; personIds?: string[] }[];
     /** `own`: whose row the member may see (a Larkspur key such as "jess"), or null for a member linked to no one. */
-    mountPeople: (options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean }) => void;
+    mountPeople: (options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later" }) => void;
   }
 }
 
@@ -42,14 +42,18 @@ function asMember(bundle: ProcessBundle, ownPersonId: string | null): ProcessBun
   return { ...bundle, people, viewer: { seesEveryone: false, ownPersonId } };
 }
 
-window.mountPeople = ({ viewer, own, capacityFactorEnabled }) => {
+window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord }) => {
   const larkspur = larkspurBundle();
   // The workspace setting that C6 (#198, parked) would use. Nothing stores a factor, so turning it on must still show nothing.
   const base = capacityFactorEnabled
     ? { ...larkspur, workspace: { ...larkspur.workspace, settings: { ...larkspur.workspace.settings, capacity_factor_enabled: true } } }
     : larkspur;
   const ownId = viewer === "own" ? (larkspurPersonIds[own ?? "jess"] ?? null) : null;
-  const bundle = viewer === "everyone" ? base : asMember(base, ownId);
+  // A linked member whose record isn't in the run: inactive, or starting after the period begins.
+  const people = ownRecord
+    ? base.people.map((p) => (p.id === ownId ? { ...p, ...(ownRecord === "inactive" ? { active: false } : { start_date: "2099-01-01" }) } : p))
+    : base.people;
+  const bundle = viewer === "everyone" ? base : asMember({ ...base, people }, ownId);
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
       <PeoplePage bundle={bundle} settingsHref="/w/larkspur/settings" />
