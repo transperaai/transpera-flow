@@ -1,12 +1,17 @@
 -- Agency workspace list, and editors change the Client health rules (issue #30, B1 part 3 of 3; docs/plans/b1-brief.md).
 --
--- Strictly additive: one table and two functions. Nothing existing is changed. `save_fields`, the `workspaces` update policy
+-- ORDER: apply this migration AFTER 20261207700000 (PR #205, saved_text_privacy) and 20261208000000 (C2 part 2). It is row 58 of
+-- docs/production-migrations.md, and its version sorts after both.
+--
+-- Strictly additive: one table, one trigger function and two functions. Nothing existing is changed. `save_fields`, the `workspaces` update policy
 -- and every grant on an existing table stay exactly as they are.
 --
 --   * `public.workspace_headlines`: one row per workspace holding the headline numbers the agency list shows (flow
 --     efficiency, processes needing attention, client groups at risk). The Overview computes them from its simulation run and
 --     an editor's browser records them (`recordHeadline`); the list only reads them. Every reader of the workspace reads the
---     row; owners and editors insert and update it; nobody deletes (it goes with its workspace).
+--     row; owners and editors insert and update it; nobody deletes (it goes with its workspace). The numbers hold exactly the
+--     five keys below and nothing else (members read this table). A BEFORE INSERT OR UPDATE trigger
+--     (`private.workspace_headlines_stamp`) sets `computed_by` to the caller and `computed_at` to now(), so neither can be forged.
 --   * `public.agency_workspace_list()` (SECURITY INVOKER, stable): one row per workspace the caller can read, with its open
 --     Operational risk issues, its last activity and its stored headline numbers. RLS decides which workspaces and rows the
 --     caller sees; `audit_log` is manage-only, so a caller who doesn't manage gets "last activity" without it.
@@ -28,8 +33,8 @@
 -- one of the four), 23514 (a value that is not null or a number from 0 to 100).
 --
 -- PREFLIGHT (read-only, run with `bash packages/db/scripts/prod-sql.sh -c "..."`; each must return the stated result):
---   0. Rows 53 to 55 applied (20261206000000, 20261207000000, 20261207500000) and nothing of ours later than this. Expect
---      those three versions, plus 20261207700000 (#205) and 20261208000000 (C2 part 2) only if they were applied first:
+--   0. Rows 53 to 57 are applied and nothing is later. Expect exactly these five versions: 20261206000000, 20261207000000,
+--      20261207500000, 20261207700000 (#205) and 20261208000000 (C2 part 2):
 --        select version from supabase_migrations.schema_migrations where version >= '20261206000000' order by 1;
 --   1. Nothing created yet. Expect null, null, null:
 --        select to_regclass('public.workspace_headlines'), to_regprocedure('public.agency_workspace_list()'),
@@ -68,6 +73,7 @@
 --   drop function if exists public.save_health_rules(uuid, jsonb, jsonb);
 --   drop function if exists public.agency_workspace_list();
 --   drop table if exists public.workspace_headlines;
+--   drop function if exists private.workspace_headlines_stamp();
 --   delete from supabase_migrations.schema_migrations where version = '20261209000000';
 --   commit;
 
@@ -89,6 +95,7 @@ create table public.workspace_headlines (
   numbers jsonb not null,
   constraint workspace_headlines_numbers check (
     jsonb_typeof(numbers) = 'object'
+    and numbers - array['flow_efficiency', 'processes_attention', 'processes_total', 'client_groups_at_risk', 'client_groups_total'] = '{}'::jsonb
     and numbers ?& array['flow_efficiency', 'processes_attention', 'processes_total', 'client_groups_at_risk', 'client_groups_total']
     and case jsonb_typeof(numbers -> 'flow_efficiency')
       when 'null' then true
@@ -117,6 +124,23 @@ create table public.workspace_headlines (
     end
   )
 );
+
+-- Who computed the numbers and when are the server's word, not the client's.
+create function private.workspace_headlines_stamp() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.computed_by := auth.uid();
+  new.computed_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function private.workspace_headlines_stamp() from public, anon, authenticated;
+
+create trigger workspace_headlines_stamp before insert or update on public.workspace_headlines
+  for each row execute function private.workspace_headlines_stamp();
 
 alter table public.workspace_headlines enable row level security;
 

@@ -1,23 +1,23 @@
 "use server";
 
 import { ENGINE_VERSION } from "@transpera-flow/engine";
-import { headlineIsFresh, type HeadlineNumbers } from "@/lib/overview/headline";
+import { headlineIsFresh, pickHeadline, sameHeadline, type HeadlineNumbers } from "@/lib/overview/headline";
 import { isId } from "@/lib/services";
 import { createClient } from "@/lib/supabase/server";
 
 // The agency list's headline numbers (issue #30, B1 part 3): the Overview, once its run at the workspace's own horizon is in,
 // records flow efficiency, processes needing attention and client groups at risk, so the agency's home page can list them
-// without simulating every workspace. Runs as the signed-in user: RLS lets owners and editors write `workspace_headlines`, and
-// the table's check pins the numbers' shape. A failure is quiet: the Overview doesn't depend on it.
+// without simulating every workspace. Runs as the signed-in user: RLS lets owners and editors write `workspace_headlines`, the
+// table's check pins the numbers' shape, and a trigger stamps who and when. A failure is quiet: the Overview doesn't depend on it.
 
-export type RecordHeadlineResult =
-  | { status: "recorded" | "fresh" }
-  | { status: "error"; message: string };
+export type RecordHeadlineResult = { status: "recorded" | "fresh" } | { status: "error"; message: string };
 
-const isCount = (v: unknown): v is number =>
-  typeof v === "number" && Number.isInteger(v) && v >= 0;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 
-/** Store the workspace's headline numbers, unless the stored ones are for the same engine and revisions and under an hour old. */
+/**
+ * Store the workspace's headline numbers, unless the stored ones are the same numbers for the same engine, revisions and horizon
+ * and under an hour old. Different numbers (a changed rule, team or client group) are written at once.
+ */
 export async function recordHeadline(
   workspaceId: string,
   revisionIds: string[],
@@ -42,40 +42,24 @@ export async function recordHeadline(
   }
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub)
-    return {
-      status: "error",
-      message: "Your session has ended. Sign in again.",
-    };
+  if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
 
   const stored = await supabase
     .from("workspace_headlines")
-    .select("engine_version, revision_ids, computed_at, horizon_weeks")
+    .select("engine_version, revision_ids, computed_at, horizon_weeks, numbers")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
-  if (stored.error)
-    return { status: "error", message: "Couldn't read the stored numbers." };
-  if (
-    stored.data &&
-    stored.data.horizon_weeks === horizonWeeks &&
-    headlineIsFresh(stored.data, {
-      engineVersion: ENGINE_VERSION,
-      revisionIds,
-      at: new Date(),
-    })
-  ) {
-    return { status: "fresh" };
-  }
+  if (stored.error) return { status: "error", message: "Couldn't read the stored numbers." };
+  const fresh = stored.data && stored.data.horizon_weeks === horizonWeeks && headlineIsFresh(stored.data, { engineVersion: ENGINE_VERSION, revisionIds, at: new Date() });
+  if (fresh && sameHeadline(stored.data?.numbers, numbers)) return { status: "fresh" };
+  // `computed_by` and `computed_at` are set by the database.
   const { error } = await supabase.from("workspace_headlines").upsert({
     workspace_id: workspaceId,
-    computed_at: new Date().toISOString(),
-    computed_by: claims.claims.sub,
     engine_version: ENGINE_VERSION,
     revision_ids: revisionIds,
     horizon_weeks: horizonWeeks,
-    numbers: { ...numbers },
+    numbers: { ...pickHeadline(numbers) },
   });
-  if (error)
-    return { status: "error", message: "Couldn't save the headline numbers." };
+  if (error) return { status: "error", message: "Couldn't save the headline numbers." };
   return { status: "recorded" };
 }

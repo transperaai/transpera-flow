@@ -3086,6 +3086,38 @@ export type Database = {
           },
         ]
       }
+      workspace_domains: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          domain: string
+          id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          domain: string
+          id?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          domain?: string
+          id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_domains_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_headlines: {
         Row: {
           computed_at: string
@@ -3119,38 +3151,6 @@ export type Database = {
             foreignKeyName: "workspace_headlines_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: true
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      workspace_domains: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          domain: string
-          id: string
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          domain: string
-          id?: string
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          domain?: string
-          id?: string
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "workspace_domains_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
@@ -3225,6 +3225,10 @@ export type Database = {
       }
     }
     Functions: {
+      add_source: {
+        Args: { p_links: Json; p_source: Json; p_workspace: string }
+        Returns: string
+      }
       agency_workspace_list: {
         Args: never
         Returns: {
@@ -3236,10 +3240,6 @@ export type Database = {
           open_risk_issues: number
           slug: string
         }[]
-      }
-      add_source: {
-        Args: { p_links: Json; p_source: Json; p_workspace: string }
-        Returns: string
       }
       apply_calibration: {
         Args: { p_calibration: string; p_keys: string[] }
@@ -3399,11 +3399,11 @@ export type Database = {
             }
             Returns: Json
           }
-      save_health_rules: { Args: { base: Json; changes: Json; ws: string }; Returns: Json }
       save_fields: {
         Args: { base: Json; changes: Json; key: Json; target: string }
         Returns: Json
       }
+      save_health_rules: { Args: { base: Json; changes: Json; ws: string }; Returns: Json }
       save_issue: {
         Args: {
           p_fields: Json

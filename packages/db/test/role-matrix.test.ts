@@ -797,6 +797,8 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
       { ...good, processes_total: 1.5 },
       { ...good, client_groups_at_risk: "1" },
       { ...good, client_groups_total: null },
+      { ...good, overtime_cost: 5 },
+      { ...good, pay: { rate: 99 } },
       Object.fromEntries(Object.entries(good).filter(([k]) => k !== "processes_total")),
     ];
     await db.as(callers.editor!.claims, async (c) => {
@@ -808,6 +810,27 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
       // A null flow efficiency (nothing to measure yet) is fine.
       await expect(upsert(c, JSON.stringify({ ...good, flow_efficiency: null }))).resolves.toBeTruthy();
     });
+  });
+
+  it("computed_by and computed_at are stamped by the database, whatever an editor sends (insert and update)", async () => {
+    await db.client.query("begin");
+    try {
+      await db.client.query("delete from workspace_headlines where workspace_id = $1", [ws]);
+      await db.client.query("set local role authenticated");
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers.editor!.claims)]);
+      const forge = "insert into workspace_headlines (workspace_id, computed_by, computed_at, engine_version, revision_ids, horizon_weeks, numbers) values ($1, $2, '2099-01-01', '1.7.0', '{}', 52, $3::jsonb) returning computed_by, computed_at > now() as future";
+      const ins = (await db.client.query(forge, [ws, callers.owner!.id, headlineNumbers])).rows[0];
+      expect(ins).toEqual({ computed_by: callers.editor!.id, future: false });
+      const upd = (
+        await db.client.query(
+          "update workspace_headlines set computed_by = $2, computed_at = '2099-01-01' where workspace_id = $1 returning computed_by, computed_at > now() as future",
+          [ws, callers.owner!.id],
+        )
+      ).rows[0];
+      expect(upd).toEqual({ computed_by: callers.editor!.id, future: false });
+    } finally {
+      await db.client.query("rollback");
+    }
   });
 
   it("a member and a viewer can't insert or update; every reader reads", async () => {
