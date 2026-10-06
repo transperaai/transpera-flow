@@ -88,6 +88,10 @@ Normal churn can be measured from a clients file (Settings, Historical data), ba
 _Avoid_: Client roster, client list, account
 Not to be confused with a **group**, which is a box of steps inside a process (above): a group holds steps, a client group counts clients.
 
+**Import**:
+A dataset: a file read on Settings → Historical data (a stage history, deals, time logs, leads, a clients file, a servicing log, jobs or tickets, or invoices), recorded with its kind, the columns that were matched, its row count and date. Its rows are never kept, so an earlier import can't be run again; its columns are offered the next time that kind is imported.
+_Avoid_: Upload (an upload is a process file or a source), dataset (in the UI)
+
 **Churn driver**:
 A reason clients leave, with a weight and an on/off switch. Example: "Late work", responsible for 40% of the clients lost this year.
 _Avoid_: Churn factor, churn cause

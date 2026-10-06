@@ -73,12 +73,17 @@ export const normHeader = (h: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
-/** Splits CSV (or tab- or semicolon-separated) text into rows of cells. Quotes as RFC 4180. */
-export function splitCsv(text: string): string[][] {
+/** The separator of a file, from its first line: a tab if there is one, else `;` if there are more of those than commas, else a comma. */
+export function detectDelimiter(text: string): "\t" | ";" | "," {
   const body = text.replace(/^﻿/, "");
   const first = body.slice(0, body.search(/\r?\n/) === -1 ? body.length : body.search(/\r?\n/));
   const count = (ch: string) => first.split(ch).length - 1;
-  const sep = count("\t") > 0 ? "\t" : count(";") > count(",") ? ";" : ",";
+  return count("\t") > 0 ? "\t" : count(";") > count(",") ? ";" : ",";
+}
+
+/** Splits CSV (or tab-, semicolon- or `sep`-separated) text into rows of cells. Quotes as RFC 4180. Without `sep`, it is detected from the first line. */
+export function splitCsv(text: string, sep: string = detectDelimiter(text)): string[][] {
+  const body = text.replace(/^﻿/, "");
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -113,8 +118,21 @@ export function splitCsv(text: string): string[][] {
   return rows;
 }
 
-const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?)?$/i;
-const SLASHED = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?(?:\s*([AP]M))?)?$/i;
+const SLASHED = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4}|\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?)?$/i;
+// Month names (English, full or three letters): `2 Mar 2026`, `02-Mar-2026`, `Mar 2, 2026`. Never ambiguous.
+const TEXTUAL_TIME = String.raw`(?:[ T,]\s*(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?)?`;
+// Two-digit years too (Excel's d-mmm-yy: `2-Mar-26`), and ordinals (`2nd March 2026`).
+const TEXTUAL = new RegExp(String.raw`^(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]{3,9})\.?,?[\s-]+(\d{4}|\d{2})` + TEXTUAL_TIME + "$", "i");
+const TEXTUAL_MDY = new RegExp(String.raw`^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}|\d{2})` + TEXTUAL_TIME + "$", "i");
+/** The century of a two-digit year: 00 to 69 are 2000 to 2069, 70 to 99 are 1970 to 1999 (the usual pivot), so `01/01/99` isn't in 2099. */
+const twoDigitYear = (yy: number): number => (yy >= 70 ? 1900 : 2000);
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+/** A month's number (1-12) from its English name, full or three letters, any case; 0 when it isn't one. */
+const monthNumber = (name: string): number => {
+  const n = name.toLowerCase();
+  return MONTHS.findIndex((m) => m === n || (n.length === 3 && m.startsWith(n)) || (n === "sept" && m === "september")) + 1;
+};
 
 /**
  * Which way round a file's slashed dates are: any first part over 12 means day first, any second part over 12 means
@@ -140,29 +158,52 @@ export function detectDateOrder(texts: Iterable<string>): DateOrder | "ambiguous
 /** Whether a date cell carries a time of day (2026-03-02 09:30), as opposed to a date alone (2026-03-02). */
 export function hasTimeOfDay(text: string): boolean {
   const s = text.trim();
-  const m = ISO.exec(s) ?? SLASHED.exec(s);
+  const m = ISO.exec(s) ?? SLASHED.exec(s) ?? TEXTUAL.exec(s) ?? TEXTUAL_MDY.exec(s);
   return m !== null && m[4] !== undefined;
 }
 
-/** A date or date-time as epoch milliseconds, or null. Slashed dates are read in `order` (day first unless told). */
+/**
+ * A date or date-time as epoch milliseconds, or null. Slashed dates are read in `order` (day first unless told). Also read:
+ * month names (`2 Mar 2026`, `2-Mar-26`, `2nd March 2026`, `Mar 2, 2026`, `Sept 2 2026`), AM/PM after a time on slashed and month-name dates, and two-digit years on
+ * slashed dates (`02/03/26` is 2026, `02/03/99` is 1999: 70 and over are the 1900s), and AM/PM after an ISO time too.
+ */
 export function parseLogTime(text: string, order: DateOrder = "dmy"): number | null {
   const s = text.trim();
   let y: number, mo: number, d: number, h = 0, mi = 0, se = 0;
   let zone: string | undefined;
+  let ampm: string | undefined;
   const iso = ISO.exec(s);
   const df = iso ? null : SLASHED.exec(s);
+  const tx = iso || df ? null : (TEXTUAL.exec(s) ?? TEXTUAL_MDY.exec(s));
   if (iso) {
     [y, mo, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
     h = Number(iso[4] ?? 0);
     mi = Number(iso[5] ?? 0);
     se = Number(iso[6] ?? 0);
     zone = iso[7];
+    ampm = iso[8];
   } else if (df) {
     [d, mo, y] = order === "dmy" ? [Number(df[1]), Number(df[2]), Number(df[3])] : [Number(df[2]), Number(df[1]), Number(df[3])];
+    if (df[3]!.length === 2) y += twoDigitYear(y);
     h = Number(df[4] ?? 0);
     mi = Number(df[5] ?? 0);
     se = Number(df[6] ?? 0);
+    ampm = df[7];
+  } else if (tx) {
+    const dayFirst = /^\d/.test(tx[1]!);
+    d = Number(dayFirst ? tx[1] : tx[2]);
+    mo = monthNumber((dayFirst ? tx[2] : tx[1])!);
+    y = Number(tx[3]);
+    if (tx[3]!.length === 2) y += twoDigitYear(y);
+    h = Number(tx[4] ?? 0);
+    mi = Number(tx[5] ?? 0);
+    se = Number(tx[6] ?? 0);
+    ampm = tx[7];
   } else return null;
+  if (ampm) {
+    if (h < 1 || h > 12) return null;
+    h = (h % 12) + (ampm.toUpperCase() === "PM" ? 12 : 0);
+  }
   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 59) return null;
   let t = Date.UTC(y, mo - 1, d, h, mi, se);
   if (new Date(t).getUTCDate() !== d) return null; // 31 February
@@ -172,6 +213,41 @@ export function parseLogTime(text: string, order: DateOrder = "dmy"): number | n
     t -= sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2))) * 60_000;
   }
   return t;
+}
+
+/**
+ * Reads one row of a step log from a cell reader (trimmed text by column) and the date order: the row, or why it can't be
+ * read. `parseStepLog` and the import wizard share it, so their messages are the same.
+ */
+export function readStepLogRow(cell: (c: StepLogColumn) => string, order: DateOrder): StepLogRow | string {
+  const item = cell("item");
+  const step = cell("step");
+  const startedText = cell("started");
+  if (!item || !step || !startedText) {
+    return `Missing ${[!item && "item", !step && "step", !startedText && "started"].filter(Boolean).join(", ")}.`;
+  }
+  if (item.length > 200 || step.length > 200) {
+    return "An item or step name is over 200 characters.";
+  }
+  const started = parseLogTime(startedText, order);
+  if (started === null) {
+    return `Can't read the start "${startedText.slice(0, 40)}". Use 2026-03-02 09:30, or one order of day and month for every date.`;
+  }
+  const finishedText = cell("finished");
+  const finished = finishedText ? parseLogTime(finishedText, order) : null;
+  if (finishedText && finished === null) {
+    return `Can't read the finish "${finishedText.slice(0, 40)}".`;
+  }
+  if (finished !== null && finished < started) {
+    return "It finished before it started.";
+  }
+  const hoursText = cell("hours").replace(",", ".");
+  const hours = hoursText ? Number(hoursText) : null;
+  if (hours !== null && !(Number.isFinite(hours) && hours >= 0 && hours <= 10_000)) {
+    return `Hours "${cell("hours").slice(0, 20)}" isn't a number of hours.`;
+  }
+  const source = cell("source");
+  return { item, step, started, finished, hours, source: source ? source.slice(0, 200) : null };
 }
 
 /**
@@ -225,40 +301,9 @@ export function parseStepLog(text: string, options: { dateOrder?: DateOrder } = 
       errors.push({ line, message: `Only the first ${MAX_STEP_LOG_ROWS.toLocaleString("en-GB")} rows are read.` });
       break;
     }
-    const item = cell(r, "item");
-    const step = cell(r, "step");
-    const startedText = cell(r, "started");
-    if (!item || !step || !startedText) {
-      errors.push({ line, message: `Missing ${[!item && "item", !step && "step", !startedText && "started"].filter(Boolean).join(", ")}.` });
-      continue;
-    }
-    if (item.length > 200 || step.length > 200) {
-      errors.push({ line, message: "An item or step name is over 200 characters." });
-      continue;
-    }
-    const started = parseLogTime(startedText, dateOrder ?? "dmy");
-    if (started === null) {
-      errors.push({ line, message: `Can't read the start "${startedText.slice(0, 40)}". Use 2026-03-02 09:30, or one order of day and month for every date.` });
-      continue;
-    }
-    const finishedText = cell(r, "finished");
-    const finished = finishedText ? parseLogTime(finishedText, dateOrder ?? "dmy") : null;
-    if (finishedText && finished === null) {
-      errors.push({ line, message: `Can't read the finish "${finishedText.slice(0, 40)}".` });
-      continue;
-    }
-    if (finished !== null && finished < started) {
-      errors.push({ line, message: "It finished before it started." });
-      continue;
-    }
-    const hoursText = cell(r, "hours").replace(",", ".");
-    const hours = hoursText ? Number(hoursText) : null;
-    if (hours !== null && !(Number.isFinite(hours) && hours >= 0 && hours <= 10_000)) {
-      errors.push({ line, message: `Hours "${cell(r, "hours").slice(0, 20)}" isn't a number of hours.` });
-      continue;
-    }
-    const source = cell(r, "source");
-    rows.push({ item, step, started, finished, hours, source: source ? source.slice(0, 200) : null });
+    const out = readStepLogRow((c) => cell(r, c), dateOrder ?? "dmy");
+    if (typeof out === "string") errors.push({ line, message: out });
+    else rows.push(out);
   }
   return { rows, columns, missing, errors, lines, dateOrder, dateProblem: null };
 }

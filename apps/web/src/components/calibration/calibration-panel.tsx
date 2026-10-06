@@ -1,20 +1,21 @@
 "use client";
 
-// Settings → Historical data (issue #41, C2 part 1): read a step log for one process, show what it measures beside the
-// values the model has now, and apply the changes a person ticks. Nothing changes until they apply, and values someone
+// Settings → Historical data (issue #41, C2 part 1; the import wizard is issue #40, C1): read a stage history, deals or time
+// logs for one process, show what they measure beside the values the model has now, and apply the changes a person ticks. Nothing changes until they apply, and values someone
 // entered or measured are never ticked for them. Step values go into the process's draft (published as usual); lead
 // volumes change live. On the demo nothing is saved.
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState, useTransition } from "react";
-import { calibrate, type CalibrationProposal, type CalibrationResult } from "@transpera-flow/engine";
-import { calibrationInput, decodeLogFile, parseStepLog, STEP_LOG_TEMPLATE, type CalibrationRows, type DateOrder, type ParsedStepLog } from "@transpera-flow/db/calibration";
+import { useMemo, useState, useTransition } from "react";
+import { calibrate, type CalibrationProposal, type CalibrationResult, type StepLogRow } from "@transpera-flow/engine";
+import { calibrationInput, type CalibrationRows } from "@transpera-flow/db/calibration";
+import type { ImportKind } from "@transpera-flow/db/csv-import";
+import { ImportWizard, type ImportReady } from "@/components/calibration/import-wizard";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Textarea } from "@/components/ui/textarea";
 import { applySummary, formatValue, formatWindow, groupProposals, initiallySelected, KIND_LABELS, selectable, SOURCE_LABELS } from "@/lib/calibration/view";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -32,11 +33,15 @@ export interface CalibrationPanelProps {
   hasDraft: boolean;
   stored: CalibrationRows;
   history: { id: string; createdAt: string; fileName: string; rowCount: number; proposals: number; applied: number }[];
-  /** A log to try (the demo's sample). */
-  sample?: { name: string; text: string };
+  /** The latest column map of each kind, offered to the wizard first. */
+  previous: Partial<Record<ImportKind, Record<string, string>>>;
+  /** Files to try (the demo's samples). */
+  sample?: Partial<Record<ImportKind, { name: string; text: string }>>;
 }
 
-type Read = { fileName: string; body: string; log: ParsedStepLog; result: CalibrationResult | null; note: string | null };
+const KINDS = ["step_log", "deals", "time_logs"] as const;
+
+type Read = { ready: ImportReady; result: CalibrationResult | null };
 type Done = { tone: "ok" | "error"; message: string; editor: boolean };
 
 const SOURCE_TONE = {
@@ -49,41 +54,44 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
   const { mode, process, stored } = props;
   const canApply = mode !== "readonly";
   const router = useRouter();
-  const [text, setText] = useState("");
-  const [fileName, setFileName] = useState("");
   const [read, setRead] = useState<Read | null>(null);
-  const [reading, setReading] = useState(false);
+  const [calculating, setCalculating] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [done, setDone] = useState<Done | null>(null);
   const [applied, setApplied] = useState<Set<string>>(new Set());
   const [pending, start] = useTransition();
-  const fileInput = useRef<HTMLInputElement>(null);
 
-  const readLog = (body: string, name: string, note: string | null = null, dateOrder?: DateOrder) => {
-    setReading(true);
-    setDone(null);
-    // Let the page show "Reading…" before a big log is parsed.
-    setTimeout(() => {
-      const log = parseStepLog(body, dateOrder ? { dateOrder } : {});
-      const result = log.missing.length || !log.rows.length ? null : calibrate(calibrationInput(stored, log.rows));
-      setRead({ fileName: name || "Pasted log", body, log, result, note });
-      setSelected(new Set(result ? result.proposals.filter(initiallySelected).map((p) => p.key) : []));
-      setApplied(new Set());
-      setReading(false);
-    }, 0);
+  // The names in the file are matched to this process's steps (not the ones a later version replaced).
+  const targets = useMemo(
+    () => ({ label: `Steps of ${process.name}`, names: stored.steps.filter((s) => !(s.replaced_by && s.replaced_by.length)).map((s) => s.name) }),
+    [process.name, stored.steps],
+  );
+
+  // What the rows measure. Time logs say how long work took and nothing reliable about waits, branch odds or redo rates, so only
+  // hands-on time is proposed from them, and they say nothing about leads a week.
+  const measure = (ready: ImportReady): CalibrationResult => {
+    const input = calibrationInput(stored, ready.rows as StepLogRow[]);
+    if (ready.kind !== "time_logs") return calibrate(input);
+    const result = calibrate({ ...input, leadSources: null });
+    return { ...result, proposals: result.proposals.filter((p) => p.kind === "work") };
   };
 
-  const onFile = async (file: File | undefined) => {
-    if (!file) return;
-    if (file.size > 20_000_000) {
-      setDone({ tone: "error", message: "That file is over 20 MB. Split it by date and read each part.", editor: false });
+  const onReady = (ready: ImportReady | null) => {
+    setDone(null);
+    setApplied(new Set());
+    setSelected(new Set());
+    if (!ready) {
+      setRead(null);
       return;
     }
-    // Excel saves "CSV" as Windows text and "Unicode text" as UTF-16: read either, and say so when it isn't UTF-8.
-    const { text: body, note } = decodeLogFile(new Uint8Array(await file.arrayBuffer()));
-    setFileName(file.name);
-    setText("");
-    readLog(body, file.name, note);
+    setCalculating(true);
+    // Let the page say so before a big file is measured.
+    setTimeout(() => {
+      const result = ready.rows.length ? measure(ready) : null;
+      setRead({ ready, result });
+      setSelected(new Set(result ? result.proposals.filter(initiallySelected).map((p) => p.key) : []));
+      setCalculating(false);
+    }, 0);
   };
 
   const toggle = (key: string, on: boolean) =>
@@ -96,6 +104,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
 
   const apply = () => {
     if (!read?.result) return;
+    const measured = read.result;
     const keys = [...selected].filter((k) => !applied.has(k));
     if (!keys.length) return;
     const subjects = new Map(read.result.proposals.map((p) => [p.key, `${p.subject} (${KIND_LABELS[p.kind].title.toLowerCase()})`]));
@@ -113,10 +122,13 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
       const out = await applyCalibration({
         workspaceId: props.workspaceId,
         processId: process.id,
-        fileName: read.fileName,
-        columnMap: read.log.columns,
-        rowCount: read.log.rows.length,
-        results: read.result,
+        kind: read.ready.kind,
+        fileName: read.ready.fileName,
+        columnMap: read.ready.columnMap,
+        rowCount: read.ready.rows.length,
+        details: read.ready.details,
+        // The names the person left out are recorded as a count with the ones that matched no step, never by name.
+        results: { ...measured, unmatchedSteps: measured.unmatchedSteps.length + read.ready.leftOut.names },
         keys,
       });
       if (out.status === "error") {
@@ -182,80 +194,21 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
             2. Add the log
           </h2>
           <CardDescription>
-            One row for each item at each step it went through: a CSV file, or rows pasted from a spreadsheet. It is read in your browser. Only its
-            name, its columns and the results are kept, not the rows.
+            A stage history (one row for each item at each step it went through), deals from your CRM, or time logs: a CSV file, or rows pasted from a
+            spreadsheet. It is read in your browser. Only its name, its columns and counts are kept, not the rows.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="font-mono text-xs leading-5">item</dt>
-            <dd className="text-muted-foreground">What went through: a deal, a job or a report. Any id.</dd>
-            <dt className="font-mono text-xs leading-5">step</dt>
-            <dd className="text-muted-foreground">The step&apos;s name as on the map. Log end steps such as Won and Lost too.</dd>
-            <dt className="font-mono text-xs leading-5">started</dt>
-            <dd className="text-muted-foreground">When it started: 2026-03-02 09:30, or 02/03/2026 09:30 (if the log can’t tell day from month, you’re asked).</dd>
-            <dt className="font-mono text-xs leading-5">finished</dt>
-            <dd className="text-muted-foreground">Optional. When it finished. Needed for waiting times.</dd>
-            <dt className="font-mono text-xs leading-5">hours</dt>
-            <dd className="text-muted-foreground">Optional. Hands-on hours spent. Needed for hands-on time.</dd>
-            <dt className="font-mono text-xs leading-5">source</dt>
-            <dd className="text-muted-foreground">Optional. The lead source, as named in Settings. Needed for leads a week.</dd>
-          </dl>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" type="button" onClick={() => fileInput.current?.click()}>
-              Choose a CSV file
-            </Button>
-            <input ref={fileInput} type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="sr-only" aria-label="CSV file" onChange={(e) => onFile(e.target.files?.[0])} />
-            <a
-              className="text-sm text-accent underline-offset-4 hover:underline"
-              download="step-log-template.csv"
-              href={`data:text/csv;charset=utf-8,${encodeURIComponent(STEP_LOG_TEMPLATE)}`}
-            >
-              Download the template
-            </a>
-            {props.sample && (
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => {
-                  setText(props.sample!.text);
-                  setFileName(props.sample!.name);
-                  readLog(props.sample!.text, props.sample!.name);
-                }}
-              >
-                Use a sample log
-              </Button>
-            )}
-          </div>
-          <label className="flex flex-col gap-1">
-            <HelpLabel
-              label="Or paste the rows"
-              description="Paste rows copied from a spreadsheet or a CSV, with the column names in the first row. Columns can be in any order; other columns are ignored."
-              example="item, step, started, finished, hours: D-101, Proposal, 2026-03-03 13:00, 2026-03-03 17:00, 4"
-            />
-            <Textarea
-              value={text}
-              rows={6}
-              spellCheck={false}
-              className="font-mono text-xs"
-              placeholder={STEP_LOG_TEMPLATE.split("\n").slice(0, 3).join("\n")}
-              onChange={(e) => {
-                setText(e.target.value);
-                setFileName("");
-              }}
-            />
-          </label>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" disabled={!text.trim() || reading} onClick={() => readLog(text, fileName)}>
-              {reading ? "Reading…" : "Read the log"}
-            </Button>
-            {fileName && <span className="text-sm text-muted-foreground">{fileName}</span>}
-          </div>
+        <CardContent>
+          <ImportWizard id="cal-log" kinds={KINDS} targets={targets} previous={props.previous} sample={props.sample} mode={mode} onReady={onReady} />
+          {calculating && (
+            <p role="status" className="mt-3 text-sm text-muted-foreground">
+              Measuring…
+            </p>
+          )}
         </CardContent>
       </Card>
 
-      {read && <LogSummary read={read} onDateOrder={(order) => readLog(read.body, read.fileName, read.note, order)} />}
+      {read && <LogSummary read={read} />}
 
       {read?.result && (
         <Card role="region" aria-labelledby="cal-diff-heading">
@@ -345,85 +298,33 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
   );
 }
 
-function LogSummary({ read, onDateOrder }: { read: Read; onDateOrder: (order: DateOrder) => void }) {
-  const { log, result } = read;
-  if (log.missing.length) {
-    return (
-      <div role="alert" className="rounded-lg border border-crit bg-crit-soft p-3 text-sm">
-        The log has no {log.missing.join(", ")} column. The first row must name the columns: item, step and started at least.
-      </div>
-    );
-  }
-  if (log.dateProblem === "mixed") {
-    return (
-      <div role="alert" className="rounded-lg border border-crit bg-crit-soft p-3 text-sm">
-        Some dates in the log can only be day first (like 13/03/2026) and others only month first (like 03/13/2026). Make them all the same
-        way round, or use 2026-03-13, and read it again.
-      </div>
-    );
-  }
-  if (log.dateProblem === "ambiguous") {
-    return (
-      <fieldset className="flex flex-col gap-2 rounded-lg border border-warn bg-warn-soft p-3 text-sm">
-        <legend className="sr-only">Day and month order</legend>
-        <span className="flex items-center gap-1 font-medium">
-          Is 02/03/2026 the 2nd of March or the 3rd of February?
-          <Help
-            label="Day and month order"
-            description="Every date in this log reads both ways round, so say which it is. All the dates are then read the same way."
-            example="Logs from Australia and the UK are usually day first: 02/03/2026 is 2 March."
-          />
-        </span>
-        <span className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2">
-            <input type="radio" name="cal-date-order" onChange={() => onDateOrder("dmy")} /> Day first (2 March)
-            <Help label="Day first" description="Read every date as day, then month, then year." example="02/03/2026 is 2 March 2026." />
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="radio" name="cal-date-order" onChange={() => onDateOrder("mdy")} /> Month first (3 February)
-            <Help label="Month first" description="Read every date as month, then day, then year, as in the US." example="02/03/2026 is 3 February 2026." />
-          </label>
-        </span>
-      </fieldset>
-    );
-  }
+/** What the rows measure: items, window, items already part-way through, and names that matched nothing. Row errors and date order are the wizard's. */
+function LogSummary({ read }: { read: Read }) {
+  const { result, ready } = read;
+  if (!result) return null;
   return (
-    <section aria-label="What was read" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3 text-sm">
+    <section aria-label="What the rows measure" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3 text-sm">
       <p>
-        Read <strong className="tabular-nums">{formatNumber(log.rows.length, 0)}</strong> rows
-        {result && (
-          <>
-            {" "}
-            about <strong className="tabular-nums">{formatNumber(result.items, 0)}</strong> items, over {formatWindow(result.window)}
-          </>
-        )}
-        .
-        {log.errors.length > 0 && ` ${log.errors.length} row${log.errors.length === 1 ? " was" : "s were"} left out.`}
-        {log.dateOrder && ` Dates read ${log.dateOrder === "dmy" ? "day first" : "month first"}.`}
-        {result && result.inProgressAtStart > 0 &&
+        Using <strong className="tabular-nums">{formatNumber(ready.rows.length, 0)}</strong> {ready.kind === "time_logs" ? "visits" : "rows"}, about{" "}
+        <strong className="tabular-nums">{formatNumber(result.items, 0)}</strong> items, over {formatWindow(result.window)}.
+        {result.inProgressAtStart > 0 &&
           ` ${result.inProgressAtStart} item${result.inProgressAtStart === 1 ? " was" : "s were"} already part-way through when the log starts, so ${result.inProgressAtStart === 1 ? "isn't" : "aren't"} counted as new leads.`}
       </p>
-      {read.note && <p className="text-muted-foreground">{read.note}</p>}
-      {log.errors.length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-muted-foreground">Rows left out</summary>
-          <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-            {log.errors.slice(0, 20).map((e) => (
-              <li key={e.line}>
-                Line {e.line}: {e.message}
-              </li>
-            ))}
-            {log.errors.length > 20 && <li>and {log.errors.length - 20} more.</li>}
-          </ul>
-        </details>
+      {ready.kind === "time_logs" && (
+        <p className="text-muted-foreground">Time logs measure hands-on time only. Waits, branch odds, redo rates and leads a week need a stage history or deals.</p>
       )}
-      {result && result.unmatchedSteps.length > 0 && (
+      {ready.leftOut.names > 0 && (
+        <p className="text-muted-foreground">
+          Left out by name: {ready.leftOut.names} name{ready.leftOut.names === 1 ? "" : "s"}, {ready.leftOut.rows} row{ready.leftOut.rows === 1 ? "" : "s"}. Match them to a step in the wizard above to use them.
+        </p>
+      )}
+      {result.unmatchedSteps.length > 0 && (
         <p className="text-muted-foreground">
           Not a step of this process, so left out: {result.unmatchedSteps.map((u) => `${u.name} (${u.rows})`).join(", ")}. Rename them in the log to
           match the map.
         </p>
       )}
-      {result && result.unmatchedSources.length > 0 && (
+      {result.unmatchedSources.length > 0 && (
         <p className="text-muted-foreground">
           Not a lead source in Settings: {result.unmatchedSources.map((u) => `${u.name} (${u.items})`).join(", ")}.
         </p>
