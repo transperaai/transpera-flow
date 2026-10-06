@@ -105,6 +105,7 @@ describe("decideFinding", () => {
   it("returns a finding with no labels untouched", async () => {
     db.stored = { ...db.stored, person_labels: {} };
     const out = await decideFinding(ID, "dismissed");
+    expect(out.status).toBe("saved");
     if (out.status === "saved") expect(out.finding.title).toBe("Team member A prices every pitch");
   });
 });

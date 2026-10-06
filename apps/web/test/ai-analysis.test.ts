@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runResults, toEngineModel } from "@transpera-flow/db";
 import { simulate, type DetectedIssue } from "@transpera-flow/engine";
-import { buildAiInput, squeeze } from "@/lib/ai/facts";
+import { aliasesFor, applyAliases, buildAiInput, squeeze } from "@/lib/ai/facts";
 import { analyseWithAi, quotationProblems, screenOutput, type AiDraftRequest, type AiModel } from "@/lib/ai/analyse";
 import { aiInputForRun, quotesFromBundle } from "@/lib/ai/input";
 import { aiDetections, aiViewFromRow, readInsights } from "@/lib/ai/types";
@@ -514,5 +514,12 @@ describe("names stay out of what is saved (B1 2b)", () => {
     expect(made.personLabels["Team member B"]).toBe(q!.id);
     expect(Object.keys(made.personLabels)).toHaveLength(bundle.people.length);
     expect(made.aliases.every((x) => typeof x.id === "string")).toBe(true);
+  });
+
+  it("a first name becomes a label only as written: a step called 'mark invoice paid' is not Mark Lee", () => {
+    const aliases = aliasesFor([{ id: "a", name: "Mark Lee" }, { id: "b", name: "Will Hart" }]);
+    expect(applyAliases("Check, then mark invoice paid", aliases)).toBe("Check, then mark invoice paid");
+    expect(applyAliases("Will Hart is at capacity; this will get worse", aliases)).toBe("Team member B is at capacity; this will get worse");
+    expect(applyAliases("Ask Mark and MARK LEE about it", aliases)).toBe("Ask Team member A and Team member A about it");
   });
 });

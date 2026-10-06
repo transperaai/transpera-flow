@@ -58,7 +58,7 @@ export interface AiInput {
   /** What its text is checked against. */
   check: CheckContext;
   /** Real name → label, for the payload (and for the key an insight is stored under: `ai_key`s are hashed on the name). */
-  aliases: { id: string; name: string; label: string }[];
+  aliases: { id: string; name: string; label: string; first?: boolean }[];
   /** Every person's label → their id: what is saved beside the text, so names go back at render per reader (B1 2b). */
   personLabels: PersonLabels;
   /** The step ids it may point at, with their names. */
@@ -88,8 +88,8 @@ export function letters(i: number): string {
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** People's names to labels: the full name, and the first name where it is unambiguous and long enough to be a name. */
-export function aliasesFor(people: readonly { id: string; name: string }[]): { id: string; name: string; label: string }[] {
-  const out: { id: string; name: string; label: string }[] = [];
+export function aliasesFor(people: readonly { id: string; name: string }[]): { id: string; name: string; label: string; first?: boolean }[] {
+  const out: { id: string; name: string; label: string; first?: boolean }[] = [];
   const firsts = new Map<string, number>();
   for (const p of people) {
     const f = p.name.trim().split(/\s+/)[0] ?? "";
@@ -100,16 +100,19 @@ export function aliasesFor(people: readonly { id: string; name: string }[]): { i
     const full = p.name.trim();
     if (full.length >= 3) out.push({ id: p.id, name: full, label });
     const first = full.split(/\s+/)[0] ?? "";
-    if (first.length >= 3 && first !== full && firsts.get(first.toLowerCase()) === 1) out.push({ id: p.id, name: first, label });
+    if (first.length >= 3 && first !== full && firsts.get(first.toLowerCase()) === 1) out.push({ id: p.id, name: first, label, first: true });
   });
   return out;
 }
 
-/** Names to labels in a text (longest names first, whole words only). */
-export function applyAliases(text: string, aliases: readonly { name: string; label: string }[]): string {
+/**
+ * Names to labels in a text (longest names first, whole words only). A full name matches in any case; a first name only
+ * as written, so "Will" the name is relabelled but "will" the word, and "Mark" in "Mark invoice paid" only as capitalised.
+ */
+export function applyAliases(text: string, aliases: readonly { name: string; label: string; first?: boolean }[]): string {
   let out = text;
   for (const a of [...aliases].sort((x, y) => y.name.length - x.name.length)) {
-    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(a.name)}(?![\\p{L}\\p{N}])`, "giu"), a.label);
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(a.name)}(?![\\p{L}\\p{N}])`, a.first ? "gu" : "giu"), a.label);
   }
   return out;
 }

@@ -112,7 +112,15 @@ describe("labelNames", () => {
   });
 
   it("turns a first name into the label too, when it is unambiguous and long enough", () => {
-    expect(labelNames("Ask Maya about it; maya agrees. Ann Lee is busy and Ann too.", labels, people)).toBe("Ask Team member A about it; Team member A agrees. Team member B is busy and Team member B too.");
+    expect(labelNames("Ask Maya about it; Maya agrees. Ann Lee is busy and Ann too.", labels, people)).toBe("Ask Team member A about it; Team member A agrees. Team member B is busy and Team member B too.");
+  });
+
+  it("matches a first name only as written: a word like 'will' is not a person, a full name still matches in any case", () => {
+    const will = [{ id: MAYA, name: "Will Hart" }];
+    const l = { "Team member A": MAYA };
+    expect(labelNames("Will Hart is at capacity; this will get worse", l, will)).toBe("Team member A is at capacity; this will get worse");
+    expect(labelNames("Will is at capacity; this will get worse", l, will)).toBe("Team member A is at capacity; this will get worse");
+    expect(labelNames("WILL HART and will hart", l, will)).toBe("Team member A and Team member A");
   });
 
   it("leaves a first name alone when another person shares it, or it is under three letters", () => {
