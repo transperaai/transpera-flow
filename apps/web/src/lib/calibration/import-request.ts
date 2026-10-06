@@ -15,8 +15,8 @@ export const MAX_DETAILS_BYTES = 20_000;
 export const isImportKind = (v: unknown): v is ImportKind => typeof v === "string" && Object.hasOwn(IMPORT_KINDS, v);
 
 /**
- * A column map: column id of the kind to the header name the person matched. Keys must be the kind's columns, values text of
- * up to 200 characters, and there are at most 20. Rebuilt, so nothing else gets through. Null when it isn't valid.
+ * A column map: column id of the kind to the header name the person matched (or a position, `Column 4`, for client, person, id and
+ * amount columns). Keys must be the kind's columns, values text of up to 60 characters, and there are at most 20. Rebuilt, so nothing else gets through. Null when it isn't valid.
  */
 export function parseColumnMap(kind: ImportKind, input: unknown): Record<string, string> | null {
   if (!isObject(input) || !isImportKind(kind)) return null;
@@ -25,7 +25,7 @@ export function parseColumnMap(kind: ImportKind, input: unknown): Record<string,
   if (entries.length > 20) return null;
   const out: Record<string, string> = {};
   for (const [k, v] of entries) {
-    if (!ids.has(k) || typeof v !== "string" || v.length > 200) return null;
+    if (!ids.has(k) || typeof v !== "string" || v.length > 60) return null;
     out[k] = v;
   }
   return out;

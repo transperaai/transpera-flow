@@ -9,6 +9,7 @@ import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   IMPORT_KINDS,
   applyNameMap,
+  columnMapValue,
   importDetails,
   suggestMapping,
   suggestNameMap,
@@ -170,7 +171,7 @@ export function ImportWizard(props: ImportWizardProps) {
     const columnMap: Record<string, string> = {};
     for (const c of spec.columns) {
       const i = mapping.index[c.id];
-      if (i !== null && i !== undefined && loaded.headers[i] !== undefined) columnMap[c.id] = loaded.headers[i]!;
+      if (i !== null && i !== undefined && loaded.headers[i] !== undefined) columnMap[c.id] = columnMapValue(c, loaded.headers[i]!, i);
     }
     ready({
       kind,

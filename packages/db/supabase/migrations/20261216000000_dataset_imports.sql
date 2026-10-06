@@ -17,6 +17,9 @@
 --     date order, lines, rows kept and left out, how many rows matched a name in the model, the window, and for leads and
 --     invoices a summary (lead source ids and numbers; counts). No string from the file. Table grants are table-level
 --     (select, insert), so the column is covered; it is insert-only like the rest of the row (no update grant).
+--   * `datasets.column_map` values are short labels: `private.column_map_ok(jsonb)` allows only text of up to 60 characters. The page stores
+--     a position (`Column 4`) for client, person, id and amount columns, never the header text, because a file with no header row
+--     makes its first data row the "headers". Added NOT VALID: records made before it are not checked.
 --   * `public.record_dataset(p_workspace, p_kind, p_file_name, p_column_map, p_row_count, p_details)` (SECURITY INVOKER): records
 --     an import that has no calibration: `leads` or `invoices`, with no process. Refuses an API token (42501) and any other kind
 --     (22023). Row-level security refuses viewers, members and strangers (insert policy `can_edit_workspace`). Returns the id.
@@ -52,6 +55,7 @@
 --   select column_name, data_type, is_nullable, column_default from information_schema.columns
 --     where table_schema = 'public' and table_name = 'datasets' and column_name = 'details';   -- jsonb, NO, '{}'::jsonb
 --   select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_details';    -- the check
+--   select pg_get_constraintdef(oid) from pg_constraint where conname = 'datasets_column_map_labels';  -- the check (not validated)
 --   select p.proname, p.prosecdef, p.proconfig, has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
 --     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --     where n.nspname = 'public' and p.proname in ('record_dataset', 'record_calibration_import', 'record_client_calibration') order by 1;
@@ -64,6 +68,8 @@
 --   drop function if exists public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[]);
 --   -- Put back row 57's record_client_calibration: re-run its `create function ... $$;` block from
 --   -- 20261208000000_client_calibration.sql as `create or replace`, with its revoke and grant.
+--   alter table public.datasets drop constraint if exists datasets_column_map_labels;
+--   drop function if exists private.column_map_ok(jsonb);
 --   alter table public.datasets drop column if exists details;
 --   delete from supabase_migrations.schema_migrations where version = '20261216000000';
 --   commit;
@@ -75,6 +81,20 @@
 -- 1. What an import holds: counts and model ids only.
 alter table public.datasets add column details jsonb not null default '{}'
   constraint datasets_details check (jsonb_typeof(details) = 'object' and octet_length(details::text) <= 20000);
+
+-- A column map holds short labels (a header name, or a position such as `Column 4`), never a long value from a file.
+create function private.column_map_ok(m jsonb) returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select not exists (select 1 from jsonb_each(m) e where jsonb_typeof(e.value) <> 'string' or char_length(e.value #>> '{}') > 60);
+$$;
+
+revoke all on function private.column_map_ok(jsonb) from public, anon;
+grant execute on function private.column_map_ok(jsonb) to authenticated;
+
+alter table public.datasets add constraint datasets_column_map_labels check (private.column_map_ok(column_map)) not valid;
 
 -- ---------------------------------------------------------------------------
 -- 2. record_dataset: an import with no calibration (leads, invoices)

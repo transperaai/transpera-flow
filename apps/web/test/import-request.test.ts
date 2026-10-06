@@ -33,8 +33,8 @@ describe("parseColumnMap", () => {
   it("refuses another kind's column, a non-text name, a name over 200 characters, over 20 keys and a non-object", () => {
     expect(parseColumnMap("deals", { client: "Client" })).toBeNull();
     expect(parseColumnMap("leads", { created: 5 })).toBeNull();
-    expect(parseColumnMap("leads", { created: "x".repeat(201) })).toBeNull();
-    expect(parseColumnMap("leads", { created: "x".repeat(200) })).not.toBeNull();
+    expect(parseColumnMap("leads", { created: "x".repeat(61) })).toBeNull();
+    expect(parseColumnMap("leads", { created: "x".repeat(60) })).not.toBeNull();
     expect(parseColumnMap("leads", [])).toBeNull();
     expect(parseColumnMap("leads", null)).toBeNull();
     expect(parseColumnMap("nonsense" as never, {})).toBeNull();

@@ -335,6 +335,17 @@ export function displayHeaders(raw: readonly string[]): string[] {
 
 export type MatchHow = "previous" | "name" | "partial";
 
+/**
+ * What `column_map` holds for a column matched to a header. A client, person, id or amount column is stored by position (`Column 4`),
+ * never by the header text: a file with no header row makes its first data row the "headers", and a name or an amount must not
+ * reach the database that way. Other columns keep the header name (at most 60 characters).
+ */
+export function columnMapValue(column: ImportColumn, header: string, index: number): string {
+  return column.type === "client" || column.type === "person" || column.type === "id" || column.type === "amount" ? `Column ${index + 1}` : header.trim().slice(0, 60);
+}
+
+const POSITIONAL = /^Column (\d+)$/;
+
 const words = (h: string) => normHeader(h).split(" ").filter(Boolean);
 
 /** Whether `run` appears in `hay` as consecutive whole words. */
@@ -373,7 +384,15 @@ export function suggestMapping(
   const ordered = [...spec.columns.filter((c) => c.required), ...spec.columns.filter((c) => !c.required)];
   for (const c of ordered) {
     const prev = previous?.[c.id];
-    if (typeof prev === "string" && prev.trim() !== "") {
+    const spot = typeof prev === "string" ? POSITIONAL.exec(prev) : null;
+    if (spot && (c.type === "client" || c.type === "person" || c.type === "id" || c.type === "amount")) {
+      // Stored by position: the same position, if the file still has it.
+      const i = Number(spot[1]) - 1;
+      if (i >= 0 && i < shown.length && free(i)) {
+        take(c, i, "previous");
+        continue;
+      }
+    } else if (typeof prev === "string" && prev.trim() !== "") {
       const want = normHeader(prev);
       const i = shown.findIndex((h, j) => free(j) && h === want);
       if (i >= 0) {

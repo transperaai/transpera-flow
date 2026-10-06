@@ -4,6 +4,7 @@ import {
   IMPORT_KIND_LIST,
   applyNameMap,
   applyNameMapCounted,
+  columnMapValue,
   dealsNote,
   dealsToStepLog,
   decodeImportFile,
@@ -104,6 +105,52 @@ describe("suggestMapping", () => {
   it("uses the display names of empty and repeated headers", () => {
     expect(displayHeaders(["Stage", "", " ", "Stage", "Stage", "Date"])).toEqual(["Stage", "Column 2", "Column 3", "Stage (2)", "Stage (3)", "Date"]);
     expect(suggestMapping(["Deal", "", "Stage"], "deals", { entered: "Column 2" }).index.entered).toBe(1);
+  });
+});
+
+describe("column_map", () => {
+  const mapOf = (text: string, kind: ImportKind, headerRow = 1) => {
+    const l = loadTable(text, "auto", headerRow);
+    if ("error" in l) throw new Error(l.error);
+    const { index } = suggestMapping(l.headers, kind);
+    return { l, index };
+  };
+
+  it("holds a position, not the header, for client, person, id and amount columns", () => {
+    const deals = IMPORT_KINDS.deals.columns;
+    const by = (id: string) => deals.find((c) => c.id === id)!;
+    expect(columnMapValue(by("deal"), "Record ID", 0)).toBe("Column 1");
+    expect(columnMapValue(by("owner"), "Deal owner", 6)).toBe("Column 7");
+    expect(columnMapValue(by("amount"), "Amount", 5)).toBe("Column 6");
+    expect(columnMapValue(IMPORT_KINDS.time_logs.columns.find((c) => c.id === "client")!, "Customer", 5)).toBe("Column 6");
+    expect(columnMapValue(by("stage"), "  Deal Stage ", 2)).toBe("Deal Stage");
+    expect(columnMapValue(by("stage"), "x".repeat(100), 2)).toHaveLength(60);
+  });
+
+  it("never holds a cell value when the file has no header row", () => {
+    // The first data row is taken as the names: "ACME Ltd" and "Jane Secretperson" are not headers.
+    const text = "D-101,Qualified lead,2026-03-02,ACME Ltd,£9999,Jane Secretperson\nD-102,Won,2026-03-03,Smith Ltd,£100,Sam";
+    const { l } = mapOf(text, "deals");
+    const index: Record<string, number | null> = { deal: 0, stage: 1, entered: 2, amount: 4, owner: 5, left: null, source: 3 };
+    const map: Record<string, string> = {};
+    for (const c of IMPORT_KINDS.deals.columns) if (index[c.id] !== null) map[c.id] = columnMapValue(c, l.headers[index[c.id]!]!, index[c.id]!);
+    expect(map).toMatchObject({ deal: "Column 1", amount: "Column 5", owner: "Column 6" });
+    const cells = new Set(text.split(/[\n,]/));
+    for (const id of ["deal", "amount", "owner"]) expect(cells.has(map[id]!), id).toBe(false);
+    // The client column of time logs, the same.
+    const t = mapOf("J1,Audit,2026-03-02,2,Jane Secretperson,ACME Ltd\nJ2,Audit,2026-03-03,2,Sam,Smith Ltd", "time_logs").l;
+    const person = IMPORT_KINDS.time_logs.columns.find((c) => c.id === "person")!;
+    expect(columnMapValue(person, t.headers[4]!, 4)).toBe("Column 5");
+  });
+
+  it("offers a position again next time, and an earlier header name still matches", () => {
+    const header = ["Record ID", "Deal Name", "Deal Stage", "Date entered stage", "Deal owner"];
+    // Stored by position: the owner was column 2 last time (a name, not what is now called "Deal owner").
+    const { index, how } = suggestMapping(header, "deals", { owner: "Column 2", stage: "Deal Stage" });
+    expect(index.owner).toBe(1);
+    expect(how.owner).toBe("previous");
+    // A position the file doesn't have falls back to the suggestion.
+    expect(suggestMapping(header, "deals", { owner: "Column 9" }).index.owner).toBe(4);
   });
 });
 

@@ -146,6 +146,21 @@ describe("datasets.details", () => {
   });
 });
 
+describe("datasets.column_map", () => {
+  it("holds short labels: a long value from a file is refused, a position is fine", async () => {
+    const start = await count();
+    await expect(
+      commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', $2, 1, '{}')", [ws, { client: "Column 1", issued: "x".repeat(61) }])),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', $2, 1, '{}')", [ws, { client: 5 }])),
+    ).rejects.toMatchObject({ code: "23514" });
+    expect(await count()).toBe(start);
+    await commitAs(editor.claims, (c) => c.query("select public.record_dataset($1, 'invoices', 'x.csv', $2, 1, '{}')", [ws, { client: "Column 1", issued: "x".repeat(60) }]));
+    expect(await count()).toBe(start + 1);
+  });
+});
+
 describe("record_dataset", () => {
   it("records leads and invoices for an editor, with details, and no process", async () => {
     const leads = await commitAs(editor.claims, (c) => recordDataset(c, "leads"));
