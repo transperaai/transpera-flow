@@ -38695,6 +38695,204 @@ revoke execute on function public.open_share_link(text) from public;
 grant execute on function public.open_share_link(text) to anon, authenticated;
 ']);
 
+-- 20261220500000_workspace_delete_cascade.sql
+-- Deleting a workspace works again (bug found while scoping B21; see docs/HANDOVER.md).
+--
+-- WHAT FAILED: every `delete from public.workspaces`, even as a superuser, failed with
+--   update or delete on table "roles" violates foreign key constraint "steps_role_id_workspace_id_fkey" on table "steps"
+-- and, once that is out of the way, with the same error on "steps_person_id_workspace_id_fkey" for any step that names a person.
+--
+-- WHY: Postgres queues the work of a cascading delete as after-row triggers and runs them in queue order, a level at a time.
+-- Deleting a workspace deletes its roles and people at the first level (`roles` and `people` reference `workspaces` directly),
+-- but its steps only at the third (workspaces -> processes -> process_revisions -> steps). The two composite foreign keys from
+-- `steps` to `roles (id, workspace_id)` and `people (id, workspace_id)` are plain NO ACTION, checked at the second level, when the
+-- steps are still there, so the check fails. The `in_use` trigger on roles already steps aside for this case
+-- (`pg_trigger_depth() > 1`); the foreign keys did not.
+--
+-- THE AUDIT: the schema has 58 composite foreign keys that include `workspace_id`. 54 are ON DELETE CASCADE or ON DELETE SET NULL
+-- (that column) and don't block. Four are NO ACTION:
+--   steps (role_id, workspace_id)            -> roles             BROKEN: roles go at level 1, steps at level 3. Changed here.
+--   steps (person_id, workspace_id)          -> people            BROKEN: people go at level 1, steps at level 3. Changed here.
+--   market_schedule (condition_id, ...)      -> market_conditions fine: both go at level 1, and the check runs at level 2.
+--   solutions (base_revision_id, process_id, workspace_id) -> process_revisions
+--                                                                 fine: solutions go at level 1 (from workspaces) or level 1 of a
+--                                                                 process delete (from processes); revisions at level 2 or 1, and the
+--                                                                 check always runs a level later. Both are kept immediate because
+--                                                                 the app relies on their 23503 (a market on the schedule can't be
+--                                                                 deleted: settings/actions.ts).
+-- Tests: packages/db/test/workspace-delete.test.ts deletes Northbeam with a step that names a person, a market on the schedule, a
+-- solution and an issue, as an agency admin, and Larkspur as a superuser, and checks no row with their `workspace_id` is left.
+--
+-- THE FIX: the two broken foreign keys become DEFERRABLE INITIALLY DEFERRED, so they are checked at commit, when a workspace's
+-- steps are gone. Nothing else about them changes: same columns, same NO ACTION, still validated (ALTER CONSTRAINT changes only
+-- the deferral flags, in the catalog: no table scan, no NOT VALID / VALIDATE needed).
+--   * Deleting one role a step uses is still refused AT ONCE, with 23503 and "still used by steps, people or clients", by the
+--     `in_use` trigger (unchanged); if that trigger were bypassed, the foreign key still refuses it at commit.
+--   * Deleting one person a step names is still refused, now at commit instead of at the statement. Nothing in the app or the MCP
+--     server deletes people (they are made inactive); only a superuser in the SQL editor can, and the error is the same.
+-- Why not `on delete set null (role_id)` (Postgres 17 here, so the syntax is available): it does NOT fix the workspace delete.
+-- The set-null update on `steps` runs at level 2, after `process_revisions` were deleted at level 2, and the update re-checks
+-- `steps_revision_id_workspace_id_fkey` and fails (tried on Postgres 16). It would also silently strip a person or role from
+-- PUBLISHED versions, which are otherwise immutable.
+--
+-- NOT ADDITIVE, but no data change: two `alter table public.steps alter constraint`. Each takes an ACCESS EXCLUSIVE lock on
+-- `public.steps` for a catalog update only (milliseconds; the apply file sets lock_timeout = 5s, so a long-running reader makes
+-- it fail rather than queue every step write behind it). Postgres 15+ is not needed: ALTER CONSTRAINT ... DEFERRABLE dates from
+-- 9.4.
+--
+-- ORDER: after 20261220000000 (row 64, B3). this is row 65, before B4 (20261221000000, now row 66); this one is independent of it and of every other
+-- migration since rows 1 and 2 made the two constraints, so it can apply before or after B4. The app needs nothing; apply whenever.
+--
+-- PREFLIGHT (read-only; run each with `bash packages/db/scripts/prod-sql.sh -c "..."`):
+--   0. This version isn't applied, and row 64 is. Expect 0, then 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261220500000';
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261220000000';
+--   1. The two constraints are still as rows 1 (init, role) and 2 (people, person) made them: NO ACTION ('a'), not deferrable, validated, on these columns.
+--      Expect exactly two rows, both `a | f | f | t`, with these definitions (the referenced table may print as `public.people`):
+--        steps_person_id_workspace_id_fkey | FOREIGN KEY (person_id, workspace_id) REFERENCES people(id, workspace_id)
+--        steps_role_id_workspace_id_fkey   | FOREIGN KEY (role_id, workspace_id) REFERENCES roles(id, workspace_id)
+--        select conname, confdeltype, condeferrable, condeferred, convalidated, pg_get_constraintdef(oid) from pg_constraint
+--         where conrelid = 'public.steps'::regclass and conname in ('steps_role_id_workspace_id_fkey', 'steps_person_id_workspace_id_fkey') order by 1;
+--   2. No other NO ACTION or RESTRICT foreign key in `public` beyond the four in THE AUDIT above. Expect exactly these four:
+--        market_schedule_condition_id_workspace_id_fkey, solutions_base_revision_id_process_id_workspace_id_fkey,
+--        steps_person_id_workspace_id_fkey, steps_role_id_workspace_id_fkey
+--        select c.conname from pg_constraint c join pg_class t on t.oid = c.conrelid join pg_namespace n on n.oid = t.relnamespace
+--         where c.contype = 'f' and c.confdeltype in ('a', 'r') and n.nspname = 'public' order by 1;
+--   3. Nothing holds a long lock on steps right now. Expect 0:
+--        select count(*) from pg_locks l join pg_stat_activity a using (pid)
+--         where l.relation = 'public.steps'::regclass and a.state <> 'idle' and a.pid <> pg_backend_pid() and now() - a.xact_start > interval '5 seconds';
+--   4. Informational: the bug, before the fix. Expect an error naming steps_role_id_workspace_id_fkey (nothing is changed; the
+--      transaction rolls back). Pick any workspace with steps that name a role:
+--        begin; delete from public.workspaces where slug = '<slug>'; rollback;
+--
+-- POST-APPLY CHECKS:
+--   1. Expect two rows, both `a | t | t | t`:
+--        select conname, confdeltype, condeferrable, condeferred, convalidated from pg_constraint
+--         where conrelid = 'public.steps'::regclass and conname in ('steps_role_id_workspace_id_fkey', 'steps_person_id_workspace_id_fkey') order by 1;
+--   2. The definitions. Expect the two from preflight 1, each followed by `DEFERRABLE INITIALLY DEFERRED`:
+--        select conname, pg_get_constraintdef(oid) from pg_constraint
+--         where conrelid = 'public.steps'::regclass and conname in ('steps_role_id_workspace_id_fkey', 'steps_person_id_workspace_id_fkey') order by 1;
+--   3. A workspace delete now succeeds, rolled back. `set constraints all immediate` runs the deferred checks before the rollback
+--      (a rollback alone would skip them). Expect DELETE 1 and SET CONSTRAINTS, no error; nothing is changed:
+--        begin; delete from public.workspaces where slug = '<slug>'; set constraints all immediate; rollback;
+--   4. The `in_use` guard still holds, rolled back. Expect an error "Role ... is still used by steps, people or clients":
+--        begin; delete from public.roles where id = (select role_id from public.steps where role_id is not null limit 1); rollback;
+--   5. The row. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = '20261220500000';
+--
+-- ROLLBACK (one transaction; puts both constraints back to NOT DEFERRABLE INITIALLY IMMEDIATE, as rows 1 and 2 made them, which brings
+-- the bug back):
+--
+--   begin;
+--   alter table public.steps alter constraint steps_role_id_workspace_id_fkey not deferrable;
+--   alter table public.steps alter constraint steps_person_id_workspace_id_fkey not deferrable;
+--   delete from supabase_migrations.schema_migrations where version = '20261220500000';
+--   commit;
+--
+-- Production data: none needed.
+
+alter table public.steps alter constraint steps_role_id_workspace_id_fkey deferrable initially deferred;
+alter table public.steps alter constraint steps_person_id_workspace_id_fkey deferrable initially deferred;
+
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261220500000', 'workspace_delete_cascade', array['-- Deleting a workspace works again (bug found while scoping B21; see docs/HANDOVER.md).
+--
+-- WHAT FAILED: every `delete from public.workspaces`, even as a superuser, failed with
+--   update or delete on table "roles" violates foreign key constraint "steps_role_id_workspace_id_fkey" on table "steps"
+-- and, once that is out of the way, with the same error on "steps_person_id_workspace_id_fkey" for any step that names a person.
+--
+-- WHY: Postgres queues the work of a cascading delete as after-row triggers and runs them in queue order, a level at a time.
+-- Deleting a workspace deletes its roles and people at the first level (`roles` and `people` reference `workspaces` directly),
+-- but its steps only at the third (workspaces -> processes -> process_revisions -> steps). The two composite foreign keys from
+-- `steps` to `roles (id, workspace_id)` and `people (id, workspace_id)` are plain NO ACTION, checked at the second level, when the
+-- steps are still there, so the check fails. The `in_use` trigger on roles already steps aside for this case
+-- (`pg_trigger_depth() > 1`); the foreign keys did not.
+--
+-- THE AUDIT: the schema has 58 composite foreign keys that include `workspace_id`. 54 are ON DELETE CASCADE or ON DELETE SET NULL
+-- (that column) and don''t block. Four are NO ACTION:
+--   steps (role_id, workspace_id)            -> roles             BROKEN: roles go at level 1, steps at level 3. Changed here.
+--   steps (person_id, workspace_id)          -> people            BROKEN: people go at level 1, steps at level 3. Changed here.
+--   market_schedule (condition_id, ...)      -> market_conditions fine: both go at level 1, and the check runs at level 2.
+--   solutions (base_revision_id, process_id, workspace_id) -> process_revisions
+--                                                                 fine: solutions go at level 1 (from workspaces) or level 1 of a
+--                                                                 process delete (from processes); revisions at level 2 or 1, and the
+--                                                                 check always runs a level later. Both are kept immediate because
+--                                                                 the app relies on their 23503 (a market on the schedule can''t be
+--                                                                 deleted: settings/actions.ts).
+-- Tests: packages/db/test/workspace-delete.test.ts deletes Northbeam with a step that names a person, a market on the schedule, a
+-- solution and an issue, as an agency admin, and Larkspur as a superuser, and checks no row with their `workspace_id` is left.
+--
+-- THE FIX: the two broken foreign keys become DEFERRABLE INITIALLY DEFERRED, so they are checked at commit, when a workspace''s
+-- steps are gone. Nothing else about them changes: same columns, same NO ACTION, still validated (ALTER CONSTRAINT changes only
+-- the deferral flags, in the catalog: no table scan, no NOT VALID / VALIDATE needed).
+--   * Deleting one role a step uses is still refused AT ONCE, with 23503 and "still used by steps, people or clients", by the
+--     `in_use` trigger (unchanged); if that trigger were bypassed, the foreign key still refuses it at commit.
+--   * Deleting one person a step names is still refused, now at commit instead of at the statement. Nothing in the app or the MCP
+--     server deletes people (they are made inactive); only a superuser in the SQL editor can, and the error is the same.
+-- Why not `on delete set null (role_id)` (Postgres 17 here, so the syntax is available): it does NOT fix the workspace delete.
+-- The set-null update on `steps` runs at level 2, after `process_revisions` were deleted at level 2, and the update re-checks
+-- `steps_revision_id_workspace_id_fkey` and fails (tried on Postgres 16). It would also silently strip a person or role from
+-- PUBLISHED versions, which are otherwise immutable.
+--
+-- NOT ADDITIVE, but no data change: two `alter table public.steps alter constraint`. Each takes an ACCESS EXCLUSIVE lock on
+-- `public.steps` for a catalog update only (milliseconds; the apply file sets lock_timeout = 5s, so a long-running reader makes
+-- it fail rather than queue every step write behind it). Postgres 15+ is not needed: ALTER CONSTRAINT ... DEFERRABLE dates from
+-- 9.4.
+--
+-- ORDER: after 20261220000000 (row 64, B3). this is row 65, before B4 (20261221000000, now row 66); this one is independent of it and of every other
+-- migration since rows 1 and 2 made the two constraints, so it can apply before or after B4. The app needs nothing; apply whenever.
+--
+-- PREFLIGHT (read-only; run each with `bash packages/db/scripts/prod-sql.sh -c "..."`):
+--   0. This version isn''t applied, and row 64 is. Expect 0, then 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261220500000'';
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261220000000'';
+--   1. The two constraints are still as rows 1 (init, role) and 2 (people, person) made them: NO ACTION (''a''), not deferrable, validated, on these columns.
+--      Expect exactly two rows, both `a | f | f | t`, with these definitions (the referenced table may print as `public.people`):
+--        steps_person_id_workspace_id_fkey | FOREIGN KEY (person_id, workspace_id) REFERENCES people(id, workspace_id)
+--        steps_role_id_workspace_id_fkey   | FOREIGN KEY (role_id, workspace_id) REFERENCES roles(id, workspace_id)
+--        select conname, confdeltype, condeferrable, condeferred, convalidated, pg_get_constraintdef(oid) from pg_constraint
+--         where conrelid = ''public.steps''::regclass and conname in (''steps_role_id_workspace_id_fkey'', ''steps_person_id_workspace_id_fkey'') order by 1;
+--   2. No other NO ACTION or RESTRICT foreign key in `public` beyond the four in THE AUDIT above. Expect exactly these four:
+--        market_schedule_condition_id_workspace_id_fkey, solutions_base_revision_id_process_id_workspace_id_fkey,
+--        steps_person_id_workspace_id_fkey, steps_role_id_workspace_id_fkey
+--        select c.conname from pg_constraint c join pg_class t on t.oid = c.conrelid join pg_namespace n on n.oid = t.relnamespace
+--         where c.contype = ''f'' and c.confdeltype in (''a'', ''r'') and n.nspname = ''public'' order by 1;
+--   3. Nothing holds a long lock on steps right now. Expect 0:
+--        select count(*) from pg_locks l join pg_stat_activity a using (pid)
+--         where l.relation = ''public.steps''::regclass and a.state <> ''idle'' and a.pid <> pg_backend_pid() and now() - a.xact_start > interval ''5 seconds'';
+--   4. Informational: the bug, before the fix. Expect an error naming steps_role_id_workspace_id_fkey (nothing is changed; the
+--      transaction rolls back). Pick any workspace with steps that name a role:
+--        begin; delete from public.workspaces where slug = ''<slug>''; rollback;
+--
+-- POST-APPLY CHECKS:
+--   1. Expect two rows, both `a | t | t | t`:
+--        select conname, confdeltype, condeferrable, condeferred, convalidated from pg_constraint
+--         where conrelid = ''public.steps''::regclass and conname in (''steps_role_id_workspace_id_fkey'', ''steps_person_id_workspace_id_fkey'') order by 1;
+--   2. The definitions. Expect the two from preflight 1, each followed by `DEFERRABLE INITIALLY DEFERRED`:
+--        select conname, pg_get_constraintdef(oid) from pg_constraint
+--         where conrelid = ''public.steps''::regclass and conname in (''steps_role_id_workspace_id_fkey'', ''steps_person_id_workspace_id_fkey'') order by 1;
+--   3. A workspace delete now succeeds, rolled back. `set constraints all immediate` runs the deferred checks before the rollback
+--      (a rollback alone would skip them). Expect DELETE 1 and SET CONSTRAINTS, no error; nothing is changed:
+--        begin; delete from public.workspaces where slug = ''<slug>''; set constraints all immediate; rollback;
+--   4. The `in_use` guard still holds, rolled back. Expect an error "Role ... is still used by steps, people or clients":
+--        begin; delete from public.roles where id = (select role_id from public.steps where role_id is not null limit 1); rollback;
+--   5. The row. Expect 1:
+--        select count(*) from supabase_migrations.schema_migrations where version = ''20261220500000'';
+--
+-- ROLLBACK (one transaction; puts both constraints back to NOT DEFERRABLE INITIALLY IMMEDIATE, as rows 1 and 2 made them, which brings
+-- the bug back):
+--
+--   begin;
+--   alter table public.steps alter constraint steps_role_id_workspace_id_fkey not deferrable;
+--   alter table public.steps alter constraint steps_person_id_workspace_id_fkey not deferrable;
+--   delete from supabase_migrations.schema_migrations where version = ''20261220500000'';
+--   commit;
+--
+-- Production data: none needed.
+
+alter table public.steps alter constraint steps_role_id_workspace_id_fkey deferrable initially deferred;
+alter table public.steps alter constraint steps_person_id_workspace_id_fkey deferrable initially deferred;
+']);
+
 -- seed.sql
 -- Generated by `pnpm --filter @transpera-flow/db gen:seed`. Do not edit by hand.
 
