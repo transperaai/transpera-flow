@@ -122,13 +122,14 @@ const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\
 const SLASHED = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4}|\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?)?$/i;
 // Month names (English, full or three letters): `2 Mar 2026`, `02-Mar-2026`, `Mar 2, 2026`. Never ambiguous.
 const TEXTUAL_TIME = String.raw`(?:[ T,]\s*(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?)?`;
-const TEXTUAL = new RegExp(String.raw`^(\d{1,2})[\s-]+([a-z]{3,9})\.?,?[\s-]+(\d{4})` + TEXTUAL_TIME + "$", "i");
-const TEXTUAL_MDY = new RegExp(String.raw`^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})` + TEXTUAL_TIME + "$", "i");
+// Two-digit years too (Excel's d-mmm-yy: `2-Mar-26`), and ordinals (`2nd March 2026`).
+const TEXTUAL = new RegExp(String.raw`^(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]{3,9})\.?,?[\s-]+(\d{4}|\d{2})` + TEXTUAL_TIME + "$", "i");
+const TEXTUAL_MDY = new RegExp(String.raw`^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4}|\d{2})` + TEXTUAL_TIME + "$", "i");
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 /** A month's number (1-12) from its English name, full or three letters, any case; 0 when it isn't one. */
 const monthNumber = (name: string): number => {
   const n = name.toLowerCase();
-  return MONTHS.findIndex((m) => m === n || (n.length === 3 && m.startsWith(n))) + 1;
+  return MONTHS.findIndex((m) => m === n || (n.length === 3 && m.startsWith(n)) || (n === "sept" && m === "september")) + 1;
 };
 
 /**
@@ -161,7 +162,7 @@ export function hasTimeOfDay(text: string): boolean {
 
 /**
  * A date or date-time as epoch milliseconds, or null. Slashed dates are read in `order` (day first unless told). Also read:
- * month names (`2 Mar 2026`, `Mar 2, 2026`), AM/PM after a time on slashed and month-name dates, and two-digit years on
+ * month names (`2 Mar 2026`, `2-Mar-26`, `2nd March 2026`, `Mar 2, 2026`, `Sept 2 2026`), AM/PM after a time on slashed and month-name dates, and two-digit years on
  * slashed dates (`02/03/26` is 2026).
  */
 export function parseLogTime(text: string, order: DateOrder = "dmy"): number | null {
@@ -190,6 +191,7 @@ export function parseLogTime(text: string, order: DateOrder = "dmy"): number | n
     d = Number(dayFirst ? tx[1] : tx[2]);
     mo = monthNumber((dayFirst ? tx[2] : tx[1])!);
     y = Number(tx[3]);
+    if (tx[3]!.length === 2) y += 2000;
     h = Number(tx[4] ?? 0);
     mi = Number(tx[5] ?? 0);
     se = Number(tx[6] ?? 0);

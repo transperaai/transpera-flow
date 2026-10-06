@@ -719,6 +719,15 @@ describe("parseLogTime extensions", () => {
     expect(parseLogTime("March 2 2026")).toBe(d(2026, 3, 2));
     expect(parseLogTime("mar 2, 2026 09:30:15")).toBe(d(2026, 3, 2, 9, 30, 15));
     expect(parseLogTime("2 Sep 2026")).toBe(d(2026, 9, 2));
+    // What Excel writes by default, and common spellings.
+    expect(parseLogTime("2-Mar-26")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("02-Mar-26")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("2 Mar 26 09:30")).toBe(d(2026, 3, 2, 9, 30));
+    expect(parseLogTime("Sept 2, 2026")).toBe(d(2026, 9, 2));
+    expect(parseLogTime("2 Sept 2026")).toBe(d(2026, 9, 2));
+    expect(parseLogTime("2nd March 2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("March 2nd, 2026")).toBe(d(2026, 3, 2));
+    expect(parseLogTime("Mar 2, 26")).toBe(d(2026, 3, 2));
     expect(parseLogTime("2 Marc 2026")).toBeNull();
     expect(parseLogTime("31 Feb 2026")).toBeNull();
     expect(parseLogTime("2 Mar")).toBeNull();
