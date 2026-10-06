@@ -202,7 +202,7 @@ export function ImportWizard(props: ImportWizardProps) {
         {kinds.length > 1 && (
           <label className="flex max-w-md flex-col gap-1">
             <HelpLabel label="What's in the file" description={spec.help.description} example={spec.help.example} />
-            <NativeSelect value={kind} onChange={(e) => pickKind(e.target.value as ImportKind)}>
+            <NativeSelect id={`${id}-kind`} value={kind} onChange={(e) => pickKind(e.target.value as ImportKind)}>
               {kinds.map((k) => (
                 <option key={k} value={k}>
                   {IMPORT_KINDS[k].label}
@@ -280,6 +280,7 @@ export function ImportWizard(props: ImportWizardProps) {
               example="Files saved in European settings often use a semicolon, so 1,5 can be one number."
             />
             <NativeSelect
+              id={`${id}-delimiter`}
               value={delimiter}
               onChange={(e) => {
                 const next = e.target.value as DelimiterChoice;
@@ -301,6 +302,7 @@ export function ImportWizard(props: ImportWizardProps) {
               example="A report with a title and a date on the first two rows has its column names on row 3."
             />
             <Input
+              id={`${id}-header-row`}
               type="number"
               min={1}
               max={20}
