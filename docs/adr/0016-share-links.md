@@ -78,11 +78,16 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
 - B4 (play links) replaces the write trigger, adds `mode` to the insert grant and a rate-limited submission function. It
   needs `lever_settings` in the snapshot.
 
-- Text is scrubbed and checked on a normalised view (NFKC, invisible characters and soft hyphens out, curly quotes straight,
-  any white space or JSON escape of one a single space): the app (`share-text.ts`) maps each match back to the original span
-  and replaces all of it, and the database (`private.share_norm`) normalises the same way before its checks. After scrubbing
-  the app checks its own output again and refuses a name word next to a "Team member N" label. A scenario's patch paths are not
-  emails (`roles.@busiest.headcount`), so the email pattern needs a letter, digit or one of `_%+-` before the `@`.
+- Names are looked for only in free text: an explicit list of keys (`SHARE_FREE_TEXT_KEYS`, the same list in
+  `private.share_snapshot_problem`). JSON keys, ids, enums, paths and numbers are never scrubbed or checked for names, so a
+  person called Tom Price, Jo Weeks or Ann Kind cannot turn `price`, `horizon_weeks` or `kind` into a label and change the
+  engine's input. Emails and money are looked for in every string value.
+- Matching is by letter tokens of a normalised view (percent-decoded, NFKC, default-ignorable code points, combining marks and
+  variation selectors removed, casefolded). Any token that equals a part (3+ characters) of a person's or client's name is
+  replaced, a run of tokens of one name with whatever sat between them (hyphen, dot, bracket, space) as one span mapped back to
+  the original text. A name token can't survive next to a label. The check tokenises the output the same way, in the app and in
+  the database (`private.share_norm`, `share_name_tokens`). The price: a word that is also part of a name ("Will", "Home",
+  "Kind") is hidden in free text; the numbers don't move because free text is not engine input.
 - One money pattern (`money.ts`) serves B20's `propose_finding` check and the share link's redaction, and the database applies
   the same forms to the normalised text. A step's `cost_override` is nulled with Financials off and refused by both checks.
 - A Google identity counts only when its own email equals the account's confirmed email (any case) and that address is listed.

@@ -261,7 +261,7 @@ describe("the write trigger", () => {
       await db.client.query("set local session_replication_role = origin");
       for (const [kind, target] of [["issue", issue], ["issue", linked], ["solution", solution]] as const) {
         const r = await attempt(db.client, () => insertLink(db.client, { kind, target }));
-        expect(r, `${kind} ${target}`).toMatchObject({ ok: false, code: "22023" });
+        expect(r, `${kind} ${target}`).toMatchObject({ ok: false, code: "22023", message: "An archived process can't be shared. Restore it first." });
       }
     } finally {
       await db.client.query("rollback");
@@ -403,7 +403,7 @@ describe("the leak check", () => {
   it("2. an email address, anywhere, even with both toggles on", async () => {
     await refused({ ...clean(), note: "write to sam@northbeam.example" }, {}, "The snapshot contains an email address.");
     await refused({ ...clean("overview", true, true), deep: { a: [{ b: "SAM@NORTHBEAM.EXAMPLE" }] } }, both, "The snapshot contains an email address.");
-    await accepted({ ...clean(), note: "meet @ 5, then 3.5 at home" });
+    await accepted({ ...clean(), note: "meet @ 5, then 3.5 later" });
   });
 
   it("3. a non-null cost_rate at any depth, even with both toggles on", async () => {
@@ -422,7 +422,7 @@ describe("the leak check", () => {
     const msg = "The snapshot names a client.";
     await refused({ ...clean(), note: `Churn risk at ${multiWordClient}.` }, {}, msg);
     await refused({ ...clean("overview", true, true), note: `Churn risk at ${multiWordClient}.` }, both, msg);
-    await refused({ ...clean("overview", true, true), arr: [{ n: multiWordClient }] }, both, msg);
+    await refused({ ...clean("overview", true, true), arr: [{ name: multiWordClient }] }, both, msg);
     await refused({ ...clean(), note: `x ${multiWordClient.toUpperCase()}` }, {}, msg);
     await refused({ ...clean(), note: `first line\n${multiWordClient}` }, {}, msg);
     // White space between the words: a no-break space (pasted from a document), two spaces, a line break.
@@ -448,7 +448,7 @@ describe("the leak check", () => {
     await refused({ ...clean(), note: `Ask ${personName}` }, {}, msg);
     await refused({ ...clean(), note: `ask ${personName.toUpperCase()}` }, {}, msg);
     await refused({ ...clean(), note: `Ask\n${personName}` }, {}, msg);
-    await refused({ ...clean(), a: { b: [personName] } }, { financials: false }, msg);
+    await refused({ ...clean(), a: { name: personName } }, { financials: false }, msg);
     const words = personName.split(" ");
     for (const gap of ["\u00a0", "  ", "\n", "\t", " \u200b "]) await refused({ ...clean(), note: `Ask ${words.join(gap)}` }, {}, msg);
     // A control character before the name: jsonb writes it as \u001f, so the character before the name is the letter f.
@@ -456,8 +456,9 @@ describe("the leak check", () => {
     // The surname alone (3+ letters), in any case.
     await refused({ ...clean(), note: `${words[words.length - 1]} is slow` }, {}, msg);
     await refused({ ...clean(), note: `${words[words.length - 1]!.toUpperCase()} is slow` }, {}, msg);
-    // A first name alone is the app's job (an accepted limit here), not the database's.
-    await accepted({ ...clean(), note: `Ask ${personFirst}` });
+    // The first name alone too (3+ letters): any part of a name is a token.
+    await refused({ ...clean(), note: `Ask ${personFirst}` }, {}, msg);
+    await refused({ ...clean(), note: `ask ${personFirst.toLowerCase()}` }, {}, msg);
     await accepted({ ...clean("overview", true, false), note: `Ask ${personName}` }, { people: true });
   });
 
@@ -470,8 +471,9 @@ describe("the leak check", () => {
       expect(await tryNote("see Cher today")).toMatchObject({ ok: false, message: msg });
       expect(await tryNote("see cher today")).toMatchObject({ ok: false, message: msg });
       expect((await tryNote("Li is here")).ok).toBe(true);
-      expect(await tryNote("see A.B (x) now")).toMatchObject({ ok: false, message: msg });
-      expect((await tryNote("see AxB x now")).ok).toBe(true);
+      // Parts under 3 characters are no tokens; the joined "abx" is.
+      expect((await tryNote("see A.B (x) now")).ok).toBe(true);
+      expect(await tryNote("see ABX now")).toMatchObject({ ok: false, message: msg });
     } finally {
       await db.client.query("rollback");
     }
@@ -514,8 +516,8 @@ describe("the leak check", () => {
     await refused({ ...clean(), note: `${fullwidth(first!)} ${surname}` }, {}, msg);
     await refused({ ...clean(), note: `${first}\\n${surname}` }, {}, msg);
     await refused({ ...clean(), note: `x\\n${surname} said` }, {}, msg);
-    // A name as a JSON key is text too.
-    await refused({ ...clean(), liveRevisions: { [`${first} ${surname}`]: "r1" } }, {}, msg);
+    // JSON keys are never text.
+    await accepted({ ...clean(), liveRevisions: { [`${first} ${surname}`]: "r1" } });
     // A name with a curly apostrophe is found when the text has a straight one, and the other way round.
     await db.client.query("begin");
     try {
@@ -529,39 +531,77 @@ describe("the leak check", () => {
     }
   });
 
-  it("6d. a word of a person's name next to a \"Team member N\" label is refused, either side, any case; two labels are fine", async () => {
-    const msg = "The snapshot puts a person's name next to a label.";
+  it("6d. the third review: a name token left in any shape (hyphen, dot, underscore, plus, bracket, %20, invisible characters, next to a label or not) is refused", async () => {
+    const msg = "The snapshot names a person.";
     const [first, ...rest] = personName.split(" ");
     const surname = rest[rest.length - 1]!;
-    for (const note of [`Team member 1 ${surname}`, `${first} Team member 1`, `${surname.toUpperCase()} Team member 12`, `Team member 3 ${first!.toLowerCase()}`]) {
-      // The surname alone is caught by check 6; whichever message, a person next to a label is refused.
-      await asEditor(async (c) => expect(await make(c, { snapshot: { ...clean(), note } }), note).toMatchObject({ ok: false, code: "23514" }));
+    const lf = first!.toLowerCase();
+    const ls = surname.toLowerCase();
+    for (const note of [
+      `Team member 1 ${surname}`, `${first} Team member 1`, `${surname.toUpperCase()} Team member 12`, `Team member 3 ${lf}`,
+      `${lf}-Team member 1`, `@${lf}.`, `${lf}_`, `${lf}+`, `${lf} (Team member 1)`, `%20${lf}`, `${lf}%20${ls}`,
+      `linkedin.com/in/${lf}-${ls}`, `@${lf}.${ls} on Slack`, `${lf}_${ls}`, `${lf}+${ls}`, `${first!.toUpperCase()}-${surname.toUpperCase()}`,
+      `${lf}.${ls}@northbeam`, `/${first}%20${surname}%20contract.pdf`,
+      `${first} ${surname.slice(0, 2)}\u034f${surname.slice(2)}`, `${first} ${surname.slice(0, 2)}\ufe00${surname.slice(2)}`, `${lf}\u3164${ls}`, `${lf}\u034f`, `${lf}\ufe00`, `${lf}\u3164`,
+      `${first} ${surname.slice(0, 2)}\u0301${surname.slice(2)}`,
+    ]) {
+      await refused({ ...clean(), note }, {}, msg);
     }
+    // The same shapes in a key that isn't free text are left alone: it is an id, an enum or a selector, never a name.
+    await accepted({ ...clean(), kind2: `${lf}-${ls}`, path: `steps.${lf}.${ls}`, op: lf });
     await db.client.query("begin");
     try {
       await db.client.query("insert into people (workspace_id, name) values ($1, 'Zed Quill')", [ws]);
-      const r = await attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note: "Team member 4 Zed" }, tok: randomUUID() }));
-      expect(r).toMatchObject({ ok: false, code: "23514", message: msg });
-      const r2 = await attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note: "Quill Team member 4" }, tok: randomUUID() }));
-      expect(r2).toMatchObject({ ok: false, code: "23514" });
+      for (const note of ["Team member 4 Zed", "Quill Team member 4", "zed-quill", "ZedQuill", "zed\u3164quill"]) {
+        expect(await attempt(db.client, () => insertLink(db.client, { snapshot: { ...clean(), note }, tok: randomUUID() })), note).toMatchObject({ ok: false, code: "23514", message: msg });
+      }
     } finally {
       await db.client.query("rollback");
     }
     await accepted({ ...clean(), note: "Team member 1 and Team member 2" });
   });
 
+  it("6e. people whose names are also field names: Tom Price, Jo Weeks, Ann Kind, Lee Retainer don't break the shape, and are still hidden in text", async () => {
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into people (workspace_id, name) values ($1, 'Tom Price'), ($1, 'Jo Weeks'), ($1, 'Ann Kind'), ($1, 'Lee Retainer'), ($1, 'Sarah Day')", [ws]);
+      const shape = (base: object) => ({
+        ...base,
+        kind2: "retainer",
+        services: [{ price: 3500, pricing_model: "retainer", name: "Standard" }],
+        settings: { horizon_weeks: 12, retainer: 900 },
+        process: { kind: "process" },
+        steps: [{ kind: "task", lost_per_day_waiting: 0.1 }],
+        scenarios: [{ patch: [{ path: "services.s1.price", op: "set", value: 4000 }] }],
+      });
+      const tryIt = (snapshot: object, over: Made = {}) => attempt(db.client, () => insertLink(db.client, { snapshot: snapshot as Json, tok: randomUUID(), ...over }));
+      expect((await tryIt(shape(clean("overview", false, true)), { financials: true })).ok).toBe(true);
+      const off = shape(clean());
+      // Financials off refuses money in text, not a number under `price`.
+      expect((await tryIt(off)).ok).toBe(true);
+      expect(await tryIt({ ...off, note: "Tom Price is away" })).toMatchObject({ ok: false, message: "The snapshot names a person." });
+      expect(await tryIt({ ...off, note: "the price is right" })).toMatchObject({ ok: false, message: "The snapshot names a person." });
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
   it("2b. a scenario's selector (roles.@busiest) is not an email; a full-width email is", async () => {
     await accepted({ ...clean(), scenarios: [{ patch: [{ path: "roles.@busiest.headcount", op: "set", value: 3 }, { path: "steps.@heaviest.work_hours", op: "set", value: 2 }] }] });
     await refused({ ...clean(), note: "write to ｓａｍ@northbeam.example" }, {}, "The snapshot contains an email address.");
-    await refused({ ...clean(), roles: { "a.b@x.example": 1 } }, {}, "The snapshot contains an email address.");
+    await refused({ ...clean(), roles: [{ owner: "a.b@x.example" }] }, {}, "The snapshot contains an email address.");
+    // A key is never text, so an address-shaped key is left alone.
+    await accepted({ ...clean(), roles: { "a.b@x.example": 1 } });
   });
 
   it("7c. money in every form the app hides: several spaces, a French thousands space, a symbol and a no-break space", async () => {
     const msg = "The snapshot contains costs or margins.";
-    for (const text of ["GBP  4,100 a month", "4 512 €", "4 512 €", "£ 4,100", "£  4,100", "£  4,100", "4,100 pounds", "1.2m GBP", "＄５"]) {
+    for (const text of ["GBP  4,100 a month", "4 512 €", "4 512 €", "£ 4,100", "£  4,100", "£  4,100", "4,100 pounds", "1.2m GBP", "1.5 k GBP", "4,100 quid", "4,100 sterling", "x5£", "ABCD$5", "Rs 4,100", "¥4100", "%C2%A34,100", "＄５"]) {
       await refused({ ...clean(), note: text }, {}, msg);
     }
     await accepted({ ...clean("overview", false, true), note: "4 512 €" }, { financials: true });
+    // Not money: the code is followed by a letter.
+    await accepted({ ...clean(), note: "CAD 3D renders" });
   });
 
   it("7d. a step's cost_override with Financials off (a number or a string), allowed with it on, null always", async () => {

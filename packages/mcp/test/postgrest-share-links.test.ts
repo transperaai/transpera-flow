@@ -246,8 +246,8 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
       ["email", { x: "a@b.example" }, TOGGLES[0]!],
       ["pay", { x: { cost_rate: 40 } }, TOGGLES[0]!],
       ["evidence", { x: { provenance: { a: 1 } } }, TOGGLES[0]!],
-      ["client", { x: `at ${client}` }, TOGGLES[0]!],
-      ["person", { x: `ask ${person}` }, TOGGLES[0]!],
+      ["client", { note: `at ${client}` }, TOGGLES[0]!],
+      ["person", { note: `ask ${person}` }, TOGGLES[0]!],
       ["costs", { x: { default_cost_rate: 55 } }, TOGGLES[0]!],
     ];
     for (const [what, patch, toggles] of cases) {
@@ -353,14 +353,26 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
       await admin.query(`update processes set archived_at = ${on ? "now()" : "null"} where id = $1`, [proc]);
       await admin.query("set session_replication_role = origin");
     };
+    // An issue on a live process that is also linked to the archived one, and one whose own process is archived but whose link
+    // is live: the app must name the archived process, not leave the database to refuse with another message.
+    const live = (await admin.query("select id from processes where workspace_id = $1 and id <> $2 and live_revision_id is not null and archived_at is null and not is_company limit 1", [ws, proc])).rows[0]?.id as string | undefined;
+    const extra: string[] = [];
+    if (live) {
+      const a = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'Live, also linked to an archived one') returning id", [ws, live])).rows[0].id as string;
+      await admin.query("insert into issue_links (workspace_id, issue_id, process_id) values ($1, $2, $3)", [ws, a, proc]);
+      const b = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'Archived itself, linked to a live one') returning id", [ws, proc])).rows[0].id as string;
+      await admin.query("insert into issue_links (workspace_id, issue_id, process_id) values ($1, $2, $3)", [ws, b, live]);
+      extra.push(a, b);
+    }
     await setArchived(true);
     try {
       const workspace = await workspaceRow();
+      for (const id of extra) await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "issue", id }, TOGGLES[0]!), id).rejects.toThrow(/archived process can't be shared/);
       await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "issue", id: iss }, TOGGLES[0]!)).rejects.toThrow(/archived/);
       await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "solution", id: sol }, TOGGLES[0]!)).rejects.toThrow(/archived/);
     } finally {
       await setArchived(false);
-      await admin.query("delete from issues where id = $1", [iss]);
+      await admin.query("delete from issues where id = any ($1)", [[iss, ...extra]]);
     }
   });
 

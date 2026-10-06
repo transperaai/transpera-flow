@@ -1,6 +1,29 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SHARE_FREE_TEXT_KEYS } from "../src/share";
+
+describe("share links: the leak check's helpers and lists", () => {
+  const migrationText = readFileSync(join(__dirname, "..", "supabase/migrations/20261218000000_share_links.sql"), "utf8");
+
+  it("preflight 1, the post-apply checks and the rollback cover every helper the migration creates", () => {
+    const created = [...migrationText.matchAll(/^create function (?:private|public)\.(\w+)\(/gm)].map((m) => m[1]!);
+    expect(created).toEqual(expect.arrayContaining(["share_norm", "share_unpct", "share_strings", "share_name_tokens"]));
+    const header = migrationText.slice(0, migrationText.indexOf("-- Production data:"));
+    for (const fn of ["share_norm(text)", "share_unpct(text)", "share_strings(jsonb)", "share_name_tokens(uuid, text)"]) {
+      expect(header, fn).toContain(`to_regprocedure('private.${fn}')`);
+      expect(header, fn).toContain(`'private.${fn}'`);
+      expect(header, fn).toContain(`drop function if exists private.${fn};`);
+    }
+    expect(header).toContain("Expect null x9");
+  });
+
+  it("the database's list of free-text keys is the app's", () => {
+    const m = /free_keys constant text\[\] := array\[([^\]]*)\]/.exec(migrationText)!;
+    const inDb = [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
+    expect([...inDb].sort()).toEqual([...SHARE_FREE_TEXT_KEYS].sort());
+  });
+});
 
 // The share-links migration's place in the apply order is written in three places (the migration's header, the apply file's
 // header, docs/production-migrations.md). They must say the same thing, and it must be true of the files on disk.

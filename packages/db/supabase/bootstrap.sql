@@ -36125,7 +36125,9 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 --     RLS: owners, editors and agency admins only. Column-level grants: the token hash and the snapshot are never readable
 --     through the API; `mode` is not insertable ('view' only until B4).
 --   * `private.share_snapshot_problem(...)`: the leak check, run by a BEFORE trigger on every insert and every snapshot change.
---   * `private.share_norm(text)`: the text those checks match on (NFKC, invisible characters out, straight quotes, one space for any white space).
+--   * `private.share_norm(text)`, `share_unpct(text)`, `share_strings(jsonb)`, `share_name_tokens(uuid, text)`: the text those checks match
+--     on (percent-decoded, NFKC, invisible characters and marks out, lower case, one space for any white space), the string values with
+--     their keys, and the tokens of the names in a workspace.
 --   * `private.share_links_before_write()` + trigger `share_links_before_write`: refuses API tokens, stamps the caller, checks
 --     the target belongs to the workspace, freezes the guarded columns, keeps revoked links revoked, runs the leak check.
 --   * `public.share_team_capacity(ws, show_people)`: `team_capacity`'s shape for a share link (labels or names, NO pay for anyone).
@@ -36137,11 +36139,13 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
 --   0. Latest applied versions; expect the latest to be 20261216000000 and nothing >= '20261218000000':
 --        select version from supabase_migrations.schema_migrations where version >= '20261212000000' order by 1;
---   1. Nothing created yet. Expect null x5:
+--   1. Nothing created yet. Expect null x9:
 --        select to_regclass('public.share_links'), to_regprocedure('public.open_share_link(text)'),
 --               to_regprocedure('public.share_team_capacity(uuid, boolean)'),
 --               to_regprocedure('private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'),
---               to_regprocedure('private.share_emails_ok(text[])');
+--               to_regprocedure('private.share_emails_ok(text[])'), to_regprocedure('private.share_norm(text)'),
+--               to_regprocedure('private.share_unpct(text)'), to_regprocedure('private.share_strings(jsonb)'),
+--               to_regprocedure('private.share_name_tokens(uuid, text)');
 --   2. Helpers exist. Expect 3 rows: can_edit_workspace, team_capacity, can_read_workspace in public:
 --        select p.proname, n.nspname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --        where n.nspname = 'public' and p.proname in ('can_edit_workspace', 'team_capacity', 'can_read_workspace');
@@ -36174,8 +36178,15 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 --        has_function_privilege('anon', 'public.open_share_link(text)', 'execute'), ('authenticated', same),
 --        ('anon', 'public.share_team_capacity(uuid, boolean)', 'execute'), ('authenticated', same),
 --        ('authenticated', 'private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)', 'execute'), ('anon', same).
---   4. prosecdef and proconfig: open_share_link t, share_team_capacity t, share_links_before_write t, share_snapshot_problem f;
---      all {search_path=""} (compare with array['search_path=""']).
+--      And the four helpers (share_norm(text), share_unpct(text), share_strings(jsonb), share_name_tokens(uuid, text)), each for
+--      anon and for authenticated. Expect f x8:
+--        select has_function_privilege(r, f, 'execute') from unnest(array['anon', 'authenticated']) r,
+--          unnest(array['private.share_norm(text)', 'private.share_unpct(text)', 'private.share_strings(jsonb)',
+--                       'private.share_name_tokens(uuid, text)']) f;
+--   4. prosecdef and proconfig: open_share_link t, share_team_capacity t, share_links_before_write t, share_snapshot_problem f,
+--      and share_norm, share_unpct, share_strings, share_name_tokens f; all {search_path=""} (compare with array['search_path=""']):
+--        select proname, prosecdef, proconfig = array['search_path=""'] from pg_proc
+--        where pronamespace in ('public'::regnamespace, 'private'::regnamespace) and proname like any (array['share\_%', 'open\_share\_link']);
 --   5. Smoke test, ROLLED BACK, as an agency admin on Northbeam (production Northbeam has no owner):
 --        begin; set local role authenticated;
 --        select set_config('request.jwt.claims', '{"sub":"<uuid>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
@@ -36191,7 +36202,10 @@ grant execute on function public.import_workspace_bundle(uuid, jsonb, text) to a
 --   drop table if exists public.share_links;
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
+--   drop function if exists private.share_name_tokens(uuid, text);
+--   drop function if exists private.share_strings(jsonb);
 --   drop function if exists private.share_norm(text);
+--   drop function if exists private.share_unpct(text);
 --   drop function if exists private.share_emails_ok(text[]);
 --   delete from supabase_migrations.schema_migrations where version = '20261218000000';
 --   commit;
@@ -36276,45 +36290,132 @@ grant update (label, snapshot, engine_version, revoked_at) on public.share_links
 -- 3. The leak check
 -- ---------------------------------------------------------------------------
 
--- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
--- email in the message). Full names only: the app's twin (`shareSnapshotLeaks`) also checks unique first names, which this
--- cannot do without refusing links over common words ("Will", "Mark").
--- The text a share link's checks match on, in one form: Unicode NFKC (a no-break space or a full-width letter becomes its plain
--- form), invisible format characters removed (zero-width space, soft hyphen, bidi marks), curly quotes and apostrophes and the
--- hyphen variants straightened, and every run of white space (or a JSON escape of one: \n, \t,   written out) one space.
--- The app's `normaliseView` (packages/db/src/share-text.ts) does the same, so the two agree on what a name or an amount looks like.
+-- The text a share link's checks match on, in one form (the app's `normaliseView`, packages/db/src/share-text.ts, is its twin):
+-- best-effort percent-decoding, Unicode NFKC, every default-ignorable character (zero-width space and joiners, soft hyphen,
+-- combining grapheme joiner, variation selectors, Hangul fillers) and every combining mark removed, curly quotes and apostrophes
+-- and the hyphen variants straightened, lower case, and every run of white space (or a JSON escape of one written out as text:
+-- \n, \t,  ) one space. The list of marks and ignorables is spelled out (Postgres has no Unicode property classes).
+
+-- `%20`, `%C3%A9`: a run of %XX that is valid UTF-8 becomes its characters; anything else stays as written.
+create function private.share_unpct(t text) returns text
+language plpgsql immutable
+set search_path = ''
+as $$
+declare
+  rest text := coalesce(t, '');
+  res text := '';
+  run text;
+  p integer;
+begin
+  loop
+    run := substring(rest from '((?:%[0-9A-Fa-f]{2})+)');
+    exit when run is null;
+    p := strpos(rest, run);
+    res := res || left(rest, p - 1);
+    begin
+      res := res || convert_from(decode(replace(run, '%', ''), 'hex'), 'UTF8');
+    exception when others then
+      res := res || run;
+    end;
+    rest := substr(rest, p + char_length(run));
+  end loop;
+  return res || rest;
+end;
+$$;
+
 create function private.share_norm(t text) returns text
 language sql immutable
 set search_path = ''
 as $$
   select pg_catalog.btrim(pg_catalog.regexp_replace(
-    pg_catalog.translate(
-      pg_catalog.regexp_replace(normalize(coalesce(t, ''), nfkc), '[­؜᠎​-‏‪-‮⁠-⁤﻿]', '', 'g'),
+    pg_catalog.lower(pg_catalog.translate(
+      pg_catalog.regexp_replace(
+        normalize(private.share_unpct(t), nfkc),
+        U&'[\00AD\034F\061C\115F\1160\17B4\17B5\180B-\180F\200B-\200F\202A-\202E\2060-\206F\3164\FE00-\FE0F\FEFF\FFA0\FFF0-\FFF8\+0E0000-\+0E0FFF\+01BCA0-\+01BCA3\+01D173-\+01D17A\0300-\036F\0483-\0489\0591-\05BD\05BF\05C1\05C2\05C4\05C5\05C7\0610-\061A\064B-\065F\0670\06D6-\06DC\06DF-\06E4\06E7\06E8\06EA-\06ED\0711\0730-\074A\0900-\0903\093A-\093C\093E-\094F\0951-\0957\0962\0963\0E31\0E34-\0E3A\0E47-\0E4E\1AB0-\1AFF\1DC0-\1DFF\20D0-\20FF\302A-\302F\3099\309A\FE20-\FE2F]',
+        '', 'g'),
       U&'\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212',
-      pg_catalog.repeat('''', 6) || '""' || '------'),
+      pg_catalog.repeat('''', 6) || '""' || '------')),
     '([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+', ' ', 'g'));
 $$;
 
+revoke execute on function private.share_unpct(text) from public;
 revoke execute on function private.share_norm(text) from public;
 
+-- The strings of a snapshot with the key each sits under (an array of strings takes its parent's key). JSON keys are never text.
+create function private.share_strings(snap jsonb) returns table (k text, v text)
+language sql immutable
+set search_path = ''
+as $$
+  with recursive w (k, v) as (
+    select null::text, snap
+    union all
+    select coalesce(e.key, w.k), e.value
+    from w
+    cross join lateral (
+      select o.key, o.value from pg_catalog.jsonb_each(case when pg_catalog.jsonb_typeof(w.v) = 'object' then w.v else '{}'::jsonb end) as o
+      union all
+      select null::text, a.value from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(w.v) = 'array' then w.v else '[]'::jsonb end) as a
+    ) as e
+  )
+  select w.k, w.v #>> '{}' from w where pg_catalog.jsonb_typeof(w.v) = 'string';
+$$;
+
+-- The tokens of the names of a workspace's people or clients that a share link must not carry: every letter run of a name that
+-- is 3+ characters, and every run of them joined ("priyashah": what is left when a zero-width space sat between the words);
+-- never a word of the labels the link writes, never a stop word. Parts under 3 characters ("o" in "O'Neil") are not tokens.
+create function private.share_name_tokens(ws uuid, kind text) returns setof text
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  nm record;
+  parts text[];
+  a integer;
+  b integer;
+  tok text;
+begin
+  -- A loop, not one big query: as a query the planner priced it high enough to start JIT compilation (0.3 s a call).
+  for nm in select private.share_norm(n.name) as name
+            from (select c.name from public.clients c where c.workspace_id = ws and kind = 'client'
+                  union all
+                  select p.name from public.people p where p.workspace_id = ws and kind = 'person') as n loop
+    parts := array(select x from unnest(regexp_split_to_array(nm.name, '[^[:alpha:]]+')) as x
+                   where x <> '' and x not in ('the', 'and', 'for', 'ltd', 'inc', 'llc', 'plc'));
+    -- A name of one short word ("Li") is no name.
+    continue when char_length(array_to_string(parts, '')) < 3;
+    for a in 1 .. cardinality(parts) loop
+      for b in a .. cardinality(parts) loop
+        tok := array_to_string(parts[a:b], '');
+        if char_length(tok) >= 3 and tok not in ('team', 'member', 'client', 'hidden', 'email', 'amount') then
+          return next tok;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return;
+end;
+$$;
+
+revoke execute on function private.share_strings(jsonb) from public;
+revoke execute on function private.share_name_tokens(uuid, text) from public;
+
+-- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
+-- email in the message). Names are looked for token by token in the free-text values only (the keys below, the same list as the
+-- app's `SHARE_FREE_TEXT_KEYS`); emails and money in every string value; JSON keys never.
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
 language plpgsql stable
 set search_path = ''
 as $$
 declare
-  txt text;
-  nm record;
-  escaped text;
-  pat text;
-  parts text[];
-  alt text;
-  -- Everything below is matched on the NORMALISED text (`private.share_norm`), names normalised the same way, so every white
-  -- space is one space. Between the words of a name: one space or none (a zero-width space between two words is removed).
-  sep constant text := ' ?';
-  -- Around a name: the start or end, or a character that is not a letter or digit.
-  lb constant text := '(^|[^[:alnum:]])';
-  rb constant text := '($|[^[:alnum:]])';
+  -- The keys whose string values are free text (keep equal to SHARE_FREE_TEXT_KEYS in packages/db/src/share.ts).
+  free_keys constant text[] := array['actor', 'agreed_by', 'auto_note', 'body', 'breaks_if_removed', 'message', 'owner_text', 'source',
+    'statement', 'test', 'horizon', 'description', 'detail', 'domain', 'evidence', 'example', 'excerpt', 'expect', 'job_done',
+    'job_progress', 'job_situation', 'job_who', 'label', 'movedOn', 'name', 'note', 'notes', 'proposer_name', 'reason', 'review_note',
+    'resolution_note', 'root_cause', 'speaker', 'speakers', 'summary', 'target_goal', 'target_measure', 'target_now', 'text', 'title',
+    'tool', 'user_name', 'user_notes', 'why', 'why_problem', 'workspaceName'];
+  everything text;
+  free text;
 begin
   -- 1. The snapshot is the link's.
   if snap is null or jsonb_typeof(snap) <> 'object'
@@ -36325,12 +36426,18 @@ begin
      or snap -> 'toggles' -> 'financials' is distinct from to_jsonb(show_financials) then
     return 'The snapshot doesn''t match the link.';
   end if;
-  -- Keys are in the text too. Normalised: NFKC, invisible characters out, curly quotes straight, one space for any white space.
-  txt := private.share_norm(snap::text);
+  -- Every string value, normalised (the \x01 between them is no space and no letter, so nothing matches across two values),
+  -- and the free-text ones on their own.
+  select string_agg(private.share_norm(s.v), E'\x01'),
+         string_agg(private.share_norm(s.v), E'\x01') filter (where s.k = any (free_keys))
+    into everything, free
+    from private.share_strings(snap) as s;
+  everything := coalesce(everything, '');
+  free := coalesce(free, '');
 
-  -- 2. No email address, anywhere. The part before the @ ends in a letter, digit or one of _ % + - (so `roles.@busiest.headcount`,
-  -- a scenario's selector, is not one).
-  if txt ~* '[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}' then
+  -- 2. No email address, in any string value. The part before the @ ends in a letter, digit or one of _ % + - (so
+  -- `roles.@busiest.headcount`, a scenario's selector, is not one).
+  if everything ~* '[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}' then
     return 'The snapshot contains an email address.';
   end if;
 
@@ -36346,49 +36453,17 @@ begin
     return 'The snapshot contains evidence notes.';
   end if;
 
-  -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
-  -- are not checked (same floor as the app's `labelNames`).
-  for nm in select private.share_norm(c.name) as name from public.clients c
-            where c.workspace_id = ws and char_length(private.share_norm(c.name)) >= 3 loop
-    parts := array_remove(regexp_split_to_array(nm.name, ' '), '');
-    select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
-    pat := lb || escaped || rb;
-    if txt ~* pat then
-      return 'The snapshot names a client.';
-    end if;
-  end loop;
+  -- 5. Clients are always anonymised: no token of a client's name (3+ characters, any case, any separators) in free text.
+  if exists (select 1 from regexp_split_to_table(free, '[^[:alpha:]]+') as w (tok)
+              where w.tok in (select private.share_name_tokens(ws, 'client'))) then
+    return 'The snapshot names a client.';
+  end if;
 
-  -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
-  -- own. A first name alone is left to the app's check (it would refuse links over words like "Will" and "Mark").
-  if not show_people then
-    for nm in select private.share_norm(p.name) as name from public.people p
-              where p.workspace_id = ws and char_length(private.share_norm(p.name)) >= 3 loop
-      parts := array_remove(regexp_split_to_array(nm.name, ' '), '');
-      select string_agg(regexp_replace(w, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), sep) into escaped from unnest(parts) as w;
-      pat := lb || escaped || rb;
-      if txt ~* pat then
-        return 'The snapshot names a person.';
-      end if;
-      if array_length(parts, 1) > 1 and char_length(parts[array_length(parts, 1)]) >= 3 then
-        escaped := regexp_replace(parts[array_length(parts, 1)], '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g');
-        pat := lb || escaped || rb;
-        if txt ~* pat then
-          return 'The snapshot names a person.';
-        end if;
-      end if;
-    end loop;
-
-    -- 6b. A word of a person's name (3+ characters, first name or surname) right next to a "Team member N" label: that would
-    -- tie the label to the name, however the name was written.
-    select string_agg(distinct regexp_replace(x, '([.^$*+?()\[\]{}|\\-])', '\\\1', 'g'), '|') into alt
-      from (select unnest(regexp_split_to_array(private.share_norm(p.name), ' ')) as x
-              from public.people p where p.workspace_id = ws) as words
-      where char_length(x) >= 3;
-    if alt is not null and (
-         txt ~* ('(^|[^[:alnum:]])(' || alt || ') Team member [0-9]+([^0-9]|$)')
-      or txt ~* ('Team member [0-9]+ (' || alt || ')($|[^[:alnum:]])')) then
-      return 'The snapshot puts a person''s name next to a label.';
-    end if;
+  -- 6. People are labels unless People is on: the same for a person's name (first name, surname, any part), so a name
+  -- token can't survive next to a "Team member N" label either.
+  if not show_people and exists (select 1 from regexp_split_to_table(free, '[^[:alpha:]]+') as w (tok)
+                                  where w.tok in (select private.share_name_tokens(ws, 'person'))) then
+    return 'The snapshot names a person.';
   end if;
 
   -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
@@ -36400,7 +36475,9 @@ begin
     or jsonb_path_exists(snap, 'lax $.**.overhead_monthly')
     or jsonb_path_exists(snap, 'lax $.**.target_margin')
     or jsonb_path_exists(snap, 'lax $.**.path ? (@ like_regex "cost_rate$")')
-    or txt ~* ('[£$€][[:space:]]*[0-9]|[0-9][[:space:]]*[£€]|(GBP|USD|EUR|AUD|NZD|CAD)[[:space:]]*[0-9]|[0-9][[:space:]]*(k|m|bn)?[[:space:]]*(GBP|USD|EUR|AUD|NZD|CAD|pounds?|dollars?|euros?)([^a-z]|$)')) then
+    or everything ~* ('[£$€¥₹][[:space:]]*[0-9]|[0-9][[:space:]]*[£€¥₹]'
+      || '|(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]]*[0-9][0-9.,]*([[:space:]]*(k|m|bn))?([^a-z0-9]|$)'
+      || '|[0-9]([[:space:]]*(k|m|bn))?[[:space:]]*(gbp|usd|eur|aud|nzd|cad|pounds?|dollars?|euros?|quid|sterling)([^a-z]|$)')) then
     return 'The snapshot contains costs or margins.';
   end if;
 
@@ -36462,20 +36539,24 @@ begin
           and p.archived_at is null and not p.is_company)
       when 'issue' then exists (
         select 1 from public.issues i where i.id = new.target_id and i.workspace_id = new.workspace_id)
-        -- An issue or a solution of an archived process shows that process: refused like the process itself.
-        and not exists (
-          select 1 from public.processes p
-          where p.workspace_id = new.workspace_id and p.archived_at is not null
-            and (p.id = (select i.process_id from public.issues i where i.id = new.target_id)
-              or p.id in (select l.process_id from public.issue_links l where l.issue_id = new.target_id and l.process_id is not null)))
       when 'solution' then exists (
         select 1 from public.solutions s where s.id = new.target_id and s.workspace_id = new.workspace_id)
-        and not exists (
-          select 1 from public.solutions s join public.processes p on p.id = s.process_id
-          where s.id = new.target_id and p.archived_at is not null)
       else false end;
     if not ok then
       raise exception 'That isn''t in this workspace.' using errcode = '22023';
+    end if;
+    -- An issue or a solution of an archived process shows that process (every process an issue is on, its own or linked): refused
+    -- like the process itself, with its own message.
+    if new.kind in ('issue', 'solution') and (
+         (new.kind = 'issue' and exists (
+            select 1 from public.processes p
+            where p.workspace_id = new.workspace_id and p.archived_at is not null
+              and (p.id = (select i.process_id from public.issues i where i.id = new.target_id)
+                or p.id in (select l.process_id from public.issue_links l where l.issue_id = new.target_id and l.process_id is not null))))
+      or (new.kind = 'solution' and exists (
+            select 1 from public.solutions s join public.processes p on p.id = s.process_id
+            where s.id = new.target_id and p.archived_at is not null))) then
+      raise exception 'An archived process can''t be shared. Restore it first.' using errcode = '22023';
     end if;
   else
     -- 3. Update. A revoked link stays revoked: no change at all.
@@ -36641,7 +36722,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     RLS: owners, editors and agency admins only. Column-level grants: the token hash and the snapshot are never readable
 --     through the API; `mode` is not insertable (''view'' only until B4).
 --   * `private.share_snapshot_problem(...)`: the leak check, run by a BEFORE trigger on every insert and every snapshot change.
---   * `private.share_norm(text)`: the text those checks match on (NFKC, invisible characters out, straight quotes, one space for any white space).
+--   * `private.share_norm(text)`, `share_unpct(text)`, `share_strings(jsonb)`, `share_name_tokens(uuid, text)`: the text those checks match
+--     on (percent-decoded, NFKC, invisible characters and marks out, lower case, one space for any white space), the string values with
+--     their keys, and the tokens of the names in a workspace.
 --   * `private.share_links_before_write()` + trigger `share_links_before_write`: refuses API tokens, stamps the caller, checks
 --     the target belongs to the workspace, freezes the guarded columns, keeps revoked links revoked, runs the leak check.
 --   * `public.share_team_capacity(ws, show_people)`: `team_capacity`''s shape for a share link (labels or names, NO pay for anyone).
@@ -36653,11 +36736,13 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
 --   0. Latest applied versions; expect the latest to be 20261216000000 and nothing >= ''20261218000000'':
 --        select version from supabase_migrations.schema_migrations where version >= ''20261212000000'' order by 1;
---   1. Nothing created yet. Expect null x5:
+--   1. Nothing created yet. Expect null x9:
 --        select to_regclass(''public.share_links''), to_regprocedure(''public.open_share_link(text)''),
 --               to_regprocedure(''public.share_team_capacity(uuid, boolean)''),
 --               to_regprocedure(''private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)''),
---               to_regprocedure(''private.share_emails_ok(text[])'');
+--               to_regprocedure(''private.share_emails_ok(text[])''), to_regprocedure(''private.share_norm(text)''),
+--               to_regprocedure(''private.share_unpct(text)''), to_regprocedure(''private.share_strings(jsonb)''),
+--               to_regprocedure(''private.share_name_tokens(uuid, text)'');
 --   2. Helpers exist. Expect 3 rows: can_edit_workspace, team_capacity, can_read_workspace in public:
 --        select p.proname, n.nspname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --        where n.nspname = ''public'' and p.proname in (''can_edit_workspace'', ''team_capacity'', ''can_read_workspace'');
@@ -36690,8 +36775,15 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        has_function_privilege(''anon'', ''public.open_share_link(text)'', ''execute''), (''authenticated'', same),
 --        (''anon'', ''public.share_team_capacity(uuid, boolean)'', ''execute''), (''authenticated'', same),
 --        (''authenticated'', ''private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'', ''execute''), (''anon'', same).
---   4. prosecdef and proconfig: open_share_link t, share_team_capacity t, share_links_before_write t, share_snapshot_problem f;
---      all {search_path=""} (compare with array[''search_path=""'']).
+--      And the four helpers (share_norm(text), share_unpct(text), share_strings(jsonb), share_name_tokens(uuid, text)), each for
+--      anon and for authenticated. Expect f x8:
+--        select has_function_privilege(r, f, ''execute'') from unnest(array[''anon'', ''authenticated'']) r,
+--          unnest(array[''private.share_norm(text)'', ''private.share_unpct(text)'', ''private.share_strings(jsonb)'',
+--                       ''private.share_name_tokens(uuid, text)'']) f;
+--   4. prosecdef and proconfig: open_share_link t, share_team_capacity t, share_links_before_write t, share_snapshot_problem f,
+--      and share_norm, share_unpct, share_strings, share_name_tokens f; all {search_path=""} (compare with array[''search_path=""'']):
+--        select proname, prosecdef, proconfig = array[''search_path=""''] from pg_proc
+--        where pronamespace in (''public''::regnamespace, ''private''::regnamespace) and proname like any (array[''share\_%'', ''open\_share\_link'']);
 --   5. Smoke test, ROLLED BACK, as an agency admin on Northbeam (production Northbeam has no owner):
 --        begin; set local role authenticated;
 --        select set_config(''request.jwt.claims'', ''{"sub":"<uuid>","role":"authenticated","app_metadata":{"agency_admin":true}}'', true);
@@ -36707,7 +36799,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --   drop table if exists public.share_links;
 --   drop function if exists private.share_links_before_write();
 --   drop function if exists private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean);
+--   drop function if exists private.share_name_tokens(uuid, text);
+--   drop function if exists private.share_strings(jsonb);
 --   drop function if exists private.share_norm(text);
+--   drop function if exists private.share_unpct(text);
 --   drop function if exists private.share_emails_ok(text[]);
 --   delete from supabase_migrations.schema_migrations where version = ''20261218000000'';
 --   commit;
@@ -36792,45 +36887,132 @@ grant update (label, snapshot, engine_version, revoked_at) on public.share_links
 -- 3. The leak check
 -- ---------------------------------------------------------------------------
 
--- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
--- email in the message). Full names only: the app''s twin (`shareSnapshotLeaks`) also checks unique first names, which this
--- cannot do without refusing links over common words ("Will", "Mark").
--- The text a share link''s checks match on, in one form: Unicode NFKC (a no-break space or a full-width letter becomes its plain
--- form), invisible format characters removed (zero-width space, soft hyphen, bidi marks), curly quotes and apostrophes and the
--- hyphen variants straightened, and every run of white space (or a JSON escape of one: \n, \t,   written out) one space.
--- The app''s `normaliseView` (packages/db/src/share-text.ts) does the same, so the two agree on what a name or an amount looks like.
+-- The text a share link''s checks match on, in one form (the app''s `normaliseView`, packages/db/src/share-text.ts, is its twin):
+-- best-effort percent-decoding, Unicode NFKC, every default-ignorable character (zero-width space and joiners, soft hyphen,
+-- combining grapheme joiner, variation selectors, Hangul fillers) and every combining mark removed, curly quotes and apostrophes
+-- and the hyphen variants straightened, lower case, and every run of white space (or a JSON escape of one written out as text:
+-- \n, \t,  ) one space. The list of marks and ignorables is spelled out (Postgres has no Unicode property classes).
+
+-- `%20`, `%C3%A9`: a run of %XX that is valid UTF-8 becomes its characters; anything else stays as written.
+create function private.share_unpct(t text) returns text
+language plpgsql immutable
+set search_path = ''''
+as $$
+declare
+  rest text := coalesce(t, '''');
+  res text := '''';
+  run text;
+  p integer;
+begin
+  loop
+    run := substring(rest from ''((?:%[0-9A-Fa-f]{2})+)'');
+    exit when run is null;
+    p := strpos(rest, run);
+    res := res || left(rest, p - 1);
+    begin
+      res := res || convert_from(decode(replace(run, ''%'', ''''), ''hex''), ''UTF8'');
+    exception when others then
+      res := res || run;
+    end;
+    rest := substr(rest, p + char_length(run));
+  end loop;
+  return res || rest;
+end;
+$$;
+
 create function private.share_norm(t text) returns text
 language sql immutable
 set search_path = ''''
 as $$
   select pg_catalog.btrim(pg_catalog.regexp_replace(
-    pg_catalog.translate(
-      pg_catalog.regexp_replace(normalize(coalesce(t, ''''), nfkc), ''[­؜᠎​-‏‪-‮⁠-⁤﻿]'', '''', ''g''),
+    pg_catalog.lower(pg_catalog.translate(
+      pg_catalog.regexp_replace(
+        normalize(private.share_unpct(t), nfkc),
+        U&''[\00AD\034F\061C\115F\1160\17B4\17B5\180B-\180F\200B-\200F\202A-\202E\2060-\206F\3164\FE00-\FE0F\FEFF\FFA0\FFF0-\FFF8\+0E0000-\+0E0FFF\+01BCA0-\+01BCA3\+01D173-\+01D17A\0300-\036F\0483-\0489\0591-\05BD\05BF\05C1\05C2\05C4\05C5\05C7\0610-\061A\064B-\065F\0670\06D6-\06DC\06DF-\06E4\06E7\06E8\06EA-\06ED\0711\0730-\074A\0900-\0903\093A-\093C\093E-\094F\0951-\0957\0962\0963\0E31\0E34-\0E3A\0E47-\0E4E\1AB0-\1AFF\1DC0-\1DFF\20D0-\20FF\302A-\302F\3099\309A\FE20-\FE2F]'',
+        '''', ''g''),
       U&''\2019\2018\02BC\2032\0060\00B4\201C\201D\2010\2011\2012\2013\2014\2212'',
-      pg_catalog.repeat('''''''', 6) || ''""'' || ''------''),
+      pg_catalog.repeat('''''''', 6) || ''""'' || ''------'')),
     ''([[:space:]]|\\[nrtbf]|\\u[0-9a-fA-F]{4})+'', '' '', ''g''));
 $$;
 
+revoke execute on function private.share_unpct(text) from public;
 revoke execute on function private.share_norm(text) from public;
 
+-- The strings of a snapshot with the key each sits under (an array of strings takes its parent''s key). JSON keys are never text.
+create function private.share_strings(snap jsonb) returns table (k text, v text)
+language sql immutable
+set search_path = ''''
+as $$
+  with recursive w (k, v) as (
+    select null::text, snap
+    union all
+    select coalesce(e.key, w.k), e.value
+    from w
+    cross join lateral (
+      select o.key, o.value from pg_catalog.jsonb_each(case when pg_catalog.jsonb_typeof(w.v) = ''object'' then w.v else ''{}''::jsonb end) as o
+      union all
+      select null::text, a.value from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(w.v) = ''array'' then w.v else ''[]''::jsonb end) as a
+    ) as e
+  )
+  select w.k, w.v #>> ''{}'' from w where pg_catalog.jsonb_typeof(w.v) = ''string'';
+$$;
+
+-- The tokens of the names of a workspace''s people or clients that a share link must not carry: every letter run of a name that
+-- is 3+ characters, and every run of them joined ("priyashah": what is left when a zero-width space sat between the words);
+-- never a word of the labels the link writes, never a stop word. Parts under 3 characters ("o" in "O''Neil") are not tokens.
+create function private.share_name_tokens(ws uuid, kind text) returns setof text
+language plpgsql stable
+set search_path = ''''
+as $$
+declare
+  nm record;
+  parts text[];
+  a integer;
+  b integer;
+  tok text;
+begin
+  -- A loop, not one big query: as a query the planner priced it high enough to start JIT compilation (0.3 s a call).
+  for nm in select private.share_norm(n.name) as name
+            from (select c.name from public.clients c where c.workspace_id = ws and kind = ''client''
+                  union all
+                  select p.name from public.people p where p.workspace_id = ws and kind = ''person'') as n loop
+    parts := array(select x from unnest(regexp_split_to_array(nm.name, ''[^[:alpha:]]+'')) as x
+                   where x <> '''' and x not in (''the'', ''and'', ''for'', ''ltd'', ''inc'', ''llc'', ''plc''));
+    -- A name of one short word ("Li") is no name.
+    continue when char_length(array_to_string(parts, '''')) < 3;
+    for a in 1 .. cardinality(parts) loop
+      for b in a .. cardinality(parts) loop
+        tok := array_to_string(parts[a:b], '''');
+        if char_length(tok) >= 3 and tok not in (''team'', ''member'', ''client'', ''hidden'', ''email'', ''amount'') then
+          return next tok;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+  return;
+end;
+$$;
+
+revoke execute on function private.share_strings(jsonb) from public;
+revoke execute on function private.share_name_tokens(uuid, text) from public;
+
+-- Returns null when the snapshot is clean, else a plain message naming WHAT leaked, never the leaked value (no name, no
+-- email in the message). Names are looked for token by token in the free-text values only (the keys below, the same list as the
+-- app''s `SHARE_FREE_TEXT_KEYS`); emails and money in every string value; JSON keys never.
 create function private.share_snapshot_problem(ws uuid, kind text, snap jsonb, show_people boolean, show_financials boolean)
 returns text
 language plpgsql stable
 set search_path = ''''
 as $$
 declare
-  txt text;
-  nm record;
-  escaped text;
-  pat text;
-  parts text[];
-  alt text;
-  -- Everything below is matched on the NORMALISED text (`private.share_norm`), names normalised the same way, so every white
-  -- space is one space. Between the words of a name: one space or none (a zero-width space between two words is removed).
-  sep constant text := '' ?'';
-  -- Around a name: the start or end, or a character that is not a letter or digit.
-  lb constant text := ''(^|[^[:alnum:]])'';
-  rb constant text := ''($|[^[:alnum:]])'';
+  -- The keys whose string values are free text (keep equal to SHARE_FREE_TEXT_KEYS in packages/db/src/share.ts).
+  free_keys constant text[] := array[''actor'', ''agreed_by'', ''auto_note'', ''body'', ''breaks_if_removed'', ''message'', ''owner_text'', ''source'',
+    ''statement'', ''test'', ''horizon'', ''description'', ''detail'', ''domain'', ''evidence'', ''example'', ''excerpt'', ''expect'', ''job_done'',
+    ''job_progress'', ''job_situation'', ''job_who'', ''label'', ''movedOn'', ''name'', ''note'', ''notes'', ''proposer_name'', ''reason'', ''review_note'',
+    ''resolution_note'', ''root_cause'', ''speaker'', ''speakers'', ''summary'', ''target_goal'', ''target_measure'', ''target_now'', ''text'', ''title'',
+    ''tool'', ''user_name'', ''user_notes'', ''why'', ''why_problem'', ''workspaceName''];
+  everything text;
+  free text;
 begin
   -- 1. The snapshot is the link''s.
   if snap is null or jsonb_typeof(snap) <> ''object''
@@ -36841,12 +37023,18 @@ begin
      or snap -> ''toggles'' -> ''financials'' is distinct from to_jsonb(show_financials) then
     return ''The snapshot doesn''''t match the link.'';
   end if;
-  -- Keys are in the text too. Normalised: NFKC, invisible characters out, curly quotes straight, one space for any white space.
-  txt := private.share_norm(snap::text);
+  -- Every string value, normalised (the \x01 between them is no space and no letter, so nothing matches across two values),
+  -- and the free-text ones on their own.
+  select string_agg(private.share_norm(s.v), E''\x01''),
+         string_agg(private.share_norm(s.v), E''\x01'') filter (where s.k = any (free_keys))
+    into everything, free
+    from private.share_strings(snap) as s;
+  everything := coalesce(everything, '''');
+  free := coalesce(free, '''');
 
-  -- 2. No email address, anywhere. The part before the @ ends in a letter, digit or one of _ % + - (so `roles.@busiest.headcount`,
-  -- a scenario''s selector, is not one).
-  if txt ~* ''[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}'' then
+  -- 2. No email address, in any string value. The part before the @ ends in a letter, digit or one of _ % + - (so
+  -- `roles.@busiest.headcount`, a scenario''s selector, is not one).
+  if everything ~* ''[a-z0-9._%+-]*[a-z0-9_%+-]@[a-z0-9.-]+\.[a-z]{2,}'' then
     return ''The snapshot contains an email address.'';
   end if;
 
@@ -36862,49 +37050,17 @@ begin
     return ''The snapshot contains evidence notes.'';
   end if;
 
-  -- 5. Clients are always anonymised: the whole name, any case, any white space between its words. Names under 3 characters
-  -- are not checked (same floor as the app''s `labelNames`).
-  for nm in select private.share_norm(c.name) as name from public.clients c
-            where c.workspace_id = ws and char_length(private.share_norm(c.name)) >= 3 loop
-    parts := array_remove(regexp_split_to_array(nm.name, '' ''), '''');
-    select string_agg(regexp_replace(w, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), sep) into escaped from unnest(parts) as w;
-    pat := lb || escaped || rb;
-    if txt ~* pat then
-      return ''The snapshot names a client.'';
-    end if;
-  end loop;
+  -- 5. Clients are always anonymised: no token of a client''s name (3+ characters, any case, any separators) in free text.
+  if exists (select 1 from regexp_split_to_table(free, ''[^[:alpha:]]+'') as w (tok)
+              where w.tok in (select private.share_name_tokens(ws, ''client''))) then
+    return ''The snapshot names a client.'';
+  end if;
 
-  -- 6. People are labels unless People is on: the full name (any case, any white space), and a surname of 3+ characters on its
-  -- own. A first name alone is left to the app''s check (it would refuse links over words like "Will" and "Mark").
-  if not show_people then
-    for nm in select private.share_norm(p.name) as name from public.people p
-              where p.workspace_id = ws and char_length(private.share_norm(p.name)) >= 3 loop
-      parts := array_remove(regexp_split_to_array(nm.name, '' ''), '''');
-      select string_agg(regexp_replace(w, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), sep) into escaped from unnest(parts) as w;
-      pat := lb || escaped || rb;
-      if txt ~* pat then
-        return ''The snapshot names a person.'';
-      end if;
-      if array_length(parts, 1) > 1 and char_length(parts[array_length(parts, 1)]) >= 3 then
-        escaped := regexp_replace(parts[array_length(parts, 1)], ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g'');
-        pat := lb || escaped || rb;
-        if txt ~* pat then
-          return ''The snapshot names a person.'';
-        end if;
-      end if;
-    end loop;
-
-    -- 6b. A word of a person''s name (3+ characters, first name or surname) right next to a "Team member N" label: that would
-    -- tie the label to the name, however the name was written.
-    select string_agg(distinct regexp_replace(x, ''([.^$*+?()\[\]{}|\\-])'', ''\\\1'', ''g''), ''|'') into alt
-      from (select unnest(regexp_split_to_array(private.share_norm(p.name), '' '')) as x
-              from public.people p where p.workspace_id = ws) as words
-      where char_length(x) >= 3;
-    if alt is not null and (
-         txt ~* (''(^|[^[:alnum:]])('' || alt || '') Team member [0-9]+([^0-9]|$)'')
-      or txt ~* (''Team member [0-9]+ ('' || alt || '')($|[^[:alnum:]])'')) then
-      return ''The snapshot puts a person''''s name next to a label.'';
-    end if;
+  -- 6. People are labels unless People is on: the same for a person''s name (first name, surname, any part), so a name
+  -- token can''t survive next to a "Team member N" label either.
+  if not show_people and exists (select 1 from regexp_split_to_table(free, ''[^[:alpha:]]+'') as w (tok)
+                                  where w.tok in (select private.share_name_tokens(ws, ''person''))) then
+    return ''The snapshot names a person.'';
   end if;
 
   -- 7. Financials off: no costs, margins or overhead. A number stored as a string counts; so does a role-rate change inside a
@@ -36916,7 +37072,9 @@ begin
     or jsonb_path_exists(snap, ''lax $.**.overhead_monthly'')
     or jsonb_path_exists(snap, ''lax $.**.target_margin'')
     or jsonb_path_exists(snap, ''lax $.**.path ? (@ like_regex "cost_rate$")'')
-    or txt ~* (''[£$€][[:space:]]*[0-9]|[0-9][[:space:]]*[£€]|(GBP|USD|EUR|AUD|NZD|CAD)[[:space:]]*[0-9]|[0-9][[:space:]]*(k|m|bn)?[[:space:]]*(GBP|USD|EUR|AUD|NZD|CAD|pounds?|dollars?|euros?)([^a-z]|$)'')) then
+    or everything ~* (''[£$€¥₹][[:space:]]*[0-9]|[0-9][[:space:]]*[£€¥₹]''
+      || ''|(gbp|usd|eur|aud|nzd|cad|rs\.?)[[:space:]]*[0-9][0-9.,]*([[:space:]]*(k|m|bn))?([^a-z0-9]|$)''
+      || ''|[0-9]([[:space:]]*(k|m|bn))?[[:space:]]*(gbp|usd|eur|aud|nzd|cad|pounds?|dollars?|euros?|quid|sterling)([^a-z]|$)'')) then
     return ''The snapshot contains costs or margins.'';
   end if;
 
@@ -36978,20 +37136,24 @@ begin
           and p.archived_at is null and not p.is_company)
       when ''issue'' then exists (
         select 1 from public.issues i where i.id = new.target_id and i.workspace_id = new.workspace_id)
-        -- An issue or a solution of an archived process shows that process: refused like the process itself.
-        and not exists (
-          select 1 from public.processes p
-          where p.workspace_id = new.workspace_id and p.archived_at is not null
-            and (p.id = (select i.process_id from public.issues i where i.id = new.target_id)
-              or p.id in (select l.process_id from public.issue_links l where l.issue_id = new.target_id and l.process_id is not null)))
       when ''solution'' then exists (
         select 1 from public.solutions s where s.id = new.target_id and s.workspace_id = new.workspace_id)
-        and not exists (
-          select 1 from public.solutions s join public.processes p on p.id = s.process_id
-          where s.id = new.target_id and p.archived_at is not null)
       else false end;
     if not ok then
       raise exception ''That isn''''t in this workspace.'' using errcode = ''22023'';
+    end if;
+    -- An issue or a solution of an archived process shows that process (every process an issue is on, its own or linked): refused
+    -- like the process itself, with its own message.
+    if new.kind in (''issue'', ''solution'') and (
+         (new.kind = ''issue'' and exists (
+            select 1 from public.processes p
+            where p.workspace_id = new.workspace_id and p.archived_at is not null
+              and (p.id = (select i.process_id from public.issues i where i.id = new.target_id)
+                or p.id in (select l.process_id from public.issue_links l where l.issue_id = new.target_id and l.process_id is not null))))
+      or (new.kind = ''solution'' and exists (
+            select 1 from public.solutions s join public.processes p on p.id = s.process_id
+            where s.id = new.target_id and p.archived_at is not null))) then
+      raise exception ''An archived process can''''t be shared. Restore it first.'' using errcode = ''22023'';
     end if;
   else
     -- 3. Update. A revoked link stays revoked: no change at all.
