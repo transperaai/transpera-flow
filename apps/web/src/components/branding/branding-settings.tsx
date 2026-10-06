@@ -235,7 +235,7 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
     shownLogo ? (
       <span aria-hidden className={`grid shrink-0 place-items-center overflow-hidden rounded-md bg-logo-tile ring-1 ring-line ${size === "sm" ? "size-8" : "size-24"}`}>
         {/* eslint-disable-next-line @next/next/no-img-element -- a small public logo; no optimiser, no remotePatterns */}
-        <img src={shownLogo} alt="" className="size-full object-contain p-0.5" onError={() => setBroken(shownLogo)} />
+        <img src={shownLogo} alt="" decoding="async" className="size-full object-contain p-0.5" onError={() => setBroken(shownLogo)} />
       </span>
     ) : (
       <span aria-hidden className={`grid shrink-0 place-items-center rounded-md bg-accent font-display font-bold text-accent-fg ${size === "sm" ? "size-8 text-sm" : "size-24 text-3xl"}`}>

@@ -107,6 +107,11 @@ describe("the accent colour", () => {
     const { page } = await mount({ mode: "live", branding: { accent: "#ffff00" } });
     await expect.poll(() => page.getByText(/Too light to read on a white page/).count()).toBe(1);
     expect(await page.getByText(/This saved colour isn't being used/).count()).toBe(1);
+    // The dark readout and preview agree with the shell: a failing light accent gives the default dark accent too.
+    expect(await page.locator("[data-dark-readout]").innerText()).toBe("Dark theme (automatic): #00b8db, 8.4:1 on the page. Passes.");
+    expect(await page.evaluate(() => window.setBrandStyle({ accent: "#ffff00" }))).toBeNull();
+    const darkPanel = page.getByRole("group", { name: "Dark theme preview" });
+    expect(await darkPanel.evaluate((el) => getComputedStyle(el).getPropertyValue("--accent").trim())).toBe("#00b8db");
     await page.getByRole("button", { name: /^Use #[0-9a-f]{6}$/ }).click();
     await expect.poll(async () => (await calls(page)).at(-1)).toEqual(["accent", "light", "#ffff00", expect.stringMatching(/^#[0-9a-f]{6}$/)]);
     await page.close();
@@ -217,8 +222,34 @@ describe("the injected style", () => {
     expect(await token(page, "--accent")).toBe("#4cc3e0");
     await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));
     // A stored colour that fails contrast is not applied at all.
-    expect(await page.evaluate(() => window.setBrandStyle({ accent: "#ffff00", accent_dark: "#000080" }))).toMatch(/^@media/);
+    expect(await page.evaluate(() => window.setBrandStyle({ accent: "#ffff00", accent_dark: "#000080" }))).toBeNull();
     expect(await token(page, "--accent")).toBe("oklch(0.52 0.105 223.128)");
+    await page.close();
+  }, 60_000);
+});
+
+describe("the Transpera Flow mark", () => {
+  it("is not recoloured by the client's accent, in either theme", async () => {
+    const { page, errors } = await open();
+    await page.evaluate(() => window.mountMark());
+    const mark = page.locator("[data-transpera-mark]");
+    await mark.waitFor({ state: "attached" });
+    const image = () => mark.evaluate((el) => getComputedStyle(el).backgroundImage);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.evaluate(() => window.setBrandStyle(null));
+      const before = await image();
+      expect(before).toContain("conic-gradient");
+      await page.evaluate(() => window.setBrandStyle({ accent: "#7a1fa2", accent_dark: "#d9a8f0" }));
+      expect(await token(page, "--accent")).not.toBe(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--brand-mark").trim()));
+      expect(await image(), scheme).toBe(before);
+    }
+    // And it is the brand teal-blue of each theme, as before.
+    await page.emulateMedia({ colorScheme: "light" });
+    expect(await token(page, "--brand-mark")).toBe("oklch(0.52 0.105 223.128)");
+    await page.emulateMedia({ colorScheme: "dark" });
+    expect(await token(page, "--brand-mark")).toBe("oklch(0.715 0.143 215.221)");
+    expect(errors).toEqual([]);
     await page.close();
   }, 60_000);
 });

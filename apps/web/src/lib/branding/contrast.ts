@@ -175,10 +175,18 @@ function nearestPassing(l0: number, c: number, h: number, theme: Theme, fromStep
   return theme === "light" ? "#000000" : WHITE;
 }
 
+/** The order a failure is reported in: the page first, then the surfaces and uses that are further from it. */
+const REPORT_ORDER: Pair[] = ["bg", "panel", "panel2", "soft", "fg"];
+
+/**
+ * Passes when every pair reaches MIN_CONTRAST (`worst` is then the lowest ratio). When it fails, `against` is the first
+ * failing pair in REPORT_ORDER and `worst` is that pair's own ratio, so a message can name the surface and quote its number.
+ */
 export function checkAccent(accent: Hex, theme: Theme): AccentVerdict {
-  const worst = accentChecks(accent, theme)[0]!;
-  if (worst.ratio >= MIN_CONTRAST) return { ok: true, worst: worst.ratio };
-  return { ok: false, worst: worst.ratio, against: worst.pair, suggestion: suggestAccent(accent, theme) };
+  const checks = accentChecks(accent, theme);
+  if (checks[0]!.ratio >= MIN_CONTRAST) return { ok: true, worst: checks[0]!.ratio };
+  const failing = checks.filter((c) => c.ratio < MIN_CONTRAST).sort((a, b) => REPORT_ORDER.indexOf(a.pair) - REPORT_ORDER.indexOf(b.pair))[0]!;
+  return { ok: false, worst: failing.ratio, against: failing.pair, suggestion: suggestAccent(accent, theme) };
 }
 
 /** The nearest passing colour: same hue (and chroma where sRGB allows), lightness moved darker (light) or lighter (dark). */

@@ -24,14 +24,16 @@ export function readBranding(raw: unknown, workspaceId: string): Branding {
 
 /**
  * What the shell applies: per theme, the three tokens, or null to keep the defaults. Re-checks contrast (the render-time
- * guard): a stored accent that fails is ignored for that theme, whatever wrote it. The dark theme uses `accentDark` if set
- * and passing, else the accent's derived dark shade, else null.
+ * guard): a stored accent that fails is ignored, whatever wrote it, and so is the dark shade that would come from it
+ * (Settings shows the same). The dark theme uses `accentDark` if set and passing, else the derived dark shade of a light
+ * accent that passes, else null.
  */
 export function resolveBranding(b: Branding): { light: AccentTokens | null; dark: AccentTokens | null } {
   const light = b.accent && checkAccent(b.accent, "light").ok ? accentTokens(b.accent, "light") : null;
   let dark: AccentTokens | null = null;
   if (b.accentDark && checkAccent(b.accentDark, "dark").ok) dark = accentTokens(b.accentDark, "dark");
-  else if (b.accent) dark = accentTokens(deriveDarkAccent(b.accent), "dark");
+  // Derived only from a light accent that passes: a failing one is ignored in both themes, so the page and Settings agree.
+  else if (light && b.accent) dark = accentTokens(deriveDarkAccent(b.accent), "dark");
   return { light, dark };
 }
 
@@ -70,6 +72,12 @@ export function failureMessage(v: Extract<AccentVerdict, { ok: false }>, theme: 
   const needs = `${formatRatio(v.worst, false)}, and text needs 4.5:1`;
   const fix = `Try ${v.suggestion}, the nearest ${shade} shade.`;
   if (v.against === "fg") return `Button text can't be read on this colour: ${needs}. ${fix}`;
-  if (theme === "light") return `Too light to read on a white page: ${needs}. ${fix}`;
-  return `Too dark to read on the dark page: ${needs}. ${fix}`;
+  const tone = theme === "light" ? "light" : "dark";
+  const where =
+    v.against === "soft"
+      ? "on its own highlight tint (count badges)"
+      : v.against === "panel2"
+        ? theme === "light" ? "on grey panels" : "on dark grey panels"
+        : theme === "light" ? "on a white page" : "on the dark page";
+  return `Too ${tone} to read ${where}: ${needs}. ${fix}`;
 }

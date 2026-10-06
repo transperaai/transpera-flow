@@ -4,6 +4,7 @@
 
 import { createRoot, type Root } from "react-dom/client";
 import { BrandingSettings } from "@/components/branding/branding-settings";
+import { TransperaMark } from "@/components/shell/transpera-mark";
 import { WorkspaceSwitcher } from "@/components/shell/workspace-switcher";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { brandingCss, readBranding, type Branding } from "@/lib/branding/branding";
@@ -14,6 +15,7 @@ declare global {
     /** Mount (or, with null, unmount) the layout's `<style data-brand>` for this stored branding. */
     setBrandStyle: (raw: unknown | null) => string | null;
     mountSwitcher: (logo: string | null) => void;
+    mountMark: () => void;
     calls: unknown[][];
   }
 }
@@ -69,6 +71,8 @@ window.setBrandStyle = (raw) => {
   styleRoot.render(css ? <style data-brand="">{css}</style> : null);
   return css;
 };
+
+window.mountMark = () => mountInto(<TransperaMark />);
 
 window.mountSwitcher = (logo) =>
   mountInto(
