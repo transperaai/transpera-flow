@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { reserveAiRun, saveAiAnalysis, setFindingStatus, storeProposedFindings, type ProposedFinding } from "@transpera-flow/db";
+import { payFreeIssueFields, reserveAiRun, saveAiAnalysis, setFindingStatus, storeProposedFindings, type ProposedFinding } from "@transpera-flow/db";
 import { generateApiToken, type McpHandlerOptions } from "../src";
 import { call, connect, signJwt } from "./helpers";
 
@@ -205,7 +205,8 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
   it("supersedes, run by run, the proposals a later run on the same version didn't make again, and proposes one again", async () => {
     const revision = (await one("select live_revision_id from processes where id = $1", [ids.process])).live_revision_id as string;
     const proposal = (aiKey: string, title: string): ProposedFinding => ({ aiKey, processId: ids.process, stepId: null, rating: "bad", type: "delay", title, evidence: "Work waits.", why: "Clients wait.", facts: [], personLabels: {} });
-    const A = proposal("ai:insight:aaaaaaaaaaa1", "Proposals wait for one person");
+    const [maya, rosa] = [randomUUID(), randomUUID()];
+    const A = { ...proposal("ai:insight:aaaaaaaaaaa1", "Proposals wait for one person"), personLabels: { "Team member A": maya } };
     const B = proposal("ai:insight:bbbbbbbbbbb2", "Only one strategist can price work");
     const run = async (findings: ProposedFinding[]) => {
       // One run a minute per process: age the earlier runs, as a minute passing would.
@@ -240,10 +241,16 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
 
     const first = await run([A, B]);
     expect(first.out).toEqual({ added: 2, renewed: 0, superseded: 0 });
+    // What the run wrote is stored with the labels its text uses (B1 2b).
+    const labelsOf = async (key: string) => (await one("select person_labels from findings where workspace_id = $1 and ai_key = $2", [ids.ws, key])).person_labels;
+    expect(await labelsOf(A.aiKey)).toEqual({ "Team member A": maya });
+    expect(await labelsOf(B.aiKey)).toEqual({});
     // The same version again: the analysis keeps its id, the run is new, and B (not proposed again) is superseded.
-    const second = await run([A]);
+    // A finding proposed again gets the new run's map with its new text.
+    const second = await run([{ ...A, personLabels: { "Team member B": rosa } }]);
     expect(second.analysisId).toBe(first.analysisId);
     expect(second.out).toEqual({ added: 0, renewed: 1, superseded: 1 });
+    expect(await labelsOf(A.aiKey)).toEqual({ "Team member B": rosa });
     let now = await status();
     expect(now[A.aiKey]).toMatchObject({ status: "proposed", run_id: second.runId });
     expect(now[B.aiKey]).toMatchObject({ status: "superseded", run_id: first.runId });
@@ -316,4 +323,108 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     const own = await call<{ findings: unknown[] }>(mcp, "list_findings", {});
     expect(own).toMatchObject({ ok: true, data: { findings: [] } });
   });
+
+  it("names AI text per reader over the connector: names for an editor, a member's own name and 'A team member' for the rest, never another person's name (B1 2b)", async () => {
+    const tag = randomUUID().slice(0, 8);
+    const maya = (await one("select id from people where workspace_id = $1 and name = 'Maya Collins'", [ids.ws])).id as string;
+    const rosa = (await one("insert into people (workspace_id, name, fte) values ($1, 'Rosa Diaz', 1) returning id", [ids.ws])).id as string;
+    const [linked, unlinked] = [randomUUID(), randomUUID()];
+    await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [linked, `f-linked-${tag}@example.com`, unlinked, `f-unlinked-${tag}@example.com`]);
+    await admin.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'member', $3), ($1, $4, 'member', null)", [ids.ws, linked, maya, unlinked]);
+    const [linkedToken, unlinkedToken] = [await apiToken(linked), await apiToken(unlinked)];
+
+    // An analysis and an AI finding the app saved with labels: A is Maya, B is Rosa.
+    const labels = JSON.stringify({ "Team member A": maya, "Team member B": rosa });
+    const revision = (await one("select live_revision_id from processes where id = $1", [ids.process])).live_revision_id as string;
+    await admin.query("begin");
+    await admin.query("set local session_replication_role = replica");
+    const run = (await admin.query("insert into ai_runs (workspace_id, process_id, trigger, user_id, user_name) values ($1, $2, 'manual', $3, 'Ed Itor') returning id", [ids.ws, ids.process, ids.editor])).rows[0].id as string;
+    const analysis = (
+      await admin.query(
+        `insert into ai_analyses (workspace_id, process_id, revision_id, status, trigger, summary, review, input_hash, run_id, created_by, person_labels)
+         values ($1, $2, $3, 'ok', 'manual', $4, $5, 'h', $6, $7, $8)
+         on conflict (revision_id) do update set summary = excluded.summary, review = excluded.review, run_id = excluded.run_id, created_by = excluded.created_by,
+           person_labels = excluded.person_labels, updated_at = now()
+         returning id`,
+        [
+          ids.ws, ids.process, revision,
+          JSON.stringify(["Team member A is overloaded. Team member B covers when Team member A is away."]),
+          JSON.stringify([{ step: "job", level: "warn", text: "Team member B owns the job." }]),
+          run, ids.editor, labels,
+        ],
+      )
+    ).rows[0].id as string;
+    const finding = (
+      await admin.query(
+        `insert into findings (workspace_id, process_id, origin, status, rating, type, title, evidence, why, facts, ai_key, analysis_id, run_id, person_labels)
+         values ($1, $2, 'ai', 'proposed', 'bad', 'capacity', 'Team member A carries the line', 'Team member B reviews it.', 'Team member A is the only one who can price.', $3, 'ai:insight:222222222222', $4, $5, $6) returning id`,
+        [ids.ws, ids.process, JSON.stringify([{ kind: "fact", key: "capacity:person:x", text: "Team member A works 4 h/wk overtime." }]), analysis, run, labels],
+      )
+    ).rows[0].id as string;
+    await admin.query("commit");
+
+    const read = async (token: string) => {
+      const mcp = await connect(token, options);
+      const found = await call<{ findings: { id: string; title: string; evidence: string; why: string; rests_on: { text: string }[] }[] }>(mcp, "list_findings", { status: ["proposed"] });
+      const analysed = await call<{ analysis: { read: string[]; review: { text: string }[] } }>(mcp, "get_analysis", { process: "Sales" });
+      expect(found.ok, JSON.stringify(found)).toBe(true);
+      expect(analysed.ok, JSON.stringify(analysed)).toBe(true);
+      return { finding: found.data.findings.find((f) => f.id === finding)!, analysis: analysed.data.analysis, text: JSON.stringify([found, analysed]) };
+    };
+
+    // An editor sees both people as they are.
+    const asEditor = await read(tokens.editor);
+    expect(asEditor.finding).toMatchObject({ title: "Maya Collins carries the line", evidence: "Rosa Diaz reviews it.", why: "Maya Collins is the only one who can price." });
+    expect(asEditor.finding.rests_on[0]!.text).toBe("Maya Collins works 4 h/wk overtime.");
+    expect(asEditor.analysis.read).toEqual(["Maya Collins is overloaded. Rosa Diaz covers when Maya Collins is away."]);
+    expect(asEditor.analysis.review[0]!.text).toBe("Rosa Diaz owns the job.");
+
+    // A member linked to Maya sees Maya, and "A team member" for Rosa: never Rosa's name, never a label's letters.
+    const asMember = await read(linkedToken);
+    expect(asMember.finding).toMatchObject({ title: "Maya Collins carries the line", evidence: "A team member reviews it.", why: "Maya Collins is the only one who can price." });
+    expect(asMember.analysis.read).toEqual(["Maya Collins is overloaded. A team member covers when Maya Collins is away."]);
+    expect(asMember.analysis.review[0]!.text).toBe("A team member owns the job.");
+    expect(asMember.text).not.toContain("Rosa Diaz");
+    expect(asMember.text).not.toMatch(/Team member [A-Z]/);
+
+    // A member linked to no one sees "A team member" twice over, and neither name.
+    const asStranger = await read(unlinkedToken);
+    expect(asStranger.finding).toMatchObject({ title: "A team member carries the line", evidence: "A team member reviews it.", why: "A team member is the only one who can price." });
+    expect(asStranger.analysis.read).toEqual(["A team member is overloaded. A team member covers when a team member is away."]);
+    expect(asStranger.text).not.toContain("Rosa Diaz");
+    expect(asStranger.text).not.toContain("Maya Collins");
+    expect(asStranger.text).not.toMatch(/Team member [A-Z]/);
+  }, 120_000);
+
+  it("gives a member no overtime money in a saved issue: the app strips it before saving, and nothing a member reads holds it (B1 2b)", async () => {
+    const tag = randomUUID().slice(0, 8);
+    const member = randomUUID();
+    await admin.query("insert into auth.users (id, email) values ($1, $2)", [member, `f-pay-${tag}@example.com`]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ids.ws, member]);
+    const token = await apiToken(member);
+    const old =
+      "Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap, costing about £1,040 at cost rates over the 26-week run. The cap is used up.";
+    // What an old browser tab sends, through the same strip the server actions use.
+    const fields = payFreeIssueFields({
+      workspace_id: ids.ws,
+      process_id: ids.process,
+      title: "Maya Collins works 4 h/wk overtime",
+      type: "capacity",
+      severity: "serious",
+      source: "promoted",
+      detected_key: `overtime:person:${tag}`,
+      evidence: old,
+      evidence_metrics: { overtime_hours_week: 4, overtime_cost: 1040 },
+    });
+    const saved = await editor.from("issues").insert(fields).select("id").single();
+    expect(saved.error).toBeNull();
+
+    const mcp = await connect(token, options);
+    const listed = await call<{ issues: { id: string; evidence: string | null; evidence_metrics: Record<string, number> }[] }>(mcp, "list_issues", {});
+    expect(listed.ok, JSON.stringify(listed)).toBe(true);
+    const row = listed.data.issues.find((i) => i.id === saved.data!.id)!;
+    expect(row.evidence).toContain("overtime on average within the 10% cap. The cap is used up.");
+    expect(row.evidence_metrics).toEqual({ overtime_hours_week: 4 });
+    expect(JSON.stringify(listed)).not.toMatch(/overtime_cost|costing about/);
+  }, 120_000);
 });
