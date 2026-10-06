@@ -102,7 +102,14 @@ export function PlanMarkerDialog({ target, roles, people, solutions, months, def
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-plan-dialog={kind}>
+      <DialogContent
+        data-plan-dialog={kind}
+        // Start on the first field, not on the (i) beside its label (which would open its help).
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement).querySelector<HTMLElement>("select, input")?.focus();
+        }}
+      >
         <form
           className="contents"
           onSubmit={(e) => {

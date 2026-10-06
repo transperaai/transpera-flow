@@ -94,7 +94,8 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
       if (v === null) next.delete(k);
       else next.set(k, v);
     }
-    const qs = next.toString();
+    // A comma stays a comma: `?compare=a,b`.
+    const qs = next.toString().replace(/%2C/gi, ",");
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
   const pick = (m: number) => {
