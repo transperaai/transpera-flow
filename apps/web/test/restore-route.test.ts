@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GATEWAY_TOO_BIG_MESSAGE, SLOW_START_MESSAGE } from "@/lib/restore/errors";
+import { GATEWAY_TOO_BIG_MESSAGE, LOST_CONNECTION_MESSAGE, SLOW_START_MESSAGE } from "@/lib/restore/errors";
 
 // POST /w/<slug>/restore/bundle (issue #39, B10 2b): the order of the refusals (env, session, origin, workspace, role, size,
 // unzip, JSON, checker, then the database), what each answers, that the role is read from the database and the RPC is never
@@ -223,6 +223,14 @@ describe("restore route", () => {
     const r = await call(zipped({ format: "transpera-workspace/1" }));
     expect(r.status).toBe(413);
     expect((await r.json()).message).toBe(GATEWAY_TOO_BIG_MESSAGE);
+  });
+
+  it("answers the lost-connection message, not 'Nothing was restored', when the database call got no answer (status 0)", async () => {
+    state.forceOk = true;
+    state.restore = { data: null, error: { message: "fetch failed" }, status: 0 };
+    const r = await call(zipped({ format: "transpera-workspace/1" }));
+    expect(r.status).toBe(502);
+    expect((await r.json()).message).toBe(LOST_CONNECTION_MESSAGE);
   });
 
   it("maps a restore already running (hint busy) to 409 and its message", async () => {

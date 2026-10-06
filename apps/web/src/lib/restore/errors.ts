@@ -61,7 +61,11 @@ export interface RestoreFailure {
 export function restoreFailure(error: { code?: string | null; message?: string | null; hint?: string | null }, status?: number | null): RestoreFailure {
   const hint = error.hint ?? "";
   if (hint === "busy") return { status: 409, message: BUSY_MESSAGE };
-  if (status === 413) return { status: 413, message: GATEWAY_TOO_BIG_MESSAGE };
+  // PostgREST also answers 413 for the database's own class 54 errors (a section that failed with "string too long", say), which carry a
+  // SQLSTATE and fall through to the section words below: only an error with no code is the gateway refusing the size.
+  if (status === 413 && !error.code) return { status: 413, message: GATEWAY_TOO_BIG_MESSAGE };
+  // No answer came back from the database (status 0: the connection reset, a gateway timed out mid-call): it may still commit.
+  if (status === 0 && !error.code) return { status: 502, message: LOST_CONNECTION_MESSAGE };
   if (hint === "not_empty") return { status: 409, message: NOT_EMPTY_MESSAGE };
   if (error.code === "57014") return { status: 504, message: TOO_BIG_MESSAGE };
   if (hint.startsWith("section:")) {
