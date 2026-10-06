@@ -57,7 +57,7 @@ export interface AiInput {
   payload: Record<string, unknown>;
   /** What its text is checked against. */
   check: CheckContext;
-  /** Real name → label, for the payload (and for the key an insight is stored under: `ai_key`s are hashed on the name). */
+  /** Real name → label, for the payload. */
   aliases: { id: string; name: string; label: string; first?: boolean }[];
   /** Every person's label → their id: what is saved beside the text, so names go back at render per reader (B1 2b). */
   personLabels: PersonLabels;

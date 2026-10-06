@@ -470,9 +470,9 @@ describe("names stay out of what is saved (B1 2b)", () => {
     expect((await analyseWithAi(input, fake(() => good()))).personLabels).toEqual({});
   });
 
-  it("keys an insight on the title as it reads with the real name, as before B1 2b, so a finding proposed earlier isn't proposed again", async () => {
+  it("keys an insight on the title as the model wrote it, with the label and no real name", async () => {
     const out = await analyseWithAi(input, fake(() => labelled()));
-    const expected = `ai:insight:${createHash("sha1").update(`${squeeze(`${a!.name} holds up the whole line`)}|${AUDIT}`).digest("hex").slice(0, 12)}`;
+    const expected = `ai:insight:${createHash("sha1").update(`${squeeze("Team member A holds up the whole line")}|${AUDIT}`).digest("hex").slice(0, 12)}`;
     expect(out.insights[0]!.key).toBe(expected);
   });
 
@@ -483,11 +483,22 @@ describe("names stay out of what is saved (B1 2b)", () => {
     expect(out.insights[0]!.facts![0]).toMatchObject({ kind: "fact", key: input.facts[0]!.key, text: input.facts[0]!.text });
   });
 
-  it("no longer maps stored text through restoreNames except for the key", () => {
+  it("no longer maps stored text through restoreNames at all: the key is hashed on the labelled title", () => {
     const source = readFileSync(join(__dirname, "..", "src", "lib/ai/analyse.ts"), "utf8");
-    const uses = source.split("\n").filter((l) => /\bback\(/.test(l) && !/^\s*(\/\/|const back)/.test(l));
-    expect(uses).toHaveLength(1);
-    expect(uses[0]).toContain("keyOf(back(title), stepId)");
+    expect(source).not.toMatch(/restoreNames|\bback\(/);
+    expect(source).toContain("keyOf(title, stepId)");
+  });
+
+  it("an insight's key is the same whatever the people are called, so it holds no name; a different labelled title is a different key", async () => {
+    const out = await analyseWithAi(input, fake(() => labelled()));
+    const renamed = { ...input, aliases: input.aliases.map((x, i) => ({ ...x, name: `Someone Else ${i}` })) };
+    const again = await analyseWithAi(renamed, fake(() => labelled()));
+    expect(again.insights[0]!.key).toBe(out.insights[0]!.key);
+    expect(out.insights[0]!.key).toMatch(/^ai:insight:[0-9a-f]{12}$/);
+    // The same run twice dedupes; another title doesn't.
+    const other = labelled();
+    other.insights[0]!.title = "Team member B holds up the whole line";
+    expect((await analyseWithAi(input, fake(() => other))).insights[0]!.key).not.toBe(out.insights[0]!.key);
   });
 
   it("buildAiInput's fact and quote refs hold labels, not names; the map covers everyone", () => {

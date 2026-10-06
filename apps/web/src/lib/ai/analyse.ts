@@ -13,7 +13,6 @@ import { createHash } from "node:crypto";
 import { labelsUsed, type PersonLabels } from "@transpera-flow/db";
 import { NarrationError } from "@/lib/narration/narrate";
 import { checkNumbers, type NumberProblem } from "@/lib/narration/numbers";
-import { restoreNames } from "@/lib/narration/facts";
 import { squeeze, type AiInput } from "./facts";
 import { aiFactsMessage, aiInstruction, AI_OUTPUT_SCHEMA, AI_SYSTEM } from "./prompt";
 import {
@@ -116,9 +115,9 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
     if (problems.length) rejected.push({ where, text, problems });
     return { ok: problems.length === 0, checked: numbers.numbers.length };
   };
-  // Text is kept as written, with labels. Only the key an insight is stored under reads real names: it is hashed on the
-  // title as it always was, so a finding proposed before B1 2b isn't proposed again as a new one.
-  const back = (s: string) => restoreNames(s, input.aliases);
+  // Text is kept as written, with labels, and so is the key an insight is stored under: it is hashed on the labelled title,
+  // so it holds nothing a member could check a guessed name against (B1 2b). Findings keyed before then are re-keyed by
+  // migration 20261207700000.
 
   // The read.
   const paragraphs = (Array.isArray(o.read) ? o.read.filter((p): p is string => typeof p === "string" && p.trim() !== "") : []).slice(0, AI_MAX_PARAGRAPHS).map((p) => p.trim().slice(0, 2000));
@@ -164,7 +163,7 @@ export function screenOutput(output: unknown, input: AiInput): Screened {
       dropped++;
       continue;
     }
-    const key = keyOf(back(title), stepId);
+    const key = keyOf(title, stepId);
     if (seen.has(key)) continue;
     seen.add(key);
     const personLabels = labelsUsed([title, evidence, why, ...facts.map((f) => f.text)], input.personLabels);
