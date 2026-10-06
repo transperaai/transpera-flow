@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { A_TEAM_MEMBER, labelNames, labelsUsed, nameAnalysisRow, nameFinding, nameLabels, readPersonLabels, type PersonLabels } from "../src";
+import { A_TEAM_MEMBER, hideAiIssueKey, labelNames, labelsUsed, nameAnalysisRow, nameFinding, nameLabels, readPersonLabels, type PersonLabels } from "../src";
 
 // AI text saved with labels and named at render (B1 2b, issue #30): pure, no database.
 
@@ -237,5 +237,22 @@ describe("nameAnalysisRow", () => {
   it("never shows a label's letters: a reader sees a name or 'A team member'", () => {
     for (const who of [editor, member, stranger]) expect(JSON.stringify({ ...nameAnalysisRow(row, who), person_labels: {} })).not.toMatch(/Team member [A-Z]/);
     expect(A_TEAM_MEMBER).toBe("A team member");
+  });
+});
+
+describe("hideAiIssueKey", () => {
+  const issue = { id: "00000000-0000-4000-8000-0000000000b1", detected_key: "ai:insight:9f3a2c", title: "t" };
+
+  it("gives a reader who doesn't see everyone ai:insight:<issue id>, not the hash of the AI text", () => {
+    expect(hideAiIssueKey(issue, false)).toEqual({ ...issue, detected_key: `ai:insight:${issue.id}` });
+    expect(hideAiIssueKey(issue, false).detected_key).toMatch(/^ai:insight:[^\s]{1,150}$/);
+  });
+
+  it("leaves a reader who sees everyone, and every key that carries ids, alone", () => {
+    expect(hideAiIssueKey(issue, true)).toBe(issue);
+    for (const key of [`overtime:person:${MAYA}`, `finding:ai:${ANN}`, "perception_gap:step:s1.work", "forecast:x", null]) {
+      const row = { ...issue, detected_key: key };
+      expect(hideAiIssueKey(row, false)).toBe(row);
+    }
   });
 });

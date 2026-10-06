@@ -96,3 +96,22 @@ describe("saved AI text is named per reader (B1 2b part 3)", () => {
     expect(actions).toContain("await named(db, decided.finding)");
   });
 });
+
+describe("issues.detected_key is opaque for AI-text keys when the reader can't see everyone (B1 2b)", () => {
+  it("every page loader of issues reads them through loadIssuesForReader", () => {
+    expect(read("lib/data.ts")).toContain("loadIssuesForReader(await createClient(), workspaceId)");
+    const processes = read("lib/processes/data.ts");
+    expect(processes).not.toMatch(/\bloadIssues\(/);
+    expect(processes.match(/loadIssuesForReader\(/g)).toHaveLength(2);
+  });
+
+  it("only editors' save paths and server-side key matching read the stored key", () => {
+    // The pages go through lib/data.ts; the two callers of the stored key are the AI service (editors run Analyse, and it
+    // skips proposals already acknowledged) and the dialog/verdict paths, which load one issue by id.
+    const users = ["lib/ai/service.ts"];
+    for (const f of users) expect(read(f)).toMatch(/\bloadIssues\(/);
+    const pages = ["components/workspace-process-page.tsx", "components/overview/workspace-overview.tsx", "app/w/[slug]/issues/page.tsx", "app/w/[slug]/issues/[number]/page.tsx"];
+    for (const f of pages) expect(read(f), f).not.toMatch(/\bloadIssues\(/);
+  });
+});
+

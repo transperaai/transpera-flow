@@ -16,7 +16,7 @@ import {
   loadMarket,
   type MarketConditionRow,
   type MarketScheduleRow,
-  loadIssues,
+  loadIssuesForReader,
   loadIssueEvents,
   loadLiveRevisionIds,
   loadLiveProcessBySlug,
@@ -142,9 +142,12 @@ export async function loadWorkspaceLiveRevisionIds(workspaceId: string): Promise
   return loadLiveRevisionIds(await createClient(), workspaceId);
 }
 
-/** The workspace's tracked issues, newest first (RLS: everyone in the workspace can read them). */
+/**
+ * The workspace's tracked issues, newest first (RLS: everyone in the workspace can read them). A member or viewer gets an
+ * opaque `detected_key` where it is a hash of AI text (B1 2b).
+ */
 export async function loadWorkspaceIssues(workspaceId: string): Promise<IssueRow[]> {
-  return loadIssues(await createClient(), workspaceId);
+  return loadIssuesForReader(await createClient(), workspaceId);
 }
 
 /** One issue's history, oldest first (RLS: everyone in the workspace can read it). */

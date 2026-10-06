@@ -170,3 +170,14 @@ export function nameAnalysisRow<T extends Pick<AiAnalysisRow, "id" | "summary" |
     reason: base.reason === null ? null : name(base.reason),
   };
 }
+
+/**
+ * An issue's `detected_key` for a reader. An acknowledged pre-B17 AI insight is keyed `ai:insight:<hash of its real-name
+ * text>`, so a reader who doesn't see everyone could hash guessed names and check them. They get `ai:insight:<issue id>`
+ * instead: the prefix readers check is kept, and it is unique and stable. Keys the engine writes (`overtime:person:<id>`,
+ * `finding:ai:<id>`, ...) carry ids, never names, and are left alone. Members can't write issues, so nothing sends it back.
+ */
+export function hideAiIssueKey<T extends { id: string; detected_key: string | null }>(row: T, seesEveryone: boolean): T {
+  if (seesEveryone || !row.detected_key?.startsWith("ai:insight:")) return row;
+  return { ...row, detected_key: `ai:insight:${row.id}` };
+}
