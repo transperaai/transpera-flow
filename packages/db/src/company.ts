@@ -86,7 +86,7 @@ export const COMPANY_FIELDS: Record<CompanyTable, Record<string, FieldMeta>> = {
     overtime_cap: { label: "Overtime cap", format: "percent" },
     availability_floor: { label: "Availability floor", format: "percent" },
     utilisation_threshold: { label: "Utilisation threshold", format: "percent" },
-    capacity_factor_enabled: { label: "Capacity factors", format: "bool" },
+    capacity_factor_enabled: { label: "Per-person times", format: "bool" },
     horizon_weeks: { label: "Simulation horizon (weeks)", format: "number" },
     leads_per_week: { label: "Leads a week (interim)", format: "perWeek" },
     active_clients: { label: "Active clients (interim)", format: "number" },

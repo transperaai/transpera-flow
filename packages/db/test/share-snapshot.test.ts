@@ -976,3 +976,48 @@ describe("payHidden on a bundle", () => {
     expect(Object.values(hidden.people ?? {}).map((p) => p.name)).toEqual(Object.values(plain.people ?? {}).map((p) => p.name));
   });
 });
+
+describe("per-person times never reach a share link (C6)", () => {
+  const factorRow = (w: (typeof worlds)[number]) => ({ person_id: w.bundle.people[0]!.id, workspace_id: w.bundle.workspace.id, step_id: null, factor: 0.8, source: "entered" });
+
+  for (const kind of KINDS) {
+    for (const toggles of TOGGLES) {
+      it(`${worlds[0]!.name} ${kind}, ${label(toggles)}: a raw snapshot built from an editor's bundle that carries factors comes out with an empty list, and no capacityFactor`, () => {
+        const w = worlds[0]!;
+        const withFactors = {
+          ...w,
+          bundle: { ...w.bundle, personCapacityFactors: [factorRow(w)], workspace: { ...w.bundle.workspace, settings: { ...w.bundle.workspace.settings, capacity_factor_enabled: true } } },
+        };
+        const input = raw(kind, withFactors, toggles);
+        expect(JSON.stringify(input)).toContain('"factor":0.8');
+        // The leak check sees it in the raw snapshot...
+        expect(shareSnapshotLeaks(input, w.secrets, toggles)).toContain("speeds");
+        const snap = redactShareSnapshot(input, toggles, w.secrets);
+        const text = JSON.stringify(snap);
+        // ...and the redaction empties it, wherever the bundle sits.
+        expect(text).not.toContain('"factor":0.8');
+        expect(text).not.toContain("capacityFactor");
+        for (const list of valuesOf(snap, "personCapacityFactors")) expect(list).toEqual([]);
+        expect(shareSnapshotLeaks(snap, w.secrets, toggles)).not.toContain("speeds");
+      });
+    }
+  }
+
+  it("shareSnapshotLeaks reports a non-empty personCapacityFactors, or any capacityFactor key, anywhere; an empty list is clean", () => {
+    const w = worlds[0]!;
+    const toggles = TOGGLES[0]!;
+    const clean = redactShareSnapshot(raw("overview", w, toggles), toggles, w.secrets);
+    expect(shareSnapshotLeaks(clean, w.secrets, toggles)).toEqual([]);
+    const nested = (extra: object) => ({ ...clean, live: { ...(clean as unknown as { live: object }).live, ...extra } });
+    expect(shareSnapshotLeaks(nested({ personCapacityFactors: [] }), w.secrets, toggles)).toEqual([]);
+    expect(shareSnapshotLeaks(nested({ personCapacityFactors: [factorRow(w)] }), w.secrets, toggles)).toEqual(["speeds"]);
+    expect(shareSnapshotLeaks(nested({ person_capacity_factors: [factorRow(w)] }), w.secrets, toggles)).toEqual(["speeds"]);
+    expect(shareSnapshotLeaks(nested({ model: { people: { p: { capacityFactor: { default: 0.9 } } } } }), w.secrets, toggles)).toEqual(["speeds"]);
+  });
+
+  it("a snapshot's bundle simulates at everyone's normal time (it holds no factor, and payHidden keeps toEngineModel from reading any)", () => {
+    const w = worlds[0]!;
+    const b = { ...w.bundle, payHidden: true as const, personCapacityFactors: [factorRow(w)], workspace: { ...w.bundle.workspace, settings: { ...w.bundle.workspace.settings, capacity_factor_enabled: true } } };
+    expect(Object.values(toEngineModel(b, { startDate: "2026-10-05" }).people ?? {}).some((p) => p.capacityFactor)).toBe(false);
+  });
+});

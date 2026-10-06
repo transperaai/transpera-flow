@@ -650,3 +650,54 @@ describe("planWorkspaceImport", () => {
     expect(summary.leftOut.map((l) => l.key)).toEqual(expect.arrayContaining(["solutions", "detections", "decided_suggestions", "history", "file_originals", "step_links", "company_map"]));
   });
 });
+
+describe("per-person times in a backup (C6): kept in the file, left out of the restore", () => {
+  const withFactors = (switchOn: boolean) => {
+    const { bundle, ids } = makeBundle();
+    const b = clone(bundle);
+    b.company_model.person_capacity_factors = [
+      { person_id: ids.person, workspace_id: ids.ws, step_id: null, factor: 0.9, source: "entered", provenance: {} },
+      { person_id: ids.person, workspace_id: ids.ws, step_id: ids.sA1, factor: 1.2, source: "entered", provenance: {} },
+    ];
+    (b.workspace.settings as Record<string, unknown>).capacity_factor_enabled = switchOn ? true : undefined;
+    return recount(b);
+  };
+  const WARNING = "This backup has per-person times switched on. They aren't restored, so results will differ from the original until you enter them again.";
+
+  it("checks clean: rows with no id are accepted", () => {
+    const c = checkWorkspaceBundle(withFactors(true));
+    expect(c.errors).toEqual([]);
+    expect(c.ok).toBe(true);
+  });
+
+  it("the plan has no factor section, and no factor value anywhere in it", () => {
+    const { plan } = planOf(withFactors(true));
+    expect(Object.keys(plan)).not.toContain("person_capacity_factors");
+    expect(IMPORT_COLUMNS).not.toHaveProperty("person_capacity_factors");
+    expect(JSON.stringify(plan)).not.toContain("capacity_factors");
+    expect(JSON.stringify(plan)).not.toMatch(/"factor"/);
+  });
+
+  it("lists them as left out, in words, and warns only when the switch was on", () => {
+    for (const on of [true, false]) {
+      const b = withFactors(on);
+      const { summary } = planOf(b);
+      const line = summary.leftOut.find((l) => l.key === "capacity_factors")!;
+      expect(line.count).toBe(2);
+      expect(line.label).toBe("per-person times (enter them again after the restore; until then everyone works at their role's normal time)");
+      const c = checkWorkspaceBundle(b);
+      expect(c.warnings).toContain("Stays in the file: 2 per-person times (enter them again after the restore; until then everyone works at their role's normal time).");
+      if (on) expect(c.warnings).toContain(WARNING);
+      else expect(c.warnings).not.toContain(WARNING);
+    }
+    // A backup with the switch on and no rows needs no warning, and has no left-out line.
+    const none = makeBundle().bundle;
+    (none.workspace.settings as Record<string, unknown>).capacity_factor_enabled = true;
+    expect(checkWorkspaceBundle(none).warnings).not.toContain(WARNING);
+    expect(planOf(none).summary.leftOut.some((l) => l.key === "capacity_factors")).toBe(false);
+  });
+
+  it("the switch itself is restored like any setting", () => {
+    expect(planOf(withFactors(true)).plan.settings).toMatchObject({ capacity_factor_enabled: true });
+  });
+});

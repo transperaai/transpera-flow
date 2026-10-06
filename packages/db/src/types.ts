@@ -54,6 +54,17 @@ export interface WorkspaceSettings {
    */
   client_health_benchmark_low?: number;
   client_health_benchmark_high?: number;
+  /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
+  capacity_factor_enabled?: boolean;
+}
+
+/** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step; `source` is entered or measured). */
+export interface PersonCapacityFactorRow {
+  person_id: string;
+  workspace_id: string;
+  step_id: string | null;
+  factor: number;
+  source: string;
 }
 
 export interface WorkspaceRow {
@@ -740,6 +751,12 @@ export interface ProcessBundle {
   personRoles: PersonRoleRow[];
   personSkills: PersonSkillRow[];
   personLeave: PersonLeaveRow[];
+  /**
+   * Per-person times (C6, #198), in the shape `team_capacity` gives: everyone's for a viewer who sees everyone, only the
+   * viewer's own otherwise, none in a share link. Optional, so fixtures, the demo and older snapshots still type-check.
+   * Read only through `team_capacity` (never the table) in any loader that feeds a bundle.
+   */
+  personCapacityFactors?: PersonCapacityFactorRow[];
   /** The workspace's services. When none apply, every win is priced at the workspace's interim `retainer`. */
   services: ServiceRow[];
   /**

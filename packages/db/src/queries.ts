@@ -26,6 +26,7 @@ import type {
   MarketConditionRow,
   MarketScheduleRow,
   EdgeRow,
+  PersonCapacityFactorRow,
   PersonLeaveRow,
   PersonRoleRow,
   PersonRow,
@@ -161,12 +162,16 @@ export interface TeamInputs {
   personSkills: PersonSkillRow[];
   personLeave: PersonLeaveRow[];
   clientAssignments: ClientAssignmentRow[];
+  /** Per-person times (C6): everyone's for those who see everyone, only the caller's own person's otherwise; none from `share_team_capacity`. */
+  personCapacityFactors: PersonCapacityFactorRow[];
 }
 
 /**
  * The whole team's simulation inputs, as `public.team_capacity` gives them to the caller: the stored values for owners,
  * editors and agency admins; for members and viewers, "Team member N" labels (their own person keeps their name) and a null cost rate for everyone but
- * themselves: no pay, and no average of it. Never email, notes, leave notes or skill efficiency.
+ * themselves: no pay, and no average of it. Never email, notes, leave notes or skill efficiency. Per-person times (C6) come the same
+ * way: everyone's for those who see everyone, only the caller's own otherwise. A bundle's per-person times must come only from
+ * here: reading `person_capacity_factors` directly would bypass `shareReaderDb` and put an editor's times into a share snapshot.
  */
 export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs> {
   const r = await db.rpc("team_capacity", { ws: workspaceId });
@@ -181,6 +186,7 @@ export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs>
     person_skills: PersonSkillRow[];
     person_leave: PersonLeaveRow[];
     client_assignments: ClientAssignmentRow[];
+    person_capacity_factors?: PersonCapacityFactorRow[];
   };
   return {
     viewer: { seesEveryone: t.sees_everyone, ownPersonId: t.own_person_id },
@@ -189,6 +195,8 @@ export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs>
     personSkills: t.person_skills,
     personLeave: t.person_leave,
     clientAssignments: t.client_assignments,
+    // numeric comes back as a number from jsonb; `share_team_capacity` has no such key, so a link's team has none.
+    personCapacityFactors: (t.person_capacity_factors ?? []).map((r) => ({ ...r, factor: Number(r.factor) })),
   };
 }
 
@@ -310,6 +318,7 @@ export async function loadProcessBundle(
     personRoles: team.personRoles,
     personSkills: team.personSkills,
     personLeave: team.personLeave,
+    personCapacityFactors: team.personCapacityFactors,
     viewer: team.viewer,
     // pricing_model is check-constrained; fallback_ongoing_load is jsonb.
     services: (rows(services) ?? []) as ServiceRow[],
