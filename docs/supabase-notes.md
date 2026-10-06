@@ -346,3 +346,15 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 | Companion rows | The company map's sync adds each new top-level process's card in one system version (cards show once a process is published); `link_cited_sources`, `issue_seed_links` and `log_perception_gaps` run as for any write. | Restore, publish every process: the map shows each top-level process once; a process held by a link is not also on the map; no duplicate perception-gap issue. |
 | Notice | A cookie set in the browser (`tf-restore-notice`) carries the sentence to the Overview. | The notice shows once after a restore, and the drafts list shows every process. |
 
+
+## Client branding (#34, migration 20261214000000)
+
+A public `branding` bucket (512 KB; PNG, JPEG, WebP), three policies on `storage.objects` for owners and agency admins (read, upload, delete; no update), `workspaces.branding` and a logo guard. Verified only against plain Postgres and the storage shim (`sql/storage-shim.sql`). The guard does not rely on `storage.objects.owner_id` (B19's live check of it is still open). To verify on Supabase:
+
+- [ ] The migration can write to `storage` (as B19's did). If refused, create the bucket in the dashboard (public, 512 KB, the three types) and run the three `create policy` statements in the SQL editor.
+- [ ] **As an owner**, upload a PNG logo in Settings, Branding: it shows in the sidebar. **As an editor**, the upload is refused (403) and the page is read-only.
+- [ ] **Signed out**, the logo's public URL loads (`/storage/v1/object/public/branding/...`), served as `image/png` (or the type uploaded). Record whether the response carries `X-Content-Type-Options: nosniff`.
+- [ ] A file over 512 KB, and a file declared as `image/svg+xml`, are refused by the bucket.
+- [ ] Replacing and removing a logo deletes the old object (Storage dashboard).
+- [ ] Sweep of abandoned uploads (an upload whose check never ran is still public under a random name): `select name, created_at from storage.objects o where bucket_id = 'branding' and created_at < now() - interval '1 hour' and not exists (select 1 from public.workspaces w where w.branding ->> 'logo_path' = o.name);`
+- [ ] A deleted workspace's logo stays in the bucket (the same sweep lists it).
