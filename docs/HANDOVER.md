@@ -33,7 +33,7 @@ checks, logged in `docs/production-migrations.md`):
 Production had no saved AI text or overtime issues, so row 56's clean-up changed no rows. `database.types.ts` still holds
 the hand edits from #205–#207 (they match the generator); regenerate when a linked machine is available.
 
-**Production database:** applied up to `20261219000000` (row 63).
+**Production database:** applied up to `20261223000000` (row 67). Rows 56–67 were applied overnight 6–7 Oct; see "Next steps".
 
 **Briefs** (in `docs/plans/`): `b1-brief.md` (all slices built; 2b's section has the leak fixes and "Changes after the
 review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets one before building.
