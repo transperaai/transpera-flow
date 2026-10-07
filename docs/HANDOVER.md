@@ -1,9 +1,8 @@
 # Handover
 
-Updated 6 Oct 2026 (overnight run, 20:30 UTC). All agents hit the usage limit at about 13:50 UTC and the container
-restarted; work resumed at 19:18 UTC from what was pushed. Merged tonight: #205, #207, #206, #209, #212 (B20), #214, #211
-(B2), #213 (B5), #216 (B21), #220 (C4), #221, #218 (C1), #222, #217 (B7). Production is at row 63 (`20261219000000`).
-Open: B4 (#33, draft PR `claude/b4-play-links`; migration row 66 not applied). Status table under "Next steps". Start a new session with:
+Updated 7 Oct 2026 (morning, AEST). The overnight run finished Milestones B and C apart from C5 (Austin's). Every ticket in
+the overnight list is merged and applied, plus C6 (Austin approved it on 6 Oct), a workspace-delete fix and the Vercel
+region move to Sydney. Production is at row 67 (`20261223000000`), ENGINE 1.10.0. No PRs are open. Start a new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -34,7 +33,7 @@ checks, logged in `docs/production-migrations.md`):
 Production had no saved AI text or overtime issues, so row 56's clean-up changed no rows. `database.types.ts` still holds
 the hand edits from #205–#207 (they match the generator); regenerate when a linked machine is available.
 
-**Production database:** applied up to `20261219000000` (row 63).
+**Production database:** applied up to `20261223000000` (row 67). Rows 56–67 were applied overnight 6–7 Oct; see "Next steps".
 
 **Briefs** (in `docs/plans/`): `b1-brief.md` (all slices built; 2b's section has the leak fixes and "Changes after the
 review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets one before building.
@@ -59,7 +58,7 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
   labels, only their own row, "A team member" for other names, and **no pay data**. Overtime cost and person-rate issue
   costs show "—" for them. Averages were rejected because overlapping averages leak an exact rate by subtraction.
 
-**Design calls Claude made, for Austin to confirm:**
+**Design calls Claude made (Austin confirmed all overnight defaults on 7 Oct, "Happy with your defaults"):**
 - When a process is placed inside an ordinary process, the company map "gives way" (B12 part 2, #188).
 - Workspace name and currency are owner-only (#190).
 - Levers and the forecast are not on the Overview; the Settings help says so.
@@ -87,8 +86,6 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
 **Waiting on Austin:**
 - **Live checks after B19 part 2 (#182):** a real source file upload works and Supabase sets `storage.objects.owner_id`; a
   PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
-- **Supabase token (blocking):** `SUPABASE_ACCESS_TOKEN` in the cloud environment returns `401 Unauthorized` from the
-  Management API (6 Oct evening). Austin put a new token in the environment settings on 6 Oct evening; it takes effect in a new session.
 - **Auto mode:** its safety check blocks `prod-sql.sh` as "Production Reads", even read-only preflight. Austin plans an
   overnight run with access granted; run production steps with auto mode off or a permission rule for `prod-sql.sh`.
 - C5 is Austin's.
@@ -195,101 +192,52 @@ password to `postgres`.
 
 ## Next steps
 
-**Overnight status** (update after every merge). Reserved migration versions follow the planned merge order; renumber
-at merge time if the order changes.
+**Overnight run, 6–7 Oct: done.** Merged and applied, each built by Sonnet from an Opus brief and reviewed by Opus (B3 took
+a review and five verification rounds; B4 a review and a verification), with preflight and post-apply checks logged in
+`docs/production-migrations.md`:
 
-| Ticket | Branch / PR | State | Migration (row) |
-|---|---|---|---|
-| B20 MCP proposes findings (#197) | #212 | **merged**, applied | `20261212000000` (59) |
-| B2 People page (#31) | #211 | **merged** | none |
-| B5 Client branding (#34) | #213 | **merged**, applied | `20261214000000` (60) |
-| B21 Bigger restores (#203) | #216 | **merged**, applied (limits 3x, not 4x) | `20261215000000` (61) |
-| C1 CSV import wizard (#40) | #218 | **merged**, applied | `20261216000000` (62) |
-| C4 Storybook (#43) | #220 | **merged** (new `visual` CI job; `[visual-update]` approves baselines) | none |
-| B7 Forecast planning (#36) | #217 | **merged**, applied; ENGINE 1.9.0 | `20261219000000` (63) |
-| B3 Share links (#32) | #215 `claude/b3-share-links` | fourth review round: redaction redesigned (free-text keys, token matching); fixing uuid-vs-currency false positives, first-principles keys, client whole-name matching; PRD D47 | `20261220000000` (64) |
-| B4 Play links (#33) | `claude/b4-play-links` (draft PR) | built; B3 has merged; to review, apply row 66 BEFORE deploying, then merge | `20261221000000` (66, NOT applied) |
-
-B3 must stay security-reviewed until a verification round finds nothing blocking: it is the only public, unauthenticated surface. Each review comment and fix list is on its PR.
-
-**Tooling:** `prod-sql.sh -f` now sends the file through `jq --rawfile` (#216); a 140 KB apply file overflowed `--arg`.
-**Bug found (not ticketed):** deleting any workspace fails, even as superuser, on `steps_role_id_workspace_id_fkey` (found
-while scoping B21).
-
-Still for Austin (live checks and confirmations):
-- Re-run Analyse in each workspace and check accepted AI findings (#205, Q11).
-- B5: upload a logo on the real project (storage). B21: a preview restore at the limits (the 40 s function timeout is
-  verified only on plain PostgREST).
-- Defaults taken overnight are listed on each issue (#31, #34, #197, #203); confirm or change them.
-- On the live site, an editor changes a client health rule and the owner's change log names them (#206).
-
-### Overnight run (Austin, 6 Oct): finish everything that doesn't need him
-
-Austin is asleep for this run. The aim is to finish Milestones B and C as far as they can go without him. The usual
-two-or-three-tickets rule is relaxed for this run only: keep the main session's context small by delegating everything,
-and update this handover (a docs-only PR, merged when green) **after every merged ticket**, so a restart loses nothing.
-
-**Order** (dependencies from each issue's "Blocked by"; after the three PRs above have merged):
-
-| # | Ticket | Notes |
+| Ticket | PR | Row |
 |---|---|---|
-| 1 | B2 People page (#31) | Unblocked once #30 closes. Check it against what B19 and B1 2b already built; the member view must stay own-row only |
-| 2 | B3 View-only share links with redacted snapshots (#32) | Redaction must follow #30's rules: no pay, no names beyond labels |
-| 3 | B4 Play links, proposals into Suggestions (#33) | Blocked by B3. A52's schema already supports `created_via='play_link'` |
-| 4 | B20 Claude outside the app proposes findings (#197) | MCP; Austin's #175 decision: "MCP may propose findings" |
-| 5 | B7 Forecast planning: drag markers, compare two plans (#36) | |
-| 6 | B5 Client branding (#34) | |
-| 7 | B21 Restore bigger workspaces (#203) | Raises the restore limits in "Follow-ups" |
-| 8 | C1 CSV import wizard with column mapping (#40) | C2 (#41) is built; check what it already parses before building |
-| 9 | C4 Storybook and visual regression (#43) | Last: least product risk |
+| B1 2b privacy on screen, saved text without pay or names | #205 | 56 |
+| C2 part 2 churn back-solve, clients and servicing CSVs | #207 | 57 |
+| B1 3/3 agency list, editors change health rules (closes #30) | #206 | 58 |
+| B20 Claude outside the app proposes findings | #212 | 59 |
+| B2 People page | #211 | none |
+| B5 client branding | #213 | 60 |
+| B21 bigger restores (limits 3x, not 4x) | #216 | 61 |
+| C1 CSV import wizard | #218 | 62 |
+| C4 Storybook and visual regression (`visual` CI job) | #220 | none |
+| B7 forecast planning (ENGINE 1.9.0) | #217 | 63 |
+| B3 share links (ADR 0016, D47) | #215 | 64 |
+| Workspace delete failed on `steps_*_workspace_id_fkey` (now deferred) | #225 | 65 |
+| B4 play links (D48) | #226 | 66 |
+| C6 per-person speed / capacity factors (ENGINE 1.10.0) | #229 | 67 |
 
-Not tonight: C5 (#44, Austin's), C6 (#198, parked), the map node redesign (needs Austin), performance (parked).
+Also: flaky tests made robust (#209, #214, #221, #222); `prod-sql.sh -f` reads files with `jq --rawfile` (#216); Vercel
+functions moved from `iad1` to `syd1`, next to the Sydney database (#224, `apps/web/vercel.json`; production headers show
+`::syd1::`). Each issue has a comment with what was applied and the defaults, which Austin confirmed.
 
-**Per ticket** (as in "How we work"):
-1. Comment on the issue that work has started, naming the branch.
-2. An Opus agent writes `docs/plans/<ticket>-brief.md`. It covers exact files, the data model and migration spec, patterns
-   to copy, edge cases, tests, what's out of scope, and done criteria. It quotes Austin's decisions verbatim and lists
-   open questions, **each with a default**.
-3. A Sonnet agent builds from the brief on its own branch, `claude/<ticket>-…`, and opens a draft PR. It commits and pushes
-   after every step.
-4. An Opus agent does an adversarial review; Sonnet fixes every finding, each with a test. Re-review if the fixes are
-   large.
-5. Get CI green, then apply the migration with preflight and post-apply checks (additive only), then merge.
-6. Comment on the issue and on the milestone parent (#2 or #3), then update this handover.
+**Austin's live checks** (all need a signed-in browser on production):
+- Re-run Analyse in each workspace (B1 2b changed how AI text is saved).
+- An editor changes a client health rule; the owner's change log names them (B1 3/3).
+- Upload a logo (B5); restore a large workspace on a preview (B21: the 40 s function timeout is verified only on plain
+  PostgREST).
+- Create a share link and a play link and open them signed out (B3, B4).
+- Switch per-person times on (Settings → Simulation), set one, check the change log (C6, post-apply 7).
 
-Two independent tickets may be built in parallel in separate worktrees. Number migrations in merge order, and
-regenerate `bootstrap.sql` after each merge of `main`.
+**For Austin to decide:**
+- **Default table grants:** Supabase gives `authenticated` REFERENCES, TRIGGER and TRUNCATE on almost every public table
+  (`docs/supabase-notes.md`). Not reachable through PostgREST; revoking them everywhere is a hardening change.
+- **B3 optional follow-ups:** the hyphen/slash money rule over-hides some dates and codes; generic keys on the non-text list
+  need a note per entry.
 
-**Rules while Austin is away:**
-- **Open questions:** take the brief's default. Record each default on the issue and under "Design calls Claude made,
-  for Austin to confirm". Never block waiting for an answer.
-- **Stop and skip** (note it here and move on to the next ticket) for:
-  - anything destructive in production: dropping or rewriting data, other than an additive clean-up a brief specifies
-    and a review has passed;
-  - anything needing a new secret or a paid service;
-  - anything needing a design decision only Austin can make.
-- **Never weaken a test to get green.** A test that is flaky by chance gets made robust in its own small PR.
-- If the token, the auto-mode classifier or a permission prompt blocks a production step, stop the production steps,
-  carry on building and reviewing the other tickets, and say so at the top of this handover.
-- **End of run:** a summary comment on #2 and #3, and this handover rewritten for Austin's morning: what merged, what's
-  open, decisions he needs to confirm, and anything skipped.
+**Open tickets:** C5 polish (#44, Austin's); #227 (calibrate per-person times from a step log), #228 (restore per-person
+times from a backup), #230 (`step_id` in the change log for per-person times). Then the map node redesign with Austin and
+performance (parked).
 
-Follow-ups noted this session:
-- B1 2b: read-time key masking (`hideAiIssueKey`, `loadIssuesForReader`) stays as defence in depth after the re-key; it
-  costs one `can_see_people` rpc per issues load.
-- B1 2b: a source link to an AI insight nobody acknowledged is orphaned by the re-key (`ai:insight:<link id>`); delete if
-  wanted.
-- B1 2b: the engine's first-principles flag text now gets first-name aliasing, so a step whose first word matches a
-  person's first name (same capitals) is relabelled inside that flag sent to the model.
-- B1 3/3: `agency_workspace_list` scans `process_revisions` without a workspace-first index; fine at agency scale.
-- Flaky under load in the cloud container (pass alone): `restore-browser.test.ts` "refuses a file over the size limit",
-  `editor-tour-browser`, once `prototype-parity` "double leads" and `workspace-import.test.ts`. Green in CI.
-- The owner guard has a known gap: an owner who joined by domain can delete that domain (ADR 0003 addendum).
-- A member can join a process presence channel via dev tools and see editors' names (names only).
-- `sources.speakers` and transcripts name people (accepted).
-- Restore limits are 50 processes, 500 steps, 1,000 edges, 300 issues, 1,000 clients and link-table caps, to stay inside
-  3 s; bigger workspaces export with a warning (#203).
-- Older: other source pickers still load full source text; four older PostgREST suites fail when re-run on the same database.
+**Session notes:** agents hit the usage limit twice overnight (13:50–19:18 UTC and about 00:10 UTC); each time the container
+restarted (Postgres stops: restart it with the command under Operations) and work resumed from what was pushed. Run at most
+4–5 builders at once on this 4-core container; under load many timing tests time out locally (they pass alone and in CI).
 
 ## Decisions from Austin (30 Sep)
 
