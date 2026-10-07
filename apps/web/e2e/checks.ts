@@ -92,7 +92,8 @@ export async function expectReadOnly(page: Page) {
   expect(visibleEntries, "edit entries visible on a phone").toEqual([]);
   const enabled = await page.evaluate(() =>
     [...document.querySelectorAll("[data-phone-read-only] :is(input, select, textarea)")]
-      .filter((e) => !(e as HTMLInputElement).disabled && (e as HTMLInputElement).type !== "hidden")
+      // `:disabled` also matches a field disabled by its fieldset, which the `disabled` property doesn't.
+      .filter((e) => !e.matches(":disabled") && (e as HTMLInputElement).type !== "hidden")
       .map((e) => `${e.tagName.toLowerCase()}[name=${e.getAttribute("name")}]`),
   );
   expect(enabled, "fields still enabled in a read-only form").toEqual([]);
@@ -132,7 +133,9 @@ export async function darkProblems(page: Page): Promise<string[]> {
       if (r.width === 0 || r.height === 0) continue;
       const cs = getComputedStyle(h);
       const bg = parse(cs.backgroundColor);
-      if (bg[3] > 0.5 && lum(bg) > 0.6) out.push(`light surface: ${label(h)}`);
+      // A hairline (an error bar, a threshold rule) is drawn in the text colour on purpose, so it is a mark and not a surface.
+      const hairline = Math.min(r.width, r.height) < 4;
+      if (bg[3] > 0.5 && lum(bg) > 0.6 && !hairline) out.push(`light surface: ${label(h)}`);
       const ownText = [...h.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() !== "");
       if (!ownText) continue;
       const fg = parse(cs.color);

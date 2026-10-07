@@ -82,7 +82,7 @@ export function ProcessSolutions({
         empty={otherOnly ? "Nothing else yet. Every solution here is for an issue above." : undefined}
       />
       {canEdit && !otherOnly && toSolve.length > 0 && (
-        <div className="flex flex-col gap-1.5" data-testid="build-from-issue">
+        <div className={`flex flex-col gap-1.5 ${EDIT_ONLY}`} data-testid="build-from-issue" data-edit-entry>
           <span className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
             Build from an issue
             <Help

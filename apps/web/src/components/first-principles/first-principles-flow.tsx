@@ -204,6 +204,7 @@ export function FirstPrinciplesFlow({
                   <li key={s.key} className="shrink-0">
                     <button
                       type="button"
+                      data-allow-on-phone /* step navigation: one step is named "Delete", not an edit */
                       aria-current={j === index ? "step" : undefined}
                       onClick={() => goTo(j + 1)}
                       className={cn(
@@ -294,7 +295,7 @@ export function FirstPrinciplesFlow({
               {FP_STEPS.map((s, j) => {
                 const n = attention(s.key);
                 return (
-                  <button key={s.key} type="button" onClick={() => goTo(j + 1)} className="flex justify-between gap-2 rounded px-0.5 py-1 text-left text-[13px] hover:text-accent">
+                  <button key={s.key} type="button" data-allow-on-phone onClick={() => goTo(j + 1)} className="flex justify-between gap-2 rounded px-0.5 py-1 text-left text-[13px] hover:text-accent">
                     <span>{s.name}</span>
                     <span className={cn("shrink-0 text-xs tabular-nums", n ? "font-semibold text-warn" : "text-fg-2")}>{n ? `${n} to fix` : "✓"}</span>
                   </button>

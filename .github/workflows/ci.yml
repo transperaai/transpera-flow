@@ -59,6 +59,18 @@ jobs:
         if: always()
         run: docker logs postgrest || true
       - run: pnpm --filter @transpera-flow/web build
+      # Crawls every demo page at 400, 768 and 1024 px and in dark mode (issue #44) against `next start`. The build above has no
+      # Supabase settings, so the app is in demo mode.
+      - run: pnpm --filter @transpera-flow/web e2e
+      - name: Upload the e2e report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
 
   # Which pushes need the visual job, and whether this one approves new baselines: see docs/visual-regression.md.
   # Only branch pushes (never tags). Off main it diffs the whole branch against the merge-base with origin/main, so a docs-only
