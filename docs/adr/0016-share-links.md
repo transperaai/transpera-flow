@@ -87,7 +87,10 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
   classified therefore fails closed. JSON keys are never touched, so a person called Tom Price, Jo Weeks or Ann Kind cannot turn
   `price`, `horizon_weeks` or `kind` into a label and change the engine's input. A key that is text anywhere (`source`) stays
   off the list. A type-level map of every string column of every table (from `database.types.ts`) fails to compile when a column
-  or table is added until it is classified. Emails and money are looked for in every string value.
+  or table is added until it is classified; so does a map of the JSON shapes a snapshot carries (`patch[]`, `lever_changes[]`,
+  `facts[]`, `links[]`, `recurrence`, `settings`, the snapshot's envelope). Every key on the list carries a one-line reason
+  (`SHARE_NON_TEXT_REASONS`: where it appears and why it is never typed words), and a test fails when a key is text in one shape and
+  not text in another (B3 follow-up, 7 Oct). Emails and money are looked for in every string value.
 - Matching is by letter tokens of a normalised view (percent-decoded, NFKD with combining marks dropped and the letters that
   don't decompose folded, default-ignorable code points and variation selectors removed, lower-cased, uuids and hex hashes masked).
   A person: any token that equals a part (3+ characters, 2 for a part with no Latin letter in it) of the name is replaced, a run
