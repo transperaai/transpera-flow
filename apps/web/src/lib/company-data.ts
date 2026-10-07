@@ -17,7 +17,7 @@ import {
   type ProposalRow,
   type SuggestionRow,
 } from "@transpera-flow/db";
-import { COMPANY_AUDIT_TABLES, type AuditEntry } from "./suggestions/audit";
+import { auditStepIds, COMPANY_AUDIT_TABLES, newestStepNames, type AuditEntry } from "./suggestions/audit";
 import { readIdea } from "./suggestions/idea";
 import type { ProposalLookups } from "./suggestions/proposals";
 import { createClient } from "./supabase/server";
@@ -62,6 +62,8 @@ export interface SuggestionsPageData {
   changes: AuditEntry[] | null;
   /** User id → email, for the change log (owners and agency admins only). */
   people: Record<string, string>;
+  /** Step id → name (the newest revision's), for the steps the change log names: skills and per-person times (#230). `{}` when there is no log. */
+  stepNames: Record<string, string>;
 }
 
 const PATH_ID = /^(services|roles|people|steps)\.([^.]+)\./;
@@ -137,6 +139,7 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
   const currency = (workspace.settings as { currency?: string } | null)?.currency;
   let changes: AuditEntry[] | null = null;
   const people: Record<string, string> = {};
+  const stepNames: Record<string, string> = {};
   if (canManage.data) {
     const [log, members] = await Promise.all([
       supabase
@@ -153,6 +156,29 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
     // actor_kind is check-constrained; diff is jsonb.
     changes = (log.data ?? []) as unknown as AuditEntry[];
     for (const m of members.data ?? []) people[m.user_id] = m.email;
+    // The steps the log names (a skill's, a per-person time's). A step id is stable across a process's versions, so it has one row per
+    // revision: newest first, the first name per id wins (a draft's copy counts as newest, so an unpublished rename can show; only
+    // owners and agency admins read this). PostgREST caps a response (`max-rows`, 1,000 by default) and the oldest rows would drop
+    // off, which could leave an id unnamed, so read it a page at a time. At most 50 entries, so at most 50 ids.
+    const ids = auditStepIds(changes);
+    if (ids.length) {
+      const PAGE = 1000;
+      const rows: { id: string; name: string }[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const page = await supabase
+          .from("steps")
+          .select("id, name, created_at")
+          .eq("workspace_id", ws)
+          .in("id", ids)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, from + PAGE - 1);
+        if (page.error) throw page.error;
+        rows.push(...(page.data ?? []));
+        if ((page.data ?? []).length < PAGE) break;
+      }
+      Object.assign(stepNames, newestStepNames(rows));
+    }
   }
   return {
     workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug },
@@ -165,6 +191,7 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
     sources: Object.fromEntries(sources.map((s) => [s.id, s.title])),
     changes,
     people,
+    stepNames,
   };
 }
 
