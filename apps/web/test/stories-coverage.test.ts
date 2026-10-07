@@ -36,6 +36,21 @@ const SHARED: [string, string][] = [
   ["solutions/solution-cards", "SolutionCards"],
   ["provenance-badge", "ProvenanceBadge"],
   ["step-issue-badges", "StepIssueBadges"],
+  ["shell/skeletons", "PageSkeleton"],
+  ["shell/skeletons", "ListSkeleton"],
+  ["shell/skeletons", "CardGridSkeleton"],
+  ["shell/skeletons", "TableSkeleton"],
+  ["shell/skeletons", "FormSkeleton"],
+  ["shell/skeletons", "SettingsSkeleton"],
+  ["shell/skeletons", "ChartSkeleton"],
+  ["shell/skeletons", "OverviewSkeleton"],
+  ["shell/skeletons", "ProcessPageSkeleton"],
+  ["shell/skeletons", "EditorSkeleton"],
+  ["shell/skeletons", "IssuePageSkeleton"],
+  ["shell/skeletons", "SolutionPageSkeleton"],
+  ["shell/empty-state", "EmptyState"],
+  ["map/map-placeholder", "MapSkeleton"],
+  ["map/map-placeholder", "FirstRunStatus"],
 ];
 
 const CHARTS: [string, string][] = [
