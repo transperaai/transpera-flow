@@ -32,7 +32,6 @@ import {
 } from "./client-calibration";
 import {
   STEP_LOG_HEADERS,
-  STEP_LOG_TEMPLATE,
   decodeLogFile,
   detectDelimiter,
   normHeader,
@@ -94,6 +93,7 @@ const STEP_LOG_COLS: readonly ImportColumn[] = [
   col("finished", "Finished", false, "date", STEP_LOG_HEADERS.finished, "When it finished the step. Needed to measure waits.", "2026-03-02 10:30"),
   col("hours", "Hands-on hours", false, "duration", STEP_LOG_HEADERS.hours, "Hours of hands-on work in the step. Needed to measure hands-on time.", "1.5"),
   col("source", "Lead source", false, "name", STEP_LOG_HEADERS.source, "Where the item came from. Needed to measure leads a week for each source.", "Website enquiries"),
+  col("person", "Person", false, "person", ["person", "user", "team member", "employee", "staff", "done by", "worked by", "assignee", "assigned to", "owner"], "Who did the visit. Owners and editors can match it to your people to measure per-person times (with Per-person times switched on). Never kept.", "A team member"),
 ];
 
 const DEALS_COLS: readonly ImportColumn[] = [
@@ -111,7 +111,7 @@ const TIME_LOG_COLS: readonly ImportColumn[] = [
   col("task", "Task", true, "name", ["task", "task name", "activity", "step", "service item", "description"], "What the time was spent on. Names are matched to your steps in the next step.", "Audit & proposal"),
   col("date", "Date", true, "date", ["date", "start date", "started", "day", "spent on", "logged on"], "The day the time was logged.", "2026-03-03"),
   col("hours", "Hours", true, "duration", ["hours", "duration", "time", "time spent", "logged hours", "quantity"], "How long the entry was. 1.5, 1:30 and 1h 30m all work.", "1.5"),
-  col("person", "Person", false, "person", ["person", "user", "member", "team member", "employee", "staff", "name"], "Who logged the time. Never shown, kept or matched to people.", "A team member"),
+  col("person", "Person", false, "person", ["person", "user", "member", "team member", "employee", "staff", "name"], "Who logged the time. Owners and editors can match it to your people to measure per-person times (with Per-person times switched on). Never kept.", "A team member"),
   col("client", "Client", false, "client", ["client", "customer", "account", "company"], "The job's client. Never shown or kept; used only to count.", "C-001"),
 ];
 
@@ -154,6 +154,18 @@ const INVOICES_COLS: readonly ImportColumn[] = [
   col("paid", "Date paid", false, "date", ["paid", "paid on", "paid date", "date paid", "payment date"], "When it was paid. Blank means unpaid.", "2026-04-02"),
   col("amount", "Amount", false, "amount", ["amount", "total", "total amount", "amount due", "gross", "net", "value"], "The invoice total. Shown to owners and editors only, and never kept.", "1200.00"),
 ];
+
+/** The step log template with the optional Person column (#227); `STEP_LOG_TEMPLATE` is C2's and stays as it is. */
+const STEP_LOG_IMPORT_TEMPLATE = [
+  "item,step,started,finished,hours,source,person",
+  "D-101,Qualify,2026-03-02 09:00,2026-03-02 10:30,1.5,Website,Team member 1",
+  "D-101,Proposal,2026-03-03 13:00,2026-03-03 17:00,4,,Team member 2",
+  "D-101,Client decides,2026-03-03 17:00,2026-03-10 11:00,,,",
+  "D-101,Won,2026-03-10 11:00,2026-03-10 11:00,,,",
+  "D-102,Qualify,2026-03-04 14:00,2026-03-04 15:00,1,Referral,Team member 1",
+  "D-102,Lost,2026-03-05 09:00,2026-03-05 09:00,,,",
+  "",
+].join("\n");
 
 const DEALS_TEMPLATE = [
   "deal,stage,entered,left,source,amount,owner",
@@ -210,7 +222,7 @@ export const IMPORT_KINDS: Record<ImportKind, ImportKindSpec> = {
     shape: "step_log",
     nameColumn: "step",
     columns: STEP_LOG_COLS,
-    template: STEP_LOG_TEMPLATE,
+    template: STEP_LOG_IMPORT_TEMPLATE,
     help: {
       description: "One row for each time an item (a deal, a job) went through a step. Measures how long steps take, waits, redo rates, branch odds and leads a week.",
       example: "Item D-101 started Discovery call on 2 March and finished on 3 March.",
@@ -639,7 +651,16 @@ function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: Da
 function readerFor(kind: ImportKind, ctx: ReadCtx): (cell: (c: string) => string, order: DateOrder) => KindRow | string {
   switch (kind) {
     case "step_log":
-      return (cell, order) => readStepLogRow(cell as Parameters<typeof readStepLogRow>[0], order);
+      return (cell, order) => {
+        const row = readStepLogRow(cell as Parameters<typeof readStepLogRow>[0], order);
+        if (typeof row === "string") return row;
+        const person = cell("person");
+        if (person) {
+          if (person.length > 200) return "The person is over 200 characters.";
+          row.person = person; // #227: the file's name for them; matched to people on the page, never kept
+        }
+        return row;
+      };
     case "clients":
       return (cell, order) => readClientRow(cell as Parameters<typeof readClientRow>[0], order);
     case "servicing_log":
@@ -674,31 +695,53 @@ export function dealsNote(rows: readonly DealRow[]): string | null {
 
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
 
+/** The kinds with hands-on hours, whose person column can be matched to people for per-person times (#227). */
+export const PERSON_TIME_KINDS: readonly ImportKind[] = ["step_log", "time_logs"];
+
 /**
  * Time entries into a step log of hands-on visits: entries of a job in date order (ties keep their file order), and
  * consecutive entries on the same task are one visit: it starts at the first entry's date and its hours are the sum. A
  * visit has no finish, so no waits come from it.
  */
 export function timeLogToStepLog(rows: readonly TimeLogRow[]): StepLogRow[] {
+  return mergeVisits(rows).map((v) => v.visit);
+}
+
+/** `timeLogToStepLog`'s merging, with each visit's entries. */
+function mergeVisits(rows: readonly TimeLogRow[]): { visit: StepLogRow; entries: TimeLogRow[] }[] {
   const byJob = new Map<string, TimeLogRow[]>();
   for (const r of rows) {
     const list = byJob.get(r.job);
     if (list) list.push(r);
     else byJob.set(r.job, [r]);
   }
-  const out: StepLogRow[] = [];
+  const out: { visit: StepLogRow; entries: TimeLogRow[] }[] = [];
   for (const [job, list] of byJob) {
     const sorted = [...list].sort((a, b) => a.date - b.date); // stable: ties keep their line order
-    let visit: StepLogRow | null = null;
+    let cur: { visit: StepLogRow; entries: TimeLogRow[] } | null = null;
     for (const r of sorted) {
-      if (visit && visit.step === r.task) visit.hours = round4((visit.hours ?? 0) + r.hours);
-      else {
-        visit = { item: job, step: r.task, started: r.date, finished: null, hours: round4(r.hours), source: null };
-        out.push(visit);
+      if (cur && cur.visit.step === r.task) {
+        cur.visit.hours = round4((cur.visit.hours ?? 0) + r.hours);
+        cur.entries.push(r);
+      } else {
+        cur = { visit: { item: job, step: r.task, started: r.date, finished: null, hours: round4(r.hours), source: null }, entries: [r] };
+        out.push(cur);
       }
     }
   }
   return out;
+}
+
+/**
+ * `timeLogToStepLog` with who did each visit (#227): the entries' person when every entry of the visit names the same
+ * non-empty person, else null (a visit by several people, or no one named). Used only for per-person times; never stored.
+ */
+export function timeLogPersonVisits(entries: readonly TimeLogRow[]): StepLogRow[] {
+  return mergeVisits(entries).map(({ visit, entries: es }) => {
+    const first = es[0]?.person ?? null;
+    const same = first !== null && first !== "" && es.every((e) => e.person === first);
+    return { ...visit, person: same ? first : null };
+  });
 }
 
 /** Jobs or tickets into a servicing log. */
@@ -957,6 +1000,23 @@ export function readImport(
 // ---------------------------------------------------------------------------
 
 /**
+ * The distinct people the file names (a step log's `person`, a time log's entries'), most rows first then by value, at most 500.
+ * For matching to people (#227); the values are never stored.
+ */
+export function personValues(read: ImportRead): { value: string; rows: number }[] {
+  let values: (string | null | undefined)[];
+  if (read.kind === "time_logs" && read.entries) values = read.entries.map((e) => e.person);
+  else if (read.kind === "step_log") values = (read.rows as StepLogRow[]).map((r) => r.person);
+  else return [];
+  const counts = new Map<string, number>();
+  for (const v of values) if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts]
+    .map(([value, n]) => ({ value, rows: n }))
+    .sort((a, b) => b.rows - a.rows || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0))
+    .slice(0, MAX_IMPORT_NAMES);
+}
+
+/**
  * Which of the model's names (`targets`) each value of the file means: the target with the same name once normalised
  * (case, spacing and punctuation ignored), else null ("Leave out"). A value shared by two targets after normalising matches
  * neither.
@@ -982,17 +1042,22 @@ export function applyNameMap(read: ImportRead, map: Record<string, string | null
   return applyNameMapCounted(read, map).rows;
 }
 
+/** Time log entries kept by the step-name map, renamed to the model's names; null for the other kinds (#227). */
+export function applyNameMapEntries(read: ImportRead, map: Record<string, string | null>): TimeLogRow[] | null {
+  if (!read.entries) return null;
+  const entries: TimeLogRow[] = [];
+  for (const e of read.entries) {
+    const t = Object.hasOwn(map, e.task) ? (map[e.task] ?? null) : null;
+    if (t !== null) entries.push({ ...e, task: t });
+  }
+  return entries;
+}
+
 /** `applyNameMap` with how many of the file's rows (time log entries, for time logs) were kept and left out. */
 export function applyNameMapCounted(read: ImportRead, map: Record<string, string | null>): { rows: ShapeRow[]; kept: number; leftOut: number } {
   const target = (value: string) => (Object.hasOwn(map, value) ? (map[value] ?? null) : null);
-  if (read.entries) {
-    const entries: TimeLogRow[] = [];
-    for (const e of read.entries) {
-      const t = target(e.task);
-      if (t !== null) entries.push({ ...e, task: t });
-    }
-    return { rows: timeLogToStepLog(entries), kept: entries.length, leftOut: read.entries.length - entries.length };
-  }
+  const entries = applyNameMapEntries(read, map);
+  if (entries && read.entries) return { rows: timeLogToStepLog(entries), kept: entries.length, leftOut: read.entries.length - entries.length };
   const shape = IMPORT_KINDS[read.kind].shape;
   const field = SHAPE_NAME_FIELD[shape];
   if (!field) return { rows: read.rows, kept: read.rows.length, leftOut: 0 };
