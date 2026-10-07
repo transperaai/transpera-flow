@@ -6,7 +6,7 @@ import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import type { PersonDetail, WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
-import { FACTOR_HELP, factorWords } from "@/lib/people";
+import { FACTOR_HELP, factorWords, stepsPersonCanDo } from "@/lib/people";
 import { savePersonCapacityFactor } from "./actions";
 
 // Per-person times for one person (C6, #198): one optional "Every step" time and one optional time per step they can do, in the
@@ -15,9 +15,7 @@ import { savePersonCapacityFactor } from "./actions";
 
 /** The steps a person can do: their skills if they have any, otherwise the steps of their roles, in `data.steps` order. */
 export function stepsFor(person: PersonDetail, data: WorkspaceSettingsData): WorkspaceSettingsData["steps"] {
-  const skills = new Set(data.personSkills.filter((s) => s.person_id === person.id).map((s) => s.step_id));
-  const roles = new Set(data.personRoles.filter((r) => r.person_id === person.id).map((r) => r.role_id));
-  return data.steps.filter((s) => (skills.size > 0 ? skills.has(s.id) : s.role_id !== null && roles.has(s.role_id)));
+  return stepsPersonCanDo(person.id, data.steps, data.personSkills, data.personRoles);
 }
 
 /** One factor: the number field, with how it reads in words after the value. */

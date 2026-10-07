@@ -205,6 +205,22 @@ export interface ShownFactor {
 }
 
 /**
+ * The steps a person can do, for per-person times: their skills if they have any, otherwise the steps of their roles, in the
+ * order of `steps`. One rule for Settings (which fields to offer) and the People page (which times to show), so a time on a step
+ * they can no longer do is listed under "Not used now" in Settings and shown nowhere else. The engine ignores it too.
+ */
+export function stepsPersonCanDo<S extends { id: string; role_id: string | null }>(
+  personId: string,
+  steps: readonly S[],
+  personSkills: readonly { person_id: string; step_id: string }[],
+  personRoles: readonly { person_id: string; role_id: string }[],
+): S[] {
+  const skills = new Set(personSkills.filter((s) => s.person_id === personId).map((s) => s.step_id));
+  const roles = new Set(personRoles.filter((r) => r.person_id === personId).map((r) => r.role_id));
+  return steps.filter((s) => (skills.size > 0 ? skills.has(s.id) : s.role_id !== null && roles.has(s.role_id)));
+}
+
+/**
  * One person's per-person times from the bundle (`bundle.personCapacityFactors`, which for a member holds only their own): the
  * default first (named "Every step"), then the steps in `stepNames` in that map's order (the process's step order). Never sorted
  * by value. Steps not in `stepNames` are dropped.

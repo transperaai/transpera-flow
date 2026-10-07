@@ -27,6 +27,7 @@ import {
   factorWords,
   personDetail,
   personFactors,
+  stepsPersonCanDo,
   personRows,
   teamSummary,
   weeksLabel,
@@ -460,7 +461,9 @@ function HowBusy({
  * table above already shows only their own row. Never in a table column, never ranked or compared.
  */
 function PersonDetailBlock({ person, detail, bundle, editHref }: { person: PersonBusy; detail: PersonDetail; bundle: ProcessBundle; editHref: string | null }) {
-  const stepNames = new Map([...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((o) => o.steps)].map((s) => [s.id, s.name] as const));
+  // Only steps they can do: a time on any other step is never used, so it isn't shown (Settings lists it under "Not used now").
+  const doable = stepsPersonCanDo(person.id, [...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((o) => o.steps)], bundle.personSkills, bundle.personRoles);
+  const stepNames = new Map(doable.map((s) => [s.id, s.name] as const));
   const factors = capacityFactorsShown(bundle.workspace.settings, personFactors(bundle, person.id, stepNames));
   const dates = [detail.startDate ? `Started ${formatDateRange(detail.startDate, detail.startDate)}` : null, detail.endDate ? `Leaves ${formatDateRange(detail.endDate, detail.endDate)}` : null].filter(Boolean);
   return (

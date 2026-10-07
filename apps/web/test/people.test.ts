@@ -22,6 +22,7 @@ import {
   personDetail,
   personFactors,
   personRows,
+  stepsPersonCanDo,
   untestedSoleHolders,
   weeksLabel,
 } from "@/lib/people";
@@ -225,6 +226,31 @@ describe("personFactors", () => {
     expect(personFactors(b, id.jess!, names)).toEqual([]);
     expect(personFactors({ ...b, personCapacityFactors: [] }, id.jess!, names)).toEqual([]);
     expect(personFactors({ ...b, personCapacityFactors: [row(id.jess!, null, 0.9, "measured")] }, id.jess!, names)[0]!.entered).toBe(false);
+  });
+});
+
+describe("stepsPersonCanDo", () => {
+  const b = larkspurBundle();
+  const steps = b.steps.filter((s) => s.role_id);
+
+  it("is a person's skills if they have any, otherwise the steps of their roles, in the steps' order", () => {
+    const skilled = b.personSkills.find((k) => k.person_id === id.freya)!;
+    const mine = stepsPersonCanDo(id.freya!, steps, b.personSkills, b.personRoles);
+    expect(mine.map((s) => s.id)).toEqual(steps.filter((s) => b.personSkills.some((k) => k.person_id === id.freya && k.step_id === s.id)).map((s) => s.id));
+    expect(mine.some((s) => s.id === skilled.step_id)).toBe(true);
+    const jessRoles = new Set(b.personRoles.filter((r) => r.person_id === id.jess).map((r) => r.role_id));
+    const jess = stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles);
+    expect(jess.length).toBeGreaterThan(0);
+    expect(jess.every((s) => jessRoles.has(s.role_id!))).toBe(true);
+    expect(jess.length).toBe(steps.filter((s) => jessRoles.has(s.role_id!)).length);
+  });
+
+  it("a time on a step the person can't do is not shown: personFactors over those steps drops it", () => {
+    const foreign = steps.find((s) => !stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles).includes(s))!;
+    const own = stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles)[0]!;
+    const rows = [id.jess!].flatMap((p) => [foreign, own].map((s, i) => ({ person_id: p, workspace_id: b.workspace.id, step_id: s.id, factor: i ? 0.8 : 1.6, source: "entered" })));
+    const doable = new Map(stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles).map((s) => [s.id, s.name]));
+    expect(personFactors({ ...b, personCapacityFactors: rows }, id.jess!, doable).map((f) => f.stepId)).toEqual([own.id]);
   });
 });
 

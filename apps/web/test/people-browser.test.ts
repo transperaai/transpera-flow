@@ -213,9 +213,14 @@ describe("Person detail", { timeout: 120_000 }, () => {
 
   // Per-person times (C6, #198). Larkspur's first step stands in for "a step"; Hana's 1.35 is the value no one else may see.
   const live = larkspurBundle();
-  const STEP = live.steps[0]!;
+  // Freya has skills, so her step is one of them; Jess has none, so hers is a step of her roles. FOREIGN is a step Jess can't do.
+  const byId = new Map(live.steps.map((st) => [st.id, st]));
+  const STEP = byId.get(live.personSkills.find((k) => k.person_id === larkspurPersonIds.freya)!.step_id)!;
+  const jessRoles = new Set(live.personRoles.filter((r) => r.person_id === larkspurPersonIds.jess).map((r) => r.role_id));
+  const JESS_STEP = live.steps.find((st) => st.role_id && jessRoles.has(st.role_id))!;
+  const FOREIGN = live.steps.find((st) => st.role_id && !jessRoles.has(st.role_id))!;
   const row = (person: string, step: string | null, factor: number): PersonCapacityFactorRow => ({ person_id: larkspurPersonIds[person]!, workspace_id: live.workspace.id, step_id: step, factor, source: "entered" });
-  const FACTORS = [row("freya", null, 0.9), row("freya", STEP.id, 0.8), row("hana", null, 1.35), row("jess", STEP.id, 1.2)];
+  const FACTORS = [row("freya", null, 0.9), row("freya", STEP.id, 0.8), row("hana", null, 1.35), row("jess", JESS_STEP.id, 1.2), row("jess", FOREIGN.id, 1.6)];
 
   it("switch off, with factors stored: no 'Time on each step' text anywhere and no [data-capacity-factors]", async () => {
     const { page, errors } = await mount({ viewer: "everyone", capacityFactorEnabled: false, factors: FACTORS });
@@ -264,7 +269,10 @@ describe("Person detail", { timeout: 120_000 }, () => {
       expect(await page.locator("[data-speeds-normalised]").innerText()).toContain("Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what owners and editors see.");
       await busyRows(page).getByRole("button", { name: "Jess Monroe" }).click();
       const text = await page.locator("[data-capacity-factors]").innerText();
-      expect(text).toContain(`${STEP.name}: 1.2 × normal (20% slower)`);
+      expect(text).toContain(`${JESS_STEP.name}: 1.2 × normal (20% slower)`);
+      // A time on a step she can't do is stored but never shown (Settings lists it under "Not used now").
+      expect(text).not.toContain(FOREIGN.name);
+      expect(text).not.toContain("1.6");
       for (const t of [await page.locator("body").innerText(), await page.locator("#root").innerHTML()]) {
         expect(t).not.toContain("1.35");
         expect(t).not.toContain("0.9 ×");
