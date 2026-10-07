@@ -430,3 +430,12 @@ Verified only against plain Postgres 16 (`packages/db/test/capacity-factors.test
 | `null` vs `false` for the switch | `save_capacity_factor_switch` treats an absent key, JSON null and false as the same (off), compared as `coalesce(nullif(x, 'null'), 'false')`. | Save `true` over the API with base `{"capacity_factor_enabled": false}` against a workspace with no key: `saved`. |
 | Paging the export | The bundle export orders by `person_id, step_id` (nulls last) with offset paging. `(person_id, step_id)` is unique, so the order is total. | Export a workspace with more than 1,000 factors: none repeated or missing. |
 
+## Default table grants on Supabase (found 7 Oct 2026, applying row 67)
+
+On production, `authenticated` holds REFERENCES, TRIGGER and TRUNCATE on almost every table in `public`, not only the
+privileges each migration grants, because Supabase's default privileges grant ALL on new tables to `anon` and
+`authenticated`. Plain Postgres in tests has no such defaults, so post-apply checks written locally expect only what the
+migration grants. The extra privileges can't be used through PostgREST (it has no TRUNCATE, and no function runs SQL a user
+supplies), so nothing is exposed today. A hardening follow-up could revoke them from both roles on every public table and
+change the default privileges; that touches every table, so it waits for Austin.
+
