@@ -10,6 +10,7 @@ import { createTestDb, type TestDb } from "./harness";
 
 const FILE = "20261224000000_revoke_unused_table_privileges.sql";
 const migration = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+const applyFile = readFileSync(new URL(`../scripts/apply/${FILE}`, import.meta.url), "utf8");
 const EXTRA = ["TRUNCATE", "TRIGGER", "REFERENCES", "MAINTAIN"];
 const RELKINDS = "('r', 'p', 'v', 'm', 'f')";
 /** A table with no grants to either role (row 64 grants by column only); Supabase's defaults never reached it either. */
@@ -48,7 +49,7 @@ const acl = async () =>
   ).map((r) => `${r.relname}.${r.col ?? "*"} ${r.grantee} ${r.privilege_type}${r.is_grantable ? " +grant" : ""}`);
 const defaults = async () =>
   (await q("select defaclrole::regrole::text as role, defaclobjtype as kind, defaclacl::text as acl from pg_default_acl where defaclnamespace = 'public'::regnamespace order by 1, 2"));
-const isExtraForClients = (line: string) => /^\S+ (anon|authenticated) (TRUNCATE|TRIGGER|REFERENCES|MAINTAIN)/.test(line);
+const isExtraForClients = (line: string) => new RegExp(`^\\S+ (anon|authenticated) (${EXTRA.join("|")})( |$)`).test(line);
 
 let before: { acl: string[]; defaults: unknown[]; dml: unknown[]; grantBack: string; extra: unknown[] };
 
@@ -162,9 +163,17 @@ describe("the header's rollback", () => {
     expect(await acl()).toEqual(before.acl);
     expect(await defaults()).toEqual(before.defaults);
     expect(await q("select version from supabase_migrations.schema_migrations where version = '20261224000000'")).toEqual([]);
-    // And the migration applies again on top.
-    await db.client.query(migration);
+    // And the production apply file applies again on top, recording the version.
+    await db.client.query(applyFile);
     expect((await acl()).filter(isExtraForClients)).toEqual([]);
+    expect(await q("select name from supabase_migrations.schema_migrations where version = '20261224000000'")).toEqual([{ name: "revoke_unused_table_privileges" }]);
+  });
+
+  it("the apply file holds the migration verbatim, in one transaction with a lock timeout", () => {
+    expect(applyFile.split(migration)).toHaveLength(3);
+    expect(applyFile).toContain("set local lock_timeout = '5s';");
+    expect(applyFile).toContain(`values ('20261224000000', 'revoke_unused_table_privileges', array[$mig$${migration}$mig$]);`);
+    expect(applyFile.trimEnd().endsWith("commit;")).toBe(true);
   });
 });
 
