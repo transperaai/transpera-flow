@@ -59,6 +59,18 @@ jobs:
         if: always()
         run: docker logs postgrest || true
       - run: pnpm --filter @transpera-flow/web build
+      # The build above has no Sentry variable: the "no DSN, no change" path, so the browser bundle must hold none of the SDK.
+      - name: No Sentry SDK in the browser bundle without a DSN
+        run: if grep -rl 'sentry.javascript' apps/web/.next/static/chunks; then echo "The Sentry SDK is bundled without a DSN"; exit 1; fi
+      # This one is "a DSN, but no upload variables" (issue #44, ADR 0017): it must build, and must leave no source map in the public
+      # files. No network: nothing is uploaded.
+      - name: Build with a Sentry DSN and no upload variables
+        run: |
+          NEXT_PUBLIC_SENTRY_DSN=https://public@o0.ingest.sentry.io/0 pnpm --filter @transpera-flow/web build
+          # An explicit failure: `! cmd` is exempt from `set -e`, so it would only fail the step while it stays the last line.
+          if find apps/web/.next/static -name '*.map' | grep .; then echo "Source maps would be served publicly"; exit 1; fi
+          # And the SDK did load: the injected browser config is in the bundle.
+          grep -rlq 'sentry.javascript' apps/web/.next/static/chunks
 
   # Which pushes need the visual job, and whether this one approves new baselines: see docs/visual-regression.md.
   # Only branch pushes (never tags). Off main it diffs the whole branch against the merge-base with origin/main, so a docs-only

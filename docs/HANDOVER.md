@@ -89,6 +89,7 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
 - **Auto mode:** its safety check blocks `prod-sql.sh` as "Production Reads", even read-only preflight. Austin plans an
   overnight run with access granted; run production steps with auto mode off or a permission rule for `prod-sql.sh`.
 - C5 is Austin's.
+- **Sentry (C5, #44):** create the account and set the four variables (see `docs/plans/c5-sentry-brief.md`, "What Austin does"), redeploy, then open `/monitoring-check` as an agency admin (linked from nowhere) and press both buttons.
 
 **Still open from Milestone A:**
 - **AI analysis sources (A46):** "read linked sources and quotes" defaults off (it would send interview quotes to
