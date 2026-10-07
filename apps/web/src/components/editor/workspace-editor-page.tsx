@@ -3,7 +3,8 @@ import { EditorView } from "@/components/editor/editor-view";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
 import { loadIdeaProposal } from "@/lib/company-data";
-import { ideaSeed } from "@/lib/suggestions/idea";
+import { mapPlayChanges } from "@/lib/share/play-changes";
+import { ideaSeed, readIdea } from "@/lib/suggestions/idea";
 import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
 import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
 import { loadLiveParts } from "@/lib/overview/data";
@@ -60,10 +61,16 @@ export async function WorkspaceEditorPage({
   const editorMode = company ? "draft" : parseEditorMode(searchParams.mode);
   const issueId = editorMode === "solution" ? parseIssueParam(searchParams.issue) : null;
   const issueRow = issueId ? (await loadWorkspaceIssues(live.workspace.id)).find((i) => i.id === issueId) : undefined;
-  // "Build it" on a solution idea (A52): `?idea=` names a waiting idea for this issue, whose steps the Editor places.
-  const ideaId = issueRow ? parseIssueParam(searchParams.idea) : null;
+  // "Build it" on a solution idea (A52): `?idea=` names a waiting idea for this issue, whose steps the Editor places. A visitor's idea
+  // from a play link (B4) may be for no issue: it opens on the process its link shared, with `?issue=` only when it named one.
+  const ideaId = editorMode === "solution" ? parseIssueParam(searchParams.idea) : null;
   const ideaRow = ideaId ? await loadIdeaProposal(live.workspace.id, ideaId) : null;
-  const idea = ideaRow && ideaRow.issue_id === issueRow?.id ? ideaSeed(ideaRow, live.roles) : null;
+  const forThisIssue = (ideaRow?.issue_id ?? null) === (issueRow?.id ?? null);
+  const visitorsHere = ideaRow?.created_via === "play_link" && (ideaRow.payload as { process_id?: unknown }).process_id === live.process.id;
+  // The lever changes are checked against live HERE, on the server: a change whose step, role, person or service has gone since the
+  // visitor sent it is dropped with a note (the snapshot kept real ids, so nothing is translated).
+  const mapped = ideaRow && forThisIssue && (issueRow || visitorsHere) ? mapPlayChanges(readIdea(ideaRow.payload).levers, live) : null;
+  const idea = ideaRow && mapped ? { ...ideaSeed(ideaRow, live.roles), levers: mapped.levers, leverNotes: mapped.notes } : null;
   return (
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit>
     <EditorView

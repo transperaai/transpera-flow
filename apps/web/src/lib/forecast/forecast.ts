@@ -3,8 +3,9 @@
 // team load chart (B15) build the same model and read the same alerts.
 
 import { ModelError, toEngineModel, type ProcessBundle } from "@transpera-flow/db";
-import { forecastAlerts, toRatingConfig, type AnalysisSettings, type DetectedIssue, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { forecastAlerts, toRatingConfig, type AnalysisSettings, type DetectedIssue, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { horizonWeeks } from "@/lib/horizon";
+import { withLeverChanges } from "@/lib/solutions/levers";
 import { visibleFindings } from "@/lib/rules/edit";
 import { calendarMonthStarts, timelineMonths } from "./timeline";
 
@@ -23,9 +24,11 @@ export function forecastModel(
   bundle: ProcessBundle,
   months: number,
   startDate: string,
+  /** The lever changes of the solutions live in this run, in go-live order (B4; D46 said they weren't applied, D48 amends it). */
+  levers: readonly ScenarioPatch[] = [],
 ): { model: EngineModel; monthStarts: number[]; error: null } | { model: null; monthStarts: null; error: string } {
   try {
-    const model = { ...toEngineModel(bundle, { startDate, planned: true }), horizonWeeks: horizonWeeks(months) };
+    const model = { ...withLeverChanges(toEngineModel(bundle, { startDate, planned: true }), levers).model, horizonWeeks: horizonWeeks(months) };
     // The run's months are the calendar's, so "February" in an alert is February.
     return { model, monthStarts: calendarMonthStarts(startDate, model.horizonWeeks, model.hoursPerWeek), error: null };
   } catch (err) {

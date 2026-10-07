@@ -24,6 +24,8 @@ export interface ShareInput {
   /** "YYYY-MM-DD": the link works until the end of that day (UTC). Null: no end date. */
   expiresOn: string | null;
   label: string;
+  /** "Let people try changes" (B4): the link is a play link. Only a process can be one. Absent: off. */
+  play?: boolean;
 }
 
 export interface ParsedShare {
@@ -36,6 +38,8 @@ export interface ParsedShare {
   /** The end of the chosen day, UTC (ISO), or null. */
   expiresAt: string | null;
   label: string | null;
+  /** A play link: visitors may move the shown levers and send their idea (B4). */
+  play: boolean;
 }
 
 export type ShareParse = { ok: true; value: ParsedShare } | { ok: false; message: string };
@@ -68,6 +72,8 @@ export function parseShareInput(input: unknown, now: Date = new Date()): SharePa
   }
   const people = i.people === true;
   const financials = i.financials === true;
+  const play = i.play === true;
+  if (play && kind !== "process") return fail("Only a process can be shared for trying changes.");
   const restricted = people || financials;
 
   const emails = restricted ? parseEmails(typeof i.emails === "string" ? i.emails : "") : [];
@@ -91,5 +97,5 @@ export function parseShareInput(input: unknown, now: Date = new Date()): SharePa
   const label = typeof i.label === "string" ? i.label.trim() : "";
   if (label.length > MAX_LABEL) return fail(`Keep the name under ${MAX_LABEL} characters.`);
 
-  return { ok: true, value: { kind, targetId: kind === "overview" ? null : (i.targetId as string), people, financials, emails, expiresAt, label: label || null } };
+  return { ok: true, value: { kind, targetId: kind === "overview" ? null : (i.targetId as string), people, financials, emails, expiresAt, label: label || null, play } };
 }

@@ -54,6 +54,7 @@ import { ServicingBanner } from "./servicing-banner";
 import { UtilisationBars } from "./utilisation-bars";
 import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { PLAY_HELP, PlaySection, type PlayConfig } from "@/components/share/play-section";
 
 const NO_FINDINGS: FindingRow[] = [];
 
@@ -90,6 +91,7 @@ export function ProcessPage({
   firstPrinciples,
   processPicker,
   notice,
+  play,
   ai,
   findings: initialFindings = NO_FINDINGS,
   aboutInfo,
@@ -138,6 +140,8 @@ export function ProcessPage({
   firstPrinciples?: { doc: FirstPrinciples | null; href: string; draftChanged?: boolean; inheritedFrom?: number | null };
   processPicker?: ReactNode;
   notice?: ReactNode;
+  /** A play link's visitor (B4): shows "Try your own changes" after the map, with the levers the workspace shows and "Send this idea". Nowhere else renders levers on this page. */
+  play?: PlayConfig;
 }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -384,6 +388,12 @@ export function ProcessPage({
             sourceTitles={sourceTitles}
           />
         </Section>
+
+        {play && model && (
+          <Section id="try-changes" title="Try your own changes" hint="Move the levers the team shows to see what would change. Nothing is saved unless you send it." help={PLAY_HELP.section}>
+            <PlaySection model={model} baseline={sim.run} bundle={bundle} play={play} />
+          </Section>
+        )}
 
         <Section id="insights" title="Findings" hint="What AI and your team concluded from the facts. Nothing reaches the map until someone acknowledges it as an issue.">
           <div className="flex flex-col gap-3">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
-import type { ProposalRow } from "@transpera-flow/db";
+import type { PlayContact, ProposalRow } from "@transpera-flow/db";
 import { reviewProposals } from "@/app/w/[slug]/suggestion-actions";
 import { Help } from "@/components/help";
 import { IdeaCard, IdeaLegend } from "@/components/idea-card";
@@ -24,6 +24,8 @@ import {
 interface ViewProps {
   proposals: ProposalRow[];
   lookups: ProposalLookups;
+  /** A visitor's email and the text held from members and viewers, by proposal id (owners and editors only; B4). */
+  contacts?: Record<string, PlayContact>;
   canEdit: boolean;
   review: (ids: string[], decision: ProposalDecision, note: string | null) => Promise<ProposalOutcome>;
   /** Where the workspace's pages live: `/w/<slug>` or `/demo`. An issue's page is `<base>/issues/<number>`; Build it opens `<base>`'s Editor. */
@@ -64,7 +66,7 @@ function SectionHead({ id, title, help, children }: { id: string; title: string;
   );
 }
 
-export function ProposalsView({ proposals, lookups, canEdit, review, base, linkableUpTo = Infinity, children }: ViewProps) {
+export function ProposalsView({ proposals, lookups, contacts = {}, canEdit, review, base, linkableUpTo = Infinity, children }: ViewProps) {
   const issueHref = (n: number) => (n <= linkableUpTo ? `${base}/issues/${n}` : null);
   const [message, setMessage] = useState<{ text: string; tone: "ok" | "error"; href?: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -74,11 +76,11 @@ export function ProposalsView({ proposals, lookups, canEdit, review, base, linka
   const ideas = waiting.filter((p) => p.kind === "solution_idea");
   const issues = waiting.filter((p) => p.kind === "issue");
 
-  const run = (id: string, decision: ProposalDecision) => {
+  const run = (id: string, decision: ProposalDecision, note: string | null = null) => {
     setMessage(null);
     setBusyId(id);
     startTransition(async () => {
-      const outcome = await review([id], decision, null);
+      const outcome = await review([id], decision, note);
       setBusyId(null);
       if (outcome.status === "error") {
         setMessage({ text: outcome.message, tone: "error" });
@@ -116,7 +118,7 @@ export function ProposalsView({ proposals, lookups, canEdit, review, base, linka
           <ul className="flex flex-col gap-3">
             {ideas.map((p) => (
               <li key={p.id}>
-                <IdeaCard p={p} lookups={lookups} base={base} from={`${base}/suggestions`} canEdit={canEdit} busy={pending} onDismiss={() => run(p.id, "reject")} linkableUpTo={linkableUpTo} />
+                <IdeaCard p={p} lookups={lookups} contact={contacts[p.id]} base={base} from={`${base}/suggestions`} canEdit={canEdit} busy={pending} onDismiss={(reply) => run(p.id, "reject", reply)} linkableUpTo={linkableUpTo} />
               </li>
             ))}
           </ul>

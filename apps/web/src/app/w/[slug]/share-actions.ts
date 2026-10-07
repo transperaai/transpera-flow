@@ -99,6 +99,7 @@ export async function createShareLink(slug: unknown, input: unknown): Promise<Sh
     token_hash: createHash("sha256").update(token).digest("hex"),
     kind: v.kind,
     target_id: v.targetId,
+    mode: v.play ? "play" : "view",
     show_people: v.people,
     show_financials: v.financials,
     allowed_emails: v.emails,

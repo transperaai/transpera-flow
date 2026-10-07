@@ -7,7 +7,7 @@ import type { Db } from "./queries";
 import type { ProposalRow, ProposalStatus } from "./types";
 
 export const PROPOSAL_ROW_COLUMNS =
-  "id, workspace_id, kind, title, detail, payload, evidence, note, issue_id, status, created_via, import_source, proposer_name, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
+  "id, workspace_id, kind, title, detail, payload, evidence, note, issue_id, status, created_via, import_source, proposer_name, share_link_id, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
 
 /** The workspace's proposals, newest first; optionally only one status. */
 export async function loadProposals(db: Db, workspaceId: string, status?: ProposalStatus): Promise<ProposalRow[]> {
@@ -28,4 +28,22 @@ export async function countPendingProposals(db: Db, workspaceId: string): Promis
     throw r.error;
   }
   return r.count ?? 0;
+}
+
+/** What only owners, editors and agency admins may read about a visitor's idea (B4): their email, and the fields held from members and viewers. */
+export type PlayContact = { email: string | null; held: { title?: string; note?: string; name?: string } };
+
+/** A visitor's email and held text for each play-link idea of the workspace. Empty for anyone who may not read them (42501). */
+export async function loadPlayContacts(db: Db, workspaceId: string): Promise<Record<string, PlayContact>> {
+  const r = await db.rpc("play_proposal_contacts", { ws: workspaceId });
+  if (r.error) {
+    // 42501: members and viewers. 42883 / PGRST202: the function isn't there yet (migration not applied).
+    if (r.error.code === "42501" || r.error.code === "42883" || r.error.code === "PGRST202") return {};
+    throw r.error;
+  }
+  const out: Record<string, PlayContact> = {};
+  for (const [id, v] of Object.entries((r.data ?? {}) as Record<string, { email?: string | null; held?: PlayContact["held"] }>)) {
+    out[id] = { email: v.email ?? null, held: v.held ?? {} };
+  }
+  return out;
 }

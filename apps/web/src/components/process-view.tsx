@@ -6,7 +6,8 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PanelRight } from "lucide-react";
 import { isUnpublished, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
-import type { EngineModel, FirstPrinciples } from "@transpera-flow/engine";
+import type { EngineModel, FirstPrinciples, ScenarioPatch } from "@transpera-flow/engine";
+import { withLeverChanges } from "@/lib/solutions/levers";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { discardChange, revertField } from "@/lib/drafts/discard";
 import { EMPTY_DIFF, diffBundles, unresolvedSteps } from "@/lib/drafts/diff";
@@ -60,15 +61,17 @@ export type EditMode = ScreenMode;
 const DEMO_VIEWER: Viewer = { userId: "demo-you", name: "You", email: null };
 
 /** A bundle's engine model, the same object while the model is unchanged (moving a step doesn't change it). */
-export function useEngineModel(bundle: ProcessBundle, weeks: number | null): { model: EngineModel | null; error: string | null } {
+export function useEngineModel(bundle: ProcessBundle, weeks: number | null, levers?: readonly ScenarioPatch[]): { model: EngineModel | null; error: string | null } {
   const resolved = useMemo(() => {
     try {
-      return { model: toEngineModel(bundle), error: null };
+      // A solution's lever changes (B4) are applied on top, so the page shows the solution's own numbers.
+      const built = toEngineModel(bundle);
+      return { model: levers?.length ? withLeverChanges(built, levers).model : built, error: null };
     } catch (err) {
       if (err instanceof ModelError) return { model: null, error: err.message };
       throw err;
     }
-  }, [bundle]);
+  }, [bundle, levers]);
   const modelKey = resolved.model ? JSON.stringify(resolved.model) : null;
   // The horizon picked on the page replaces the workspace's (issue #123); null keeps the workspace's.
   const model = useMemo(() => {

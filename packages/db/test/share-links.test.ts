@@ -213,13 +213,13 @@ describe("the write trigger", () => {
     await db.client.query("delete from share_links where token_hash = $1", [sha("forge")]);
   });
 
-  it("play links are refused (22023), as is an expiry in the past", async () => {
+  it("a play link for the Overview is refused (22023; B4 allows play links for a process only), as is an expiry in the past", async () => {
     await db.client.query("begin");
     try {
       const play = await attempt(db.client, () =>
         db.client.query("insert into share_links (workspace_id, token_hash, kind, mode, snapshot, engine_version) values ($1, $2, 'overview', 'play', $3::jsonb, '1')", [ws, sha("p"), JSON.stringify(clean())]),
       );
-      expect(play).toMatchObject({ ok: false, code: "22023", message: "Play links come later." });
+      expect(play).toMatchObject({ ok: false, code: "22023", message: "Only a process can be shared for trying changes." });
     } finally {
       await db.client.query("rollback");
     }

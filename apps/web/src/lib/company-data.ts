@@ -5,6 +5,7 @@ import {
   loadCompanyModel,
   loadLiveRevisions,
   loadSources,
+  loadPlayContacts,
   loadProposals,
   loadSuggestions,
   PROPOSAL_ROW_COLUMNS,
@@ -12,6 +13,7 @@ import {
   snapshotModel,
   type CompanyModel,
   type IssueProposalPayload,
+  type PlayContact,
   type ProposalRow,
   type SuggestionRow,
 } from "@transpera-flow/db";
@@ -51,6 +53,8 @@ export interface SuggestionsPageData {
   proposals: ProposalRow[];
   /** What the proposals point at, by name. */
   lookups: ProposalLookups;
+  /** A visitor's email and the text held from members and viewers, for each play-link idea. Owners, editors and agency admins only; empty for everyone else (B4). */
+  contacts: Record<string, PlayContact>;
   model: CompanyModel;
   /** Titles of the sources suggestions cite. */
   sources: Record<string, string>;
@@ -60,26 +64,54 @@ export interface SuggestionsPageData {
   people: Record<string, string>;
 }
 
-/** The names the proposals' cards show: processes, steps and the issues ideas are for. */
-export async function proposalLookups(supabase: Awaited<ReturnType<typeof createClient>>, ws: string, proposals: readonly ProposalRow[]): Promise<ProposalLookups> {
+const PATH_ID = /^(services|roles|people|steps)\.([^.]+)\./;
+
+/**
+ * The names the proposals' cards show: processes, steps and the issues ideas are for, and for a visitor's idea (B4) the roles, services
+ * and (only for a reader who sees everyone) people its lever changes name.
+ */
+export async function proposalLookups(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ws: string,
+  proposals: readonly ProposalRow[],
+  opts: { currency?: string; seesEveryone?: boolean } = {},
+): Promise<ProposalLookups> {
+  const playIdeas = proposals.filter((p) => p.kind === "solution_idea" && p.created_via === "play_link");
+  const leverPaths = playIdeas.flatMap((p) => readIdea(p.payload).levers.map((l) => PATH_ID.exec(l.path)).flatMap((m) => (m ? [{ family: m[1]!, id: m[2]! }] : [])));
+  const leverSteps = leverPaths.filter((x) => x.family === "steps" && !x.id.startsWith("@")).map((x) => x.id);
+  const wants = (family: string) => leverPaths.some((x) => x.family === family);
+  const playProcessIds = playIdeas.flatMap((p) => ((p.payload as { process_id?: unknown }).process_id && typeof (p.payload as { process_id?: unknown }).process_id === "string" ? [(p.payload as { process_id: string }).process_id] : []));
   const links = proposals.flatMap((p) => {
     const l = p.kind === "issue" ? (p.payload as IssueProposalPayload).links : undefined;
     return Array.isArray(l) ? l.filter((x) => typeof x === "object" && x !== null) : [];
   });
   const stepIds = [
-    ...new Set([...links.flatMap((l) => (typeof l.step_id === "string" ? [l.step_id] : [])), ...proposals.flatMap((p) => (p.kind === "solution_idea" ? readIdea(p.payload).replaces : []))]),
+    ...new Set([
+      ...links.flatMap((l) => (typeof l.step_id === "string" ? [l.step_id] : [])),
+      ...proposals.flatMap((p) => (p.kind === "solution_idea" ? readIdea(p.payload).replaces : [])),
+      ...leverSteps,
+    ]),
   ];
   const issueIds = [...new Set(proposals.flatMap((p) => (p.issue_id ? [p.issue_id] : [])))];
-  const [processes, steps, issues] = await Promise.all([
-    links.some((l) => l.process_id) ? supabase.from("processes").select("id, name").eq("workspace_id", ws) : null,
+  const [processes, steps, issues, roles, services, team] = await Promise.all([
+    links.some((l) => l.process_id) || playProcessIds.length ? supabase.from("processes").select("id, name").eq("workspace_id", ws) : null,
     stepIds.length ? supabase.from("steps").select("id, name").eq("workspace_id", ws).in("id", stepIds) : null,
     issueIds.length ? supabase.from("issues").select("id, number, title, process_id").eq("workspace_id", ws).in("id", issueIds) : null,
+    wants("roles") ? supabase.from("roles").select("id, name").eq("workspace_id", ws) : null,
+    wants("services") ? supabase.from("services").select("id, name").eq("workspace_id", ws) : null,
+    // A person's name only for a reader who sees everyone: `team_capacity` gives everyone else labels, which are not names.
+    wants("people") && opts.seesEveryone ? supabase.rpc("team_capacity", { ws }) : null,
   ]);
-  for (const r of [processes, steps, issues]) if (r?.error) throw r.error;
+  for (const r of [processes, steps, issues, roles, services, team]) if (r?.error) throw r.error;
+  const teamPeople = ((team?.data ?? { people: [] }) as { sees_everyone?: boolean; people?: { id: string; name: string }[] }).sees_everyone ? ((team?.data as { people: { id: string; name: string }[] }).people ?? []) : [];
   return {
     processes: Object.fromEntries((processes?.data ?? []).map((r) => [r.id, r.name])),
     steps: Object.fromEntries((steps?.data ?? []).map((r) => [r.id, r.name])),
     issues: Object.fromEntries((issues?.data ?? []).map((r) => [r.id, { number: r.number, title: r.title, processId: r.process_id }])),
+    roles: Object.fromEntries((roles?.data ?? []).map((r) => [r.id, r.name])),
+    services: Object.fromEntries((services?.data ?? []).map((r) => [r.id, r.name])),
+    ...(teamPeople.length ? { people: Object.fromEntries(teamPeople.map((r) => [r.id, r.name])) } : {}),
+    ...(opts.currency ? { currency: opts.currency } : {}),
   };
 }
 
@@ -89,9 +121,10 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
   const workspace = await workspaceBySlug(supabase, slug);
   if (!workspace) return null;
   const ws = workspace.id;
-  const [canEdit, canManage, suggestions, proposals, model, sources] = await Promise.all([
+  const [canEdit, canManage, seesPeople, suggestions, proposals, model, sources] = await Promise.all([
     supabase.rpc("can_edit_workspace", { ws }),
     supabase.rpc("can_manage_workspace", { ws }),
+    supabase.rpc("can_see_people", { ws }),
     loadSuggestions(supabase, ws),
     loadProposals(supabase, ws),
     loadCompanyModel(supabase, workspace),
@@ -99,6 +132,9 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
   ]);
   if (canEdit.error) throw canEdit.error;
   if (canManage.error) throw canManage.error;
+  // A visitor's email and the wording held from members and viewers are for owners, editors and agency admins (B4); empty for the rest.
+  const contacts = canEdit.data === true ? await loadPlayContacts(supabase, ws) : {};
+  const currency = (workspace.settings as { currency?: string } | null)?.currency;
   let changes: AuditEntry[] | null = null;
   const people: Record<string, string> = {};
   if (canManage.data) {
@@ -123,7 +159,8 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
     canEdit: canEdit.data === true,
     suggestions,
     proposals,
-    lookups: await proposalLookups(supabase, ws, proposals),
+    lookups: await proposalLookups(supabase, ws, proposals, { currency, seesEveryone: seesPeople.data === true }),
+    contacts,
     model,
     sources: Object.fromEntries(sources.map((s) => [s.id, s.title])),
     changes,

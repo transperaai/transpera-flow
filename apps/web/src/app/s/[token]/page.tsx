@@ -20,6 +20,9 @@ export async function generateMetadata(): Promise<Metadata> {
 interface Opened {
   status?: string;
   kind?: string;
+  mode?: string;
+  show_people?: boolean;
+  show_financials?: boolean;
   snapshot_at?: string;
   expires_at?: string | null;
   snapshot?: { v?: number; kind?: string };
@@ -74,7 +77,26 @@ export default async function SharedPage(props: PageProps<"/s/[token]">) {
       </Gate>
     );
   }
-  return <SharedView data={{ snapshot: snapshot as unknown as ShareSnapshot, snapshotAt: opened.snapshot_at ?? "", expiresAt: opened.expires_at ?? null }} />;
+  // A play link (B4): the page also needs the token (the Send action takes it) and, for a restricted link, the address the visitor
+  // signed in with, from their own session (as the not-allowed gate above). It still calls only `open_share_link`.
+  const play = opened.mode === "play";
+  let visitorEmail: string | null = null;
+  if (play && (opened.show_people || opened.show_financials)) {
+    const { data: user } = await db.auth.getUser();
+    visitorEmail = user.user?.email ?? null;
+  }
+  return (
+    <SharedView
+      data={{
+        snapshot: snapshot as unknown as ShareSnapshot,
+        snapshotAt: opened.snapshot_at ?? "",
+        expiresAt: opened.expires_at ?? null,
+        mode: play ? "play" : "view",
+        token: play ? token : undefined,
+        visitorEmail,
+      }}
+    />
+  );
 }
 
 function Gate({ title, children }: { title: string; children: React.ReactNode }) {
