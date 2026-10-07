@@ -5,7 +5,7 @@
 // `Worker` is replaced by one that starts the bundled script the test hands over as `window.workerScripts`.
 
 import { createRoot } from "react-dom/client";
-import { larkspurBundle, larkspurPersonIds, type ProcessBundle } from "@transpera-flow/db";
+import { larkspurBundle, larkspurPersonIds, type PersonCapacityFactorRow, type ProcessBundle } from "@transpera-flow/db";
 import { PeoplePage } from "@/components/people-page";
 
 declare global {
@@ -19,7 +19,16 @@ declare global {
     releaseSimulations: () => void;
     workerRequests?:{ file: string; hasPersonIds: boolean; personIds?: string[] }[];
     /** `own`: whose row the member may see (a Larkspur key such as "jess"), or null for a member linked to no one. */
-    mountPeople: (options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later" }) => void;
+    mountPeople: (options: {
+      viewer: "everyone" | "own" | "unlinked";
+      own?: string;
+      capacityFactorEnabled?: boolean;
+      ownRecord?: "inactive" | "starts-later";
+      /** Per-person times (C6) stored in the workspace; a member's bundle holds only their own, as `team_capacity` gives. */
+      factors?: PersonCapacityFactorRow[];
+      /** Hand a member's page every row, as a bug would: it must still show only their own. */
+      unfiltered?: boolean;
+    }) => void;
   }
 }
 
@@ -56,9 +65,9 @@ function asMember(bundle: ProcessBundle, ownPersonId: string | null): ProcessBun
   return { ...bundle, people, viewer: { seesEveryone: false, ownPersonId } };
 }
 
-window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord }) => {
+window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord, factors, unfiltered }) => {
   const larkspur = larkspurBundle();
-  // The workspace setting that C6 (#198, parked) would use. Nothing stores a factor, so turning it on must still show nothing.
+  // The workspace switch for per-person times (C6, #198).
   const base = capacityFactorEnabled
     ? { ...larkspur, workspace: { ...larkspur.workspace, settings: { ...larkspur.workspace.settings, capacity_factor_enabled: true } } }
     : larkspur;
@@ -67,7 +76,12 @@ window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord }) => {
   const people = ownRecord
     ? base.people.map((p) => (p.id === ownId ? { ...p, ...(ownRecord === "inactive" ? { active: false } : { start_date: "2099-01-01" }) } : p))
     : base.people;
-  const bundle = viewer === "everyone" ? base : asMember({ ...base, people }, ownId);
+  const stored = factors ?? [];
+  const bundle: ProcessBundle =
+    viewer === "everyone"
+      ? { ...base, personCapacityFactors: stored }
+      : // `team_capacity` gives a member only their own person's rows ([] when linked to nobody).
+        { ...asMember({ ...base, people }, ownId), personCapacityFactors: unfiltered ? stored : ownId ? stored.filter((f) => f.person_id === ownId) : [] };
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
       <PeoplePage bundle={bundle} settingsHref="/w/larkspur/settings" />

@@ -226,6 +226,29 @@ describe("scrubbing", () => {
     expect(scrubDeep({ Updated_By: "x", edited_by_name: "y", resolved_by: "z", reviewedBy: "k", keep_this: 1 })).toEqual({ reviewedBy: "k", keep_this: 1 });
   });
 
+  it("exports per-person times (C6) for those who can read them: a default and a step, the default first; a viewer's export has none", async () => {
+    const persons = (await db.client.query("select id from people where workspace_id = $1 order by id limit 2", [ws])).rows.map((r) => r.id as string);
+    const step = (await db.client.query("select id from steps where workspace_id = $1 order by id limit 1", [ws])).rows[0].id as string;
+    await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $3, $2, 1.2), ($1, $3, null, 0.9), ($4, $3, null, 1.1)", [persons[0], step, ws, persons[1]]);
+    try {
+      const editor = await member("bundle.factors@northbeam.example", "editor");
+      const b = (await exportAs(editor.claims))!;
+      const rows = b.company_model.person_capacity_factors!;
+      expect(rows).toHaveLength(3);
+      expect(b.counts["company_model.person_capacity_factors"]).toBe(3);
+      // Ordered by person, then step with the default (null) last in the stable paging order the database gives.
+      const own = rows.filter((r) => r.person_id === persons[0]);
+      expect(own.map((r) => r.step_id)).toEqual([step, null]);
+      expect(rows.map((r) => Number(r.factor)).sort()).toEqual([0.9, 1.1, 1.2]);
+      // A viewer linked to nobody reads none through RLS, so their export holds none.
+      const viewer = await member("bundle.factors.viewer@northbeam.example", "viewer");
+      const v = (await exportAs(viewer.claims, ws, false))!;
+      expect(v.company_model.person_capacity_factors).toEqual([]);
+    } finally {
+      await db.client.query("delete from person_capacity_factors");
+    }
+  });
+
   it("sends the JSON in pieces that join to the same text", async () => {
     const editor = await member("bundle.chunks@northbeam.example", "editor");
     const b = (await exportAs(editor.claims))!;

@@ -58,5 +58,11 @@
     "date": "2026-10-06",
     "note": "MonthlyResult gains mrr and atRisk (B7); no simulated number moved",
     "digest": "sha256:8ebb2e033f8c654ea90369a9817f5d7aab8e7dc56bd53ff4c1df809a256bd6d4"
+  },
+  {
+    "version": "1.10.0",
+    "date": "2026-10-06",
+    "note": "EnginePerson gains an optional capacityFactor (per-person times, C6 #198): hands-on time × the person's factor. No fixture has one, so no simulated number moved.",
+    "digest": "sha256:8ebb2e033f8c654ea90369a9817f5d7aab8e7dc56bd53ff4c1df809a256bd6d4"
   }
 ]

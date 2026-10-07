@@ -15,6 +15,7 @@ import {
   loadClients,
   loadMarket,
   type MarketConditionRow,
+  type PersonCapacityFactorRow,
   type MarketScheduleRow,
   loadIssuesForReader,
   loadIssueEvents,
@@ -397,6 +398,8 @@ export interface WorkspaceSettingsData {
   personRoles: PersonRoleRow[];
   personSkills: PersonSkillRow[];
   personLeave: LeaveDetail[];
+  /** Per-person times (C6): everyone's for owners and editors, only the viewer's own person's otherwise (RLS, `can_see_person`). */
+  personCapacityFactors: PersonCapacityFactorRow[];
   services: ServiceRow[];
   /** The workspace's processes, for a service's entry process. */
   processes: { id: string; name: string; kind: string }[];
@@ -415,6 +418,12 @@ export interface WorkspaceSettingsData {
   /** Market conditions (A57): presets and your own, and the 24-month schedule. */
   marketConditions: MarketConditionRow[];
   marketSchedule: MarketScheduleRow[];
+}
+
+/** `entered` or `measured`, from `provenance.factor.source` (entered when there is none). */
+function factorSource(provenance: unknown): string {
+  const f = (provenance as { factor?: { source?: unknown } } | null)?.factor;
+  return typeof f?.source === "string" ? f.source : "entered";
 }
 
 export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSettingsData | null> {
@@ -451,7 +460,7 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
   ]);
   // "Used by 3 people" counts the whole team, which a member's own reads of the per-person tables can't: team_capacity
   // gives every reader the roles and assignments of everyone (B1 2b).
-  const [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, team] = await Promise.all([
+  const [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, team, factorRows] = await Promise.all([
     supabase.rpc("can_edit_workspace", { ws }),
     supabase.rpc("can_manage_workspace", { ws }),
     supabase.from("roles").select("id, name, color, active").eq("workspace_id", ws).order("name"),
@@ -480,9 +489,11 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     // Every revision, live or not: a role a superseded step names can't be deleted either.
     supabase.from("steps").select("id, role_id").eq("workspace_id", ws).not("role_id", "is", null),
     loadTeam(supabase, ws),
+    // This page isn't a share source, so a direct read is fine here (RLS: everyone's for editors, own for members).
+    supabase.from("person_capacity_factors").select("person_id, step_id, workspace_id, factor, provenance").eq("workspace_id", ws).order("person_id").order("step_id", { nullsFirst: true }),
   ]);
   const [leadSources, seasonality, demand, servicingLinks, market, clientGroups, churnDrivers] = await demandQueries;
-  for (const r of [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, leadSources, seasonality, demand, servicingLinks]) {
+  for (const r of [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, leadSources, seasonality, demand, servicingLinks, factorRows]) {
     if (r.error) throw r.error;
   }
 
@@ -497,6 +508,13 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     personRoles: personRoles.data ?? [],
     personSkills: personSkills.data ?? [],
     personLeave: personLeave.data ?? [],
+    personCapacityFactors: (factorRows.data ?? []).map((r) => ({
+      person_id: r.person_id,
+      workspace_id: r.workspace_id,
+      step_id: r.step_id,
+      factor: Number(r.factor),
+      source: factorSource(r.provenance),
+    })),
     // The cast narrows pricing_model, which a check constraint limits.
     services: (services.data ?? []) as ServiceRow[],
     processes: processes.map(({ id, name, kind }) => ({ id, name, kind })),

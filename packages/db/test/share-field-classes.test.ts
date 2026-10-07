@@ -47,6 +47,7 @@ const TABLES: TableClasses = {
   memberships: "unused",
   narrations: "unused",
   people: { created_at: "not", created_by: "not", email: "text", end_date: "not", id: "not", name: "text", notes: "text", start_date: "not", updated_at: "not", workspace_id: "not" },
+  person_capacity_factors: "unused",
   person_leave: { created_at: "not", created_by: "not", end_date: "not", id: "not", note: "text", person_id: "not", start_date: "not", updated_at: "not", workspace_id: "not" },
   person_roles: { created_at: "not", person_id: "not", role_id: "not", workspace_id: "not" },
   person_skills: { created_at: "not", person_id: "not", step_id: "not", workspace_id: "not" },

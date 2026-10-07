@@ -106,6 +106,40 @@ export async function saveHealthRule(workspaceId: string, key: HealthSetting, ba
   return { status: "saved", value: readField(result.row, field) as number | null };
 }
 
+/**
+ * Switch Per-person times (`settings.capacity_factor_enabled`, C6) if its stored value is still `base`. Owners and editors may
+ * (`save_capacity_factor_switch`, a SECURITY DEFINER function that writes nothing but this key; `save_fields('workspaces')` is
+ * owner-only). Absent, null and false all mean off, so the outcome is a plain boolean.
+ */
+export async function saveCapacityFactorSwitch(workspaceId: string, base: boolean | null, value: boolean): Promise<SaveOutcome<boolean>> {
+  const supabase = await createClient();
+  const key = "capacity_factor_enabled";
+  const { data, error } = await supabase.rpc("save_capacity_factor_switch", { ws: workspaceId, base: { [key]: base }, changes: { [key]: value } });
+  if (error) return errorOutcome(error);
+  const result = data as unknown as FieldsResult;
+  if (result.status === "not_found") return { status: "not_found" };
+  if (result.status === "conflict" && result.conflicts && key in result.conflicts) {
+    return { status: "conflict", theirs: result.conflicts[key] === true };
+  }
+  return { status: "saved", value: readField(result.row, `settings.${key}`) === true };
+}
+
+/**
+ * Save one person's time on one step (`stepId` null: on every step they do) if the stored factor is still `base` (null: none).
+ * `value` null removes it. Owners and editors only (`save_capacity_factor` is SECURITY INVOKER, so RLS decides).
+ */
+export async function saveCapacityFactor(personId: string, stepId: string | null, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
+  const supabase = await createClient();
+  // The generated types make every argument non-null; the function takes null for the default step, no base and no value.
+  const args = { person: personId, step: stepId, base, value } as unknown as { person: string; step: string; base: number; value: number };
+  const { data, error } = await supabase.rpc("save_capacity_factor", args);
+  if (error) return errorOutcome(error);
+  const result = data as unknown as { status: "saved" | "conflict" | "not_found"; value?: number | null; theirs?: number | null };
+  if (result.status === "not_found") return { status: "not_found" };
+  if (result.status === "conflict") return { status: "conflict", theirs: result.theirs ?? null };
+  return { status: "saved", value: result.value ?? null };
+}
+
 export type Scalar = string | number | boolean | null;
 
 export type FieldsOutcome<V = Scalar> =

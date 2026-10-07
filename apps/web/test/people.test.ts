@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { larkspurBundle, larkspurPersonIds, toEngineModel } from "@transpera-flow/db";
+import { larkspurBundle, larkspurPersonIds, speedsNormalisedFor, toEngineModel } from "@transpera-flow/db";
 import {
   absenceCandidates,
   absenceRating,
@@ -17,9 +17,12 @@ import {
   absenceCoverage,
   absenceRows,
   capacityFactorsShown,
+  factorWords,
   leaveDays,
   personDetail,
+  personFactors,
   personRows,
+  stepsPersonCanDo,
   untestedSoleHolders,
   weeksLabel,
 } from "@/lib/people";
@@ -174,6 +177,93 @@ describe("capacityFactorsShown", () => {
     expect(capacityFactorsShown({ capacity_factor_enabled: 1 }, [ten])).toEqual([]);
   });
   it("shows nothing with no factors", () => expect(capacityFactorsShown(on, [])).toEqual([]));
+
+  it("shows real rows (C6): entered ones when on, none when off", () => {
+    const b = larkspurBundle();
+    const [first, second] = b.steps;
+    b.personCapacityFactors = [
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: second!.id, factor: 1.25, source: "entered" },
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: null, factor: 0.9, source: "entered" },
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: first!.id, factor: 0.8, source: "entered" },
+    ];
+    const names = new Map(b.steps.map((s) => [s.id, s.name]));
+    expect(capacityFactorsShown(b.workspace.settings, personFactors(b, id.jess!, names))).toEqual([]);
+    expect(capacityFactorsShown({ ...b.workspace.settings, capacity_factor_enabled: true }, personFactors(b, id.jess!, names))).toHaveLength(3);
+  });
+});
+
+describe("factorWords", () => {
+  it("reads a factor in words", () => {
+    expect(factorWords(0.8)).toBe("20% faster");
+    expect(factorWords(1)).toBe("normal time");
+    expect(factorWords(1.25)).toBe("25% slower");
+    expect(factorWords(0.5)).toBe("50% faster");
+    expect(factorWords(2)).toBe("100% slower");
+    expect(factorWords(0.9)).toBe("10% faster");
+  });
+});
+
+describe("personFactors", () => {
+  const b = larkspurBundle();
+  const [s1, s2, s3] = b.steps;
+  const names = new Map([s1!, s2!, s3!].map((s) => [s.id, s.name]));
+  const row = (person: string, step: string | null, factor: number, source = "entered") => ({ person_id: person, workspace_id: b.workspace.id, step_id: step, factor, source });
+
+  it("puts the default first and then the steps in the process's order, never by value, and drops steps it doesn't know", () => {
+    const withRows = {
+      ...b,
+      personCapacityFactors: [row(id.jess!, s3!.id, 0.6), row(id.jess!, "00000000-0000-4000-8000-00000000dead", 1.9), row(id.jess!, s1!.id, 1.9), row(id.jess!, null, 1.1), row(id.hana!, s2!.id, 0.7)],
+    };
+    const shown = personFactors(withRows, id.jess!, names);
+    expect(shown.map((f) => f.stepName)).toEqual(["Every step", s1!.name, s3!.name]);
+    expect(shown.map((f) => f.factor)).toEqual([1.1, 1.9, 0.6]);
+    expect(shown[0]).toMatchObject({ stepId: null, measuredItems: 0, entered: true });
+    // Someone else's rows never appear for this person.
+    expect(personFactors(withRows, id.hana!, names).map((f) => f.factor)).toEqual([0.7]);
+  });
+
+  it("has nothing for a person with no rows, or a bundle with no list; a measured source is not 'entered'", () => {
+    expect(personFactors(b, id.jess!, names)).toEqual([]);
+    expect(personFactors({ ...b, personCapacityFactors: [] }, id.jess!, names)).toEqual([]);
+    expect(personFactors({ ...b, personCapacityFactors: [row(id.jess!, null, 0.9, "measured")] }, id.jess!, names)[0]!.entered).toBe(false);
+  });
+});
+
+describe("stepsPersonCanDo", () => {
+  const b = larkspurBundle();
+  const steps = b.steps.filter((s) => s.role_id);
+
+  it("is a person's skills if they have any, otherwise the steps of their roles, in the steps' order", () => {
+    const skilled = b.personSkills.find((k) => k.person_id === id.freya)!;
+    const mine = stepsPersonCanDo(id.freya!, steps, b.personSkills, b.personRoles);
+    expect(mine.map((s) => s.id)).toEqual(steps.filter((s) => b.personSkills.some((k) => k.person_id === id.freya && k.step_id === s.id)).map((s) => s.id));
+    expect(mine.some((s) => s.id === skilled.step_id)).toBe(true);
+    const jessRoles = new Set(b.personRoles.filter((r) => r.person_id === id.jess).map((r) => r.role_id));
+    const jess = stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles);
+    expect(jess.length).toBeGreaterThan(0);
+    expect(jess.every((s) => jessRoles.has(s.role_id!))).toBe(true);
+    expect(jess.length).toBe(steps.filter((s) => jessRoles.has(s.role_id!)).length);
+  });
+
+  it("a time on a step the person can't do is not shown: personFactors over those steps drops it", () => {
+    const foreign = steps.find((s) => !stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles).includes(s))!;
+    const own = stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles)[0]!;
+    const rows = [id.jess!].flatMap((p) => [foreign, own].map((s, i) => ({ person_id: p, workspace_id: b.workspace.id, step_id: s.id, factor: i ? 0.8 : 1.6, source: "entered" })));
+    const doable = new Map(stepsPersonCanDo(id.jess!, steps, b.personSkills, b.personRoles).map((s) => [s.id, s.name]));
+    expect(personFactors({ ...b, personCapacityFactors: rows }, id.jess!, doable).map((f) => f.stepId)).toEqual([own.id]);
+  });
+});
+
+describe("speedsNormalisedFor", () => {
+  it("is true only when the switch is on and this viewer's model uses normal times", () => {
+    const b = larkspurBundle();
+    const on = { ...b, workspace: { ...b.workspace, settings: { ...b.workspace.settings, capacity_factor_enabled: true } } };
+    expect(speedsNormalisedFor(b)).toBe(false);
+    expect(speedsNormalisedFor(on)).toBe(false);
+    expect(speedsNormalisedFor({ ...on, viewer: { seesEveryone: false, ownPersonId: id.jess! } })).toBe(true);
+    expect(speedsNormalisedFor({ ...b, viewer: { seesEveryone: false, ownPersonId: id.jess! } })).toBe(false);
+    expect(speedsNormalisedFor({ ...on, viewer: { seesEveryone: true, ownPersonId: null } })).toBe(false);
+  });
 });
 
 describe("personDetail", () => {

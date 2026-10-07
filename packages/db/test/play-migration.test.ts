@@ -21,8 +21,8 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 
 describe("play links: row 66 of the production ledger", () => {
-  it("nothing on disk is past it, and it follows B3's 20261220000000 (the workspace-delete fix, 20261220500000, is on main's side and may not be on this branch yet)", () => {
-    expect(versions.filter((v) => v >= "20261220000000" && v !== "20261220500000")).toEqual(["20261220000000", VERSION]);
+  it("it follows B3's 20261220000000 with nothing between (the workspace-delete fix, 20261220500000, is row 65); later tickets' migrations (C6, row 67) may follow it", () => {
+    expect(versions.filter((v) => v >= "20261220000000" && v <= VERSION && v !== "20261220500000")).toEqual(["20261220000000", VERSION]);
   });
 
   it("preflight 0 expects B3 as the latest applied and nothing at or past this version; the headers name row 66", () => {

@@ -1,7 +1,7 @@
 {
   "model": "northbeam-groups",
   "description": "Northbeam as the seed loads it since client groups: its clients counted per service (17 SEO clients at health 83, 12 PPC clients at health 52) and simulated as unnamed clients, with the same servicing: a healthy group and one at risk.",
-  "engineVersion": "1.9.0",
+  "engineVersion": "1.10.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

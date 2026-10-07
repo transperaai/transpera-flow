@@ -8,7 +8,9 @@
 // placeholder that keeps the order of the old ids (the engine sorts by id, so a restore must not reshuffle them).
 //
 // Not restored (decisions 1 to 4 on #39): history and older versions, the company map (the new workspace keeps its own),
-// solutions, decided suggestions, detections, issue history, source files and everything about who made what.
+// solutions, decided suggestions, detections, issue history, source files and everything about who made what, and per-person
+// times (C6, `person_capacity_factors`: the backup holds them, the restore leaves them out and says so; the switch itself is
+// restored like any setting).
 
 import { ENGINE_VERSION } from "@transpera-flow/engine";
 import type { Database } from "./database.types";
@@ -135,6 +137,7 @@ const SETTING_KEYS: Record<keyof WorkspaceSettings, true> = {
   health_initial: true,
   client_health_benchmark_low: true,
   client_health_benchmark_high: true,
+  capacity_factor_enabled: true,
 };
 export const WORKSPACE_SETTING_KEYS = Object.keys(SETTING_KEYS) as readonly (keyof WorkspaceSettings)[];
 
@@ -238,7 +241,7 @@ const pick = (row: Row, columns: readonly string[]): Row => {
 
 const SECTION_ARRAYS = ["processes", "scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const;
 /** Tables whose rows have an `id` column (company-model tables without one are keyed otherwise). */
-const NO_ID_TABLES = new Set(["person_roles", "person_skills", "client_services", "client_assignments", "demand_settings", "lever_settings", "analysis_rules", "solution_issues"]);
+const NO_ID_TABLES = new Set(["person_roles", "person_skills", "person_capacity_factors", "client_services", "client_assignments", "demand_settings", "lever_settings", "analysis_rules", "solution_issues"]);
 
 const things = (key: string) => key.replace(/^company_model\./, "").replace(/_/g, " ");
 
@@ -758,6 +761,10 @@ export function planWorkspaceImport(
   }
   for (const k of unknown.sort()) warnings.push(`The workspace setting "${k}" isn't one this version knows and was left out.`);
   plan.settings = Object.keys(known).length ? known : null;
+  // Per-person times aren't restored (C6): with the switch on, results differ from the original until they are entered again.
+  if (rowsOf(cm.person_capacity_factors).length > 0 && known.capacity_factor_enabled === true) {
+    warnings.push("This backup has per-person times switched on. They aren't restored, so results will differ from the original until you enter them again.");
+  }
 
   // Pending suggestions and proposals, last: they point at what is restored.
   for (const set of [sets.processes!, sets.steps!, sets.roles!, sets.people!, sets.services!, sets.clients!, sets.sources!, sets.scenarios!, sets.issues!]) for (const id of set) restoredIds.add(id);
@@ -804,6 +811,7 @@ export function planWorkspaceImport(
     line("processes", processes.length, "processes, as drafts"),
     ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "scenarios", "blocks", "issues", "sources", "suggestions", "proposals"] as const).map((k) => line(k, plan[k].length)),
   ].filter((l) => l.count > 0);
+  const capacityFactors = rowsOf(cm.person_capacity_factors).length;
   const leftOut = [
     line("older_versions", olderVersions, "older versions of processes"),
     line("company_map", companyVersions, "versions of the company map (the new workspace keeps its own)"),
@@ -814,6 +822,7 @@ export function planWorkspaceImport(
     line("step_links", stepLinksGone, "source links to steps no longer in the process"),
     line("history", issueEvents, "issue history entries"),
     line("file_originals", fileOriginals, "source file originals (the text is restored)"),
+    line("capacity_factors", capacityFactors, "per-person times (enter them again after the restore; until then everyone works at their role's normal time)"),
   ].filter((l) => l.count > 0);
 
   const summary: ImportSummary = {

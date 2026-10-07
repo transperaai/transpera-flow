@@ -99,6 +99,21 @@ describe("levers are generated from the model", () => {
     expect(rerunBest(model)).toBeLessThan(250);
   });
 
+  it("re-running the full seeded Northbeam with per-person times (every person 0.9, two step factors; C6) stays within the same target", { tags: ["perf"] }, () => {
+    const factored = () => {
+      const m = model();
+      const steps = [northbeamStepIds.audit, northbeamStepIds.discovery];
+      return {
+        ...m,
+        people: Object.fromEntries(
+          Object.entries(m.people!).map(([id, p]) => [id, { ...p, capacityFactor: { default: 0.9, steps: Object.fromEntries(steps.map((s, i) => [s, 0.8 + i * 0.3])) } }]),
+        ),
+      };
+    };
+    expect(Object.values(factored().people!).every((p) => p.capacityFactor?.default === 0.9)).toBe(true);
+    expect(rerunBest(factored)).toBeLessThan(250);
+  });
+
   it("re-running Northbeam with its named client roster and servicing stays within the same target", { tags: ["perf"] }, () => {
     const named = () => toEngineModel({ ...northbeamBundle(), clientGroups: [] }, START);
     expect(named().clients).toBeDefined();

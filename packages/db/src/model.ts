@@ -217,6 +217,21 @@ function hidesPay(b: ProcessBundle): boolean {
 }
 
 /**
+ * True when per-person times (capacity factors, C6 #198) may reach the model: the workspace switch is on and the viewer sees
+ * everyone (`!hidesPay`: members, viewers and share-link bundles never do). A bundle with no `viewer` (the demo, fixtures) sees
+ * everyone. AI reads a bundle that says `seesEveryone: false`, so it never reads a factor and an analysis's base hash doesn't
+ * change when one does.
+ */
+export function usesCapacityFactors(b: ProcessBundle): boolean {
+  return b.workspace.settings.capacity_factor_enabled === true && !hidesPay(b);
+}
+
+/** The switch is on but this viewer's model uses everyone's normal time (a member or viewer, or a share link): the screens say so. */
+export function speedsNormalisedFor(b: ProcessBundle): boolean {
+  return b.workspace.settings.capacity_factor_enabled === true && !usesCapacityFactors(b);
+}
+
+/**
  * Resolve a stored process revision into the engine's model.
  *
  * - The single `start` step marks the entry: its one outgoing edge points at
@@ -659,6 +674,7 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
   if (!employed.length) return undefined;
 
   const people: Record<string, EnginePerson> = {};
+  const useFactors = usesCapacityFactors(bundle);
   for (const p of employed) {
     const skillRows = bundle.personSkills.filter((k) => k.person_id === p.id);
     const leave = bundle.personLeave
@@ -669,6 +685,13 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
       ])
       .filter(([a, b]) => b > a)
       .sort((a, b) => a[0] - b[0]);
+    // Per-person times (C6): the default is the row with no step, a step's own wins; a factor of exactly 1 changes nothing and is
+    // dropped, as are steps outside the model; keys in sorted id order so the model is the same however the rows came.
+    const factorRows = useFactors ? (bundle.personCapacityFactors ?? []).filter((f) => f.person_id === p.id) : [];
+    const defaultFactor = factorRows.find((f) => f.step_id === null && Number(f.factor) !== 1);
+    const stepFactors = factorRows
+      .filter((f) => f.step_id !== null && stepIds.has(f.step_id) && Number(f.factor) !== 1)
+      .sort((a, b) => (a.step_id! < b.step_id! ? -1 : a.step_id! > b.step_id! ? 1 : 0));
     people[p.id] = {
       name: p.name,
       roles: bundle.personRoles
@@ -680,6 +703,14 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
       ...(p.cost_rate != null && !hidesPay(bundle) ? { cost: Number(p.cost_rate) } : {}),
       ...(skillRows.length ? { skills: skillRows.map((k) => k.step_id).filter((id) => stepIds.has(id)).sort() } : {}),
       ...(leave.length ? { leave } : {}),
+      ...(defaultFactor || stepFactors.length
+        ? {
+            capacityFactor: {
+              ...(defaultFactor ? { default: Number(defaultFactor.factor) } : {}),
+              ...(stepFactors.length ? { steps: Object.fromEntries(stepFactors.map((f) => [f.step_id!, Number(f.factor)])) } : {}),
+            },
+          }
+        : {}),
       ...(planned && p.start_date && p.start_date > startDate ? { from: hoursTo(p.start_date) } : {}),
       ...(planned && p.end_date ? { until: hoursTo(nextDay(p.end_date)) } : {}),
     };

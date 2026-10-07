@@ -47,6 +47,12 @@ export interface EnginePerson {
   from?: number;
   /** The hour a person leaves for good (their end date). From it on they are gone, as before `from`. Omitted: there to the end. */
   until?: number;
+  /**
+   * Per-person time (capacity factor; PRD §6.3.7, D20; C6, #198): the hands-on time they take on a step is the drawn time ×
+   * the factor. 1 is the role's normal time, 0.8 is 20% faster. `steps` wins over `default`; a step in neither is 1.
+   * Omitted: 1 everywhere. Only for steps they can do (a factor on any other step is never used).
+   */
+  capacityFactor?: { default?: number; steps?: Record<string, number> };
 }
 
 export interface EngineEdge {

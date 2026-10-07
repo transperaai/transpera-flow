@@ -1779,6 +1779,47 @@ export type Database = {
           },
         ]
       }
+      person_capacity_factors: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          factor: number
+          person_id: string
+          provenance: Json
+          step_id: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          factor: number
+          person_id: string
+          provenance?: Json
+          step_id?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          factor?: number
+          person_id?: string
+          provenance?: Json
+          step_id?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_capacity_factors_person_id_workspace_id_fkey"
+            columns: ["person_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id", "workspace_id"]
+          },
+        ]
+      }
       person_leave: {
         Row: {
           created_at: string
@@ -3572,6 +3613,11 @@ export type Database = {
             }
             Returns: Json
           }
+      save_capacity_factor: {
+        Args: { base: number; person: string; step: string; value: number }
+        Returns: Json
+      }
+      save_capacity_factor_switch: { Args: { base: Json; changes: Json; ws: string }; Returns: Json }
       save_fields: {
         Args: { base: Json; changes: Json; key: Json; target: string }
         Returns: Json

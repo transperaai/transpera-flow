@@ -108,6 +108,18 @@ const TABLES: TableCase[] = [
     reads: "per-person",
     personColumn: "person_id",
   },
+  // C6: per-person times. Read like skills and leave; the spare person's default is the seed row, one step the probe.
+  {
+    table: "person_capacity_factors",
+    insert: (tag) => [
+      "insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, $3, 1.25)",
+      [person.spare, ws, tag === "seed" ? null : northbeamStepIds.discovery],
+    ],
+    update: ["update person_capacity_factors set factor = factor where person_id = $1 and step_id is null", [person.spare]],
+    delete: ["delete from person_capacity_factors where person_id = $1 and step_id is null", [person.spare]],
+    reads: "per-person",
+    personColumn: "person_id",
+  },
   {
     table: "person_leave",
     insert: (tag) => [
@@ -378,6 +390,7 @@ beforeAll(async () => {
   for (const role of ["member", "viewer", "editor"] as const) {
     await db.client.query("insert into person_skills (person_id, step_id, workspace_id) values ($1, $2, $3)", [person[role], northbeamStepIds.audit, ws]);
     await db.client.query("insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, '2027-03-01', '2027-03-05')", [person[role], ws]);
+    await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, null, 0.9)", [person[role], ws]);
   }
   // A suggestion about the member's person, one about another person (the spare), and the non-people one the table case seeds.
   for (const [who, tag] of [[person.member, "x person own"], [person.spare, "x person other"]] as const) {
@@ -656,6 +669,17 @@ describe("functions", () => {
     {
       name: "save_health_rules",
       call: (c) => c.query("select public.save_health_rules($1, $2::jsonb, '{\"health_recover\": 7}') as r", [ws, `{"health_recover": ${healthRecover}}`]),
+      refusal: { status: "not_found" },
+    },
+    // C6: one factor of the spare person (her seeded default is 1.25), and the Per-person times switch (owners and editors).
+    {
+      name: "save_capacity_factor",
+      call: (c) => c.query("select public.save_capacity_factor($1, null, 1.25, 1.5) as r", [person.spare]),
+      refusal: { status: "not_found" },
+    },
+    {
+      name: "save_capacity_factor_switch",
+      call: (c) => c.query("select public.save_capacity_factor_switch($1, '{\"capacity_factor_enabled\": null}', '{\"capacity_factor_enabled\": true}') as r", [ws]),
       refusal: { status: "not_found" },
     },
   ];

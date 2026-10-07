@@ -14,7 +14,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { partOf, type ForecastPlanMarker, type ForecastPlanRow, type IssueRow, type ProcessBundle, type SolutionRow, type SourceRow } from "@transpera-flow/db";
+import { partOf, speedsNormalisedFor, type ForecastPlanMarker, type ForecastPlanRow, type IssueRow, type ProcessBundle, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
@@ -36,6 +36,7 @@ import { horizonLabel, horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import { issueFormOptions } from "@/lib/issues/draft";
 import { useIssues } from "@/lib/issues/use-issues";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
+import { SPEEDS_NORMALISED_NOTE } from "@/lib/people";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "./forecast-timeline";
@@ -407,6 +408,12 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
             Over the next {span}. Roles already too busy today are in the Overview&apos;s insights instead.
             {planUi ? " These are your live model, whatever plan is open below." : ""}
           </p>
+          {speedsNormalisedFor(live) && (
+            <p className="flex items-center text-sm text-muted-foreground" data-speeds-normalised>
+              {SPEEDS_NORMALISED_NOTE.text}
+              <Help label="Per-person times" description={SPEEDS_NORMALISED_NOTE.description} example={SPEEDS_NORMALISED_NOTE.example} />
+            </p>
+          )}
         </div>
         {alerts !== null && alerts.length === 0 && state.issues.length === 0 ? (
           <Card className="px-4 py-3 text-sm text-muted-foreground" data-forecast-empty>

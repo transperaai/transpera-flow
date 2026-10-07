@@ -42,6 +42,9 @@ export const BUNDLE_TABLES = {
   person_roles: T("person_roles", "person_id", "role_id"),
   person_skills: T("person_skills", "person_id", "step_id"),
   person_leave: T("person_leave"),
+  // C6: per-person times, kept in a backup (RLS: editors only). The restore leaves them out and says so. `step_id` is null for a
+  // person's default: nulls sort last, and (person_id, step_id) is unique, so the order is total and the paging stable.
+  person_capacity_factors: T("person_capacity_factors", "person_id", "step_id"),
   services: T("services"),
   service_servicing: T("service_servicing"),
   client_groups: T("client_groups"),
@@ -291,7 +294,7 @@ export async function exportWorkspaceBundle(
   }));
 
   const companyKeys = [
-    "roles", "people", "person_roles", "person_skills", "person_leave", "services", "service_servicing", "client_groups", "client_services",
+    "roles", "people", "person_roles", "person_skills", "person_leave", "person_capacity_factors", "services", "service_servicing", "client_groups", "client_services",
     "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "lever_settings", "analysis_rules",
   ] as const;
   const company_model: Record<string, Row[]> = Object.fromEntries(companyKeys.map((k) => [k, data[k]]));

@@ -394,6 +394,7 @@ export function offeredLoad(m: EngineModel): OfferedLoad {
   m.steps.forEach((s, i) => {
     const repeats = 1 / (1 - Math.min(s.rework, MAX_REWORK));
     visits[s.id] = v[i]! * repeats;
+    // Role-level estimate at the role's normal time: per-person times (EnginePerson.capacityFactor, C6) are not applied here.
     stepHours[s.id] = s.role || s.person ? m.leadsPerWeek * visits[s.id]! * s.work : 0;
   });
   // Servicing tasks from the roster as it stands (docs/PRD.md §6.3.5): each

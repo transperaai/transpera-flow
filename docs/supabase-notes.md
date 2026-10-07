@@ -417,3 +417,25 @@ Verified only against plain Postgres 16 (`packages/db/test/play-links.test.ts`, 
 | `for update` on the link row | Two submissions to one link are serialised by `select ... for update`; a concurrent `open_share_link` (its counter update) waits a few milliseconds and then returns. | Two concurrent calls on the real project both finish and the counts hold. |
 | Column grants | `suggestion_proposals.share_link_id` is granted to `authenticated` for SELECT, `visitor_text` is not (like `proposer_email`); `share_links` INSERT is now 12 columns (with `mode`). Supabase's default grants on the table are taken back by earlier migrations; `alter table ... add column` doesn't re-grant. | Post-apply check 4 in the migration's header. |
 | API tokens | `submit_play_proposal` and `play_proposal_contacts` refuse a request whose claims carry `api_token_id` (42501), read with `coalesce(auth.jwt(), '{}') ? 'api_token_id'` as the other functions do. | The MCP server's token against both functions. |
+
+## Per-person times (issue #198, C6, migration 20261223000000)
+
+Verified only against plain Postgres 16 (`packages/db/test/capacity-factors.test.ts`, the role matrix, `team-capacity.test.ts` and `share-links.test.ts`).
+
+| Area | What we assumed | What to verify on Supabase |
+|---|---|---|
+| Partial unique indexes as identity | `person_capacity_factors` has no primary key: `(person_id, step_id) where step_id is not null` and `(person_id) where step_id is null` are the identity, so `on conflict` isn't used; `save_capacity_factor` catches `unique_violation` instead. PostgREST can't upsert on a partial index. | Insert a default twice over the API: the second is a 409 (23505). |
+| `$.**` jsonpath in a trigger | `private.share_links_no_speeds` uses `jsonb_path_exists(snapshot, 'lax $.**.personCapacityFactors[*]')` (and `person_capacity_factors`, `capacityFactor`) to refuse a snapshot at any depth; an empty list passes. | Insert a share link whose snapshot holds `personCapacityFactors: [{...}]` as an editor: 23514 "The snapshot contains per-person times." |
+| API token through a SECURITY INVOKER function | `save_capacity_factor` is refused for an API token (42501) by the `needs_review` trigger at depth 1, even though the call is a function. | Call `rpc/save_capacity_factor` with an MCP token: 42501. |
+| `null` vs `false` for the switch | `save_capacity_factor_switch` treats an absent key, JSON null and false as the same (off), compared as `coalesce(nullif(x, 'null'), 'false')`. | Save `true` over the API with base `{"capacity_factor_enabled": false}` against a workspace with no key: `saved`. |
+| Paging the export | The bundle export orders by `person_id, step_id` (nulls last) with offset paging. `(person_id, step_id)` is unique, so the order is total. | Export a workspace with more than 1,000 factors: none repeated or missing. |
+
+## Default table grants on Supabase (found 7 Oct 2026, applying row 67)
+
+On production, `authenticated` holds REFERENCES, TRIGGER and TRUNCATE on almost every table in `public`, not only the
+privileges each migration grants, because Supabase's default privileges grant ALL on new tables to `anon` and
+`authenticated`. Plain Postgres in tests has no such defaults, so post-apply checks written locally expect only what the
+migration grants. The extra privileges can't be used through PostgREST (it has no TRUNCATE, and no function runs SQL a user
+supplies), so nothing is exposed today. A hardening follow-up could revoke them from both roles on every public table and
+change the default privileges; that touches every table, so it waits for Austin.
+

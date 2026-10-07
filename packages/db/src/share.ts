@@ -289,7 +289,9 @@ const PERSON_NUMBER = /^Team member \d+$/;
 function redactBundle(b: Obj, toggles: ShareToggles, secrets: ShareSecrets): Obj {
   const personLabel = new Map(secrets.people.map((p) => [p.id, p.label]));
   const clientLabel = new Map(secrets.clients.map((c) => [c.id, c.label]));
-  const out: Obj = { ...b, viewer: { seesEveryone: toggles.people, ownPersonId: null }, payHidden: true };
+  // `personCapacityFactors: []` (C6): no link carries anyone's per-person times, whatever its toggles (D20). The list is already
+  // empty (`share_team_capacity` has none); this is defence in depth.
+  const out: Obj = { ...b, viewer: { seesEveryone: toggles.people, ownPersonId: null }, payHidden: true, personCapacityFactors: [] };
   out.people = (b.people as Obj[]).map((p) => ({
     ...p,
     name: toggles.people ? p.name : (personLabel.get(String(p.id)) ?? (PERSON_NUMBER.test(String(p.name)) ? p.name : "A team member")),
@@ -341,7 +343,10 @@ export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, s
     const src = isBundleLike(value) ? redactBundle(value, toggles, secrets) : value;
     const out: Obj = {};
     for (const [k, v] of Object.entries(src)) {
-      if (Object.hasOwn(BLANKED, k)) out[k] = structuredClone(BLANKED[k]);
+      // Per-person times (C6) never go out, wherever they sit: an engine person's `capacityFactor` is dropped, a list is emptied.
+      if (k === "capacityFactor") continue;
+      if (k === "personCapacityFactors" || k === "person_capacity_factors") out[k] = [];
+      else if (Object.hasOwn(BLANKED, k)) out[k] = structuredClone(BLANKED[k]);
       // A step's own cost figure: a money field, hidden with Financials off.
       else if (k === "cost_override" && !toggles.financials) out[k] = null;
       // Word-for-word quotes from sources never go out (they name people and clients as the speaker said them).
@@ -370,6 +375,7 @@ export const SHARE_LEAKS = {
   person: "The snapshot names a person.",
   costs: "The snapshot contains costs or margins.",
   money: "The snapshot contains a money amount.",
+  speeds: "The snapshot contains per-person times.",
 } as const;
 export type ShareLeak = keyof typeof SHARE_LEAKS;
 
@@ -423,6 +429,9 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
       // `hiddenLevers` is a non-text key wherever it sits, so it may appear only once, at the top: a copy nested elsewhere would skip the name checks.
       if (k === "hiddenLevers" && depth > 0) found.add("mismatch");
       if (k === "cost_rate" && v !== null && v !== undefined) found.add("pay");
+      // Per-person times (C6): any capacityFactor key, or a non-empty list of them, anywhere.
+      if (k === "capacityFactor") found.add("speeds");
+      if ((k === "personCapacityFactors" || k === "person_capacity_factors") && Array.isArray(v) && v.length) found.add("speeds");
       // Evidence notes of any JSON type: only an empty object (or null) is clean.
       if (k === "provenance" && v !== null && v !== undefined && !(isObj(v) && Object.keys(v).length === 0)) found.add("evidence");
       if (k === "facts" && Array.isArray(v) && v.some(isQuoteFact)) found.add("evidence");

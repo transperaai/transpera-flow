@@ -11,6 +11,8 @@ import {
   northbeamServicingStepIds,
   northbeamStepIds,
   toEngineModel,
+  speedsNormalisedFor,
+  usesCapacityFactors,
   workingDaysBetween,
   type ProcessBundle,
   type ServiceRow,
@@ -517,5 +519,88 @@ describe("people", () => {
     const model = toEngineModel(b, { startDate: START });
     expect(model.steps.find((st) => st.id === northbeamStepIds.audit)!.person).toBe(maya);
     expect(model.availabilityFloor).toBe(0.12);
+  });
+});
+
+describe("per-person times (C6)", () => {
+  const maya = northbeamPersonIds["Maya Collins"]!;
+  const rows = (b: ProcessBundle) => [
+    { person_id: maya, workspace_id: b.workspace.id, step_id: null, factor: 0.9, source: "entered" },
+    // Out of order on purpose: the model's keys come out in sorted id order.
+    { person_id: maya, workspace_id: b.workspace.id, step_id: northbeamStepIds.discovery, factor: 1.2, source: "entered" },
+    { person_id: maya, workspace_id: b.workspace.id, step_id: northbeamStepIds.audit, factor: 0.8, source: "entered" },
+    // A 1 is harmless and dropped; a step outside the model is dropped.
+    { person_id: maya, workspace_id: b.workspace.id, step_id: northbeamStepIds.kickoff, factor: 1, source: "entered" },
+    { person_id: maya, workspace_id: b.workspace.id, step_id: "00000000-0000-4000-8000-00000000dead", factor: 1.5, source: "entered" },
+  ];
+  const withFactors = (on: boolean, viewer?: ProcessBundle["viewer"]): ProcessBundle => {
+    const b = northbeamBundle();
+    b.workspace.settings = { ...b.workspace.settings, ...(on ? { capacity_factor_enabled: true } : {}) };
+    b.personCapacityFactors = rows(b);
+    if (viewer) b.viewer = viewer;
+    return b;
+  };
+  const anyFactor = (m: EngineModel) => Object.values(m.people ?? {}).some((p) => p.capacityFactor !== undefined);
+
+  it("switch off: no capacityFactor on anyone, even with rows", () => {
+    expect(anyFactor(toEngineModel(withFactors(false), { startDate: START }))).toBe(false);
+  });
+
+  it("switch on and a viewer who sees everyone (or no viewer): the default and steps as stored, with 1s and steps outside the model dropped", () => {
+    for (const viewer of [undefined, { seesEveryone: true, ownPersonId: null }] as const) {
+      const m = toEngineModel(withFactors(true, viewer), { startDate: START });
+      expect(m.people![maya]!.capacityFactor).toEqual({ default: 0.9, steps: { [northbeamStepIds.audit]: 0.8, [northbeamStepIds.discovery]: 1.2 } });
+      expect(Object.keys(m.people![maya]!.capacityFactor!.steps!)).toEqual([northbeamStepIds.audit, northbeamStepIds.discovery].sort());
+      // Nobody else has any.
+      expect(Object.entries(m.people!).filter(([id, p]) => id !== maya && p.capacityFactor)).toEqual([]);
+    }
+  });
+
+  it("only a default, or only steps, gives only that key; a default of exactly 1 gives none", () => {
+    const only = (list: ReturnType<typeof rows>) => {
+      const b = withFactors(true);
+      b.personCapacityFactors = list;
+      return toEngineModel(b, { startDate: START }).people![maya]!.capacityFactor;
+    };
+    const all = rows(northbeamBundle());
+    expect(only(all.filter((r) => r.step_id === null))).toEqual({ default: 0.9 });
+    expect(only(all.filter((r) => r.step_id === northbeamStepIds.audit))).toEqual({ steps: { [northbeamStepIds.audit]: 0.8 } });
+    expect(only([{ ...all[0]!, factor: 1 }])).toBeUndefined();
+  });
+
+  it("a viewer who doesn't see everyone (a member, a viewer), and a bundle that hides pay (a share link): none", () => {
+    expect(anyFactor(toEngineModel(withFactors(true, { seesEveryone: false, ownPersonId: maya }), { startDate: START }))).toBe(false);
+    expect(anyFactor(toEngineModel({ ...withFactors(true), payHidden: true }, { startDate: START }))).toBe(false);
+  });
+
+  it("usesCapacityFactors and speedsNormalisedFor follow the switch and the viewer", () => {
+    expect(usesCapacityFactors(withFactors(false))).toBe(false);
+    expect(speedsNormalisedFor(withFactors(false))).toBe(false);
+    expect(usesCapacityFactors(withFactors(true))).toBe(true);
+    expect(speedsNormalisedFor(withFactors(true))).toBe(false);
+    const member = withFactors(true, { seesEveryone: false, ownPersonId: maya });
+    expect(usesCapacityFactors(member)).toBe(false);
+    expect(speedsNormalisedFor(member)).toBe(true);
+    expect(speedsNormalisedFor({ ...withFactors(true), payHidden: true })).toBe(true);
+  });
+
+  it("the AI's bundle (payFreeBundle's one line, and neutral names) reads none, and changing a factor doesn't change its model", () => {
+    const payFree = (b: ProcessBundle): ProcessBundle => ({ ...b, viewer: { seesEveryone: false, ownPersonId: null } });
+    const neutral = (b: ProcessBundle): ProcessBundle => ({ ...payFree(b), people: b.people.map((p) => ({ ...p, name: p.id })) });
+    const b = withFactors(true);
+    expect(anyFactor(toEngineModel(payFree(b), { startDate: START }))).toBe(false);
+    const changed = withFactors(true);
+    changed.personCapacityFactors = changed.personCapacityFactors!.map((r) => ({ ...r, factor: r.factor === 0.9 ? 1.4 : r.factor }));
+    expect(toEngineModel(neutral(changed), { startDate: START })).toEqual(toEngineModel(neutral(b), { startDate: START }));
+    // ...while the editor's own model does change.
+    expect(toEngineModel(changed, { startDate: START })).not.toEqual(toEngineModel(b, { startDate: START }));
+  });
+
+  it("a person's times reach the engine: the strategist's run differs with them and not without the switch", () => {
+    const base = simulate(toEngineModel(withFactors(false), { startDate: START }), 10, 1);
+    const off = simulate(toEngineModel(withFactors(false, { seesEveryone: true, ownPersonId: null }), { startDate: START }), 10, 1);
+    expect(JSON.stringify(off)).toBe(JSON.stringify(base));
+    const on = simulate(toEngineModel(withFactors(true), { startDate: START }), 10, 1);
+    expect(JSON.stringify(on)).not.toBe(JSON.stringify(base));
   });
 });
