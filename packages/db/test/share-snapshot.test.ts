@@ -1,6 +1,11 @@
 import { detectIssues, parsePatchPath, simulate, type DetectedIssue, type FirstPrinciples, type SimulationResult } from "@transpera-flow/engine";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { JOIN_PLACE_WORDS, JOIN_STANDARD_WORDS, JOIN_VERSION_WORDS } from "../src/money";
+import { normaliseView } from "../src/share-text";
+import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES, OLD_SHARE_MONEY_SOURCE } from "./money-cases";
 import {
   SHARE_SNAPSHOT_VERSION,
   larkspurBundle,
@@ -20,7 +25,7 @@ import {
   type ShareToggles,
   type SolutionRow,
 } from "../src";
-import { LEVER_KIND_IDS, SHARE_FREE_TEXT_KEYS, SHARE_NON_TEXT_KEYS, cleanHiddenLevers, validHiddenLevers } from "../src/share";
+import { LEVER_KIND_IDS, SHARE_FREE_TEXT_KEYS, SHARE_HEX_COLOR, SHARE_NON_TEXT_KEYS, cleanHiddenLevers, validHiddenLevers } from "../src/share";
 
 // Share links, the pure half (issue #32, B3): the Db a snapshot is read through, the redaction of every kind of snapshot under
 // every toggle combination, its checker, and the proof that a redacted view's numbers are the unredacted run's.
@@ -959,6 +964,76 @@ describe("the fifth round: tags, ids, names and money", () => {
     }
     // By design no money: the code is glued to letters or digits inside something longer.
     for (const text of ["ref4100GBP", "CAD3D", "4100GBPx"]) expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+  });
+
+  it("B3 follow-up: a date, a version or a standard's number joined to a code by a hyphen or a slash is no money, and is left as written", () => {
+    for (const { text, joinedBy } of MONEY_NOT) {
+      expect(redactTitle(text), `${text} (${joinedBy})`).toBe(text);
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+    }
+    for (const { text, like } of MONEY_NOT_VARIANTS) {
+      expect(redactTitle(text), `${text} (like ${like})`).toBe(text);
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+    }
+  });
+
+  it("B3 follow-up: every case through main's old rule and the new one: what the old refused, the new refuses, except the listed exemptions; the new refuses nothing the old didn't", () => {
+    const oldFlags = (text: string) => new RegExp(OLD_SHARE_MONEY_SOURCE, "giu").test(normaliseView(text).n);
+    const newFlags = (text: string) => shareSnapshotLeaks(bare({ note: text }), w.secrets, off).includes("money");
+    const exempt = new Set([...MONEY_NOT.map((c) => c.text), ...MONEY_NOT_VARIANTS.map((c) => c.text)]);
+    const all = [...exempt, ...MONEY_YES, ...MONEY_OTHER];
+    const lost = all.filter((t) => oldFlags(t) && !newFlags(t) && !exempt.has(t));
+    const gained = all.filter((t) => newFlags(t) && !oldFlags(t));
+    expect(lost).toEqual([]);
+    expect(gained).toEqual([]);
+    // Each exemption really was refused before (it is a change, not a no-op), and each money text was too.
+    for (const t of exempt) expect(oldFlags(t), t).toBe(true);
+    for (const t of MONEY_YES) expect(oldFlags(t), t).toBe(true);
+  });
+
+  it("B3 follow-up: every money form is still hidden and still flagged", () => {
+    for (const text of MONEY_YES) {
+      expect(redactTitle(text), text).toContain("[amount hidden]");
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).toContain("money");
+      // With Financials on, nothing is hidden.
+      expect(redactTitle(text, w.secrets, { ...off, financials: true }), text).toBe(text);
+    }
+  });
+
+  it("B3 follow-up: color and plan are free text (the database checks neither): a name typed into one is hidden and flagged; a hex colour and a plan word are left", () => {
+    const name = w.personFull[0]!;
+    for (const extra of [{ roles: [{ color: name }] }, { workspace: { plan: name } }]) {
+      expect(shareSnapshotLeaks(bare(extra), w.secrets, off), JSON.stringify(extra)).toContain("person");
+      expect(JSON.stringify(redactShareSnapshot(bare(extra), off, w.secrets))).not.toContain(name);
+    }
+    const plain = bare({ roles: [{ color: "#2a78d6" }], workspace: { plan: "agency" } });
+    expect(shareSnapshotLeaks(plain, w.secrets, off)).toEqual([]);
+    expect(redactShareSnapshot(plain, off, w.secrets)).toMatchObject({ roles: [{ color: "#2a78d6" }], workspace: { plan: "agency" } });
+  });
+
+  it("B3 follow-up: a whole hex colour under color is no text, even when its letters spell a name; anything else under color is free text", () => {
+    const secrets: ShareSecrets = { people: [{ id: "p-ada", name: "Ada Lovelace", label: "Team member 9" }], clients: [{ id: "c-fab", name: "Fab", label: "Client 9" }] };
+    for (const color of ["#ada123", "#ADA", "#fab000", "#FAB000AA"]) {
+      const snap = bare({ roles: [{ color }] });
+      expect(shareSnapshotLeaks(snap, secrets, off), color).toEqual([]);
+      expect(redactShareSnapshot(snap, off, secrets), color).toMatchObject({ roles: [{ color }] });
+    }
+    // Not a whole hex colour, or not under `color`: free text, hidden and flagged.
+    expect(shareSnapshotLeaks(bare({ roles: [{ color: "ada" }] }), secrets, off)).toContain("person");
+    expect(shareSnapshotLeaks(bare({ roles: [{ color: "#ada123 Ada" }] }), secrets, off)).toContain("person");
+    expect(shareSnapshotLeaks(bare({ roles: [{ color: "#ada1234567" }] }), secrets, off)).toContain("person");
+    expect(shareSnapshotLeaks(bare({ note: "#fab000" }), secrets, off)).toContain("client");
+    expect(shareSnapshotLeaks(bare({ roles: [{ colour: "#ada123" }] }), secrets, off)).toContain("person");
+    expect(SHARE_HEX_COLOR.test("#2a78d6")).toBe(true);
+  });
+
+  it("B3 follow-up: the words that make a number an identifier are the database's (the same list in the migration's money rule)", () => {
+    const sql = readFileSync(join(__dirname, "..", "supabase/migrations/20261224500000_share_money_rule.sql"), "utf8");
+    const body = sql.slice(sql.search(/^create or replace function private\.share_snapshot_problem\(/m));
+    const lists = [...body.matchAll(/\(\?<!\(\^\|\[\^a-z\]\)\(([a-z|]+)\)\[\[:space:\]\]\+\)/g)].map((m) => m[1]!);
+    // The standard words guard every plain-number form; version words both 1- or 2-digit forms; place words only the whole one.
+    const [std, version, place] = [JOIN_STANDARD_WORDS, JOIN_VERSION_WORDS, JOIN_PLACE_WORDS].map((w) => w.join("|"));
+    expect(lists).toEqual([std, std, version, place, std, version]);
   });
 });
 
