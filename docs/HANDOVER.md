@@ -242,11 +242,12 @@ Merged (Sonnet-built from Opus briefs, Opus-reviewed; migrations applied with pr
 | #239 | Propose per-person times from a step log that names people (closes #227) | 72 |
 | #235 | C5: loading skeletons, first-run chip, empty states (#44) | none |
 | #238 | C5: Sentry error reporting, off until the key is set (#44, ADR, PRD D49) | none |
-| #240 | C5: dark mode tokens and phone read-only pass, e2e suite in `check` (#44); **reviewed, merge when CI is green** | none |
+| #240 | C5: dark mode tokens and phone read-only pass, e2e suite in `check` (#44) | none |
 | #237 | Test race: the archive test uses its own process | none |
 
 Also: the share/play-link PostgREST tests deleted every link in the shared workspace on teardown; each now deletes only its
-own (in #233). Production has only one account (the agency admin), so smoke tests that need a member create a throwaway
+own (in #233). `Shared/EmptyState/EmptyMap`'s screenshot once drew 1 px off in CI (light theme); a separate task makes it
+deterministic. Production has only one account (the agency admin), so smoke tests that need a member create a throwaway
 `auth.users` row inside their rolled-back block (rows 70–72 notes).
 
 **Austin's live checks** (a signed-in browser on production):
