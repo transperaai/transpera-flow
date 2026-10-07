@@ -96,6 +96,8 @@ import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { RATING_STYLE, ratingOfRank } from "@/lib/map/rating";
 import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
 import { MapLegend, ZoomControls } from "./map/map-controls";
+import { FirstRunStatus } from "./map/map-placeholder";
+import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
 import { formatHours, formatNumber } from "@/lib/format";
 import { usePlayback } from "@/lib/playback/use-playback";
@@ -888,6 +890,10 @@ interface CanvasProps {
   stepExtras?: (stepId: string) => StepExtras | null;
   /** Titles of the workspace's sources by id, for the sources a step's detail lists. */
   sourceTitles?: Readonly<Record<string, string>>;
+  /** The first run is still computing: shows FirstRunStatus over the map. */
+  computing?: boolean;
+  /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
+  emptyAction?: ReactNode;
 }
 
 export function ProcessCanvas(props: CanvasProps) {
@@ -930,8 +936,12 @@ function Canvas({
   stepDetail = true,
   stepExtras,
   sourceTitles,
+  computing = false,
+  emptyAction,
 }: CanvasProps) {
   const editable = editor !== null;
+  // A read-only map with nothing between start and end has nothing to draw. (The Editor keeps its empty canvas: a new block starts there.)
+  const nothingToDraw = !editable && !bundle.steps.some((s) => s.kind !== "start" && s.kind !== "end");
   // Groups open in place (issue #102): to edit inside one, open it; to read the map, close it for the roll-up.
   const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(() => (editor ? new Set(groupIds(bundle.steps)) : new Set()));
   const expanded = expandedProp ?? ownExpanded;
@@ -1635,6 +1645,14 @@ function Canvas({
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
               <Toolbar bundle={bundle} editor={editor} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
+            </div>
+          )}
+          {computing && <FirstRunStatus />}
+          {nothingToDraw && (
+            <div className="absolute inset-0 z-[5] flex items-center justify-center p-4">
+              <EmptyState className="bg-card" action={emptyAction}>
+                Nothing to draw yet: this process has no steps.
+              </EmptyState>
             </div>
           )}
           {diffLegend && diff && diff.list.length > 0 && (

@@ -7,6 +7,7 @@ import { ChevronRight, CornerDownRight } from "lucide-react";
 import { Help } from "@/components/help";
 import { RatingPill } from "@/components/processes/rating";
 import { Badge } from "@/components/ui/badge";
+import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { confirmedBadges, confirmedRatings, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import type { ProcessCardData } from "@/lib/processes/data";
@@ -15,7 +16,7 @@ import { shortDate, type ProcessRowData } from "@/lib/processes/rows";
 // The map is heavy and only needed once a row is opened.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
   ssr: false,
-  loading: () => <Skeleton className="h-64 w-full" />,
+  loading: () => <MapSkeleton height={256} />,
 });
 
 type Card = { state: "loading" } | { state: "none" } | { state: "error" } | { state: "ready"; data: ProcessCardData };

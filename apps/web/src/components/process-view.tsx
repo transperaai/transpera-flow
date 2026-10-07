@@ -524,6 +524,7 @@ export function ProcessView({
           stepExtras={issuesUi.stepExtras}
           highlight={issuesUi.highlight}
           sourceTitles={sourceTitles}
+          computing={model !== null && sim.status === "running" && sim.run === null}
         />
         <MapSidePanel
           open={panelOpen}

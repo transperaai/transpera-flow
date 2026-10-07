@@ -44,6 +44,8 @@ export function MrrChart({
 }) {
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  // No months to draw (the series is indexed below): say so, after the hooks.
+  if (points.length === 0) return <p className="text-sm text-muted-foreground" data-empty>No months to show yet.</p>;
   const width = measured || 560;
   const compact = width < 480;
   const m = { l: compact ? 52 : 62, r: compact ? 58 : 72, t: 14, b: 30 };

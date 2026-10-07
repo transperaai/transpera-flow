@@ -14,6 +14,7 @@ import { MrrChart } from "@/components/overview/charts";
 import { useEngineModel } from "@/components/process-view";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { Card } from "@/components/ui/card";
+import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { horizonWeeks, monthsForWeeks } from "@/lib/horizon";
 import { checkpointMonths, checkpointWeeks, mrrSeries } from "@/lib/overview/projection";
@@ -31,7 +32,7 @@ import { cn } from "@/lib/utils";
 // The map is heavy: load it once the page has drawn.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
   ssr: false,
-  loading: () => <Skeleton className="h-64 w-full" />,
+  loading: () => <MapSkeleton height={256} />,
 });
 
 const CARD_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -75,7 +76,15 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
 
   return (
     <div className="flex flex-col gap-6" data-solution-compare>
-      <MapsSection comparison={comparison} notes={notes} />
+      <MapsSection
+        comparison={comparison}
+        notes={notes}
+        // Only the first run of each side, and only while a model exists to run (an error leaves it null).
+        computing={{
+          live: live.model !== null && liveSim.status === "running" && liveSim.run === null,
+          solution: solved.model !== null && solvedSim.status === "running" && solvedSim.run === null,
+        }}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2" data-section="horizon">
         <p className="text-sm text-muted-foreground">The measures, the revenue chart and the stress test look this far ahead.</p>
@@ -127,7 +136,7 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
   );
 }
 
-function MapsSection({ comparison, notes }: { comparison: ReturnType<typeof compareMaps>; notes: string[] }) {
+function MapsSection({ comparison, notes, computing }: { comparison: ReturnType<typeof compareMaps>; notes: string[]; computing: { live: boolean; solution: boolean } }) {
   // One set of open groups for both maps: open or close a group on either and it follows on the other.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(comparison.open);
   return (
@@ -173,6 +182,7 @@ function MapsSection({ comparison, notes }: { comparison: ReturnType<typeof comp
                 focus={comparison.changed}
                 height="auto"
                 stepDetail={false}
+                computing={computing[id]}
               />
             </div>
           </div>

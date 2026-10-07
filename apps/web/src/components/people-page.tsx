@@ -12,6 +12,7 @@ import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { useEngineModel } from "@/components/process-view";
+import { EmptyState } from "@/components/shell/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { benchmarkOf, positionAgainst, type Benchmark } from "@/lib/client-groups";
@@ -372,7 +373,22 @@ function HowBusy({
           Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an owner to link you on Settings → Access.
         </p>
       )}
-      {(!onlyOwn || rows.length > 0) && (
+      {!onlyOwn && rows.length === 0 && (
+        <div className="px-4 pb-4">
+          <EmptyState
+            action={
+              settingsHref ? (
+                <Link href={`${settingsHref}#people-heading`} className="font-medium text-accent hover:underline">
+                  Open Settings, People →
+                </Link>
+              ) : undefined
+            }
+          >
+            No people yet. Add them in Settings, People.
+          </EmptyState>
+        </div>
+      )}
+      {rows.length > 0 && (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
