@@ -51,6 +51,8 @@ export default process.env.NEXT_PUBLIC_SENTRY_DSN?.trim()
       telemetry: false,
       sourcemaps: { disable: !sourceMaps, deleteSourcemapsAfterUpload: true },
       widenClientFileUpload: false,
+      // Tracing is off, so the hook the SDK asks for (navigation spans) has nothing to do.
+      suppressOnRouterTransitionStartWarning: true,
       errorHandler: (err) => console.warn(`[sentry] source map upload failed; the build carries on: ${err.message}`),
     })
   : nextConfig;
