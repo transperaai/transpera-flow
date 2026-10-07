@@ -5,10 +5,11 @@ import {
   northbeamLeadSourceIds,
   northbeamPersonIds,
   northbeamRoleIds,
+  northbeamStepIds,
   snapshotModel,
   diffSnapshots,
 } from "@transpera-flow/db";
-import { describeAuditEntry, type AuditEntry } from "@/lib/suggestions/audit";
+import { auditStepId, describeAuditEntry, type AuditEntry } from "@/lib/suggestions/audit";
 import { demoBaselineSnapshot, demoCompany, demoProcesses, demoSuggestions } from "@/lib/suggestions/demo";
 import { parseReview, reviewInMemory, reviewSummary } from "@/lib/suggestions/review";
 import { defaultRunName, parseSaveRun } from "@/lib/runs/runs";
@@ -123,13 +124,67 @@ describe("the change log", () => {
     ).toBe("Rejected a suggested change to the company model: “No”");
   });
 
-  it("tells a per-person time (C6) in words and never states the number", () => {
+  it("tells a per-person time (C6, #230) in words, names its step, and never states the number", () => {
     const sam = northbeamPersonIds["Sam Patel"];
-    const say = (action: string, diff: AuditEntry["diff"]) => describeAuditEntry(entry({ target_table: "person_capacity_factors", action, target_id: sam, diff }), m);
-    expect(say("insert", { new: { person_id: sam, step_id: null, factor: 0.8 } })).toBe("Sam Patel: a per-person time set");
+    const kickoff = northbeamStepIds.kickoff;
+    const stepNames = { [kickoff]: "Kickoff", [northbeamStepIds.audit]: "Audit" };
+    const say = (action: string, diff: AuditEntry["diff"], names: Record<string, string> = stepNames) =>
+      describeAuditEntry(entry({ target_table: "person_capacity_factors", action, target_id: sam, diff }), m, names);
+    // An entry logged before #230 has no step on an update: today's wording, never a guess.
     expect(say("update", { old: { factor: 0.8 }, new: { factor: 1.3 } })).toBe("Sam Patel: a per-person time changed");
-    expect(say("delete", { old: { person_id: sam, factor: 1.3 } })).toBe("Sam Patel: a per-person time removed");
-    for (const text of [say("insert", { new: { person_id: sam, factor: 0.8 } }), say("update", { old: { factor: 0.8 }, new: { factor: 1.3 } })]) expect(text).not.toMatch(/0\.8|1\.3/);
+    // A step: the top-level key (#230), or inside the whole row an insert or delete logs.
+    expect(say("insert", { step_id: kickoff, new: { person_id: sam, step_id: kickoff, factor: 0.8 } })).toBe("Sam Patel: per-person time on Kickoff set");
+    expect(say("update", { step_id: kickoff, old: { factor: 0.8 }, new: { factor: 1.3 } })).toBe("Sam Patel: per-person time on Kickoff changed");
+    expect(say("delete", { old: { person_id: sam, step_id: kickoff, factor: 1.3 } })).toBe("Sam Patel: per-person time on Kickoff removed");
+    expect(say("delete", { step_id: kickoff, old: { person_id: sam, factor: 1.3 } })).toBe("Sam Patel: per-person time on Kickoff removed");
+    // Every step: the explicit key, or (old entries) an insert or delete with no step anywhere.
+    expect(say("update", { every_step: true, old: { factor: 0.8 }, new: { factor: 1.3 } })).toBe("Sam Patel: per-person time for every step changed");
+    expect(say("insert", { every_step: true, new: { person_id: sam, factor: 0.8 } })).toBe("Sam Patel: per-person time for every step set");
+    expect(say("insert", { new: { person_id: sam, factor: 0.8 } })).toBe("Sam Patel: per-person time for every step set");
+    expect(say("delete", { old: { person_id: sam, factor: 1.3 } })).toBe("Sam Patel: per-person time for every step removed");
+    // A step that is in no process any more, or no names given at all.
+    expect(say("insert", { step_id: "00000000-0000-4000-8000-000000000000", new: { factor: 0.8 } })).toBe("Sam Patel: per-person time on a step no longer in any process set");
+    expect(say("insert", { step_id: kickoff, new: { factor: 0.8 } }, {})).toBe("Sam Patel: per-person time on a step no longer in any process set");
+    // Measured times (#227) say so; entered ones don't.
+    expect(say("insert", { step_id: kickoff, new: { factor: 0.9, provenance: { factor: { source: "measured", at: "2026-10-01" } } } })).toBe("Sam Patel: per-person time on Kickoff set (measured)");
+    expect(say("insert", { step_id: kickoff, new: { factor: 0.9, provenance: { factor: { source: "entered", by: "u" } } } })).toBe("Sam Patel: per-person time on Kickoff set");
+    expect(say("insert", { step_id: kickoff, new: { factor: 0.9, provenance: "measured" } })).toBe("Sam Patel: per-person time on Kickoff set");
+    // Never the number, and never anyone else's name.
+    const texts = [
+      say("insert", { step_id: kickoff, new: { person_id: sam, step_id: kickoff, factor: 0.8 } }),
+      say("update", { step_id: kickoff, old: { factor: 0.8 }, new: { factor: 1.3 } }),
+      say("update", { every_step: true, old: { factor: 0.8 }, new: { factor: 1.3 } }),
+      say("update", { old: { factor: 0.8 }, new: { factor: 1.3 } }),
+      say("delete", { old: { person_id: sam, factor: 1.3 } }),
+    ];
+    for (const text of texts) {
+      expect(text).not.toMatch(/0\.8|1\.3/);
+      expect(text).not.toContain("Rosa Diaz");
+    }
+  });
+
+  it("names the step of a skill (#230), and keeps today's wording without one", () => {
+    const sam = northbeamPersonIds["Sam Patel"];
+    const kickoff = northbeamStepIds.kickoff;
+    const say = (action: string, diff: AuditEntry["diff"]) =>
+      describeAuditEntry(entry({ target_table: "person_skills", action, target_id: sam, diff }), m, { [kickoff]: "Kickoff" });
+    expect(say("insert", { step_id: kickoff, new: { person_id: sam, step_id: kickoff } })).toBe("Sam Patel: skill Kickoff added");
+    expect(say("delete", { step_id: kickoff, old: { person_id: sam, step_id: kickoff } })).toBe("Sam Patel: skill Kickoff removed");
+    expect(say("update", { step_id: kickoff, old: { efficiency: 1 }, new: { efficiency: 1.2 } })).toBe("Sam Patel: skill Kickoff changed");
+    expect(say("insert", { new: { person_id: sam } })).toBe("Sam Patel: a skill added");
+    expect(say("update", { old: { efficiency: 1 }, new: { efficiency: 1.2 } })).toBe("Sam Patel: a skill changed");
+  });
+
+  it("auditStepId reads diff.step_id, then new.step_id, then old.step_id", () => {
+    const a = "11111111-1111-4111-8111-111111111111";
+    const b = "22222222-2222-4222-8222-222222222222";
+    const c = "33333333-3333-4333-8333-333333333333";
+    expect(auditStepId({ diff: { step_id: a, new: { step_id: b }, old: { step_id: c } } })).toBe(a);
+    expect(auditStepId({ diff: { new: { step_id: b }, old: { step_id: c } } })).toBe(b);
+    expect(auditStepId({ diff: { old: { step_id: c } } })).toBe(c);
+    expect(auditStepId({ diff: { new: { step_id: null } } })).toBeNull();
+    expect(auditStepId({ diff: { every_step: true } })).toBeNull();
+    expect(auditStepId({ diff: {} })).toBeNull();
   });
 
   it("tells branding changes (issue #34): colours by value, the logo never by its storage path", () => {

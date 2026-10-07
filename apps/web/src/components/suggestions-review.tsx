@@ -337,7 +337,7 @@ function SuggestionCard({
 }
 
 /** Recent company-model writes from the audit log (owners and agency admins). */
-export function ChangeLog({ entries, model, people }: { entries: AuditEntry[]; model: CompanyModel; people: Record<string, string> }) {
+export function ChangeLog({ entries, model, people, stepNames }: { entries: AuditEntry[]; model: CompanyModel; people: Record<string, string>; stepNames: Record<string, string> }) {
   return (
     <section aria-labelledby="changes-heading" className="mt-8">
       <h2 id="changes-heading" className="mb-1 text-base font-bold">
@@ -358,7 +358,7 @@ export function ChangeLog({ entries, model, people }: { entries: AuditEntry[]; m
                 {e.actor_kind === "mcp" ? `Claude (API token of ${people[e.actor_id ?? ""] ?? "a user"})` : (people[e.actor_id ?? ""] ?? "Someone")}
                 {e.diff.suggestion_id ? " · accepted suggestion" : ""}
               </span>
-              <span className="min-w-0 grow">{describeAuditEntry(e, model)}</span>
+              <span className="min-w-0 grow">{describeAuditEntry(e, model, stepNames)}</span>
             </li>
           ))}
         </ul>

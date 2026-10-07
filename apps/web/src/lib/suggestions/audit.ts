@@ -12,8 +12,38 @@ export interface AuditEntry {
   action: string;
   target_table: string;
   target_id: string | null;
-  diff: { old?: Record<string, unknown>; new?: Record<string, unknown>; suggestion_id?: string; role_id?: string; service_id?: string };
+  diff: {
+    old?: Record<string, unknown>;
+    new?: Record<string, unknown>;
+    suggestion_id?: string;
+    role_id?: string;
+    service_id?: string;
+    /** The step of a skill or a per-person time (the row's step, also on an update). */
+    step_id?: string;
+    /** A per-person time that is the person's time for every step (#230; its null `step_id` is stripped from the diff). */
+    every_step?: boolean;
+  };
 }
+
+const GONE_STEP = "a step no longer in any process";
+
+/**
+ * The step an entry is about: the top-level `step_id`, else the one inside the whole row an insert or delete logs
+ * (`new` / `old`), else null. Entries logged before #230 have none on an update of a per-person time.
+ */
+export function auditStepId(e: Pick<AuditEntry, "diff">): string | null {
+  const id = e.diff.step_id ?? e.diff.new?.step_id ?? e.diff.old?.step_id;
+  return typeof id === "string" ? id : null;
+}
+
+/** Whether a per-person time's new provenance says it was measured (from the person's own times, #227). Read defensively. */
+function isMeasured(e: AuditEntry): boolean {
+  const provenance = e.diff.new?.provenance;
+  if (!provenance || typeof provenance !== "object") return false;
+  const factor = (provenance as Record<string, unknown>).factor;
+  return !!factor && typeof factor === "object" && (factor as Record<string, unknown>).source === "measured";
+}
+
 
 /** The tables whose writes the change log shows. */
 export const COMPANY_AUDIT_TABLES = [
@@ -68,7 +98,7 @@ function describeBrandingChange(before: unknown, after: unknown): string[] {
 }
 
 /** One entry as the change log shows it. */
-export function describeAuditEntry(e: AuditEntry, model: CompanyModel): string {
+export function describeAuditEntry(e: AuditEntry, model: CompanyModel, stepNames: Readonly<Record<string, string>> = {}): string {
   const currency = model.workspace.settings.currency || "GBP";
   const row = { ...(e.diff.old ?? {}), ...(e.diff.new ?? {}) } as Record<string, unknown>;
   const name = (list: { id: string; name: string }[], id: unknown) => list.find((x) => x.id === id)?.name ?? "someone or something since removed";
@@ -102,11 +132,20 @@ export function describeAuditEntry(e: AuditEntry, model: CompanyModel): string {
       if (e.action === "delete") return `${who("client_assignments")}: ${role} unassigned`;
       return `${who("client_assignments")}: ${role} → ${name(model.people, e.diff.new?.person_id ?? row.person_id)}`;
     }
-    case "person_skills":
-      return `${who("person_skills")}: a skill ${e.action === "insert" ? "added" : e.action === "delete" ? "removed" : "changed"}`;
-    // Per-person times (C6): never the number in text (the diff holds it, and only managers read the log).
-    case "person_capacity_factors":
-      return `${who("person_capacity_factors")}: a per-person time ${e.action === "insert" ? "set" : e.action === "delete" ? "removed" : "changed"}`;
+    case "person_skills": {
+      const verb = e.action === "insert" ? "added" : e.action === "delete" ? "removed" : "changed";
+      const step = auditStepId(e);
+      return step ? `${who("person_skills")}: skill ${stepNames[step] ?? GONE_STEP} ${verb}` : `${who("person_skills")}: a skill ${verb}`;
+    }
+    // Per-person times (C6, #230): the step, or "every step"; never the number in text (the diff holds it, and only managers read the log).
+    case "person_capacity_factors": {
+      const verb = e.action === "insert" ? "set" : e.action === "delete" ? "removed" : "changed";
+      const step = auditStepId(e);
+      // An absent step on an insert or delete is "every step": the whole row was logged and a null step_id is stripped.
+      const words = e.diff.every_step === true ? "for every step" : step ? `on ${stepNames[step] ?? GONE_STEP}` : e.action !== "update" ? "for every step" : null;
+      const text = words ? `${who("person_capacity_factors")}: per-person time ${words} ${verb}` : `${who("person_capacity_factors")}: a per-person time ${verb}`;
+      return isMeasured(e) ? `${text} (measured)` : text;
+    }
     case "person_leave":
       return `${who("person_leave")}: leave ${String(row.start_date ?? "")} to ${String(row.end_date ?? "")} ${e.action === "insert" ? "added" : e.action === "delete" ? "removed" : "changed"}`;
   }
