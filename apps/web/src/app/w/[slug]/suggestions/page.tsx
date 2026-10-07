@@ -42,7 +42,7 @@ export default async function SuggestionsPage(props: PageProps<"/w/[slug]/sugges
           sourcesHref={`/w/${slug}/sources`}
         />
       </LiveProposals>
-      {data.changes && <ChangeLog entries={data.changes} model={data.model} people={data.people} />}
+      {data.changes && <ChangeLog entries={data.changes} model={data.model} people={data.people} stepNames={data.stepNames} />}
     </Page>
   );
 }

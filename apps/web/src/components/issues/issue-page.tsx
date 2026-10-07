@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { MapSkeleton } from "@/components/map/map-placeholder";
 import { draftFromIssue, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
 import { historyLines, isOpenIssue, issueHref, loggedLine, resolvedBar, type HistoryNames, type SolutionTest } from "@/lib/issues/pages";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
@@ -38,7 +38,7 @@ import { namedForViewer, viewerOf } from "@/lib/viewer";
 // The map is heavy; load it when the page has drawn.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
   ssr: false,
-  loading: () => <Skeleton className="h-64 w-full" />,
+  loading: () => <MapSkeleton height={256} />,
 });
 
 
