@@ -14,6 +14,7 @@ import { MrrChart } from "@/components/overview/charts";
 import { useEngineModel } from "@/components/process-view";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { Card } from "@/components/ui/card";
+import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { horizonWeeks, monthsForWeeks } from "@/lib/horizon";
 import { checkpointMonths, checkpointWeeks, mrrSeries } from "@/lib/overview/projection";
@@ -31,7 +32,7 @@ import { cn } from "@/lib/utils";
 // The map is heavy: load it once the page has drawn.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
   ssr: false,
-  loading: () => <Skeleton className="h-64 w-full" />,
+  loading: () => <MapSkeleton height={256} />,
 });
 
 const CARD_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -75,6 +76,8 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
 
   return (
     <div className="flex flex-col gap-6" data-solution-compare>
+      {/* No first-run chip on these maps (issue #44): they draw no run's numbers, so a run finishing changes nothing on them.
+          The measures, the chart and the stress test below show their own loading. */}
       <MapsSection comparison={comparison} notes={notes} />
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2" data-section="horizon">

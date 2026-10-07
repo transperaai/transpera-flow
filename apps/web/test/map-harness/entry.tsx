@@ -32,6 +32,10 @@ export interface HarnessOptions {
   card?: boolean;
   /** An ordinary process's editor with the process library (B12 part 2): Northbeam's other processes, one on the company map, templates, and a stand-in "New process". */
   library?: boolean;
+  /** The first run is still computing (issue #44): the map carries the "Running the first simulation" chip. */
+  computing?: boolean;
+  /** A process with nothing between start and end (issue #44): a read-only map says so, an editable one stays empty. */
+  empty?: boolean;
 }
 
 declare global {
@@ -104,7 +108,13 @@ function EditorKeys({ editor, bundle, selection, setSelection }: { editor: Proce
 }
 
 function Harness({ options }: { options: HarnessOptions }) {
-  const base = useMemo(() => (options.company ? companyBundle() : options.nested ? withDemoGroups(demoBundle()) : demoBundle()), [options.nested, options.company]);
+  const base = useMemo(() => {
+    const bundle = options.company ? companyBundle() : options.nested ? withDemoGroups(demoBundle()) : demoBundle();
+    if (!options.empty) return bundle;
+    const ends = bundle.steps.filter((s) => s.kind === "start" || s.kind === "end");
+    const kept = new Set(ends.map((s) => s.id));
+    return { ...bundle, steps: ends, edges: bundle.edges.filter((e) => kept.has(e.from_step_id) && kept.has(e.to_step_id)) };
+  }, [options.nested, options.company, options.empty]);
   const editor = useMemo(() => (options.editable ? new ProcessEditor(base, new MemoryStore(base)) : null), [base, options.editable]);
   const state = useSyncExternalStore(editor ? editor.subscribe : never, editor ? editor.getState : () => null, () => null);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
@@ -153,6 +163,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         hideAdd={options.palette}
         viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
+        computing={options.computing}
       />
       {options.palette && editor && options.company && (
         <aside aria-label="Inspector" style={{ width: 260, padding: 8 }}>

@@ -386,6 +386,15 @@ export function ProcessPage({
             stepExtras={issuesUi.stepExtras}
             highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : null)}
             sourceTitles={sourceTitles}
+            // Only while there is a model to run: one that can't be built never starts a run.
+            computing={model !== null && sim.status === "running" && sim.run === null}
+            emptyAction={
+              editHref ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={withHorizon(editHref, pickedMonths)}>Open in Editor</Link>
+                </Button>
+              ) : undefined
+            }
           />
         </Section>
 

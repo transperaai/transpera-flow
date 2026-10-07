@@ -546,6 +546,7 @@ export function Overview({
                 height="auto"
                 stepDetail={false}
                 onStepClick={openProcess}
+                computing={horizonModel !== null && horizonSim.status === "running" && horizonSim.run === null}
               />
             ) : (
               <p className="p-6 text-sm text-muted-foreground">No process has been published yet.</p>
