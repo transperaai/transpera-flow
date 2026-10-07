@@ -1,7 +1,7 @@
 -- Production apply file for 20261226000000_restore_capacity_factors (#228, C6 follow-up). Strictly additive: one `create or replace` of
 -- `public.import_workspace_bundle(uuid, jsonb, text)` with the same signature, settings, refusals and result, and one more section
--- (`person_capacity_factors`) so a restore brings per-person times back. Applies after row 67 (20261223000000) and row 61 (20261215000000);
--- ledger row 70. Preflight, post-apply checks and rollback are in the migration's own header, repeated below. Apply BEFORE deploying the app:
+-- (`person_capacity_factors`) so a restore brings per-person times back. Applies after row 70 (20261225000000), row 67 (20261223000000) and row 61 (20261215000000);
+-- ledger row 71. Preflight, post-apply checks and rollback are in the migration's own header, repeated below. Apply BEFORE deploying the app:
 -- the old function would ignore the new section and restore without the times, without saying so.
 
 begin;
@@ -47,8 +47,8 @@ set local lock_timeout = '5s';
 -- STRICTLY ADDITIVE: one `create or replace` of `public.import_workspace_bundle` with the same signature, settings, refusals and result; one
 -- more section. It doesn't redefine `save_fields` or any other function, trigger or policy.
 --
--- ORDER: after 20261223000000 (row 67: the table) and 20261215000000 (row 61: the body copied). Independent of #230 (20261225000000) and
--- #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
+-- ORDER: after row 70 (20261225000000, #230), row 67 (20261223000000: the table) and row 61 (20261215000000: the body copied). Ledger row 71.
+-- Independent of #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
 -- The old function writes only the sections in its `sections` constant and ignores any other key, so the new app's plan against the old
 -- function would restore WITHOUT the per-person times and without saying so.
 --
@@ -971,8 +971,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- STRICTLY ADDITIVE: one `create or replace` of `public.import_workspace_bundle` with the same signature, settings, refusals and result; one
 -- more section. It doesn't redefine `save_fields` or any other function, trigger or policy.
 --
--- ORDER: after 20261223000000 (row 67: the table) and 20261215000000 (row 61: the body copied). Independent of #230 (20261225000000) and
--- #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
+-- ORDER: after row 70 (20261225000000, #230), row 67 (20261223000000: the table) and row 61 (20261215000000: the body copied). Ledger row 71.
+-- Independent of #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
 -- The old function writes only the sections in its `sections` constant and ignores any other key, so the new app's plan against the old
 -- function would restore WITHOUT the per-person times and without saying so.
 --

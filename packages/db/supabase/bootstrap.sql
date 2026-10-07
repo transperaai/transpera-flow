@@ -42584,8 +42584,8 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 -- STRICTLY ADDITIVE: one `create or replace` of `public.import_workspace_bundle` with the same signature, settings, refusals and result; one
 -- more section. It doesn't redefine `save_fields` or any other function, trigger or policy.
 --
--- ORDER: after 20261223000000 (row 67: the table) and 20261215000000 (row 61: the body copied). Independent of #230 (20261225000000) and
--- #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
+-- ORDER: after row 70 (20261225000000, #230), row 67 (20261223000000: the table) and row 61 (20261215000000: the body copied). Ledger row 71.
+-- Independent of #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
 -- The old function writes only the sections in its `sections` constant and ignores any other key, so the new app's plan against the old
 -- function would restore WITHOUT the per-person times and without saying so.
 --
@@ -43508,8 +43508,8 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- STRICTLY ADDITIVE: one `create or replace` of `public.import_workspace_bundle` with the same signature, settings, refusals and result; one
 -- more section. It doesn''t redefine `save_fields` or any other function, trigger or policy.
 --
--- ORDER: after 20261223000000 (row 67: the table) and 20261215000000 (row 61: the body copied). Independent of #230 (20261225000000) and
--- #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
+-- ORDER: after row 70 (20261225000000, #230), row 67 (20261223000000: the table) and row 61 (20261215000000: the body copied). Ledger row 71.
+-- Independent of #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
 -- The old function writes only the sections in its `sections` constant and ignores any other key, so the new app''s plan against the old
 -- function would restore WITHOUT the per-person times and without saying so.
 --
