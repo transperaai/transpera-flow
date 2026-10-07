@@ -1021,6 +1021,8 @@ describe("hiddenLevers on a process snapshot (B4)", () => {
     const { hiddenLevers: _x, ...bare } = out;
     expect(shareSnapshotLeaks(bare, w.secrets, t)).toEqual([]);
     expect(validHiddenLevers(undefined)).toBe(true);
+  });
+});
 
 describe("per-person times never reach a share link (C6)", () => {
   const factorRow = (w: (typeof worlds)[number]) => ({ person_id: w.bundle.people[0]!.id, workspace_id: w.bundle.workspace.id, step_id: null, factor: 0.8, source: "entered" });
