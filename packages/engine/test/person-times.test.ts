@@ -75,7 +75,7 @@ describe("proposePersonTimes", () => {
     for (const b of [cant, few, small, zero]) {
       expect([b.measured, b.proposed, b.set, b.before, b.changed]).toEqual([null, null, null, null, false]);
     }
-    // "The step has N visits, M needed" can't be reached while n >= minSample (the step has at least n): it guards the order.
+    // The brief's "step under 10 visits" reason is dropped: it can't happen once the person has `minSample` (the step has at least that many).
   });
 
   it("limits to 0.5 and 2, and tells a small difference in a wide spread from a clear one", () => {

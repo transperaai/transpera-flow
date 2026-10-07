@@ -131,7 +131,6 @@ export function proposePersonTimes(input: PersonTimesInput): { proposals: Person
       let blocked: string | null = null;
       if (!canDo.has(s.id)) blocked = "Not one of the steps this person does (Settings → People), so it wouldn't be used.";
       else if (n < minSample) blocked = `Too few to measure: ${n} of the ${minSample} needed.`;
-      else if (stepN < minSample) blocked = `The step has ${stepN} logged visits with hands-on hours; ${minSample} are needed to know its normal time.`;
       else if (n === stepN) blocked = "Every logged visit at this step is theirs, so the step's normal time is already their time.";
       else if (M <= 0) blocked = "The step's logged hands-on hours are all zero.";
       if (blocked) {
