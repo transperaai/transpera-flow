@@ -86,8 +86,10 @@ describe.skipIf(!POSTGREST_URL)("play links over PostgREST", () => {
 
   afterAll(async () => {
     if (!admin) return;
-    await admin.query("delete from suggestion_proposals where workspace_id = $1 and created_via = 'play_link'", [ws]);
-    await admin.query("delete from share_links where workspace_id = $1", [ws]);
+    // Only what this file made: the other PostgREST files share the database and run at the same time, and share-links makes
+    // links in the same workspace. (Its teardown once deleted every Larkspur link, so a link made here answered `gone`.)
+    await admin.query("delete from suggestion_proposals where share_link_id in (select id from share_links where created_by = any($1))", [Object.values(users)]);
+    await admin.query("delete from share_links where created_by = any($1)", [Object.values(users)]);
     await admin.query("delete from memberships where user_id = any($1)", [[users.editor, users.member]]);
     await admin.query("delete from api_tokens where user_id = $1", [users.editor]);
     await admin.query("delete from auth.users where id = any($1)", [Object.values(users)]);

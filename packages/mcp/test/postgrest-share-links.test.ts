@@ -129,13 +129,14 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
 
   afterAll(async () => {
     if (!admin) return;
-    await admin.query("delete from share_links where workspace_id = $1", [ws]);
+    // Only the links this file made: the other PostgREST files share the database and run at the same time, and play-links
+    // makes links in the same workspace (deleting every Larkspur link here once made its submissions answer `gone`).
+    await admin.query("delete from share_links where created_by = any($1)", [Object.values(users)]);
     await admin.query("delete from solutions where id = $1", [solutionId]);
     await admin.query("delete from issues where id = $1", [issueId]);
     for (const p of saved.people as { id: string; email: string | null; notes: string | null }[]) await admin.query("update people set email = $2, notes = $3 where id = $1", [p.id, p.email, p.notes]);
     for (const c of saved.clients as { id: string; notes: string | null }[]) await admin.query("update clients set notes = $2 where id = $1", [c.id, c.notes]);
     await admin.query("delete from memberships where user_id = any($1)", [[users.editor, users.member]]);
-    await admin.query("delete from share_links where workspace_id = $1", [NORTHBEAM_WORKSPACE_ID]);
     await admin.query("delete from api_tokens where user_id = $1", [users.editor]);
     await admin.query("delete from auth.users where id = any($1)", [Object.values(users)]);
     await admin.end();
