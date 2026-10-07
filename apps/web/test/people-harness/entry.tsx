@@ -26,6 +26,8 @@ declare global {
       ownRecord?: "inactive" | "starts-later";
       /** Per-person times (C6) stored in the workspace; a member's bundle holds only their own, as `team_capacity` gives. */
       factors?: PersonCapacityFactorRow[];
+      /** Hand a member's page every row, as a bug would: it must still show only their own. */
+      unfiltered?: boolean;
     }) => void;
   }
 }
@@ -63,7 +65,7 @@ function asMember(bundle: ProcessBundle, ownPersonId: string | null): ProcessBun
   return { ...bundle, people, viewer: { seesEveryone: false, ownPersonId } };
 }
 
-window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord, factors }) => {
+window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord, factors, unfiltered }) => {
   const larkspur = larkspurBundle();
   // The workspace switch for per-person times (C6, #198).
   const base = capacityFactorEnabled
@@ -79,7 +81,7 @@ window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord, factors }
     viewer === "everyone"
       ? { ...base, personCapacityFactors: stored }
       : // `team_capacity` gives a member only their own person's rows ([] when linked to nobody).
-        { ...asMember({ ...base, people }, ownId), personCapacityFactors: ownId ? stored.filter((f) => f.person_id === ownId) : [] };
+        { ...asMember({ ...base, people }, ownId), personCapacityFactors: unfiltered ? stored : ownId ? stored.filter((f) => f.person_id === ownId) : [] };
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
       <PeoplePage bundle={bundle} settingsHref="/w/larkspur/settings" />

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SettingsSection } from "./section";
-import { CapacityFactors } from "./capacity-factors-field";
+import { CapacityFactors, type SaveFactor } from "./capacity-factors-field";
 import type { PersonDetail, WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { formatNumber } from "@/lib/format";
@@ -98,7 +98,7 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   );
 }
 
-export function PeopleSettings({ data }: { data: WorkspaceSettingsData }) {
+export function PeopleSettings({ data, saveFactor }: { data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
   const active = data.people.filter((p) => p.active);
   const inactive = data.people.filter((p) => !p.active);
   return (
@@ -124,7 +124,7 @@ export function PeopleSettings({ data }: { data: WorkspaceSettingsData }) {
         <ul className="flex flex-col divide-y divide-line border-y border-line">
           {[...active, ...inactive].map((p) => (
             <li key={p.id}>
-              <PersonRow person={p} data={data} />
+              <PersonRow person={p} data={data} saveFactor={saveFactor} />
             </li>
           ))}
         </ul>
@@ -167,7 +167,7 @@ function AddPerson({ data }: { data: WorkspaceSettingsData }) {
   );
 }
 
-function PersonRow({ person: p, data }: { person: PersonDetail; data: WorkspaceSettingsData }) {
+function PersonRow({ person: p, data, saveFactor }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
   const roleIds = data.personRoles.filter((r) => r.person_id === p.id).map((r) => r.role_id);
   const skillIds = data.personSkills.filter((s) => s.person_id === p.id).map((s) => s.step_id);
   const leave = data.personLeave.filter((l) => l.person_id === p.id);
@@ -265,7 +265,7 @@ function PersonRow({ person: p, data }: { person: PersonDetail; data: WorkspaceS
         )}
         {factorsOn ? (
           <div className="sm:col-span-2 lg:col-span-3">
-            <CapacityFactors person={p} data={data} />
+            <CapacityFactors person={p} data={data} saveFactor={saveFactor} />
           </div>
         ) : hasStoredFactors ? (
           <p className="text-fg-3 sm:col-span-2 lg:col-span-3" data-factors-off>

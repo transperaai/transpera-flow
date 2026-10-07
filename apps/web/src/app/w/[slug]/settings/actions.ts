@@ -133,7 +133,10 @@ export async function savePersonCapacityFactor(
   const inRange = (v: unknown) => v === null || (number(v) && (v as number) >= 0.5 && (v as number) <= 2);
   if (!isId(personId) || !(stepId === null || isId(stepId)) || !inRange(value) || !(base === null || isFiniteNumber(base))) return invalid;
   if (!(await signedIn())) return signedOut;
-  return saveCapacityFactor(personId, stepId, base, value === null ? null : Math.round(value * 100) / 100);
+  const outcome = await saveCapacityFactor(personId, stepId, base, value === null ? null : Math.round(value * 100) / 100);
+  // The page's other fields and its "Not used now" list read what is stored, so a save or a conflict (someone else's value) refreshes it.
+  if (outcome.status === "saved" || outcome.status === "conflict") refresh();
+  return outcome;
 }
 
 /**

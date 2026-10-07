@@ -45,6 +45,8 @@ async function openPerson(page: Page, name: string): Promise<Locator> {
   await details.locator("summary").click();
   return details;
 }
+/** The page fits its width: nothing makes it scroll sideways. */
+const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 const calls = (page: Page) => page.evaluate(() => window.__serverActions ?? []);
 const field = (scope: Locator | Page, label: string) => scope.getByLabel(label, { exact: true });
 
@@ -164,8 +166,67 @@ describe("Settings: a person's time on each step", { timeout: 120_000 }, () => {
       for (const input of await box.locator("input").all()) expect(await input.isDisabled()).toBe(true);
       expect(await box.getByRole("button", { name: "Remove" }).count()).toBe(0);
       expect(await page.locator("#root").innerText()).not.toContain("1.35");
+      expect(await fits(page)).toBe(true);
       expect(errors).toEqual([]);
       await page.close();
     });
   }
+
+  it("a member's screen shows only their own times even when handed everyone's rows", async () => {
+    const { page, errors } = await mount({ who: "member", switch: true, unfiltered: true, factors: [row(JESS, null, 0.9), row(larkspurPersonIds.hana!, null, 1.35), row(larkspurPersonIds.hana!, own.id, 1.7)] });
+    const jess = await openPerson(page, "Jess Monroe");
+    expect(await field(jess.locator("[data-capacity-factors-editor]"), "Every step").inputValue()).toBe("0.9");
+    for (const t of [await page.locator("#root").innerText(), await page.locator("#root").innerHTML()]) {
+      expect(t).not.toContain("1.35");
+      expect(t).not.toContain("1.7");
+    }
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  for (const width of [1440, 400]) {
+    it(`an editor with the switch on and a person open fits the page (${width}px)`, async () => {
+      const { page, errors } = await mount({ who: "editor", switch: true, factors: [row(JESS, null, 0.9), row(JESS, own.id, 1.25), row(JESS, foreign.id, 1.4)] }, width);
+      await openPerson(page, "Jess Monroe");
+      expect(await fits(page)).toBe(true);
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+  }
+});
+
+describe("Settings: the fields follow a save or a conflict", { timeout: 120_000 }, () => {
+  it("saving 'Every step' makes the other fields say they follow it, and shows its words", async () => {
+    const { page, errors } = await mount({ who: "editor", switch: true, factorSaves: "saved" });
+    const jess = await openPerson(page, "Jess Monroe");
+    const box = jess.locator("[data-capacity-factors-editor]");
+    const other = live.steps.filter((st) => st.role_id && jessRoles.has(st.role_id))[0]!;
+    expect(await field(box, other.name).getAttribute("placeholder")).toBe("1 (normal)");
+    await field(box, "Every step").fill("0.9");
+    await field(box, "Every step").blur();
+    await box.locator("[data-factor-words]").first().waitFor();
+    expect(await box.locator("[data-factor-words]").first().innerText()).toBe("10% faster");
+    expect(await field(box, other.name).getAttribute("placeholder")).toBe("Same as every step");
+    // Removing it again (blank) goes back.
+    await field(box, "Every step").fill("");
+    await field(box, "Every step").blur();
+    await page.waitForFunction(() => document.querySelectorAll("[data-factor-words]").length === 0);
+    expect(await field(box, other.name).getAttribute("placeholder")).toBe("1 (normal)");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("after a conflict, keeping theirs shows the words for their value", async () => {
+    const { page, errors } = await mount({ who: "editor", switch: true, factors: [row(JESS, null, 0.9)], factorSaves: { conflict: 1.5 } });
+    const jess = await openPerson(page, "Jess Monroe");
+    const box = jess.locator("[data-capacity-factors-editor]");
+    expect(await box.locator("[data-factor-words]").first().innerText()).toBe("10% faster");
+    await field(box, "Every step").fill("0.8");
+    await field(box, "Every step").blur();
+    await box.getByRole("button", { name: "Keep theirs" }).click();
+    expect(await field(box, "Every step").inputValue()).toBe("1.5");
+    expect(await box.locator("[data-factor-words]").first().innerText()).toBe("50% slower");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
 });

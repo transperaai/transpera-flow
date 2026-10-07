@@ -26,7 +26,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later"; factors?: PersonCapacityFactorRow[] }, width = 1440): Promise<{ page: Page; errors: string[] }> {
+async function mount(options: { viewer: "everyone" | "own" | "unlinked"; own?: string; capacityFactorEnabled?: boolean; ownRecord?: "inactive" | "starts-later"; factors?: PersonCapacityFactorRow[]; unfiltered?: boolean }, width = 1440): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 1000 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -281,6 +281,19 @@ describe("Person detail", { timeout: 120_000 }, () => {
       await page.close();
     });
   }
+
+  it("a member's page shows only their own times even when handed everyone's rows (the screen, not the harness, keeps them apart)", async () => {
+    const { page, errors } = await mount({ viewer: "own", own: "jess", capacityFactorEnabled: true, factors: FACTORS, unfiltered: true });
+    await busyRows(page).getByRole("button", { name: "Jess Monroe" }).click();
+    for (const t of [await page.locator("body").innerText(), await page.locator("#root").innerHTML()]) {
+      expect(t).not.toContain("1.35");
+      expect(t).not.toContain("0.9 ×");
+      expect(t).not.toContain("Every step: 0.9");
+    }
+    expect(await page.locator("[data-capacity-factors]").innerText()).toContain(`${JESS_STEP.name}: 1.2`);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
 
   it("switch on, a member linked to nobody: the note shows, no times", async () => {
     const { page, errors } = await mount({ viewer: "unlinked", capacityFactorEnabled: true, factors: FACTORS });

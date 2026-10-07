@@ -9,12 +9,20 @@ import type { WorkspaceSettingsData } from "@/lib/data";
 
 declare global {
   interface Window {
-    mountSettings: (options: { who: "owner" | "editor" | "member"; switch?: boolean; factors?: PersonCapacityFactorRow[] }) => void;
+    mountSettings: (options: {
+      who: "owner" | "editor" | "member";
+      switch?: boolean;
+      factors?: PersonCapacityFactorRow[];
+      /** What the stood-in save of a time answers: saved (the default is the Server Action, which answers an error here), or someone else's value. */
+      factorSaves?: "saved" | { conflict: number };
+      /** Hand the page every row, as a bug would: a member's screen must still show only their own. */
+      unfiltered?: boolean;
+    }) => void;
     __serverActions?: { name: string; args: unknown[] }[];
   }
 }
 
-window.mountSettings = ({ who, switch: on = false, factors = [] }) => {
+window.mountSettings = ({ who, switch: on = false, factors = [], factorSaves, unfiltered = false }) => {
   const b = larkspurBundle();
   const own = larkspurPersonIds.jess!;
   // A member's Settings read holds only their own person (RLS, `can_see_person`) and their own factors.
@@ -32,12 +40,20 @@ window.mountSettings = ({ who, switch: on = false, factors = [] }) => {
     personRoles: b.personRoles.filter((r) => ids.has(r.person_id)),
     personSkills: b.personSkills.filter((r) => ids.has(r.person_id)),
     personLeave: b.personLeave.filter((r) => ids.has(r.person_id)).map((l) => ({ ...l, note: null })),
-    personCapacityFactors: factors.filter((f) => ids.has(f.person_id)),
+    // As RLS gives them: a member's read holds only their own person's rows. `unfiltered` hands the page the lot instead.
+    personCapacityFactors: unfiltered ? factors : factors.filter((f) => ids.has(f.person_id)),
   } as unknown as WorkspaceSettingsData;
   createRoot(document.getElementById("root")!).render(
     <div className="flex flex-col gap-6 p-4">
       <SimulationSettings data={data} />
-      <PeopleSettings data={data} />
+      <PeopleSettings
+        data={data}
+        saveFactor={
+          factorSaves === undefined
+            ? undefined
+            : async (_person, _step, _base, value) => (factorSaves === "saved" ? { status: "saved", value } : { status: "conflict", theirs: factorSaves.conflict })
+        }
+      />
     </div>,
   );
 };

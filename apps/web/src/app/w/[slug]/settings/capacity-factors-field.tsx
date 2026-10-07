@@ -18,12 +18,18 @@ export function stepsFor(person: PersonDetail, data: WorkspaceSettingsData): Wor
   return stepsPersonCanDo(person.id, data.steps, data.personSkills, data.personRoles);
 }
 
-/** One factor: the number field, with how it reads in words after the value. */
+/** Saves one time (the Server Action; a test stands in for it). */
+export type SaveFactor = typeof savePersonCapacityFactor;
+
+/** One factor: the number field, with how it reads in words after the value. `now` is the value the editor last knew stored. */
 function FactorField({
   personId,
   stepId,
   label,
   value,
+  now,
+  onStored,
+  saveFactor,
   placeholder,
   disabled,
   help,
@@ -32,14 +38,18 @@ function FactorField({
   stepId: string | null;
   label: string;
   value: number | null;
+  now: number | null;
+  /** The stored value changed: after a save, or when someone else's change showed up as a conflict. */
+  onStored: (v: number | null) => void;
+  saveFactor: SaveFactor;
   placeholder: string;
   disabled: boolean;
   help: { description: string; example: string };
 }) {
-  const [now, setNow] = useState<number | null>(value);
   const save = async (base: number | null, next: number | null): Promise<SaveOutcome<number | null>> => {
-    const outcome = await savePersonCapacityFactor(personId, stepId, base, next);
-    if (outcome.status === "saved") setNow(outcome.value);
+    const outcome = await saveFactor(personId, stepId, base, next);
+    if (outcome.status === "saved") onStored(outcome.value);
+    else if (outcome.status === "conflict") onStored(outcome.theirs);
     return outcome;
   };
   return (
@@ -59,11 +69,15 @@ function FactorField({
   );
 }
 
-export function CapacityFactors({ person, data }: { person: PersonDetail; data: WorkspaceSettingsData }) {
+export function CapacityFactors({ person, data, saveFactor = savePersonCapacityFactor }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
   const disabled = !data.canEdit;
   const steps = stepsFor(person, data);
   const mine = data.personCapacityFactors.filter((f) => f.person_id === person.id);
-  const factorOf = (stepId: string | null) => mine.find((f) => f.step_id === stepId)?.factor ?? null;
+  // What is stored, as this editor last knew it: kept here (not only in each field) so the other fields' placeholders and the
+  // words after each value follow a save or a conflict without a reload.
+  const [stored, setStored] = useState<Record<string, number | null>>(() => Object.fromEntries(mine.map((f) => [f.step_id ?? "every", f.factor])));
+  const factorOf = (stepId: string | null) => stored[stepId ?? "every"] ?? null;
+  const setOne = (stepId: string | null) => (v: number | null) => setStored((prev) => ({ ...prev, [stepId ?? "every"]: v }));
   const every = factorOf(null);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [removing, startRemoving] = useTransition();
@@ -71,7 +85,7 @@ export function CapacityFactors({ person, data }: { person: PersonDetail; data: 
 
   const doable = new Set(steps.map((s) => s.id));
   const stepName = new Map(data.steps.map((s) => [s.id, s.name]));
-  const stale = mine.filter((f) => f.step_id !== null && !doable.has(f.step_id) && !removed.has(f.step_id));
+  const stale = mine.filter((f) => f.step_id !== null && !doable.has(f.step_id) && !removed.has(f.step_id)).map((f) => ({ ...f, factor: factorOf(f.step_id) ?? f.factor }));
   const hasDefault = every !== null;
 
   return (
@@ -85,7 +99,10 @@ export function CapacityFactors({ person, data }: { person: PersonDetail; data: 
           personId={person.id}
           stepId={null}
           label="Every step"
-          value={every}
+          value={mine.find((f) => f.step_id === null)?.factor ?? null}
+          now={every}
+          onStored={setOne(null)}
+          saveFactor={saveFactor}
           placeholder="1 (normal)"
           disabled={disabled}
           help={{
@@ -99,7 +116,10 @@ export function CapacityFactors({ person, data }: { person: PersonDetail; data: 
             personId={person.id}
             stepId={s.id}
             label={s.name}
-            value={factorOf(s.id)}
+            value={mine.find((f) => f.step_id === s.id)?.factor ?? null}
+            now={factorOf(s.id)}
+            onStored={setOne(s.id)}
+            saveFactor={saveFactor}
             placeholder={hasDefault ? "Same as every step" : "1 (normal)"}
             disabled={disabled}
             help={{
@@ -134,7 +154,7 @@ export function CapacityFactors({ person, data }: { person: PersonDetail; data: 
                     disabled={removing}
                     onClick={() =>
                       startRemoving(async () => {
-                        const r = await savePersonCapacityFactor(person.id, f.step_id, f.factor, null);
+                        const r = await saveFactor(person.id, f.step_id, f.factor, null);
                         if (r.status === "saved" || r.status === "not_found") {
                           setRemoved((prev) => new Set(prev).add(f.step_id!));
                           setError(undefined);
