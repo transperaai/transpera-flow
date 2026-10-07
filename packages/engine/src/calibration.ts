@@ -92,6 +92,11 @@ export interface StepLogRow {
   hours: number | null;
   /** Lead source name, if logged. */
   source: string | null;
+  /**
+   * Who did the visit: the file's name for them while reading, a person id once matched (#227). Used only for
+   * per-person times; never stored.
+   */
+  person?: string | null;
 }
 
 export interface CalibrationInput {
@@ -180,6 +185,19 @@ const round = (x: number, dp: number) => {
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+/** A step or log name with case and spacing ignored, as steps are matched by name. */
+export const normStepName = norm;
+
+/** Step ids by normalised name; a name two steps share maps to null (it matches neither). */
+export function stepIdsByName(steps: readonly { id: string; name: string }[]): Map<string, string | null> {
+  const byName = new Map<string, string | null>();
+  for (const s of steps) {
+    const k = norm(s.name);
+    byName.set(k, byName.has(k) ? null : s.id);
+  }
+  return byName;
+}
+
 function quantile(sorted: readonly number[], q: number): number {
   if (!sorted.length) return 0;
   const pos = (sorted.length - 1) * q;
@@ -188,7 +206,7 @@ function quantile(sorted: readonly number[], q: number): number {
   return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
 }
 
-function meanAndCv(xs: readonly number[]): { mean: number; cv: number } {
+export function meanAndCv(xs: readonly number[]): { mean: number; cv: number } {
   const n = xs.length;
   const mean = xs.reduce((s, x) => s + x, 0) / n;
   if (n < 2 || mean <= 0) return { mean, cv: 0 };
@@ -238,11 +256,7 @@ export function calibrate(input: CalibrationInput): CalibrationResult {
   const byId = new Map(steps.map((s) => [s.id, s]));
 
   // Match names to steps.
-  const byName = new Map<string, string | null>();
-  for (const s of steps) {
-    const k = norm(s.name);
-    byName.set(k, byName.has(k) ? null : s.id);
-  }
+  const byName = stepIdsByName(steps);
   const unmatched = new Map<string, { name: string; rows: number }>();
   const visits: { item: string; step: string; row: StepLogRow; order: number }[] = [];
   input.rows.forEach((row, order) => {
