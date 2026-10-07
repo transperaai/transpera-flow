@@ -28,6 +28,7 @@ const bodyOf = (sql: string) => {
   return sql.slice(open + 2, sql.indexOf("$$", open + 2));
 };
 
+type AuditDiff = { step_id?: string; every_step?: boolean; old?: Record<string, unknown>; new?: Record<string, unknown> };
 let db: TestDb;
 let editor: { id: string; claims: Record<string, unknown> };
 let owner: { id: string; claims: Record<string, unknown> };
@@ -44,7 +45,7 @@ afterAll(async () => {
 });
 
 /** The audit rows of the transaction so far for one table, read as the superuser (only managers read the log), then back as the caller. */
-async function auditDiffs(c: pg.Client, table: string): Promise<{ action: string; diff: Record<string, any> }[]> {
+async function auditDiffs(c: pg.Client, table: string): Promise<{ action: string; diff: AuditDiff }[]> {
   await c.query("reset role");
   try {
     return (await c.query("select action, diff from audit_log where target_table = $1 and created_at = now() order by action", [table])).rows;
@@ -71,8 +72,8 @@ describe("a per-person time's log entry names its step", () => {
       // The update changed only the factor yet names the step: it is read from the whole row.
       const update = rows.find((r) => r.action === "update")!;
       expect(update.diff.new).not.toHaveProperty("step_id");
-      expect(update.diff.new.factor).toBe(0.9);
-      expect(update.diff.old.factor).toBe(0.8);
+      expect(update.diff.new!.factor).toBe(0.9);
+      expect(update.diff.old!.factor).toBe(0.8);
     });
   });
 
@@ -245,7 +246,7 @@ describe("the function and the migration", () => {
       expect(rows.find((r) => r.action === "update")!.diff).not.toHaveProperty("step_id");
       expect(rows.find((r) => r.action === "update")!.diff).not.toHaveProperty("every_step");
       expect(rows.find((r) => r.action === "insert")!.diff).not.toHaveProperty("step_id");
-      expect(rows.find((r) => r.action === "insert")!.diff.new.step_id).toBe(STEP);
+      expect(rows.find((r) => r.action === "insert")!.diff.new!.step_id).toBe(STEP);
     } finally {
       await c.query("rollback");
     }
