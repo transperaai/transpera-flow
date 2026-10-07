@@ -107,7 +107,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
   for (const width of [1440, 640, 400]) {
     describe(`at ${width}px`, () => {
       // A phone (under 640px) is read only (issue #44): its plan lane draws the markers but can't move, open or remove them, so the
-      // cases that add and move markers run from 640px up. The phone's own cases are in "on a phone" below.
+      // cases that add, move and save run from 640px up. The phone's own cases are in "on a phone" below.
       const onTablet = width >= 640 ? it : () => {};
       onTablet("adds a hire and drags it along the months: dropping it runs the forecast again", async () => {
         const { page, errors } = await mount(width);
@@ -194,7 +194,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("ignores a release over another month after Escape: nothing moves and no dialog opens", async () => {
+      onTablet("ignores a release over another month after Escape: nothing moves and no dialog opens", async () => {
         const { page, errors } = await mount(width);
         await addHire(page);
         await waitRuns(page, 1);
@@ -271,7 +271,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("saves, renames and deletes plans in the demo", async () => {
+      onTablet("saves, renames and deletes plans in the demo", async () => {
         const { page, errors } = await mount(width);
         const options = () => page.locator("[data-plan-select] option").allInnerTexts();
         await page.locator("[data-plan-select]").selectOption({ label: "Hire in January" });
@@ -394,6 +394,16 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
       await waitRuns(page, 1);
       expect(await page.locator("[data-with-this-plan]").innerText()).toContain("With this plan");
       expect(await page.locator("[data-plan-compare]").count()).toBe(1);
+      // Add, Save, Rename and Delete are edit entries, which the app's stylesheet hides on a phone (this harness loads none, so
+      // the check is that each one sits in a [data-edit-entry]); the plan picker and Compare are not.
+      const loose = await page.evaluate(() =>
+        [...document.querySelectorAll("[data-plan-bar] button")]
+          .filter((b) => /^(Add|Save|Rename|Delete)/.test((b.textContent ?? "").trim()) && !b.closest("[data-edit-entry]"))
+          .map((b) => (b.textContent ?? "").trim()),
+      );
+      expect(loose).toEqual([]);
+      expect(await page.locator("[data-plan-bar] [data-edit-entry] button", { hasText: "Rename" }).count()).toBe(1);
+      expect(await page.locator("[data-edit-entry] [data-plan-select], [data-edit-entry] [data-plan-compare]").count()).toBe(0);
       expect(errors).toEqual([]);
       await page.close();
     });

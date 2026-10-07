@@ -78,6 +78,26 @@ describe("PhoneReadOnly", () => {
     await page.close();
   }, 60_000);
 
+  it("writes the notice into a status region that is there before it appears, so it is announced", async () => {
+    const wide = await mount("notice", 1024);
+    await wide.page.waitForSelector("[role=status]", { state: "attached" });
+    expect(await wide.page.locator("[role=status]").count()).toBe(1);
+    expect(await wide.page.locator("[role=status]").innerText()).toBe("");
+    await wide.page.close();
+    const phone = await mount("notice", 400);
+    await phone.page.waitForSelector("[role=status] [data-phone-notice]");
+    expect(await phone.page.locator("[role=status]").count()).toBe(1);
+    await phone.page.close();
+  }, 60_000);
+
+  it("a disabled form takes its controls out of the tab order: Tab moves past them", async () => {
+    const { page } = await mount("form", 400);
+    await page.waitForSelector("[data-phone-read-only]");
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("A");
+    await page.close();
+  }, 60_000);
+
   it("PhoneNotice alone shows only on a phone", async () => {
     const phone = await mount("notice", 400);
     await phone.page.waitForSelector("[data-phone-notice]");
@@ -96,6 +116,8 @@ describe("EditorPhoneGate", () => {
     expect(await page.locator("[data-editor-child]").count()).toBe(0);
     expect(await page.getByText("Editing needs a wider screen").count()).toBe(1);
     expect(await page.getByRole("link", { name: "Back to the process" }).getAttribute("href")).toBe("/demo/p/1");
+    // Announced: the notice sits in a status region.
+    expect(await page.locator("[role=status] [data-phone-gate]").count()).toBe(1);
     expect(errors).toEqual([]);
     await page.close();
   }, 60_000);

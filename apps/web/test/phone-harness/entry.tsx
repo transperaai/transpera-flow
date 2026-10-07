@@ -21,6 +21,7 @@ window.mountPhone = (what) => {
         Name <input name="name" defaultValue="Northbeam" />
       </label>
       <button type="button">Save</button>
+      <a href="#after">A link after the form</a>
     </PhoneReadOnly>
   );
   root.render(

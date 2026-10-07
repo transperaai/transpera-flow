@@ -16,6 +16,8 @@ test.describe("phone, 400px", () => {
         await expect(page.locator(".react-flow")).toHaveCount(0);
       }
       await expectReadOnly(page);
+      // No text tells a phone to use a control it doesn't have (`innerText` leaves out what CSS hides).
+      expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/press Open in Editor|drag a marker/i);
       expect(errors.list()).toEqual([]);
     });
   }

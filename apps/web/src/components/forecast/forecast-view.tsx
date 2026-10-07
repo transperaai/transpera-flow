@@ -14,7 +14,7 @@
 import { useIsPhone } from "@/hooks/use-mobile";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { partOf, speedsNormalisedFor, type ForecastPlanMarker, type ForecastPlanRow, type IssueRow, type ProcessBundle, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
@@ -60,7 +60,7 @@ export interface ForecastViewProps {
   /** The ISO date the forecast starts on; today when omitted. Fixed on the demo so its months don't move. */
   startDate?: string;
   /** A line under the title, e.g. the demo's note about its sample plan. */
-  note?: string;
+  note?: ReactNode;
   /** Saved forecast plans (owners, editors and agency admins; none otherwise). */
   plans?: ForecastPlanRow[];
   /** Saved solutions a plan can put live. On the demo the tab's own are added to these. */
