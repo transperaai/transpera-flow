@@ -233,7 +233,7 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
   const monogram = name.trim().charAt(0).toUpperCase() || "T";
   const tile = (size: "sm" | "lg") =>
     shownLogo ? (
-      <span aria-hidden className={`grid shrink-0 place-items-center overflow-hidden rounded-md bg-logo-tile ring-1 ring-line ${size === "sm" ? "size-8" : "size-24"}`}>
+      <span aria-hidden data-allow-light className={`grid shrink-0 place-items-center overflow-hidden rounded-md bg-logo-tile ring-1 ring-line ${size === "sm" ? "size-8" : "size-24"}`}>
         {/* eslint-disable-next-line @next/next/no-img-element -- a small public logo; no optimiser, no remotePatterns */}
         <img src={shownLogo} alt="" decoding="async" className="size-full object-contain p-0.5" onError={() => setBroken(shownLogo)} />
       </span>

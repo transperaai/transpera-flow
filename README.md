@@ -34,7 +34,12 @@ Northbeam sample from the seed fixtures. To use a database, copy
 pnpm lint
 pnpm typecheck
 pnpm test           # database tests need Postgres, see below
+pnpm --filter @transpera-flow/web build && pnpm --filter @transpera-flow/web e2e
 ```
+
+`e2e` (needs a finished build, made without Supabase settings so the app is in demo mode) opens every demo page at
+400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read only, no light surface in
+dark mode. It runs in CI's `check` job after the build.
 
 `pnpm test` runs the PRD §6.7 timing tests (tagged `perf`) last, on their own, so
 the other suites don't share the CPU with them. A package's own `pnpm test` leaves

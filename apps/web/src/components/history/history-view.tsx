@@ -6,6 +6,7 @@ import { DuplicateDialog, RestoreDialog, type VersionActions, type VersionLinks 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { authorLabel, describeChanges, formatPublished, type VersionMeta } from "@/lib/history/versions";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /**
  * A process's History screen: a plain list of its published versions, newest first: who published each, when, and what
@@ -83,12 +84,12 @@ export function HistoryView({
                         </Button>
                       )}
                       {actions && !v.live && (
-                        <Button variant="outline" size="sm" onClick={() => setDialog({ kind: "restore", version: v })}>
+                        <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ kind: "restore", version: v })}>
                           Restore
                         </Button>
                       )}
                       {actions && (
-                        <Button variant="outline" size="sm" onClick={() => setDialog({ kind: "duplicate", version: v })}>
+                        <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ kind: "duplicate", version: v })}>
                           Duplicate
                         </Button>
                       )}

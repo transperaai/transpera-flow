@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { AI_NOT_SET_UP, type AiMode, type AiPanelData, type AiReviewFinding } from "@/lib/ai/types";
 import { cn } from "@/lib/utils";
 import { useAiRun } from "./use-ai-run";
+import { EDIT_ONLY } from "@/lib/phone";
 
 const STYLE: Record<AiReviewFinding["level"], { mark: string; box: string; label: string; colour: string }> = {
   bad: { mark: "!", box: "bg-crit-soft", label: "Needs fixing", colour: "bg-crit" },
@@ -90,7 +91,7 @@ export function AiReviewPanel({
           example="“You named proposal review; the simulation's bottleneck is the discovery call.”"
         />
         {canRun && !isReadOnly(mode) && (
-          <span className="ml-auto flex items-center">
+          <span className={`ml-auto flex items-center ${EDIT_ONLY}`} data-edit-entry>
             <Button variant="ghost" size="sm" disabled={!runnable || pending} onClick={run} title={!runnable ? (!configured ? AI_NOT_SET_UP : "Publish first principles first") : undefined}>
               {pending ? "Analysing…" : "Analyse"}
             </Button>

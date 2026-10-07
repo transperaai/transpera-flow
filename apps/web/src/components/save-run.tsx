@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { saveRun } from "@/app/w/[slug]/run-actions";
 import { saveDemoRun } from "@/lib/demo/company-store";
 import { defaultRunName, type SaveRunInput, type SaveRunResult } from "@/lib/runs/runs";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // "Save this run" on the process page (issue #25): keeps the results shown
 // with a snapshot of the model behind them, so opening the run later says
@@ -78,7 +79,7 @@ export function SaveRunBar({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
+    <div className={`flex flex-wrap items-center gap-2 text-xs ${EDIT_ONLY}`} data-edit-entry>
       {naming === null ? (
         <Button
           type="button"

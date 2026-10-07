@@ -7,6 +7,7 @@ import Link from "next/link";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { TRACK_STAGES, type IssueTrack } from "@/lib/process-page/track";
 import { solutionHref } from "@/lib/solutions/cards";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export function IssueTrackView({ track, base, buildHref }: { track: IssueTrack; base: string; /** Where "Build solution" opens the Editor, for those who can edit an issue still open. */ buildHref?: string | null }) {
   const { stage, closed, solutions, verified, implementing } = track;
@@ -62,7 +63,7 @@ export function IssueTrackView({ track, base, buildHref }: { track: IssueTrack; 
         </ul>
       )}
       {buildHref && (
-        <Link href={buildHref} className="self-start text-xs font-semibold text-edit hover:underline">
+        <Link href={buildHref} data-edit-entry className={`self-start text-xs font-semibold text-edit hover:underline ${EDIT_ONLY}`}>
           ✎ Build solution
         </Link>
       )}

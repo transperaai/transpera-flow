@@ -25,6 +25,11 @@
   --edit: #6d3fc4;
   --edit-soft: #ece4fa;
   --edit-fg: #ffffff;
+  /* Text on a solid --crit fill. */
+  --crit-fg: #ffffff;
+  /* Dialog and sheet backdrop, and the Editor tour's spotlight shade. */
+  --overlay: rgba(0, 0, 0, 0.1);
+  --scrim: rgba(0, 0, 0, 0.45);
   /* The Transpera Flow mark in the sidebar header: its own token, so a client's accent (issue #34) never recolours it. */
   --brand-mark: oklch(0.52 0.105 223.128);
   /* Map ratings (A34): Great, Good could improve (lime, so it doesn't clash with the brand blue), Bad not urgent, Operational risk. */
@@ -101,6 +106,9 @@
     --edit: #a37ef0;
     --edit-soft: #2e2248;
     --edit-fg: #140a26;
+    --crit-fg: oklch(0.145 0 0);
+    --overlay: rgba(0, 0, 0, 0.5);
+    --scrim: rgba(0, 0, 0, 0.65);
     --brand-mark: oklch(0.715 0.143 215.221);
     --rate-great: oklch(0.66 0.14 155);
     --rate-great-soft: oklch(0.3 0.05 155);
@@ -138,6 +146,9 @@
   --edit: #a37ef0;
   --edit-soft: #2e2248;
   --edit-fg: #140a26;
+  --crit-fg: oklch(0.145 0 0);
+  --overlay: rgba(0, 0, 0, 0.5);
+  --scrim: rgba(0, 0, 0, 0.65);
   --rate-great: oklch(0.66 0.14 155);
   --rate-great-soft: oklch(0.3 0.05 155);
   --rate-good: oklch(0.75 0.15 128);

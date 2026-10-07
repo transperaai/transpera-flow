@@ -55,6 +55,7 @@ import { UtilisationBars } from "./utilisation-bars";
 import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { PLAY_HELP, PlaySection, type PlayConfig } from "@/components/share/play-section";
+import { EDIT_ONLY } from "@/lib/phone";
 
 const NO_FINDINGS: FindingRow[] = [];
 
@@ -307,7 +308,7 @@ export function ProcessPage({
               </Button>
             )}
             {editHref && (
-              <Button asChild className="bg-edit text-edit-fg hover:bg-edit/90">
+              <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry>
                 <Link href={withHorizon(editHref, pickedMonths)}>✎ Open in Editor</Link>
               </Button>
             )}
@@ -390,7 +391,7 @@ export function ProcessPage({
             computing={model !== null && sim.status === "running" && sim.run === null}
             emptyAction={
               editHref ? (
-                <Button asChild variant="outline" size="sm">
+                <Button asChild variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry>
                   <Link href={withHorizon(editHref, pickedMonths)}>Open in Editor</Link>
                 </Button>
               ) : undefined

@@ -10,6 +10,7 @@ import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { SUGGESTIONS_HELP } from "@/lib/suggestions/proposals";
 import { Input } from "@/components/ui/input";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // The Suggestions page (docs/PRD.md §8 screen 8, §7.1c; issue #25): company-
 // model changes Claude suggested over MCP, to accept or reject one by one or
@@ -109,6 +110,7 @@ export function SuggestionsView({ suggestions, model, sources, canEdit, review, 
               key={f}
               type="button"
               role="tab"
+              data-allow-on-phone /* a filter (Accepted, Rejected), not an edit */
               aria-selected={filter === f}
               onClick={() => setFilter(f)}
               variant={filter === f ? "secondary" : "ghost"}
@@ -118,11 +120,13 @@ export function SuggestionsView({ suggestions, model, sources, canEdit, review, 
             </Button>
           ))}
         </div>
-        <Help {...SUGGESTIONS_HELP.show} />
+        <span className="contents" data-allow-on-phone>
+          <Help {...SUGGESTIONS_HELP.show} />
+        </span>
       </div>
 
       {canEdit && selectable.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-2 shadow-xs">
+        <div className={`flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-2 shadow-xs ${EDIT_ONLY}`} data-edit-entry>
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -239,7 +243,7 @@ function SuggestionCard({
     <li aria-labelledby={headingId} data-suggestion={s.id} data-status={s.status} className="rounded-lg border border-line bg-panel p-3 shadow-xs">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         {open && canEdit && (
-          <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select: ${view.headline}`} className="self-center" />
+          <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select: ${view.headline}`} data-edit-entry className={`self-center ${EDIT_ONLY}`} />
         )}
         <span className="font-mono text-[11px] uppercase tracking-widest text-fg-3">{view.subject}</span>
         <span className={`rounded-full border px-1.5 text-[11px] font-semibold ${STATUS_CLASS[s.status]}`}>{STATUS_LABEL[s.status]}</span>
@@ -315,7 +319,7 @@ function SuggestionCard({
 
       {open ? (
         canEdit && (
-          <div className="mt-3 flex gap-2">
+          <div className={`mt-3 flex gap-2 ${EDIT_ONLY}`} data-edit-entry>
             <Button type="button" disabled={busy} onClick={onAccept}>
               Accept
             </Button>

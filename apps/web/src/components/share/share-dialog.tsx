@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_DAYS, daysFromNow, parseShareInput, type ShareInput } from "@/lib/share/input";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** The (i) texts: what each field does, in plain words, with an example. */
 export const SHARE_HELP = {
@@ -72,7 +73,7 @@ export function ShareButton(props: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button type="button" variant="outline" onClick={() => setOpen(true)} data-share-open>
+      <Button type="button" variant="outline" className={EDIT_ONLY} onClick={() => setOpen(true)} data-share-open data-edit-entry>
         <Share2 aria-hidden /> Share
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>

@@ -4,6 +4,8 @@ Storybook shows every shared component, chart and the process map in isolation. 
 in the light and dark theme (and at 400 px for stories tagged `visual-phone`) and CI fails when a picture differs from its
 committed baseline without anyone having approved it. No external service, no secret, no Git LFS.
 
+Whole pages are crawled by a separate suite (400, 768 and 1024 px, and dark mode): `pnpm --filter @transpera-flow/web e2e`, after a build (see the README, Checks).
+
 ## Run Storybook
 
 ```sh

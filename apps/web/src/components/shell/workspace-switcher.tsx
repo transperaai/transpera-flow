@@ -38,7 +38,7 @@ export function WorkspaceSwitcher({
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton size="lg" className="data-[state=open]:bg-muted" aria-label={`Workspace: ${current}`}>
               {showLogo ? (
-                <span aria-hidden className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md bg-logo-tile ring-1 ring-line">
+                <span aria-hidden data-allow-light className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md bg-logo-tile ring-1 ring-line">
                   {/* eslint-disable-next-line @next/next/no-img-element -- a small public logo; no optimiser, no remotePatterns */}
                   <img src={logo} alt="" decoding="async" className="size-full object-contain p-0.5" onError={() => setBroken(logo)} />
                 </span>

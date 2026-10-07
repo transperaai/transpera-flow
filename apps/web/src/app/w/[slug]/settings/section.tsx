@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 
 /** One block of the settings page: a card with a heading (the sidebar's People item links to `#people-heading`) and a plain sentence. */
@@ -11,7 +12,10 @@ export function SettingsSection({ id, title, description, children }: { id: stri
         </h2>
         {description && <CardDescription>{description}</CardDescription>}
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">{children}</CardContent>
+      <CardContent className="flex flex-col gap-4">
+        {/* A phone is read only (issue #44); the page shows one notice, so the sections show none. */}
+        <PhoneReadOnly notice={false}>{children}</PhoneReadOnly>
+      </CardContent>
     </Card>
   );
 }

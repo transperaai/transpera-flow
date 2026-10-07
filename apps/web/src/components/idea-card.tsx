@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { demoProposalBackend, useDemoCompany } from "@/lib/demo/company-store";
 import { buildIdeaHref, ideaToBlock, readIdea } from "@/lib/suggestions/idea";
 import { describeProposal, hasHeld, heldSeen, proposalSummary, SUGGESTIONS_HELP, withHeld, type ProposalLookups, type ProposalOutcome } from "@/lib/suggestions/proposals";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // A solution idea (A52, docs/PRD.md §7.1c; prototype: Suggestions, and AI ideas on the Issue page): the issue it is for, the
 // idea in plain words, a small map of the proposed steps and what it would replace. "Build it" opens the Editor in solution mode
@@ -86,7 +87,7 @@ export function IdeaCard({
           )}
         </div>
         {canEdit && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
             <Button variant="outline" size="sm" type="button" disabled={busy || replying} onClick={() => (isPlay ? setReplying(true) : onDismiss(null))}>
               Dismiss
             </Button>
@@ -175,7 +176,7 @@ export function IdeaCard({
 /** The (i) legend under a list of ideas: what Build it and Dismiss do. */
 export function IdeaLegend() {
   return (
-    <p className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-fg-2">
+    <p className={`mt-1 flex flex-wrap items-center gap-x-1 text-xs text-fg-2 ${EDIT_ONLY}`} data-edit-entry>
       <b className="font-medium text-fg">Build it</b>
       <Help {...SUGGESTIONS_HELP.buildIt} />
       <span>opens the Editor with the steps placed.</span>

@@ -18,6 +18,7 @@ import { describeValue, fieldLabel } from "@/lib/editor/describe";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import type { BreakingScenario } from "@/lib/scenarios/broken";
 import type { Table } from "@/lib/editor/ops";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export type DraftView = "draft" | "live";
 
@@ -124,7 +125,7 @@ export function DraftBar({
             </Button>
           )}
           {canEdit && (
-            <>
+            <span className={`contents ${EDIT_ONLY}`} data-edit-entry>
               <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirming("discard")} className="border-crit/60 text-destructive hover:bg-crit-soft">
                 Discard draft…
               </Button>
@@ -137,7 +138,7 @@ export function DraftBar({
               >
                 Publish…
               </Button>
-            </>
+            </span>
           )}
         </div>
       )}
@@ -328,7 +329,8 @@ export function ChangesPanel({
                   title={problem ?? undefined}
                   aria-label={`${action}: ${what ?? name}${what ? ` ${name}` : ""}`}
                   onClick={() => editor.run((b) => discardChange(live, b, c.table, c.id))}
-                  className={button}
+                  data-edit-entry
+                  className={`${button} ${EDIT_ONLY}`}
                 >
                   {action}
                 </button>

@@ -7,6 +7,7 @@ import { RestoreDialog, type VersionActions, type VersionLinks } from "@/compone
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { authorLabel, describeChanges, formatPublished, type VersionMeta } from "@/lib/history/versions";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /**
  * The company map's History (B11): every published version of the map, newest first, with what changed and who made it.
@@ -93,7 +94,7 @@ export function CompanyHistoryView({
                         </Button>
                       )}
                       {actions && !v.live && (
-                        <Button variant="outline" size="sm" onClick={() => setRestoring(v)}>
+                        <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setRestoring(v)}>
                           Restore
                         </Button>
                       )}

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { bundleForProcess, northbeamIssues } from "@transpera-flow/db";
+import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
 import { withDemoGroups } from "@/lib/demo/nested";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
@@ -26,7 +27,9 @@ export default async function DemoEditPage(props: PageProps<"/demo/edit">) {
   const ideaRow = ideaId ? demoProposals().find((p) => p.id === ideaId && p.kind === "solution_idea") : undefined;
   const idea = ideaRow && ideaRow.issue_id === issueRow?.id ? ideaSeed(ideaRow, bundle.roles) : null;
   const back = `/demo/p/${bundle.process.id}${nested === "1" ? "?nested=1" : ""}`;
+  const exit = exitHref(search.from, back);
   return (
+    <EditorPhoneGate backHref={exit}>
     <EditorView
       key={bundle.process.id}
       live={bundle}
@@ -38,8 +41,9 @@ export default async function DemoEditPage(props: PageProps<"/demo/edit">) {
       sources={demoSources()}
       sourcesHref="/demo/sources"
       historyHref="/demo/history"
-      exitHref={exitHref(search.from, back)}
+      exitHref={exit}
       horizonMonths={parseHorizon(search.horizon)}
     />
+    </EditorPhoneGate>
   );
 }

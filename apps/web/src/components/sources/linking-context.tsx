@@ -10,6 +10,7 @@ import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { targetValue } from "@/lib/sources/links";
 import { SOURCE_KIND_LABELS } from "@/lib/sources/validate";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** The (i) texts: what the Sources block and its "+ Link" mean. */
 export const LINKED_SOURCES_HELP = {
@@ -93,7 +94,7 @@ export function LinkedSources({
           </h4>
         )}
         {linking.canEdit && (
-          <span className="flex items-center">
+          <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
             <Button type="button" variant="ghost" size="sm" onClick={() => linking.open(target, label)} aria-label={`Link a source to ${label}`}>
               {linkText}
             </Button>
@@ -114,7 +115,8 @@ export function LinkedSources({
                   type="button"
                   disabled={linking.busy}
                   aria-label={`Remove link: ${source.title}`}
-                  className="-mr-1 grid size-5 shrink-0 place-items-center rounded-full text-fg-3 outline-none hover:bg-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  data-edit-entry
+                  className={`-mr-1 grid size-5 shrink-0 place-items-center rounded-full text-fg-3 outline-none hover:bg-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${EDIT_ONLY}`}
                   onClick={() => void linking.unlink(link)}
                 >
                   <span aria-hidden>×</span>

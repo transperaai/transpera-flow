@@ -130,7 +130,7 @@ function TourCard({ steps, index, setIndex, onClose }: { steps: TourStep[]; inde
           aria-hidden
           data-tour-highlight={step.id}
           className="pointer-events-none fixed z-[60] rounded-lg ring-2 ring-accent transition-[top,left,width,height] duration-150"
-          style={{ ...placement.box, boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)" }}
+          style={{ ...placement.box, boxShadow: "0 0 0 9999px var(--scrim)" }}
         />
       )}
       <div

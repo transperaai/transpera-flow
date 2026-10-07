@@ -10,6 +10,7 @@ import { OtherImportsPanel } from "@/components/calibration/other-imports-panel"
 import { loadCalibrationPage } from "@/lib/calibration/data";
 import { loadClientCalibration } from "@/lib/calibration/client-data";
 import { loadImports } from "@/lib/calibration/import-data";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
  * Settings → Historical data (issue #41, C2; the import wizard is issue #40, C1): calibrate a process from a stage history, deals
@@ -36,6 +37,7 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
         </Link>
       }
     >
+      <PhoneReadOnly>
       <CalibrationPanel
         mode={canEdit ? "live" : "readonly"}
         workspaceId={data.workspaceId}
@@ -61,6 +63,7 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
       )}
       <OtherImportsPanel mode={mode} workspaceId={data.workspaceId} leadSources={leadSources} previous={imports.previous} />
       <ImportsHistory imports={imports.imports} leadSources={leadSources} />
+      </PhoneReadOnly>
     </Page>
   );
 }

@@ -7,6 +7,7 @@ import { NOT_EMPTY_MESSAGE, ROLE_MESSAGE } from "@/lib/restore/errors";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
 import { supabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
  * Restore a backup (issue #39, B10 2b): fill this new, empty workspace from a JSON backup another workspace exported. Only
@@ -30,7 +31,9 @@ export default async function RestorePage(props: PageProps<"/w/[slug]/restore">)
   if (!(await workspaceIsEmpty(await createClient(), head.id))) return refused(NOT_EMPTY_MESSAGE);
   return (
     <Page title="Restore a backup" eyebrow="Workspace" description={description} width="max-w-3xl">
-      <RestoreBackup slug={slug} canManage={await canManageWorkspace(head.id)} />
+      <PhoneReadOnly>
+        <RestoreBackup slug={slug} canManage={await canManageWorkspace(head.id)} />
+      </PhoneReadOnly>
     </Page>
   );
 }

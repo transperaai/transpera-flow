@@ -13,6 +13,7 @@ import { SOLUTIONS_LIST_HELP, newOnProcessHelp } from "@/lib/solutions/help";
 import { builtBy, builtDate, changesLine, effectiveVerdict, linksOf, solutionHref, solutionType, VERDICT_WORDS, type SolutionsData } from "@/lib/solutions/cards";
 import { solutionEditorHref } from "@/lib/solutions/links";
 import { cn } from "@/lib/utils";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** "Pass" in green, "Fail" in red, "Not checked" quiet: the word always says it, so colour is never the only signal. */
 export function VerdictWord({ verdict, className }: { verdict: SolutionVerdict | null; className?: string }) {
@@ -180,7 +181,7 @@ function SolutionCard({
           <Help {...SOLUTIONS_LIST_HELP.open} />
         </span>
         {canEdit && (
-          <span className="flex items-center">
+          <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
             <Link
               href={solutionEditorHref(base, s.process_id, { from })}
               className="inline-flex h-8 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
