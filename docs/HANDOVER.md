@@ -1,8 +1,9 @@
 # Handover
 
-Updated 7 Oct 2026 (morning, AEST). The overnight run finished Milestones B and C apart from C5 (Austin's). Every ticket in
-the overnight list is merged and applied, plus C6 (Austin approved it on 6 Oct), a workspace-delete fix and the Vercel
-region move to Sydney. Production is at row 67 (`20261223000000`), ENGINE 1.10.0. No PRs are open. Start a new session with:
+Updated 7 Oct 2026 (evening, AEST). Everything buildable is built: Milestones B and C are merged and applied, and the
+C6 follow-ups (#227, #228, #230), the B3 follow-ups and C5's loading/empty states, dark mode and phone pass and Sentry are
+in. Production is at row 72 (`20261227000000`), ENGINE 1.10.0. What's left is Austin's (see "Waiting on Austin"). Start a
+new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
@@ -33,7 +34,8 @@ checks, logged in `docs/production-migrations.md`):
 Production had no saved AI text or overtime issues, so row 56's clean-up changed no rows. `database.types.ts` still holds
 the hand edits from #205–#207 (they match the generator); regenerate when a linked machine is available.
 
-**Production database:** applied up to `20261223000000` (row 67). Rows 56–67 were applied overnight 6–7 Oct; see "Next steps".
+**Production database:** applied up to `20261227000000` (row 72). Rows 56–67 were applied overnight 6–7 Oct and rows 68–72 on
+7 Oct; see "Next steps" and `docs/production-migrations.md`.
 
 **Briefs** (in `docs/plans/`): `b1-brief.md` (all slices built; 2b's section has the leak fixes and "Changes after the
 review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets one before building.
@@ -88,8 +90,17 @@ review"), `c2-2-brief.md` (built), `b10-2-brief.md` (done). Every ticket gets on
   PDF's text is read on Vercel (`unpdf` ships via `outputFileTracingIncludes` in `apps/web/next.config.ts`, untested there).
 - **Auto mode:** its safety check blocks `prod-sql.sh` as "Production Reads", even read-only preflight. Austin plans an
   overnight run with access granted; run production steps with auto mode off or a permission rule for `prod-sql.sh`.
-- C5 is Austin's.
-- **Sentry (C5, #44):** create the account and set the four variables (see `docs/plans/c5-sentry-brief.md`, "What Austin does"), redeploy, then open `/monitoring-check` as an agency admin (linked from nowhere) and press both buttons.
+- **C5 (#44):** the visual design pass is Austin's. Everything else in C5 that was asked for is built (see "Next steps").
+- **Sentry (C5, #44, PR #238):** off until its key is set; with no key nothing of it ships. Steps (full text in #238):
+  - Sentry: sign up, choose **EU (Frankfurt)** storage (no AU option; can't change later), create a Next.js project
+    `transpera-flow`, copy the DSN; Organisation and Project Settings → Security & Privacy: Prevent Storing of IP Addresses,
+    keep the default scrubbers; create an Organization Token (`vercel-source-maps`). Don't install Sentry's Vercel integration.
+  - Vercel (Production and Preview, not Development): `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_AUTH_TOKEN` (Sensitive),
+    `SENTRY_ORG`, `SENTRY_PROJECT`; redeploy production without the build cache.
+  - Check: open `/monitoring-check` as an agency admin (linked from nowhere), press both buttons, see two events in Sentry
+    with file names and lines, only a method and path in Request, no user, cookies or headers.
+- **Map node design:** pick A (ledger card), B (rating tile) or C (capsule) from the prototype
+  (https://claude.ai/artifact/Tsk94fmnFB4MPj66xxTihd); then it gets a brief and a build.
 
 **Still open from Milestone A:**
 - **AI analysis sources (A46):** "read linked sources and quotes" defaults off (it would send interview quotes to
@@ -218,27 +229,41 @@ Also: flaky tests made robust (#209, #214, #221, #222); `prod-sql.sh -f` reads f
 functions moved from `iad1` to `syd1`, next to the Sydney database (#224, `apps/web/vercel.json`; production headers show
 `::syd1::`). Each issue has a comment with what was applied and the defaults, which Austin confirmed.
 
-**Austin's live checks** (all need a signed-in browser on production):
+**Day run, 7 Oct: done.** Austin's answers that morning: revoke the unused grants; C5 = loading/empty states, dark mode and
+phones, Sentry (he does the visual pass himself); include the B3 follow-ups; prototype map nodes; same production rules.
+Merged (Sonnet-built from Opus briefs, Opus-reviewed; migrations applied with preflight and post-apply checks first):
+
+| PR | Ticket | Row |
+|---|---|---|
+| #232 | Revoke TRUNCATE, TRIGGER, REFERENCES, MAINTAIN from `anon`/`authenticated` (rollback file in `packages/db/scripts/apply/`) | 68 |
+| #233 | B3 follow-ups: dates, versions, page numbers and codes no longer read as money; `color`/`plan` are free text (#32) | 69 |
+| #234 | The change log names the step of a per-person time (closes #230) | 70 |
+| #236 | A restore brings per-person times back (closes #228) | 71 |
+| #239 | Propose per-person times from a step log that names people (closes #227) | 72 |
+| #235 | C5: loading skeletons, first-run chip, empty states (#44) | none |
+| #238 | C5: Sentry error reporting, off until the key is set (#44, ADR, PRD D49) | none |
+| #240 | C5: dark mode tokens and phone read-only pass, e2e suite in `check` (#44) | none |
+| #237 | Test race: the archive test uses its own process | none |
+
+Also: the share/play-link PostgREST tests deleted every link in the shared workspace on teardown; each now deletes only its
+own (in #233). `Shared/EmptyState/EmptyMap`'s screenshot once drew 1 px off in CI (light theme); a separate task makes it
+deterministic. Production has only one account (the agency admin), so smoke tests that need a member create a throwaway
+`auth.users` row inside their rolled-back block (rows 70–72 notes).
+
+**Austin's live checks** (a signed-in browser on production):
 - Re-run Analyse in each workspace (B1 2b changed how AI text is saved).
 - An editor changes a client health rule; the owner's change log names them (B1 3/3).
 - Upload a logo (B5); restore a large workspace on a preview (B21: the 40 s function timeout is verified only on plain
-  PostgREST).
+  PostgREST), with per-person times on, and check they come back (#228).
 - Create a share link and a play link and open them signed out (B3, B4).
-- Switch per-person times on (Settings → Simulation), set one, check the change log (C6, post-apply 7).
+- Switch per-person times on (Settings → Simulation), set one, check the change log names the step (C6, #230).
+- Import a step log with a Person column and apply the proposed per-person times (#227).
+- Open the app on a phone: pages read, nothing edits; check dark mode.
 
-**For Austin to decide:**
-- **Default table grants:** Supabase gives `authenticated` REFERENCES, TRIGGER and TRUNCATE on almost every public table
-  (`docs/supabase-notes.md`). Not reachable through PostgREST; revoking them everywhere is a hardening change.
-- **B3 optional follow-ups:** the hyphen/slash money rule over-hides some dates and codes; generic keys on the non-text list
-  need a note per entry.
+**Open tickets:** C5 (#44) stays open for Austin's visual pass. The map node redesign waits on his pick.
 
-**Open tickets:** C5 polish (#44, Austin's); #227 (calibrate per-person times from a step log), #228 (restore per-person
-times from a backup), #230 (`step_id` in the change log for per-person times). Then the map node redesign with Austin and
-performance (parked).
-
-**Session notes:** agents hit the usage limit twice overnight (13:50–19:18 UTC and about 00:10 UTC); each time the container
-restarted (Postgres stops: restart it with the command under Operations) and work resumed from what was pushed. Run at most
-4–5 builders at once on this 4-core container; under load many timing tests time out locally (they pass alone and in CI).
+**Session notes:** run at most 4–5 builders at once on this 4-core container; under load many timing tests time out locally
+(they pass alone and in CI). Container restarts stop Postgres: restart it with the command under Operations.
 
 ## Decisions from Austin (30 Sep)
 
