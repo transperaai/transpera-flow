@@ -450,8 +450,13 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
   finds them.
 - **MAINTAIN** (Postgres 17) is revoked only when `server_version_num` is 170000 or more, so the tests (Postgres 16) never run
   that branch.
-- **Sequences** can hold only USAGE, SELECT and UPDATE, so there is nothing to revoke on them (`issues_seq_seq`, the only
-  one, keeps what it has).
+- **Sequences** can hold only USAGE, SELECT and UPDATE, so there is nothing to revoke on them (`issue_events_seq_seq`, the only
+  one, keeps what it has). Out of scope here: `anon` and `authenticated` still hold SELECT, UPDATE and USAGE on it from
+  Supabase's sequence defaults (`rwU`), and new sequences get the same; unreachable through PostgREST, but a later hardening
+  pass could revoke them and the sequence (`S`) default privileges too.
+- **Rollback** needs preflight 2's saved output (the exact grant-back). There is deliberately no fallback: the catalog can't
+  say afterwards which tables held these privileges, and any wider grant (e.g. `grant all`) would hand back privileges that
+  migrations revoked on purpose (TRUNCATE on `audit_log`, table-wide SELECT on `suggestion_proposals`).
 - Post-apply checks written against plain Postgres can now expect the same table privileges on Supabase as locally, for
   tables `postgres` makes after this migration.
 

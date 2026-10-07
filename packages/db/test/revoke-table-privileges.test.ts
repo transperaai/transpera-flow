@@ -5,8 +5,9 @@ import { createTestDb, type TestDb } from "./harness";
 
 // Migration 20261224000000_revoke_unused_table_privileges.sql: anon and authenticated lose TRUNCATE, TRIGGER and REFERENCES (and
 // MAINTAIN on Postgres 17) on every public table, and new tables made by postgres stop getting them. Plain Postgres has no Supabase
-// defaults, so this file first puts back what production has (the harness's Supabase default privileges, plus the three extra
-// privileges granted on every public table), then runs the migration's own SQL and its header's checks and rollback.
+// defaults, so this file first puts back what production has (the harness's Supabase default privileges, plus the extra privileges
+// for authenticated, and none for anon, on the tables Supabase's defaults reached), then runs the migration's own SQL and its
+// header's checks and rollback.
 
 const FILE = "20261224000000_revoke_unused_table_privileges.sql";
 const migration = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
@@ -15,6 +16,8 @@ const EXTRA = ["TRUNCATE", "TRIGGER", "REFERENCES", "MAINTAIN"];
 const RELKINDS = "('r', 'p', 'v', 'm', 'f')";
 /** A table with no grants to either role (row 64 grants by column only); Supabase's defaults never reached it either. */
 const UNTOUCHED = "share_links";
+/** As on production: a table where a migration took TRUNCATE away on purpose, so it holds REFERENCES and TRIGGER only. */
+const NO_TRUNCATE = "audit_log";
 
 /** The SQL statements of item `n` of a header section (`PREFLIGHT` or `POST-APPLY CHECK`), as an operator would copy them. */
 function headerItem(section: string, n: number): string[] {
@@ -56,12 +59,14 @@ let before: { acl: string[]; defaults: unknown[]; dml: unknown[]; grantBack: str
 beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   // The harness ran every migration, this one included. Put production's state back: Supabase's default privileges for tables
-  // made by postgres, and the extra privileges on every public relation (bar one), plus a column-level REFERENCES.
+  // made by postgres, and, as production has them, the extra privileges for authenticated (not anon) on every public relation
+  // where authenticated holds a table-level privilege (TRUNCATE left off one), plus a column-level REFERENCES.
   await db.client.query("alter default privileges in schema public grant all on tables to anon, authenticated");
   await db.client.query(`do $$ declare r record; begin
-    for r in select oid::regclass as t from pg_class where relnamespace = 'public'::regnamespace and relkind in ${RELKINDS}
-      and relname <> '${UNTOUCHED}'
-    loop execute format('grant truncate, trigger, references on table %s to anon, authenticated', r.t); end loop; end $$`);
+    for r in select distinct c.oid::regclass as t, c.relname from pg_class c cross join lateral aclexplode(c.relacl) g
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ${RELKINDS} and g.grantee = 'authenticated'::regrole
+    loop execute format('grant trigger, references%s on table %s to authenticated',
+                        case when r.relname = '${NO_TRUNCATE}' then '' else ', truncate' end, r.t); end loop; end $$`);
   await db.client.query("grant references (kind) on public.share_links to authenticated");
   await db.client.query("create schema if not exists supabase_migrations");
   await db.client.query("create table if not exists supabase_migrations.schema_migrations (version text primary key, name text, statements text[])");
@@ -86,16 +91,22 @@ afterAll(async () => {
 });
 
 describe("before the migration (the simulated Supabase state)", () => {
-  it("anon and authenticated held the extra privileges on the public tables", () => {
-    expect(before.extra.length).toBeGreaterThan(100);
-    expect(before.acl).toContain("workspaces.* anon TRUNCATE");
+  it("authenticated held the extra privileges on the public tables, anon none (preflight 1's expectation)", () => {
+    expect(before.extra.length).toBeGreaterThan(40);
+    expect(before.extra.every((r) => (r as { grantee: string }).grantee === "authenticated")).toBe(true);
+    expect(before.acl).toContain("workspaces.* authenticated TRUNCATE");
     expect(before.acl).toContain("workspaces.* authenticated REFERENCES");
+    expect(before.acl).toContain(`${NO_TRUNCATE}.* authenticated TRIGGER`);
+    expect(before.acl).not.toContain(`${NO_TRUNCATE}.* authenticated TRUNCATE`);
+    expect(before.acl.filter((l) => / anon (TRUNCATE|TRIGGER|REFERENCES|MAINTAIN)/.test(l))).toEqual([]);
     expect(before.acl).toContain("share_links.kind authenticated REFERENCES");
     expect(before.acl.filter((l) => l.startsWith(`${UNTOUCHED}.* `) && isExtraForClients(l))).toEqual([]);
   });
 
   it("preflight 2 writes one GRANT per table and role, and the column-level REFERENCES", () => {
-    expect(before.grantBack).toContain("grant REFERENCES, TRIGGER, TRUNCATE on table workspaces to anon;");
+    expect(before.grantBack).toContain("grant REFERENCES, TRIGGER, TRUNCATE on table workspaces to authenticated;");
+    expect(before.grantBack).toContain(`grant REFERENCES, TRIGGER on table ${NO_TRUNCATE} to authenticated;`);
+    expect(before.grantBack).not.toMatch(/ to anon;/);
     expect(before.grantBack).toContain("grant references (kind) on table share_links to authenticated;");
     expect(before.grantBack).not.toMatch(/grant [A-Z, ]+ on table share_links to/);
   });
@@ -148,6 +159,27 @@ describe("after the migration", () => {
     }
   });
 
+  it("also takes them from anon, where anon holds them", async () => {
+    await db.client.query("begin");
+    try {
+      await db.client.query("grant truncate, trigger, references on public.workspaces to anon");
+      await db.client.query(migration);
+      expect((await acl()).filter(isExtraForClients)).toEqual([]);
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("leaves the sequences alone; the only one is issue_events_seq_seq, as the header and notes say", async () => {
+    expect(await q("select relname from pg_class where relnamespace = 'public'::regnamespace and relkind = 'S'")).toEqual([{ relname: "issue_events_seq_seq" }]);
+    expect(migration).toContain("`issue_events_seq_seq` is the only sequence");
+    expect(migration).not.toMatch(/issues_seq_seq|`issues\.seq`/);
+    const notes = readFileSync(new URL("../../../docs/supabase-notes.md", import.meta.url), "utf8");
+    expect(notes).toContain("`issue_events_seq_seq`, the only");
+    expect(notes).not.toContain("issues_seq_seq");
+    expect((await acl()).filter((l) => l.startsWith("issue_events_seq_seq."))).toEqual(before.acl.filter((l) => l.startsWith("issue_events_seq_seq.")));
+  });
+
   it("can run again (nothing to do)", async () => {
     const acls = await acl();
     await db.client.query(migration);
@@ -156,11 +188,28 @@ describe("after the migration", () => {
 });
 
 describe("the header's rollback", () => {
+  it("never grants all, and has no fallback that grants on tables without preflight 2's saved text", () => {
+    const section = migration.slice(migration.indexOf("-- ROLLBACK ("), migration.indexOf("-- Production data"));
+    expect(section).not.toMatch(/grant all on/i);
+    expect(section).not.toMatch(/fallback, not exact/);
+    expect(section).toContain("deliberately NO fallback");
+    // The runnable block grants only in the default privileges; table grants come only from preflight 2's saved text.
+    expect(headerRollback(FILE)).not.toMatch(/on table(?!s)/i);
+    expect(headerRollback(FILE)).not.toMatch(/grant all/i);
+  });
+
   it("with preflight 2's saved text puts back exactly what was there, default privileges included", async () => {
     const rollback = headerRollback(FILE);
-    expect(rollback).toContain("grant all on tables to anon, authenticated");
+    expect(rollback).toContain("grant truncate, trigger, references%s on tables to anon, authenticated");
     await db.client.query(rollback.replace("begin;", `begin;\n${before.grantBack}`));
-    expect(await acl()).toEqual(before.acl);
+    // DML and column grants identical to before, the extra privileges back exactly where they were, and nowhere else.
+    const after = await acl();
+    expect(after.filter((l) => !isExtraForClients(l))).toEqual(before.acl.filter((l) => !isExtraForClients(l)));
+    expect(after.filter((l) => !/^\S+\.\* /.test(l))).toEqual(before.acl.filter((l) => !/^\S+\.\* /.test(l)));
+    expect(after).toEqual(before.acl);
+    expect(after).not.toContain(`${NO_TRUNCATE}.* authenticated TRUNCATE`);
+    // Column-limited SELECT stays column-limited: no table-wide SELECT, UPDATE or DELETE comes back.
+    expect(after.filter((l) => l.startsWith("suggestion_proposals.* authenticated ") && !isExtraForClients(l))).toEqual(["suggestion_proposals.* authenticated INSERT"]);
     expect(await defaults()).toEqual(before.defaults);
     expect(await q("select version from supabase_migrations.schema_migrations where version = '20261224000000'")).toEqual([]);
     // And the production apply file applies again on top, recording the version.

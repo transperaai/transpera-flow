@@ -34,7 +34,7 @@ set local lock_timeout = '5s';
 --     as `postgres`), and a later run of the loop above (or this migration's post-apply 1) catches any.
 --   * Sequences: NOTHING to do. A sequence can only hold USAGE, SELECT and UPDATE (Postgres refuses TRUNCATE, TRIGGER, REFERENCES
 --     and MAINTAIN on one: "invalid privilege type ... for sequence"), and those are what inserts into identity columns use
---     (`issues.seq`), so they are left as they are. Post-apply 3 shows the sequence grants are unchanged.
+--     (`issue_events.seq`, sequence `issue_events_seq_seq`), so they are left as they are. Post-apply 3 shows the sequence grants are unchanged.
 --   * NOT changed: any SELECT, INSERT, UPDATE or DELETE grant (table- or column-level), `service_role`, `postgres`, functions,
 --     schemas, RLS and policies. Each table keeps exactly the DML its migrations meant it to have; post-apply 2 compares counts.
 --
@@ -47,8 +47,9 @@ set local lock_timeout = '5s';
 -- in the log, because 2 is the exact rollback and 4 is what post-apply 2 compares with):
 --   0. Latest applied versions. Expect 20261223000000 (row 67) as the latest and nothing >= 20261224000000:
 --        select version from supabase_migrations.schema_migrations where version >= '20261221000000' order by 1;
---   1. For the log: the privileges this removes, per table and role (table-level, then column-level REFERENCES). Expect almost
---      every public table twice (anon and authenticated) with REFERENCES, TRIGGER, TRUNCATE (and MAINTAIN on PG17); then 0 rows:
+--   1. For the log: the privileges this removes, per table and role (table-level, then column-level REFERENCES). Expect,
+--      on production, about 46 rows, ALL for authenticated and none for anon (anon holds no table-level privilege there):
+--      MAINTAIN, REFERENCES, TRIGGER on about 46 tables and TRUNCATE on about 42 of them (PG17); then 0 rows:
 --        select c.relname, g.grantee::regrole::text as grantee,
 --               string_agg(g.privilege_type, ', ' order by g.privilege_type) as privileges
 --        from pg_class c cross join lateral aclexplode(c.relacl) g
@@ -88,7 +89,7 @@ set local lock_timeout = '5s';
 --               pg_has_role(current_user, 'supabase_admin', 'member');
 --        select count(*) from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p', 'v', 'm', 'f')
 --          and not pg_has_role(current_user, relowner, 'member');
---      and, for the log, the sequence grants (post-apply 3 expects the same rows; `issues_seq_seq` is the only sequence, and where
+--      and, for the log, the sequence grants (post-apply 3 expects the same rows; `issue_events_seq_seq` is the only sequence, and where
 --      Supabase's sequence defaults reached it anon and authenticated hold SELECT, UPDATE, USAGE on it):
 --        select c.relname, g.grantee::regrole::text, string_agg(g.privilege_type, ', ' order by g.privilege_type)
 --        from pg_class c cross join lateral aclexplode(c.relacl) g
@@ -143,25 +144,23 @@ set local lock_timeout = '5s';
 --        rollback;
 --   5. The app: sign in and save a field; a share link opens. (DML grants are untouched, so nothing should change.)
 --
--- ROLLBACK (one transaction): first run the text saved from preflight 2 (the exact grant-back, one GRANT per table and role),
--- then the block below, which puts Supabase's default privileges back as they were (`grant all` on tables made by `postgres`;
--- SELECT, INSERT, UPDATE and DELETE are already there, so this adds back only what was revoked):
+-- ROLLBACK (one transaction). It needs the text SAVED from preflight 2: the exact grant-back, one GRANT of only TRUNCATE,
+-- TRIGGER, REFERENCES (and MAINTAIN) per table and role that held them. There is deliberately NO fallback without it: the
+-- catalog no longer says which tables held them, and granting more than was taken away (any `grant all`, or these privileges
+-- on every table) would hand back privileges that migrations revoked on purpose (e.g. TRUNCATE on `audit_log`, table-wide
+-- SELECT on `suggestion_proposals`). Without the saved text, leave the privileges off (nothing uses them) and only run the
+-- default-privileges and version-row lines. Then the block below puts back, in the default privileges for tables made by
+-- `postgres`, only what was revoked:
 --   begin;
 --   -- <paste the text saved from preflight 2 here>
---   alter default privileges for role postgres in schema public grant all on tables to anon, authenticated;
+--   do $$ begin
+--     execute format('alter default privileges for role postgres in schema public grant truncate, trigger, references%s on tables to anon, authenticated',
+--                    case when current_setting('server_version_num')::int >= 170000 then ', maintain' else '' end);
+--   end $$;
 --   delete from supabase_migrations.schema_migrations where version = '20261224000000';
 --   commit;
--- If preflight 3 said `t` (the supabase_admin step ran), also run, inside the transaction:
---   alter default privileges for role supabase_admin in schema public grant all on tables to anon, authenticated;
--- If preflight 2's text was lost, this grants the privileges back on every public table where the role still holds any
--- table-level privilege (Supabase's default reached those; it may also add them back on a table whose migration revoked
--- everything and granted only SELECT): a fallback, not exact.
---     do $$ declare r record; begin
---       for r in select distinct c.oid::regclass as t, g.grantee::regrole::text as role
---         from pg_class c cross join lateral aclexplode(c.relacl) g
---         where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm', 'f')
---           and g.grantee in ('anon'::regrole, 'authenticated'::regrole)
---       loop execute format('grant all on table %s to %I', r.t, r.role); end loop; end $$;
+-- If preflight 3 said `t` (the supabase_admin step ran), also run, inside the transaction, the same `do` block with
+-- `for role supabase_admin` in place of `for role postgres`.
 --
 -- Production data: none changes.
 
@@ -232,7 +231,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     as `postgres`), and a later run of the loop above (or this migration's post-apply 1) catches any.
 --   * Sequences: NOTHING to do. A sequence can only hold USAGE, SELECT and UPDATE (Postgres refuses TRUNCATE, TRIGGER, REFERENCES
 --     and MAINTAIN on one: "invalid privilege type ... for sequence"), and those are what inserts into identity columns use
---     (`issues.seq`), so they are left as they are. Post-apply 3 shows the sequence grants are unchanged.
+--     (`issue_events.seq`, sequence `issue_events_seq_seq`), so they are left as they are. Post-apply 3 shows the sequence grants are unchanged.
 --   * NOT changed: any SELECT, INSERT, UPDATE or DELETE grant (table- or column-level), `service_role`, `postgres`, functions,
 --     schemas, RLS and policies. Each table keeps exactly the DML its migrations meant it to have; post-apply 2 compares counts.
 --
@@ -245,8 +244,9 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- in the log, because 2 is the exact rollback and 4 is what post-apply 2 compares with):
 --   0. Latest applied versions. Expect 20261223000000 (row 67) as the latest and nothing >= 20261224000000:
 --        select version from supabase_migrations.schema_migrations where version >= '20261221000000' order by 1;
---   1. For the log: the privileges this removes, per table and role (table-level, then column-level REFERENCES). Expect almost
---      every public table twice (anon and authenticated) with REFERENCES, TRIGGER, TRUNCATE (and MAINTAIN on PG17); then 0 rows:
+--   1. For the log: the privileges this removes, per table and role (table-level, then column-level REFERENCES). Expect,
+--      on production, about 46 rows, ALL for authenticated and none for anon (anon holds no table-level privilege there):
+--      MAINTAIN, REFERENCES, TRIGGER on about 46 tables and TRUNCATE on about 42 of them (PG17); then 0 rows:
 --        select c.relname, g.grantee::regrole::text as grantee,
 --               string_agg(g.privilege_type, ', ' order by g.privilege_type) as privileges
 --        from pg_class c cross join lateral aclexplode(c.relacl) g
@@ -286,7 +286,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --               pg_has_role(current_user, 'supabase_admin', 'member');
 --        select count(*) from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p', 'v', 'm', 'f')
 --          and not pg_has_role(current_user, relowner, 'member');
---      and, for the log, the sequence grants (post-apply 3 expects the same rows; `issues_seq_seq` is the only sequence, and where
+--      and, for the log, the sequence grants (post-apply 3 expects the same rows; `issue_events_seq_seq` is the only sequence, and where
 --      Supabase's sequence defaults reached it anon and authenticated hold SELECT, UPDATE, USAGE on it):
 --        select c.relname, g.grantee::regrole::text, string_agg(g.privilege_type, ', ' order by g.privilege_type)
 --        from pg_class c cross join lateral aclexplode(c.relacl) g
@@ -341,25 +341,23 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --        rollback;
 --   5. The app: sign in and save a field; a share link opens. (DML grants are untouched, so nothing should change.)
 --
--- ROLLBACK (one transaction): first run the text saved from preflight 2 (the exact grant-back, one GRANT per table and role),
--- then the block below, which puts Supabase's default privileges back as they were (`grant all` on tables made by `postgres`;
--- SELECT, INSERT, UPDATE and DELETE are already there, so this adds back only what was revoked):
+-- ROLLBACK (one transaction). It needs the text SAVED from preflight 2: the exact grant-back, one GRANT of only TRUNCATE,
+-- TRIGGER, REFERENCES (and MAINTAIN) per table and role that held them. There is deliberately NO fallback without it: the
+-- catalog no longer says which tables held them, and granting more than was taken away (any `grant all`, or these privileges
+-- on every table) would hand back privileges that migrations revoked on purpose (e.g. TRUNCATE on `audit_log`, table-wide
+-- SELECT on `suggestion_proposals`). Without the saved text, leave the privileges off (nothing uses them) and only run the
+-- default-privileges and version-row lines. Then the block below puts back, in the default privileges for tables made by
+-- `postgres`, only what was revoked:
 --   begin;
 --   -- <paste the text saved from preflight 2 here>
---   alter default privileges for role postgres in schema public grant all on tables to anon, authenticated;
+--   do $$ begin
+--     execute format('alter default privileges for role postgres in schema public grant truncate, trigger, references%s on tables to anon, authenticated',
+--                    case when current_setting('server_version_num')::int >= 170000 then ', maintain' else '' end);
+--   end $$;
 --   delete from supabase_migrations.schema_migrations where version = '20261224000000';
 --   commit;
--- If preflight 3 said `t` (the supabase_admin step ran), also run, inside the transaction:
---   alter default privileges for role supabase_admin in schema public grant all on tables to anon, authenticated;
--- If preflight 2's text was lost, this grants the privileges back on every public table where the role still holds any
--- table-level privilege (Supabase's default reached those; it may also add them back on a table whose migration revoked
--- everything and granted only SELECT): a fallback, not exact.
---     do $$ declare r record; begin
---       for r in select distinct c.oid::regclass as t, g.grantee::regrole::text as role
---         from pg_class c cross join lateral aclexplode(c.relacl) g
---         where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm', 'f')
---           and g.grantee in ('anon'::regrole, 'authenticated'::regrole)
---       loop execute format('grant all on table %s to %I', r.t, r.role); end loop; end $$;
+-- If preflight 3 said `t` (the supabase_admin step ran), also run, inside the transaction, the same `do` block with
+-- `for role supabase_admin` in place of `for role postgres`.
 --
 -- Production data: none changes.
 
