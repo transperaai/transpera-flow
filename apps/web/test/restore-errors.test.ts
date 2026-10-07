@@ -30,6 +30,17 @@ describe("restoreFailure", () => {
     }
   });
 
+  // #228.
+  it("names the per-person times when their section fails", () => {
+    expect(sectionInWords("person_capacity_factors")).toBe("the per-person times");
+    const f = restoreFailure({ code: "23514", hint: "section:person_capacity_factors", message: "import_workspace_bundle: person_capacity_factors could not be restored: save_capacity_factor: a factor is from 0.5 to 2" });
+    expect(f.status).toBe(422);
+    expect(f.message).toMatch(/^Couldn't restore the per-person times: .* Nothing was restored\.$/);
+    // The database's own words about a column or constraint are never echoed.
+    const sql = restoreFailure({ code: "23514", hint: "section:person_capacity_factors", message: 'import_workspace_bundle: person_capacity_factors could not be restored: new row for relation "person_capacity_factors" violates check constraint "person_capacity_factors_factor_check"' });
+    expect(sql.message).toBe("Couldn't restore the per-person times: a row didn't fit this workspace's rules. Nothing was restored.");
+  });
+
   // B21 (#203).
   it("maps the busy hint (a restore already running) to 409 and its message, before any other hint", () => {
     expect(restoreFailure({ code: "55P03", hint: "busy", message: "A restore into this workspace is already running." })).toEqual({ status: 409, message: BUSY_MESSAGE });
