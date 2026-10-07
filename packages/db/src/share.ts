@@ -221,7 +221,8 @@ export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
  * classifies the JSON shapes a snapshot carries and fails when one key is text in one shape and not text in another. Keys that
  * appear in no shape a snapshot carries say so ("not in a snapshot"): they are listed so a future loader fails safe on the id.
  * A key belongs here only when its value can't be words: an id, a date, or an enum or format the database enforces. `color` (roles)
- * and `plan` (workspaces) are not here: the database checks neither, so a name typed into one is looked for like any free text.
+ * and `plan` (workspaces) are not here: the database checks neither, so a name typed into one is looked for like any free text
+ * (a `color` that is a whole hex colour is no text: `SHARE_HEX_COLOR`, the database's rule too).
  */
 export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   agreed_by: "first principles `deletes[].agreed_by`: a person id, saved from a person picker (the MCP tool resolves a name to an id or drops it)",
@@ -327,8 +328,10 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
 /** The keys of `SHARE_NON_TEXT_REASONS` (`private.share_snapshot_problem` has the same list). */
 export const SHARE_NON_TEXT_KEYS: readonly string[] = Object.keys(SHARE_NON_TEXT_REASONS);
 const NON_TEXT = new Set(SHARE_NON_TEXT_KEYS);
-/** Free text unless the key says otherwise (default deny). */
-const isFree = (key: string): boolean => !NON_TEXT.has(key);
+/** A whole hex colour (`#rgb` to `#rrggbbaa`): no text, under `color` only. Anything else in `color` is free text. */
+export const SHARE_HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;
+/** Free text unless the key says otherwise (default deny), or the value is a whole hex colour under `color` (the database's rule too). */
+const isFree = (key: string, value: string): boolean => !NON_TEXT.has(key) && !(key === "color" && SHARE_HEX_COLOR.test(value));
 
 /** Ids, dates and plain numbers hold nothing to hide: skipped, for speed. */
 const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[\d\-:.TZ+ ]*)$/i;
@@ -431,7 +434,7 @@ const BLANKED: Record<string, unknown> = {
 export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
   const scrub = scrubber(toggles, secrets);
   const walk = (value: unknown, key = ""): unknown => {
-    if (typeof value === "string") return scrub.text(value, isFree(key));
+    if (typeof value === "string") return scrub.text(value, isFree(key, value));
     if (Array.isArray(value)) return value.map((x) => walk(x, key));
     if (!isObj(value)) return value;
     const src = isBundleLike(value) ? redactBundle(value, toggles, secrets) : value;
@@ -516,7 +519,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     }
   };
   const walk = (value: unknown, key = "", depth = 0) => {
-    if (typeof value === "string") return text(value, isFree(key));
+    if (typeof value === "string") return text(value, isFree(key, value));
     if (Array.isArray(value)) return void value.forEach((x) => walk(x, key, depth));
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {

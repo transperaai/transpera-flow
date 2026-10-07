@@ -33,17 +33,21 @@ const ISO = String.raw`(?:gbp|usd|eur|aud|nzd|cad)`;
 //     "4100-4500-GBP"; a date's last part has 1 or 2). A hyphen or slash after a letter or space is a sign ("-4100-GBP") or a
 //     separator ("x/4100-GBP"), and counts;
 //   * may follow another amount and a hyphen or slash (a range, "4,100-4,500-GBP", "4100/4500/GBP"), hidden as one;
-//   * if it is a plain number (no thousands groups, no exponent), is not right after a word of JOIN_STANDARD_WORDS ("iso 4217"),
-//     and if it also has 1 or 2 digits, not right after a word of JOIN_WORDS ("windows 10", "page 3"), with only spaces between.
+//   * if it is a plain number (no thousands groups, no exponent), is not right after a word of JOIN_STANDARD_WORDS ("iso 4217");
+//     if it also has 1 or 2 digits, not right after a word of JOIN_VERSION_WORDS ("windows 10", "v 1.2"), and if it is also whole,
+//     not right after a word of JOIN_PLACE_WORDS ("page 3"; "page 12.50-GBP" is money), with only spaces between.
 // A space between the number and the code, a code BEFORE the number ("GBP-4100", "GBP/4100") and a symbol are unchanged. Every
 // text this rule matches, the rule before it matched (a test runs both). The database's check (`private.share_snapshot_problem`,
-// migration 20261228000000) applies the same rule; keep the two equal.
+// migration 20261224500000) applies the same rule; keep the two equal.
 /** Words naming a standard: a plain number of any length after them is its number, not an amount. */
 export const JOIN_STANDARD_WORDS: readonly string[] = ["iso", "rfc"];
-/** Words that make a plain 1- or 2-digit number after them an identifier (a version, a page, a part), not an amount. */
-export const JOIN_WORDS: readonly string[] = [
-  "windows", "win", "ios", "android", "macos", "office", "version", "ver", "v", "build", "release", "rev", "revision", "page",
-  "pages", "p", "pp", "chapter", "ch", "section", "sec", "clause", "para", "paragraph", "article", "appendix", "annex", "row",
+/** Words naming a product or a version: a plain 1- or 2-digit number after them, whole or decimal ("v 1.2"), is its version. */
+export const JOIN_VERSION_WORDS: readonly string[] = [
+  "windows", "win", "ios", "android", "macos", "office", "version", "ver", "v", "build", "release", "rev", "revision",
+];
+/** Words naming a place in a document or a plan: a WHOLE 1- or 2-digit number after them is its number ("page 3"); a decimal is money ("page 12.50"). */
+export const JOIN_PLACE_WORDS: readonly string[] = [
+  "page", "pages", "p", "pp", "chapter", "ch", "section", "sec", "clause", "para", "paragraph", "article", "appendix", "annex", "row",
   "column", "col", "table", "figure", "fig", "vol", "volume", "part", "phase", "sprint", "ticket", "slide",
 ];
 const notAfter = (words: readonly string[]) => String.raw`(?<!(?:^|[^a-z])(?:${words.join("|")}) +)`;
@@ -55,7 +59,7 @@ const RANGE_FROM = String.raw`${SCI}|${SPACE_GROUPED}|${GROUPED}|\d+(?:[.,]\d+)?
 /** An amount that can't be a date's last part: grouped, scientific, or 3 or more digits. */
 const LONG = String.raw`${SCI}|${SPACE_GROUPED}|(?:${GROUPED})[.,]?|\d{3,}(?:[.,]\d+)?[.,]?`;
 /** The amount before the code, with the word exemptions on plain numbers only. */
-const JOINED = String.raw`${SCI}|${SPACE_GROUPED}|(?:${GROUPED})[.,]?|${notAfter(JOIN_STANDARD_WORDS)}\d{3,}(?:[.,]\d+)?[.,]?|${notAfter(JOIN_STANDARD_WORDS)}${notAfter(JOIN_WORDS)}\d{1,2}(?:[.,]\d+)?[.,]?`;
+const JOINED = String.raw`${SCI}|${SPACE_GROUPED}|(?:${GROUPED})[.,]?|${notAfter(JOIN_STANDARD_WORDS)}\d{3,}(?:[.,]\d+)?[.,]?|${notAfter(JOIN_STANDARD_WORDS)}${notAfter(JOIN_VERSION_WORDS)}${notAfter(JOIN_PLACE_WORDS)}\d{1,2}[.,]?|${notAfter(JOIN_STANDARD_WORDS)}${notAfter(JOIN_VERSION_WORDS)}\d{1,2}[.,]\d+[.,]?`;
 const TO_CODE = String.raw`${MAG}\s*[\-/]\s*${ISO}(?![a-z0-9])`;
 
 /** Money in a share link's normalised text: a symbol or code before a number, a number before a symbol, code or amount in words (pounds, dollars, euros, quid, sterling). */

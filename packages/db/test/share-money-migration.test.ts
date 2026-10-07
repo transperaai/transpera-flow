@@ -6,11 +6,11 @@ import { createTestDb, type TestDb } from "./harness";
 import { headerRollback } from "./header-rollback";
 import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES } from "./money-cases";
 
-// The money-rule follow-up to B3 (#32), migration 20261228000000 (row 72): its place in the apply order, that the function it
+// The money-rule follow-up to B3 (#32), migration 20261224500000 (row 69): its place in the apply order, that the function it
 // replaces is a full copy of B4's body changing only the `-- share_money_rule` lines, that the header's md5s are the real ones, that
 // the apply file carries the migration byte for byte, and that the header's checks and ROLLBACK block do what they say.
 
-const VERSION = "20261228000000";
+const VERSION = "20261224500000";
 const FILE = `${VERSION}_share_money_rule.sql`;
 const SOURCE = "20261221000000_play_links.sql";
 const root = join(__dirname, "..");
@@ -36,25 +36,29 @@ const src = statement(migrations(SOURCE), HEADER);
 const mig = statement(migration, HEADER);
 const header = migration.slice(0, migration.indexOf("-- ROLLBACK ("));
 
-describe("share money rule: row 72 of the production ledger", () => {
-  it("it is on disk once, after C6 (20261223000000, row 67); rows 68 to 71 (other work) may sit between", () => {
+describe("share money rule: row 69 of the production ledger", () => {
+  it("it is on disk once, after C6 (20261223000000, row 67); row 68 (20261224000000, applied) sits between when it is on disk", () => {
     expect(versions.filter((v) => v === VERSION)).toEqual([VERSION]);
     expect(versions.indexOf("20261223000000")).toBeGreaterThanOrEqual(0);
     expect(versions.indexOf("20261223000000")).toBeLessThan(versions.indexOf(VERSION));
   });
 
-  it("the headers name row 72 and what it follows; preflight 0 expects nothing at or past this version", () => {
+  it("the headers name row 69 and what it follows; preflight 0 expects row 68 as the latest and nothing at or past this version", () => {
     for (const text of [migration, apply]) {
-      expect(text).toContain("this is row 72");
+      expect(text).toContain("row 69");
+      expect(text).not.toMatch(/row 72|20261228000000/);
       expect(text).toContain(`nothing >= '${VERSION}'`);
     }
-    expect(migration).toContain("after 20261223000000 (C6, row 67), 20261221000000 (B4, row 66)");
-    expect(apply).toContain("after row 67 (20261223000000, C6)");
+    expect(migration).toContain("this is\n-- row 69");
+    expect(migration).toContain("after 20261224000000 (row 68, applied), 20261223000000 (C6, row 67), 20261221000000 (B4, row 66)");
+    expect(migration).toContain("20261224000000 (the latest), and nothing >= '20261224500000'");
+    expect(apply).toContain("This is row 69 of docs/production-migrations.md; apply it after row 68 (20261224000000, applied) and row 67 (20261223000000, C6)");
+    expect(apply).toContain(`values ('${VERSION}', 'share_money_rule'`);
   });
 
-  it("the ledger has row 72 for this version, NOT applied, and no other row uses 72 or this version", () => {
-    expect(ledger).toMatch(new RegExp(`^\\| 72 \\| ${VERSION} \\| share_money_rule \\| [^|]*NOT applied[^|]* \\| B3 follow-up`, "m"));
-    expect(ledger.match(/^\| 72 \|/gm)).toHaveLength(1);
+  it("the ledger has row 69 for this version, NOT applied, and no other row uses 69 or this version", () => {
+    expect(ledger).toMatch(new RegExp(`^\\| 69 \\| ${VERSION} \\| share_money_rule \\| [^|]*NOT applied[^|]* \\| B3 follow-up`, "m"));
+    expect(ledger.match(/^\| 69 \|/gm)).toHaveLength(1);
     expect(ledger.match(new RegExp(`^\\| \\d+ \\| ${VERSION} `, "gm"))).toHaveLength(1);
   });
 });
@@ -77,10 +81,12 @@ describe("share money rule: share_snapshot_problem is a full copy of B4's, chang
     expect(migration).not.toMatch(/^(?:grant|revoke|alter|drop|insert|update|delete) /im);
   });
 
-  it("has B4's body once its marked lines are taken out and the three lines they replace are taken out of B4's", () => {
+  it("has B4's body once its marked lines are taken out and the five lines they replace are taken out of B4's", () => {
     const removed = [
       "    'base_revision_id', 'by', 'child_process_id', 'client_id', 'color', 'comparator', 'condition_id', 'created_at',\n",
       "    'person_id', 'plan', 'preset', 'pricing_model', 'process_id', 'proposed_via', 'published_at', 'published_by',\n",
+      "  select string_agg(n.v, E'\\x01'), string_agg(n.v, E'\\x01') filter (where n.k is null or n.k <> all (non_text_keys))\n",
+      "    from (select s.k, private.share_norm(s.v) as v from private.share_strings(snap) as s\n",
       "      || '|(^|[^a-z0-9])[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?[[:space:]/-]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'\n",
     ];
     let expected = bodyOf(src);
@@ -190,10 +196,30 @@ describe("share money rule: the header's checks and rollback, run on a test data
     expect((await q("select private.share_snapshot_problem($1, 'overview', $2::jsonb, false, false) as p", [ws, hex]))[0]!.p).toBeNull();
   });
 
+  it("a whole hex colour under color is no text, even when its letters spell a person's or a client's name; anything else under color is free text", async () => {
+    const ws = (await q("select id from workspaces where slug = 'northbeam'"))[0]!.id as string;
+    const problem = async (extra: object) =>
+      (await db.client.query("select private.share_snapshot_problem($1, 'overview', $2::jsonb, false, true) as p", [ws, JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials: true }, ...extra })])).rows[0]!.p as string | null;
+    await db.client.query("begin");
+    try {
+      await db.client.query("insert into people (workspace_id, name) values ($1, 'Ada Lovelace')", [ws]);
+      await db.client.query("insert into clients (workspace_id, name) values ($1, 'Fab')", [ws]);
+      for (const color of ["#ada123", "#ADA", "#fab000", "#FAB000AA", "#2a78d6"]) expect(await problem({ roles: [{ color }] }), color).toBeNull();
+      // Not a whole hex colour, or not under `color`: free text, checked.
+      expect(await problem({ roles: [{ color: "ada" }] })).toBe("The snapshot names a person.");
+      expect(await problem({ roles: [{ color: "#ada123 Ada" }] })).toBe("The snapshot names a person.");
+      expect(await problem({ roles: [{ color: "#ada1234567" }] })).toBe("The snapshot names a person.");
+      expect(await problem({ roles: [{ color: "#fab" }], note: "#fab000" })).toBe("The snapshot names a client.");
+      expect(await problem({ roles: [{ colour: "#ada123" }] })).toBe("The snapshot names a person.");
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
   it("the ROLLBACK block puts B4's body back (preflight 1's md5 returns), the preflight reads as written, and the migration applies again", async () => {
     await q("create schema if not exists supabase_migrations");
     await q("create table if not exists supabase_migrations.schema_migrations (version text primary key, name text, statements text[])");
-    for (const v of ["20261221000000", "20261223000000", VERSION]) await q("insert into supabase_migrations.schema_migrations (version) values ($1) on conflict do nothing", [v]);
+    for (const v of ["20261221000000", "20261223000000", "20261224000000", VERSION]) await q("insert into supabase_migrations.schema_migrations (version) values ($1) on conflict do nothing", [v]);
     const after = await liveMd5();
     expect(after).toBe(md5(bodyOf(mig)));
 
@@ -207,7 +233,8 @@ describe("share money rule: the header's checks and rollback, run on a test data
     // The preflight now reads as the header says.
     const [p0] = queries("-- PREFLIGHT", 0);
     const rows = (await qa(p0!)).map((r) => r[0]);
-    expect(rows).toEqual(expect.arrayContaining(["20261221000000", "20261223000000"]));
+    expect(rows).toEqual(expect.arrayContaining(["20261221000000", "20261223000000", "20261224000000"]));
+    expect(rows.at(-1)).toBe("20261224000000");
     expect(rows.filter((v) => (v as string) >= VERSION)).toEqual([]);
     const [p1] = queries("-- PREFLIGHT", 1);
     expect(await qa(p1!)).toEqual([["private", "share_snapshot_problem", MD5_BEFORE, false]]);

@@ -186,10 +186,10 @@ const qa = async (sql: string) => (await db.client.query({ text: sql, rowMode: "
 const b4Md5 = (r: Replaced) => md5(bodyOf(statement(migration, r.migrationHeader)));
 /**
  * Functions a LATER migration replaces again, with that migration's md5 (what a test database built from every migration holds).
- * 20261228000000_share_money_rule (B3 follow-up, row 72) copies B4's share_snapshot_problem and tightens one line of its money rule.
+ * 20261224500000_share_money_rule (B3 follow-up, row 69) copies B4's share_snapshot_problem and tightens one line of its money rule.
  */
 const REPLACED_LATER: Record<string, string> = {
-  share_snapshot_problem: md5(bodyOf(statement(migrations("20261228000000_share_money_rule.sql"), /^create or replace function private\.share_snapshot_problem\(/m))),
+  share_snapshot_problem: md5(bodyOf(statement(migrations("20261224500000_share_money_rule.sql"), /^create or replace function private\.share_snapshot_problem\(/m))),
 };
 const md5s = async () =>
   Object.fromEntries(

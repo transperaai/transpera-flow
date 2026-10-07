@@ -71,10 +71,11 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
   plus amounts written in words ("4,100 pounds"); the database checks a conservative equivalent. A bare "4.1k a month" with no
   symbol, code or unit cannot be told from a count and is left. A number joined to a code after it by a hyphen or a slash
   ("4100-GBP") is money unless it ends a date, a version or a standard's, product's or document's number (B3 follow-up, 7 Oct,
-  migration `20261228000000`): the amount is not glued to a letter or digit, nor to a digit and `.` `,` (a version), nor to a digit
+  migration `20261224500000`): the amount is not glued to a letter or digit, nor to a digit and `.` `,` (a version), nor to a digit
   and `-` `/` unless it has 3 or more digits, groups or an exponent (a date's last part has 1 or 2); a plain number right after
-  "iso" or "rfc", or a plain 1- or 2-digit one right after a word such as "windows", "page" or "version" (`JOIN_WORDS`), is an
-  identifier. So "2026-10-06-CAD", "ISO 4217-GBP", "Windows 10-USD", "v1.2/EUR" and "page 3/GBP" stay as written (and text of the
+  "iso" or "rfc", a plain 1- or 2-digit one right after a version word such as "windows" or "v" (`JOIN_VERSION_WORDS`), and a
+  whole 1- or 2-digit one right after a place word such as "page", "row" or "part" (`JOIN_PLACE_WORDS`), is an identifier; a
+  decimal after a place word ("page 12.50-GBP", "row 99,99-EUR") is money. So "2026-10-06-CAD", "ISO 4217-GBP", "Windows 10-USD", "v1.2/EUR" and "page 3/GBP" stay as written (and text of the
   same shape, such as "1.2.3-EUR" or "RFC 4217/NZD"), while negatives ("-4100-GBP"), ranges ("4,100-4,500-GBP", "4100/4500/GBP")
   and grouped or long numbers after those words ("page 4100-GBP", "sprint 4,500-GBP") are still money. With a space between
   ("2026-10-06 CAD") the rule is unchanged. A test runs every case through the rule before the change too: it refuses nothing new,
@@ -99,7 +100,9 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
   list carries a one-line reason (`SHARE_NON_TEXT_REASONS`: where it appears and why it is never typed words), and a test fails
   when a key is text in one shape and not text in another (B3 follow-up, 7 Oct). A key is on the list only when its value can't be
   words: an id, a date, or an enum or format the database enforces. `color` (roles) and `plan` (workspaces) were taken off for
-  that reason (no check constraint): they are free text, which moves no number since neither is engine input. Emails and money are looked for in every string value.
+  that reason (no check constraint): they are free text, which moves no number since neither is engine input. A `color` value that
+  is a whole hex colour (`#rgb` to `#rrggbbaa`, `SHARE_HEX_COLOR`) is no text, in the app and the database, so a colour whose letters
+  spell a name (`#ada123` and a person called Ada) keeps its value; anything else under `color` is free text. Emails and money are looked for in every string value.
 - Matching is by letter tokens of a normalised view (percent-decoded, NFKD with combining marks dropped and the letters that
   don't decompose folded, default-ignorable code points and variation selectors removed, lower-cased, uuids and hex hashes masked).
   A person: any token that equals a part (3+ characters, 2 for a part with no Latin letter in it) of the name is replaced, a run

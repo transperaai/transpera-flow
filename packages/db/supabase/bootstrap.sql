@@ -42543,7 +42543,7 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
   for each row execute function private.share_links_no_speeds();
 ']);
 
--- 20261228000000_share_money_rule.sql
+-- 20261224500000_share_money_rule.sql
 -- Share links: the money rule no longer hides dates, versions and standard codes; `color` and `plan` are free text (B3 follow-ups,
 -- issue #32; the optional findings of the B3 verification on PR #215, approved by Austin on 7 Oct, and the review of PR #233;
 -- docs/adr/0016-share-links.md).
@@ -42557,8 +42557,10 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 --     nor to a digit and a dot or comma ("v1.2"), nor to a digit and a hyphen or slash ("2026-10-06") unless it has 3 or more
 --     digits, thousands groups or an exponent (a range's second amount). A sign or a separator after a letter or a space counts
 --     ("-4100-GBP", "x/4100-GBP"); a range is matched whole ("4,100-4,500-GBP", "4100/4500/GBP"). A plain number (no groups, no
---     exponent) right after "iso" or "rfc" is a standard's number, and a plain 1- or 2-digit one right after a word of JOIN_WORDS
---     in packages/db/src/money.ts ("windows", "page", "version" ...) is a version or a place in a document;
+--     exponent) right after "iso" or "rfc" is a standard's number; a plain 1- or 2-digit one right after a version word
+--     (JOIN_VERSION_WORDS in packages/db/src/money.ts: "windows", "version", "v" ...) is a version, whole or decimal ("v 1.2"); and a
+--     WHOLE 1- or 2-digit one right after a place word (JOIN_PLACE_WORDS: "page", "row", "part" ...) is a place in a document. A
+--     decimal after a place word is money ("page 12.50-GBP", "row 99,99-EUR");
 --   * a code BEFORE the number ("GBP-4100", "GBP/4100", "usd-1e6"), symbols ("£4.1k", "4,512€") and amounts in words ("quid"):
 --     unchanged.
 -- The app applies the same rule (`shareMoneyRegex`); a test keeps the word lists equal, and one list of texts runs through both
@@ -42569,20 +42571,21 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 -- constraint), so a name typed into one skipped the name checks. They are free text now, in the app (`SHARE_NON_TEXT_REASONS`) and
 -- here: checked like any other string. Neither is engine input, so no number moves. Strictly more is checked: a stored snapshot
 -- with a person's or a client's name in a role's colour or the plan would be refused at its next Update copy (preflight 3 counts
--- them; expect none).
+-- them; expect none). A `color` value that is a whole hex colour (`#rgb` to `#rrggbbaa`) is no text, so a colour whose letters spell
+-- a name ("#ada123" and a person called Ada) is neither hidden nor refused; the app's SHARE_HEX_COLOR is the same rule.
 --
 -- What this REPLACES, with `create or replace`, the same signature, language, volatility, security flag and `set search_path = ''`,
 -- as a full copy of the body named, changing only the lines marked `-- B3 follow-up` (a test checks it):
 --   * private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)   from 20261221000000_play_links.sql (B4, row 66, the newest):
---     one line of step 7's money pattern (the number before a code) becomes a space-only form and a hyphen-or-slash form, and two
---     lines of `non_text_keys` lose `color` and `plan`.
+--     one line of step 7's money pattern (the number before a code) becomes a space-only form and a hyphen-or-slash form, two
+--     lines of `non_text_keys` lose `color` and `plan`, and the two lines that gather free text skip a whole hex colour under `color`.
 -- Nothing is added or dropped. No row is changed. No policy or grant changes. No engine change, no golden number moves.
 --
--- ORDER: after 20261223000000 (C6, row 67), 20261221000000 (B4, row 66) and every earlier row; this is row 72. Rows 68 to 71 are other
--- work in flight; renumber at merge if anything later merges first. It depends only on B4's body of the function it replaces.
+-- ORDER: after 20261224000000 (row 68, applied), 20261223000000 (C6, row 67), 20261221000000 (B4, row 66) and every earlier row; this is
+-- row 69. Renumber at merge if anything later merges first. It depends only on B4's body of the function it replaces.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. B4 and C6 applied, nothing at or past this one. Expect 20261221000000 and 20261223000000 among the rows, and nothing >= '20261228000000':
+--   0. Row 68 is the latest applied, nothing at or past this one. Expect 20261221000000, 20261223000000 and 20261224000000 (the latest), and nothing >= '20261224500000':
 --        select version from supabase_migrations.schema_migrations where version >= '20261221000000' order by 1;
 --   1. The replaced function is as reviewed (B4's post-apply 5). Expect exactly one row:
 --        select n.nspname, p.proname, md5(p.prosrc), p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('private','share_snapshot_problem')) order by 1, 2;
@@ -42596,15 +42599,15 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 --
 -- POST-APPLY CHECK:
 --   1. The new body, not SECURITY DEFINER, empty search_path, stable. Expect private | share_snapshot_problem | <md5> | f | t | s with md5
---      4d2eb004d579886d65117c32853d6637:
+--      644d3a5cb3b9c171f4f81e962b8eab2e:
 --        select n.nspname, p.proname, md5(p.prosrc), p.prosecdef, p.proconfig = array['search_path=""'], p.provolatile from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('private','share_snapshot_problem'));
 --   2. Still private. Expect f, f:
 --        select has_function_privilege('anon', 'private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)', 'execute'), has_function_privilege('authenticated', 'private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)', 'execute');
 --   3. Smoke test (read-only: the function is stable and writes nothing). On Northbeam, a Financials-off overview snapshot whose text
 --      is a date, a standard's code, a product, a version and a page with a currency code passes (null), and one with a negative
---      amount and a hyphenated range is refused. Expect null, then The snapshot contains costs or margins.:
+--      amount, a hyphenated range and a decimal after a place word is refused. Expect null, then The snapshot contains costs or margins.:
 --        select private.share_snapshot_problem((select id from public.workspaces where slug = 'northbeam'), 'overview', '{"v":1,"kind":"overview","toggles":{"people":false,"financials":false},"note":"2026-10-06-CAD, ISO 4217-GBP, Windows 10-USD, v1.2/EUR, page 3/GBP"}'::jsonb, false, false);
---        select private.share_snapshot_problem((select id from public.workspaces where slug = 'northbeam'), 'overview', '{"v":1,"kind":"overview","toggles":{"people":false,"financials":false},"note":"about -4100-GBP, or 4,100-4,500-GBP a month"}'::jsonb, false, false);
+--        select private.share_snapshot_problem((select id from public.workspaces where slug = 'northbeam'), 'overview', '{"v":1,"kind":"overview","toggles":{"people":false,"financials":false},"note":"about -4100-GBP, or 4,100-4,500-GBP a month, page 12.50-GBP"}'::jsonb, false, false);
 --
 -- ROLLBACK (one transaction; redeploy the app from before this change first, or an Update copy that keeps one of the forms above
 -- would be refused by the old rule). Stored snapshots stay as they are and still open. The full previous body (B4's) is pasted, so
@@ -42739,7 +42742,7 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 --     return null;
 --   end;
 --   $$;
---   delete from supabase_migrations.schema_migrations where version = '20261228000000';
+--   delete from supabase_migrations.schema_migrations where version = '20261224500000';
 --   commit;
 --
 -- Production data: none needed.
@@ -42798,9 +42801,10 @@ begin
   end if;
   -- Every string value, normalised ONCE (the \x01 between them is no space and no letter, so nothing matches across two values),
   -- and the free-text ones on their own. A bare uuid is skipped before it costs a normalisation.
-  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where n.k is null or n.k <> all (non_text_keys))
+  select string_agg(n.v, E'\x01'), string_agg(n.v, E'\x01') filter (where (n.k is null or n.k <> all (non_text_keys))  -- B3 follow-up
+      and not (n.k is not distinct from 'color' and n.raw ~ '^#[0-9a-fA-F]{3,8}$'))  -- B3 follow-up: a whole hex colour is no text
     into everything, free
-    from (select s.k, private.share_norm(s.v) as v from private.share_strings(snap) as s
+    from (select s.k, s.v as raw, private.share_norm(s.v) as v from private.share_strings(snap) as s  -- B3 follow-up
           where s.v !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') as n;
   everything := coalesce(everything, '');
   free := coalesce(free, '');
@@ -42869,11 +42873,12 @@ begin
       -- A hyphen or a slash before the code: not the end of a date, a version or a standard's, product's or document's number  -- B3 follow-up
       -- (`shareMoneyRegex` in packages/db/src/money.ts has the same rule and words; a test keeps them equal). An amount or a range  -- B3 follow-up
       -- not glued to a letter, a digit, or a digit and . , - or /; a plain number not after a standard's word (iso 4217), and  -- B3 follow-up
-      -- with 1 or 2 digits not after a word such as windows or page:  -- B3 follow-up
+      -- with 1 or 2 digits not after a version word (windows 10, v 1.2), nor, when whole, after a place word (page 3):  -- B3 follow-up
       || '|(?<![a-z0-9])(?<![0-9][.,])(?<![0-9][/-])'  -- B3 follow-up
       || '(([0-9]+(\.[0-9]+)?e[+-]?[0-9]+|[0-9]{1,3}( [0-9]{3})+([.,][0-9]+)?|[0-9]{1,3}([.,][0-9]{3})+([.,][0-9]+)?|[0-9]+([.,][0-9]+)?)([[:space:]]*(k|m|bn))?[[:space:]]*[/-][[:space:]]*)?'  -- B3 follow-up
       || '([0-9]+(\.[0-9]+)?e[+-]?[0-9]+|[0-9]{1,3}( [0-9]{3})+([.,][0-9]+)?|([0-9]{1,3}([.,][0-9]{3})+([.,][0-9]+)?)[.,]?|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)[0-9]{3,}([.,][0-9]+)?[.,]?'  -- B3 follow-up
-      || '|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)(?<!(^|[^a-z])(windows|win|ios|android|macos|office|version|ver|v|build|release|rev|revision|page|pages|p|pp|chapter|ch|section|sec|clause|para|paragraph|article|appendix|annex|row|column|col|table|figure|fig|vol|volume|part|phase|sprint|ticket|slide)[[:space:]]+)[0-9]{1,2}([.,][0-9]+)?[.,]?)'  -- B3 follow-up
+      || '|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)(?<!(^|[^a-z])(windows|win|ios|android|macos|office|version|ver|v|build|release|rev|revision)[[:space:]]+)(?<!(^|[^a-z])(page|pages|p|pp|chapter|ch|section|sec|clause|para|paragraph|article|appendix|annex|row|column|col|table|figure|fig|vol|volume|part|phase|sprint|ticket|slide)[[:space:]]+)[0-9]{1,2}[.,]?'  -- B3 follow-up
+      || '|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)(?<!(^|[^a-z])(windows|win|ios|android|macos|office|version|ver|v|build|release|rev|revision)[[:space:]]+)[0-9]{1,2}[.,][0-9]+[.,]?)'  -- B3 follow-up
       || '([[:space:]]*(k|m|bn))?[[:space:]]*[/-][[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'  -- B3 follow-up
       -- ... or glued to a digit and a hyphen or slash when it can't be a date's last part (a range's second amount):  -- B3 follow-up
       || '|(?<=[0-9][/-])([0-9]+(\.[0-9]+)?e[+-]?[0-9]+|[0-9]{1,3}( [0-9]{3})+([.,][0-9]+)?|([0-9]{1,3}([.,][0-9]{3})+([.,][0-9]+)?)[.,]?|[0-9]{3,}([.,][0-9]+)?[.,]?)([[:space:]]*(k|m|bn))?[[:space:]]*[/-][[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'  -- B3 follow-up
@@ -42885,7 +42890,7 @@ begin
 end;
 $$;
 
-insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261228000000', 'share_money_rule', array['-- Share links: the money rule no longer hides dates, versions and standard codes; `color` and `plan` are free text (B3 follow-ups,
+insert into supabase_migrations.schema_migrations (version, name, statements) values ('20261224500000', 'share_money_rule', array['-- Share links: the money rule no longer hides dates, versions and standard codes; `color` and `plan` are free text (B3 follow-ups,
 -- issue #32; the optional findings of the B3 verification on PR #215, approved by Austin on 7 Oct, and the review of PR #233;
 -- docs/adr/0016-share-links.md).
 --
@@ -42898,8 +42903,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     nor to a digit and a dot or comma ("v1.2"), nor to a digit and a hyphen or slash ("2026-10-06") unless it has 3 or more
 --     digits, thousands groups or an exponent (a range''s second amount). A sign or a separator after a letter or a space counts
 --     ("-4100-GBP", "x/4100-GBP"); a range is matched whole ("4,100-4,500-GBP", "4100/4500/GBP"). A plain number (no groups, no
---     exponent) right after "iso" or "rfc" is a standard''s number, and a plain 1- or 2-digit one right after a word of JOIN_WORDS
---     in packages/db/src/money.ts ("windows", "page", "version" ...) is a version or a place in a document;
+--     exponent) right after "iso" or "rfc" is a standard''s number; a plain 1- or 2-digit one right after a version word
+--     (JOIN_VERSION_WORDS in packages/db/src/money.ts: "windows", "version", "v" ...) is a version, whole or decimal ("v 1.2"); and a
+--     WHOLE 1- or 2-digit one right after a place word (JOIN_PLACE_WORDS: "page", "row", "part" ...) is a place in a document. A
+--     decimal after a place word is money ("page 12.50-GBP", "row 99,99-EUR");
 --   * a code BEFORE the number ("GBP-4100", "GBP/4100", "usd-1e6"), symbols ("£4.1k", "4,512€") and amounts in words ("quid"):
 --     unchanged.
 -- The app applies the same rule (`shareMoneyRegex`); a test keeps the word lists equal, and one list of texts runs through both
@@ -42910,20 +42917,21 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- constraint), so a name typed into one skipped the name checks. They are free text now, in the app (`SHARE_NON_TEXT_REASONS`) and
 -- here: checked like any other string. Neither is engine input, so no number moves. Strictly more is checked: a stored snapshot
 -- with a person''s or a client''s name in a role''s colour or the plan would be refused at its next Update copy (preflight 3 counts
--- them; expect none).
+-- them; expect none). A `color` value that is a whole hex colour (`#rgb` to `#rrggbbaa`) is no text, so a colour whose letters spell
+-- a name ("#ada123" and a person called Ada) is neither hidden nor refused; the app''s SHARE_HEX_COLOR is the same rule.
 --
 -- What this REPLACES, with `create or replace`, the same signature, language, volatility, security flag and `set search_path = ''''`,
 -- as a full copy of the body named, changing only the lines marked `-- B3 follow-up` (a test checks it):
 --   * private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)   from 20261221000000_play_links.sql (B4, row 66, the newest):
---     one line of step 7''s money pattern (the number before a code) becomes a space-only form and a hyphen-or-slash form, and two
---     lines of `non_text_keys` lose `color` and `plan`.
+--     one line of step 7''s money pattern (the number before a code) becomes a space-only form and a hyphen-or-slash form, two
+--     lines of `non_text_keys` lose `color` and `plan`, and the two lines that gather free text skip a whole hex colour under `color`.
 -- Nothing is added or dropped. No row is changed. No policy or grant changes. No engine change, no golden number moves.
 --
--- ORDER: after 20261223000000 (C6, row 67), 20261221000000 (B4, row 66) and every earlier row; this is row 72. Rows 68 to 71 are other
--- work in flight; renumber at merge if anything later merges first. It depends only on B4''s body of the function it replaces.
+-- ORDER: after 20261224000000 (row 68, applied), 20261223000000 (C6, row 67), 20261221000000 (B4, row 66) and every earlier row; this is
+-- row 69. Renumber at merge if anything later merges first. It depends only on B4''s body of the function it replaces.
 --
 -- PREFLIGHT (read-only; `prod-sql.sh -c`, one query at a time):
---   0. B4 and C6 applied, nothing at or past this one. Expect 20261221000000 and 20261223000000 among the rows, and nothing >= ''20261228000000'':
+--   0. Row 68 is the latest applied, nothing at or past this one. Expect 20261221000000, 20261223000000 and 20261224000000 (the latest), and nothing >= ''20261224500000'':
 --        select version from supabase_migrations.schema_migrations where version >= ''20261221000000'' order by 1;
 --   1. The replaced function is as reviewed (B4''s post-apply 5). Expect exactly one row:
 --        select n.nspname, p.proname, md5(p.prosrc), p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in ((''private'',''share_snapshot_problem'')) order by 1, 2;
@@ -42937,15 +42945,15 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --
 -- POST-APPLY CHECK:
 --   1. The new body, not SECURITY DEFINER, empty search_path, stable. Expect private | share_snapshot_problem | <md5> | f | t | s with md5
---      4d2eb004d579886d65117c32853d6637:
+--      644d3a5cb3b9c171f4f81e962b8eab2e:
 --        select n.nspname, p.proname, md5(p.prosrc), p.prosecdef, p.proconfig = array[''search_path=""''], p.provolatile from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in ((''private'',''share_snapshot_problem''));
 --   2. Still private. Expect f, f:
 --        select has_function_privilege(''anon'', ''private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'', ''execute''), has_function_privilege(''authenticated'', ''private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'', ''execute'');
 --   3. Smoke test (read-only: the function is stable and writes nothing). On Northbeam, a Financials-off overview snapshot whose text
 --      is a date, a standard''s code, a product, a version and a page with a currency code passes (null), and one with a negative
---      amount and a hyphenated range is refused. Expect null, then The snapshot contains costs or margins.:
+--      amount, a hyphenated range and a decimal after a place word is refused. Expect null, then The snapshot contains costs or margins.:
 --        select private.share_snapshot_problem((select id from public.workspaces where slug = ''northbeam''), ''overview'', ''{"v":1,"kind":"overview","toggles":{"people":false,"financials":false},"note":"2026-10-06-CAD, ISO 4217-GBP, Windows 10-USD, v1.2/EUR, page 3/GBP"}''::jsonb, false, false);
---        select private.share_snapshot_problem((select id from public.workspaces where slug = ''northbeam''), ''overview'', ''{"v":1,"kind":"overview","toggles":{"people":false,"financials":false},"note":"about -4100-GBP, or 4,100-4,500-GBP a month"}''::jsonb, false, false);
+--        select private.share_snapshot_problem((select id from public.workspaces where slug = ''northbeam''), ''overview'', ''{"v":1,"kind":"overview","toggles":{"people":false,"financials":false},"note":"about -4100-GBP, or 4,100-4,500-GBP a month, page 12.50-GBP"}''::jsonb, false, false);
 --
 -- ROLLBACK (one transaction; redeploy the app from before this change first, or an Update copy that keeps one of the forms above
 -- would be refused by the old rule). Stored snapshots stay as they are and still open. The full previous body (B4''s) is pasted, so
@@ -43080,7 +43088,7 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --     return null;
 --   end;
 --   $$;
---   delete from supabase_migrations.schema_migrations where version = ''20261228000000'';
+--   delete from supabase_migrations.schema_migrations where version = ''20261224500000'';
 --   commit;
 --
 -- Production data: none needed.
@@ -43139,9 +43147,10 @@ begin
   end if;
   -- Every string value, normalised ONCE (the \x01 between them is no space and no letter, so nothing matches across two values),
   -- and the free-text ones on their own. A bare uuid is skipped before it costs a normalisation.
-  select string_agg(n.v, E''\x01''), string_agg(n.v, E''\x01'') filter (where n.k is null or n.k <> all (non_text_keys))
+  select string_agg(n.v, E''\x01''), string_agg(n.v, E''\x01'') filter (where (n.k is null or n.k <> all (non_text_keys))  -- B3 follow-up
+      and not (n.k is not distinct from ''color'' and n.raw ~ ''^#[0-9a-fA-F]{3,8}$''))  -- B3 follow-up: a whole hex colour is no text
     into everything, free
-    from (select s.k, private.share_norm(s.v) as v from private.share_strings(snap) as s
+    from (select s.k, s.v as raw, private.share_norm(s.v) as v from private.share_strings(snap) as s  -- B3 follow-up
           where s.v !~ ''^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'') as n;
   everything := coalesce(everything, '''');
   free := coalesce(free, '''');
@@ -43210,11 +43219,12 @@ begin
       -- A hyphen or a slash before the code: not the end of a date, a version or a standard''s, product''s or document''s number  -- B3 follow-up
       -- (`shareMoneyRegex` in packages/db/src/money.ts has the same rule and words; a test keeps them equal). An amount or a range  -- B3 follow-up
       -- not glued to a letter, a digit, or a digit and . , - or /; a plain number not after a standard''s word (iso 4217), and  -- B3 follow-up
-      -- with 1 or 2 digits not after a word such as windows or page:  -- B3 follow-up
+      -- with 1 or 2 digits not after a version word (windows 10, v 1.2), nor, when whole, after a place word (page 3):  -- B3 follow-up
       || ''|(?<![a-z0-9])(?<![0-9][.,])(?<![0-9][/-])''  -- B3 follow-up
       || ''(([0-9]+(\.[0-9]+)?e[+-]?[0-9]+|[0-9]{1,3}( [0-9]{3})+([.,][0-9]+)?|[0-9]{1,3}([.,][0-9]{3})+([.,][0-9]+)?|[0-9]+([.,][0-9]+)?)([[:space:]]*(k|m|bn))?[[:space:]]*[/-][[:space:]]*)?''  -- B3 follow-up
       || ''([0-9]+(\.[0-9]+)?e[+-]?[0-9]+|[0-9]{1,3}( [0-9]{3})+([.,][0-9]+)?|([0-9]{1,3}([.,][0-9]{3})+([.,][0-9]+)?)[.,]?|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)[0-9]{3,}([.,][0-9]+)?[.,]?''  -- B3 follow-up
-      || ''|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)(?<!(^|[^a-z])(windows|win|ios|android|macos|office|version|ver|v|build|release|rev|revision|page|pages|p|pp|chapter|ch|section|sec|clause|para|paragraph|article|appendix|annex|row|column|col|table|figure|fig|vol|volume|part|phase|sprint|ticket|slide)[[:space:]]+)[0-9]{1,2}([.,][0-9]+)?[.,]?)''  -- B3 follow-up
+      || ''|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)(?<!(^|[^a-z])(windows|win|ios|android|macos|office|version|ver|v|build|release|rev|revision)[[:space:]]+)(?<!(^|[^a-z])(page|pages|p|pp|chapter|ch|section|sec|clause|para|paragraph|article|appendix|annex|row|column|col|table|figure|fig|vol|volume|part|phase|sprint|ticket|slide)[[:space:]]+)[0-9]{1,2}[.,]?''  -- B3 follow-up
+      || ''|(?<!(^|[^a-z])(iso|rfc)[[:space:]]+)(?<!(^|[^a-z])(windows|win|ios|android|macos|office|version|ver|v|build|release|rev|revision)[[:space:]]+)[0-9]{1,2}[.,][0-9]+[.,]?)''  -- B3 follow-up
       || ''([[:space:]]*(k|m|bn))?[[:space:]]*[/-][[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)''  -- B3 follow-up
       -- ... or glued to a digit and a hyphen or slash when it can''t be a date''s last part (a range''s second amount):  -- B3 follow-up
       || ''|(?<=[0-9][/-])([0-9]+(\.[0-9]+)?e[+-]?[0-9]+|[0-9]{1,3}( [0-9]{3})+([.,][0-9]+)?|([0-9]{1,3}([.,][0-9]{3})+([.,][0-9]+)?)[.,]?|[0-9]{3,}([.,][0-9]+)?[.,]?)([[:space:]]*(k|m|bn))?[[:space:]]*[/-][[:space:]]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)''  -- B3 follow-up

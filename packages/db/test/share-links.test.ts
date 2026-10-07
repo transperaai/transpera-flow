@@ -689,7 +689,7 @@ describe("the leak check", () => {
     await accepted({ ...clean(), note: "CAD 3D renders" });
   });
 
-  it("7e. B3 follow-up (20261228000000): a date, a version or a standard's number joined to a code is no money; every money form still is", async () => {
+  it("7e. B3 follow-up (20261224500000): a date, a version or a standard's number joined to a code is no money; every money form still is", async () => {
     // The same lists the app's tests run (test/money-cases.ts), so the two checks agree.
     for (const { text } of [...MONEY_NOT, ...MONEY_NOT_VARIANTS]) await accepted({ ...clean(), note: text });
     await accepted({ ...clean(), notes: MONEY_NOT.map((c) => c.text) });

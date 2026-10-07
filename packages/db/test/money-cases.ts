@@ -63,6 +63,11 @@ export const MONEY_YES: readonly string[] = [
   "page 100/GBP",
   "ISO 4,217-GBP",
   "en 4100-GBP",
+  // A decimal after a place word (page, row, part ...): only a whole number there is a place in a document.
+  "page 12.50-GBP",
+  "row 99,99-EUR",
+  "part 1.5/EUR",
+  "table 2.5 - AUD",
 ];
 
 /**

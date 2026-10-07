@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { JOIN_STANDARD_WORDS, JOIN_WORDS } from "../src/money";
+import { JOIN_PLACE_WORDS, JOIN_STANDARD_WORDS, JOIN_VERSION_WORDS } from "../src/money";
 import { normaliseView } from "../src/share-text";
 import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES, OLD_SHARE_MONEY_SOURCE } from "./money-cases";
 import {
@@ -25,7 +25,7 @@ import {
   type ShareToggles,
   type SolutionRow,
 } from "../src";
-import { LEVER_KIND_IDS, SHARE_FREE_TEXT_KEYS, SHARE_NON_TEXT_KEYS, cleanHiddenLevers, validHiddenLevers } from "../src/share";
+import { LEVER_KIND_IDS, SHARE_FREE_TEXT_KEYS, SHARE_HEX_COLOR, SHARE_NON_TEXT_KEYS, cleanHiddenLevers, validHiddenLevers } from "../src/share";
 
 // Share links, the pure half (issue #32, B3): the Db a snapshot is read through, the redaction of every kind of snapshot under
 // every toggle combination, its checker, and the proof that a redacted view's numbers are the unredacted run's.
@@ -1011,12 +1011,29 @@ describe("the fifth round: tags, ids, names and money", () => {
     expect(redactShareSnapshot(plain, off, w.secrets)).toMatchObject({ roles: [{ color: "#2a78d6" }], workspace: { plan: "agency" } });
   });
 
+  it("B3 follow-up: a whole hex colour under color is no text, even when its letters spell a name; anything else under color is free text", () => {
+    const secrets: ShareSecrets = { people: [{ id: "p-ada", name: "Ada Lovelace", label: "Team member 9" }], clients: [{ id: "c-fab", name: "Fab", label: "Client 9" }] };
+    for (const color of ["#ada123", "#ADA", "#fab000", "#FAB000AA"]) {
+      const snap = bare({ roles: [{ color }] });
+      expect(shareSnapshotLeaks(snap, secrets, off), color).toEqual([]);
+      expect(redactShareSnapshot(snap, off, secrets), color).toMatchObject({ roles: [{ color }] });
+    }
+    // Not a whole hex colour, or not under `color`: free text, hidden and flagged.
+    expect(shareSnapshotLeaks(bare({ roles: [{ color: "ada" }] }), secrets, off)).toContain("person");
+    expect(shareSnapshotLeaks(bare({ roles: [{ color: "#ada123 Ada" }] }), secrets, off)).toContain("person");
+    expect(shareSnapshotLeaks(bare({ roles: [{ color: "#ada1234567" }] }), secrets, off)).toContain("person");
+    expect(shareSnapshotLeaks(bare({ note: "#fab000" }), secrets, off)).toContain("client");
+    expect(shareSnapshotLeaks(bare({ roles: [{ colour: "#ada123" }] }), secrets, off)).toContain("person");
+    expect(SHARE_HEX_COLOR.test("#2a78d6")).toBe(true);
+  });
+
   it("B3 follow-up: the words that make a number an identifier are the database's (the same list in the migration's money rule)", () => {
-    const sql = readFileSync(join(__dirname, "..", "supabase/migrations/20261228000000_share_money_rule.sql"), "utf8");
+    const sql = readFileSync(join(__dirname, "..", "supabase/migrations/20261224500000_share_money_rule.sql"), "utf8");
     const body = sql.slice(sql.search(/^create or replace function private\.share_snapshot_problem\(/m));
     const lists = [...body.matchAll(/\(\?<!\(\^\|\[\^a-z\]\)\(([a-z|]+)\)\[\[:space:\]\]\+\)/g)].map((m) => m[1]!);
-    // The standard words guard both plain-number forms; the other words only the 1- or 2-digit one.
-    expect(lists).toEqual([JOIN_STANDARD_WORDS.join("|"), JOIN_STANDARD_WORDS.join("|"), JOIN_WORDS.join("|")]);
+    // The standard words guard every plain-number form; version words both 1- or 2-digit forms; place words only the whole one.
+    const [std, version, place] = [JOIN_STANDARD_WORDS, JOIN_VERSION_WORDS, JOIN_PLACE_WORDS].map((w) => w.join("|"));
+    expect(lists).toEqual([std, std, version, place, std, version]);
   });
 });
 
