@@ -26,6 +26,8 @@ const ids = { ws: "", proc: "", rev: "", role: "", qualify: "", won: "", lost: "
 let editor: SupabaseClient<Database>;
 let member: SupabaseClient<Database>;
 let anon: SupabaseClient<Database>;
+/** This file's own accounts, removed afterwards. */
+const accounts: string[] = [];
 
 function client(token: string): SupabaseClient<Database> {
   return createClient<Database>("http://postgrest.invalid", token, {
@@ -91,6 +93,7 @@ describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST
     await edge(ids.qualify, ids.lost, 0.5);
 
     const [ed, mb] = [randomUUID(), randomUUID()];
+    accounts.push(ed, mb);
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `pt-editor-${tag}@example.com`, mb, `pt-member-${tag}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [ids.ws, ed, mb]);
     const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
@@ -105,6 +108,12 @@ describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST
   });
 
   afterAll(async () => {
+    // Only this file's own rows: its workspace (everything in it cascades) and its two accounts.
+    if (ids.ws) {
+      await admin.query("delete from workspaces where id = $1", [ids.ws]);
+      await admin.query("delete from audit_log where workspace_id = $1", [ids.ws]);
+      await admin.query("delete from auth.users where id = any ($1)", [accounts]);
+    }
     await admin?.end();
   });
 

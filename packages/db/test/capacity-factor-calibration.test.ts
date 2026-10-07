@@ -308,6 +308,25 @@ describe("team_capacity items", () => {
   });
 });
 
+describe("team_capacity with a hand-written provenance", () => {
+  it("gives items null, and doesn't fail, when a measured time's n isn't a count", async () => {
+    await db.client.query("begin");
+    try {
+      // As written or restored by hand: a huge number and a string. The read must still work for everyone.
+      await q("update person_capacity_factors set provenance = jsonb_build_object('factor', jsonb_build_object('source', 'measured', 'n', 1e20)) where person_id = $1 and step_id = $2", [P.a, S1]);
+      await q("update person_capacity_factors set provenance = jsonb_build_object('factor', jsonb_build_object('source', 'measured', 'n', 'many')) where person_id = $1 and step_id = $2", [P.b, S2]);
+      await q("set local role authenticated");
+      await q("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(editor.claims)]);
+      const t = (await q("select public.team_capacity($1) as t", [ws]))[0]!.t as { person_capacity_factors: { person_id: string; step_id: string | null; items: number | null }[] };
+      const item = (person: string, step: string) => t.person_capacity_factors.find((x) => x.person_id === person && x.step_id === step)!;
+      expect(item(P.a, S1).items).toBeNull();
+      expect(item(P.b, S2).items).toBeNull();
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+});
+
 /** The text between a function's `$$` marks, as pg_proc.prosrc holds it. */
 function body(file: string, name: string): string {
   const sql = readFileSync(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
@@ -421,6 +440,16 @@ describe("the migration file", () => {
       expect(rollback).toMatch(/commit;$/);
       await own.client.query(rollback);
       expect(await oq("select to_regclass('public.capacity_factor_proposals') as t")).toEqual([{ t: null }]);
+      // Preflight 1, as the header prints it, now gives exactly what it expects before the migration.
+      const pre1 = /^-- {8}(select n\.nspname \|\| '\.' \|\| p\.proname, md5\(p\.prosrc\), p\.prosecdef, p\.proconfig .*;)$/m.exec(readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8"))![1]!;
+      expect((await own.client.query({ text: pre1, rowMode: "array" })).rows).toEqual(
+        FUNCTIONS.map((f) => f.name)
+          .sort()
+          .map((name) => {
+            const f = FUNCTIONS.find((x) => x.name === name)!;
+            return [name, f.md5, name === "public.team_capacity", ['search_path=""']];
+          }),
+      );
       expect(await md5s()).toEqual({
         apply_calibration: "28fcf1c8c13a5f2e4b4b9c5d7f3feadb",
         calibration_payload_problem: "d4da9751d6d050289a7dc5f07eb3c414",
@@ -431,6 +460,75 @@ describe("the migration file", () => {
       expect(await oq("select has_function_privilege('anon', 'public.apply_calibration(uuid, text[])', 'execute') a, has_function_privilege('authenticated', 'public.apply_calibration(uuid, text[])', 'execute') b")).toEqual([{ a: false, b: true }]);
     } finally {
       await own.close();
+    }
+  }, 120_000);
+
+  it("says in its header where it goes (after row 71, applied) and what preflight 0 expects", () => {
+    expect(sql).toContain("-- ORDER: after row 71 (applied): 20261226000000 (#228), the latest on production.");
+    expect(sql).toContain(
+      "select version from supabase_migrations.schema_migrations where version in ('20261208000000', '20261216000000', '20261223000000') or version >= '20261224000000' order by 1;",
+    );
+    expect(sql).toContain("20261208000000, 20261216000000, 20261223000000, 20261224000000, 20261224500000, 20261225000000, 20261226000000 (so nothing\n--      >= 20261227000000)");
+    const apply = readFileSync(new URL(`../scripts/apply/${FILE}`, import.meta.url), "utf8");
+    expect(apply.slice(0, apply.indexOf("begin;"))).toContain("apply it after row 71 (applied)");
+  });
+
+  /** The smoke block exactly as the header prints it (post-apply 6), and the message it must end with. */
+  const smoke = () => {
+    const head = sql.slice(0, sql.indexOf("-- ROLLBACK ("));
+    const lines = head.split("\n");
+    const from = lines.indexOf("--        do $smoke$");
+    const to = lines.indexOf("--        $smoke$;");
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const block = lines.slice(from, to + 1).map((l) => l.slice("--        ".length)).join("\n");
+    expect(block).toContain("<agency admin user id>");
+    const expected = lines[from - 1]!.slice("--        ".length);
+    return { block, expected };
+  };
+  const counts = async () => (await q("select (select count(*) from datasets)::int d, (select count(*) from calibrations)::int c, (select count(*) from capacity_factor_proposals)::int p, (select count(*) from person_capacity_factors)::int f, (select count(*) from memberships)::int m, (select settings from workspaces where id = $1) s", [ws]))[0];
+
+  it("has a post-apply smoke test (one do block, as an agency admin, then as a member) that rolls everything back", async () => {
+    const { block, expected } = smoke();
+    expect(expected).toBe(
+      "SMOKE TEST ROLLED BACK: as the admin status=applied, source=measured, n=12, items=12, calibration names nobody=yes; as a member proposals=0, other people's times=0, calibration names nobody=yes, recording=42501",
+    );
+    // With the switch off, as on production before anyone switches it on: the block switches it on itself.
+    await setSwitch(false);
+    try {
+      const before = await counts();
+      // Run as the operator would: outside any transaction, the block as printed with the user id put in.
+      const e = await db.client.query(block.replace("<agency admin user id>", admin.id)).then(
+        () => null,
+        (x: { code?: string; message?: string }) => x,
+      );
+      expect([e?.code, e?.message]).toEqual(["P0001", expected]);
+      expect(await counts()).toEqual(before);
+      expect(await q("select count(*)::int as n from datasets where file_name = 'smoke-test-227.csv'")).toEqual([{ n: 0 }]);
+
+      // With no member or viewer in Northbeam, the block makes an account with no access a member (and rolls that back too).
+      await db.client.query("begin");
+      try {
+        await db.client.query("delete from memberships where workspace_id = $1 and role in ('member', 'viewer')", [ws]);
+        const e2 = await db.client.query(block.replace("<agency admin user id>", admin.id)).then(
+          () => null,
+          (x: { code?: string; message?: string }) => x,
+        );
+        expect([e2?.code, e2?.message]).toEqual(["P0001", expected]);
+      } finally {
+        await db.client.query("rollback");
+      }
+      expect(await counts()).toEqual(before);
+
+      // Someone who isn't an agency admin, owner or editor can't pass it by accident: recording is refused.
+      const refused = await db.client.query(block.replace("<agency admin user id>", stranger.id).replace('"agency_admin":true', '"agency_admin":false')).then(
+        () => null,
+        (x: { code?: string }) => x,
+      );
+      expect(refused?.code).toBe("42501");
+      expect(await counts()).toEqual(before);
+    } finally {
+      await setSwitch(true);
     }
   }, 120_000);
 

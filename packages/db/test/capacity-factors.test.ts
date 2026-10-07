@@ -400,7 +400,7 @@ describe("the migration file", () => {
     // #227 (20261227000000) replaced team_capacity again: its preflight expects exactly the body this migration installs, and the
     // live body is the one its post-apply check states.
     const latest = readFileSync(new URL("../supabase/migrations/20261227000000_calibrate_capacity_factors.sql", import.meta.url), "utf8");
-    expect(/public\.team_capacity ([0-9a-f]{32}):/.exec(latest)![1]).toBe(next);
+    expect(/public\.team_capacity ([0-9a-f]{32}) t \{search_path=""\}:/.exec(latest)![1]).toBe(next);
     const live = /new md5 ([0-9a-f]{32})\./.exec(latest.slice(latest.indexOf("Replaces the body of 20261223000000")))![1]!;
     const md5 = async () => (await db.client.query("select md5(prosrc) as m from pg_proc where pronamespace = 'public'::regnamespace and proname = 'team_capacity'")).rows[0].m;
     expect(await md5()).toBe(live);

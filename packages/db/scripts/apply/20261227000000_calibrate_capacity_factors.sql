@@ -1,10 +1,11 @@
 -- Production apply file for 20261227000000_calibrate_capacity_factors (issue #227, C6 follow-up). One table (`capacity_factor_proposals`) and FOUR replaced
 -- functions: `private.calibration_payload_problem`, `public.apply_calibration`, `public.record_calibration_import` and
 -- `public.team_capacity` (each a full copy of its latest body plus marked `-- #227` lines). This is row 72 of
--- docs/production-migrations.md; apply it after rows 57, 62, 67 and 71 (20261226000000), else renumber per HANDOVER.
+-- docs/production-migrations.md; apply it after row 71 (applied): 20261226000000, the latest on production (rows 68 to 71 are all
+-- applied; preflight 0 expects them and nothing at or past this one).
 -- APPLY BEFORE DEPLOYING THE APP (the page sends `capacity_factors`; the old `record_calibration_import` would store them in
--- `results`, which members read). Preflight, post-apply checks and rollback are in the migration's own header, repeated below.
--- Sets `lock_timeout` to 5 s.
+-- `results`, which members read). Preflight, post-apply checks (with the rolled-back smoke test) and rollback are in the
+-- migration's own header, repeated below. Sets `lock_timeout` to 5 s.
 
 begin;
 set local lock_timeout = '5s';
@@ -46,29 +47,39 @@ set local lock_timeout = '5s';
 --     for anyone who can't see people and (22023) when the switch is off, stored in the new table, and the call's keys are mapped
 --     to `factor:<row id>` and back. Replaces the body of 20261216000000 (md5 f1a66685c4bbaeb3c212e5babeea9a6e); new md5 fe662ce28581be4541d5903507b1ed25.
 --   * `public.team_capacity(uuid)`: each factor item gains `items`, how many visits a measured time rests on (null when entered).
---     Replaces the body of 20261223000000 (md5 a8dcb5d1bddaf549ecef591a3c1b5ae0); new md5 8beae978ee431f5f3e50d17c71c3c056.
+--     Replaces the body of 20261223000000 (md5 a8dcb5d1bddaf549ecef591a3c1b5ae0); new md5 3d1b927807832414bf57f5b5a629e08b.
 -- Not touched: `save_fields`, `record_calibration`, `record_client_calibration`, the `calibrations` trigger, any policy or grant on
 -- an existing table, `share_team_capacity`.
 --
--- ORDER: after 20261223000000 (C6, row 67), 20261216000000 (C1, row 62), 20261208000000 (C2 part 2, row 57) and after row 71
--- (20261226000000). Independent of #230 (20261225000000) and #228 (20261226000000), which replace other functions; if this file
--- is applied before either, that one is renumbered above it. This is row 72 of docs/production-migrations.md.
+-- ORDER: after row 71 (applied): 20261226000000 (#228), the latest on production. Rows 68 (20261224000000, unused table
+-- privileges), 69 (20261224500000, share_snapshot_problem), 70 (20261225000000, audit_company_write) and 71 (import_workspace_bundle)
+-- are all applied and touch none of the four functions this replaces, nor the new table's name. It also needs the bodies it copies:
+-- row 57 (20261208000000, C2 part 2), row 62 (20261216000000, C1) and row 67 (20261223000000, C6), all applied. This is row 72 of
+-- docs/production-migrations.md.
 -- APPLY BEFORE DEPLOYING THE APP: the page sends `capacity_factors`; the old `record_calibration_import` would store them in
 -- `results`, which members read.
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -c "..."`, one query at a time):
---   0. Rows 57, 62 and 67 are applied and nothing is at or past this one. Expect the three:
---        select version from supabase_migrations.schema_migrations where version in ('20261208000000', '20261216000000', '20261223000000') or version >= '20261227000000' order by 1;
---   1. The four bodies are as expected. Expect public.apply_calibration 28fcf1c8c13a5f2e4b4b9c5d7f3feadb,
---      private.calibration_payload_problem d4da9751d6d050289a7dc5f07eb3c414,
---      public.record_calibration_import f1a66685c4bbaeb3c212e5babeea9a6e and public.team_capacity a8dcb5d1bddaf549ecef591a3c1b5ae0:
---        select n.nspname || '.' || p.proname, md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
+--   0. Rows 57, 62 and 67 (the bodies copied) and rows 68 to 71 are applied, and nothing is at or past this one. Expect exactly
+--      20261208000000, 20261216000000, 20261223000000, 20261224000000, 20261224500000, 20261225000000, 20261226000000 (so nothing
+--      >= 20261227000000):
+--        select version from supabase_migrations.schema_migrations where version in ('20261208000000', '20261216000000', '20261223000000') or version >= '20261224000000' order by 1;
+--   1. The four bodies and their settings are the ones this file copies (one row each, so no overload). Expect exactly these four
+--      rows: private.calibration_payload_problem d4da9751d6d050289a7dc5f07eb3c414 f {search_path=""},
+--      public.apply_calibration 28fcf1c8c13a5f2e4b4b9c5d7f3feadb f {search_path=""},
+--      public.record_calibration_import f1a66685c4bbaeb3c212e5babeea9a6e f {search_path=""} and
+--      public.team_capacity a8dcb5d1bddaf549ecef591a3c1b5ae0 t {search_path=""}:
+--        select n.nspname || '.' || p.proname, md5(p.prosrc), p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
 --   2. Nothing created yet. Expect null:
 --        select to_regclass('public.capacity_factor_proposals');
 --   3. No calibration so far holds a person-level key (sanity). Expect 0:
 --        select count(*) from public.calibrations where results ? 'capacity_factors' or exists (select 1 from unnest(applied_keys) k where k like 'factor:%');
 --   4. For the log: workspaces with the switch on:
 --        select slug from public.workspaces where settings -> 'capacity_factor_enabled' = 'true'::jsonb;
+--   5. For the smoke test (post-apply 6): an agency admin's user id, and Northbeam has a published task step and an active person.
+--      Expect at least one id, then t, t:
+--        select id from auth.users where (raw_app_meta_data ->> 'agency_admin')::boolean;
+--        select exists (select 1 from public.steps s join public.processes p on p.live_revision_id = s.revision_id join public.workspaces w on w.id = p.workspace_id where w.slug = 'northbeam' and s.kind = 'task'), exists (select 1 from public.people pe join public.workspaces w on w.id = pe.workspace_id where w.slug = 'northbeam' and pe.active);
 --
 -- POST-APPLY CHECK:
 --   1. RLS on and two policies (select and insert, both can_see_people). Expect t, 2, then the two quals:
@@ -84,17 +95,93 @@ set local lock_timeout = '5s';
 --      {search_path=""}:
 --        select n.nspname || '.' || p.proname, p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
 --      and their new md5s: apply_calibration a0dee83e87244d89864d1e6534abaab4, calibration_payload_problem 35670c65c2998138df67edcb691c1f33,
---      record_calibration_import fe662ce28581be4541d5903507b1ed25, team_capacity 8beae978ee431f5f3e50d17c71c3c056:
+--      record_calibration_import fe662ce28581be4541d5903507b1ed25, team_capacity 3d1b927807832414bf57f5b5a629e08b:
 --        select n.nspname || '.' || p.proname, md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
 --   5. anon can't execute the three public ones. Expect f, f, f:
 --        select has_function_privilege('anon', 'public.apply_calibration(uuid, text[])', 'execute'),
 --               has_function_privilege('anon', 'public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])', 'execute'),
 --               has_function_privilege('anon', 'public.team_capacity(uuid)', 'execute');
---   6. Smoke test, ROLLED BACK, as the Northbeam owner: the factor list is empty.
---        begin; set local role authenticated;
---        select set_config('request.jwt.claims', '{"sub":"<user id>","role":"authenticated"}', true);
---        select public.team_capacity('<northbeam id>') -> 'person_capacity_factors';   -- []
---        rollback;
+--   6. Smoke test, ROLLED BACK: one `do` block (one `prod-sql.sh -c` call) that, as an agency admin on Northbeam, switches Per-person
+--      times on, records one per-person time from a time log and applies it, reads what the admin sees, then, as a member (a
+--      member or viewer of Northbeam, else an account with no access made a member inside the block), reads what they see and
+--      tries to record one; and then raises an error so that everything it did is rolled back. Put the agency admin's user id from
+--      preflight 5 in the claims, save the block (without the `--        ` prefix) to a file and run it with `prod-sql.sh -f` (with
+--      -c, the shell would expand `$smoke`). Expect exactly this ERROR (any other error is a failure), then 0 and 0 from the checks after it:
+--        SMOKE TEST ROLLED BACK: as the admin status=applied, source=measured, n=12, items=12, calibration names nobody=yes; as a member proposals=0, other people's times=0, calibration names nobody=yes, recording=42501
+--        do $smoke$
+--        declare
+--          ws uuid;
+--          proc uuid;
+--          step uuid;
+--          person uuid;
+--          was numeric;
+--          member uuid;
+--          prop jsonb;
+--          r jsonb;
+--          cal uuid;
+--          status text;
+--          prov jsonb;
+--          items int;
+--          clean text;
+--          m_proposals int;
+--          m_others int;
+--          m_clean text;
+--          m_record text := 'not refused';
+--        begin
+--          -- As the applier: Northbeam, the first task step of a published process, the first active person and their time there now.
+--          select w.id into ws from public.workspaces w where w.slug = 'northbeam';
+--          select s.id, s.process_id into step, proc from public.steps s join public.processes p on p.live_revision_id = s.revision_id
+--            where p.workspace_id = ws and s.kind = 'task' order by p.created_at, p.id, s.id limit 1;
+--          select pe.id into person from public.people pe where pe.workspace_id = ws and pe.active order by pe.created_at, pe.id limit 1;
+--          select c.factor into was from public.person_capacity_factors c where c.person_id = person and c.step_id = step;
+--          -- Someone to stand in for a member: a member or viewer of Northbeam, else an account with no access to it, made a member here.
+--          select m.user_id into member from public.memberships m where m.workspace_id = ws and m.role in ('member', 'viewer') order by m.created_at, m.id limit 1;
+--          if member is null then
+--            select u.id into member from auth.users u
+--              where not coalesce((u.raw_app_meta_data ->> 'agency_admin')::boolean, false)
+--                and not exists (select 1 from public.memberships m where m.workspace_id = ws and m.user_id = u.id)
+--              order by u.id limit 1;
+--            if member is null then
+--              raise exception 'SMOKE TEST: no account can stand in for a member';
+--            end if;
+--            insert into public.memberships (workspace_id, user_id, role) values (ws, member, 'member');
+--          end if;
+--          -- As the agency admin: switch Per-person times on, record one per-person time from a time log and apply it.
+--          perform set_config('role', 'authenticated', true);
+--          perform set_config('request.jwt.claims', '{"sub":"<agency admin user id>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
+--          perform public.save_capacity_factor_switch(ws, jsonb_build_object('capacity_factor_enabled', (select w.settings -> 'capacity_factor_enabled' from public.workspaces w where w.id = ws)), '{"capacity_factor_enabled": true}');
+--          prop := jsonb_build_object('key', 'factor:' || person || ':' || step, 'kind', 'capacity_factor',
+--            'target', jsonb_build_object('table', 'person_capacity_factors', 'id', person, 'step_id', step), 'n', 12, 'stepN', 30,
+--            'note', 'Smoke test.', 'set', jsonb_build_object('factor', case when was = 0.8 then 0.9 else 0.8 end), 'before', jsonb_build_object('factor', was));
+--          r := public.record_calibration_import(ws, proc, 'time_logs', 'smoke-test-227.csv', '{}', 30, '{}',
+--            jsonb_build_object('proposals', '[]'::jsonb, 'capacity_factors', jsonb_build_array(prop)), array[prop ->> 'key']);
+--          cal := (r ->> 'calibration_id')::uuid;
+--          status := r -> 'results' -> 0 ->> 'status';
+--          select c.provenance -> 'factor' into prov from public.person_capacity_factors c where c.person_id = person and c.step_id = step;
+--          select (x ->> 'items')::int into items from jsonb_array_elements(public.team_capacity(ws) -> 'person_capacity_factors') x
+--            where x ->> 'person_id' = person::text and x ->> 'step_id' = step::text;
+--          select case when not c.results ? 'capacity_factors' and strpos(c.results::text || c.applied_keys::text, person::text) = 0
+--            and c.applied_keys = array(select 'factor:' || x.id from public.capacity_factor_proposals x where x.calibration_id = cal) then 'yes' else 'no' end
+--            into clean from public.calibrations c where c.id = cal;
+--          -- As the member: no proposal, no one else's time, the calibration (which they read) names no one, and recording is refused.
+--          perform set_config('request.jwt.claims', jsonb_build_object('sub', member, 'role', 'authenticated')::text, true);
+--          select count(*) into m_proposals from public.capacity_factor_proposals;
+--          select count(*) into m_others from jsonb_array_elements(public.team_capacity(ws) -> 'person_capacity_factors') x
+--            where x ->> 'person_id' is distinct from public.my_person_id(ws)::text;
+--          select case when count(*) = 1 and bool_and(strpos(c.results::text || c.applied_keys::text, person::text) = 0) then 'yes' else 'no' end
+--            into m_clean from public.calibrations c where c.id = cal;
+--          begin
+--            perform public.record_calibration_import(ws, proc, 'time_logs', 'smoke-test-227.csv', '{}', 30, '{}',
+--              jsonb_build_object('proposals', '[]'::jsonb, 'capacity_factors', jsonb_build_array(prop)), array[prop ->> 'key']);
+--          exception when others then
+--            m_record := sqlstate;
+--          end;
+--          raise exception 'SMOKE TEST ROLLED BACK: as the admin status=%, source=%, n=%, items=%, calibration names nobody=%; as a member proposals=%, other people''s times=%, calibration names nobody=%, recording=%',
+--            status, prov ->> 'source', prov ->> 'n', items, clean, m_proposals, m_others, m_clean, m_record;
+--        end
+--        $smoke$;
+--        select count(*) from public.datasets where file_name = 'smoke-test-227.csv';
+--        select count(*) from public.capacity_factor_proposals;
 --   7. Live check (Austin): switch Per-person times on, read a time log with a person column on Historical data, match the people,
 --      apply one per-person time. Settings -> People shows it "measured from N visits". A member sees no per-person part on
 --      Historical data.
@@ -1161,9 +1248,11 @@ begin
     'person_capacity_factors', coalesce((select jsonb_agg(jsonb_build_object('person_id', f.person_id, 'step_id', f.step_id,
         'workspace_id', f.workspace_id, 'factor', f.factor,
         'source', coalesce(f.provenance -> 'factor' ->> 'source', 'entered'),
-        -- #227: how many visits a measured time rests on (PRD §6.3.7 shows a measured time only from 10); null when entered.
+        -- #227: how many visits a measured time rests on (PRD §6.3.7 shows a measured time only from 10); null when entered, or
+        -- #227: when `n` isn't a count (provenance can be written or restored by hand: never let it fail everyone's read).
         'items', case when f.provenance -> 'factor' ->> 'source' = 'measured' and jsonb_typeof(f.provenance -> 'factor' -> 'n') = 'number'
-          then round((f.provenance -> 'factor' ->> 'n')::numeric)::int end)
+          then case when (f.provenance -> 'factor' ->> 'n')::numeric between 0 and 1000000000
+            then round((f.provenance -> 'factor' ->> 'n')::numeric)::int end end)
         order by f.person_id, f.step_id nulls first)
       from public.person_capacity_factors f
       where f.workspace_id = ws and (everyone or (own is not null and f.person_id = own))), '[]'::jsonb)
@@ -1213,29 +1302,39 @@ values ('20261227000000', 'calibrate_capacity_factors', array[$mig$-- Per-person
 --     for anyone who can't see people and (22023) when the switch is off, stored in the new table, and the call's keys are mapped
 --     to `factor:<row id>` and back. Replaces the body of 20261216000000 (md5 f1a66685c4bbaeb3c212e5babeea9a6e); new md5 fe662ce28581be4541d5903507b1ed25.
 --   * `public.team_capacity(uuid)`: each factor item gains `items`, how many visits a measured time rests on (null when entered).
---     Replaces the body of 20261223000000 (md5 a8dcb5d1bddaf549ecef591a3c1b5ae0); new md5 8beae978ee431f5f3e50d17c71c3c056.
+--     Replaces the body of 20261223000000 (md5 a8dcb5d1bddaf549ecef591a3c1b5ae0); new md5 3d1b927807832414bf57f5b5a629e08b.
 -- Not touched: `save_fields`, `record_calibration`, `record_client_calibration`, the `calibrations` trigger, any policy or grant on
 -- an existing table, `share_team_capacity`.
 --
--- ORDER: after 20261223000000 (C6, row 67), 20261216000000 (C1, row 62), 20261208000000 (C2 part 2, row 57) and after row 71
--- (20261226000000). Independent of #230 (20261225000000) and #228 (20261226000000), which replace other functions; if this file
--- is applied before either, that one is renumbered above it. This is row 72 of docs/production-migrations.md.
+-- ORDER: after row 71 (applied): 20261226000000 (#228), the latest on production. Rows 68 (20261224000000, unused table
+-- privileges), 69 (20261224500000, share_snapshot_problem), 70 (20261225000000, audit_company_write) and 71 (import_workspace_bundle)
+-- are all applied and touch none of the four functions this replaces, nor the new table's name. It also needs the bodies it copies:
+-- row 57 (20261208000000, C2 part 2), row 62 (20261216000000, C1) and row 67 (20261223000000, C6), all applied. This is row 72 of
+-- docs/production-migrations.md.
 -- APPLY BEFORE DEPLOYING THE APP: the page sends `capacity_factors`; the old `record_calibration_import` would store them in
 -- `results`, which members read.
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -c "..."`, one query at a time):
---   0. Rows 57, 62 and 67 are applied and nothing is at or past this one. Expect the three:
---        select version from supabase_migrations.schema_migrations where version in ('20261208000000', '20261216000000', '20261223000000') or version >= '20261227000000' order by 1;
---   1. The four bodies are as expected. Expect public.apply_calibration 28fcf1c8c13a5f2e4b4b9c5d7f3feadb,
---      private.calibration_payload_problem d4da9751d6d050289a7dc5f07eb3c414,
---      public.record_calibration_import f1a66685c4bbaeb3c212e5babeea9a6e and public.team_capacity a8dcb5d1bddaf549ecef591a3c1b5ae0:
---        select n.nspname || '.' || p.proname, md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
+--   0. Rows 57, 62 and 67 (the bodies copied) and rows 68 to 71 are applied, and nothing is at or past this one. Expect exactly
+--      20261208000000, 20261216000000, 20261223000000, 20261224000000, 20261224500000, 20261225000000, 20261226000000 (so nothing
+--      >= 20261227000000):
+--        select version from supabase_migrations.schema_migrations where version in ('20261208000000', '20261216000000', '20261223000000') or version >= '20261224000000' order by 1;
+--   1. The four bodies and their settings are the ones this file copies (one row each, so no overload). Expect exactly these four
+--      rows: private.calibration_payload_problem d4da9751d6d050289a7dc5f07eb3c414 f {search_path=""},
+--      public.apply_calibration 28fcf1c8c13a5f2e4b4b9c5d7f3feadb f {search_path=""},
+--      public.record_calibration_import f1a66685c4bbaeb3c212e5babeea9a6e f {search_path=""} and
+--      public.team_capacity a8dcb5d1bddaf549ecef591a3c1b5ae0 t {search_path=""}:
+--        select n.nspname || '.' || p.proname, md5(p.prosrc), p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
 --   2. Nothing created yet. Expect null:
 --        select to_regclass('public.capacity_factor_proposals');
 --   3. No calibration so far holds a person-level key (sanity). Expect 0:
 --        select count(*) from public.calibrations where results ? 'capacity_factors' or exists (select 1 from unnest(applied_keys) k where k like 'factor:%');
 --   4. For the log: workspaces with the switch on:
 --        select slug from public.workspaces where settings -> 'capacity_factor_enabled' = 'true'::jsonb;
+--   5. For the smoke test (post-apply 6): an agency admin's user id, and Northbeam has a published task step and an active person.
+--      Expect at least one id, then t, t:
+--        select id from auth.users where (raw_app_meta_data ->> 'agency_admin')::boolean;
+--        select exists (select 1 from public.steps s join public.processes p on p.live_revision_id = s.revision_id join public.workspaces w on w.id = p.workspace_id where w.slug = 'northbeam' and s.kind = 'task'), exists (select 1 from public.people pe join public.workspaces w on w.id = pe.workspace_id where w.slug = 'northbeam' and pe.active);
 --
 -- POST-APPLY CHECK:
 --   1. RLS on and two policies (select and insert, both can_see_people). Expect t, 2, then the two quals:
@@ -1251,17 +1350,93 @@ values ('20261227000000', 'calibrate_capacity_factors', array[$mig$-- Per-person
 --      {search_path=""}:
 --        select n.nspname || '.' || p.proname, p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
 --      and their new md5s: apply_calibration a0dee83e87244d89864d1e6534abaab4, calibration_payload_problem 35670c65c2998138df67edcb691c1f33,
---      record_calibration_import fe662ce28581be4541d5903507b1ed25, team_capacity 8beae978ee431f5f3e50d17c71c3c056:
+--      record_calibration_import fe662ce28581be4541d5903507b1ed25, team_capacity 3d1b927807832414bf57f5b5a629e08b:
 --        select n.nspname || '.' || p.proname, md5(p.prosrc) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where (n.nspname, p.proname) in (('public', 'apply_calibration'), ('private', 'calibration_payload_problem'), ('public', 'record_calibration_import'), ('public', 'team_capacity')) order by 1;
 --   5. anon can't execute the three public ones. Expect f, f, f:
 --        select has_function_privilege('anon', 'public.apply_calibration(uuid, text[])', 'execute'),
 --               has_function_privilege('anon', 'public.record_calibration_import(uuid, uuid, text, text, jsonb, integer, jsonb, jsonb, text[])', 'execute'),
 --               has_function_privilege('anon', 'public.team_capacity(uuid)', 'execute');
---   6. Smoke test, ROLLED BACK, as the Northbeam owner: the factor list is empty.
---        begin; set local role authenticated;
---        select set_config('request.jwt.claims', '{"sub":"<user id>","role":"authenticated"}', true);
---        select public.team_capacity('<northbeam id>') -> 'person_capacity_factors';   -- []
---        rollback;
+--   6. Smoke test, ROLLED BACK: one `do` block (one `prod-sql.sh -c` call) that, as an agency admin on Northbeam, switches Per-person
+--      times on, records one per-person time from a time log and applies it, reads what the admin sees, then, as a member (a
+--      member or viewer of Northbeam, else an account with no access made a member inside the block), reads what they see and
+--      tries to record one; and then raises an error so that everything it did is rolled back. Put the agency admin's user id from
+--      preflight 5 in the claims, save the block (without the `--        ` prefix) to a file and run it with `prod-sql.sh -f` (with
+--      -c, the shell would expand `$smoke`). Expect exactly this ERROR (any other error is a failure), then 0 and 0 from the checks after it:
+--        SMOKE TEST ROLLED BACK: as the admin status=applied, source=measured, n=12, items=12, calibration names nobody=yes; as a member proposals=0, other people's times=0, calibration names nobody=yes, recording=42501
+--        do $smoke$
+--        declare
+--          ws uuid;
+--          proc uuid;
+--          step uuid;
+--          person uuid;
+--          was numeric;
+--          member uuid;
+--          prop jsonb;
+--          r jsonb;
+--          cal uuid;
+--          status text;
+--          prov jsonb;
+--          items int;
+--          clean text;
+--          m_proposals int;
+--          m_others int;
+--          m_clean text;
+--          m_record text := 'not refused';
+--        begin
+--          -- As the applier: Northbeam, the first task step of a published process, the first active person and their time there now.
+--          select w.id into ws from public.workspaces w where w.slug = 'northbeam';
+--          select s.id, s.process_id into step, proc from public.steps s join public.processes p on p.live_revision_id = s.revision_id
+--            where p.workspace_id = ws and s.kind = 'task' order by p.created_at, p.id, s.id limit 1;
+--          select pe.id into person from public.people pe where pe.workspace_id = ws and pe.active order by pe.created_at, pe.id limit 1;
+--          select c.factor into was from public.person_capacity_factors c where c.person_id = person and c.step_id = step;
+--          -- Someone to stand in for a member: a member or viewer of Northbeam, else an account with no access to it, made a member here.
+--          select m.user_id into member from public.memberships m where m.workspace_id = ws and m.role in ('member', 'viewer') order by m.created_at, m.id limit 1;
+--          if member is null then
+--            select u.id into member from auth.users u
+--              where not coalesce((u.raw_app_meta_data ->> 'agency_admin')::boolean, false)
+--                and not exists (select 1 from public.memberships m where m.workspace_id = ws and m.user_id = u.id)
+--              order by u.id limit 1;
+--            if member is null then
+--              raise exception 'SMOKE TEST: no account can stand in for a member';
+--            end if;
+--            insert into public.memberships (workspace_id, user_id, role) values (ws, member, 'member');
+--          end if;
+--          -- As the agency admin: switch Per-person times on, record one per-person time from a time log and apply it.
+--          perform set_config('role', 'authenticated', true);
+--          perform set_config('request.jwt.claims', '{"sub":"<agency admin user id>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
+--          perform public.save_capacity_factor_switch(ws, jsonb_build_object('capacity_factor_enabled', (select w.settings -> 'capacity_factor_enabled' from public.workspaces w where w.id = ws)), '{"capacity_factor_enabled": true}');
+--          prop := jsonb_build_object('key', 'factor:' || person || ':' || step, 'kind', 'capacity_factor',
+--            'target', jsonb_build_object('table', 'person_capacity_factors', 'id', person, 'step_id', step), 'n', 12, 'stepN', 30,
+--            'note', 'Smoke test.', 'set', jsonb_build_object('factor', case when was = 0.8 then 0.9 else 0.8 end), 'before', jsonb_build_object('factor', was));
+--          r := public.record_calibration_import(ws, proc, 'time_logs', 'smoke-test-227.csv', '{}', 30, '{}',
+--            jsonb_build_object('proposals', '[]'::jsonb, 'capacity_factors', jsonb_build_array(prop)), array[prop ->> 'key']);
+--          cal := (r ->> 'calibration_id')::uuid;
+--          status := r -> 'results' -> 0 ->> 'status';
+--          select c.provenance -> 'factor' into prov from public.person_capacity_factors c where c.person_id = person and c.step_id = step;
+--          select (x ->> 'items')::int into items from jsonb_array_elements(public.team_capacity(ws) -> 'person_capacity_factors') x
+--            where x ->> 'person_id' = person::text and x ->> 'step_id' = step::text;
+--          select case when not c.results ? 'capacity_factors' and strpos(c.results::text || c.applied_keys::text, person::text) = 0
+--            and c.applied_keys = array(select 'factor:' || x.id from public.capacity_factor_proposals x where x.calibration_id = cal) then 'yes' else 'no' end
+--            into clean from public.calibrations c where c.id = cal;
+--          -- As the member: no proposal, no one else's time, the calibration (which they read) names no one, and recording is refused.
+--          perform set_config('request.jwt.claims', jsonb_build_object('sub', member, 'role', 'authenticated')::text, true);
+--          select count(*) into m_proposals from public.capacity_factor_proposals;
+--          select count(*) into m_others from jsonb_array_elements(public.team_capacity(ws) -> 'person_capacity_factors') x
+--            where x ->> 'person_id' is distinct from public.my_person_id(ws)::text;
+--          select case when count(*) = 1 and bool_and(strpos(c.results::text || c.applied_keys::text, person::text) = 0) then 'yes' else 'no' end
+--            into m_clean from public.calibrations c where c.id = cal;
+--          begin
+--            perform public.record_calibration_import(ws, proc, 'time_logs', 'smoke-test-227.csv', '{}', 30, '{}',
+--              jsonb_build_object('proposals', '[]'::jsonb, 'capacity_factors', jsonb_build_array(prop)), array[prop ->> 'key']);
+--          exception when others then
+--            m_record := sqlstate;
+--          end;
+--          raise exception 'SMOKE TEST ROLLED BACK: as the admin status=%, source=%, n=%, items=%, calibration names nobody=%; as a member proposals=%, other people''s times=%, calibration names nobody=%, recording=%',
+--            status, prov ->> 'source', prov ->> 'n', items, clean, m_proposals, m_others, m_clean, m_record;
+--        end
+--        $smoke$;
+--        select count(*) from public.datasets where file_name = 'smoke-test-227.csv';
+--        select count(*) from public.capacity_factor_proposals;
 --   7. Live check (Austin): switch Per-person times on, read a time log with a person column on Historical data, match the people,
 --      apply one per-person time. Settings -> People shows it "measured from N visits". A member sees no per-person part on
 --      Historical data.
@@ -2328,9 +2503,11 @@ begin
     'person_capacity_factors', coalesce((select jsonb_agg(jsonb_build_object('person_id', f.person_id, 'step_id', f.step_id,
         'workspace_id', f.workspace_id, 'factor', f.factor,
         'source', coalesce(f.provenance -> 'factor' ->> 'source', 'entered'),
-        -- #227: how many visits a measured time rests on (PRD §6.3.7 shows a measured time only from 10); null when entered.
+        -- #227: how many visits a measured time rests on (PRD §6.3.7 shows a measured time only from 10); null when entered, or
+        -- #227: when `n` isn't a count (provenance can be written or restored by hand: never let it fail everyone's read).
         'items', case when f.provenance -> 'factor' ->> 'source' = 'measured' and jsonb_typeof(f.provenance -> 'factor' -> 'n') = 'number'
-          then round((f.provenance -> 'factor' ->> 'n')::numeric)::int end)
+          then case when (f.provenance -> 'factor' ->> 'n')::numeric between 0 and 1000000000
+            then round((f.provenance -> 'factor' ->> 'n')::numeric)::int end end)
         order by f.person_id, f.step_id nulls first)
       from public.person_capacity_factors f
       where f.workspace_id = ws and (everyone or (own is not null and f.person_id = own))), '[]'::jsonb)
