@@ -997,6 +997,78 @@ describe("open_share_link (B3)", () => {
   });
 });
 
+describe("play links (B4): submit_play_proposal and play_proposal_contacts", () => {
+  const tok = "z".repeat(43);
+
+  it("anon and every signed-in role may call submit_play_proposal, and an unknown token gets {status: gone} from each", async () => {
+    const call = "select public.submit_play_proposal($1, 'T', null, 'N', 'n@x.example', null, '[]'::jsonb) as r";
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      expect((await db.client.query(call, [tok])).rows[0].r).toEqual({ status: "gone" });
+    } finally {
+      await db.client.query("rollback");
+    }
+    for (const role of Object.keys(ROLES) as RoleName[]) {
+      await db.as(callers[role]!.claims, async (c) => {
+        expect((await c.query(call, [tok])).rows[0].r, role).toEqual({ status: "gone" });
+      });
+    }
+  });
+
+  it("play_proposal_contacts: anon holds no execute right; owners, editors and agency admins get {}; members, viewers and strangers are refused (42501)", async () => {
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      await expect(db.client.query("select public.play_proposal_contacts($1)", [ws])).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await db.client.query("rollback");
+    }
+    for (const role of Object.keys(ROLES) as RoleName[]) {
+      await db.as(callers[role]!.claims, async (c) => {
+        await c.query("savepoint s");
+        const r = await c.query("select public.play_proposal_contacts($1) as r", [ws]).then(
+          (x) => ({ ok: true as const, v: x.rows[0].r }),
+          (e: { code?: string }) => ({ ok: false as const, code: e.code }),
+        );
+        if (ROLES[role].writes) expect(r, role).toEqual({ ok: true, v: {} });
+        else expect(r, role).toEqual({ ok: false, code: "42501" });
+      });
+    }
+  });
+
+  it("the only write a play link can make: anon holds no INSERT, UPDATE, DELETE or TRUNCATE on any table, and the public functions anon can execute are what they were plus submit_play_proposal", async () => {
+    await db.client.query("begin");
+    try {
+      const writes = (
+        await db.client.query(
+          `select table_schema || '.' || table_name as t, privilege_type from information_schema.role_table_grants
+           where grantee = 'anon' and privilege_type in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE') and table_schema in ('public', 'private')
+           union select table_schema || '.' || table_name, privilege_type from information_schema.column_privileges
+           where grantee = 'anon' and privilege_type in ('INSERT', 'UPDATE') and table_schema in ('public', 'private')`,
+        )
+      ).rows;
+      expect(writes).toEqual([]);
+      const fns = (
+        await db.client.query("select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'execute') order by 1")
+      ).rows.map((r) => r.proname as string);
+      // Before B4: every anon-executable function except submit_play_proposal (the stable helpers the policies use, the token
+      // functions, B3's open_share_link ...).
+      const before = fns.filter((f) => f !== "submit_play_proposal");
+      expect(fns).toContain("submit_play_proposal");
+      expect(before).toEqual([
+        "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
+        "is_agency_admin", "is_free_mail_domain", "open_share_link", "reconcile_after_access_change", "report_download", "set_updated_at",
+        "stamp_provenance", "use_api_token", "workspace_role",
+      ]);
+      // And none of the functions that act on visitors' ideas or build solutions.
+      for (const f of ["play_proposal_contacts", "review_proposals", "build_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity"]) expect(fns, f).not.toContain(f);
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+});
+
 describe("team_capacity (B1 2a)", () => {
   type Team = {
     sees_everyone: boolean;

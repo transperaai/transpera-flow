@@ -79,7 +79,7 @@ export function usePlanForecast({
     const segments: Prepared["segments"] = [];
     let error: string | null = null;
     for (const seg of plan.segments) {
-      const built = forecastModel(seg.bundle, months, startDate);
+      const built = forecastModel(seg.bundle, months, startDate, seg.levers);
       if (built.error !== null) {
         const solutionNames = seg.solutionIds.map((id) => names.get(id) ?? "A solution");
         // The last solution to go live is the one that changed this segment.

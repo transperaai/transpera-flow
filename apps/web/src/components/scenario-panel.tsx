@@ -9,7 +9,7 @@
 import { isReadOnly } from "@/lib/mode";
 import { useEffect, useMemo, useState } from "react";
 import type { ScenarioRow, Viewer } from "@transpera-flow/db";
-import { applyPatches, compareHeadline, compareRuns, repointPatch, type EngineModel, type EnginePerson, type ProvenanceRows, type RetiredSteps } from "@transpera-flow/engine";
+import { applyPatches, compareHeadline, compareRuns, repointPatch, type EngineModel, type ScenarioPatch, type EnginePerson, type ProvenanceRows, type RetiredSteps } from "@transpera-flow/engine";
 import { buildLevers, leverPatches, type LeverValues } from "@/lib/scenarios/levers";
 import { leverKind, visibleLevers } from "@/lib/scenarios/lever-catalogue";
 import { liveScenarioStore } from "@/lib/scenarios/live-store";
@@ -42,6 +42,8 @@ export function ScenarioPanel({
   hiddenLevers = NO_HIDDEN,
   leversHref,
   viewer,
+  library = true,
+  onLeversChange,
 }: {
   /** The baseline model (the process as it is now). */
   model: EngineModel;
@@ -64,6 +66,10 @@ export function ScenarioPanel({
   leversHref?: string;
   /** Who is looking: a member or viewer gets people rows and levers for their own person only (B1 2b). */
   viewer?: Viewer;
+  /** Show the saved scenarios (the library). A play link's visitor sees only the levers (B4). Default: shown. */
+  library?: boolean;
+  /** Told the levers that are moved (as patches) whenever they change; none when everything is at neutral. */
+  onLeversChange?: (patches: ScenarioPatch[]) => void;
 }) {
   const canEdit = !isReadOnly(mode);
   const [store] = useState<ScenarioStore>(() => (mode === "live" ? liveScenarioStore(workspaceId) : new MemoryScenarioStore(workspaceId)));
@@ -88,6 +94,7 @@ export function ScenarioPanel({
   const levers = useMemo(() => visibleLevers(allLevers, hiddenLevers), [allLevers, hiddenLevers]);
   const hiddenCount = hiddenLevers.filter((id) => leverKind(id)?.control === "slider").length;
   const moved = useMemo(() => leverPatches(levers, values), [levers, values]);
+  useEffect(() => onLeversChange?.(moved), [moved, onLeversChange]);
   const patches = useMemo(() => [...usable.flatMap((s) => s.patch), ...moved], [usable, moved]);
   // Model resolution refuses a broken scenario rather than skipping its patch (issue #16).
   const resolved = useMemo(() => (patches.length ? resolveRun(model, patches, retired) : null), [model, patches, retired]);
@@ -190,6 +197,7 @@ export function ScenarioPanel({
               />
             }
           />
+          {library && (
           <ScenarioLibrary
             scenarios={scenarios}
             model={model}
@@ -252,6 +260,7 @@ export function ScenarioPanel({
               }
             }}
           />
+          )}
         </div>
       </div>
     </div>

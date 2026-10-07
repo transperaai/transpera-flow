@@ -7,7 +7,7 @@
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import { compareRuns, compareTable } from "@transpera-flow/engine";
-import type { IssueRow, MarketConditionRow, ProcessBundle, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import { toEngineModel, type IssueRow, type MarketConditionRow, type ProcessBundle, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { MrrChart } from "@/components/overview/charts";
@@ -24,6 +24,7 @@ import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { SCHEDULE_KEY, compareMaps, overallResult, pinProblems, stressConditions, stressTargets, toneWord } from "@/lib/solutions/compare";
 import { SOLUTION_PAGE_HELP } from "@/lib/solutions/help";
+import { withLeverChanges } from "@/lib/solutions/levers";
 import { useStress } from "@/lib/solutions/use-stress";
 import { cn } from "@/lib/utils";
 
@@ -52,7 +53,7 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
   const [months, setMonths] = useState<number | null>(null);
   const weeks = months === null ? null : horizonWeeks(months);
   const liveBuilt = useEngineModel(comparison.base, weeks);
-  const solvedBuilt = useEngineModel(comparison.solved, weeks);
+  const solvedBuilt = useEngineModel(comparison.solved, weeks, solution.lever_changes);
   const error = liveBuilt.error ?? solvedBuilt.error;
   // A solution the engine can't read has nothing to compare: no run starts for either side.
   const live = { model: error ? null : liveBuilt.model, error: liveBuilt.error };
@@ -60,7 +61,17 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
   const liveSim = useSimulation(live.model);
   const solvedSim = useSimulation(solved.model);
   const currency = base.workspace.settings.currency;
-  const notes = useMemo(() => [...(movedOn ? [movedOn] : []), ...pinProblems(comparison.base)], [movedOn, comparison.base]);
+  // A lever change whose target has gone (a step, role or service removed since) is left out; say so.
+  const leverNotes = useMemo(() => {
+    if (!solution.lever_changes.length) return [];
+    try {
+      const problems = withLeverChanges(toEngineModel(comparison.solved), solution.lever_changes).problems;
+      return problems.length ? [`${problems.length === 1 ? "One lever change" : `${problems.length} lever changes`} in this solution no longer apply (${problems.join(" ")})`] : [];
+    } catch {
+      return [];
+    }
+  }, [comparison.solved, solution.lever_changes]);
+  const notes = useMemo(() => [...(movedOn ? [movedOn] : []), ...leverNotes, ...pinProblems(comparison.base)], [movedOn, leverNotes, comparison.base]);
 
   return (
     <div className="flex flex-col gap-6" data-solution-compare>

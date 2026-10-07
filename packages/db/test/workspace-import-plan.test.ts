@@ -573,6 +573,18 @@ describe("planWorkspaceImport", () => {
     expect(planOf(recount(b)).plan.scenarios.map((s) => s.name)).toContain("Seeded");
   });
 
+  it("leaves out a visitor's idea that isn't for an issue (a restored row would be an upload idea, which must have an issue), with a note (B4)", () => {
+    const { bundle, ids } = makeBundle();
+    bundle.suggestion_proposals.push(
+      { id: "00000000-0000-4000-8000-0000000000e1", workspace_id: bundle.workspace.id, status: "pending", kind: "solution_idea", title: "Visitor, no issue", issue_id: null, payload: { steps: [], levers: [] }, created_at: "2026-01-03", created_via: "play_link" } as never,
+    );
+    const { plan, placeholderOf, warnings } = planWorkspaceImport(recount(bundle), { canManage: true }) as ReturnType<typeof planWorkspaceImport> & { warnings: string[] };
+    expect(plan.proposals.map((s) => s.id)).toEqual([placeholderOf.get(ids.prop!)!]);
+    expect(warnings).toContain("Visitor ideas not tied to an issue aren't restored.");
+    // With none, no note.
+    expect(planOf(makeBundle().bundle).warnings).not.toContain("Visitor ideas not tied to an issue aren't restored.");
+  });
+
   it("applies the left-out rules", () => {
     const { bundle, ids } = makeBundle();
     const { plan, placeholderOf } = planOf(bundle);

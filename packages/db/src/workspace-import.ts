@@ -771,7 +771,11 @@ export function planWorkspaceImport(
     })
     .map((s) => pick(s, IMPORT_COLUMNS.suggestions))
     .sort(byCreated);
-  plan.proposals = flat("proposals", pendingProposals, IMPORT_REFS.proposals).sort(byCreated);
+  // A visitor's idea from a play link (B4) may be for no issue. A restored row becomes an `upload` idea, and the table's rule says
+  // an idea that isn't for an issue must be a play-link one, so those are left out (with a note) rather than failing the restore.
+  const restorableProposals = pendingProposals.filter((p) => !(p.kind === "solution_idea" && (p.issue_id == null || p.issue_id === "")));
+  if (restorableProposals.length < pendingProposals.length) warnings.push("Visitor ideas not tied to an issue aren't restored.");
+  plan.proposals = flat("proposals", restorableProposals, IMPORT_REFS.proposals).sort(byCreated);
 
   // A pending suggestion only counted as dropped above if it pointed at nothing restored; the lists are final now.
   for (const [section, e] of dropped) {

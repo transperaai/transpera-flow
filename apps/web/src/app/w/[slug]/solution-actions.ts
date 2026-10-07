@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { SOLUTION_ISSUE_COLUMNS, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
 import { serverVerdict, type CopyRun } from "@/lib/solutions/server-verdict";
+import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 import { isId } from "@/lib/sources/validate";
 import { createClient } from "@/lib/supabase/server";
 
@@ -19,6 +20,12 @@ const signedOut = { status: "error", message: "Your session has ended. Sign in a
 const forbidden = { status: "error", message: "You don't have permission to save solutions here." } as const;
 const invalid = { status: "error", message: "That solution isn't valid." } as const;
 
+/** A stored solution's lever changes, as patches (anything that isn't valid counts as none). */
+const leversOf = (stored: unknown): ScenarioPatch[] => {
+  const p = parsePatches(stored);
+  return p.ok ? p.patches : [];
+};
+
 function failure(error: { code?: string; message?: string }) {
   const m = error.message ?? "";
   if (/issue is closed/.test(m)) return { status: "error", message: "That issue is already resolved, marked won't fix or dismissed, so a solution can't be linked to it." } as const;
@@ -26,6 +33,7 @@ function failure(error: { code?: string; message?: string }) {
   if (/another process/.test(m)) return { status: "error", message: "That issue is about another process, so this solution can't be linked to it." } as const;
   if (/already been dealt with/.test(m)) return { status: "error", message: "That idea has already been built or dismissed." } as const;
   if (/linked to the idea's issue/.test(m)) return { status: "error", message: "A solution built from an idea has to be linked to the idea's issue." } as const;
+  if (/idea is for another process/.test(m)) return { status: "error", message: "That idea is for another process." } as const;
   if (/no such idea/.test(m)) return { status: "error", message: "That idea isn't there any more, or isn't yours to build." } as const;
   if (/published version/.test(m)) return { status: "error", message: "A solution has to start from a published version of the process." } as const;
   if (error.code === "42501") return forbidden;
@@ -52,7 +60,7 @@ export async function createSolution(workspaceId: unknown, input: unknown, ideaI
   let base: ProcessBundle | undefined;
   let run: CopyRun | undefined;
   for (const l of v.links) {
-    const r = await serverVerdict({ db: supabase, workspaceId, processId: v.processId, baseRevisionId: v.baseRevisionId, copy: v.copy, issueId: l.issueId, base, run });
+    const r = await serverVerdict({ db: supabase, workspaceId, processId: v.processId, baseRevisionId: v.baseRevisionId, copy: v.copy, levers: v.levers, issueId: l.issueId, base, run });
     if (!r.ok) return { status: "error", message: r.message };
     base = r.base;
     run = r.run;
@@ -89,9 +97,9 @@ export async function linkSolutionToIssue(workspaceId: unknown, solutionId: unkn
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return signedOut;
-  const { data: sol } = await supabase.from("solutions").select("id, process_id, base_revision_id, steps").eq("id", solutionId).eq("workspace_id", workspaceId).maybeSingle();
+  const { data: sol } = await supabase.from("solutions").select("id, process_id, base_revision_id, steps, lever_changes").eq("id", solutionId).eq("workspace_id", workspaceId).maybeSingle();
   if (!sol) return { status: "error", message: "That solution isn't there any more." };
-  const r = await serverVerdict({ db: supabase, workspaceId, processId: sol.process_id, baseRevisionId: sol.base_revision_id, copy: sol.steps as unknown as BlockBundle, issueId });
+  const r = await serverVerdict({ db: supabase, workspaceId, processId: sol.process_id, baseRevisionId: sol.base_revision_id, copy: sol.steps as unknown as BlockBundle, levers: leversOf(sol.lever_changes), issueId });
   if (!r.ok) return { status: "error", message: r.message };
   const checked = r.verdict.status !== "unchecked";
   const { data, error } = await supabase

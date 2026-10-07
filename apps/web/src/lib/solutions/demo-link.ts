@@ -7,6 +7,7 @@ import { bundleForProcess, toEngineModel, type IssueRow, type SolutionRow } from
 import { demoBundle } from "@/lib/sources/demo";
 import { solutionIssueOf, verdictArea } from "./area";
 import { bundleFromSolution } from "./bundle";
+import { withLeverChanges } from "./levers";
 import { verdictInWorker } from "./verdict-client";
 
 export interface DemoLinkVerdict {
@@ -25,7 +26,7 @@ export async function demoLinkVerdict(solution: SolutionRow, issue: IssueRow): P
     const asIssue = solutionIssueOf(issue, solution.process_id, solved.steps);
     const was = new Set(base.steps.map((s) => s.id));
     const added = solved.steps.filter((s) => !was.has(s.id)).map((s) => s.id);
-    const verdict = await verdictInWorker({ target: asIssue.target, model: toEngineModel(solved), area: verdictArea(solved.steps, asIssue, added) }).promise;
+    const verdict = await verdictInWorker({ target: asIssue.target, model: withLeverChanges(toEngineModel(solved), solution.lever_changes ?? []).model, area: verdictArea(solved.steps, asIssue, added) }).promise;
     return verdict.status === "unchecked"
       ? { autoVerdict: null, holdsPct: null, autoNote: verdict.note }
       : { autoVerdict: verdict.status, holdsPct: verdict.holdsPct, autoNote: verdict.note };

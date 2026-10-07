@@ -8,6 +8,7 @@
 
 import type { Viewer } from "@transpera-flow/db";
 import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
+import { PLAY_CAPS } from "@/lib/share/play-input";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances" | "market";
@@ -58,7 +59,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     base: model.leadsPerWeek,
     unit: "per_week",
     min: 0,
-    max: Math.max(20, ceilTo(model.leadsPerWeek * 3, 5)),
+    max: Math.min(PLAY_CAPS.leads, Math.max(20, ceilTo(model.leadsPerWeek * 3, 5))),
     step: 0.5,
   });
   add({
@@ -70,7 +71,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     base: model.activeClients,
     unit: "clients",
     min: 0,
-    max: Math.max(20, ceilTo(model.activeClients * 2, 10)),
+    max: Math.min(PLAY_CAPS.clients, Math.max(20, ceilTo(model.activeClients * 2, 10))),
     step: 1,
   });
   add({
@@ -89,7 +90,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   // People: head-count per role, FTE per named person.
   for (const [id, role] of Object.entries(model.roles)) {
     const count = headcount(model, id);
-    add({ path: `roles.${id}.headcount`, group: "people", section: "Roles", label: role.name, op: "set", base: count, unit: "people", min: 0, max: count + 5, step: 1 });
+    add({ path: `roles.${id}.headcount`, group: "people", section: "Roles", label: role.name, op: "set", base: count, unit: "people", min: 0, max: Math.min(PLAY_CAPS.headcount, count + 5), step: 1 });
   }
   // A member or viewer gets a lever for their own person only (B1 2b).
   const seen = viewerOf({ viewer });
@@ -125,10 +126,10 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const services = Object.entries(model.services ?? {});
   if (services.length) {
     for (const [id, svc] of services) {
-      add({ path: `services.${id}.price`, group: "finances", section: "Prices", label: svc.name, op: "set", base: svc.price, unit: "money", min: 0, max: Math.max(1000, ceilTo(svc.price * 3, 100)), step: 50 });
+      add({ path: `services.${id}.price`, group: "finances", section: "Prices", label: svc.name, op: "set", base: svc.price, unit: "money", min: 0, max: Math.min(PLAY_CAPS.price, Math.max(1000, ceilTo(svc.price * 3, 100))), step: 50 });
     }
   } else {
-    add({ path: "finances.retainer", group: "finances", section: "Prices", label: "Monthly retainer", op: "set", base: model.retainer, unit: "money", min: 0, max: Math.max(1000, ceilTo(model.retainer * 3, 100)), step: 50 });
+    add({ path: "finances.retainer", group: "finances", section: "Prices", label: "Monthly retainer", op: "set", base: model.retainer, unit: "money", min: 0, max: Math.min(PLAY_CAPS.price, Math.max(1000, ceilTo(model.retainer * 3, 100))), step: 50 });
   }
   return levers;
 }

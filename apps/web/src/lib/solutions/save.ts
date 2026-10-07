@@ -3,7 +3,7 @@
 // verdicts again, and row-level security decides who may write.
 
 import type { BlockBundle, SolutionIssueRow, SolutionRow, SolutionVerdict } from "@transpera-flow/db";
-import type { ScenarioPatch } from "@transpera-flow/engine";
+import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 import { solutionProblem } from "./bundle";
 
 export const MAX_NAME = 200;
@@ -52,8 +52,12 @@ export function parseSolutionInput(input: unknown): { ok: true; value: SolutionI
   const copy = i.copy as BlockBundle;
   if (new TextEncoder().encode(JSON.stringify(copy)).length > MAX_COPY) return { ok: false, error: "That solution is too big to save." };
   const changed = Array.isArray(i.changedStepIds) ? i.changedStepIds.filter((s): s is string => typeof s === "string") : [];
-  const levers = Array.isArray(i.levers) ? (i.levers as ScenarioPatch[]) : [];
-  if (levers.length > MAX_LEVERS) return { ok: false, error: "That solution changes too many levers." };
+  const rawLevers = Array.isArray(i.levers) ? i.levers : [];
+  if (rawLevers.length > MAX_LEVERS) return { ok: false, error: "That solution changes too many levers." };
+  // Now that a solution's lever changes are simulated, only well-formed ones are kept (the table checks the shape again).
+  const parsedLevers = parsePatches(rawLevers);
+  if (!parsedLevers.ok) return { ok: false, error: "That solution's lever changes aren't valid." };
+  const levers: ScenarioPatch[] = parsedLevers.patches;
   const links: SolutionLinkInput[] = [];
   for (const l of Array.isArray(i.links) ? i.links : []) {
     if (!l || typeof l !== "object" || typeof l.issueId !== "string" || !UUID.test(l.issueId)) return { ok: false, error: "That issue isn't valid." };

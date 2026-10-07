@@ -43,7 +43,7 @@ describe("with Supabase's default table privileges", () => {
     expect(g.filter((x) => x.grantee === "anon")).toEqual([]);
   });
 
-  it("lets authenticated read every column but the visitor's email", async () => {
+  it("lets authenticated read every column but the visitor's email and what was held from members (B4)", async () => {
     const readable = (
       await db.client.query(
         "select column_name from information_schema.column_privileges where table_schema = 'public' and table_name = 'suggestion_proposals' and privilege_type = 'SELECT' and grantee = 'authenticated'",
@@ -51,7 +51,9 @@ describe("with Supabase's default table privileges", () => {
     ).rows.map((r) => r.column_name as string);
     const all = (await db.client.query("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'suggestion_proposals'")).rows.map((r) => r.column_name as string);
     expect(all).toContain("proposer_email");
-    expect(readable.sort()).toEqual(all.filter((c) => c !== "proposer_email").sort());
+    expect(all).toContain("visitor_text");
+    expect(readable).toContain("share_link_id");
+    expect(readable.sort()).toEqual(all.filter((c) => c !== "proposer_email" && c !== "visitor_text").sort());
     await db.as(editor.claims, async (c) => {
       await c.query("savepoint s");
       await expect(c.query("select proposer_email from suggestion_proposals")).rejects.toThrow(/permission denied/);

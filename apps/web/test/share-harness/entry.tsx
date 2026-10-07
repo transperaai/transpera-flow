@@ -21,6 +21,7 @@ import { ShareButton } from "@/components/share/share-dialog";
 import { ShareLinksTable } from "@/components/share/share-links-table";
 import { SharedView } from "@/components/share/shared-view";
 import type { ShareInput } from "@/lib/share/input";
+import type { PlayIdeaInput, PlayResult } from "@/lib/share/play-input";
 import type { ShareLinkRow } from "@/lib/share/list";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { demoBundle } from "@/lib/sources/demo";
@@ -29,7 +30,8 @@ declare global {
   interface Window {
     workerScripts: Record<string, string>;
     workerPosts: string[];
-    mountShare: (kind: ShareKind, toggles: ShareToggles) => { clientNames: string[]; personNames: string[]; personFirst: string[] };
+    /** `play` (B4): a play link, with the kinds the workspace hides; the Send action is stood in for (`playSubmits`, `playAnswer`). */
+    mountShare: (kind: ShareKind, toggles: ShareToggles, options?: { mode?: "view" | "play"; hidden?: string[]; visitorEmail?: string | null }) => { clientNames: string[]; personNames: string[]; personFirst: string[] };
     unmountShare: () => void;
     /** The Share dialog, with its Server Action stood in for: what it asked to make, and what to answer. */
     mountShareDialog: () => void;
@@ -39,6 +41,8 @@ declare global {
     mountShareList: (links: ShareLinkRow[]) => void;
     shareRefreshes: string[];
     shareRevokes: string[];
+    playSubmits: PlayIdeaInput[];
+    playAnswer: PlayResult;
   }
 }
 
@@ -70,7 +74,7 @@ function editorBundle(): ProcessBundle {
   return b;
 }
 
-function snapshotOf(kind: ShareKind, toggles: ShareToggles): { snapshot: ShareSnapshot; secrets: ShareSecrets } {
+function snapshotOf(kind: ShareKind, toggles: ShareToggles, hidden: string[] = ["process.rework"]): { snapshot: ShareSnapshot; secrets: ShareSecrets } {
   const live = editorBundle();
   const secrets: ShareSecrets = {
     people: live.people.map((p, i) => ({ id: p.id, name: p.name, label: `Team member ${i + 1}` })),
@@ -119,7 +123,7 @@ function snapshotOf(kind: ShareKind, toggles: ShareToggles): { snapshot: ShareSn
       raw = { ...base, kind, live, parts: [partOf(live), ...(live.otherProcesses ?? [])], company: null, issues, solutions, solutionBases: {}, findings: [], firstPrinciples: null };
       break;
     case "process":
-      raw = { ...base, kind, bundle: live, processes, scenarios: [], issues, liveRevisions: { [live.process.id]: live.revision.id }, solutions, findings: [], firstPrinciples: null };
+      raw = { ...base, kind, bundle: live, hiddenLevers: hidden, processes, scenarios: [], issues, liveRevisions: { [live.process.id]: live.revision.id }, solutions, findings: [], firstPrinciples: null };
       break;
     case "issue":
       raw = { ...base, kind, issueId: issue.id, bundle: live, issues, processes: processes.map(({ id, name }) => ({ id, name })), liveRevisions: { [live.process.id]: live.revision.id }, solutions };
@@ -142,10 +146,20 @@ function snapshotOf(kind: ShareKind, toggles: ShareToggles): { snapshot: ShareSn
 }
 
 let root: Root | null = null;
-window.mountShare = (kind, toggles) => {
-  const { snapshot, secrets } = snapshotOf(kind, toggles);
+window.playSubmits = [];
+window.playAnswer = { status: "ok" };
+window.mountShare = (kind, toggles, options = {}) => {
+  const { snapshot, secrets } = snapshotOf(kind, toggles, options.hidden);
   root = createRoot(document.getElementById("root")!);
-  root.render(<SharedView data={{ snapshot, snapshotAt: "2026-10-05T09:00:00Z", expiresAt: toggles.people || toggles.financials ? "2026-11-05T23:59:59Z" : null }} />);
+  root.render(
+    <SharedView
+      data={{ snapshot, snapshotAt: "2026-10-05T09:00:00Z", expiresAt: toggles.people || toggles.financials ? "2026-11-05T23:59:59Z" : null, mode: options.mode ?? "view", token: "x".repeat(43), visitorEmail: options.visitorEmail ?? null }}
+      submit={async (input) => {
+        window.playSubmits.push(input);
+        return window.playAnswer;
+      }}
+    />,
+  );
   return {
     clientNames: secrets.clients.map((c) => c.name),
     personNames: secrets.people.map((p) => p.name),

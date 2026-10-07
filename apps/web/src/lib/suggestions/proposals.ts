@@ -5,7 +5,9 @@
 // dismissed for now (building it in the Editor is slice 2).
 
 import type { ProposalApplied, ProposalRow, IssueProposalPayload } from "@transpera-flow/db";
+import type { PlayContact } from "@transpera-flow/db";
 import { readIdea } from "@/lib/suggestions/idea";
+import { describeLeverChange } from "@/lib/suggestions/lever-changes";
 import { RATING_LABELS, ratingOfStored } from "@transpera-flow/engine";
 import type { IssueStore } from "@/lib/issues/store";
 import type { HelpProps } from "@/components/help";
@@ -33,6 +35,13 @@ export interface ProposalLookups {
   steps: Record<string, string>;
   /** Issue id to its number, title and process (a solution idea is for one; Build it opens the Editor on the process). */
   issues: Record<string, { number: number | null; title: string; processId?: string | null }>;
+  /** Names for a visitor's lever changes (B4). A change to something not named here reads "a role that has gone". */
+  roles?: Record<string, string>;
+  services?: Record<string, string>;
+  /** Filled only for a reader who sees everyone (B1 2b); otherwise a person's hours read "a team member". */
+  people?: Record<string, string>;
+  /** The workspace's currency, for prices in a lever change. */
+  currency?: string;
 }
 
 export interface ProposalView {
@@ -45,6 +54,8 @@ export interface ProposalView {
   lines: string[];
   /** For a solution idea: the issue it is for. */
   issue: { id: string; number: number | null; title: string } | null;
+  /** A visitor's lever changes, in words (B4); empty for anything else. */
+  changes: string[];
 }
 
 const STORED = ["critical", "serious", "warning", "info"];
@@ -52,6 +63,7 @@ const list = (names: string[]) => (names.length <= 2 ? names.join(" and ") : `${
 
 /** How a proposal reads to a reviewer. */
 export function describeProposal(p: ProposalRow, lookups: ProposalLookups): ProposalView {
+  const play = p.created_via === "play_link" && p.kind === "solution_idea";
   const from = p.created_via === "play_link" ? `${p.proposer_name?.trim() || "A visitor"} (play link)` : p.created_via === "upload" ? `Upload (${p.import_source ?? "a file"})` : "Claude (MCP)";
   if (p.kind === "issue") {
     const payload = p.payload as IssueProposalPayload;
@@ -65,12 +77,28 @@ export function describeProposal(p: ProposalRow, lookups: ProposalLookups): Prop
       lines.push(`Target: ${payload.target_measure}${payload.target_now ? `, now ${payload.target_now}` : ""}${payload.target_goal ? `, goal ${payload.target_goal}` : ""}.`);
     }
     if (p.detail) lines.push(p.detail);
-    return { kind: "Issue", from, title: p.title, lines, issue: null };
+    return { kind: "Issue", from, title: p.title, lines, issue: null, changes: [] };
   }
   const idea = readIdea(p.payload);
   const target = p.issue_id ? lookups.issues[p.issue_id] : undefined;
   const lines: string[] = [];
   if (p.detail) lines.push(p.detail);
+  if (play) {
+    // A visitor's idea (B4): lever changes, no steps. Described with the reader's own names.
+    const names = { steps: lookups.steps, roles: lookups.roles, services: lookups.services, people: lookups.people };
+    const changes = idea.levers.map((l) => describeLeverChange(l, names, lookups.currency));
+    if (changes.length) lines.push(`Changes: ${changes.join("; ")}.`);
+    const processId = (p.payload as { process_id?: unknown }).process_id;
+    lines.push(`Sent from a link to ${typeof processId === "string" ? (lookups.processes[processId] ?? "a process that has gone") : "a process"}.`);
+    return {
+      kind: "Visitor's idea",
+      from,
+      title: p.title,
+      lines,
+      issue: p.issue_id ? { id: p.issue_id, number: target?.number ?? null, title: target?.title ?? "an issue that has gone" } : null,
+      changes,
+    };
+  }
   const replaced = idea.replaces.map((id) => lookups.steps[id] ?? "a step that has gone");
   lines.push(`Proposed steps: ${idea.steps.length ? idea.steps.map((s) => s.name).join(" → ") : "none that can be shown"}${replaced.length ? `. Would replace ${list(replaced)}` : ""}.`);
   if (idea.expect) lines.push(`${idea.expect} Not simulated yet.`);
@@ -80,8 +108,29 @@ export function describeProposal(p: ProposalRow, lookups: ProposalLookups): Prop
     title: p.title,
     lines,
     issue: p.issue_id ? { id: p.issue_id, number: target?.number ?? null, title: target?.title ?? "an issue that has gone" } : null,
+    changes: [],
   };
 }
+
+/**
+ * A visitor's idea as owners and editors read it: the original title, note and name in place of the stand-ins members and viewers read
+ * where the wording named someone, gave an email address or an amount (B4). Everyone else's view is the row as stored.
+ */
+export function withHeld(p: ProposalRow, contact: PlayContact | undefined): ProposalRow {
+  const held = contact?.held;
+  if (!held || !Object.keys(held).length || p.created_via !== "play_link") return p;
+  return { ...p, title: held.title ?? p.title, detail: held.note ?? p.detail, proposer_name: held.name ?? p.proposer_name };
+}
+
+/** What members and viewers read in place of the held fields, in words: “A visitor's idea”, no note, “A visitor”. */
+export function heldSeen(contact: PlayContact | undefined): string {
+  const held = contact?.held ?? {};
+  const parts = [held.title !== undefined ? "“A visitor's idea”" : null, held.note !== undefined ? "no note" : null, held.name !== undefined ? "“A visitor” as the name" : null].filter((x): x is string => x !== null);
+  return parts.length <= 1 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+}
+
+/** True when part of what a visitor wrote is shown to members and viewers as a stand-in. */
+export const hasHeld = (contact: PlayContact | undefined): boolean => Boolean(contact && Object.keys(contact.held).length);
 
 /** One line after a review: "Accepted. Now issue #16." / "Rejected 1. 1 couldn't be accepted: …". */
 export function proposalSummary(results: readonly ProposalReviewResult[], decision: ProposalDecision): string {
@@ -169,6 +218,21 @@ export const SUGGESTIONS_HELP = {
     label: "Build it",
     description: "Opens the Editor in solution mode with the idea's steps already placed. Adjust them, simulate, then save: that turns the idea into a real solution, tested against the issue.",
     example: "Build “Fast-track partner leads”, check the new steps, and save it as a solution.",
+  },
+  visitorIdea: {
+    label: "Visitor's idea",
+    description: "Someone you shared a page with tried their own changes and sent them. Nothing is changed until you build it.",
+    example: "Marta moved Strategist to 3 people and sent it as “One more strategist”.",
+  },
+  reply: {
+    label: "Reply",
+    description: "Your reply is kept with the dismissed idea, so your team can see why. The sender isn't emailed: use their address above if you want them to know.",
+    example: "Thanks Marta: we're hiring for this in January.",
+  },
+  held: {
+    label: "What members and viewers see",
+    description: "Visitors can't see your team's or clients' names, so anything they write that mentions one, or an amount, is kept to owners and editors. Nothing was changed: you're reading what they sent.",
+    example: "A note saying “Ask Priya about onboarding” shows to members as no note.",
   },
   ideaMap: {
     label: "Proposed steps",

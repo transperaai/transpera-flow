@@ -29,6 +29,7 @@ export default async function SuggestionsPage(props: PageProps<"/w/[slug]/sugges
         workspaceId={data.workspace.id}
         initial={data.proposals}
         lookups={data.lookups}
+        contacts={data.contacts}
         canEdit={data.canEdit}
         base={`/w/${slug}`}
       >

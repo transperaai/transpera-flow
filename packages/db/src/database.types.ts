@@ -3036,9 +3036,11 @@ export type Database = {
           review_note: string | null
           reviewed_at: string | null
           reviewed_by: string | null
+          share_link_id: string | null
           status: string
           title: string
           updated_at: string
+          visitor_text: Json | null
           workspace_id: string
         }
         Insert: {
@@ -3059,9 +3061,11 @@ export type Database = {
           review_note?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
+          share_link_id?: string | null
           status?: string
           title: string
           updated_at?: string
+          visitor_text?: Json | null
           workspace_id: string
         }
         Update: {
@@ -3082,9 +3086,11 @@ export type Database = {
           review_note?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
+          share_link_id?: string | null
           status?: string
           title?: string
           updated_at?: string
+          visitor_text?: Json | null
           workspace_id?: string
         }
         Relationships: [
@@ -3435,6 +3441,7 @@ export type Database = {
       my_person_id: { Args: { ws: string }; Returns: string }
       open_draft: { Args: { target_process: string }; Returns: Json }
       open_share_link: { Args: { token: string }; Returns: Json }
+      play_proposal_contacts: { Args: { ws: string }; Returns: Json }
       publish_process: {
         Args: { accept_estimates?: boolean; target_process: string }
         Returns: Json
@@ -3632,6 +3639,18 @@ export type Database = {
       }
       share_team_capacity: {
         Args: { show_people: boolean; ws: string }
+        Returns: Json
+      }
+      submit_play_proposal: {
+        Args: {
+          email: string
+          issue: string | null
+          levers: Json
+          name: string
+          note: string | null
+          title: string
+          token: string
+        }
         Returns: Json
       }
       take_link_fetch: { Args: never; Returns: number }
