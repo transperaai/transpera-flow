@@ -99,7 +99,8 @@ export function SourcesPage({
 }) {
   const canEdit = mode !== "readonly";
   // A phone is read only (issue #44): the open source shows its details without the controls that change them.
-  const canEditHere = canEdit && !useIsPhone();
+  const isPhone = useIsPhone();
+  const canEditHere = canEdit && !isPhone;
   const router = useRouter();
   const demoSolutions = useDemoSolutions().solutions;
   // In the demo every page of the tab shares one store, so a link made on a step or an issue is here too.

@@ -74,7 +74,8 @@ describe("screens whose controls come in as props that are undefined without can
     expect(read(PAGE("solutions"))).toContain("actions={canEdit ? <NewSolutionButton");
     const page = read("components/solutions/solution-page.tsx");
     expect(page).toContain('const canEdit = !isReadOnly(mode);');
-    expect(page).toMatch(/\{canEdit && \(\s*<span className="flex flex-wrap items-center gap-2">\s*(\{props\.share\}\s*)?<DeleteSolution/);
+    // On a phone the whole block is hidden too (issue #44): the class carries EDIT_ONLY.
+    expect(page).toMatch(/\{canEdit && \(\s*<span className=\{`flex flex-wrap items-center gap-2 \$\{EDIT_ONLY\}`\} data-edit-entry>\s*(\{props\.share\}\s*)?<DeleteSolution/);
   });
 
   it("the Block library: no New block link without canEdit", () => {
