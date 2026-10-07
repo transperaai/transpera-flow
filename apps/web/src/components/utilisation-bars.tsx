@@ -63,6 +63,7 @@ function Bar({ row, stacked }: { row: Row; stacked: boolean }) {
 export function UtilisationBars({ model, result, viewer }: { model: EngineModel; result: SimulationResult | null; viewer?: Viewer }) {
   const seen = viewerOf({ viewer });
   const [view, setView] = useState<"roles" | "people">("roles");
+  if (Object.keys(model.roles).length === 0) return <p className="text-sm text-muted-foreground" data-empty>No roles to show. Add roles in Settings.</p>;
 
   const roleRows: Row[] = Object.entries(model.roles).map(([id, role]) => {
     const members = result ? Object.values(result.resolvedPeople).filter((p) => p.roles.includes(id)).length : role.count;
