@@ -65,8 +65,8 @@ describe("per-person times (capacityFactor)", () => {
     // The arrivals are the same draws (their own stream): the leads of one run enter at the same hours.
     const enters = (m: EngineModel) => runOnce(m, 1, true).entities!.map((e) => e.t0);
     expect(enters(oneStep({ default: 0.5 }))).toEqual(enters(oneStep()));
-    // (The step's counted arrivals can differ by a lead at the window's edge, where work in flight differs.)
-    expect(Math.abs(b.steps.a!.arrivals - a.steps.a!.arrivals)).toBeLessThan(0.5);
+    // The counted arrivals are exactly equal (a factor never shifts a stream); only completed work (`won`) moves at the window's edge.
+    expect(b.steps.a!.arrivals).toBe(a.steps.a!.arrivals);
     expect(Math.abs(b.won - a.won)).toBeLessThan(1);
   });
 
