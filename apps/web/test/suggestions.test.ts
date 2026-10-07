@@ -9,7 +9,7 @@ import {
   snapshotModel,
   diffSnapshots,
 } from "@transpera-flow/db";
-import { auditStepId, describeAuditEntry, type AuditEntry } from "@/lib/suggestions/audit";
+import { auditStepId, auditStepIds, describeAuditEntry, newestStepNames, type AuditEntry } from "@/lib/suggestions/audit";
 import { demoBaselineSnapshot, demoCompany, demoProcesses, demoSuggestions } from "@/lib/suggestions/demo";
 import { parseReview, reviewInMemory, reviewSummary } from "@/lib/suggestions/review";
 import { defaultRunName, parseSaveRun } from "@/lib/runs/runs";
@@ -149,6 +149,10 @@ describe("the change log", () => {
     expect(say("insert", { step_id: kickoff, new: { factor: 0.9, provenance: { factor: { source: "measured", at: "2026-10-01" } } } })).toBe("Sam Patel: per-person time on Kickoff set (measured)");
     expect(say("insert", { step_id: kickoff, new: { factor: 0.9, provenance: { factor: { source: "entered", by: "u" } } } })).toBe("Sam Patel: per-person time on Kickoff set");
     expect(say("insert", { step_id: kickoff, new: { factor: 0.9, provenance: "measured" } })).toBe("Sam Patel: per-person time on Kickoff set");
+    // A measured update from before #230 has no step, but still says it was measured.
+    expect(say("update", { old: { factor: 0.8 }, new: { factor: 0.9, provenance: { factor: { source: "measured" } } } })).toBe("Sam Patel: a per-person time changed (measured)");
+    // every_step wins over a stray step id inside the row.
+    expect(say("insert", { every_step: true, new: { person_id: sam, step_id: kickoff, factor: 0.8 } })).toBe("Sam Patel: per-person time for every step set");
     // Never the number, and never anyone else's name.
     const texts = [
       say("insert", { step_id: kickoff, new: { person_id: sam, step_id: kickoff, factor: 0.8 } }),
@@ -173,6 +177,27 @@ describe("the change log", () => {
     expect(say("update", { step_id: kickoff, old: { efficiency: 1 }, new: { efficiency: 1.2 } })).toBe("Sam Patel: skill Kickoff changed");
     expect(say("insert", { new: { person_id: sam } })).toBe("Sam Patel: a skill added");
     expect(say("update", { old: { efficiency: 1 }, new: { efficiency: 1.2 } })).toBe("Sam Patel: a skill changed");
+  });
+
+  it("collects the step ids the log names, once each, and takes the newest revision's name", () => {
+    const [a, b] = [northbeamStepIds.kickoff, northbeamStepIds.audit];
+    const ids = auditStepIds([
+      entry({ target_table: "person_capacity_factors", diff: { step_id: a } }),
+      entry({ target_table: "person_skills", diff: { new: { step_id: a } } }),
+      entry({ target_table: "person_capacity_factors", action: "delete", diff: { old: { step_id: b } } }),
+      entry({ target_table: "person_capacity_factors", diff: { every_step: true } }),
+      entry({ target_table: "people", diff: { step_id: "ignored-table" } }),
+    ]);
+    expect(ids).toEqual([a, b]);
+    // `steps` has a row per revision, newest first: the first name per id wins (a rename shows its newest name).
+    expect(
+      newestStepNames([
+        { id: a, name: "Kick-off call" },
+        { id: b, name: "Audit" },
+        { id: a, name: "Kickoff" },
+      ]),
+    ).toEqual({ [a]: "Kick-off call", [b]: "Audit" });
+    expect(newestStepNames([])).toEqual({});
   });
 
   it("auditStepId reads diff.step_id, then new.step_id, then old.step_id", () => {

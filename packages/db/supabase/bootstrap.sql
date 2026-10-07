@@ -42563,13 +42563,14 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 -- so their diffs are unchanged. It doesn't redefine `save_fields` or anything else. Strictly additive in effect: existing log
 -- entries keep their diffs (`audit_log` is append-only); the app reads either.
 --
--- ORDER: after 20261223000000 (row 67, which made `person_capacity_factors`). This is row 69 of docs/production-migrations.md.
--- Independent of #228 (20261226000000, `import_workspace_bundle`) and #227 (20261227000000, `apply_calibration` and others):
--- neither touches this function. If either is applied first, renumber this file above it (HANDOVER "Migration order").
--- Apply any time after row 67 (the app reads either diff).
+-- ORDER: after row 69 (20261224500000, the B3 follow-up), which follows row 68 (20261224000000, applied) and row 67 (20261223000000,
+-- which made `person_capacity_factors`). This is row 70 of docs/production-migrations.md.
+-- Independent of #228 (20261226000000, row 71, `import_workspace_bundle`) and #227 (20261227000000, row 72, `apply_calibration`
+-- and others): neither touches this function. If either is applied first, renumber this file above it (HANDOVER "Migration order").
+-- Apply any time after row 69 (the app reads either diff).
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -c "..."`, one query at a time):
---   0. Row 67 applied, nothing at or past this one. Expect 20261223000000 among the rows and nothing >= 20261225000000:
+--   0. Rows 67 to 69 applied, nothing at or past this one. Expect 20261223000000, 20261224000000 and 20261224500000, and nothing >= 20261225000000:
 --        select version from supabase_migrations.schema_migrations where version >= '20261223000000' order by 1;
 --   1. The function is still 20261015000000's. Expect e936352b8a20cdd8fd374756e4fa4439, t, {search_path=""}:
 --        select md5(prosrc), prosecdef, proconfig from pg_proc where oid = 'private.audit_company_write()'::regprocedure;
@@ -42587,7 +42588,10 @@ create trigger share_links_no_speeds before insert or update of snapshot on publ
 --               has_function_privilege('authenticated', 'private.audit_company_write()', 'execute');
 --   3. Still 18 triggers, all 'O' (preflight 2 again).
 --   4. Smoke test, ROLLED BACK, as the Northbeam owner (as C6's post-apply 6): set the claims, save a factor for a step and
---      change it, then read the log. Expect `insert` and `update`, both with the step id and no every_step:
+--      change it, then read the log. First pick a person and a step with NO stored time (a person who already has a time on that
+--      step makes the first call return {"status":"conflict"} and insert nothing, which would look like the trigger not logging):
+--        select 1 from public.person_capacity_factors where person_id = '<person id>' and step_id = '<a step id>';   -- expect no row
+--      Expect {"status":"saved"...} from both calls, then `insert` and `update` in the log, both with the step id and no every_step:
 --        begin; set local role authenticated;
 --        select set_config('request.jwt.claims', '{"sub":"<owner user id>","role":"authenticated"}', true);
 --        select public.save_capacity_factor('<person id>', '<a step id>', null, 0.8);
@@ -42741,13 +42745,14 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 -- so their diffs are unchanged. It doesn''t redefine `save_fields` or anything else. Strictly additive in effect: existing log
 -- entries keep their diffs (`audit_log` is append-only); the app reads either.
 --
--- ORDER: after 20261223000000 (row 67, which made `person_capacity_factors`). This is row 69 of docs/production-migrations.md.
--- Independent of #228 (20261226000000, `import_workspace_bundle`) and #227 (20261227000000, `apply_calibration` and others):
--- neither touches this function. If either is applied first, renumber this file above it (HANDOVER "Migration order").
--- Apply any time after row 67 (the app reads either diff).
+-- ORDER: after row 69 (20261224500000, the B3 follow-up), which follows row 68 (20261224000000, applied) and row 67 (20261223000000,
+-- which made `person_capacity_factors`). This is row 70 of docs/production-migrations.md.
+-- Independent of #228 (20261226000000, row 71, `import_workspace_bundle`) and #227 (20261227000000, row 72, `apply_calibration`
+-- and others): neither touches this function. If either is applied first, renumber this file above it (HANDOVER "Migration order").
+-- Apply any time after row 69 (the app reads either diff).
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -c "..."`, one query at a time):
---   0. Row 67 applied, nothing at or past this one. Expect 20261223000000 among the rows and nothing >= 20261225000000:
+--   0. Rows 67 to 69 applied, nothing at or past this one. Expect 20261223000000, 20261224000000 and 20261224500000, and nothing >= 20261225000000:
 --        select version from supabase_migrations.schema_migrations where version >= ''20261223000000'' order by 1;
 --   1. The function is still 20261015000000''s. Expect e936352b8a20cdd8fd374756e4fa4439, t, {search_path=""}:
 --        select md5(prosrc), prosecdef, proconfig from pg_proc where oid = ''private.audit_company_write()''::regprocedure;
@@ -42765,7 +42770,10 @@ insert into supabase_migrations.schema_migrations (version, name, statements) va
 --               has_function_privilege(''authenticated'', ''private.audit_company_write()'', ''execute'');
 --   3. Still 18 triggers, all ''O'' (preflight 2 again).
 --   4. Smoke test, ROLLED BACK, as the Northbeam owner (as C6''s post-apply 6): set the claims, save a factor for a step and
---      change it, then read the log. Expect `insert` and `update`, both with the step id and no every_step:
+--      change it, then read the log. First pick a person and a step with NO stored time (a person who already has a time on that
+--      step makes the first call return {"status":"conflict"} and insert nothing, which would look like the trigger not logging):
+--        select 1 from public.person_capacity_factors where person_id = ''<person id>'' and step_id = ''<a step id>'';   -- expect no row
+--      Expect {"status":"saved"...} from both calls, then `insert` and `update` in the log, both with the step id and no every_step:
 --        begin; set local role authenticated;
 --        select set_config(''request.jwt.claims'', ''{"sub":"<owner user id>","role":"authenticated"}'', true);
 --        select public.save_capacity_factor(''<person id>'', ''<a step id>'', null, 0.8);

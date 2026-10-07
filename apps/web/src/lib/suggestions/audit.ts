@@ -44,6 +44,21 @@ function isMeasured(e: AuditEntry): boolean {
   return !!factor && typeof factor === "object" && (factor as Record<string, unknown>).source === "measured";
 }
 
+/** The step ids the change log names (those of skills and per-person times), once each. */
+export function auditStepIds(entries: readonly Pick<AuditEntry, "target_table" | "diff">[]): string[] {
+  const ids = entries.flatMap((e) => (e.target_table === "person_capacity_factors" || e.target_table === "person_skills" ? [auditStepId(e)] : []));
+  return [...new Set(ids.filter((id): id is string => id !== null))];
+}
+
+/**
+ * Step id to name from `steps` rows (one per revision of a step, so an id repeats), given newest first: the first name per id wins.
+ * A draft's copy is made when the draft opens, so "newest" can be a draft's name that is not published yet (fine: only owners read the log).
+ */
+export function newestStepNames(rows: readonly { id: string; name: string }[]): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const r of rows) names[r.id] ??= r.name;
+  return names;
+}
 
 /** The tables whose writes the change log shows. */
 export const COMPANY_AUDIT_TABLES = [

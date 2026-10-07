@@ -170,6 +170,50 @@ describe("nothing else moved: every other audited table keeps exactly today's di
     });
   });
 
+  it("an assignment taken away (client_assignments) has role_id and nothing new", async () => {
+    await db.as(editor.claims, async (c) => {
+      await c.query("delete from client_assignments where client_id = $1 and role_id = $2", [northbeamClientIds.c01, northbeamRoleIds.seo]);
+      expect(await diffOf(c, "client_assignments")).toEqual({
+        old: expect.objectContaining({ client_id: northbeamClientIds.c01, role_id: northbeamRoleIds.seo }),
+        role_id: northbeamRoleIds.seo,
+      });
+    });
+  });
+
+  it("leave added (person_leave)", async () => {
+    await db.as(editor.claims, async (c) => {
+      await c.query("insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, '2026-12-21', '2026-12-31')", [sam, ws]);
+      expect(await diffOf(c, "person_leave")).toEqual({ new: expect.objectContaining({ person_id: sam, start_date: "2026-12-21" }) });
+    });
+  });
+
+  it("a suggestion made (suggestions) carries no suggestion_id, step_id or every_step", async () => {
+    await db.as(editor.claims, async (c) => {
+      await c.query("insert into suggestions (workspace_id, target_table, target_id, patch) values ($1, 'lead_sources', $2, $3)", [
+        ws,
+        northbeamLeadSourceIds.ads,
+        JSON.stringify({ set: { volume_week: 15 } }),
+      ]);
+      expect(await diffOf(c, "suggestions")).toEqual({ new: expect.objectContaining({ target_table: "lead_sources" }) });
+    });
+  });
+
+  it("a write that carries a suggestion id keeps suggestion_id beside step_id (a time) and beside nothing new (a lead source)", async () => {
+    const suggestion = "5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a";
+    await db.as(editor.claims, async (c) => {
+      await c.query("select set_config('transpera.suggestion_id', $1, true)", [suggestion]);
+      await save(c, STEP, null, 0.8);
+      expect(await diffOf(c, "person_capacity_factors")).toEqual({ new: expect.objectContaining({ step_id: STEP, factor: 0.8 }), step_id: STEP, suggestion_id: suggestion });
+    });
+    await db.as(editor.claims, async (c) => {
+      await c.query("select set_config('transpera.suggestion_id', $1, true)", [suggestion]);
+      await save(c, null, null, 1.2);
+      expect(await diffOf(c, "person_capacity_factors")).toEqual({ new: expect.objectContaining({ factor: 1.2 }), every_step: true, suggestion_id: suggestion });
+      await c.query("update lead_sources set volume_week = 15 where id = $1", [northbeamLeadSourceIds.ads]);
+      expect(await diffOf(c, "lead_sources")).toEqual({ old: expect.any(Object), new: expect.any(Object), suggestion_id: suggestion });
+    });
+  });
+
   it("the function is still called by 18 enabled triggers", async () => {
     const rows = (
       await db.client.query(
@@ -203,6 +247,12 @@ describe("the function and the migration", () => {
     expect(live).not.toBe(OLD_MD5);
     expect(sql.split(OLD_MD5).length - 1).toBeGreaterThanOrEqual(3);
     expect(sql).toContain("Expect 18 rows");
+    // The order is stated against the ledger as it is now (row 69 is the B3 follow-up), and the smoke test can't give a false result.
+    expect(sql).toContain("ORDER: after row 69 (20261224500000");
+    expect(sql).toContain("This is row 70 of docs/production-migrations.md");
+    expect(sql).toContain("20261223000000, 20261224000000 and 20261224500000, and nothing >= 20261225000000");
+    expect(sql).toContain("NO stored time");
+    expect(sql).toContain('Expect {"status":"saved"...} from both calls');
   });
 
   it("differs from the old body only by the two marked lines (and the comment above them)", () => {

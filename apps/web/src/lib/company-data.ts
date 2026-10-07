@@ -17,7 +17,7 @@ import {
   type ProposalRow,
   type SuggestionRow,
 } from "@transpera-flow/db";
-import { auditStepId, COMPANY_AUDIT_TABLES, type AuditEntry } from "./suggestions/audit";
+import { auditStepIds, COMPANY_AUDIT_TABLES, newestStepNames, type AuditEntry } from "./suggestions/audit";
 import { readIdea } from "./suggestions/idea";
 import type { ProposalLookups } from "./suggestions/proposals";
 import { createClient } from "./supabase/server";
@@ -157,12 +157,27 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
     changes = (log.data ?? []) as unknown as AuditEntry[];
     for (const m of members.data ?? []) people[m.user_id] = m.email;
     // The steps the log names (a skill's, a per-person time's). A step id is stable across a process's versions, so it has one row per
-    // revision: the newest comes first and wins. At most 50 entries, so at most 50 ids.
-    const ids = [...new Set(changes.flatMap((e) => (e.target_table === "person_capacity_factors" || e.target_table === "person_skills" ? [auditStepId(e)] : [])).filter((id): id is string => id !== null))];
+    // revision: newest first, the first name per id wins (a draft's copy counts as newest, so an unpublished rename can show; only
+    // owners and agency admins read this). PostgREST caps a response (`max-rows`, 1,000 by default) and the oldest rows would drop
+    // off, which could leave an id unnamed, so read it a page at a time. At most 50 entries, so at most 50 ids.
+    const ids = auditStepIds(changes);
     if (ids.length) {
-      const steps = await supabase.from("steps").select("id, name, created_at").eq("workspace_id", ws).in("id", ids).order("created_at", { ascending: false });
-      if (steps.error) throw steps.error;
-      for (const st of steps.data ?? []) stepNames[st.id] ??= st.name;
+      const PAGE = 1000;
+      const rows: { id: string; name: string }[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const page = await supabase
+          .from("steps")
+          .select("id, name, created_at")
+          .eq("workspace_id", ws)
+          .in("id", ids)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, from + PAGE - 1);
+        if (page.error) throw page.error;
+        rows.push(...(page.data ?? []));
+        if ((page.data ?? []).length < PAGE) break;
+      }
+      Object.assign(stepNames, newestStepNames(rows));
     }
   }
   return {
