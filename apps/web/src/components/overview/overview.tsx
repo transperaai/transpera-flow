@@ -77,6 +77,7 @@ import { useIssues } from "@/lib/issues/use-issues";
 import { FindingsByProcess } from "./findings-by-process";
 import { FlowEfficiencyCard, ImprovementCard, OpenIssuesCard, ProcessHealthCard } from "./health-cards";
 import { RatingPill } from "./rating-pill";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // The trend charts and the team load timeline load after the map and the cards.
 const chartLoading = () => <Skeleton className="h-[180px] w-full" aria-busy="true" />;
@@ -478,7 +479,7 @@ export function Overview({
           action={
             <div className="flex flex-wrap items-center gap-1.5">
               {companyEditHref && (
-                <Link href={companyEditHref} data-edit-company-map className={cn(buttonVariants({ size: "sm" }), "bg-edit text-edit-fg hover:bg-edit/90")}>
+                <Link href={companyEditHref} data-edit-company-map data-edit-entry className={cn(buttonVariants({ size: "sm" }), "bg-edit text-edit-fg hover:bg-edit/90", EDIT_ONLY)}>
                   ✎ Edit company map
                 </Link>
               )}

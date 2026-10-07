@@ -64,10 +64,15 @@ export default async function DemoProcessPage(props: PageProps<"/demo/p/[process
         <Alert role="note">
           <Info />
           <AlertDescription className="text-xs leading-relaxed">
-            <p>
+            {/* A phone is read only (issue #44): it has no Open in Editor and no New issue, so it gets its own wording (CSS, no flash). */}
+            <p className="max-sm:hidden">
               Demo mode: sample data from the seed fixtures, not a database. This page is for reading: press Open in Editor to change the
               process in a draft you can simulate against live, publish or discard. Log issues here to try them out.
               Everything stays in this tab and is gone when you reload.
+            </p>
+            <p className="sm:hidden">
+              Demo mode: sample data from the seed fixtures, not a database. On a phone this page is read only: open it on a tablet or
+              computer to change the process in the Editor or to log issues.
             </p>
           </AlertDescription>
         </Alert>

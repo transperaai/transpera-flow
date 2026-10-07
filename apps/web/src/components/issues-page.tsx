@@ -33,6 +33,7 @@ import { useAbsenceTest } from "@/lib/sim/absence";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export interface Named {
   id: string;
@@ -121,6 +122,7 @@ export function IssuesPage({
                 key={k}
                 type="button"
                 data-show={k}
+                data-allow-on-phone /* a filter (Resolved), not an edit */
                 aria-pressed={filters.show === k}
                 onClick={() => setFilter({ ...filters, show: k })}
                 className={cn("rounded-md px-3 py-1 text-sm", filters.show === k ? "bg-accent font-medium text-accent-fg" : "text-fg-2 hover:bg-muted")}
@@ -129,7 +131,9 @@ export function IssuesPage({
               </button>
             ))}
           </div>
-          <Help {...LIST_HELP.show} className="ml-0" />
+          <span className="contents" data-allow-on-phone>
+            <Help {...LIST_HELP.show} className="ml-0" />
+          </span>
           <RatingChips ratings={ratings} value={filters.rating} onChange={(rating) => setFilter({ ...filters, rating })} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -145,7 +149,7 @@ export function IssuesPage({
             Export CSV
           </Button>
           {canEdit && (
-            <span className="flex items-center">
+            <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
               <Button type="button" onClick={() => setNewOpen(true)}>
                 + New issue
               </Button>

@@ -32,6 +32,8 @@
   --color-edit: var(--edit);
   --color-edit-soft: var(--edit-soft);
   --color-edit-fg: var(--edit-fg);
+  --color-crit-fg: var(--crit-fg);
+  --color-overlay: var(--overlay);
   --color-good: var(--good);
   --color-warn: var(--warn);
   --color-serious: var(--serious);

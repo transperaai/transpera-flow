@@ -16,6 +16,7 @@ import {
   type ProposalLookups,
   type ProposalOutcome,
 } from "@/lib/suggestions/proposals";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // The proposals half of the Suggestions page (A52, docs/PRD.md §7.1c, §8 screen 8): solution ideas (a map of the proposed
 // steps, Build it and Dismiss) and proposed issues (accept adds the issue through the Acknowledge path, reject drops
@@ -145,10 +146,10 @@ export function ProposalsView({ proposals, lookups, contacts = {}, canEdit, revi
                   <ProposalCard p={p} lookups={lookups} issueHref={issueHref}>
                     {canEdit && (
                       <>
-                        <Button type="button" disabled={pending} onClick={() => run(p.id, "accept")} aria-busy={busyId === p.id}>
+                        <Button type="button" className={EDIT_ONLY} data-edit-entry disabled={pending} onClick={() => run(p.id, "accept")} aria-busy={busyId === p.id}>
                           Accept
                         </Button>
-                        <Button variant="outline" size="sm" type="button" disabled={pending} onClick={() => run(p.id, "reject")}>
+                        <Button variant="outline" size="sm" type="button" className={EDIT_ONLY} data-edit-entry disabled={pending} onClick={() => run(p.id, "reject")}>
                           Reject
                         </Button>
                       </>
@@ -158,7 +159,7 @@ export function ProposalsView({ proposals, lookups, contacts = {}, canEdit, revi
               ))}
             </ul>
             {canEdit && (
-              <p className="mt-2 flex flex-wrap items-center gap-x-1 text-xs text-fg-2">
+              <p className={`mt-2 flex flex-wrap items-center gap-x-1 text-xs text-fg-2 ${EDIT_ONLY}`} data-edit-entry>
                 <b className="font-medium text-fg">Accept</b>
                 <Help {...SUGGESTIONS_HELP.accept} />
                 <span>adds it to your issues.</span>

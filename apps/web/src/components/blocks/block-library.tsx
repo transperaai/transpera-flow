@@ -16,6 +16,7 @@ import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
 import { useDemoBlocks } from "@/lib/blocks/demo";
 import { cn } from "@/lib/utils";
 import { BlockMap } from "./block-map";
+import { EDIT_ONLY } from "@/lib/phone";
 
 const TYPE_LABEL: Record<BlockRow["type"], string> = { manual: "By hand", ai: "AI" };
 
@@ -32,7 +33,7 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
       description="Saved bundles of steps. Drop one into a solution, or into a process in the Editor. AI solutions are blocks too."
       actions={
         newHref ? (
-          <span className="inline-flex items-center">
+          <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
             <Link href={newHref} className={cn(buttonVariants({ variant: "outline" }), "border-edit bg-edit text-edit-fg hover:bg-edit/90 hover:text-edit-fg dark:border-edit dark:bg-edit dark:hover:bg-edit/90")}>
               ✎ New block
             </Link>

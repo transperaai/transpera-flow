@@ -28,6 +28,7 @@ import { acknowledgeDraft, acknowledgeInsight, dismissInsight, type InsightConte
 import type { IssueDraft, IssueFormOptions } from "@/lib/issues/draft";
 import { buildInsights, filterByRating, limitInsights, ratingCountsOf, type Insight } from "@/lib/insights/insights";
 import type { IssuesState } from "@/lib/issues/use-issues";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** The (i) texts in an opened insight: only what the screen does not say by itself. */
 export const INSIGHT_HELP = {
@@ -365,7 +366,7 @@ function InsightDialog({
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-muted-foreground uppercase">Sources</span>
-                  <Button variant="ghost" size="sm" disabled={insight.issue !== null || !canAct} onClick={() => onStartAcknowledge(insight)}>
+                  <Button variant="ghost" size="sm" className={EDIT_ONLY} data-edit-entry disabled={insight.issue !== null || !canAct} onClick={() => onStartAcknowledge(insight)}>
                     + Link a source
                   </Button>
                 </div>
@@ -400,6 +401,8 @@ function InsightDialog({
                   {onEdit && insight.detection.findingId && (
                     <Button
                       variant="ghost"
+                      className={EDIT_ONLY}
+                      data-edit-entry
                       disabled={working || busy}
                       onClick={() => {
                         onClose();
@@ -409,13 +412,13 @@ function InsightDialog({
                       Edit
                     </Button>
                   )}
-                  <span className="flex items-center">
+                  <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
                     <Button variant="outline" disabled={working || busy} onClick={() => act(onDismiss)}>
                       Dismiss
                     </Button>
                     <Help {...INSIGHT_HELP.dismiss} />
                   </span>
-                  <Button disabled={working || busy} onClick={() => onStartAcknowledge(insight)}>
+                  <Button className={EDIT_ONLY} data-edit-entry disabled={working || busy} onClick={() => onStartAcknowledge(insight)}>
                     Acknowledge as issue…
                   </Button>
                 </>

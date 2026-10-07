@@ -17,6 +17,8 @@ import { GROUP_LABELS, LEVER_GROUP_ORDER, cleanHidden, kindsOf, type LeverKind }
 import { getDemoHiddenLevers, setDemoHiddenLevers } from "@/lib/levers/demo-store";
 import { cn } from "@/lib/utils";
 import { saveLevers } from "@/app/w/[slug]/settings/levers/actions";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export type LeversMode = "live" | "readonly" | "demo";
 
@@ -114,12 +116,13 @@ export function LeversSettings({
       actions={
         <>
           <SaveStatus state={state} mode={mode} />
-          <Button variant="outline" size="sm" disabled={!canEdit || hidden.length === 0} onClick={() => update([])}>
+          <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || hidden.length === 0} onClick={() => update([])}>
             Show all
           </Button>
         </>
       }
     >
+      <PhoneReadOnly>
       {mode === "readonly" && (
         <p role="note" className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
           Only owners and editors can change which levers show. You can see them here.
@@ -180,6 +183,7 @@ export function LeversSettings({
         ))}
       </div>
       {children}
+      </PhoneReadOnly>
     </Page>
   );
 }

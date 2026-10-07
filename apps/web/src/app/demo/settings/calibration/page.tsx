@@ -8,6 +8,7 @@ import { calibrationRows } from "@/lib/calibration/rows";
 import { clientCalibrationRows, simulationPlan } from "@/lib/calibration/client-rows";
 import { SAMPLE_AS_OF } from "@/lib/calibration/client-sample";
 import { demoBundle } from "@/lib/sources/demo";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
  * Settings → Historical data on the demo: Northbeam's pipeline with a sample stage history, deals and time logs to read, its clients
@@ -27,6 +28,7 @@ export default function DemoCalibrationPage() {
       eyebrow="Company"
       description="Demo mode: import the sample files, check them against Northbeam's model and see what they would change. Nothing is saved."
     >
+      <PhoneReadOnly>
       <CalibrationPanel
         personTimes={{ state: "hidden" }}
         mode="demo"
@@ -53,6 +55,7 @@ export default function DemoCalibrationPage() {
       />
       <OtherImportsPanel mode="demo" workspaceId={null} leadSources={leadSources} previous={{}} sample={samples} asOf={Date.parse(SAMPLE_AS_OF) + 86_400_000 - 1} />
       <ImportsHistory imports={[]} leadSources={leadSources} />
+      </PhoneReadOnly>
     </Page>
   );
 }

@@ -486,7 +486,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
             </span>
           )}
           {roll.openIssues > 0 && (
-            <span className="rounded-full bg-crit px-1.5 font-sans text-[10px] font-semibold text-white" title="Confirmed issues on the steps inside">
+            <span className="rounded-full bg-crit px-1.5 font-sans text-[10px] font-semibold text-crit-fg" title="Confirmed issues on the steps inside">
               {roll.openIssues} {roll.openIssues === 1 ? "issue" : "issues"}
             </span>
           )}

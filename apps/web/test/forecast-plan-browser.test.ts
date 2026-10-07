@@ -4,7 +4,7 @@ import { bundleHarness } from "./build-harness";
 
 // Forecast planning in a real browser (issue #36, B7), with the simulation in a real Web Worker (./forecast-harness/entry.tsx):
 // add a hire and drag it along the months, move markers by keyboard, a click that isn't a drag, Escape cancelling a drag, leave,
-// a sample plan with a solution, comparing two plans, saving in the demo, and the member view. At 1440 px and 400 px. Every
+// a sample plan with a solution, comparing two plans, saving in the demo, and the member view. At 1440, 640 and 400 px (a phone, which is read only). Every
 // case checks for console errors.
 
 let browser: Browser;
@@ -104,9 +104,12 @@ async function dragTo(page: Page, m: Locator, toColumn: number, { release = true
 }
 
 describe("planning on the Forecast", { timeout: 180_000 }, () => {
-  for (const width of [1440, 400]) {
+  for (const width of [1440, 640, 400]) {
     describe(`at ${width}px`, () => {
-      it("adds a hire and drags it along the months: dropping it runs the forecast again", async () => {
+      // A phone (under 640px) is read only (issue #44): its plan lane draws the markers but can't move, open or remove them, so the
+      // cases that add, move and save run from 640px up. The phone's own cases are in "on a phone" below.
+      const onTablet = width >= 640 ? it : () => {};
+      onTablet("adds a hire and drags it along the months: dropping it runs the forecast again", async () => {
         const { page, errors } = await mount(width);
         expect(await page.locator("[data-plan-lane]").count()).toBe(1);
         expect(await runs(page)).toBe(0);
@@ -127,7 +130,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("moves by keyboard: a month a key press, three months a page, Delete removes", async () => {
+      onTablet("moves by keyboard: a month a key press, three months a page, Delete removes", async () => {
         const { page, errors } = await mount(width);
         await addHire(page, "April 2027");
         await waitRuns(page, 1);
@@ -155,7 +158,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("treats a short click as a click, not a drag: it opens the marker, Escape closes it, nothing moved", async () => {
+      onTablet("treats a short click as a click, not a drag: it opens the marker, Escape closes it, nothing moved", async () => {
         const { page, errors } = await mount(width);
         await addHire(page);
         await waitRuns(page, 1);
@@ -172,7 +175,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("cancels a drag with Escape: the marker stays and nothing runs", async () => {
+      onTablet("cancels a drag with Escape: the marker stays and nothing runs", async () => {
         const { page, errors } = await mount(width);
         await addHire(page);
         await waitRuns(page, 1);
@@ -191,7 +194,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("ignores a release over another month after Escape: nothing moves and no dialog opens", async () => {
+      onTablet("ignores a release over another month after Escape: nothing moves and no dialog opens", async () => {
         const { page, errors } = await mount(width);
         await addHire(page);
         await waitRuns(page, 1);
@@ -211,7 +214,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("adds leave as a bar that moves by whole weeks, always to a Monday", async () => {
+      onTablet("adds leave as a bar that moves by whole weeks, always to a Monday", async () => {
         const { page, errors } = await mount(width);
         await addFromMenu(page, "Add leave");
         await page.getByLabel("Person", { exact: true }).selectOption({ label: "Dan Okafor" });
@@ -268,7 +271,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("saves, renames and deletes plans in the demo", async () => {
+      onTablet("saves, renames and deletes plans in the demo", async () => {
         const { page, errors } = await mount(width);
         const options = () => page.locator("[data-plan-select] option").allInnerTexts();
         await page.locator("[data-plan-select]").selectOption({ label: "Hire in January" });
@@ -293,7 +296,7 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.close();
       });
 
-      it("runs a plan's segments once and reuses the ones a change leaves alone", async () => {
+      onTablet("runs a plan's segments once and reuses the ones a change leaves alone", async () => {
         const { page, errors } = await mount(width, "demo", undefined, false, true);
         const simRuns = () => page.evaluate(() => window.__simRuns ?? 0);
         const before = await simRuns();
@@ -358,4 +361,51 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
       });
     });
   }
+
+  describe("on a phone (400px, issue #44)", () => {
+    it("draws a saved plan's markers but can't move, open or remove them", async () => {
+      const { page, errors } = await mount(400);
+      await page.locator("[data-plan-select]").selectOption({ label: "Hire in January" });
+      await waitRuns(page, 1);
+      const m = marker(page, "hire");
+      const at = await valuetext(m);
+      expect(at).toContain("1 January 2027");
+      const done = await runs(page);
+      // Dragging does nothing.
+      await dragTo(page, m, 6);
+      expect(await valuetext(m)).toBe(at);
+      // A click doesn't open the marker's dialog.
+      await m.click();
+      expect(await page.locator("[data-plan-dialog]").count()).toBe(0);
+      // Neither do the keys: no move, no edit, no removal.
+      await m.focus();
+      for (const key of ["ArrowRight", "PageDown", "Enter", "Delete"]) await page.keyboard.press(key);
+      expect(await page.locator("[data-plan-dialog]").count()).toBe(0);
+      expect(await page.locator("[data-plan-marker]").count()).toBeGreaterThan(0);
+      expect(await valuetext(m)).toBe(at);
+      expect(await runs(page)).toBe(done);
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+
+    it("still lets a phone read the plans: pick one and compare", async () => {
+      const { page, errors } = await mount(400);
+      await page.locator("[data-plan-select]").selectOption({ label: "Hire in March" });
+      await waitRuns(page, 1);
+      expect(await page.locator("[data-with-this-plan]").innerText()).toContain("With this plan");
+      expect(await page.locator("[data-plan-compare]").count()).toBe(1);
+      // Add, Save, Rename and Delete are edit entries, which the app's stylesheet hides on a phone (this harness loads none, so
+      // the check is that each one sits in a [data-edit-entry]); the plan picker and Compare are not.
+      const loose = await page.evaluate(() =>
+        [...document.querySelectorAll("[data-plan-bar] button")]
+          .filter((b) => /^(Add|Save|Rename|Delete)/.test((b.textContent ?? "").trim()) && !b.closest("[data-edit-entry]"))
+          .map((b) => (b.textContent ?? "").trim()),
+      );
+      expect(loose).toEqual([]);
+      expect(await page.locator("[data-plan-bar] [data-edit-entry] button", { hasText: "Rename" }).count()).toBe(1);
+      expect(await page.locator("[data-edit-entry] [data-plan-select], [data-edit-entry] [data-plan-compare]").count()).toBe(0);
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+  });
 });

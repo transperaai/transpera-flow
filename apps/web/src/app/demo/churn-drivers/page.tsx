@@ -1,4 +1,5 @@
 import { Page } from "@/components/shell/page";
+import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { demoBundle } from "@/lib/sources/demo";
 import { ChurnDriversSettings } from "../../w/[slug]/settings/churn-drivers-settings";
 
@@ -6,6 +7,7 @@ import { ChurnDriversSettings } from "../../w/[slug]/settings/churn-drivers-sett
 export default function DemoChurnDriversPage() {
   return (
     <Page title="Settings" eyebrow="Company">
+      <PhoneNotice />
       <ChurnDriversSettings mode="demo" workspaceId={null} bundle={demoBundle()} rows={[]} />
     </Page>
   );

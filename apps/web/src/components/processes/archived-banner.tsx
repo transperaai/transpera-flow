@@ -9,6 +9,7 @@ import { ArchiveRestore } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ProcessAdminResult } from "@/lib/processes/admin";
 import { shortDate } from "@/lib/processes/rows";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export function ArchivedBanner({ name, archivedAt, restore }: { name: string; archivedAt: string; restore?: () => Promise<ProcessAdminResult> }) {
   const router = useRouter();
@@ -32,7 +33,7 @@ export function ArchivedBanner({ name, archivedAt, restore }: { name: string; ar
         <span className="font-semibold">Archived on {shortDate(archivedAt)}.</span> {name} is off the company map, the lists and the simulation, and read only. Its history is kept.
       </p>
       {restore && (
-        <Button type="button" size="sm" variant="outline" disabled={working} onClick={() => void run()} aria-label={`Restore ${name}`} className="shrink-0">
+        <Button type="button" size="sm" variant="outline" disabled={working} onClick={() => void run()} aria-label={`Restore ${name}`} className={`shrink-0 ${EDIT_ONLY}`} data-edit-entry>
           <ArchiveRestore aria-hidden /> {working ? "Restoring…" : "Restore"}
         </Button>
       )}

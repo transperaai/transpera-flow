@@ -11,9 +11,10 @@
 // markers is a plan, saved with a name (owners, editors and agency admins only; the demo keeps plans in the tab), and
 // two plans can be compared side by side. The live forecast, and its insights, are never changed by a plan.
 
+import { useIsPhone } from "@/hooks/use-mobile";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { partOf, speedsNormalisedFor, type ForecastPlanMarker, type ForecastPlanRow, type IssueRow, type ProcessBundle, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
@@ -59,7 +60,7 @@ export interface ForecastViewProps {
   /** The ISO date the forecast starts on; today when omitted. Fixed on the demo so its months don't move. */
   startDate?: string;
   /** A line under the title, e.g. the demo's note about its sample plan. */
-  note?: string;
+  note?: ReactNode;
   /** Saved forecast plans (owners, editors and agency admins; none otherwise). */
   plans?: ForecastPlanRow[];
   /** Saved solutions a plan can put live. On the demo the tab's own are added to these. */
@@ -142,6 +143,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
 
   // ---- Plans (B7): owners, editors and agency admins only; a member or viewer sees the forecast as it was. ----
   const planUi = mode !== "readonly";
+  const isPhone = useIsPhone();
   const demoStore = useDemoPlans();
   const demoSolutions = useDemoSolutions();
   const [livePlans, setLivePlans] = useState(plans);
@@ -361,7 +363,8 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
           bounds,
           startDate: start,
           hoursPerWeek: built.model?.hoursPerWeek ?? hpw,
-          editable: true,
+          // A phone is read only (issue #44): the plan lane draws the markers but can't move or remove them.
+          editable: !isPhone,
           status: plan.status,
           runs: plan.finished,
           onMove: moveMarker,

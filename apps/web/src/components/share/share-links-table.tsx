@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { STATUS_LABELS, ideasText, openedText, shareDate, showsFinancials, showsPeople, showsTryChanges, whoText } from "@/lib/share/format";
 import type { ShareLinkRow } from "@/lib/share/list";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** The (i) texts: what each action does, in plain words, with an example. */
 export const SHARE_LIST_HELP = {
@@ -137,7 +138,7 @@ export function ShareLinksTable({ slug, links, refresh, revoke }: ShareLinksTabl
                 </TableCell>
                 <TableCell>
                   {l.status === "off" ? null : (
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className={`flex flex-wrap items-center justify-end gap-2 ${EDIT_ONLY}`} data-edit-entry>
                       <span className="inline-flex items-center">
                         <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => run(l.id, doRefresh, "The copy is up to date.")} data-share-update>
                           Update copy

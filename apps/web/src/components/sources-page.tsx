@@ -33,6 +33,8 @@ import { liveSourceStore } from "@/lib/sources/live-store";
 import { MemorySourceStore, sourceFieldValue, type SourceStore } from "@/lib/sources/store";
 import { SOURCE_KIND_LABELS, SOURCE_KINDS, parseSpeakers, type SourceField } from "@/lib/sources/validate";
 import { SOURCE_FILE_ACCEPT, SOURCE_FILE_LABELS, fileSize } from "@/lib/sources/file-check";
+import { EDIT_ONLY } from "@/lib/phone";
+import { useIsPhone } from "@/hooks/use-mobile";
 
 /** Plain-English (i) text for a source's fields, with an example (issue #123). */
 const SOURCE_HELP = {
@@ -96,6 +98,9 @@ export function SourcesPage({
   processBase?: string;
 }) {
   const canEdit = mode !== "readonly";
+  // A phone is read only (issue #44): the open source shows its details without the controls that change them.
+  const isPhone = useIsPhone();
+  const canEditHere = canEdit && !isPhone;
   const router = useRouter();
   const demoSolutions = useDemoSolutions().solutions;
   // In the demo every page of the tab shares one store, so a link made on a step or an issue is here too.
@@ -272,7 +277,7 @@ export function SourcesPage({
           )}
         </p>
         {canEdit && (
-          <button type="button" className={primary} onClick={() => setDialog({ source: null })}>
+          <button type="button" className={`${primary} ${EDIT_ONLY}`} data-edit-entry onClick={() => setDialog({ source: null })}>
             + Add source
           </button>
         )}
@@ -317,12 +322,12 @@ export function SourcesPage({
               source={{ ...opened.row, body: opened.body ?? null }}
               loadingText={opened.body === undefined && opened.row.has_body}
               file={opened.file}
-              onUpload={canEdit && store.attachFile ? (f) => attach(opened.row.id, f) : undefined}
+              onUpload={canEditHere && store.attachFile ? (f) => attach(opened.row.id, f) : undefined}
               onDownload={store.fileLink ? () => void download(opened.row.id, opened.file?.name ?? "file") : undefined}
               citations={citations[opened.row.id] ?? []}
               links={links.filter((l) => l.source_id === opened.row.id)}
               targets={targets}
-              canEdit={canEdit}
+              canEdit={canEditHere}
               busy={busy}
               saver={saver}
               processBase={processBase}

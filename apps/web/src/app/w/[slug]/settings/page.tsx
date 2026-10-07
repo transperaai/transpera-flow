@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Page } from "@/components/shell/page";
+import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { buttonVariants } from "@/components/ui/button";
 import { loadLiveProcess, loadWorkspaceClients, loadWorkspaceSettings } from "@/lib/data";
 import { clientSources } from "@/lib/clients";
@@ -48,6 +49,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       }
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
+      <PhoneNotice />
       <WorkspaceDetails
         workspaceId={data.workspace.id}
         name={data.workspace.name}

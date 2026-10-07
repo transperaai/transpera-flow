@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { PROCESS_KIND_CHOICES } from "@/lib/processes/admin";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export type CreateProcess = (prev: CreateProcessResult, form: FormData) => Promise<CreateProcessResult>;
 
@@ -13,7 +14,7 @@ export type CreateProcess = (prev: CreateProcessResult, form: FormData) => Promi
 export function NewProcessButton({ create }: { create: CreateProcess }) {
   const [open, setOpen] = useState(false);
   return (
-    <span className="inline-flex items-center">
+    <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
       <Button className="bg-edit text-edit-fg hover:bg-edit/90" onClick={() => setOpen(true)}>
         ✎ New process
       </Button>

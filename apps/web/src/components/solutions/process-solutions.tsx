@@ -11,6 +11,7 @@ import { SolutionCards } from "@/components/solutions/solution-cards";
 import type { SolutionsData } from "@/lib/solutions/cards";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { buildSolutionHref, newSolutionHref } from "@/lib/solutions/links";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export type { SolutionsData };
 
@@ -54,7 +55,7 @@ export function ProcessSolutions({
   return (
     <div className="flex flex-col gap-3" data-testid="process-solutions">
       {canEdit && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+        <div className={`flex flex-wrap items-center gap-x-2 gap-y-2 ${EDIT_ONLY}`} data-edit-entry>
           <Link
             href={newSolutionHref(base, processId, from)}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
@@ -81,7 +82,7 @@ export function ProcessSolutions({
         empty={otherOnly ? "Nothing else yet. Every solution here is for an issue above." : undefined}
       />
       {canEdit && !otherOnly && toSolve.length > 0 && (
-        <div className="flex flex-col gap-1.5" data-testid="build-from-issue">
+        <div className={`flex flex-col gap-1.5 ${EDIT_ONLY}`} data-testid="build-from-issue" data-edit-entry>
           <span className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
             Build from an issue
             <Help

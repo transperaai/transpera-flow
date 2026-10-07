@@ -28,6 +28,7 @@ import {
 import type { ProcessCardData } from "@/lib/processes/data";
 import { shortDate, type ProcessRowData } from "@/lib/processes/rows";
 import { cn } from "@/lib/utils";
+import { EDIT_ONLY } from "@/lib/phone";
 
 type Open = { mode: "rename" | "kind" | "archive"; row: ProcessRowData } | null;
 
@@ -123,6 +124,7 @@ function ViewChip({ on, onPick, children }: { on: boolean; onPick: () => void; c
   return (
     <button
       type="button"
+      data-allow-on-phone /* a view filter (Archived), not an edit */
       aria-pressed={on}
       onClick={onPick}
       className={cn(
@@ -143,7 +145,8 @@ function RowMenu({ row, onPick }: { row: ProcessRowData; onPick: (mode: "rename"
           type="button"
           aria-label={`Change ${row.name}`}
           data-process-menu={row.name}
-          className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          data-edit-entry
+          className={`grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${EDIT_ONLY}`}
         >
           <MoreHorizontal aria-hidden className="size-4" />
         </button>
@@ -219,7 +222,7 @@ function ArchivedTable({
                 <td className="px-2 py-2.5 text-xs whitespace-nowrap text-muted-foreground">{shortDate(p.archivedAt)}</td>
                 {canRestore && (
                   <td className="px-2 py-2 text-right">
-                    <Button type="button" size="sm" variant="outline" disabled={restoring !== null} onClick={() => onRestore(p)} aria-label={`Restore ${p.name}`}>
+                    <Button type="button" size="sm" variant="outline" className={EDIT_ONLY} data-edit-entry disabled={restoring !== null} onClick={() => onRestore(p)} aria-label={`Restore ${p.name}`}>
                       <ArchiveRestore aria-hidden /> {restoring === p.id ? "Restoring…" : "Restore"}
                     </Button>
                   </td>
