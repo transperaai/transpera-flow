@@ -266,4 +266,11 @@ describe("(i) help on every control", () => {
     expect(read("lib/solutions/stress.ts")).toMatch(/checkTarget/);
     expect(read("lib/solutions/stress.ts")).toMatch(/withMarketCondition/);
   });
+
+  it("puts no first-run chip on the compare maps: they draw no run's numbers (issue #44)", () => {
+    const compare = read("components/solutions/solution-compare.tsx");
+    expect(compare).toContain("<ProcessCanvas");
+    expect(compare).not.toMatch(/\bcomputing[=:{]/);
+    expect(compare).not.toMatch(/\bresult=\{/);
+  });
 });
