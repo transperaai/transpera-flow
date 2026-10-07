@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sharedOptions } from "@/lib/monitoring/options";
 import { sentryDsn, sentryEnvironment, sourceMapsConfigured } from "@/lib/monitoring/env";
@@ -60,6 +62,21 @@ describe("sharedOptions", () => {
     vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", DSN);
     const options = sharedOptions()!;
     expect(options).toMatchObject({ dsn: DSN, sendDefaultPii: false, includeLocalVariables: false, attachStacktrace: false, sendClientReports: false, maxBreadcrumbs: 30 });
+    // sendDefaultPii: false alone still collects filtered headers, cookies, query strings and frame variables in 10.x: every
+    // category is turned off at collection, not only removed by the scrubber.
+    expect(options.dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      stackFrameVariables: false,
+    });
+    expect(options.tracePropagationTargets).toEqual([]);
+    expect(options.enhanceFetchErrorMessages).toBe(false);
     expect(options.beforeSend).toBe(scrubEvent);
     expect(options.beforeBreadcrumb).toBe(scrubBreadcrumb);
     expect(options.beforeSendTransaction?.({} as never, {})).toBeNull();
@@ -95,10 +112,10 @@ describe("the three config files", () => {
     });
   }
 
-  it("the client's integration filter removes tracing, replay, feedback and profiling and keeps the rest", async () => {
+  it("the client's integration filter removes tracing, replay, feedback, profiling and sessions and keeps the rest", async () => {
     vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "");
     const { withoutExtras } = await import("../sentry.client.config");
-    const names = ["Breadcrumbs", "BrowserTracing", "Replay", "ReplayCanvas", "Feedback", "BrowserProfiling", "GlobalHandlers", "LinkedErrors"];
+    const names = ["Breadcrumbs", "BrowserTracing", "Replay", "ReplayCanvas", "Feedback", "BrowserProfiling", "BrowserSession", "GlobalHandlers", "LinkedErrors"];
     expect(withoutExtras(names.map((name) => ({ name }))).map((i) => i.name)).toEqual(["Breadcrumbs", "GlobalHandlers", "LinkedErrors"]);
   });
 
@@ -128,9 +145,40 @@ describe("instrumentation", () => {
     await expect(onRequestError(new Error("x"), { path: "/", method: "GET", headers: {} }, {} as never)).resolves.toBeUndefined();
   });
 
-  it("the browser file imports the client config statically, before hydration", () => {
-    expect(read("src/instrumentation-client.ts")).toMatch(/^import "\.\.\/sentry\.client\.config";$/m);
-    expect(read("src/instrumentation-client.ts")).not.toContain("onRouterTransitionStart");
+  it("has no instrumentation-client file, which every build would bundle: the client config is injected only with a DSN", () => {
+    for (const file of ["src/instrumentation-client.ts", "src/instrumentation-client.js", "instrumentation-client.ts", "instrumentation-client.js"]) {
+      expect(existsSync(new URL(`../${file}`, import.meta.url)), file).toBe(false);
+    }
+  });
+});
+
+describe("the browser bundle without a DSN", () => {
+  // Every file under src/ that a page could bundle. Only sentry.client.config.ts (outside src/, injected with a DSN) loads the SDK;
+  // src/ may name it in types (`import type`) and on the server (instrumentation.ts loads it only with a DSN).
+  const files = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [join(dir, e.name)] : []));
+  const src = fileURLToPath(new URL("../src", import.meta.url));
+
+  it("no file under src/ imports the Sentry SDK at the top level, except as types", () => {
+    for (const file of files(src)) {
+      const code = readFileSync(file, "utf8");
+      expect(code, file).not.toMatch(/^import (?!type )[^;]*from "@sentry\//m);
+      expect(code, file).not.toMatch(/^import "@sentry\//m);
+    }
+  });
+
+  it("the error screens report through lib/monitoring/report.ts, which the client config fills in", async () => {
+    for (const file of ["src/app/global-error.tsx", "src/app/w/[slug]/error.tsx", "src/app/demo/error.tsx"]) {
+      expect(read(file), file).toContain('import { reportError } from "@/lib/monitoring/report";');
+    }
+    expect(read("sentry.client.config.ts")).toMatch(/if \(options\) setErrorReporter\(\(error\) => Sentry\.captureException\(error\)\);/);
+    const { reportError, setErrorReporter } = await import("@/lib/monitoring/report");
+    expect(() => reportError(new Error("x"))).not.toThrow();
+    const seen: unknown[] = [];
+    setErrorReporter((e) => seen.push(e));
+    const error = new Error("y");
+    reportError(error);
+    expect(seen).toEqual([error]);
   });
 });
 
@@ -138,18 +186,28 @@ describe("next.config.ts", () => {
   const source = read("next.config.ts");
   const FIELDS = ["headers", "outputFileTracingIncludes", "outputFileTracingRoot", "redirects", "serverExternalPackages", "transpilePackages"];
 
-  it("is not wrapped without a DSN: today's fields only, and no source maps for the browser", async () => {
+  it("is not wrapped without a DSN: today's fields only, no source maps for the browser, and no client config injected", async () => {
     vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "");
     const config = (await import("../next.config")).default as Record<string, unknown>;
     expect(Object.keys(config).sort()).toEqual(FIELDS);
     expect(config).not.toHaveProperty("productionBrowserSourceMaps");
+    expect(config).not.toHaveProperty("instrumentationClientInject");
     expect(config.transpilePackages).toEqual(["@transpera-flow/engine", "@transpera-flow/db", "@transpera-flow/mcp"]);
     expect(config.serverExternalPackages).toEqual(["unpdf"]);
   });
 
   it("wraps with Sentry only when the DSN is set", () => {
-    expect(source).toMatch(/export default process\.env\.NEXT_PUBLIC_SENTRY_DSN\?\.trim\(\)\s*\? withSentryConfig\(nextConfig,/);
-    expect(source).toMatch(/:\s*nextConfig;/);
+    expect(source).toMatch(/export default process\.env\.NEXT_PUBLIC_SENTRY_DSN\?\.trim\(\) \? withSentry\(nextConfig\) : nextConfig;/);
+  });
+
+  it("with a DSN: injects the client config before hydration, drops the trace meta tags and the route list", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", DSN);
+    for (const v of BUILD_VARS) vi.stubEnv(v, "");
+    const config = (await import("../next.config")).default as { instrumentationClientInject?: string[]; experimental?: Record<string, unknown> };
+    expect(config.instrumentationClientInject).toEqual(["./sentry.client.config.ts"]);
+    expect(existsSync(new URL("../sentry.client.config.ts", import.meta.url))).toBe(true);
+    expect(config.experimental ?? {}).not.toHaveProperty("clientTraceMetadata");
+    expect(source).toContain("routeManifestInjection: false");
   });
 
   it("disables source maps unless all three build variables are set, and deletes them after upload", () => {

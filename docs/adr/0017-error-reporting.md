@@ -19,17 +19,25 @@ can carry local variables; server action arguments hold names and rates.
 
 ## Decision
 
-- **Errors only.** No tracing, session replay, user feedback, logs or profiling: none of their options is set, and the
-  client's default integrations for tracing, replay, feedback and profiling are filtered out.
+- **Errors only.** No tracing, session replay, user feedback, logs, profiling or browser sessions: none of their options is
+  set, and the client's default integrations for tracing, replay, feedback, profiling and sessions are filtered out. The
+  server sends no `sentry-trace` or `baggage` header to other services (`tracePropagationTargets: []`), and Next writes no
+  trace ids into pages (`clientTraceMetadata` is taken back out of the wrapped config).
 - **Nothing personal leaves.** One tested module, `apps/web/src/lib/monitoring/scrub.ts`, is `beforeSend` and
   `beforeBreadcrumb` in every runtime. `scrubEvent` **rebuilds** the event from an allow-list of fields (so a field the SDK
   adds later is not sent until someone lists it), then runs every remaining string through `scrubText` as a backstop.
-  - `sendDefaultPii: false`; **no user at all** (not even a pseudonymous id: it would need an amendment to this ADR); no
+  - **Nothing personal is collected in the first place:** `sendDefaultPii: false` and, because 10.x still collects
+    filtered headers, cookies and query strings with that alone, `dataCollection` turns every category off (user, cookies,
+    headers, bodies, query strings, GraphQL, AI inputs and outputs, database values, frame variables).
+  - **No user at all** (not even a pseudonymous id: it would need an amendment to this ADR); no
     request headers, cookies, body or query string (a request is only its method and a scrubbed address); no local
     variables; no `extra`, `modules`, spans or attachments; contexts only for runtime, OS, browser, device (minus its
     name), app (minus its name) and Next's route.
-  - **Addresses** lose their query and fragment; `/s/<token>` becomes `/s/[token]` and `/w/<slug>` becomes `/w/[slug]`;
-    ids stay (ADR 0016, "Real ids stay").
+  - **Addresses** lose their query and fragment, and keep only path segments that are known words (the app's own route
+    segments, Next's build files, the Supabase and Anthropic API words: `ROUTE_WORDS`), ids and numbers; `/s/<token>`
+    becomes `/s/[token]`, `/w/<slug>` becomes `/w/[slug]` and any other segment `[part]` (a Storage path ends in the file's
+    own name, which can name a person). Ids stay (ADR 0016, "Real ids stay"). A test checks every static route segment is
+    in the list and that no name is.
   - **Breadcrumbs:** only navigation and HTTP ones, with scrubbed addresses; console, clicks, input and custom ones are
     dropped.
   - **Error messages are cut to allow-listed words.** Any word that is not on a fixed vocabulary
@@ -50,13 +58,16 @@ can carry local variables; server action arguments hold names and rates.
   compile, and deleted after upload). 11.x (11.0.0 was published on 23 Sep 2026) turns on build-time server-dependency
   instrumentation by default, which changes the server bundle more than we need: **11.x waits until it has had a month**, then
   moves in its own small PR. `withSentryConfig` is imported from `@sentry/nextjs/config` (the root export is deprecated).
-- **Where it runs.** Browser (`instrumentation-client.ts`, a static import, so errors during hydration are caught), Node
+- **Where it runs.** Browser (`sentry.client.config.ts`, which `next.config.ts` injects through Next's
+  `instrumentationClientInject` only when the DSN is set at build: it runs before hydration, so errors during hydration are
+  caught, and without a DSN none of the SDK is in the browser bundle; there is no `instrumentation-client.ts`), Node
   and edge (`instrumentation.ts`, with `onRequestError` for rendering, route handlers, server actions and the proxy). Every
   route runs on Node today; the edge config costs nothing and loads only when `NEXT_RUNTIME` is "edge". No tunnel route
   (it would pass through `proxy.ts`, which redirects signed-out visitors, and adds server load).
 - **Error screens** use the existing tokens and classes only (Austin does the visual design later): `global-error.tsx`, and
   `error.tsx` for the workspace and demo segments. A segment's screen reports only an error with no digest (one with a
-  digest came from the server, which `onRequestError` already reported).
+  digest came from the server, which `onRequestError` already reported). The screens report through
+  `lib/monitoring/report.ts`, which the browser config fills in, so none of them imports the SDK.
 - **A check page**, `/monitoring-check`, for agency admins only and linked from nowhere, sends one test error from the browser
   and one from the server.
 - **Region:** the default is the European Union (Germany), chosen at sign-up (Sentry has no Australian region; it can't be
@@ -70,12 +81,13 @@ can carry local variables; server action arguments hold names and rates.
   kept out of the list by the guard test. A word that is merely unfamiliar reads "…", which is the safe way to be wrong.
 - Code identifiers containing an underscore pass as they are (`save_fields`), and so would a name typed with one. Accepted:
   names in our messages come from `%` in SQL, which are free text, not identifiers.
-- The SDK is in the browser bundle even without a DSN (it does nothing); a dynamic import would miss errors during
-  hydration.
+- Without a DSN the browser bundle holds none of the SDK (CI checks it). With one, the SDK is in every page's first load
+  (about 56 kB gzipped). `NEXT_PUBLIC_SENTRY_DSN` is read at build, so turning reporting on or off needs a new build.
 - Web Workers (`src/workers/`) are not covered: they report failures to the page as rejected promises, which the UI shows.
 - Server actions that return `{ status: "error" }` are expected and are not reported; only thrown ones are.
 - Ad blockers stop `*.ingest.sentry.io` for some visitors; those errors are lost.
 - Sentry's own server-side scrubbing (Austin turns on "Prevent Storing of IP Addresses" and adds sensitive fields) is a
   second layer. The scrubber in the app is the one we rely on.
-- Release health sessions (the SDK's default) are not turned off; they carry the release, environment and browser, no user.
+- Browser sessions (release health) are off: they would send the visitor's browser details on every page view. The Node
+  server still sends its per-minute request counts (release, environment and numbers only).
 - Free-plan quota (5,000 errors a month) is Sentry's to limit: a spike limit can be set in the project's settings.

@@ -115,7 +115,9 @@ the API. See [`docs/adr/0011-narration.md`](docs/adr/0011-narration.md).
 
 Errors from the browser, the Node server and the edge runtime go to Sentry when
 `NEXT_PUBLIC_SENTRY_DSN` is set (Vercel: Production and Preview). Without it
-nothing is initialised or sent, and the build is exactly the one without Sentry.
+nothing is initialised or sent, the build is exactly the one without Sentry, and
+the browser bundle holds none of the SDK (the DSN is read at build, so a change
+needs a redeploy).
 Source maps (so stack traces read as our TypeScript) are made and uploaded at
 build only when all of `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`
 are set too; they are deleted after upload, and a failed upload warns without

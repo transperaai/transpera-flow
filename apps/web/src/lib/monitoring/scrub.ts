@@ -13,26 +13,78 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
 const UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 const UUID_WHOLE = new RegExp(`^${UUID}$`);
 
-/** A URL or path cut to what is safe: no query, no fragment; /s/<token> → /s/[token]; /w/<slug> → /w/[slug]; auth codes gone. */
-export function scrubUrl(url: string): string {
+// The path segments an address may keep (deny by default): the app's own static route segments, Next's build files, and the
+// Supabase and Anthropic API words the app calls. Any other segment becomes "[part]": a file's name in a Storage path
+// (`/storage/v1/object/sources/<ids>/Maya Collins interview.pdf`), a workspace's slug, a share token, anything new.
+// test/monitoring-scrub.test.ts checks every static route segment under src/app is here, and that no name is.
+export const ROUTE_WORDS: ReadonlySet<string> = new Set([
+  // The app's routes (src/app).
+  "access", "ai", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "churn-drivers", "demo", "edit",
+  "export", "first-principles", "forecast", "history", "issues", "levers", "library", "login", "market", "mcp", "monitoring-check",
+  "narrate", "overview", "p", "people", "privacy", "processes", "restore", "s", "settings", "share", "signout", "solutions",
+  "sources", "suggestions", "tokens", "w",
+  // Next's build files.
+  "_next", "chunks", "css", "media", "static",
+  // Supabase (REST, Auth, Storage, Realtime) and Anthropic.
+  "authenticated", "buckets", "functions", "info", "logout", "messages", "object", "otp", "public", "realtime", "recover", "rest",
+  "rpc", "sign", "storage", "token", "user", "v1", "verify", "websocket",
+]);
+
+// A route pattern's placeholders (Next's `[slug]`, and the ones this file writes).
+const ROUTE_PARAM = /^\[(?:\.\.\.)?(?:slug|token|processId|number|id|part)\]$/;
+// Postgres table and function names in a Supabase REST path (`/rest/v1/rpc/import_workspace_bundle`).
+const SNAKE_CASE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+
+function keepSegment(segment: string, index: number, segments: readonly string[]): string {
+  if (segment === "" || UUID_WHOLE.test(segment) || /^\d+$/.test(segment) || ROUTE_PARAM.test(segment)) return segment;
+  // segments[0] is "" (the path starts with a slash); the one after /s or /w is the secret or the company's name.
+  if (index === 2 && segments[1] === "s") return "[token]";
+  if (index === 2 && segments[1] === "w") return "[slug]";
+  const lower = segment.toLowerCase();
+  if (segment === lower && (ROUTE_WORDS.has(segment) || ALLOWED_WORDS.has(segment))) return segment;
+  if (segments[1] === "rest" && SNAKE_CASE.test(segment)) return segment;
+  // Next's build files are named by content hashes: nothing personal, and the stack trace needs them.
+  if (segments[1] === "_next" && segments[2] === "static" && /^[\w.-]+$/.test(segment)) return segment;
+  return "[part]";
+}
+
+type Parsed = { origin: string; segments: string[] };
+
+/** Parses an address; null when it isn't one. A query and a fragment are always dropped. */
+function parseAddress(url: string): Parsed | null {
   const input = url.trim();
   // A query or fragment is dropped, so only what stays has to look like an address (browsers encode spaces; a raw one is not a URL).
-  if (!input || input === "[url]" || /\s/.test(input.replace(/[?#][\s\S]*$/, ""))) return "[url]";
+  if (!input || input === "[url]" || /\s/.test(input.replace(/[?#][\s\S]*$/, ""))) return null;
   const hasOrigin = /^[a-z][a-z0-9+.-]*:\/\//i.test(input);
   let parsed: URL;
   try {
     parsed = new URL(input, "http://x");
   } catch {
-    return "[url]";
+    return null;
   }
-  const segments = parsed.pathname.split("/");
-  // segments[0] is "" (the path starts with a slash); the one after /s or /w is the secret or the company's name.
-  if ((segments[1] === "s" || segments[1] === "w") && segments.length > 2 && segments[2] !== "") segments[2] = segments[1] === "s" ? "[token]" : "[slug]";
-  const path = segments.join("/");
   // Credentials in the address ("https://user:pass@host") are dropped with `origin`.
   // Next's browser files live at "app:///_next/..."; a non-http scheme has no `origin`, so rebuild it.
-  const origin = parsed.origin !== "null" ? parsed.origin : `${parsed.protocol}//${parsed.host}`;
-  return (hasOrigin ? origin : "") + path;
+  const origin = hasOrigin ? (parsed.origin !== "null" ? parsed.origin : `${parsed.protocol}//${parsed.host}`) : "";
+  return { origin, segments: parsed.pathname.split("/") };
+}
+
+/**
+ * A URL or path cut to what is safe: no query, no fragment, and only path segments that are route words, ids or numbers;
+ * /s/<token> → /s/[token]; /w/<slug> → /w/[slug]; any other segment → [part].
+ */
+export function scrubUrl(url: string): string {
+  const parsed = parseAddress(url);
+  if (!parsed) return "[url]";
+  return parsed.origin + parsed.segments.map(keepSegment).join("/");
+}
+
+/** A stack frame's file (a bundle's path on the server or in the browser): query, fragment, the share token and the slug cut. */
+function scrubCodePath(url: string): string {
+  const parsed = parseAddress(url);
+  if (!parsed) return "[url]";
+  const { segments } = parsed;
+  if ((segments[1] === "s" || segments[1] === "w") && segments.length > 2 && segments[2] !== "") segments[2] = segments[1] === "s" ? "[token]" : "[slug]";
+  return parsed.origin + segments.join("/");
 }
 
 const TRAILING = /[.,;:!?)'"”’]+$/;
@@ -44,6 +96,9 @@ function scrubFound(found: string): string {
 }
 
 const EMAIL = /[^\s@"'<>]+@[^\s@"'<>]+\.[^\s@"'<>]+/g;
+// In a file path an address has no slash and ends in a real top-level domain, so pnpm's store paths
+// (`.pnpm/next@16.3.6_@babel+core@7.29.7_/node_modules/...`) stay readable.
+const EMAIL_IN_CODE = /[^\s@"'<>/]+@[^\s@"'<>/]+\.[A-Za-z]{2,}(?![\w.])/g;
 const KEY_DETAIL = /Key \(([^)]*)\)=\(([^)]*)\)/g;
 // Quotes that open or close text, not apostrophes inside a word (can't, Orla's).
 const QUOTED = [
@@ -68,7 +123,7 @@ function scrub(text: string, code: boolean): string {
   out = out.replace(/(?<![\p{L}\p{N}_.\-/])\/(?:s|w)\/[^\s"'<>]*/gu, scrubFound);
   // Before the email rule, which would otherwise swallow the whole "Key (email)=(a@b.c)" and hide that it was a key detail.
   out = out.replace(KEY_DETAIL, "Key ([column])=([value])");
-  out = out.replace(EMAIL, "[email]");
+  out = out.replace(code ? EMAIL_IN_CODE : EMAIL, "[email]");
   out = out.replace(moneyRegex(), "[amount]");
   out = out.replace(shareMoneyRegex(), "[amount]");
   // Source code (a stack frame's file, function and line) keeps its quotes and long names; the steps above still apply to it.
@@ -82,7 +137,7 @@ export function scrubText(text: string): string {
   return scrub(text, false);
 }
 
-const PLACEHOLDERS = new Set(["[email]", "[amount]", "[text]", "[token]", "[url]", "[slug]", "[column]", "[value]"]);
+const PLACEHOLDERS = new Set(["[email]", "[amount]", "[text]", "[token]", "[url]", "[slug]", "[part]", "[column]", "[value]", "[type]"]);
 // Order matters: a uuid and a placeholder are matched whole before the word rule can split them.
 const PIECE = new RegExp(`${UUID}|\\[[a-z]+\\]|[\\p{L}\\p{N}_](?:[\\p{L}\\p{N}_]|['’](?=\\p{L}))*`, "gu");
 const SQLSTATE = /^(?=.*\d)[0-9A-Z]{5}$/;
@@ -142,10 +197,14 @@ function scrubFrame(frame: unknown): Obj | null {
   return out;
 }
 
-/** A frame's file: a URL or an absolute path is cut like any address; anything else ("<anonymous>") gets the code-safe rules only. */
+/**
+ * A frame's file. A web page's own address (an inline script) is cut like any address; a bundle's path (`app:///_next/...`, a
+ * server path, `/_next/static/...`) keeps its path so source maps match; anything else ("<anonymous>") gets the code-safe rules.
+ */
 function scrubFile(file: string): string {
   if (!/^(?:[a-z][a-z0-9+.-]*:\/\/|\/)/i.test(file)) return scrub(file, true);
-  const url = scrubUrl(file);
+  const page = /^https?:\/\//i.test(file) && !/^https?:\/\/[^/]*\/_next\//i.test(file);
+  const url = page ? scrubUrl(file) : scrubCodePath(file);
   return url === "[url]" ? scrub(file, true) : url;
 }
 
@@ -153,7 +212,8 @@ function scrubException(value: unknown): Obj | null {
   if (!isObj(value)) return null;
   const out: Obj = {};
   const type = str(value.type);
-  if (type !== undefined) out.type = type;
+  // A class name (TypeError, PostgrestError). Anything that isn't an identifier was set by hand, so it may be text.
+  if (type !== undefined) out.type = /^[A-Za-z_$][\w$.]*$/.test(type) ? type : "[type]";
   const message = str(value.value);
   if (message !== undefined) out.value = shapeMessage(message);
   if (isObj(value.mechanism)) {

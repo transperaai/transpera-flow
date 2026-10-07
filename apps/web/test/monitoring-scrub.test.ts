@@ -1,7 +1,10 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { Breadcrumb, ErrorEvent } from "@sentry/nextjs";
 import { larkspurBundle, northbeamBundle } from "@transpera-flow/db";
-import { scrubBreadcrumb, scrubEvent, scrubText, scrubUrl, shapeMessage } from "@/lib/monitoring/scrub";
+import { ROUTE_WORDS, scrubBreadcrumb, scrubEvent, scrubText, scrubUrl, shapeMessage } from "@/lib/monitoring/scrub";
 import { ALLOWED_WORDS } from "@/lib/monitoring/words";
 
 // Sentry stores what it receives (issue #44, ADR 0017), so nothing personal may leave the app: the scrubber is tested against
@@ -282,11 +285,66 @@ describe("scrubUrl", () => {
     ["https://user:pass@app.example.com/w/acme/people#top", "https://app.example.com/w/[slug]/people"],
     ["app:///_next/static/chunks/a.js?v=1", "app:///_next/static/chunks/a.js"],
     ["/w/[slug]/issues/12", "/w/[slug]/issues/12"],
+    // A Storage path ends in the file's own name, which can name a person: every segment that isn't a known word or an id goes.
+    [`https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/Maya%20Collins%20interview.pdf`, `https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/[part]`],
+    [`https://abc.supabase.co/storage/v1/object/sign/sources/${UUID}/maya-collins.pdf?token=abc`, `https://abc.supabase.co/storage/v1/object/sign/sources/${UUID}/[part]`],
+    ["https://abc.supabase.co/rest/v1/rpc/import_workspace_bundle", "https://abc.supabase.co/rest/v1/rpc/import_workspace_bundle"],
+    [`/w/acme/p/${UUID}/first-principles`, `/w/[slug]/p/${UUID}/first-principles`],
+    ["/w/acme/people/maya", "/w/[slug]/people/[part]"],
+    ["/something/new/Maya", "/[part]/new/[part]"],
+    ["https://app.example.com/_next/static/chunks/0vr2yp4jytrc4.js", "https://app.example.com/_next/static/chunks/0vr2yp4jytrc4.js"],
+    ["/[part]/new/[part]", "/[part]/new/[part]"],
     ["http://", "[url]"],
     ["not a url at all", "[url]"],
     ["", "[url]"],
   ])("%s", (input, expected) => {
     expect(scrubUrl(input)).toBe(expected);
+  });
+});
+
+describe("ROUTE_WORDS", () => {
+  const appDir = fileURLToPath(new URL("../src/app", import.meta.url));
+  const segments = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .flatMap((e) => [e.name, ...segments(join(dir, e.name))]);
+
+  it("keeps every static route segment of the app, so a report still says which page failed", () => {
+    // /demo/larkspur is named after a fixture client: it reads [part], like any name.
+    const statics = [...new Set(segments(appDir))].filter((s) => !/^[[(@_]/.test(s) && s !== "larkspur");
+    expect(statics.length).toBeGreaterThan(20);
+    for (const segment of statics) expect(scrubUrl(`/demo/${segment}`), segment).toBe(`/demo/${segment}`);
+  });
+
+  it("holds no fixture name and none of the common first names", () => {
+    for (const word of [...nameWords(people), ...nameWords(clients)]) expect(ROUTE_WORDS.has(word), word).toBe(false);
+    for (const name of COMMON_FIRST_NAMES_THAT_ARE_WORDS) expect(ROUTE_WORDS.has(name), name).toBe(false);
+  });
+});
+
+describe("scrubEvent: smaller fields", () => {
+  it("keeps a server frame's pnpm store path readable, and still cuts an email from it", () => {
+    const file = "/var/task/node_modules/.pnpm/next@16.3.6_@babel+core@7.29.7_@opentelemetry+api@1.9.1/node_modules/next/dist/server.js";
+    const event = { exception: { values: [{ type: "Error", value: "x", stacktrace: { frames: [{ filename: file }, { filename: `/tmp/${EMAILS[0]}/a.js` }] } }] } } as unknown as ErrorEvent;
+    const frames = scrubEvent(event)!.exception!.values![0]!.stacktrace!.frames!;
+    expect(frames[0]!.filename).toBe(file);
+    expect(frames[1]!.filename).toBe("/tmp/[email]/a.js");
+  });
+
+  it("keeps the SDK's own settings (infer_ip: never tells Sentry not to take the sender's IP address)", () => {
+    const event = { ...browserEvent(), sdk: { name: "sentry.javascript.nextjs", version: "10.76.1", settings: { infer_ip: "never" } } } as unknown as ErrorEvent;
+    expect(scrubEvent(event)!.sdk).toEqual({ name: "sentry.javascript.nextjs", version: "10.76.1", settings: { infer_ip: "never" } });
+  });
+
+  it("keeps an exception type that is a class name, and nothing else in its place", () => {
+    const withType = (type: string) => scrubEvent({ exception: { values: [{ type, value: "x" }] } } as unknown as ErrorEvent)!.exception!.values![0]!.type;
+    expect(withType("PostgrestError")).toBe("PostgrestError");
+    expect(withType("Maya Collins")).toBe("[type]");
+  });
+
+  it("cuts a fetch breadcrumb to Storage down to the bucket and ids", () => {
+    const out = scrubBreadcrumb({ category: "fetch", data: { method: "POST", url: `https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/${encodeURIComponent(people[0]!)}.pdf` } });
+    expect(out!.data!.url).toBe(`https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/[part]`);
   });
 });
 
