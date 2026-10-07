@@ -44,6 +44,7 @@ export function ScenarioPanel({
   viewer,
   library = true,
   onLeversChange,
+  clampToCaps = false,
 }: {
   /** The baseline model (the process as it is now). */
   model: EngineModel;
@@ -70,6 +71,8 @@ export function ScenarioPanel({
   library?: boolean;
   /** Told the levers that are moved (as patches) whenever they change; none when everything is at neutral. */
   onLeversChange?: (patches: ScenarioPatch[]) => void;
+  /** A play link (B4): slider maxima stop at the caps the database enforces on what a visitor sends. Default off: the Editor's sliders are as before. */
+  clampToCaps?: boolean;
 }) {
   const canEdit = !isReadOnly(mode);
   const [store] = useState<ScenarioStore>(() => (mode === "live" ? liveScenarioStore(workspaceId) : new MemoryScenarioStore(workspaceId)));
@@ -89,7 +92,7 @@ export function ScenarioPanel({
 
   // Levers act on the model with the applied scenarios in it.
   const stacked = useMemo(() => applyPatches(model, usable.flatMap((s) => s.patch)).model, [model, usable]);
-  const allLevers = useMemo(() => buildLevers(stacked, viewer), [stacked, viewer]);
+  const allLevers = useMemo(() => buildLevers(stacked, viewer, clampToCaps), [stacked, viewer, clampToCaps]);
   // A hidden lever isn't offered, and a slider moved before it was hidden no longer changes the run.
   const levers = useMemo(() => visibleLevers(allLevers, hiddenLevers), [allLevers, hiddenLevers]);
   const hiddenCount = hiddenLevers.filter((id) => leverKind(id)?.control === "slider").length;

@@ -53,7 +53,7 @@ export function PlaySection({ model, baseline, bundle, play }: { model: EngineMo
   const [sending, setSending] = useState(false);
   const onLeversChange = useCallback((p: ScenarioPatch[]) => setPatches(p), []);
   // Are there any levers to move? The workspace may have switched every kind off.
-  const shown = useMemo(() => visibleLevers(buildLevers(model, bundle.viewer), play.hiddenLevers).length, [model, bundle.viewer, play.hiddenLevers]);
+  const shown = useMemo(() => visibleLevers(buildLevers(model, bundle.viewer, true), play.hiddenLevers).length, [model, bundle.viewer, play.hiddenLevers]);
   const moved = patches.length > 0;
 
   return (
@@ -80,6 +80,7 @@ export function PlaySection({ model, baseline, bundle, play }: { model: EngineMo
           hiddenLevers={play.hiddenLevers}
           viewer={bundle.viewer}
           library={false}
+          clampToCaps
           onLeversChange={onLeversChange}
         />
       )}

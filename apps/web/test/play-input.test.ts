@@ -51,7 +51,7 @@ describe("playPatchProblem agrees with the database's table of cases", () => {
 describe("the sliders stop at the database's caps, so a real visitor is never refused", () => {
   const big = { leadsPerWeek: 9000, activeClients: 90000, retainer: 9_000_000, hoursPerWeek: 40, steps: [], roles: { r: { name: "R", count: 499, cost: 0, ongoing: 0 } }, services: {} } as never;
   it("on a huge workspace no slider can reach a value the check refuses", () => {
-    const levers = buildLevers(big);
+    const levers = buildLevers(big, undefined, true);
     const by = (path: string) => levers.find((l) => l.path === path);
     expect(by("demand.leads_per_week")!.max).toBe(PLAY_CAPS.leads);
     expect(by("demand.active_clients")!.max).toBe(PLAY_CAPS.clients);
@@ -59,6 +59,14 @@ describe("the sliders stop at the database's caps, so a real visitor is never re
     for (const l of levers.filter((x) => x.op === "set" && x.path !== "demand.churn_monthly")) {
       expect(playPatchProblem([{ path: l.path, op: "set", value: l.max }], {}), l.path).not.toBe(MESSAGES.range);
     }
+  });
+  it("without the clamp (the Editor, the process page) a value above a cap keeps its slider range exactly as before", () => {
+    const levers = buildLevers(big);
+    expect(levers.find((l) => l.path === "demand.leads_per_week")!.max).toBe(27000);
+    expect(levers.find((l) => l.path === "demand.active_clients")!.max).toBe(180000);
+    expect(levers.find((l) => l.path === "finances.retainer")!.max).toBe(27_000_000);
+    expect(levers.find((l) => l.path === "roles.r.headcount")!.max).toBe(504);
+    expect(buildLevers(big, undefined, false)).toEqual(levers);
   });
   it("a normal workspace's sliders are unchanged", () => {
     const levers = buildLevers({ ...(big as object), leadsPerWeek: 10, activeClients: 20, retainer: 2000 } as never);
