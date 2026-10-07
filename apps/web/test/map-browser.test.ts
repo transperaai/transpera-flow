@@ -507,3 +507,31 @@ describe("the process library in an ordinary process's editor (B12 part 2)", () 
     await page.close();
   }, 60_000);
 });
+
+describe("loading and empty states (issue #44)", () => {
+  it("shows the first-run status over a map whose first run is computing, and only then", async () => {
+    const page = await mount({ computing: true });
+    const chip = page.locator("[data-first-run]");
+    expect(await chip.count()).toBe(1);
+    expect(await chip.innerText()).toContain("Running the first simulation");
+    expect(await chip.getAttribute("role")).toBe("status");
+    await page.close();
+    const idle = await mount({});
+    expect(await idle.locator("[data-first-run]").count()).toBe(0);
+    await idle.close();
+  }, 60_000);
+
+  it("says a read-only map has no steps, while the editable one stays an empty canvas", async () => {
+    const readOnly = await mount({ empty: true });
+    const empty = readOnly.locator("[data-process-map] [data-empty]");
+    expect(await empty.count()).toBe(1);
+    expect(await empty.innerText()).toContain("Nothing to draw yet: this process has no steps.");
+    await readOnly.close();
+    const editable = await mount({ empty: true, editable: true });
+    expect(await editable.locator("[data-empty]").count()).toBe(0);
+    await editable.close();
+    const full = await mount({});
+    expect(await full.locator("[data-empty]").count()).toBe(0);
+    await full.close();
+  }, 60_000);
+});
