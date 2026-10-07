@@ -110,3 +110,27 @@ text prints and the UI says narration needs the key. Every number in a draft is
 checked against the run's figures; one redraft, then the template. Tests use
 fakes and never call the API. The public `/demo` uses a stand-in writer, never
 the API. See [`docs/adr/0011-narration.md`](docs/adr/0011-narration.md).
+
+## Error reporting (Sentry)
+
+Errors from the browser, the Node server and the edge runtime go to Sentry when
+`NEXT_PUBLIC_SENTRY_DSN` is set (Vercel: Production and Preview). Without it
+nothing is initialised or sent, the build is exactly the one without Sentry, and
+the browser bundle holds none of the SDK (the DSN is read at build, so a change
+needs a redeploy).
+Source maps (so stack traces read as our TypeScript) are made and uploaded at
+build only when all of `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`
+are set too; they are deleted after upload, and a failed upload warns without
+failing the build. A local `next dev` never sends. Copy `apps/web/.env.example`
+for the names.
+
+Nothing personal is sent: no names, emails, pay, workspace contents, share-link
+snapshots or tokens, headers, cookies or query strings. One tested scrubber
+(`apps/web/src/lib/monitoring/scrub.ts`) rebuilds every event, and error
+messages are cut down to a fixed vocabulary. See
+[`docs/adr/0017-error-reporting.md`](docs/adr/0017-error-reporting.md).
+
+After setting the variables and redeploying, sign in as an agency admin and open
+`/monitoring-check` (linked from nowhere) to send a test error from the browser
+and one from the server. The steps in Sentry and Vercel are in
+[`docs/plans/c5-sentry-brief.md`](docs/plans/c5-sentry-brief.md), "What Austin does".

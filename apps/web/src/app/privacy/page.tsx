@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Privacy policy · Transpera Flow" };
 
-const UPDATED = "30 September 2026";
+const UPDATED = "7 October 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -43,7 +43,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Technical data:</strong> sign-in sessions and standard server logs (such as IP address and request
-            times) kept by our hosting providers for security and troubleshooting.
+            times) kept by our hosting providers for security and troubleshooting, and error reports when something breaks (see Service providers).
           </li>
         </ul>
       </Section>
@@ -67,6 +67,11 @@ export default function PrivacyPage() {
         <ul className="list-disc pl-5">
           <li>Supabase: database, sign-in and file storage, hosted in Sydney, Australia.</li>
           <li>Vercel: web hosting.</li>
+          <li>
+            Sentry: error reports when something in the app breaks: which page, what failed in our code, and the browser and
+            device type. Names, email addresses, pay, the contents of your workspace and share links are removed before a report
+            is sent, and IP addresses are not stored. Hosted in the European Union (Germany).
+          </li>
           <li>Google: sign-in.</li>
           <li>
             Anthropic: explains a saved run, only when someone asks. It receives the
