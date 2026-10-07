@@ -14,11 +14,15 @@ const ok =
   <T extends string | number | boolean | null | readonly string[]>(): Saver<T> =>
   async (_base, next) => ({ status: "saved", value: next });
 
-/** The one line a phone sees where it can't make changes. It renders nothing on a wider screen, so this story is empty there. */
+/**
+ * The one line a phone sees where it can't make changes. It renders nothing on a wider screen, so the story puts a line of text
+ * above it: the screenshot needs something visible to wait for.
+ */
 export const Notice: StoryObj = {
   tags: ["visual-phone"],
   render: () => (
-    <div className="max-w-md">
+    <div className="flex max-w-md flex-col gap-2">
+      <p className="text-sm text-fg-2">On a phone, the notice shows below this line.</p>
       <PhoneNotice />
     </div>
   ),
