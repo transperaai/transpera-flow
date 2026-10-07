@@ -5,7 +5,9 @@ import {
   CardGridSkeleton,
   ChartSkeleton,
   EditorSkeleton,
+  FirstPrinciplesSkeleton,
   FormSkeleton,
+  HistorySkeleton,
   IssuePageSkeleton,
   ListSkeleton,
   OverviewSkeleton,
@@ -113,7 +115,7 @@ export const Chart: StoryObj = {
   tags: ["visual-phone"],
   render: () => (
     <Shell>
-      <PageSkeleton title="Forecast" eyebrow="Company" width="max-w-6xl">
+      <PageSkeleton title="Forecast" width="max-w-6xl" hideHeader>
         <ChartSkeleton />
       </PageSkeleton>
     </Shell>
@@ -134,6 +136,24 @@ export const SolutionPage: StoryObj = {
   render: () => (
     <Shell>
       <SolutionPageSkeleton />
+    </Shell>
+  ),
+};
+
+export const History: StoryObj = {
+  tags: ["visual-phone"],
+  render: () => (
+    <Shell>
+      <HistorySkeleton />
+    </Shell>
+  ),
+};
+
+export const FirstPrinciples: StoryObj = {
+  tags: ["visual-phone"],
+  render: () => (
+    <Shell>
+      <FirstPrinciplesSkeleton />
     </Shell>
   ),
 };

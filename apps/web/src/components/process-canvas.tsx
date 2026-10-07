@@ -1647,7 +1647,8 @@ function Canvas({
               <Toolbar bundle={bundle} editor={editor} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
             </div>
           )}
-          {computing && <FirstRunStatus />}
+          {/* Nothing to draw means nothing for a run to change on the map: the empty state says enough. */}
+          {computing && !nothingToDraw && <FirstRunStatus />}
           {nothingToDraw && (
             <div className="absolute inset-0 z-[5] flex items-center justify-center p-4">
               <EmptyState className="bg-card" action={emptyAction}>

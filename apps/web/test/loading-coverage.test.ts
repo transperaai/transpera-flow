@@ -29,6 +29,8 @@ function pageFolders(dir: string): string[] {
 
 const folders = pageFolders(ROOT);
 const withLoading = folders.filter((f) => existsSync(join(ROOT, f, "loading.tsx")));
+/** Loading states outside the workspace shell, checked the same way. */
+const OUTSIDE = [join(WEB, "src/app/settings/tokens/loading.tsx")];
 
 describe("every workspace page has a loading state", () => {
   it("finds the pages", () => {
@@ -55,9 +57,12 @@ describe("every workspace page has a loading state", () => {
 });
 
 describe("a loading state loads nothing", () => {
-  for (const folder of withLoading) {
-    const name = `${folder === "" ? "w/[slug]" : folder}/loading.tsx`;
-    const src = readFileSync(join(ROOT, folder, "loading.tsx"), "utf8");
+  const files = [
+    ...withLoading.map((folder) => ({ name: `${folder === "" ? "w/[slug]" : folder}/loading.tsx`, path: join(ROOT, folder, "loading.tsx") })),
+    ...OUTSIDE.map((path) => ({ name: relative(join(WEB, "src/app"), path), path })),
+  ];
+  for (const { name, path } of files) {
+    const src = readFileSync(path, "utf8");
     it(`${name} draws a skeleton`, () => {
       expect(src).toMatch(/from "@\/components\/(shell\/skeletons|sources\/sources-library)"/);
       expect(src).toMatch(/export default function \w+\(/);
@@ -66,6 +71,19 @@ describe("a loading state loads nothing", () => {
       expect(src).not.toMatch(/from "@\/lib\/data"/);
       expect(src).not.toMatch(/from "@\/lib\/supabase/);
       expect(src).not.toContain('"use server"');
+      expect(src).not.toMatch(/\bawait\b|\basync\b/);
+    });
+  }
+});
+
+describe("the skeletons load nothing either", () => {
+  // They render on the server inside `loading.tsx`: no client code of their own, no data, no server actions.
+  for (const file of ["src/components/shell/skeletons.tsx", "src/components/map/map-placeholder.tsx"]) {
+    const src = readFileSync(join(WEB, file), "utf8");
+    it(`${file} is a server module that imports no data`, () => {
+      expect(src).not.toMatch(/^["']use client["']/m);
+      expect(src).not.toContain('"use server"');
+      expect(src).not.toMatch(/from "@\/lib\/(data|supabase)/);
       expect(src).not.toMatch(/\bawait\b|\basync\b/);
     });
   }

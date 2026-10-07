@@ -30,10 +30,25 @@ function FieldRow() {
   );
 }
 
-/** The frame of a page made with `Page`, under the page's real title (so the header doesn't jump), with `children` as the body. */
-export function PageSkeleton({ title, eyebrow, width, children }: { title: string; eyebrow?: string; width?: "max-w-3xl" | "max-w-5xl" | "max-w-6xl"; children: ReactNode }) {
+/**
+ * The frame of a page made with `Page`, under the page's real title (so the header doesn't jump), with `children` as the body.
+ * `hideHeader` for a page whose content draws its own header (Forecast), as `Page` takes it.
+ */
+export function PageSkeleton({
+  title,
+  eyebrow,
+  width,
+  hideHeader,
+  children,
+}: {
+  title: string;
+  eyebrow?: string;
+  width?: "max-w-3xl" | "max-w-5xl" | "max-w-6xl";
+  hideHeader?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <Page title={title} eyebrow={eyebrow} description="Loading…" width={width}>
+    <Page title={title} eyebrow={eyebrow} description="Loading…" width={width} hideHeader={hideHeader}>
       {children}
     </Page>
   );
@@ -185,11 +200,7 @@ export function OverviewSkeleton() {
 export function ProcessPageSkeleton() {
   return (
     <div className="flex min-h-svh flex-1 flex-col">
-      <div className="sticky top-0 z-20 flex items-center gap-x-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="data-[orientation=vertical]:h-4" />
-        <Skeleton className="h-6 w-48" aria-hidden />
-      </div>
+      <ProcessTopBar />
       <Loading name="process-page" label="Loading the process" className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-5">
         <header className="flex flex-wrap items-start justify-between gap-3" aria-hidden>
           <Skeleton className="h-6 w-44 rounded-full" />
@@ -219,6 +230,55 @@ export function ProcessPageSkeleton() {
         <SectionShape>
           <MapSkeleton nested height={360} />
         </SectionShape>
+      </Loading>
+    </div>
+  );
+}
+
+/** The top bar of a page outside `Page` (the process page, First principles): the sidebar toggle and a line for the process picker. */
+function ProcessTopBar() {
+  return (
+    <div className="sticky top-0 z-20 flex items-center gap-x-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="data-[orientation=vertical]:h-4" />
+      <Skeleton className="h-6 w-48" aria-hidden />
+    </div>
+  );
+}
+
+/** A process's History (`HistoryPage`): its own top bar and heading under the process switcher, then the versions table. */
+export function HistorySkeleton() {
+  return (
+    <div>
+      <ShellHeader title="Process history" />
+      <Loading name="history" label="Loading the history" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-5 px-4 pt-6 pb-12 sm:px-6">
+        <header className="flex flex-col gap-1" aria-hidden>
+          <Skeleton className="h-4 w-56" />
+          <h2 className="font-heading text-2xl leading-tight font-semibold tracking-tight">Process history</h2>
+        </header>
+        <TableRows columns={4} rows={6} />
+      </Loading>
+    </div>
+  );
+}
+
+/** A process's First principles flow: the process page's top bar, the breadcrumb and title, then the form. */
+export function FirstPrinciplesSkeleton() {
+  return (
+    <div className="flex min-h-svh flex-1 flex-col">
+      <ProcessTopBar />
+      <Loading name="first-principles" label="Loading the first principles" className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5">
+        <header className="flex flex-col gap-1.5" aria-hidden>
+          <Skeleton className="h-3 w-56" />
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-4 w-full max-w-3xl" />
+        </header>
+        <Card className="gap-4 px-4 py-4" aria-hidden>
+          <Skeleton className="h-5 w-40" />
+          {Array.from({ length: 4 }, (_, i) => (
+            <FieldRow key={i} />
+          ))}
+        </Card>
       </Loading>
     </div>
   );

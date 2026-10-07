@@ -519,6 +519,11 @@ describe("loading and empty states (issue #44)", () => {
     const idle = await mount({});
     expect(await idle.locator("[data-first-run]").count()).toBe(0);
     await idle.close();
+    // A map with no steps has nothing for the run to change: the empty state shows, not the chip.
+    const empty = await mount({ computing: true, empty: true });
+    expect(await empty.locator("[data-empty]").count()).toBe(1);
+    expect(await empty.locator("[data-first-run]").count()).toBe(0);
+    await empty.close();
   }, 60_000);
 
   it("says a read-only map has no steps, while the editable one stays an empty canvas", async () => {

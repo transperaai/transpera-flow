@@ -76,15 +76,9 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
 
   return (
     <div className="flex flex-col gap-6" data-solution-compare>
-      <MapsSection
-        comparison={comparison}
-        notes={notes}
-        // Only the first run of each side, and only while a model exists to run (an error leaves it null).
-        computing={{
-          live: live.model !== null && liveSim.status === "running" && liveSim.run === null,
-          solution: solved.model !== null && solvedSim.status === "running" && solvedSim.run === null,
-        }}
-      />
+      {/* No first-run chip on these maps (issue #44): they draw no run's numbers, so a run finishing changes nothing on them.
+          The measures, the chart and the stress test below show their own loading. */}
+      <MapsSection comparison={comparison} notes={notes} />
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2" data-section="horizon">
         <p className="text-sm text-muted-foreground">The measures, the revenue chart and the stress test look this far ahead.</p>
@@ -136,7 +130,7 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
   );
 }
 
-function MapsSection({ comparison, notes, computing }: { comparison: ReturnType<typeof compareMaps>; notes: string[]; computing: { live: boolean; solution: boolean } }) {
+function MapsSection({ comparison, notes }: { comparison: ReturnType<typeof compareMaps>; notes: string[] }) {
   // One set of open groups for both maps: open or close a group on either and it follows on the other.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(comparison.open);
   return (
@@ -182,7 +176,6 @@ function MapsSection({ comparison, notes, computing }: { comparison: ReturnType<
                 focus={comparison.changed}
                 height="auto"
                 stepDetail={false}
-                computing={computing[id]}
               />
             </div>
           </div>

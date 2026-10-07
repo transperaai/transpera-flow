@@ -384,7 +384,10 @@ function HowBusy({
               ) : undefined
             }
           >
-            No people yet. Add them in Settings, People.
+            {/* Only someone who sees everyone gets here, so saying whether people exist reveals nothing. */}
+            {bundle.people.length > 0
+              ? "Nobody is in this simulation: every person is inactive or starts later. Change that in Settings, People."
+              : "No people yet. Add them in Settings, People."}
           </EmptyState>
         </div>
       )}
