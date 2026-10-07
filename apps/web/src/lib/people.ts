@@ -165,7 +165,8 @@ export const CAPACITY_FACTOR_MIN_ITEMS = 10;
 /**
  * Whether a person's capacity factors may be shown (PRD §6.3.7, D20; #31). Only when the workspace has switched them on
  * and the factor is measured (at least 10 completed items for that person-step) or entered. C6 (#198) stores entered ones
- * (`person_capacity_factors`); nothing measures them yet (`measuredItems` is 0), so only entered ones show.
+ * (`person_capacity_factors`); calibration from a log that names people (#227) stores measured ones, with how many visits they
+ * rest on (`measuredItems`), and proposes only from 10, so an applied one always shows.
  */
 export function capacityFactorsShown<F extends { measuredItems: number; entered: boolean }>(settings: unknown, factors: readonly F[]): F[] {
   const on = typeof settings === "object" && settings !== null && (settings as { capacity_factor_enabled?: unknown }).capacity_factor_enabled === true;
@@ -199,7 +200,7 @@ export interface ShownFactor {
   stepId: string | null;
   stepName: string;
   factor: number;
-  /** Completed items behind it when measured; 0 for an entered one (nothing is measured yet). */
+  /** Visits behind it when measured (#227); 0 for an entered one. */
   measuredItems: number;
   entered: boolean;
 }
@@ -227,11 +228,11 @@ export function stepsPersonCanDo<S extends { id: string; role_id: string | null 
  */
 export function personFactors(bundle: ProcessBundle, personId: string, stepNames: Map<string, string>): ShownFactor[] {
   const mine = (bundle.personCapacityFactors ?? []).filter((f) => f.person_id === personId);
-  const shown = (stepId: string | null, stepName: string, f: { factor: number; source: string }): ShownFactor => ({
+  const shown = (stepId: string | null, stepName: string, f: { factor: number; source: string; items?: number | null }): ShownFactor => ({
     stepId,
     stepName,
     factor: Number(f.factor),
-    measuredItems: 0,
+    measuredItems: f.source === "measured" ? Number(f.items ?? 0) : 0,
     entered: f.source !== "measured",
   });
   const out: ShownFactor[] = [];

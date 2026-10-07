@@ -101,7 +101,7 @@ The outside climate for demand: a preset (Boom, Stable, Soft, Downturn) or your 
 _Avoid_: Economy, scenario, seasonality (seasonality is a separate monthly demand pattern)
 
 **Per-person time** (capacity factor in code and the PRD):
-How long one person takes on a step compared with their role's normal time: 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower, from 0.5 to 2. There is one optional time for every step they do and one optional time per step, which wins. Off by default (Settings → Simulation, "Per-person times"); owners and editors enter them under Settings → People. Each person sees only their own, and members' and viewers' simulations always use the role's normal time. Never ranked, never compared across people, never in a share link. Example: Maya takes 0.8 on Kickoff.
+How long one person takes on a step compared with their role's normal time: 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower, from 0.5 to 2. There is one optional time for every step they do and one optional time per step, which wins. Off by default (Settings → Simulation, "Per-person times"); owners and editors enter them under Settings → People. Each person sees only their own, and members' and viewers' simulations always use the role's normal time. Calibration can also measure them: a stage history or time log that names who did each visit gives each person's time on each step against the step's normal time, proposed (from 10 visits) to owners and editors, who tick what to apply; an applied one is marked measured, with how many visits it rests on. Never ranked, never compared across people, never in a share link. Example: Maya takes 0.8 on Kickoff.
 _Avoid_: Speed, efficiency, performance (it is capacity, not performance), rating
 
 **Plan**:

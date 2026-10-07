@@ -212,7 +212,7 @@ function pipelineOf(bundle: ProcessBundle): ProcessPart {
  * True when no pay may reach the model: the viewer doesn't see everyone (members and viewers, B1 2a), or the bundle says so
  * (`payHidden`: a share link that shows names but never pay, B3).
  */
-function hidesPay(b: ProcessBundle): boolean {
+export function hidesPay(b: ProcessBundle): boolean {
   return b.payHidden === true || (!!b.viewer && !b.viewer.seesEveryone);
 }
 

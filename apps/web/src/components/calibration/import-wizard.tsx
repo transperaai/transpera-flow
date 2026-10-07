@@ -6,13 +6,19 @@
 // from the file is stored (D27, #30). The card around it decides what the rows are used for.
 
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import type { StepLogRow } from "@transpera-flow/engine";
 import {
   IMPORT_KINDS,
+  MAX_IMPORT_NAMES,
+  PERSON_TIME_KINDS,
   applyNameMapCounted,
+  applyNameMapEntries,
   columnMapValue,
   importDetails,
+  personValues,
   suggestMapping,
   suggestNameMap,
+  timeLogPersonVisits,
   type DurationUnit,
   type ImportDetails,
   type ImportKind,
@@ -49,6 +55,11 @@ export interface ImportWizardProps {
   sample?: Partial<Record<ImportKind, { name: string; text: string }>>;
   /** Owners and editors see amounts; viewers and members don't. */
   mode: ImportMode;
+  /**
+   * Owners, editors and agency admins with Per-person times on: the people a person column is matched to. Null or absent: no
+   * matching, and person values stay labelled "Person 1…" (#227).
+   */
+  people?: readonly { id: string; name: string }[] | null;
   /** Called with the rows to use, or null when the person starts again. */
   onReady: (ready: ImportReady | null) => void;
 }
@@ -66,6 +77,10 @@ export interface ImportReady {
   leftOut: { names: number; rows: number };
   /** Counts only. The card adds the summary for leads and invoices. */
   details: ImportDetails;
+  /** The file's person values matched to people (file value to person id; null: left out). Null when no matching was offered. Never sent or stored (#227). */
+  personMap: Record<string, string | null> | null;
+  /** The visits with `person` replaced by a person id (or null). Null without matching. Used only to propose per-person times (#227). */
+  personRows: StepLogRow[] | null;
 }
 
 const DELIMITERS: { value: DelimiterChoice; label: string }[] = [
@@ -84,7 +99,7 @@ function ColumnSelect(props: React.ComponentProps<typeof NativeSelect>) {
 }
 
 export function ImportWizard(props: ImportWizardProps) {
-  const { id, kinds, targets, previous, sample, mode, onReady } = props;
+  const { id, kinds, targets, previous, sample, mode, people, onReady } = props;
   const canSeeAmounts = mode !== "readonly";
   const hook = useCsvImport();
   const { state, loaded } = hook;
@@ -118,6 +133,27 @@ export function ImportWizard(props: ImportWizardProps) {
   const nameMap = suggestedNames ? (nameEdit && nameEdit.base === suggestedNames ? nameEdit.map : suggestedNames) : null;
   const counted = useMemo(() => (read ? (nameMap ? applyNameMapCounted(read, nameMap) : { rows: read.rows, kept: read.rows.length, leftOut: 0 }) : null), [read, nameMap]);
   const kept = counted?.rows ?? null;
+
+  // The people in the file matched to the workspace's people (owners and editors only, #227), until the person changes one.
+  const personList = useMemo(() => (read && people && PERSON_TIME_KINDS.includes(kind) ? personValues(read) : []), [read, people, kind]);
+  const personTotal = useMemo(() => (read && personList.length >= MAX_IMPORT_NAMES ? personValues(read, Infinity).length : personList.length), [read, personList]);
+  const suggestedPeople = useMemo(() => {
+    if (!people || personList.length === 0) return null;
+    const byName = suggestNameMap(personList, people.map((p) => p.name));
+    const idOf = new Map(people.map((p) => [p.name, p.id]));
+    return Object.fromEntries(personList.map((n) => [n.value, byName[n.value] ? (idOf.get(byName[n.value]!) ?? null) : null])) as Record<string, string | null>;
+  }, [people, personList]);
+  const [personEdit, setPersonEdit] = useState<{ base: unknown; map: Record<string, string | null> } | null>(null);
+  const personMap = suggestedPeople ? (personEdit && personEdit.base === suggestedPeople ? personEdit.map : suggestedPeople) : null;
+  const personRows = useMemo<StepLogRow[] | null>(() => {
+    if (!read || !personMap || !kept) return null;
+    const idOf = (v: string | null | undefined) => (v && Object.hasOwn(personMap, v) ? (personMap[v] ?? null) : null);
+    if (read.entries) {
+      const entries = nameMap ? applyNameMapEntries(read, nameMap)! : read.entries;
+      return timeLogPersonVisits(entries.map((e) => ({ ...e, person: idOf(e.person) })));
+    }
+    return (kept as StepLogRow[]).map((r) => ({ ...r, person: idOf(r.person) }));
+  }, [read, personMap, kept, nameMap]);
 
   const ready = (r: ImportReady | null) => {
     setUsed(r !== null);
@@ -155,6 +191,7 @@ export function ImportWizard(props: ImportWizardProps) {
     setFileName("");
     setEdit(null);
     setNameEdit(null);
+    setPersonEdit(null);
     ready(null);
   };
 
@@ -195,6 +232,8 @@ export function ImportWizard(props: ImportWizardProps) {
         nameMatches: { matched: counted.kept, leftOut: counted.leftOut },
         rows: kept,
       }),
+      personMap,
+      personRows,
     });
   };
 
@@ -457,6 +496,15 @@ export function ImportWizard(props: ImportWizardProps) {
               unuse();
               setNameEdit({ base: suggestedNames, map: { ...nameMap, [value]: target } });
             }}
+            people={people ?? null}
+            personList={personList}
+            personTotal={personTotal}
+            personMap={personMap}
+            onPerson={(value, target) => {
+              if (!suggestedPeople || !personMap) return;
+              unuse();
+              setPersonEdit({ base: suggestedPeople, map: { ...personMap, [value]: target } });
+            }}
             kept={kept.length}
             leftByName={counted?.leftOut ?? 0}
             used={used}
@@ -482,6 +530,12 @@ function RowsStep(props: {
   targets: ImportWizardProps["targets"];
   nameMap: Record<string, string | null> | null;
   onName: (value: string, target: string | null) => void;
+  /** Per-person matching (#227): the people to match to, the file's distinct values (at most 500, with the total) and the map. */
+  people: readonly { id: string; name: string }[] | null;
+  personList: { value: string; rows: number }[];
+  personTotal: number;
+  personMap: Record<string, string | null> | null;
+  onPerson: (value: string, personId: string | null) => void;
   kept: number;
   /** Rows left out because their name isn't matched (and any beyond the 500 listed). */
   leftByName: number;
@@ -622,6 +676,41 @@ function RowsStep(props: {
                     {targets.names.map((t) => (
                       <option key={t} value={t}>
                         {t}
+                      </option>
+                    ))}
+                  </ColumnSelect>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {props.people && props.personMap && props.personList.length > 0 && (
+          <section aria-labelledby={`${id}-people`} data-import-people className="flex flex-col gap-2">
+            <h4 id={`${id}-people`} className="flex items-center text-sm font-semibold">
+              Match the people
+              <Help
+                label="Match the people"
+                description="Each name in the file is matched to one of your people, to measure their time on each step. Only owners and editors see this. Names in the file are never kept."
+                example="Sam P. → Sam Patel"
+              />
+            </h4>
+            {props.personTotal > props.personList.length && (
+              <p className="text-sm text-muted-foreground">
+                The file has {formatNumber(props.personTotal, 0)} different names. The {formatNumber(props.personList.length, 0)} with the most rows are listed below; visits by any other name
+                count only toward each step&apos;s normal time.
+              </p>
+            )}
+            <ul className="flex max-h-80 flex-col divide-y divide-line overflow-y-auto rounded-lg border border-line">
+              {props.personList.map((n, i) => (
+                <li key={n.value} className="grid items-center gap-x-4 gap-y-1 px-3 py-2 text-sm md:grid-cols-2">
+                  <label htmlFor={`${id}-person-${i}`} className="min-w-0 break-words">
+                    {n.value} <span className="text-muted-foreground">({formatNumber(n.rows, 0)} rows)</span>
+                  </label>
+                  <ColumnSelect id={`${id}-person-${i}`} value={props.personMap![n.value] ?? ""} onChange={(e) => props.onPerson(n.value, e.target.value === "" ? null : e.target.value)}>
+                    <option value="">Leave out</option>
+                    {props.people!.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
                       </option>
                     ))}
                   </ColumnSelect>

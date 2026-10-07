@@ -68,24 +68,28 @@ export function formatValue(kind: CalibrationKind, value: number | null, cv?: nu
   return formatPercent(value);
 }
 
-export type ApplyStatus = "applied" | "changed" | "not_found" | "already_applied" | "not_proposed";
+export type ApplyStatus = "applied" | "changed" | "not_found" | "already_applied" | "not_proposed" | "switched_off";
 
 const STATUS_WORDS: Record<Exclude<ApplyStatus, "applied">, string> = {
   changed: "changed since the log was read, so left as it is",
   not_found: "no longer in the process",
   already_applied: "already applied",
   not_proposed: "not proposed",
+  switched_off: "per-person times are switched off",
 };
 
 /** One sentence about what applying did. */
 export function applySummary(results: readonly { key: string; status: string }[], subjects: Map<string, string>, draftNumber: number | null): string {
   const applied = results.filter((r) => r.status === "applied");
   const skipped = results.filter((r) => r.status !== "applied");
-  const steps = applied.filter((r) => !r.key.startsWith("arrivals:")).length;
-  const leads = applied.length - steps;
+  // Per-person times (#227) are live and count apart: they never go into the draft.
+  const people = applied.filter((r) => r.key.startsWith("factor:")).length;
+  const steps = applied.filter((r) => !r.key.startsWith("arrivals:") && !r.key.startsWith("factor:")).length;
+  const leads = applied.length - steps - people;
   const parts: string[] = [];
   if (steps) parts.push(`${steps} change${steps === 1 ? "" : "s"} to steps went into the draft${draftNumber ? ` (version ${draftNumber})` : ""}. Publish it to use them`);
   if (leads) parts.push(`${leads} lead source${leads === 1 ? "" : "s"} updated`);
+  if (people) parts.push(`${people} per-person time${people === 1 ? "" : "s"} set`);
   if (!applied.length) parts.push("Nothing was applied");
   const notes = skipped.map((r) => `${subjects.get(r.key) ?? r.key}: ${STATUS_WORDS[r.status as Exclude<ApplyStatus, "applied">] ?? r.status}`);
   return `${parts.join(". ")}.${notes.length ? ` ${notes.join("; ")}.` : ""}`;

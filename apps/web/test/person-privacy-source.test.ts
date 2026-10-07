@@ -136,6 +136,24 @@ describe("per-person times are never ranked or compared", () => {
     for (const f of walk("")) expect(read(f), f).not.toMatch(/(median|average|rank|mean)\w*\([^)]*capacityFactor|capacityFactor[^\n]*(median|average|\.reduce)/i);
   });
 
+  // Measured per-person proposals (#227): the same rules, and only owners and editors with the switch on see them.
+  it("no file sorts per-person proposals by value", () => {
+    for (const f of walk("")) expect(read(f), f).not.toMatch(/sort\([^)]*\b(proposed|measured|factor)\b/i);
+    expect(read("lib/calibration/person-times.ts")).not.toMatch(/\.sort\(|toSorted\(/);
+  });
+
+  it("the calibration panel renders the per-person part, and computes it, only when the setup is `on`", () => {
+    const source = read("components/calibration/calibration-panel.tsx");
+    const uses = [...source.matchAll(/<PersonTimesSection/g)];
+    expect(uses).toHaveLength(1);
+    const before = source.slice(0, uses[0]!.index);
+    expect(before.slice(before.lastIndexOf("{personTimes.state")).startsWith('{personTimes.state === "on"')).toBe(true);
+    expect(source).toMatch(/personTimes\.state === "on" && ready\.personRows\s*\?\s*proposePersonTimes\(/);
+    // The wizard offers people to match only when given them, and the demo passes none.
+    expect(source).toContain('people={personTimes.state === "on" ? personTimes.people : null}');
+    expect(read("app/demo/settings/calibration/page.tsx")).toContain('personTimes={{ state: "hidden" }}');
+  });
+
   it("the People page reads per-person times only through personFactors, inside PersonDetailBlock", () => {
     const source = read("components/people-page.tsx");
     expect(source).not.toContain("personCapacityFactors");

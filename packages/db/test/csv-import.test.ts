@@ -4,6 +4,7 @@ import {
   IMPORT_KIND_LIST,
   applyNameMap,
   applyNameMapCounted,
+  applyNameMapEntries,
   columnMapValue,
   dealsNote,
   dealsToStepLog,
@@ -16,11 +17,13 @@ import {
   loadTable,
   parseAmount,
   parseDuration,
+  personValues,
   readImport,
   storedInvoicesSummary,
   storedLeadsSummary,
   suggestMapping,
   suggestNameMap,
+  timeLogPersonVisits,
   timeLogToStepLog,
   type DealRow,
   type ImportKind,
@@ -253,7 +256,7 @@ describe("readImport", () => {
   it("reads good rows of each kind into its shape", () => {
     const step = read(IMPORT_KINDS.step_log.template, "step_log");
     expect(step.errors).toEqual([]);
-    expect(step.rows[0]).toEqual({ item: "D-101", step: "Qualify", started: d(2026, 3, 2, 9), finished: d(2026, 3, 2, 10, 30), hours: 1.5, source: "Website" });
+    expect(step.rows[0]).toEqual({ item: "D-101", step: "Qualify", started: d(2026, 3, 2, 9), finished: d(2026, 3, 2, 10, 30), hours: 1.5, source: "Website", person: "Team member 1" });
     const deals = read(IMPORT_KINDS.deals.template, "deals");
     expect(deals.errors).toEqual([]);
     expect(deals.rows).toHaveLength(5);
@@ -899,5 +902,60 @@ describe("what is stored", () => {
       window: { from: d(2026, 3, 2), to: d(2026, 3, 13) },
       summary: null,
     });
+  });
+});
+
+describe("people in a step log or time log (#227)", () => {
+  it("suggests the step log's person column from Person, Done by and Assignee", () => {
+    for (const header of ["Person", "Done by", "Assignee"]) {
+      const { index } = suggestMapping(["item", "step", "started", header], "step_log");
+      expect(index.person, header).toBe(3);
+    }
+  });
+
+  it("reads no person key when the file has none, and the person when it does", () => {
+    const without = read("item,step,started\nD1,Qualify,2026-03-02\n", "step_log");
+    expect(without.rows[0]).toEqual({ item: "D1", step: "Qualify", started: d(2026, 3, 2), finished: null, hours: null, source: null });
+    expect(Object.keys(without.rows[0]!)).not.toContain("person");
+    const blank = read("item,step,started,person\nD1,Qualify,2026-03-02,\n", "step_log");
+    expect(Object.keys(blank.rows[0]!)).not.toContain("person");
+    const named = read("item,step,started,person\nD1,Qualify,2026-03-02,Sam P.\n", "step_log");
+    expect((named.rows[0] as { person?: string }).person).toBe("Sam P.");
+    const long = read(`item,step,started,person\nD1,Qualify,2026-03-02,${"x".repeat(201)}\n`, "step_log");
+    expect(long.errors[0]!.message).toBe("The person is over 200 characters.");
+  });
+
+  it("lists the distinct people of a file, most rows first", () => {
+    const steps = read("item,step,started,person\nD1,A,2026-03-02,Jo\nD2,A,2026-03-02,Sam\nD3,A,2026-03-02,Sam\nD4,A,2026-03-02,\n", "step_log");
+    expect(personValues(steps)).toEqual([
+      { value: "Sam", rows: 2 },
+      { value: "Jo", rows: 1 },
+    ]);
+    const time = read("job,task,date,hours,person\nJ1,A,2026-03-02,1,Sam\nJ1,A,2026-03-03,1,Jo\nJ2,A,2026-03-02,1,Jo\nJ2,B,2026-03-02,1,Al\n", "time_logs");
+    expect(personValues(time)).toEqual([
+      { value: "Jo", rows: 2 },
+      { value: "Al", rows: 1 },
+      { value: "Sam", rows: 1 },
+    ]);
+    expect(personValues(read(IMPORT_KINDS.deals.template, "deals"))).toEqual([]);
+  });
+
+  it("gives the entries kept by the name map, renamed, and null for other kinds", () => {
+    const r = read("job,task,date,hours,person\nJ1,a,2026-03-02,1,Sam\nJ1,X,2026-03-03,1,Sam\n", "time_logs");
+    const entries = applyNameMapEntries(r, { a: "Audit", X: null });
+    expect(entries).toHaveLength(1);
+    expect(entries![0]).toMatchObject({ task: "Audit", person: "Sam" });
+    expect(applyNameMapEntries(read(IMPORT_KINDS.deals.template, "deals"), {})).toBeNull();
+    expect(applyNameMapCounted(r, { a: "Audit", X: null }).rows).toEqual(timeLogToStepLog(entries!));
+  });
+
+  it("puts a person on each visit only when every entry of it names the same one", () => {
+    const e = (job: string, task: string, date: number, hours: number, person: string | null): TimeLogRow => ({ job, task, date, hours, person, client: null });
+    expect(timeLogPersonVisits([e("J", "A", 1, 1, "Sam"), e("J", "A", 2, 1, "Sam")])).toEqual([{ item: "J", step: "A", started: 1, finished: null, hours: 2, source: null, person: "Sam" }]);
+    expect(timeLogPersonVisits([e("J", "A", 1, 1, "Sam"), e("J", "A", 2, 1, "Jo")])[0]!.person).toBeNull();
+    expect(timeLogPersonVisits([e("J", "A", 1, 1, "Sam"), e("J", "A", 2, 1, null)])[0]!.person).toBeNull();
+    expect(timeLogPersonVisits([e("J", "A", 1, 1, null)])[0]!.person).toBeNull();
+    // timeLogToStepLog itself carries no person.
+    expect(timeLogToStepLog([e("J", "A", 1, 1, "Sam")])[0]).not.toHaveProperty("person");
   });
 });

@@ -8,14 +8,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { calibrate, type CalibrationProposal, type CalibrationResult, type StepLogRow } from "@transpera-flow/engine";
+import { calibrate, proposePersonTimes, type CalibrationProposal, type CalibrationResult, type PersonTimeProposal, type StepLogRow } from "@transpera-flow/engine";
 import { calibrationInput, type CalibrationRows } from "@transpera-flow/db/calibration";
-import type { ImportKind } from "@transpera-flow/db/csv-import";
+import { PERSON_TIME_KINDS, personValues, type ImportKind } from "@transpera-flow/db/csv-import";
 import { ImportWizard, type ImportReady } from "@/components/calibration/import-wizard";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
+import { groupByPerson, initiallyTickedFactor, selectableFactor, type PersonTimesSetup } from "@/lib/calibration/person-times";
+import { factorWords } from "@/lib/people";
 import { applySummary, formatValue, formatWindow, groupProposals, initiallySelected, KIND_LABELS, selectable, SOURCE_LABELS } from "@/lib/calibration/view";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -32,7 +34,12 @@ export interface CalibrationPanelProps {
   process: { id: string; name: string; kind: string };
   hasDraft: boolean;
   stored: CalibrationRows;
-  history: { id: string; createdAt: string; fileName: string; rowCount: number; proposals: number; applied: number }[];
+  history: { id: string; createdAt: string; fileName: string; rowCount: number; proposals: number; applied: number; perPersonApplied?: number }[];
+  /**
+   * Per-person times (#227): `hidden` for members and viewers (nothing per-person is shown or computed), `off` with the switch off,
+   * `on` for owners, editors and agency admins with it on. The demo passes `hidden`.
+   */
+  personTimes: PersonTimesSetup;
   /** The latest column map of each kind, offered to the wizard first. */
   previous: Partial<Record<ImportKind, Record<string, string>>>;
   /** Files to try (the demo's samples). */
@@ -41,7 +48,8 @@ export interface CalibrationPanelProps {
 
 const KINDS = ["step_log", "deals", "time_logs"] as const;
 
-type Read = { ready: ImportReady; result: CalibrationResult | null };
+/** `factors`: per-person times proposed from the log's people (#227); empty unless the setup is `on` and people were matched. */
+type Read = { ready: ImportReady; result: CalibrationResult | null; factors: PersonTimeProposal[] };
 type Done = { tone: "ok" | "error"; message: string; editor: boolean };
 
 const SOURCE_TONE = {
@@ -51,7 +59,7 @@ const SOURCE_TONE = {
 } as const;
 
 export function CalibrationPanel(props: CalibrationPanelProps) {
-  const { mode, process, stored } = props;
+  const { mode, process, stored, personTimes } = props;
   const canApply = mode !== "readonly";
   const router = useRouter();
   const [read, setRead] = useState<Read | null>(null);
@@ -88,8 +96,13 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
     // Let the page say so before a big file is measured.
     setTimeout(() => {
       const result = ready.rows.length ? measure(ready) : null;
-      setRead({ ready, result });
-      setSelected(new Set(result ? result.proposals.filter(initiallySelected).map((p) => p.key) : []));
+      // Per-person times: only for owners, editors and agency admins with the switch on, from the visits whose people were matched.
+      const factors =
+        result && personTimes.state === "on" && ready.personRows
+          ? proposePersonTimes({ steps: calibrationInput(stored, []).steps, rows: ready.personRows, people: personTimes.persons }).proposals
+          : [];
+      setRead({ ready, result, factors });
+      setSelected(new Set([...(result ? result.proposals.filter(initiallySelected).map((p) => p.key) : []), ...factors.filter(initiallyTickedFactor).map((p) => p.key)]));
       setCalculating(false);
     }, 0);
   };
@@ -108,6 +121,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
     const keys = [...selected].filter((k) => !applied.has(k));
     if (!keys.length) return;
     const subjects = new Map(read.result.proposals.map((p) => [p.key, `${p.subject} (${KIND_LABELS[p.kind].title.toLowerCase()})`]));
+    for (const f of read.factors) subjects.set(f.key, `${f.subject} (per-person time)`);
     if (mode === "demo") {
       setApplied(new Set([...applied, ...keys]));
       setSelected(new Set());
@@ -129,6 +143,9 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
         details: read.ready.details,
         // The names the person left out are recorded as a count with the ones that matched no step, never by name.
         results: { ...measured, unmatchedSteps: measured.unmatchedSteps.length + read.ready.leftOut.names },
+        // Every per-person time with a value, ticked or not, so the record holds what was proposed; the database keeps them where only
+        // owners and editors read them (#227).
+        capacityFactors: read.factors.filter((f) => f.set),
         keys,
       });
       if (out.status === "error") {
@@ -141,7 +158,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
       setDone({
         tone: "ok",
         message: applySummary(out.results, subjects, out.draft?.number ?? null),
-        editor: ok.some((k) => !k.startsWith("arrivals:")),
+        editor: ok.some((k) => !k.startsWith("arrivals:") && !k.startsWith("factor:")),
       });
     });
   };
@@ -199,7 +216,16 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ImportWizard id="cal-log" kinds={KINDS} targets={targets} previous={props.previous} sample={props.sample} mode={mode} onReady={onReady} />
+          <ImportWizard
+            id="cal-log"
+            kinds={KINDS}
+            targets={targets}
+            previous={props.previous}
+            sample={props.sample}
+            mode={mode}
+            people={personTimes.state === "on" ? personTimes.people : null}
+            onReady={onReady}
+          />
           {calculating && (
             <p role="status" className="mt-3 text-sm text-muted-foreground">
               Measuring…
@@ -234,6 +260,30 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
               />
             ))}
             {groups.length === 0 && <p className="text-sm text-muted-foreground">Nothing in the log matches a step of {process.name}.</p>}
+            {personTimes.state === "on" && read.factors.length > 0 && (
+              <PersonTimesSection
+                proposals={read.factors}
+                people={personTimes.people}
+                unattributed={read.ready.personRows ? read.ready.personRows.filter((r) => r.person === null).length : 0}
+                selected={selected}
+                applied={applied}
+                canApply={canApply}
+                onToggle={toggle}
+              />
+            )}
+            {personTimes.state === "off" && PERSON_TIME_KINDS.includes(read.ready.kind) && personValues(read.ready.read).length > 0 && (
+              <p data-person-times-off className="text-sm text-muted-foreground">
+                This log names people.{" "}
+                {props.base ? (
+                  <Link href={`${props.base}/settings#simulation`} className="text-accent underline-offset-4 hover:underline">
+                    Switch Per-person times on in Settings → Simulation
+                  </Link>
+                ) : (
+                  "Switch Per-person times on in Settings → Simulation"
+                )}{" "}
+                to measure each person&apos;s time on each step.
+              </p>
+            )}
             {canApply ? (
               <div className="sticky bottom-2 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-2 shadow-xs">
                 <span className="text-sm">
@@ -287,6 +337,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
                   <span className="text-muted-foreground">
                     {new Date(h.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} ·{" "}
                     {formatNumber(h.rowCount, 0)} rows · applied {h.applied} of {h.proposals}
+                    {h.perPersonApplied ? ` and ${h.perPersonApplied} per-person time${h.perPersonApplied === 1 ? "" : "s"}` : ""}
                   </span>
                 </li>
               ))}
@@ -390,6 +441,132 @@ function ProposalGroup({
         </details>
       )}
     </section>
+  );
+}
+
+/**
+ * Per-person times from a log that names people (#227), only for owners, editors and agency admins with the switch on. One closed
+ * <details> per person, in the roster's order, with their steps in the process's order. Never sorted by value, no table with people as rows
+ * or columns, no totals or averages across people.
+ */
+function PersonTimesSection({
+  proposals,
+  people,
+  unattributed,
+  selected,
+  applied,
+  canApply,
+  onToggle,
+}: {
+  proposals: PersonTimeProposal[];
+  people: { id: string; name: string }[];
+  unattributed: number;
+  selected: Set<string>;
+  applied: Set<string>;
+  canApply: boolean;
+  onToggle: (key: string, on: boolean) => void;
+}) {
+  const groups = groupByPerson(proposals, people);
+  return (
+    <section data-person-times aria-labelledby="cal-person-times" className="flex flex-col gap-2">
+      <h3 id="cal-person-times" className="flex items-center gap-1 text-sm font-semibold">
+        Per-person times
+        <Help
+          label="Per-person times"
+          description="How long each person takes on a step compared with the step's normal time, from the log's hands-on hours. Only owners and editors see this. Times are never ranked or compared across people. 1 is the normal time, 0.8 is 20% faster, 1.25 is 25% slower."
+          example="Sam's 14 Kickoff visits took 0.8 of the step's normal time: tick it to set his Kickoff time to 0.8."
+        />
+      </h3>
+      {unattributed > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {formatNumber(unattributed, 0)} visit{unattributed === 1 ? " was" : "s were"} by more than one person or named no one, so {unattributed === 1 ? "it counts" : "they count"} only toward each
+          step&apos;s normal time.
+        </p>
+      )}
+      <div className="flex flex-col gap-2">
+        {groups.map((g) => {
+          const measured = g.proposals.filter((p) => p.set).length;
+          return (
+            <details key={g.person.id} data-person-time-group className="rounded-lg border border-line">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+                {g.person.name}: {measured} step{measured === 1 ? "" : "s"} measured
+              </summary>
+              <ul className="flex flex-col divide-y divide-line border-t border-line">
+                {g.proposals.map((p) => (
+                  <PersonTimeRow key={p.key} p={p} checked={selected.has(p.key)} applied={applied.has(p.key)} canApply={canApply} onToggle={onToggle} />
+                ))}
+              </ul>
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function nowWords(p: PersonTimeProposal): string {
+  if (p.current !== null) return `Now: ${p.current} × normal`;
+  if (p.every !== null) return `Now: ${p.every} × normal (every step)`;
+  return "Now: normal";
+}
+
+function PersonTimeRow({
+  p,
+  checked,
+  applied,
+  canApply,
+  onToggle,
+}: {
+  p: PersonTimeProposal;
+  checked: boolean;
+  applied: boolean;
+  canApply: boolean;
+  onToggle: (key: string, on: boolean) => void;
+}) {
+  const id = `cal-${p.key}`;
+  const tickable = selectableFactor(p);
+  return (
+    <li className={cn("grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1 px-3 py-2.5 text-sm", applied && "bg-good-soft")}>
+      <span className="flex h-5 items-center">
+        {tickable && canApply && !applied ? (
+          <input id={id} type="checkbox" className="size-4 accent-accent" checked={checked} onChange={(e) => onToggle(p.key, e.target.checked)} />
+        ) : applied ? (
+          <span aria-label="Applied" className="text-good">
+            ✓
+          </span>
+        ) : null}
+      </span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <label htmlFor={tickable ? id : undefined} className="font-medium">
+            {p.subject}
+          </label>
+          <Help
+            label={`${p.subject}, measured per person`}
+            description={`${p.note} Applying sets this person's time on the step, marked measured, with this log as where it came from.`}
+            example={p.proposed === null ? `Not measured: ${p.blocked ?? "too few visits"}.` : `Applying sets their time on ${p.subject} to ${p.proposed}, which is ${factorWords(p.proposed)}.`}
+          />
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            {nowWords(p)}
+            {p.currentSource && (
+              <span data-provenance={p.currentSource} className={cn("inline-block rounded-token border px-1.5 text-[11px] leading-4 text-fg-2", SOURCE_TONE[p.currentSource])}>
+                {SOURCE_LABELS[p.currentSource]}
+              </span>
+            )}
+          </span>
+          {p.proposed !== null && (
+            <span className="tabular-nums font-medium">
+              Measured: {p.proposed} × normal ({factorWords(p.proposed)})
+            </span>
+          )}
+          <span className="tabular-nums text-muted-foreground">{formatNumber(p.n, 0)} visits</span>
+        </span>
+        {p.set ? <span className="text-xs text-muted-foreground">{p.note}</span> : <span className="text-xs text-muted-foreground">{p.blocked}</span>}
+        {p.set && !p.changed && <span className="text-xs text-muted-foreground">Matches what is stored.</span>}
+        {tickable && p.currentSource === "entered" && !applied && <span className="text-xs text-muted-foreground">Now entered: tick it only to replace it with a measured one.</span>}
+        {applied && <span className="text-xs text-muted-foreground">Applied.</span>}
+      </span>
+    </li>
   );
 }
 

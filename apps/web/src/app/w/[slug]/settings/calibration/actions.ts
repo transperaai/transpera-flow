@@ -40,10 +40,17 @@ export async function applyCalibration(input: unknown): Promise<ApplyOutcome> {
     p_column_map: r.columnMap as Json,
     p_row_count: r.rowCount,
     p_details: (r.details ?? {}) as unknown as Json,
-    p_results: r.results as unknown as Json,
+    // Per-person times travel apart from the results (#227): the database keeps them where only owners and editors read them.
+    p_results: (r.capacityFactors.length ? { ...r.results, capacity_factors: r.capacityFactors } : r.results) as unknown as Json,
     p_keys: r.keys,
   });
-  if (error) return { status: "error", message: error.code === "42501" ? denied : "Couldn't apply. Try again." };
+  if (error) {
+    if (error.code === "42501") return { status: "error", message: denied };
+    if (error.code === "22023" && error.message.includes("switched off")) {
+      return { status: "error", message: "Per-person times are switched off in this workspace. Switch them on in Settings → Simulation, then apply again." };
+    }
+    return { status: "error", message: "Couldn't apply. Try again." };
+  }
   const out = data as { status: string; calibration_id?: string; results?: { key: string; status: string }[]; draft?: { revision_id: string; number: number; created: boolean } | null };
   if (out.status !== "ok" || !out.calibration_id) return { status: "error", message: denied };
   // The process page, the Editor and the sidebar read the draft and the lead sources.

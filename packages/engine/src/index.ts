@@ -378,7 +378,17 @@ export {
   type CalibrationStepKind,
   type CalibrationValueSource,
   type StepLogRow,
+  normStepName,
+  stepIdsByName,
 } from "./calibration";
+export {
+  PERSON_TIME_MAX,
+  PERSON_TIME_MIN,
+  proposePersonTimes,
+  type PersonTimeProposal,
+  type PersonTimesInput,
+  type PersonTimesPerson,
+} from "./person-times";
 export {
   CHURN_BACKSOLVE_MAX_RUNS,
   CHURN_BACKSOLVE_REPS,

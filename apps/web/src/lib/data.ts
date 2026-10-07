@@ -426,6 +426,12 @@ function factorSource(provenance: unknown): string {
   return typeof f?.source === "string" ? f.source : "entered";
 }
 
+/** How many visits a measured time rests on (`provenance.factor.n`); null when entered or when none is recorded (#227). */
+function factorItems(provenance: unknown): number | null {
+  const f = (provenance as { factor?: { source?: unknown; n?: unknown } } | null)?.factor;
+  return f?.source === "measured" && typeof f.n === "number" && Number.isFinite(f.n) ? Math.round(f.n) : null;
+}
+
 export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSettingsData | null> {
   const supabase = await createClient();
   const { data: workspace, error: wsError } = await supabase
@@ -514,6 +520,7 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
       step_id: r.step_id,
       factor: Number(r.factor),
       source: factorSource(r.provenance),
+      items: factorItems(r.provenance),
     })),
     // The cast narrows pricing_model, which a check constraint limits.
     services: (services.data ?? []) as ServiceRow[],
