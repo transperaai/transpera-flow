@@ -541,6 +541,11 @@ function PersonTimeRow({
           <label htmlFor={tickable ? id : undefined} className="font-medium">
             {p.subject}
           </label>
+          <Help
+            label={`${p.subject}, measured per person`}
+            description={`${p.note} Applying sets this person's time on the step, marked measured, with this log as where it came from.`}
+            example={p.proposed === null ? `Not measured: ${p.blocked ?? "too few visits"}.` : `Applying sets their time on ${p.subject} to ${p.proposed}, which is ${factorWords(p.proposed)}.`}
+          />
           <span className="flex items-center gap-1.5 text-muted-foreground">
             {nowWords(p)}
             {p.currentSource && (
