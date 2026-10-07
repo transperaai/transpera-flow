@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseEnv } from "@/lib/supabase/env";
 import { revokeToken } from "./actions";
 import { CreateTokenForm } from "./create-token-form";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
 
@@ -39,6 +40,7 @@ export default async function ApiTokensPage() {
           </>
         }
       />
+      <PhoneReadOnly>
       <CreateTokenForm endpoint={endpoint} />
       <Card className="py-2">
         <Table>
@@ -80,6 +82,7 @@ export default async function ApiTokensPage() {
           </TableBody>
         </Table>
       </Card>
+      </PhoneReadOnly>
     </main>
   );
 }

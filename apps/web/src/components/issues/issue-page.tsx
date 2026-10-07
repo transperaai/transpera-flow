@@ -34,6 +34,7 @@ import { NO_SOLUTIONS_DATA, effectiveVerdict, solutionHref, solutionTests, solut
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { ratingOfStored } from "@transpera-flow/engine";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // The map is heavy; load it when the page has drawn.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
@@ -160,7 +161,7 @@ export function IssuePage(props: IssuePageProps) {
           </div>
         </div>
         {canEdit && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
             {props.share}
             <span className="flex items-center">
               <Button type="button" variant="outline" onClick={() => setEdit(true)}>
@@ -375,7 +376,7 @@ export function IssuePage(props: IssuePageProps) {
                     <Help {...ISSUE_PAGE_HELP.sources} />
                   </span>
                   {canEdit && (
-                    <span className="flex items-center">
+                    <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
                       <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
                         + Link
                       </Button>

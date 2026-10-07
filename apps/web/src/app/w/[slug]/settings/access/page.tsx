@@ -20,6 +20,7 @@ import {
   setMemberRole,
   updateEmail,
 } from "./actions";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 const SOURCE_LABEL: Record<WorkspaceMember["source"], string> = {
   access_list: "Pre-assigned email",
@@ -105,6 +106,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
       eyebrow="Company"
       description="People get in by signing in with Google. Nobody is emailed. Changes apply on their next page load."
     >
+      <PhoneReadOnly>
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>
@@ -325,6 +327,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
           </Table>
         </CardContent>
       </Card>
+      </PhoneReadOnly>
     </Page>
   );
 }

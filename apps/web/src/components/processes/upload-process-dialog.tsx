@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { downloadHref, fileSizeProblem, isRedirect, uploadSizeProblem, type CreateUploadInput, type CreateUploadResult, type PreviewInput, type PreviewResult, type UploadPreview } from "@/lib/processes/upload";
 import { cn } from "@/lib/utils";
+import { EDIT_ONLY } from "@/lib/phone";
 
 export interface UploadProcess {
   /** Check the file and say what it would create (writes nothing). */
@@ -49,7 +50,7 @@ export const UPLOAD_HELP = {
 export function UploadProcessButton({ upload }: { upload: UploadProcess }) {
   const [open, setOpen] = useState(false);
   return (
-    <span className="inline-flex items-center">
+    <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
       <Button variant="outline" onClick={() => setOpen(true)} data-upload-open>
         <Upload /> Upload process
       </Button>

@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
@@ -71,7 +72,9 @@ export async function WorkspaceEditorPage({
   // visitor sent it is dropped with a note (the snapshot kept real ids, so nothing is translated).
   const mapped = ideaRow && forThisIssue && (issueRow || visitorsHere) ? mapPlayChanges(readIdea(ideaRow.payload).levers, live) : null;
   const idea = ideaRow && mapped ? { ...ideaSeed(ideaRow, live.roles), levers: mapped.levers, leverNotes: mapped.notes } : null;
+  const exit = exitHref(searchParams.from, base);
   return (
+    <EditorPhoneGate backHref={exit}>
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit>
     <EditorView
       key={live.process.id}
@@ -91,10 +94,11 @@ export async function WorkspaceEditorPage({
       viewer={viewer && { ...viewer, email: null, name: canSeeNames ? viewer.name : "A team member" }}
       sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
-      exitHref={exitHref(searchParams.from, base)}
+      exitHref={exit}
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
     />
     </SourceLinkingScope>
+    </EditorPhoneGate>
   );
 }

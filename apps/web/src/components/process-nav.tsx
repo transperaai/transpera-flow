@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { trailOf } from "@/lib/processes/rows";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /**
  * The title of a process page (issues #76, #101): breadcrumbs above it (Processes, then the processes it sits
@@ -113,7 +114,7 @@ export function ProcessNav({
               ))}
               {(create || processesHref) && <DropdownMenuSeparator />}
               {create && (
-                <DropdownMenuItem onSelect={() => setAdding(true)}>
+                <DropdownMenuItem className={EDIT_ONLY} data-edit-entry onSelect={() => setAdding(true)}>
                   <Plus /> New process…
                 </DropdownMenuItem>
               )}

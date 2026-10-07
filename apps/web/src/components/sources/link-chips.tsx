@@ -6,6 +6,7 @@
 import type { LinkTargets, SourceLinkRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { linkLabel, linkTitle } from "@/lib/sources/links";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** The (i) texts for what a source's links and its warning mean. */
 export const LINK_HELP = {
@@ -46,7 +47,8 @@ export function LinkChips({
                 type="button"
                 disabled={disabled}
                 aria-label={`Remove link: ${linkTitle(l, targets)}`}
-                className="-mr-1 grid size-4 shrink-0 place-items-center rounded-full text-fg-3 outline-none hover:bg-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                data-edit-entry
+                className={`-mr-1 grid size-4 shrink-0 place-items-center rounded-full text-fg-3 outline-none hover:bg-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${EDIT_ONLY}`}
                 onClick={() => onUnlink(l)}
               >
                 <span aria-hidden>×</span>

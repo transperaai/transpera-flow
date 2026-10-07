@@ -11,6 +11,7 @@
 // markers is a plan, saved with a name (owners, editors and agency admins only; the demo keeps plans in the tab), and
 // two plans can be compared side by side. The live forecast, and its insights, are never changed by a plan.
 
+import { useIsPhone } from "@/hooks/use-mobile";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -142,6 +143,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
 
   // ---- Plans (B7): owners, editors and agency admins only; a member or viewer sees the forecast as it was. ----
   const planUi = mode !== "readonly";
+  const isPhone = useIsPhone();
   const demoStore = useDemoPlans();
   const demoSolutions = useDemoSolutions();
   const [livePlans, setLivePlans] = useState(plans);
@@ -361,7 +363,8 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
           bounds,
           startDate: start,
           hoursPerWeek: built.model?.hoursPerWeek ?? hpw,
-          editable: true,
+          // A phone is read only (issue #44): the plan lane draws the markers but can't move or remove them.
+          editable: !isPhone,
           status: plan.status,
           runs: plan.finished,
           onMove: moveMarker,

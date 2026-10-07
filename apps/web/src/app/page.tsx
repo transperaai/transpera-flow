@@ -10,6 +10,7 @@ import { isAgencyAdmin, resolveMyAccess } from "@/lib/access-data";
 import { listAgencyWorkspaces, listWorkspaces } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseEnv } from "@/lib/supabase/env";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { NewWorkspaceForm } from "./new-workspace-form";
 
 export default async function HomePage() {
@@ -41,7 +42,9 @@ export default async function HomePage() {
             <details open={workspaces.length === 0}>
               <summary className="cursor-pointer font-medium">New workspace</summary>
               <div className="pt-4">
-                <NewWorkspaceForm />
+                <PhoneReadOnly>
+                  <NewWorkspaceForm />
+                </PhoneReadOnly>
               </div>
             </details>
           </CardContent>

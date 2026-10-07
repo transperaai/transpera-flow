@@ -49,6 +49,7 @@ import { StepInspector } from "./step-inspector";
 import { UtilisationBars } from "./utilisation-bars";
 import { BottleneckPanel } from "./bottleneck-panel";
 import { ServicingBanner } from "./servicing-banner";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /**
  * How edits are saved: `live` to the database as the signed-in user, `demo`
@@ -443,7 +444,7 @@ export function ProcessView({
                   ? `Viewing live · version ${live.revision.number}`
                   : `Viewing draft version ${drafts.draft?.number ?? live.revision.number + 1} (read-only)`}
               </span>
-              <Button asChild size="sm" className="bg-edit text-edit-fg hover:bg-edit/90">
+              <Button asChild size="sm" className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry>
                 <Link href={withHorizon(editHref, pickedMonths)}>{hasDraft ? "✎ Open draft in Editor" : "✎ Edit process"}</Link>
               </Button>
             </>

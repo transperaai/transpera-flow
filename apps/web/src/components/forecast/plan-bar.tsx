@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { PLAN_HELP } from "@/lib/forecast/help";
 import { MAX_MARKERS, MAX_NAME, MAX_PLANS, MAX_SOLUTIONS } from "@/lib/forecast/plan";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** The option value for "No changes" (the live forecast), and for a plan that isn't saved yet. */
 export const NO_CHANGES = "";
@@ -72,7 +73,7 @@ export function PlanBar(p: PlanBarProps) {
           </NativeSelect>
         </label>
 
-        <div className="flex items-center">
+        <div className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" data-plan-add>
@@ -95,7 +96,7 @@ export function PlanBar(p: PlanBarProps) {
           <Help {...PLAN_HELP.add} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
           {p.dirty || (p.hasPlan && p.selectedId === null) ? (
             <Button onClick={p.onSave} disabled={planLimit} title={planLimit ? `This workspace already has ${MAX_PLANS} plans. Delete one first.` : undefined} data-plan-save>
               Save

@@ -32,6 +32,8 @@ import { demoLinkVerdict } from "@/lib/solutions/demo-link";
 import { SOLUTION_PAGE_HELP, newOnProcessHelp } from "@/lib/solutions/help";
 import { solutionEditorHref } from "@/lib/solutions/links";
 import { cn } from "@/lib/utils";
+import { EDIT_ONLY } from "@/lib/phone";
+import { useIsPhone } from "@/hooks/use-mobile";
 
 const CARD_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 const EYEBROW = "flex items-center text-2xs font-semibold tracking-wider text-muted-foreground uppercase";
@@ -146,7 +148,7 @@ export function SolutionPage(props: SolutionPageProps) {
           <span className="text-xs text-muted-foreground">Changes: {changesLine(solution, 6)}</span>
         </div>
         {canEdit && (
-          <span className="flex flex-wrap items-center gap-2">
+          <span className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
             {props.share}
             <DeleteSolution
               name={solution.name}
@@ -190,7 +192,7 @@ export function SolutionPage(props: SolutionPageProps) {
             <p className="text-sm text-muted-foreground">A solution can solve more than one issue. Each is judged against its own target.</p>
           </div>
           {canEdit && (
-            <span className="flex items-center">
+            <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
               <Button type="button" size="sm" variant="outline" onClick={() => setLinking(true)} data-link-issue>
                 + Link an issue
               </Button>
@@ -355,7 +357,7 @@ function SolvesCard({
             <Help {...SOLUTION_PAGE_HELP.yours} />
           </span>
           {canEdit ? (
-            <div className="flex gap-1.5" role="group" aria-label="Your verdict">
+            <div className={`flex gap-1.5 ${EDIT_ONLY}`} role="group" aria-label="Your verdict" data-edit-entry>
               {(["pass", "fail"] as const).map((v) => (
                 <Button
                   key={v}
@@ -395,6 +397,7 @@ function SolvesCard({
 }
 
 function NotesCard({ notes, canEdit, onSave }: { notes: string; canEdit: boolean; onSave: (notes: string) => Promise<boolean> }) {
+  const isPhone = useIsPhone();
   const [text, setText] = useState(notes);
   const [saved, setSaved] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -409,7 +412,7 @@ function NotesCard({ notes, canEdit, onSave }: { notes: string; canEdit: boolean
         <Textarea
           value={text}
           maxLength={MAX_NOTES}
-          disabled={!canEdit}
+          disabled={!canEdit || isPhone}
           rows={4}
           aria-label="Notes"
           placeholder={canEdit ? "Anything worth knowing" : "No notes"}

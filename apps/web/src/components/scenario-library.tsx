@@ -11,6 +11,7 @@ import type { BrokenPatch, EngineModel, RetiredSteps } from "@transpera-flow/eng
 import { repointTargets } from "@/lib/scenarios/broken";
 import { MAX_DESCRIPTION, MAX_NAME } from "@/lib/scenarios/validate";
 import { describePatch } from "@/lib/scenarios/scenarios";
+import { EDIT_ONLY } from "@/lib/phone";
 
 const buttonClass = "rounded-token border border-line px-2 py-0.5 text-xs hover:bg-panel-2 disabled:opacity-50";
 
@@ -42,7 +43,7 @@ function BrokenChange({
         <code className="rounded bg-panel-2 px-1 text-[11px] break-all text-fg-2">{problem.path}</code> {problem.message}
       </p>
       {canEdit && (suggested.length > 0 || others.length > 0) && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className={`flex flex-wrap items-center gap-1.5 ${EDIT_ONLY}`} data-edit-entry>
           {suggested.map((t) => (
             <button key={t.id} type="button" disabled={busy} onClick={() => onRepoint(t.id)} className={`${buttonClass} border-accent`}>
               Point at {t.name}
@@ -148,7 +149,7 @@ function ScenarioItem({
         </div>
       )}
       {canEdit && (
-        <div className="flex gap-2">
+        <div className={`flex gap-2 ${EDIT_ONLY}`} data-edit-entry>
           <button type="button" onClick={onDuplicate} disabled={busy} className={buttonClass}>
             Duplicate
           </button>
@@ -273,7 +274,7 @@ export function ScenarioLibrary({
         {!scenarios.length && <li className="text-xs text-fg-3">No saved scenarios yet.</li>}
       </ul>
       {canEdit && (
-        <form onSubmit={submit} className="flex flex-col gap-1.5 border-t border-line pt-2">
+        <form onSubmit={submit} className={`flex flex-col gap-1.5 border-t border-line pt-2 ${EDIT_ONLY}`} data-edit-entry>
           <label htmlFor="scenario-name" className="text-xs font-medium text-fg-2">
             Save the levers as a scenario
           </label>

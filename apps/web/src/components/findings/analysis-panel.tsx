@@ -23,6 +23,7 @@ import type { FindingsState } from "@/lib/findings/use-findings";
 import { proposedFindings } from "@/lib/findings/view";
 import { cn } from "@/lib/utils";
 import { emptyFindingDraft, FindingDialog, type FindingDialogOptions } from "./finding-dialog";
+import { EDIT_ONLY } from "@/lib/phone";
 
 const when = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -142,7 +143,7 @@ export function AnalysisPanel({
         )}
         <span className="ml-auto flex flex-wrap items-center gap-1">
           {canEdit && (
-            <Button variant="ghost" size="sm" onClick={() => setDialog({ mode: "add" })} data-add-finding>
+            <Button variant="ghost" size="sm" className={EDIT_ONLY} onClick={() => setDialog({ mode: "add" })} data-add-finding data-edit-entry>
               <Plus aria-hidden />
               Add a finding
             </Button>
@@ -151,6 +152,8 @@ export function AnalysisPanel({
             <Button
               variant="outline"
               size="sm"
+              className={EDIT_ONLY}
+              data-edit-entry
               disabled={!runnable || pending}
               onClick={run}
               title={!runnable ? (!configured ? AI_NOT_SET_UP : "Write first principles first") : view ? "Runs AI again even if nothing has changed. It counts towards the day's AI runs." : undefined}
@@ -233,7 +236,7 @@ export function AnalysisPanel({
                         <span className="text-xs text-muted-foreground">Cites no facts</span>
                       )}
                     </div>
-                    <span className="flex shrink-0 flex-wrap gap-1">
+                    <span className={`flex shrink-0 flex-wrap gap-1 ${EDIT_ONLY}`} data-edit-entry>
                       <Button size="sm" disabled={findings.busy} onClick={() => void findings.accept(f.id)} aria-label={`Accept: ${f.title}`}>
                         Accept
                       </Button>

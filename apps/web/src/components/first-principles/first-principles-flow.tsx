@@ -13,6 +13,8 @@ import { countFilled, countFlags, FP_STEPS, firstPrinciplesFlags, isAttention, m
 import { Help } from "@/components/help";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AiReviewPanel } from "@/components/ai/ai-review-panel";
+import { PhoneNotice } from "@/components/shell/phone-read-only";
+import { useIsPhone } from "@/hooks/use-mobile";
 import type { AiMode, AiPanelData } from "@/lib/ai/types";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -120,7 +122,9 @@ export function FirstPrinciplesFlow({
   const total = countFlags(flags);
   const attention = (k: FpStepKey) => flags[k].filter(isAttention).length;
 
-  const disabled = !canEdit;
+  // A phone is read only (issue #44): the answers stay readable and the steps still turn, but nothing can be typed.
+  const isPhone = useIsPhone();
+  const disabled = !canEdit || isPhone;
   return (
     <div className="flex min-h-svh flex-1 flex-col">
       <div className="sticky top-0 z-20 flex items-center gap-x-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
@@ -165,6 +169,7 @@ export function FirstPrinciplesFlow({
         </header>
 
         <EditingNote editing={editing} status={draft.status} message={draft.message} />
+        {canEdit && <PhoneNotice />}
 
         {draft.status === "conflict" && (
           <Alert role="alert" className="border-warn bg-warn-soft">

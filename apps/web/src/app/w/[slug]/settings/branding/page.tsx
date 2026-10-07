@@ -7,6 +7,7 @@ import { canManageWorkspace } from "@/lib/access-data";
 import { logoUrl, readBranding } from "@/lib/branding/branding";
 import { loadWorkspaceHead } from "@/lib/data";
 import { removeWorkspaceLogo, saveBrandAccent } from "./actions";
+import { PhoneNotice } from "@/components/shell/phone-read-only";
 
 /**
  * Settings -> Branding (issue #34, B5): the workspace's logo and accent colour. Everyone in the workspace sees them; owners
@@ -29,6 +30,7 @@ export default async function BrandingSettingsRoute(props: PageProps<"/w/[slug]/
         </Link>
       }
     >
+      <PhoneNotice />
       <BrandingSettings
         mode={canManage ? "live" : "readonly"}
         workspaceId={head.id}

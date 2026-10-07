@@ -15,6 +15,7 @@ import { NO_SOLUTIONS_DATA, solutionsListHref, type SolutionsData } from "@/lib/
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { SOLUTIONS_LIST_HELP } from "@/lib/solutions/help";
 import { newSolutionHref } from "@/lib/solutions/links";
+import { EDIT_ONLY } from "@/lib/phone";
 
 /** "✎ New solution": starts one on a process. With one process it goes straight to the Editor; with several it asks which. */
 export function NewSolutionButton({ processes, base }: { processes: readonly { id: string; name: string }[]; base: string }) {
@@ -25,7 +26,7 @@ export function NewSolutionButton({ processes, base }: { processes: readonly { i
   const style = "inline-flex h-8 items-center gap-1.5 rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90";
   if (!processes.length) return null;
   return (
-    <span className="flex items-center">
+    <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
       {processes.length === 1 ? (
         <Link href={newSolutionHref(base, processes[0]!.id, from)} className={style} data-new-solution>
           ✎ New solution

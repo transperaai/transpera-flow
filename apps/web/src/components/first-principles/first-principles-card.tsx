@@ -23,6 +23,7 @@ import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { EDIT_ONLY } from "@/lib/phone";
 
 const tone = (pct: number) => (pct >= 80 ? "text-good" : pct >= 50 ? "text-warn" : "text-crit");
 
@@ -73,7 +74,7 @@ export function FirstPrinciplesCard({
             Not started
             {draftChanged && <span className="ml-2 rounded-full border border-warn bg-warn-soft px-2 py-0.5 text-xs font-normal text-fg">Draft has changes that aren&apos;t published</span>}
           </p>
-          <Button asChild size="sm" className="bg-edit text-edit-fg hover:bg-edit/90">
+          <Button asChild size="sm" className={canEdit ? `bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}` : "bg-edit text-edit-fg hover:bg-edit/90"} data-edit-entry={canEdit || undefined}>
             <Link href={href}>{canEdit ? "Work through the 7 steps →" : "Open →"}</Link>
           </Button>
         </div>

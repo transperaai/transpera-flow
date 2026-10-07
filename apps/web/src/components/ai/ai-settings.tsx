@@ -16,6 +16,7 @@ import { AI_NOT_SET_UP } from "@/lib/ai/types";
 import { AI_SWITCHES } from "@/lib/ai/switches";
 import { cn } from "@/lib/utils";
 import { saveAiSwitch } from "@/app/w/[slug]/settings/ai/actions";
+import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 export type AiSettingsMode = "live" | "readonly" | "demo";
 
@@ -55,6 +56,7 @@ export function AiSettingsPage({ mode, workspaceId, initial, configured }: { mod
       description="Runs when you press Analyse on a process or on the Overview. It reads the facts from the simulation, each process's first principles and your sources, and proposes findings for you to accept or dismiss. It never invents numbers: every figure it uses comes from the simulation."
       actions={<SaveStatus state={state} mode={mode} />}
     >
+      <PhoneReadOnly>
       {mode === "readonly" && (
         <p role="note" className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
           Only owners and editors can change these. You can see them here.
@@ -90,6 +92,7 @@ export function AiSettingsPage({ mode, workspaceId, initial, configured }: { mod
           ))}
         </CardContent>
       </Card>
+      </PhoneReadOnly>
     </Page>
   );
 }

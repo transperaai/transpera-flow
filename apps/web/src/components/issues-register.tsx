@@ -34,6 +34,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { AcknowledgeDialog } from "./acknowledge-dialog";
 import { SelectField, TextField, type SelectOption } from "./fields";
 import { HelpLabel } from "./help";
+import { EDIT_ONLY } from "@/lib/phone";
 
 
 /** Plain-English (i) text for the issue fields and filters, with an example (issue #123). */
@@ -233,7 +234,7 @@ export function IssuesRegister({
       )}
 
       {canEdit && view !== "insights" && (
-        <button type="button" className={`${button} self-start`} onClick={() => setDialog({ mode: "new", draft: emptyDraft(processId, stepFilter) })}>
+        <button type="button" className={`${button} self-start ${EDIT_ONLY}`} data-edit-entry onClick={() => setDialog({ mode: "new", draft: emptyDraft(processId, stepFilter) })}>
           + New issue
         </button>
       )}
@@ -382,7 +383,7 @@ function IssueItem({
       {where.length > 0 && <p className="mt-0.5 text-xs text-fg-3">{where.join(" · ")}</p>}
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
         {meta}
-        <span className="ml-auto flex flex-wrap gap-1">
+        <span className={`ml-auto flex flex-wrap gap-1 ${EDIT_ONLY}`} data-edit-entry>
           {issue && canEdit && (
             <>
               <button type="button" className={button} onClick={() => onEdit(issue)}>
