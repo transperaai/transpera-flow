@@ -182,6 +182,15 @@ describe("play links: the six replaced functions are full copies, changing only 
 let db: TestDb;
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows;
 const qa = async (sql: string) => (await db.client.query({ text: sql, rowMode: "array" })).rows[0] as unknown[];
+/** B4's body of a replaced function, as this migration writes it (md5 of the text between the $$ marks, as pg_proc.prosrc holds it). */
+const b4Md5 = (r: Replaced) => md5(bodyOf(statement(migration, r.migrationHeader)));
+/**
+ * Functions a LATER migration replaces again, with that migration's md5 (what a test database built from every migration holds).
+ * 20261228000000_share_money_rule (B3 follow-up, row 72) copies B4's share_snapshot_problem and tightens one line of its money rule.
+ */
+const REPLACED_LATER: Record<string, string> = {
+  share_snapshot_problem: md5(bodyOf(statement(migrations("20261228000000_share_money_rule.sql"), /^create or replace function private\.share_snapshot_problem\(/m))),
+};
 const md5s = async () =>
   Object.fromEntries(
     (await q("select p.proname, md5(p.prosrc) as m from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace) and p.proname = any ($1)", [REPLACED.map((r) => r.name)])).map((r) => [r.proname, r.m]),
@@ -212,7 +221,11 @@ describe("play links: the header's md5s, its rollback and its preflight, run on 
     const post = header.slice(header.indexOf("5. The six replaced functions' md5s"));
     for (const r of REPLACED) {
       expect(real[r.name], r.name).not.toBe(r.md5Before);
-      expect(post).toMatch(new RegExp(`${r.name}\\s+\\| ${real[r.name]!} \\|`));
+      // A function a later migration replaces again holds that one's body here: B4's own is the one in this file.
+      const later = REPLACED_LATER[r.name];
+      if (later) expect(real[r.name], r.name).toBe(later);
+      expect(post).toMatch(new RegExp(`${r.name}\\s+\\| ${b4Md5(r)} \\|`));
+      if (!later) expect(real[r.name], r.name).toBe(b4Md5(r));
     }
   });
 
@@ -392,6 +405,7 @@ describe("play links: the header's md5s, its rollback and its preflight, run on 
     // And the migration applies again, to the same md5s as before the rollback.
     await db.client.query(migration);
     const again = await md5s();
-    expect(again).toEqual(before);
+    // ... except a function a later migration replaces again: it now holds B4's body, not the later one's.
+    expect(again).toEqual({ ...before, ...Object.fromEntries(REPLACED.filter((r) => REPLACED_LATER[r.name]).map((r) => [r.name, b4Md5(r)])) });
   });
 });

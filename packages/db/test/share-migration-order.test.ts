@@ -25,12 +25,14 @@ describe("share links: the leak check's helpers and lists", () => {
   });
 
   it("the database's list of keys that are no text is the app's (B4's migration replaced the function with one more key, hiddenLevers)", () => {
-    // The newest definition of `private.share_snapshot_problem` is the one that counts: B4's (20261221000000) copies B3's and adds a key.
-    const newest = readFileSync(join(__dirname, "..", "supabase/migrations/20261221000000_play_links.sql"), "utf8");
-    const lists = [migrationText, newest].map((text) => {
+    // The newest definition of `private.share_snapshot_problem` is the one that counts: B4's (20261221000000) copies B3's and adds a
+    // key; the money-rule follow-up (20261228000000) copies B4's and keeps its list.
+    const read = (f: string) => readFileSync(join(__dirname, "..", "supabase/migrations", f), "utf8");
+    const lists = [migrationText, read("20261221000000_play_links.sql"), read("20261228000000_share_money_rule.sql")].map((text) => {
       const m = /^  non_text_keys constant text\[\] := array\[([^\]]*)\]/m.exec(text)!;
       return [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
     });
+    expect([...lists[2]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
     expect([...lists[1]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
     // B3's own list is the app's without the one key B4 added.
     expect([...lists[0]!].sort()).toEqual(SHARE_NON_TEXT_KEYS.filter((k) => k !== "hiddenLevers").sort());

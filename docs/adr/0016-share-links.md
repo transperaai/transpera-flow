@@ -69,7 +69,11 @@ snapshot's own viewer, **without** the word-for-word quotes from sources (`facts
   any case, with any white space; a part of a client name alone ("Fenwick") is not.
 - Money in text (Financials off) uses one pattern shared with B20's `propose_finding` check (`packages/db/src/money.ts`),
   plus amounts written in words ("4,100 pounds"); the database checks a conservative equivalent. A bare "4.1k a month" with no
-  symbol, code or unit cannot be told from a count and is left.
+  symbol, code or unit cannot be told from a count and is left. A number joined to a code after it by a hyphen or a slash
+  ("4100-GBP") counts only as a standalone amount (B3 follow-up, 7 Oct, migration `20261228000000`): not the end of a date or a
+  version, and not right after a word such as "iso", "windows" or "page" (`JOIN_WORDS`), so "2026-10-06-CAD", "ISO 4217-GBP",
+  "Windows 10-USD", "v1.2/EUR" and "page 3/GBP" stay as written. With a space between ("2026-10-06 CAD") the rule is unchanged,
+  so a range such as "4,100-4,500 GBP" is still caught.
 - A role-rate change (`roles.<id>.cost_rate`) inside a scenario's patch or a solution's lever changes is dropped with
   Financials off (the visitor's browser would price work at the real rate); both checks refuse one.
 - **Order:** with Financials off the visitor reads detected issues sorted by rating, then key (`sortWithoutMoney`). The editor's

@@ -1,6 +1,10 @@
 import { detectIssues, parsePatchPath, simulate, type DetectedIssue, type FirstPrinciples, type SimulationResult } from "@transpera-flow/engine";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { JOIN_WORDS } from "../src/money";
+import { MONEY_NOT, MONEY_YES } from "./money-cases";
 import {
   SHARE_SNAPSHOT_VERSION,
   larkspurBundle,
@@ -959,6 +963,30 @@ describe("the fifth round: tags, ids, names and money", () => {
     }
     // By design no money: the code is glued to letters or digits inside something longer.
     for (const text of ["ref4100GBP", "CAD3D", "4100GBPx"]) expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+  });
+
+  it("B3 follow-up: a date, a version or a standard's number joined to a code by a hyphen or a slash is no money, and is left as written", () => {
+    for (const { text, joinedBy } of MONEY_NOT) {
+      expect(redactTitle(text), `${text} (${joinedBy})`).toBe(text);
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+    }
+  });
+
+  it("B3 follow-up: every money form is still hidden and still flagged", () => {
+    for (const text of MONEY_YES) {
+      expect(redactTitle(text), text).toContain("[amount hidden]");
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).toContain("money");
+      // With Financials on, nothing is hidden.
+      expect(redactTitle(text, w.secrets, { ...off, financials: true }), text).toBe(text);
+    }
+  });
+
+  it("B3 follow-up: the words that make a number an identifier are the database's (the same list in the migration's money rule)", () => {
+    const sql = readFileSync(join(__dirname, "..", "supabase/migrations/20261228000000_share_money_rule.sql"), "utf8");
+    const body = sql.slice(sql.search(/^create or replace function private\.share_snapshot_problem\(/m));
+    const m = /\(\?<!\(\^\|\[\^a-z\]\)\(([a-z|]+)\)\[\[:space:\]\]\+\)/.exec(body);
+    expect(m, "the joined rule's lookbehind").not.toBeNull();
+    expect(m![1]!.split("|")).toEqual([...JOIN_WORDS]);
   });
 });
 
