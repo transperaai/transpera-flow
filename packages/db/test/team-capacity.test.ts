@@ -123,7 +123,7 @@ describe("team_capacity per-person times (C6)", () => {
       const f = await factorsAs(who);
       expect(f.map(key).sort()).toEqual(all);
       for (const row of f) {
-        expect(Object.keys(row).sort()).toEqual(["factor", "person_id", "source", "step_id", "workspace_id"]);
+        expect(Object.keys(row).sort()).toEqual(["factor", "items", "person_id", "source", "step_id", "workspace_id"]);
         expect(row.source).toBe("entered");
         expect(row.workspace_id).toBe(ws);
         expect(typeof row.factor).toBe("number");

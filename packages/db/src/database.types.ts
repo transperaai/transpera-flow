@@ -388,6 +388,61 @@ export type Database = {
           },
         ]
       }
+      capacity_factor_proposals: {
+        Row: {
+          calibration_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          person_id: string
+          proposal: Json
+          step_id: string
+          workspace_id: string
+        }
+        Insert: {
+          calibration_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          person_id: string
+          proposal: Json
+          step_id: string
+          workspace_id: string
+        }
+        Update: {
+          calibration_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          person_id?: string
+          proposal?: Json
+          step_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capacity_factor_proposals_calibration_id_workspace_id_fkey"
+            columns: ["calibration_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "calibrations"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "capacity_factor_proposals_person_id_workspace_id_fkey"
+            columns: ["person_id", "workspace_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id", "workspace_id"]
+          },
+          {
+            foreignKeyName: "capacity_factor_proposals_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       churn_drivers: {
         Row: {
           created_at: string

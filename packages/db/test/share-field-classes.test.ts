@@ -23,6 +23,7 @@ const TABLES: TableClasses = {
   api_tokens: "unused",
   audit_log: "unused",
   calibrations: "unused",
+  capacity_factor_proposals: "unused",
   churn_drivers: { created_at: "not", created_by: "not", description: "text", driver: "not", example: "text", id: "not", name: "text", updated_at: "not", workspace_id: "not" },
   blocks: "unused",
   client_assignments: { client_id: "not", created_at: "not", person_id: "not", role_id: "not", updated_at: "not", workspace_id: "not" },
