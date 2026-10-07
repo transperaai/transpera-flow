@@ -34,18 +34,29 @@
 -- insert: `stamp_provenance('factor')` keeps a given `provenance.factor` (else stamps `entered` by the caller, now), `needs_review` refuses an
 -- API token (the function refuses tokens first), `audit_company` logs one insert per row, and the two partial unique indexes can't collide
 -- because the planner refuses a repeated (person, step) pair.
+-- The function itself checks, for this section: the id check (step 5) admits only placeholders or null in `person_id` and `step_id`, so no
+-- id of another workspace gets in; `person_id` must then be a person restored into this workspace (the foreign key on (person_id,
+-- workspace_id)); the factor is checked by the table's own constraint, 0.5 to 2, the range `save_capacity_factor` checks (23514 either way).
+-- A placeholder `step_id` that names no restored step is not refused (the table has no foreign key on `step_id`, as for `person_skills`,
+-- whose restore doesn't check it either): the planner drops such a row, and an editor can store such a row directly through the API
+-- anyway; the engine ignores a time on a step that isn't in the model.
+-- Provenance: `provenance.factor` is kept as the backup holds it, which is `source` and `at` only: the export removes every account id
+-- (`by` included; packages/db/src/workspace-bundle.ts `ACCOUNT_KEY`), as for every other restored provenance.
 --
 -- STRICTLY ADDITIVE: one `create or replace` of `public.import_workspace_bundle` with the same signature, settings, refusals and result; one
 -- more section. It doesn't redefine `save_fields` or any other function, trigger or policy.
 --
--- ORDER: after row 70 (20261225000000, #230), row 67 (20261223000000: the table) and row 61 (20261215000000: the body copied). Ledger row 71.
--- Independent of #227 (20261227000000); if #227 is applied first, renumber this file above it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
+-- ORDER: after row 70 (20261225000000, #230, applied), the latest on production; it also needs row 67 (20261223000000: the table) and
+-- row 61 (20261215000000: the body copied), both applied. Ledger row 71. Rows 68 (20261224000000), 69 (20261224500000) and 70 touch
+-- neither this function nor the table's shape. Independent of #227 (20261227000000); if #227 is applied first, renumber this file above
+-- it (HANDOVER "Migration order"). Apply BEFORE deploying the app.
 -- The old function writes only the sections in its `sections` constant and ignores any other key, so the new app's plan against the old
 -- function would restore WITHOUT the per-person times and without saying so.
 --
 -- PREFLIGHT (read-only; `bash packages/db/scripts/prod-sql.sh -c "..."`, one query at a time):
---   0. Rows 61 and 67 are applied, and nothing is at or past this one. Expect both versions, and nothing >= 20261226000000:
---        select version from supabase_migrations.schema_migrations where version in ('20261215000000', '20261223000000') or version >= '20261226000000' order by 1;
+--   0. Rows 61 and 67 are applied, rows 68 to 70 are the latest, and nothing is at or past this one. Expect exactly five rows,
+--      20261215000000, 20261223000000, 20261224000000, 20261224500000, 20261225000000 (so nothing >= 20261226000000):
+--        select version from supabase_migrations.schema_migrations where version in ('20261215000000', '20261223000000') or version >= '20261224000000' order by 1;
 --   1. The function is B21's. Expect 32b64f2ad9be79d0044f640e4a4d2ed2, f, {search_path="",statement_timeout=40s}:
 --        select md5(prosrc), prosecdef, proconfig from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure;
 --   2. The table and its triggers exist. Expect `person_capacity_factors`, then the four names audit_company, needs_review, set_updated_at, stamp_provenance:
@@ -62,7 +73,27 @@
 --         where routine_schema = 'public' and routine_name = 'import_workspace_bundle' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 2;
 --   3. The row. Expect 1:
 --        select count(*) from supabase_migrations.schema_migrations where version = '20261226000000';
---   4. Live check (Austin, on a preview): export a workspace with per-person times switched on and a few times set, restore it into a new
+--   4. Smoke test, ROLLED BACK: one `do` block (one `prod-sql.sh -c` call) that, as an agency admin, creates a workspace, restores a
+--      one-person plan with an "Every step" time of 0.8 into it, reads the stored row, and then raises an error so that everything it
+--      did is rolled back. Put a real agency admin's user id in the claims (`select id from auth.users where (raw_app_meta_data ->>
+--      'agency_admin')::boolean;`). Expect exactly this ERROR (any other error is a failure), then 0 from the check after it:
+--        SMOKE TEST ROLLED BACK: restored 1, factor 0.8, step every step, source entered
+--        do $smoke$
+--        declare
+--          ws uuid;
+--          r jsonb;
+--          f record;
+--        begin
+--          perform set_config('role', 'authenticated', true);
+--          perform set_config('request.jwt.claims', '{"sub":"<agency admin user id>","role":"authenticated","app_metadata":{"agency_admin":true}}', true);
+--          ws := public.create_workspace('Smoke test 228', 'smoke-test-228-' || substr(md5(clock_timestamp()::text), 1, 8));
+--          r := public.import_workspace_bundle(ws, '{"format":"transpera-workspace-import/1","roles":[],"people":[{"id":"00000000-0000-4000-8000-000000000001","name":"Smoke person"}],"person_roles":[],"person_leave":[],"lead_sources":[],"seasonality":[],"churn_drivers":[],"market_conditions":[],"market_schedule":[],"clients":[],"sources":[],"processes":[],"scenarios":[],"blocks":[],"issues":[],"services":[],"service_servicing":[],"client_groups":[],"client_services":[],"client_assignments":[],"person_skills":[],"person_capacity_factors":[{"person_id":"00000000-0000-4000-8000-000000000001","step_id":null,"factor":0.8,"provenance":{"factor":{"source":"entered","at":"2026-10-01T00:00:00Z"}}}],"source_links":[],"suggestions":[],"proposals":[]}'::jsonb, 'smoke test');
+--          select c.factor, c.step_id, c.provenance -> 'factor' ->> 'source' as source into f from public.person_capacity_factors c where c.workspace_id = ws;
+--          raise exception 'SMOKE TEST ROLLED BACK: restored %, factor %, step %, source %', r -> 'counts' ->> 'person_capacity_factors', f.factor, coalesce(f.step_id::text, 'every step'), f.source;
+--        end
+--        $smoke$;
+--        select count(*) from public.workspaces where name = 'Smoke test 228';
+--   5. Live check (Austin, on a preview): export a workspace with per-person times switched on and a few times set, restore it into a new
 --      workspace, publish, and see the same times in Settings -> People. (An editor's restore brings the times, but the switch arrives as a
 --      pending settings suggestion for an owner, as for every setting.)
 --

@@ -567,6 +567,38 @@ describe("the function and the migration", () => {
     expect(String((await q(`select md5(prosrc) as md5 from pg_proc where oid = '${FN}'::regprocedure`))[0]!.md5)).toBe(live);
   }, 120_000);
 
+  it("has a post-apply smoke test (one do block, as an agency admin) that restores a time and then rolls everything back", async () => {
+    const sql = sqlOf(FILE);
+    const head = sql.slice(0, sql.indexOf("-- ROLLBACK ("));
+    const expected = "SMOKE TEST ROLLED BACK: restored 1, factor 0.8, step every step, source entered";
+    expect(head).toContain(`--        ${expected}\n`);
+    // The block exactly as the header prints it, with the user id put in, as the operator would run it (outside any transaction).
+    const lines = head.split("\n");
+    const from = lines.indexOf("--        do $smoke$");
+    const to = lines.indexOf("--        $smoke$;");
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const block = lines.slice(from, to + 1).map((l) => l.slice("--        ".length)).join("\n");
+    expect(block).toContain("<agency admin user id>");
+    const workspaces = async () => Number((await q("select count(*) from public.workspaces"))[0]!.count);
+    const before = await workspaces();
+    const e = await failure(() => db.client.query(block.replace("<agency admin user id>", admin.id)));
+    expect([e.code, e.message]).toEqual(["P0001", expected]);
+    expect(await workspaces()).toBe(before);
+    expect(await q("select count(*)::int as n from public.workspaces where name = 'Smoke test 228'")).toEqual([{ n: 0 }]);
+    // Someone who isn't an agency admin can't even start it (create_workspace refuses), so it can't pass by accident.
+    const outsider = await createUser(db, `u${++seq}.outsider@import-factors.example.com`);
+    const refused = await failure(() => db.client.query(block.replace("<agency admin user id>", outsider.id).replace('"agency_admin":true', '"agency_admin":false')));
+    expect(refused.code).toBe("42501");
+  }, 120_000);
+
+  it("says in its header where it goes (after row 70, applied) and what preflight 0 expects", () => {
+    const sql = sqlOf(FILE);
+    expect(sql).toContain("-- ORDER: after row 70 (20261225000000, #230, applied)");
+    expect(sql).toContain("select version from supabase_migrations.schema_migrations where version in ('20261215000000', '20261223000000') or version >= '20261224000000' order by 1;");
+    expect(sql).toContain("20261215000000, 20261223000000, 20261224000000, 20261224500000, 20261225000000 (so nothing >= 20261226000000)");
+  });
+
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const dir = new URL("../", import.meta.url);
     const mig = readFileSync(new URL(`supabase/migrations/${FILE}`, dir), "utf8").trimEnd();
