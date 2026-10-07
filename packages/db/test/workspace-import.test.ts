@@ -800,6 +800,7 @@ describe("limits", () => {
     ["proposals", (p: ImportPlan) => { p.proposals = rows(L.proposals + 1); }],
     ["role assignments", (p: ImportPlan) => { p.person_roles = rows(L.personRoles + 1); }],
     ["skills", (p: ImportPlan) => { p.person_skills = rows(L.personSkills + 1); }],
+    ["per-person times", (p: ImportPlan) => { p.person_capacity_factors = rows(L.capacityFactors + 1); }],
     ["client assignments", (p: ImportPlan) => { p.client_assignments = rows(L.clientAssignments + 1); }],
     ["source links", (p: ImportPlan) => { p.source_links = rows(L.sourceLinks + 1); }],
     ["client services", (p: ImportPlan) => { p.client_services = rows(L.clientServices + 1); }],

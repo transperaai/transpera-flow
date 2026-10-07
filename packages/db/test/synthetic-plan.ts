@@ -94,6 +94,14 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
   const person_roles = people.flatMap((p) => roles.map((r) => ({ person_id: p.id, role_id: r.id, created_at: when }))).slice(0, L.personRoles);
   const allSteps = processes.flatMap((p) => p.steps.map((st) => st.id));
   const person_skills = people.flatMap((p, i) => Array.from({ length: 10 }, (_, k) => ({ person_id: p.id, step_id: allSteps[(i * 10 + k) % allSteps.length], efficiency: 1, created_at: when }))).slice(0, L.personSkills);
+  // Per-person times (#228), exactly at the limit: one "Every step" a person (round 0), then one time on a step a person (round 1, 2, ...), each round on
+  // a different step for the same person, so no (person, step) pair repeats. Whole rounds first, so the people with the most times have the same count +/- 1.
+  const person_capacity_factors: Row[] = [];
+  for (let round = 0; person_capacity_factors.length < L.capacityFactors && round <= allSteps.length; round++) {
+    for (let i = 0; i < people.length && person_capacity_factors.length < L.capacityFactors; i++) {
+      person_capacity_factors.push({ person_id: people[i]!.id, step_id: round === 0 ? null : allSteps[(i + round - 1) % allSteps.length], factor: round === 0 ? 0.9 : Number((0.8 + ((i + round) % 10) / 20).toFixed(2)), provenance: {} });
+    }
+  }
   const client_assignments = clients.map((c, i) => ({ client_id: c.id, role_id: role, person_id: people[i % people.length]!.id, created_at: when })).slice(0, L.clientAssignments);
   // Source links of every kind: one `issue` link per issue (its one source, which `link_issue_source` makes anyway, so the row is
   // counted once), then `process` and `step` links in equal parts for the rest.
@@ -152,6 +160,6 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     settings: { hours_per_week: 38, currency: "GBP" },
     roles, people, person_roles, person_leave, lead_sources, seasonality, demand_settings: { growth_monthly: 0.01, created_at: when }, churn_drivers,
     market_conditions, market_schedule, lever_settings: { hidden: [], created_at: when }, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, scenarios, blocks, issues, services,
-    service_servicing, client_groups, client_services, client_assignments, person_skills, source_links, suggestions, proposals,
+    service_servicing, client_groups, client_services, client_assignments, person_skills, person_capacity_factors, source_links, suggestions, proposals,
   };
 }

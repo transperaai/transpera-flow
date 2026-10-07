@@ -203,6 +203,8 @@ const L = WORKSPACE_IMPORT_LIMITS;
 const sqlOf = (name: string) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
 const OLD_MIGRATION = "20261207000000_import_workspace_bundle.sql";
 const NEW_MIGRATION = "20261215000000_bigger_restores.sql";
+/** The latest migration that defines `import_workspace_bundle` (#228 replaced B21's body, which NEW_MIGRATION still holds). */
+const LATEST_MIGRATION = "20261226000000_restore_capacity_factors.sql";
 const OLD_MD5 = "968cbd0034a0bb1479b8ee0c9eaf7962";
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */
@@ -290,6 +292,7 @@ describe("every limit at once", () => {
       ["suggestion_proposals", L.proposals],
       ["person_roles", L.personRoles],
       ["person_skills", L.personSkills],
+      ["person_capacity_factors", L.capacityFactors],
       ["person_leave", L.personLeave],
       ["client_services", L.clientServices],
       ["client_assignments", L.clientAssignments],
@@ -339,7 +342,7 @@ describe("a workspace at the limits exports without the warning and checks clean
     // Equal where the synthetic plan can land exactly. Every list below comes back as it went in; the library scenarios the new workspace
     // has already are in its export (so the plan leaves four out: `forExport`), and the `issue` source links the database made from the
     // issue sources are the ones the plan already holds.
-    for (const key of ["processes", "steps", "edges", "issues", "people", "clients", "scenarios", "blocks", "suggestions", "proposals", "personRoles", "personSkills", "clientAssignments", "sourceLinks", "clientServices", "personLeave", "companyOther", "sources"] as const) {
+    for (const key of ["processes", "steps", "edges", "issues", "people", "clients", "scenarios", "blocks", "suggestions", "proposals", "personRoles", "personSkills", "capacityFactors", "clientAssignments", "sourceLinks", "clientServices", "personLeave", "companyOther", "sources"] as const) {
       expect(m[key], key).toBe(L[key]);
     }
     for (const key of Object.keys(m) as (keyof typeof m)[]) expect(m[key], key).toBeLessThanOrEqual(L[key]);
@@ -367,7 +370,7 @@ describe("the new caps", () => {
     const before = await snapshot(ws);
     const e = await failure(() => restoreAs(admin, ws, copy));
     expect(e.code, label).toBe("22023");
-    expect(e.message).toMatch(/^import_workspace_bundle: the plan is over a limit \(.*3000 client services, 1500 leave entries, 1500 other company settings rows\)$/);
+    expect(e.message).toMatch(/^import_workspace_bundle: the plan is over a limit \(.*3000 client services, 1500 leave entries, 1500 other company settings rows, 3000 per-person times\)$/);
     expect(await snapshot(ws)).toEqual(before);
   });
 });
@@ -501,10 +504,10 @@ describe("the function and the migration", () => {
       "select grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name = 'import_workspace_bundle' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1",
     );
     expect(grants).toEqual([{ grantee: "authenticated", privilege_type: "EXECUTE" }]);
-    // The new body is what the migration file says (and the md5 in its post-apply check).
+    // The live body is what the latest migration file says (and the md5 in its post-apply check).
     const live = String((await q("select md5(prosrc) as md5 from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure"))[0]!.md5);
-    expect(live).toBe(md5(bodyOf(sqlOf(NEW_MIGRATION))));
-    expect(sqlOf(NEW_MIGRATION)).toContain(`${live}:`);
+    expect(live).toBe(md5(bodyOf(sqlOf(LATEST_MIGRATION))));
+    expect(sqlOf(LATEST_MIGRATION)).toContain(`${live}:`);
   });
 
   it("has the index on audit_log (target_id)", async () => {
