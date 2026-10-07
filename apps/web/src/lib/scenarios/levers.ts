@@ -45,12 +45,7 @@ const FACTOR = { min: 0.1, max: 2, step: 0.05 } as const;
 
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 
-/**
- * `capped` (a play link, B4): slider maxima stop at the caps the database enforces on what a visitor may send, so a visitor is never refused.
- * Everywhere else (the Editor, the process page) they are as they were.
- */
-export function buildLevers(model: EngineModel, viewer?: Viewer, capped = false): Lever[] {
-  const cap = (v: number, c: number) => (capped ? Math.min(c, v) : v);
+export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const levers: Lever[] = [];
   const add = (l: Lever) => levers.push(l);
 
@@ -64,7 +59,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer, capped = false)
     base: model.leadsPerWeek,
     unit: "per_week",
     min: 0,
-    max: cap(Math.max(20, ceilTo(model.leadsPerWeek * 3, 5)), PLAY_CAPS.leads),
+    max: Math.min(PLAY_CAPS.leads, Math.max(20, ceilTo(model.leadsPerWeek * 3, 5))),
     step: 0.5,
   });
   add({
@@ -76,7 +71,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer, capped = false)
     base: model.activeClients,
     unit: "clients",
     min: 0,
-    max: cap(Math.max(20, ceilTo(model.activeClients * 2, 10)), PLAY_CAPS.clients),
+    max: Math.min(PLAY_CAPS.clients, Math.max(20, ceilTo(model.activeClients * 2, 10))),
     step: 1,
   });
   add({
@@ -95,7 +90,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer, capped = false)
   // People: head-count per role, FTE per named person.
   for (const [id, role] of Object.entries(model.roles)) {
     const count = headcount(model, id);
-    add({ path: `roles.${id}.headcount`, group: "people", section: "Roles", label: role.name, op: "set", base: count, unit: "people", min: 0, max: cap(count + 5, PLAY_CAPS.headcount), step: 1 });
+    add({ path: `roles.${id}.headcount`, group: "people", section: "Roles", label: role.name, op: "set", base: count, unit: "people", min: 0, max: Math.min(PLAY_CAPS.headcount, count + 5), step: 1 });
   }
   // A member or viewer gets a lever for their own person only (B1 2b).
   const seen = viewerOf({ viewer });
@@ -131,10 +126,10 @@ export function buildLevers(model: EngineModel, viewer?: Viewer, capped = false)
   const services = Object.entries(model.services ?? {});
   if (services.length) {
     for (const [id, svc] of services) {
-      add({ path: `services.${id}.price`, group: "finances", section: "Prices", label: svc.name, op: "set", base: svc.price, unit: "money", min: 0, max: cap(Math.max(1000, ceilTo(svc.price * 3, 100)), PLAY_CAPS.price), step: 50 });
+      add({ path: `services.${id}.price`, group: "finances", section: "Prices", label: svc.name, op: "set", base: svc.price, unit: "money", min: 0, max: Math.min(PLAY_CAPS.price, Math.max(1000, ceilTo(svc.price * 3, 100))), step: 50 });
     }
   } else {
-    add({ path: "finances.retainer", group: "finances", section: "Prices", label: "Monthly retainer", op: "set", base: model.retainer, unit: "money", min: 0, max: cap(Math.max(1000, ceilTo(model.retainer * 3, 100)), PLAY_CAPS.price), step: 50 });
+    add({ path: "finances.retainer", group: "finances", section: "Prices", label: "Monthly retainer", op: "set", base: model.retainer, unit: "money", min: 0, max: Math.min(PLAY_CAPS.price, Math.max(1000, ceilTo(model.retainer * 3, 100))), step: 50 });
   }
   return levers;
 }

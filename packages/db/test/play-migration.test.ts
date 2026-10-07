@@ -36,11 +36,11 @@ describe("play links: row 66 of the production ledger", () => {
     expect(apply).toContain("row 65 (20261220500000, the workspace-delete fix)");
   });
 
-  it("the ledger has row 66 for this version, marked NOT applied, and no other row uses 66 or this version", () => {
+  it("the ledger has row 66 for this version (its status column changes once applied), and no other row uses 66 or this version", () => {
     expect(ledger).toMatch(new RegExp(`\\| 66 \\| ${VERSION} \\| play_links \\| `));
     expect(ledger.match(/^\| 66 \|/gm)).toHaveLength(1);
     expect(ledger.split(VERSION).length - 1).toBeGreaterThanOrEqual(1);
-    expect(ledger).toMatch(new RegExp(`\\| 66 \\| ${VERSION} \\| play_links \\| NOT applied \\| B4`));
+    expect(ledger).toMatch(new RegExp(`\\| 66 \\| ${VERSION} \\| play_links \\| [^|]+ \\| B4`));
   });
 });
 
