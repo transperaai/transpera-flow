@@ -28,6 +28,7 @@ export default function DemoCalibrationPage() {
       description="Demo mode: import the sample files, check them against Northbeam's model and see what they would change. Nothing is saved."
     >
       <CalibrationPanel
+        personTimes={{ state: "hidden" }}
         mode="demo"
         workspaceId={null}
         base={null}

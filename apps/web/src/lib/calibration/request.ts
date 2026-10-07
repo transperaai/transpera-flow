@@ -43,7 +43,8 @@ export const MAX_RESULTS_BYTES = 900_000;
 export function storedResults(results: Record<string, unknown>): Record<string, unknown> {
   const count = (v: unknown) => (Array.isArray(v) ? v.length : typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
   // Per-person data never goes into `results`, which every member of the workspace reads (#227): it travels apart, rebuilt.
-  const { unmatchedSteps, unmatchedSources, capacity_factors: _a, capacityFactors: _b, personTimes: _c, ...rest } = results;
+  const { unmatchedSteps, unmatchedSources, ...rest } = results;
+  for (const key of ["capacity_factors", "capacityFactors", "personTimes"]) delete rest[key];
   return { ...rest, unmatchedSteps: count(unmatchedSteps), unmatchedSources: count(unmatchedSources) };
 }
 

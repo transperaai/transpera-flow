@@ -45,6 +45,7 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
         hasDraft={data.hasDraft}
         stored={data.stored}
         history={data.history}
+        personTimes={data.personTimes}
         previous={imports.previous}
       />
       {clientData && (

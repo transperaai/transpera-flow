@@ -13,6 +13,7 @@ import { ClientCalibrationPanel } from "@/components/calibration/client-calibrat
 import { OtherImportsPanel } from "@/components/calibration/other-imports-panel";
 import { importSamples } from "@/lib/calibration/import-samples";
 import { calibrationRows } from "@/lib/calibration/rows";
+import { personTimesSetup } from "@/lib/calibration/person-times";
 import { clientCalibrationRows, simulationPlan } from "@/lib/calibration/client-rows";
 import { SAMPLE_AS_OF } from "@/lib/calibration/client-sample";
 import { demoBundle } from "@/lib/sources/demo";
@@ -22,7 +23,13 @@ declare global {
     importWorkerScripts: Record<string, string>;
     /** Each message posted to a worker, in order: its file, and the `op` of the message. */
     importWorkerPosts: { file: string; op: string | null }[];
-    mountImport: (options?: { mode?: "live" | "readonly" | "demo"; previous?: Partial<Record<ImportKind, Record<string, string>>>; samples?: boolean }) => void;
+    /** `personTimes` (#227): hidden (a member), off (an owner or editor with the switch off) or on; Northbeam's people. Default hidden. */
+    mountImport: (options?: {
+      mode?: "live" | "readonly" | "demo";
+      previous?: Partial<Record<ImportKind, Record<string, string>>>;
+      samples?: boolean;
+      personTimes?: "hidden" | "off" | "on";
+    }) => void;
   }
 }
 
@@ -50,6 +57,10 @@ const runs = simulationPlan(rows, bundle.process.id).map((item) => ({ processId:
 const stored = calibrationRows(bundle, null);
 const leadSources = stored.leadSources.map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }));
 
+const withSwitch = (on: boolean) => ({ ...bundle, workspace: { ...bundle.workspace, settings: { ...bundle.workspace.settings, capacity_factor_enabled: on } } });
+const personTimesFor = (state: "hidden" | "off" | "on") =>
+  state === "hidden" ? ({ state: "hidden" } as const) : personTimesSetup(withSwitch(state === "on"), stored.steps);
+
 window.mountImport = (options = {}) => {
   const mode = options.mode ?? "live";
   const previous = options.previous ?? {};
@@ -65,6 +76,7 @@ window.mountImport = (options = {}) => {
         hasDraft={false}
         stored={stored}
         history={[]}
+        personTimes={personTimesFor(options.personTimes ?? "hidden")}
         previous={previous}
         sample={samples}
       />

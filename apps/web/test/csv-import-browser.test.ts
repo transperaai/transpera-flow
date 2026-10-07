@@ -421,3 +421,108 @@ describe("the import wizard", () => {
     await page.close();
   }, 120_000);
 });
+
+// Per-person times (issue #227): a time log that names people, matched to Northbeam's people by an owner or editor with Per-person
+// times on. Sales' Qualify lead is done by Priya Shah and Tom Reed; in the file Priya is "PRIYA SHAH" (matched for you) and Tom is
+// "T. Reed" (matched by hand).
+const peopleLog = () =>
+  [
+    "Job,Task,Date,Hours,Person",
+    ...Array.from({ length: 24 }, (_, i) => `J-${i},Qualify lead,2026-04-${String((i % 27) + 1).padStart(2, "0")},${i % 2 ? 3 : 2},${i % 2 ? "T. Reed" : "PRIYA SHAH"}`),
+  ].join("\n");
+
+describe("per-person times", () => {
+  const serverActions = (page: Page) => page.evaluate(() => (globalThis as unknown as { __serverActions?: { name: string; args: unknown[] }[] }).__serverActions ?? []);
+
+  it("an editor with the switch on matches the people, sees one closed group per person, and applies the times", async () => {
+    const { page, errors } = await mount({ personTimes: "on" });
+    await choose(page, "cal-log", "Time logs", csv(peopleLog()));
+    await readIt(page, "cal-log");
+    const rows = step(page, "cal-log", "rows");
+    const people = rows.locator("[data-import-people]");
+    expect(await people.innerText()).toContain("Match the people");
+    const select = (value: string) => people.getByLabel(new RegExp(`^${value.replace(".", "\\.")} \\(`));
+    expect(await picked(select("PRIYA SHAH"))).toBe("Priya Shah");
+    expect(await picked(select("T. Reed"))).toBe("Leave out");
+    await select("T. Reed").selectOption({ label: "Tom Reed" });
+    await rows.getByRole("button", { name: "Use these rows", exact: true }).click();
+
+    const section = page.locator("[data-person-times]");
+    await section.waitFor({ timeout: 60_000 });
+    const groups = section.locator("[data-person-time-group]");
+    expect(await groups.count()).toBe(2);
+    // Closed by default, in the roster's order.
+    expect(await section.locator("details[open]").count()).toBe(0);
+    const summaries = await groups.locator("summary").allInnerTexts();
+    expect(summaries).toEqual(["Priya Shah: 1 step measured", "Tom Reed: 1 step measured"]);
+    await groups.first().locator("summary").click();
+    const first = await groups.first().innerText();
+    expect(first).toContain("Measured: 0.8 × normal (20% faster)");
+    expect(first).toContain("12 visits");
+    // No sort control and no table of people.
+    expect(await section.locator("table, select, [role=columnheader]").count()).toBe(0);
+
+    await page.getByRole("button", { name: /^Apply \d+ ticked/ }).click();
+    await page.waitForFunction(() => ((globalThis as unknown as { __serverActions?: unknown[] }).__serverActions ?? []).length > 0);
+    const calls = await serverActions(page);
+    const req = calls.find((c) => c.name === "applyCalibration")!.args[0] as { capacityFactors: { key: string; personId: string; set: { factor: number } }[]; keys: string[]; results: unknown };
+    expect(req.capacityFactors.map((f) => f.set.factor)).toEqual([0.8, 1.2]);
+    const factorKeys = req.capacityFactors.map((f) => f.key);
+    for (const k of factorKeys) expect(req.keys).toContain(k);
+    // Nothing per-person, and none of the file's names, in what is stored as the calibration's results or its details.
+    const stored = JSON.stringify({ results: req.results, details: (calls[0]!.args[0] as { details: unknown }).details });
+    for (const f of req.capacityFactors) expect(stored).not.toContain(f.personId);
+    expect(stored).not.toMatch(/PRIYA|Reed|Priya|Tom/);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+
+  it("with the switch off, says so and shows no matching and no section", async () => {
+    const { page, errors } = await mount({ personTimes: "off" });
+    await choose(page, "cal-log", "Time logs", csv(peopleLog()));
+    await readIt(page, "cal-log");
+    const rows = step(page, "cal-log", "rows");
+    expect(await rows.locator("[data-import-people]").count()).toBe(0);
+    await rows.getByRole("button", { name: "Use these rows", exact: true }).click();
+    const note = page.locator("[data-person-times-off]");
+    await note.waitFor({ timeout: 60_000 });
+    expect(await note.innerText()).toContain("Switch Per-person times on in Settings → Simulation");
+    expect(await note.locator("a").getAttribute("href")).toBe("/w/harness/settings#simulation");
+    expect(await page.locator("[data-person-times]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+
+  it("a member sees nothing per-person: no matching, no section, none of the file's names, no times", async () => {
+    const { page, errors } = await mount({ mode: "readonly", personTimes: "hidden" });
+    await choose(page, "cal-log", "Time logs", csv(peopleLog()));
+    await readIt(page, "cal-log");
+    const rows = step(page, "cal-log", "rows");
+    expect(await rows.locator("[data-import-people]").count()).toBe(0);
+    await rows.getByRole("button", { name: "Use these rows", exact: true }).click();
+    await page.locator("#cal-diff-heading").waitFor({ timeout: 60_000 });
+    expect(await page.locator("[data-person-times], [data-person-times-off]").count()).toBe(0);
+    const body = await text(page);
+    for (const needle of ["PRIYA SHAH", "T. Reed", "Priya", "Tom Reed", "× normal"]) expect(body, needle).not.toContain(needle);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+
+  it("fits a 400 px screen with a person open", async () => {
+    const { page, errors } = await mount({ personTimes: "on" });
+    await page.setViewportSize({ width: 400, height: 1600 });
+    await choose(page, "cal-log", "Time logs", csv(peopleLog()));
+    await readIt(page, "cal-log");
+    const rows = step(page, "cal-log", "rows");
+    await rows.locator("[data-import-people]").getByLabel(/^T\. Reed \(/).selectOption({ label: "Tom Reed" });
+    await rows.getByRole("button", { name: "Use these rows", exact: true }).click();
+    const section = page.locator("[data-person-times]");
+    await section.waitFor({ timeout: 60_000 });
+    await section.locator("[data-person-time-group] summary").first().click();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 120_000);
+});
+

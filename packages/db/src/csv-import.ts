@@ -1003,7 +1003,7 @@ export function readImport(
  * The distinct people the file names (a step log's `person`, a time log's entries'), most rows first then by value, at most 500.
  * For matching to people (#227); the values are never stored.
  */
-export function personValues(read: ImportRead): { value: string; rows: number }[] {
+export function personValues(read: ImportRead, limit = MAX_IMPORT_NAMES): { value: string; rows: number }[] {
   let values: (string | null | undefined)[];
   if (read.kind === "time_logs" && read.entries) values = read.entries.map((e) => e.person);
   else if (read.kind === "step_log") values = (read.rows as StepLogRow[]).map((r) => r.person);
@@ -1013,7 +1013,7 @@ export function personValues(read: ImportRead): { value: string; rows: number }[
   return [...counts]
     .map(([value, n]) => ({ value, rows: n }))
     .sort((a, b) => b.rows - a.rows || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0))
-    .slice(0, MAX_IMPORT_NAMES);
+    .slice(0, limit);
 }
 
 /**
