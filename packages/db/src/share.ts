@@ -220,6 +220,8 @@ export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
  * typed. A key name is shared by every shape that uses it, so a reason has to hold for all of them; `share-field-classes.test.ts`
  * classifies the JSON shapes a snapshot carries and fails when one key is text in one shape and not text in another. Keys that
  * appear in no shape a snapshot carries say so ("not in a snapshot"): they are listed so a future loader fails safe on the id.
+ * A key belongs here only when its value can't be words: an id, a date, or an enum or format the database enforces. `color` (roles)
+ * and `plan` (workspaces) are not here: the database checks neither, so a name typed into one is looked for like any free text.
  */
 export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   agreed_by: "first principles `deletes[].agreed_by`: a person id, saved from a person picker (the MCP tool resolves a name to an id or drops it)",
@@ -233,7 +235,6 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   by: "provenance `by` (and `resolved.by`): a user id, set by the app or a trigger; provenance is emptied in every snapshot anyway",
   child_process_id: "steps.child_process_id: a uuid",
   client_id: "issues, client_assignments, client_services: a uuid",
-  color: "roles.color: a hex colour such as #2a78d6",
   comparator: "first principles `measures[].comparator`: the enum atLeast or atMost",
   condition_id: "market_schedule.condition_id: a uuid",
   created_at: "every table: a timestamp",
@@ -277,7 +278,6 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   parent_step_id: "steps.parent_step_id: a uuid",
   path: "scenarios `patch[].path` and solutions `lever_changes[].path`: a selector the engine reads (steps.<id>.work_hours)",
   person_id: "issues, steps, person_* tables, client_assignments: a person id",
-  plan: "workspaces.plan: an enum",
   preset: "market_conditions.preset: an enum",
   pricing_model: "services.pricing_model: an enum",
   process_id: "every per-process table and issues `links[]`: a uuid",

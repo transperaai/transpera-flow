@@ -58,7 +58,7 @@ const TABLES: TableClasses = {
   processes: { archived_at: "not", archived_by: "not", created_at: "not", created_by: "not", description: "text", draft_revision_id: "not", entity_name: "text", id: "not", kind: "not", live_revision_id: "not", name: "text", parent_process_id: "not", source: "text", updated_at: "not", workspace_id: "not" },
   reports: "unused",
   robustness_results: "unused",
-  roles: { color: "not", created_at: "not", created_by: "not", id: "not", name: "text", updated_at: "not", workspace_id: "not" },
+  roles: { color: "text", created_at: "not", created_by: "not", id: "not", name: "text", updated_at: "not", workspace_id: "not" },
   runs: "unused",
   scenarios: { created_at: "not", created_by: "not", description: "text", id: "not", name: "text", parent_scenario_id: "not", updated_at: "not", workspace_id: "not" },
   seasonality: { created_at: "not", created_by: "not", id: "not", updated_at: "not", workspace_id: "not" },
@@ -76,7 +76,7 @@ const TABLES: TableClasses = {
   workspace_domains: "unused",
   workspace_headlines: "unused",
   user_tours: "unused",
-  workspaces: { created_at: "not", created_by: "not", id: "not", name: "text", plan: "not", slug: "not", updated_at: "not" },
+  workspaces: { created_at: "not", created_by: "not", id: "not", name: "text", plan: "text", slug: "not", updated_at: "not" },
 };
 
 const FP = {

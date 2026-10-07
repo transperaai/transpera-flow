@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "./harness";
 import { headerRollback } from "./header-rollback";
-import { MONEY_NOT, MONEY_YES } from "./money-cases";
+import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES } from "./money-cases";
 
 // The money-rule follow-up to B3 (#32), migration 20261228000000 (row 72): its place in the apply order, that the function it
 // replaces is a full copy of B4's body changing only the `-- share_money_rule` lines, that the header's md5s are the real ones, that
@@ -21,7 +21,7 @@ const ledger = readFileSync(join(root, "../../docs/production-migrations.md"), "
 const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.slice(0, 14)).sort();
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 const MD5_BEFORE = "76ac6261c43393b9fb36615d727af8fc";
-const MARK = "-- share_money_rule";
+const MARK = "-- B3 follow-up";
 
 function statement(text: string, header: RegExp): string {
   const m = header.exec(text);
@@ -77,13 +77,20 @@ describe("share money rule: share_snapshot_problem is a full copy of B4's, chang
     expect(migration).not.toMatch(/^(?:grant|revoke|alter|drop|insert|update|delete) /im);
   });
 
-  it("has B4's body once its marked lines are taken out and the one line they replace is taken out of B4's", () => {
-    const removed = "      || '|(^|[^a-z0-9])[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?[[:space:]/-]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'\n";
-    const expected = bodyOf(src);
-    expect(expected.split(removed)).toHaveLength(2);
-    const kept = bodyOf(mig).split("\n").filter((l) => !l.trimEnd().endsWith(MARK)).join("\n");
-    expect(kept).toBe(expected.replace(removed, ""));
-    expect(bodyOf(mig).split("\n").filter((l) => l.trimEnd().endsWith(MARK)).length).toBeGreaterThan(1);
+  it("has B4's body once its marked lines are taken out and the three lines they replace are taken out of B4's", () => {
+    const removed = [
+      "    'base_revision_id', 'by', 'child_process_id', 'client_id', 'color', 'comparator', 'condition_id', 'created_at',\n",
+      "    'person_id', 'plan', 'preset', 'pricing_model', 'process_id', 'proposed_via', 'published_at', 'published_by',\n",
+      "      || '|(^|[^a-z0-9])[0-9][0-9.,]*(e[+-]?[0-9]+)?([[:space:]]*(k|m|bn))?[[:space:]/-]*(gbp|usd|eur|aud|nzd|cad)([^a-z0-9]|$)'\n",
+    ];
+    let expected = bodyOf(src);
+    for (const line of removed) {
+      expect(expected.split(line), line).toHaveLength(2);
+      expected = expected.replace(line, "");
+    }
+    const kept = bodyOf(mig).split("\n").filter((l) => !l.includes(MARK)).join("\n");
+    expect(kept).toBe(expected);
+    expect(bodyOf(mig).split("\n").filter((l) => l.includes(MARK)).length).toBeGreaterThan(3);
   });
 
   it("B4's body is the one production holds (preflight 1's md5), and post-apply 1 names the new body's md5", () => {
@@ -127,19 +134,60 @@ describe("share money rule: the header's checks and rollback, run on a test data
     expect(await qa(c2!)).toEqual([[false, false]]);
   });
 
-  it("post-apply 3, the smoke test: the five texts that were hidden pass, and a hyphenated amount is refused", async () => {
+  it("post-apply 3, the smoke test: the five texts that were hidden pass, and a negative amount and a hyphenated range are refused", async () => {
     const [ok, refused] = queries("-- POST-APPLY CHECK:", 3);
     expect(await qa(ok!)).toEqual([[null]]);
     expect(await qa(refused!)).toEqual([["The snapshot contains costs or margins."]]);
   });
 
-  it("the function itself: the shared lists, with Financials off and on", async () => {
+  it("preflight 3 reads 0, 0 on the seed (role colours are hex, plans a word)", async () => {
+    const [p3] = queries("-- PREFLIGHT", 3);
+    expect((await qa(p3!))[0]!.map(Number)).toEqual([0, 0]);
+  });
+
+  const check = async (fn: string, note: string, financials: boolean) => {
     const ws = (await q("select id from workspaces where slug = 'northbeam'"))[0]!.id as string;
-    const check = async (note: string, financials: boolean) =>
-      (await q("select private.share_snapshot_problem($1, 'overview', $2::jsonb, false, $3) as p", [ws, JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials }, note }), financials]))[0]!.p;
-    for (const { text } of MONEY_NOT) expect(await check(text, false), text).toBeNull();
-    for (const text of MONEY_YES) expect(await check(text, false), text).toBe("The snapshot contains costs or margins.");
-    for (const text of MONEY_YES) expect(await check(text, true), text).toBeNull();
+    return (await q(`select ${fn}($1, 'overview', $2::jsonb, false, $3) as p`, [ws, JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials }, note }), financials]))[0]!.p as string | null;
+  };
+
+  it("the function itself: the shared lists, with Financials off and on", async () => {
+    const fn = "private.share_snapshot_problem";
+    for (const { text } of MONEY_NOT) expect(await check(fn, text, false), text).toBeNull();
+    for (const { text } of MONEY_NOT_VARIANTS) expect(await check(fn, text, false), text).toBeNull();
+    for (const text of MONEY_YES) expect(await check(fn, text, false), text).toBe("The snapshot contains costs or margins.");
+    for (const text of MONEY_YES) expect(await check(fn, text, true), text).toBeNull();
+  });
+
+  it("every case through main's old rule (B4's body) and the new one: what the old refused, the new refuses, except the listed exemptions; the new refuses nothing the old didn't", async () => {
+    // B4's function, as main has it, under another name beside the new one.
+    await q(src.replace("create or replace function private.share_snapshot_problem(", "create or replace function private.share_snapshot_problem_main("));
+    try {
+      const exempt = new Set([...MONEY_NOT.map((c) => c.text), ...MONEY_NOT_VARIANTS.map((c) => c.text)]);
+      const lost: string[] = [];
+      const gained: string[] = [];
+      for (const text of [...exempt, ...MONEY_YES, ...MONEY_OTHER]) {
+        const before = (await check("private.share_snapshot_problem_main", text, false)) !== null;
+        const after = (await check("private.share_snapshot_problem", text, false)) !== null;
+        if (before && !after && !exempt.has(text)) lost.push(text);
+        if (after && !before) gained.push(text);
+        if (exempt.has(text) || MONEY_YES.includes(text)) expect(before, `main refused ${text}`).toBe(true);
+      }
+      expect(lost).toEqual([]);
+      expect(gained).toEqual([]);
+    } finally {
+      await q("drop function private.share_snapshot_problem_main(uuid, text, jsonb, boolean, boolean)");
+    }
+  });
+
+  it("color and plan are free text now: a person's name in a role's colour or the plan is refused with People off", async () => {
+    const ws = (await q("select id from workspaces where slug = 'northbeam'"))[0]!.id as string;
+    const name = (await q("select name from people where workspace_id = $1 order by created_at, id limit 1", [ws]))[0]!.name as string;
+    for (const extra of [{ roles: [{ color: name }] }, { workspace: { plan: name } }]) {
+      const snap = JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials: true }, ...extra });
+      expect((await q("select private.share_snapshot_problem($1, 'overview', $2::jsonb, false, true) as p", [ws, snap]))[0]!.p).toBe("The snapshot names a person.");
+    }
+    const hex = JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials: false }, roles: [{ color: "#2a78d6" }], workspace: { plan: "agency" } });
+    expect((await q("select private.share_snapshot_problem($1, 'overview', $2::jsonb, false, false) as p", [ws, hex]))[0]!.p).toBeNull();
   });
 
   it("the ROLLBACK block puts B4's body back (preflight 1's md5 returns), the preflight reads as written, and the migration applies again", async () => {

@@ -32,10 +32,12 @@ describe("share links: the leak check's helpers and lists", () => {
       const m = /^  non_text_keys constant text\[\] := array\[([^\]]*)\]/m.exec(text)!;
       return [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
     });
+    // The newest (the follow-up's) is the app's. B4's is the app's plus the two keys the follow-up made free text (color, plan);
+    // B3's is B4's without the one key B4 added.
+    const dropped = ["color", "plan"];
     expect([...lists[2]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
-    expect([...lists[1]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
-    // B3's own list is the app's without the one key B4 added.
-    expect([...lists[0]!].sort()).toEqual(SHARE_NON_TEXT_KEYS.filter((k) => k !== "hiddenLevers").sort());
+    expect([...lists[1]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS, ...dropped].sort());
+    expect([...lists[0]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS.filter((k) => k !== "hiddenLevers"), ...dropped].sort());
   });
 });
 

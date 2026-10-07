@@ -25,22 +25,38 @@ const SPACED = String.raw`\d+(?:\.\d+)?e[+-]?\d+|\d{1,3}(?: \d{3})+(?:[.,]\d+)?|
 const SIGNS = String.raw`[£$€¥₹]`;
 const MAG = String.raw`(?:\s*(?:bn|[km])\b)?`;
 const ISO = String.raw`(?:gbp|usd|eur|aud|nzd|cad)`;
-// A number joined to the code AFTER it by a hyphen or a slash ("4100-GBP", "4100/GBP") must be a standalone amount, because that
-// join is also how dates, versions and standard codes are written ("2026-10-06-CAD", "v1.2/EUR", "ISO 4217-GBP"):
-//   * one amount: plain, grouped in thousands, or scientific; never a run of dotted groups ("1.2.3"), which is a version;
-//   * nothing glued to its left: no letter, digit, dot, comma, hyphen or slash ("v1.2", "2026-10-06", "1.2" of "1.2.3");
-//   * not the number of a standard, a product or a place in a document: no word from JOIN_WORDS right before it, with only
-//     spaces between ("ISO 4217-GBP", "Windows 10-USD", "page 3/GBP").
-// A space between the number and the code, a code BEFORE the number ("GBP-4100", "GBP/4100") and a symbol are unchanged.
-// The database's check (`private.share_snapshot_problem`, migration 20261228000000) applies the same rule; keep the two equal.
-const JOINED = String.raw`\d+(?:\.\d+)?e[+-]?\d+|\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?`;
-/** Words that make the number after them an identifier, not an amount, when a hyphen or slash joins it to a code. */
+// A number joined to the code AFTER it by a hyphen or a slash ("4100-GBP", "4100/GBP") is money unless it is the end of a date,
+// a version or a standard's or product's number, which are written the same way ("2026-10-06-CAD", "v1.2/EUR", "ISO 4217-GBP",
+// "Windows 10-USD", "page 3/GBP"). So the amount right before the code:
+//   * is not glued to a letter or a digit, nor to a digit and a dot or comma ("v1.2", the "2" of "1.2"), nor to a digit and a
+//     hyphen or slash ("2026-10-06") unless it has 3 or more digits, thousands groups or an exponent (a range's second amount,
+//     "4100-4500-GBP"; a date's last part has 1 or 2). A hyphen or slash after a letter or space is a sign ("-4100-GBP") or a
+//     separator ("x/4100-GBP"), and counts;
+//   * may follow another amount and a hyphen or slash (a range, "4,100-4,500-GBP", "4100/4500/GBP"), hidden as one;
+//   * if it is a plain number (no thousands groups, no exponent), is not right after a word of JOIN_STANDARD_WORDS ("iso 4217"),
+//     and if it also has 1 or 2 digits, not right after a word of JOIN_WORDS ("windows 10", "page 3"), with only spaces between.
+// A space between the number and the code, a code BEFORE the number ("GBP-4100", "GBP/4100") and a symbol are unchanged. Every
+// text this rule matches, the rule before it matched (a test runs both). The database's check (`private.share_snapshot_problem`,
+// migration 20261228000000) applies the same rule; keep the two equal.
+/** Words naming a standard: a plain number of any length after them is its number, not an amount. */
+export const JOIN_STANDARD_WORDS: readonly string[] = ["iso", "rfc"];
+/** Words that make a plain 1- or 2-digit number after them an identifier (a version, a page, a part), not an amount. */
 export const JOIN_WORDS: readonly string[] = [
-  "iso", "rfc", "en", "bs", "din", "windows", "win", "ios", "android", "macos", "office", "version", "ver", "v", "build", "release",
-  "rev", "revision", "page", "pages", "p", "pp", "chapter", "ch", "section", "sec", "clause", "para", "paragraph", "article",
-  "appendix", "annex", "item", "line", "row", "column", "col", "table", "figure", "fig", "vol", "volume", "part", "phase", "sprint",
-  "ticket", "slide", "model",
+  "windows", "win", "ios", "android", "macos", "office", "version", "ver", "v", "build", "release", "rev", "revision", "page",
+  "pages", "p", "pp", "chapter", "ch", "section", "sec", "clause", "para", "paragraph", "article", "appendix", "annex", "row",
+  "column", "col", "table", "figure", "fig", "vol", "volume", "part", "phase", "sprint", "ticket", "slide",
 ];
+const notAfter = (words: readonly string[]) => String.raw`(?<!(?:^|[^a-z])(?:${words.join("|")}) +)`;
+const SCI = String.raw`\d+(?:\.\d+)?e[+-]?\d+`;
+const SPACE_GROUPED = String.raw`\d{1,3}(?: \d{3})+(?:[.,]\d+)?`;
+const GROUPED = String.raw`\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?`;
+/** Any amount: the first of a range. */
+const RANGE_FROM = String.raw`${SCI}|${SPACE_GROUPED}|${GROUPED}|\d+(?:[.,]\d+)?`;
+/** An amount that can't be a date's last part: grouped, scientific, or 3 or more digits. */
+const LONG = String.raw`${SCI}|${SPACE_GROUPED}|(?:${GROUPED})[.,]?|\d{3,}(?:[.,]\d+)?[.,]?`;
+/** The amount before the code, with the word exemptions on plain numbers only. */
+const JOINED = String.raw`${SCI}|${SPACE_GROUPED}|(?:${GROUPED})[.,]?|${notAfter(JOIN_STANDARD_WORDS)}\d{3,}(?:[.,]\d+)?[.,]?|${notAfter(JOIN_STANDARD_WORDS)}${notAfter(JOIN_WORDS)}\d{1,2}(?:[.,]\d+)?[.,]?`;
+const TO_CODE = String.raw`${MAG}\s*[\-/]\s*${ISO}(?![a-z0-9])`;
 
 /** Money in a share link's normalised text: a symbol or code before a number, a number before a symbol, code or amount in words (pounds, dollars, euros, quid, sterling). */
 export const shareMoneyRegex = (): RegExp =>
@@ -51,8 +67,10 @@ export const shareMoneyRegex = (): RegExp =>
       String.raw`(?:${SPACED})${MAG}\s*[£€¥₹]`,
       // A code after the number is a standalone token: not a digit run glued to letters inside something longer.
       String.raw`(?<![a-z0-9])(?:${SPACED})${MAG}\s*${ISO}(?![a-z0-9])`,
-      // The same joined by a hyphen or a slash: only a standalone amount (above).
-      String.raw`(?<![a-z0-9.,\-/])(?<!(?:^|[^a-z])(?:${JOIN_WORDS.join("|")}) +)(?:${JOINED})${MAG}\s*[\-/]\s*${ISO}(?![a-z0-9])`,
+      // The same joined by a hyphen or a slash (above): an amount, or a range, not glued to a letter, a digit or a digit's . , - /.
+      String.raw`(?<![a-z0-9])(?<!\d[.,])(?<!\d[\-/])(?:(?:${RANGE_FROM})${MAG}\s*[\-/]\s*)?(?:${JOINED})${TO_CODE}`,
+      // ... or glued to a digit and a hyphen or slash when it can't be a date's last part (a range's second amount).
+      String.raw`(?<=\d[\-/])(?:${LONG})${TO_CODE}`,
       String.raw`(?:${SPACED})${MAG}\s*(?:pounds?|dollars?|euros?|quid|sterling)(?![a-z])`,
     ].join("|"),
     "giu",

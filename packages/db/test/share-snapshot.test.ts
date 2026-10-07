@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { JOIN_WORDS } from "../src/money";
-import { MONEY_NOT, MONEY_YES } from "./money-cases";
+import { JOIN_STANDARD_WORDS, JOIN_WORDS } from "../src/money";
+import { normaliseView } from "../src/share-text";
+import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES, OLD_SHARE_MONEY_SOURCE } from "./money-cases";
 import {
   SHARE_SNAPSHOT_VERSION,
   larkspurBundle,
@@ -970,6 +971,24 @@ describe("the fifth round: tags, ids, names and money", () => {
       expect(redactTitle(text), `${text} (${joinedBy})`).toBe(text);
       expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
     }
+    for (const { text, like } of MONEY_NOT_VARIANTS) {
+      expect(redactTitle(text), `${text} (like ${like})`).toBe(text);
+      expect(shareSnapshotLeaks(bare({ note: text }), w.secrets, off), text).not.toContain("money");
+    }
+  });
+
+  it("B3 follow-up: every case through main's old rule and the new one: what the old refused, the new refuses, except the listed exemptions; the new refuses nothing the old didn't", () => {
+    const oldFlags = (text: string) => new RegExp(OLD_SHARE_MONEY_SOURCE, "giu").test(normaliseView(text).n);
+    const newFlags = (text: string) => shareSnapshotLeaks(bare({ note: text }), w.secrets, off).includes("money");
+    const exempt = new Set([...MONEY_NOT.map((c) => c.text), ...MONEY_NOT_VARIANTS.map((c) => c.text)]);
+    const all = [...exempt, ...MONEY_YES, ...MONEY_OTHER];
+    const lost = all.filter((t) => oldFlags(t) && !newFlags(t) && !exempt.has(t));
+    const gained = all.filter((t) => newFlags(t) && !oldFlags(t));
+    expect(lost).toEqual([]);
+    expect(gained).toEqual([]);
+    // Each exemption really was refused before (it is a change, not a no-op), and each money text was too.
+    for (const t of exempt) expect(oldFlags(t), t).toBe(true);
+    for (const t of MONEY_YES) expect(oldFlags(t), t).toBe(true);
   });
 
   it("B3 follow-up: every money form is still hidden and still flagged", () => {
@@ -981,12 +1000,23 @@ describe("the fifth round: tags, ids, names and money", () => {
     }
   });
 
+  it("B3 follow-up: color and plan are free text (the database checks neither): a name typed into one is hidden and flagged; a hex colour and a plan word are left", () => {
+    const name = w.personFull[0]!;
+    for (const extra of [{ roles: [{ color: name }] }, { workspace: { plan: name } }]) {
+      expect(shareSnapshotLeaks(bare(extra), w.secrets, off), JSON.stringify(extra)).toContain("person");
+      expect(JSON.stringify(redactShareSnapshot(bare(extra), off, w.secrets))).not.toContain(name);
+    }
+    const plain = bare({ roles: [{ color: "#2a78d6" }], workspace: { plan: "agency" } });
+    expect(shareSnapshotLeaks(plain, w.secrets, off)).toEqual([]);
+    expect(redactShareSnapshot(plain, off, w.secrets)).toMatchObject({ roles: [{ color: "#2a78d6" }], workspace: { plan: "agency" } });
+  });
+
   it("B3 follow-up: the words that make a number an identifier are the database's (the same list in the migration's money rule)", () => {
     const sql = readFileSync(join(__dirname, "..", "supabase/migrations/20261228000000_share_money_rule.sql"), "utf8");
     const body = sql.slice(sql.search(/^create or replace function private\.share_snapshot_problem\(/m));
-    const m = /\(\?<!\(\^\|\[\^a-z\]\)\(([a-z|]+)\)\[\[:space:\]\]\+\)/.exec(body);
-    expect(m, "the joined rule's lookbehind").not.toBeNull();
-    expect(m![1]!.split("|")).toEqual([...JOIN_WORDS]);
+    const lists = [...body.matchAll(/\(\?<!\(\^\|\[\^a-z\]\)\(([a-z|]+)\)\[\[:space:\]\]\+\)/g)].map((m) => m[1]!);
+    // The standard words guard both plain-number forms; the other words only the 1- or 2-digit one.
+    expect(lists).toEqual([JOIN_STANDARD_WORDS.join("|"), JOIN_STANDARD_WORDS.join("|"), JOIN_WORDS.join("|")]);
   });
 });
 

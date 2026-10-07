@@ -3,7 +3,7 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, larkspurPersonIds, northbeamIssues } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
-import { MONEY_NOT, MONEY_YES } from "./money-cases";
+import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_YES } from "./money-cases";
 
 // Share links (issue #32, B3): the table, its write trigger, the leak check Postgres runs on every snapshot, the team-input
 // function and the one function a visitor reads through. Each test runs in a rolled-back transaction.
@@ -691,7 +691,7 @@ describe("the leak check", () => {
 
   it("7e. B3 follow-up (20261228000000): a date, a version or a standard's number joined to a code is no money; every money form still is", async () => {
     // The same lists the app's tests run (test/money-cases.ts), so the two checks agree.
-    for (const { text } of MONEY_NOT) await accepted({ ...clean(), note: text });
+    for (const { text } of [...MONEY_NOT, ...MONEY_NOT_VARIANTS]) await accepted({ ...clean(), note: text });
     await accepted({ ...clean(), notes: MONEY_NOT.map((c) => c.text) });
     for (const text of MONEY_YES) await refused({ ...clean(), note: text }, {}, "The snapshot contains costs or margins.");
     for (const text of MONEY_YES) await accepted({ ...clean("overview", false, true), note: text }, { financials: true });
