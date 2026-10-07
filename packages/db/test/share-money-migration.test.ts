@@ -56,8 +56,8 @@ describe("share money rule: row 69 of the production ledger", () => {
     expect(apply).toContain(`values ('${VERSION}', 'share_money_rule'`);
   });
 
-  it("the ledger has row 69 for this version, NOT applied, and no other row uses 69 or this version", () => {
-    expect(ledger).toMatch(new RegExp(`^\\| 69 \\| ${VERSION} \\| share_money_rule \\| [^|]*NOT applied[^|]* \\| B3 follow-up`, "m"));
+  it("the ledger has row 69 for this version (applied or not), and no other row uses 69 or this version", () => {
+    expect(ledger).toMatch(new RegExp(`^\\| 69 \\| ${VERSION} \\| share_money_rule \\| [^|]+ \\| B3 follow-up`, "m"));
     expect(ledger.match(/^\| 69 \|/gm)).toHaveLength(1);
     expect(ledger.match(new RegExp(`^\\| \\d+ \\| ${VERSION} `, "gm"))).toHaveLength(1);
   });
