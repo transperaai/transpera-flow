@@ -43,7 +43,7 @@ export function StepIssueBadges({ badges, onOpen }: { badges: Record<string, Ste
         title={label}
         aria-label={`${label}. Show in the Issues tab.`}
         // nodrag/nopan: React Flow leaves pointer events on the badge alone.
-        className={`nodrag nopan absolute -top-2.5 -right-2.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold shadow-token bg-crit text-white`}
+        className={`nodrag nopan absolute -top-2.5 -right-2.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold shadow-token bg-crit text-crit-fg`}
         onClick={(e) => {
           e.stopPropagation();
           onOpen(id);

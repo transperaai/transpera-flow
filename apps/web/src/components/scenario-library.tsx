@@ -161,7 +161,7 @@ function ScenarioItem({
                   onDelete();
                 }}
                 disabled={busy}
-                className="rounded-token bg-crit px-2 py-0.5 text-xs font-semibold text-white"
+                className="rounded-token bg-crit px-2 py-0.5 text-xs font-semibold text-crit-fg"
               >
                 Delete “{scenario.name}”
               </button>
