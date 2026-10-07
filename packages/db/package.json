@@ -14,7 +14,8 @@
     "./simulation-gaps": "./src/simulation-gaps.ts",
     "./calibration": "./src/calibration.ts",
     "./csv-import": "./src/csv-import.ts",
-    "./workspace-import": "./src/workspace-import.ts"
+    "./workspace-import": "./src/workspace-import.ts",
+    "./money": "./src/money.ts"
   },
   "scripts": {
     "lint": "eslint .",
