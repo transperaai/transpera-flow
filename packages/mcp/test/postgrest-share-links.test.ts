@@ -344,35 +344,53 @@ describe.skipIf(!POSTGREST_URL)("share links over PostgREST", () => {
   });
 
   it("an issue or a solution of an archived process is refused, like the process itself", async () => {
-    const sol = targetId("solution")!;
-    const proc = (await admin.query("select process_id from solutions where id = $1", [sol])).rows[0].process_id as string;
-    const iss = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'On a process that will be archived') returning id", [ws, proc])).rows[0].id as string;
-    const setArchived = async (on: boolean) => {
-      // The superuser, with the archive guards off (the real ones refuse while a service enters the process).
-      await admin.query("set session_replication_role = replica");
-      await admin.query(`update processes set archived_at = ${on ? "now()" : "null"} where id = $1`, [proc]);
-      await admin.query("set session_replication_role = origin");
-    };
+    // A throwaway published process with a solution on it, never a seeded one: other test files share this database and build
+    // links of the seeded processes while this runs, so archiving one of them would refuse their links too.
+    const one = async (sql: string, params: unknown[]) => (await admin.query(sql, params)).rows[0].id as string;
     // An issue on a live process that is also linked to the archived one, and one whose own process is archived but whose link
-    // is live: the app must name the archived process, not leave the database to refuse with another message.
-    const live = (await admin.query("select id from processes where workspace_id = $1 and id <> $2 and live_revision_id is not null and archived_at is null and not is_company limit 1", [ws, proc])).rows[0]?.id as string | undefined;
-    const extra: string[] = [];
-    if (live) {
-      const a = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'Live, also linked to an archived one') returning id", [ws, live])).rows[0].id as string;
+    // is live: the app must name the archived process, not leave the database to refuse with another message. The live one is
+    // Larkspur's seeded process, which is only linked to, never archived.
+    const live = LARKSPUR_PROCESS_ID;
+    let proc = "";
+    const made: string[] = [];
+    // Everything is made and archived in one transaction, so no other connection ever sees the throwaway process live.
+    await admin.query("begin");
+    try {
+      proc = await one("insert into processes (workspace_id, name, kind) values ($1, 'Will be archived', 'pipeline') returning id", [ws]);
+      const rev = await one("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 1, 'published') returning id", [ws, proc]);
+      await admin.query("update processes set live_revision_id = $2 where id = $1", [proc, rev]);
+      const sol = await one("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'On a process that will be archived', $4::jsonb) returning id", [
+        ws,
+        proc,
+        rev,
+        JSON.stringify({ steps: [], edges: [], entry_step_id: null }),
+      ]);
+      const iss = await one("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'On a process that will be archived') returning id", [ws, proc]);
+      const a = await one("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'Live, also linked to an archived one') returning id", [ws, live]);
       await admin.query("insert into issue_links (workspace_id, issue_id, process_id) values ($1, $2, $3)", [ws, a, proc]);
-      const b = (await admin.query("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'Archived itself, linked to a live one') returning id", [ws, proc])).rows[0].id as string;
+      const b = await one("insert into issues (workspace_id, process_id, type, title) values ($1, $2, 'delay', 'Archived itself, linked to a live one') returning id", [ws, proc]);
       await admin.query("insert into issue_links (workspace_id, issue_id, process_id) values ($1, $2, $3)", [ws, b, live]);
-      extra.push(a, b);
+      made.push(sol, iss, a, b);
+      // Run the deferred checks on what was just made while the process is still live, then archive it as
+      // the superuser, with the archive guards off (the real ones refuse while a service enters the process).
+      await admin.query("set constraints all immediate");
+      await admin.query("set local session_replication_role = replica");
+      await admin.query("update processes set archived_at = now() where id = $1", [proc]);
+      await admin.query("commit");
+    } catch (e) {
+      await admin.query("rollback");
+      throw e;
     }
-    await setArchived(true);
+    const [sol, iss, a, b] = made as [string, string, string, string];
     try {
       const workspace = await workspaceRow();
-      for (const id of extra) await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "issue", id }, TOGGLES[0]!), id).rejects.toThrow(/archived process can't be shared/);
+      for (const id of [a, b]) await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "issue", id }, TOGGLES[0]!), id).rejects.toThrow(/archived process can't be shared/);
       await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "issue", id: iss }, TOGGLES[0]!)).rejects.toThrow(/archived/);
       await expect(loadShareData(editorSession as unknown as Db, workspace, { kind: "solution", id: sol }, TOGGLES[0]!)).rejects.toThrow(/archived/);
     } finally {
-      await setArchived(false);
-      await admin.query("delete from issues where id = any ($1)", [[iss, ...extra]]);
+      await admin.query("delete from issues where id = any ($1)", [[iss, a, b]]);
+      await admin.query("delete from solutions where id = $1", [sol]);
+      await admin.query("delete from processes where id = $1", [proc]);
     }
   });
 
