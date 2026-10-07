@@ -17,6 +17,7 @@ const SHARED: [string, string][] = [
   ["shell/page", "Page"],
   ["shell/page", "PageHeader"],
   ["shell/shell-header", "ShellHeader"],
+  ["shell/error-state", "ErrorState"],
   ["fields", "TextField"],
   ["fields", "DateField"],
   ["fields", "NumberField"],
