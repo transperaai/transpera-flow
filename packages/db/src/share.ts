@@ -215,26 +215,123 @@ export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
  * A test derives every string column of every table from the database types and fails on one that is not classified.
  * `condition_tag` and `path_tags` are text: a name in a tag becomes its label on both sides (an edge and the services it
  * routes to carry the same tag), so the tags still match and the numbers stay equal.
+ *
+ * Each key carries a one-line reason: where it appears (table column or JSON shape) and why its value is never words someone
+ * typed. A key name is shared by every shape that uses it, so a reason has to hold for all of them; `share-field-classes.test.ts`
+ * classifies the JSON shapes a snapshot carries and fails when one key is text in one shape and not text in another. Keys that
+ * appear in no shape a snapshot carries say so ("not in a snapshot"): they are listed so a future loader fails safe on the id.
+ * A key belongs here only when its value can't be words: an id, a date, or an enum or format the database enforces. `color` (roles)
+ * and `plan` (workspaces) are not here: the database checks neither, so a name typed into one is looked for like any free text
+ * (a `color` that is a whole hex colour is no text: `SHARE_HEX_COLOR`, the database's rule too).
  */
-export const SHARE_NON_TEXT_KEYS: readonly string[] = [
-  "agreed_by", "kpi",
-  "ai_key", "analysis_id", "archived_at", "archived_by", "at", "auto_verdict", "base_revision_id", "by",
-  "child_process_id", "client_id", "color", "comparator", "condition_id", "created_at", "created_by", "currency",
-  "dataset_id", "decided_at", "decided_by", "detected_key", "dismissed_revision_id", "draft_revision_id", "driver",
-  "end_date", "entry_process_id", "entry_step_id", "every", "file_url", "from_step_id", "hiddenLevers", "id", "import_source",
-  "input_hash", "insight_key", "issueId", "issue_id", "key", "kind", "linked_parameter", "live_revision_id",
-  "market_pending_at", "model", "model_hash", "op", "origin", "outcome", "owner_ids", "owner_person_id",
-  "parent_process_id", "parent_scenario_id", "parent_step_id", "path", "person_id", "plan", "preset", "pricing_model",
-  "process_id", "proposed_via", "published_at", "published_by", "rating", "recorded_at", "replaced_by",
-  "replaces_step_ids", "resolution", "resolved_at", "resolved_how", "resolved_solution_id", "reviewed_at", "reviewed_by",
-  "revision_id", "rework_to_step_id", "role_id", "run_id", "scenario_id", "service_id", "severity", "slug", "solutionId",
-  "solution_id", "source_id", "source_ids", "stage", "start_date", "started_at", "status", "step_id", "suggestion_id",
-  "timestamp", "to_step_id", "type", "updated_at", "updated_by", "user_id", "user_verdict", "verdict", "wait_dist",
-  "work_dist", "workspace_id",
-];
+export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
+  agreed_by: "first principles `deletes[].agreed_by`: a person id, saved from a person picker (the MCP tool resolves a name to an id or drops it)",
+  ai_key: "findings.ai_key: a hash of the AI finding's title, or with People off the row id (nameFinding swaps it); never shown",
+  analysis_id: "findings.analysis_id: a uuid",
+  archived_at: "processes.archived_at: a timestamp",
+  archived_by: "processes.archived_by: a user id",
+  at: "provenance `at` (and a settled conflict's `resolved.at`): a timestamp; provenance is emptied in every snapshot anyway",
+  auto_verdict: "solution_issues.auto_verdict: the enum pass or fail",
+  base_revision_id: "solutions.base_revision_id: a uuid",
+  by: "provenance `by` (and `resolved.by`): a user id, set by the app or a trigger; provenance is emptied in every snapshot anyway",
+  child_process_id: "steps.child_process_id: a uuid",
+  client_id: "issues, client_assignments, client_services: a uuid",
+  comparator: "first principles `measures[].comparator`: the enum atLeast or atMost",
+  condition_id: "market_schedule.condition_id: a uuid",
+  created_at: "every table: a timestamp",
+  created_by: "every table: a user id",
+  currency: "workspaces.settings.currency: an ISO 4217 code such as GBP",
+  dataset_id: "provenance `dataset_id`: a uuid; provenance is emptied in every snapshot anyway",
+  decided_at: "findings.decided_at: a timestamp",
+  decided_by: "findings.decided_by: a user id",
+  detected_key: "issues.detected_key: `<detector>:<kind>:<id>` or `finding:<origin>:<id>`, built by the engine or the database",
+  dismissed_revision_id: "issues.dismissed_revision_id: a uuid",
+  draft_revision_id: "processes.draft_revision_id: a uuid",
+  driver: "churn_drivers.driver: an enum key of the engine's churn drivers",
+  end_date: "people, person_leave: a date",
+  entry_process_id: "services.entry_process_id: a uuid",
+  entry_step_id: "steps.entry_step_id and a solution's `steps.entry_step_id` (BlockBundle): a uuid",
+  every: "service_servicing.recurrence.every: the enum week or month",
+  file_url: "sources.file_url: not in a snapshot (sources are left out); a link, which is still checked for emails and money",
+  from_step_id: "edges.from_step_id: a uuid",
+  hiddenLevers: "a play link's top-level `hiddenLevers`: known lever kind ids only, checked by both sides (and only at the top)",
+  id: "every table and JSON shape with an id: a uuid, or a first principles measure's local id",
+  import_source: "suggestions and proposals: not in a snapshot; an enum of where an import came from",
+  input_hash: "ai_analyses.input_hash: not in a snapshot; a hash",
+  insight_key: "source_links.insight_key: not in a snapshot; an engine key",
+  issueId: "an issue link's top-level `issueId`: a uuid",
+  issue_id: "issue_links, solution_issues: a uuid",
+  key: "findings `facts[].key`: an engine fact key `<detector>:<subject>:<id>`, or the step id a quote is cited on (quotes are dropped)",
+  kind: "steps, processes, findings `facts[]`, first principles statements, the snapshot itself and its process list: an enum",
+  kpi: "first principles `measures[].kpi`: an enum key of the engine's measures",
+  linked_parameter: "first principles `statements[].linked_parameter`: a parameter path the engine reads",
+  live_revision_id: "processes.live_revision_id: a uuid",
+  market_pending_at: "ai_settings.market_pending_at: not in a snapshot; a timestamp",
+  model: "ai_analyses.model: not in a snapshot; a model id",
+  model_hash: "ai_analyses.model_hash: not in a snapshot; a hash",
+  op: "scenarios `patch[].op` and solutions `lever_changes[].op`: the enum set, multiply or add",
+  origin: "findings.origin: the enum ai or manual",
+  outcome: "steps.outcome: the enum won, lost or done",
+  owner_ids: "issues.owner_ids: person ids",
+  owner_person_id: "issues.owner_person_id and first principles `requirements[].owner_person_id`: a person id",
+  parent_process_id: "processes.parent_process_id: a uuid",
+  parent_scenario_id: "scenarios.parent_scenario_id: a uuid",
+  parent_step_id: "steps.parent_step_id: a uuid",
+  path: "scenarios `patch[].path` and solutions `lever_changes[].path`: a selector the engine reads (steps.<id>.work_hours)",
+  person_id: "issues, steps, person_* tables, client_assignments: a person id",
+  preset: "market_conditions.preset: an enum",
+  pricing_model: "services.pricing_model: an enum",
+  process_id: "every per-process table and issues `links[]`: a uuid",
+  proposed_via: "findings.proposed_via: the enum connector, or null",
+  published_at: "process_revisions.published_at: a timestamp",
+  published_by: "process_revisions.published_by: a user id",
+  rating: "findings.rating: an enum (risk, bad, good, great)",
+  recorded_at: "sources.recorded_at: not in a snapshot; a date",
+  replaced_by: "steps.replaced_by: a uuid",
+  replaces_step_ids: "a solution idea's payload: not in a snapshot; step ids",
+  resolution: "issues.resolution: an enum",
+  resolved_at: "issues.resolved_at: a timestamp",
+  resolved_how: "issues.resolved_how: an enum (solution, process_change, not_a_problem)",
+  resolved_solution_id: "issues.resolved_solution_id: a uuid",
+  reviewed_at: "suggestions and proposals: not in a snapshot; a timestamp",
+  reviewed_by: "suggestions and proposals: not in a snapshot; a user id",
+  revision_id: "steps, edges, first_principles: a uuid",
+  rework_to_step_id: "steps.rework_to_step_id: a uuid",
+  role_id: "issues, person_roles, client_assignments, steps: a uuid",
+  run_id: "findings.run_id: a uuid",
+  scenario_id: "issues.scenario_id and first principles `improvements[].scenario_id`: a uuid",
+  service_id: "client_groups, client_services, service_servicing: a uuid",
+  severity: "issues.severity: an enum",
+  slug: "workspaces.slug: the workspace's URL slug ([a-z0-9-]); the link shows the workspace's name anyway",
+  solutionId: "a solution link's top-level `solutionId`: a uuid",
+  solution_id: "solution_issues.solution_id: a uuid",
+  source_id: "provenance `evidence[].source_id`: a uuid; provenance is emptied in every snapshot anyway",
+  source_ids: "findings.source_ids: uuids",
+  stage: "first principles `improvements[].stage`: an enum",
+  start_date: "people, person_leave, clients, client_services: a date",
+  started_at: "ai_runs.started_at: not in a snapshot; a timestamp",
+  status: "process_revisions, issues, findings: an enum",
+  step_id: "steps-linked tables, issues `links[]`, first principles shapes: a uuid",
+  suggestion_id: "provenance `suggestion_id`: a uuid; provenance is emptied in every snapshot anyway",
+  timestamp: "provenance `evidence[].timestamp`: a time in a recording or a page; provenance is emptied in every snapshot anyway",
+  to_step_id: "edges.to_step_id: a uuid",
+  type: "issues.type, findings.type: an enum",
+  updated_at: "every table: a timestamp",
+  updated_by: "findings.updated_by: a user id",
+  user_id: "ai_runs.user_id: not in a snapshot; a user id",
+  user_verdict: "solution_issues.user_verdict: the enum pass or fail",
+  verdict: "first principles `requirements[].verdict`: an enum",
+  wait_dist: "steps.wait_dist: a distribution name",
+  work_dist: "steps.work_dist: a distribution name",
+  workspace_id: "every table: a uuid",
+};
+/** The keys of `SHARE_NON_TEXT_REASONS` (`private.share_snapshot_problem` has the same list). */
+export const SHARE_NON_TEXT_KEYS: readonly string[] = Object.keys(SHARE_NON_TEXT_REASONS);
 const NON_TEXT = new Set(SHARE_NON_TEXT_KEYS);
-/** Free text unless the key says otherwise (default deny). */
-const isFree = (key: string): boolean => !NON_TEXT.has(key);
+/** A whole hex colour (`#rgb` to `#rrggbbaa`): no text, under `color` only. Anything else in `color` is free text. */
+export const SHARE_HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;
+/** Free text unless the key says otherwise (default deny), or the value is a whole hex colour under `color` (the database's rule too). */
+const isFree = (key: string, value: string): boolean => !NON_TEXT.has(key) && !(key === "color" && SHARE_HEX_COLOR.test(value));
 
 /** Ids, dates and plain numbers hold nothing to hide: skipped, for speed. */
 const QUIET = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[\d\-:.TZ+ ]*)$/i;
@@ -337,7 +434,7 @@ const BLANKED: Record<string, unknown> = {
 export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
   const scrub = scrubber(toggles, secrets);
   const walk = (value: unknown, key = ""): unknown => {
-    if (typeof value === "string") return scrub.text(value, isFree(key));
+    if (typeof value === "string") return scrub.text(value, isFree(key, value));
     if (Array.isArray(value)) return value.map((x) => walk(x, key));
     if (!isObj(value)) return value;
     const src = isBundleLike(value) ? redactBundle(value, toggles, secrets) : value;
@@ -422,7 +519,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     }
   };
   const walk = (value: unknown, key = "", depth = 0) => {
-    if (typeof value === "string") return text(value, isFree(key));
+    if (typeof value === "string") return text(value, isFree(key, value));
     if (Array.isArray(value)) return void value.forEach((x) => walk(x, key, depth));
     if (!isObj(value)) return;
     for (const [k, v] of Object.entries(value)) {

@@ -20,6 +20,7 @@ const SHARED: [string, string][] = [
   ["shell/phone-read-only", "PhoneReadOnly"],
   ["shell/phone-read-only", "PhoneNotice"],
   ["editor/editor-phone-gate", "EditorPhoneGate"],
+  ["shell/error-state", "ErrorState"],
   ["fields", "TextField"],
   ["fields", "DateField"],
   ["fields", "NumberField"],

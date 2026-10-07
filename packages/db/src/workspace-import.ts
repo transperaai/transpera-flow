@@ -8,9 +8,9 @@
 // placeholder that keeps the order of the old ids (the engine sorts by id, so a restore must not reshuffle them).
 //
 // Not restored (decisions 1 to 4 on #39): history and older versions, the company map (the new workspace keeps its own),
-// solutions, decided suggestions, detections, issue history, source files and everything about who made what, and per-person
-// times (C6, `person_capacity_factors`: the backup holds them, the restore leaves them out and says so; the switch itself is
-// restored like any setting).
+// solutions, decided suggestions, detections, issue history, source files and everything about who made what. Per-person times
+// (C6, `person_capacity_factors`) are restored (#228), so a restored workspace simulates like the original; the switch itself
+// is restored like any setting.
 
 import { ENGINE_VERSION } from "@transpera-flow/engine";
 import type { Database } from "./database.types";
@@ -52,6 +52,8 @@ export const WORKSPACE_IMPORT_LIMITS = {
   /** The link tables, each row about 0.1 ms: sized with the limits above (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, a few links a source). */
   personRoles: 1200,
   personSkills: 3000,
+  /** Per-person times (#228): one 'Every step' and one per step a person does; sized like skills. */
+  capacityFactors: 3000,
   clientAssignments: 1200,
   sourceLinks: 3000,
   /** Sections that had no cap before B21. */
@@ -115,6 +117,8 @@ export const IMPORT_COLUMNS = {
   client_services: cols("client_services", "client_id", "service_id", "start_date", "created_at"),
   client_assignments: cols("client_assignments", "client_id", "role_id", "person_id", "created_at"),
   person_skills: cols("person_skills", "person_id", "step_id", "efficiency", "provenance", "created_at"),
+  /** No `created_at`: nothing orders per-person times by it. */
+  person_capacity_factors: cols("person_capacity_factors", "person_id", "step_id", "factor", "provenance"),
   source_links: cols("source_links", "id", "insight_key", "issue_id", "kind", "process_id", "source_id", "step_id"),
   suggestions: cols("suggestions", "id", "target_table", "target_id", "patch", "evidence", "note", "created_at"),
   proposals: cols("suggestion_proposals", "id", "kind", "title", "detail", "payload", "evidence", "note", "issue_id", "created_at"),
@@ -155,7 +159,7 @@ export interface ImportSummary {
   /** Whether the workspace settings would be written (an owner or agency admin), suggested (an editor), or aren't in the file. */
   settings: "applied" | "suggested" | "none";
   /** The numbers the limits are checked against. */
-  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; clientAssignments: number; sourceLinks: number; clientServices: number; personLeave: number; companyOther: number; planBytes: number };
+  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; capacityFactors: number; clientAssignments: number; sourceLinks: number; clientServices: number; personLeave: number; companyOther: number; planBytes: number };
 }
 
 export interface BundleCheck {
@@ -212,6 +216,7 @@ export interface ImportPlan {
   client_services: Row[];
   client_assignments: Row[];
   person_skills: Row[];
+  person_capacity_factors: Row[];
   source_links: Row[];
   suggestions: Row[];
   proposals: Row[];
@@ -287,6 +292,18 @@ function shapeProblem(v: Row): string | null {
     const p = checkTable(k, v[k] as unknown[], !NO_ID_TABLES.has(k));
     if (p) return p;
   }
+  // Per-person times (#228): a person, a step or null ("Every step"), a factor from 0.5 to 2, and no pair twice (null counts as one value).
+  const factorPairs = new Set<string>();
+  for (const f of (cm.person_capacity_factors ?? []) as unknown[]) {
+    const r = f as Row;
+    const n = typeof r.factor === "number" ? r.factor : typeof r.factor === "string" && r.factor.trim() !== "" ? Number(r.factor) : NaN;
+    if (typeof r.person_id !== "string" || !UUID.test(r.person_id) || (r.step_id != null && (typeof r.step_id !== "string" || !UUID.test(r.step_id))) || !Number.isFinite(n) || n < 0.5 || n > 2) {
+      return "a per-person time isn't valid";
+    }
+    const pair = `${lc(r.person_id)}|${r.step_id == null ? "" : lc(r.step_id)}`;
+    if (factorPairs.has(pair)) return "a per-person time repeats";
+    factorPairs.add(pair);
+  }
   const versionIds = new Set<string>();
   const parents = new Map<string, string | null>();
   for (const p of v.processes as Row[]) {
@@ -344,7 +361,7 @@ export function checkWorkspaceBundle(value: unknown, options: { canManage?: bool
     restored: [],
     leftOut: [],
     settings: "none",
-    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, clientAssignments: 0, sourceLinks: 0, clientServices: 0, personLeave: 0, companyOther: 0, planBytes: 0 },
+    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, capacityFactors: 0, clientAssignments: 0, sourceLinks: 0, clientServices: 0, personLeave: 0, companyOther: 0, planBytes: 0 },
   };
   const stop = (message: string): BundleCheck => ({ ok: false, errors: [message], warnings: [], summary: empty });
 
@@ -443,6 +460,7 @@ function limitProblems(m: ImportSummary["measures"]): string[] {
   over(m.proposals, L.proposals, "pending proposals");
   over(m.personRoles, L.personRoles, "role assignments");
   over(m.personSkills, L.personSkills, "skills");
+  over(m.capacityFactors, L.capacityFactors, "per-person times");
   over(m.clientAssignments, L.clientAssignments, "client assignments");
   over(m.sourceLinks, L.sourceLinks, "source links");
   over(m.clientServices, L.clientServices, "client services");
@@ -469,7 +487,7 @@ export function restoreSizeWarning(bundle: WorkspaceBundle): string | null {
     [m.processes, L.processes, "processes"], [m.steps, L.steps, "steps"], [m.edges, L.edges, "edges"], [m.sources, L.sources, "sources"],
     [m.sourceChars, L.sourceChars, "characters of source text"], [m.issues, L.issues, "issues"], [m.people, L.people, "people"], [m.clients, L.clients, "clients"],
     [m.scenarios, L.scenarios, "scenarios"], [m.blocks, L.blocks, "blocks"], [m.suggestions, L.suggestions, "pending suggestions"], [m.proposals, L.proposals, "pending proposals"],
-    [m.personRoles, L.personRoles, "role assignments"], [m.personSkills, L.personSkills, "skills"], [m.clientAssignments, L.clientAssignments, "client assignments"],
+    [m.personRoles, L.personRoles, "role assignments"], [m.personSkills, L.personSkills, "skills"], [m.capacityFactors, L.capacityFactors, "per-person times"], [m.clientAssignments, L.clientAssignments, "client assignments"],
     [m.sourceLinks, L.sourceLinks, "source links"], [m.clientServices, L.clientServices, "client services"], [m.personLeave, L.personLeave, "leave entries"],
     [m.companyOther, L.companyOther, "other company settings rows"], [m.planBytes, L.planBytes, "bytes once prepared"],
   ];
@@ -502,6 +520,8 @@ export const IMPORT_REFS: Record<string, Ref[]> = {
   client_services: [R("client_id", "clients", "require"), R("service_id", "services", "require")],
   client_assignments: [R("client_id", "clients", "require"), R("role_id", "roles", "require"), R("person_id", "people", "require")],
   person_skills: [R("person_id", "people", "require"), R("step_id", "steps", "require")],
+  // A null step is the "Every step" row (kept); a step that isn't in a restored version drops the row (#228).
+  person_capacity_factors: [R("person_id", "people", "require"), R("step_id", "steps", "drop")],
   scenarios: [R("parent_scenario_id", "scenarios", "null")],
   issues: [
     R("client_id", "clients", "null"), R("owner_person_id", "people", "null"), R("person_id", "people", "null"), R("process_id", "processes", "null"),
@@ -516,7 +536,7 @@ const LABELS: Record<string, string> = {
   roles: "roles", people: "people", person_roles: "role assignments", person_leave: "leave entries", lead_sources: "lead sources", seasonality: "seasonality months",
   churn_drivers: "churn drivers", market_conditions: "market conditions", market_schedule: "market schedule rows", clients: "clients", sources: "sources",
   scenarios: "scenarios", blocks: "blocks", issues: "issues", services: "services", service_servicing: "servicing rules", client_groups: "client groups",
-  client_services: "client services", client_assignments: "client assignments", person_skills: "skills", source_links: "source links", suggestions: "pending suggestions",
+  client_services: "client services", client_assignments: "client assignments", person_skills: "skills", person_capacity_factors: "per-person times", source_links: "source links", suggestions: "pending suggestions",
   proposals: "pending proposals", steps: "steps", edges: "edges", processes: "processes",
 };
 
@@ -713,6 +733,8 @@ export function planWorkspaceImport(
 
   const restoredIds = new Set<string>([lc(bundle.workspace.id)]);
   const personSkills = flat("person_skills", company("person_skills"), IMPORT_REFS.person_skills);
+  // The export may carry a numeric as a string; the plan holds a number.
+  const capacityFactors = flat("person_capacity_factors", company("person_capacity_factors"), IMPORT_REFS.person_capacity_factors).map((r) => ({ ...r, factor: Number(r.factor) }));
   const sourceLinks = flat("source_links", linkRows, IMPORT_REFS.source_links);
 
   const pendingSuggestions = bundle.suggestions.filter((s) => s.status === "pending");
@@ -746,6 +768,7 @@ export function planWorkspaceImport(
     client_services: flat("client_services", company("client_services"), IMPORT_REFS.client_services),
     client_assignments: flat("client_assignments", company("client_assignments"), IMPORT_REFS.client_assignments),
     person_skills: personSkills,
+    person_capacity_factors: capacityFactors,
     source_links: sourceLinks,
     suggestions: [],
     proposals: [],
@@ -761,10 +784,6 @@ export function planWorkspaceImport(
   }
   for (const k of unknown.sort()) warnings.push(`The workspace setting "${k}" isn't one this version knows and was left out.`);
   plan.settings = Object.keys(known).length ? known : null;
-  // Per-person times aren't restored (C6): with the switch on, results differ from the original until they are entered again.
-  if (rowsOf(cm.person_capacity_factors).length > 0 && known.capacity_factor_enabled === true) {
-    warnings.push("This backup has per-person times switched on. They aren't restored, so results will differ from the original until you enter them again.");
-  }
 
   // Pending suggestions and proposals, last: they point at what is restored.
   for (const set of [sets.processes!, sets.steps!, sets.roles!, sets.people!, sets.services!, sets.clients!, sets.sources!, sets.scenarios!, sets.issues!]) for (const id of set) restoredIds.add(id);
@@ -810,8 +829,8 @@ export function planWorkspaceImport(
   const restored = [
     line("processes", processes.length, "processes, as drafts"),
     ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "scenarios", "blocks", "issues", "sources", "suggestions", "proposals"] as const).map((k) => line(k, plan[k].length)),
+    line("person_capacity_factors", plan.person_capacity_factors.length),
   ].filter((l) => l.count > 0);
-  const capacityFactors = rowsOf(cm.person_capacity_factors).length;
   const leftOut = [
     line("older_versions", olderVersions, "older versions of processes"),
     line("company_map", companyVersions, "versions of the company map (the new workspace keeps its own)"),
@@ -822,7 +841,6 @@ export function planWorkspaceImport(
     line("step_links", stepLinksGone, "source links to steps no longer in the process"),
     line("history", issueEvents, "issue history entries"),
     line("file_originals", fileOriginals, "source file originals (the text is restored)"),
-    line("capacity_factors", capacityFactors, "per-person times (enter them again after the restore; until then everyone works at their role's normal time)"),
   ].filter((l) => l.count > 0);
 
   const summary: ImportSummary = {
@@ -844,6 +862,7 @@ export function planWorkspaceImport(
       proposals: plan.proposals.length,
       personRoles: plan.person_roles.length,
       personSkills: plan.person_skills.length,
+      capacityFactors: plan.person_capacity_factors.length,
       clientAssignments: plan.client_assignments.length,
       sourceLinks: plan.source_links.length,
       clientServices: plan.client_services.length,

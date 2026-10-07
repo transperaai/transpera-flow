@@ -42,7 +42,7 @@ export const BUNDLE_TABLES = {
   person_roles: T("person_roles", "person_id", "role_id"),
   person_skills: T("person_skills", "person_id", "step_id"),
   person_leave: T("person_leave"),
-  // C6: per-person times, kept in a backup (RLS: editors only). The restore leaves them out and says so. `step_id` is null for a
+  // C6: per-person times, kept in a backup (RLS: editors only). The restore brings them back (#228). `step_id` is null for a
   // person's default: nulls sort last, and (person_id, step_id) is unique, so the order is total and the paging stable.
   person_capacity_factors: T("person_capacity_factors", "person_id", "step_id"),
   services: T("services"),

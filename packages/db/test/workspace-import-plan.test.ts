@@ -663,53 +663,171 @@ describe("planWorkspaceImport", () => {
   });
 });
 
-describe("per-person times in a backup (C6): kept in the file, left out of the restore", () => {
+describe("per-person times in a backup (#228): restored", () => {
   const withFactors = (switchOn: boolean) => {
     const { bundle, ids } = makeBundle();
     const b = clone(bundle);
     b.company_model.person_capacity_factors = [
-      { person_id: ids.person, workspace_id: ids.ws, step_id: null, factor: 0.9, source: "entered", provenance: {} },
-      { person_id: ids.person, workspace_id: ids.ws, step_id: ids.sA1, factor: 1.2, source: "entered", provenance: {} },
+      { person_id: ids.person, workspace_id: ids.ws, step_id: null, factor: 0.9, provenance: { factor: { source: "entered", by: "someone", at: "2026-10-01T00:00:00Z" } }, created_at: "2026-10-01T00:00:00Z", created_by: "u" },
+      { person_id: ids.person, workspace_id: ids.ws, step_id: ids.sA1, factor: 1.2, provenance: {}, created_at: "2026-10-01T00:00:00Z", created_by: "u" },
     ];
     (b.workspace.settings as Record<string, unknown>).capacity_factor_enabled = switchOn ? true : undefined;
-    return recount(b);
+    return { b: recount(b), ids };
   };
   const WARNING = "This backup has per-person times switched on. They aren't restored, so results will differ from the original until you enter them again.";
+  const factorRows = (b: WorkspaceBundle) => b.company_model.person_capacity_factors as Row[];
 
   it("checks clean: rows with no id are accepted", () => {
-    const c = checkWorkspaceBundle(withFactors(true));
+    const c = checkWorkspaceBundle(withFactors(true).b);
     expect(c.errors).toEqual([]);
     expect(c.ok).toBe(true);
   });
 
-  it("the plan has no factor section, and no factor value anywhere in it", () => {
-    const { plan } = planOf(withFactors(true));
-    expect(Object.keys(plan)).not.toContain("person_capacity_factors");
-    expect(IMPORT_COLUMNS).not.toHaveProperty("person_capacity_factors");
-    expect(JSON.stringify(plan)).not.toContain("capacity_factors");
-    expect(JSON.stringify(plan)).not.toMatch(/"factor"/);
+  it("the plan holds both times, with placeholder ids, numbers and the provenance, and none of the columns the restore sets itself", () => {
+    const { b, ids } = withFactors(true);
+    const { plan, placeholderOf } = planOf(b);
+    const p = (k: string) => placeholderOf.get(ids[k]!)!;
+    expect(IMPORT_COLUMNS.person_capacity_factors).toEqual(["person_id", "step_id", "factor", "provenance"]);
+    expect(plan.person_capacity_factors).toEqual([
+      { person_id: p("person"), step_id: null, factor: 0.9, provenance: { factor: { source: "entered", by: "someone", at: "2026-10-01T00:00:00Z" } } },
+      { person_id: p("person"), step_id: p("sA1"), factor: 1.2, provenance: {} },
+    ]);
+    for (const r of plan.person_capacity_factors) for (const k of ["workspace_id", "created_by", "created_at", "updated_at"]) expect(r).not.toHaveProperty(k);
+    expect(IMPORT_REFS.person_capacity_factors!.map((r) => [r.col, r.to, r.mode])).toEqual([["person_id", "people", "require"], ["step_id", "steps", "drop"]]);
   });
 
-  it("lists them as left out, in words, and warns only when the switch was on", () => {
+  it("keeps the order of the bundle, and the placeholders sort as the old ids did", () => {
+    const { b, ids } = withFactors(true);
+    factorRows(b).push({ person_id: ids.person, workspace_id: ids.ws, step_id: ids.sA2, factor: 0.7, provenance: {} });
+    const { plan, placeholderOf } = planOf(recount(b));
+    expect(plan.person_capacity_factors.map((r) => r.factor)).toEqual([0.9, 1.2, 0.7]);
+    const steps = plan.person_capacity_factors.filter((r) => r.step_id != null).map((r) => r.step_id as string);
+    const oldSteps = [ids.sA1!, ids.sA2!];
+    expect(steps).toEqual(oldSteps.map((s) => placeholderOf.get(s)!));
+    expect(placeholderOf.get(oldSteps[0]!)! < placeholderOf.get(oldSteps[1]!)!).toBe(oldSteps[0]! < oldSteps[1]!);
+  });
+
+  it("leaves out a time on a step that is only in an older version, and says so", () => {
+    const { b, ids } = withFactors(true);
+    const onlyOld = id();
+    const alpha = b.processes.find((x) => x.id === ids.pA)!;
+    ((alpha.versions as Row[]).find((v) => v.id === ids.revA1)!.steps as Row[]).push({ id: onlyOld, process_version_id: ids.revA1, workspace_id: ids.ws, name: "old only" } as Row);
+    factorRows(b).push({ person_id: ids.person, workspace_id: ids.ws, step_id: onlyOld, factor: 1.5, provenance: {} });
+    const bundle = recount(b);
+    expect(checkWorkspaceBundle(bundle).errors).toEqual([]);
+    const { plan } = planOf(bundle);
+    expect(plan.person_capacity_factors).toHaveLength(2);
+    expect(JSON.stringify(plan.person_capacity_factors)).not.toContain("1.5");
+    expect(checkWorkspaceBundle(bundle).warnings).toContain("1 per-person times pointed at something that isn't in the backup or isn't restored, and were left out.");
+  });
+
+  it("a time for a person who isn't in the backup is left out too", () => {
+    const { b, ids } = withFactors(true);
+    factorRows(b).push({ person_id: id(), workspace_id: ids.ws, step_id: null, factor: 1.5, provenance: {} });
+    const bundle = recount(b);
+    expect(planOf(bundle).plan.person_capacity_factors).toHaveLength(2);
+    expect(checkWorkspaceBundle(bundle).warnings).toContain("1 per-person times pointed at something that isn't in the backup or isn't restored, and were left out.");
+  });
+
+  it("lists them as restored, not as left out, with no warning, with the switch on or off", () => {
     for (const on of [true, false]) {
-      const b = withFactors(on);
+      const { b } = withFactors(on);
       const { summary } = planOf(b);
-      const line = summary.leftOut.find((l) => l.key === "capacity_factors")!;
-      expect(line.count).toBe(2);
-      expect(line.label).toBe("per-person times (enter them again after the restore; until then everyone works at their role's normal time)");
+      expect(summary.restored.find((l) => l.key === "person_capacity_factors")).toEqual({ key: "person_capacity_factors", label: "per-person times", count: 2 });
+      expect(summary.leftOut.some((l) => l.key === "capacity_factors")).toBe(false);
+      expect(summary.measures.capacityFactors).toBe(2);
       const c = checkWorkspaceBundle(b);
-      expect(c.warnings).toContain("Stays in the file: 2 per-person times (enter them again after the restore; until then everyone works at their role's normal time).");
-      if (on) expect(c.warnings).toContain(WARNING);
-      else expect(c.warnings).not.toContain(WARNING);
+      expect(c.warnings).not.toContain(WARNING);
+      expect(c.warnings.some((w) => w.includes("per-person times"))).toBe(false);
     }
-    // A backup with the switch on and no rows needs no warning, and has no left-out line.
     const none = makeBundle().bundle;
     (none.workspace.settings as Record<string, unknown>).capacity_factor_enabled = true;
     expect(checkWorkspaceBundle(none).warnings).not.toContain(WARNING);
-    expect(planOf(none).summary.leftOut.some((l) => l.key === "capacity_factors")).toBe(false);
+    expect(planOf(none).summary.restored.some((l) => l.key === "person_capacity_factors")).toBe(false);
   });
 
   it("the switch itself is restored like any setting", () => {
-    expect(planOf(withFactors(true)).plan.settings).toMatchObject({ capacity_factor_enabled: true });
+    expect(planOf(withFactors(true).b).plan.settings).toMatchObject({ capacity_factor_enabled: true });
+  });
+
+  it("refuses a damaged time, and accepts a numeric string", () => {
+    const damaged = (edit: (rows: Row[], ids: Ids) => void) => {
+      const { b, ids } = withFactors(true);
+      edit(factorRows(b), ids);
+      return checkWorkspaceBundle(recount(b));
+    };
+    const cases: [string, (rows: Row[], ids: Ids) => void, string][] = [
+      ["a factor of 2.5", (r) => { r[0]!.factor = 2.5; }, "a per-person time isn't valid"],
+      ["a factor under 0.5", (r) => { r[0]!.factor = 0.4; }, "a per-person time isn't valid"],
+      ["a factor of abc", (r) => { r[0]!.factor = "abc"; }, "a per-person time isn't valid"],
+      ["no factor", (r) => { delete r[0]!.factor; }, "a per-person time isn't valid"],
+      ["a person that isn't a uuid", (r) => { r[0]!.person_id = "not-a-uuid"; }, "a per-person time isn't valid"],
+      ["a step that isn't a uuid", (r) => { r[1]!.step_id = "nope"; }, "a per-person time isn't valid"],
+      ["a repeated pair (two defaults for one person)", (r, ids) => { r.push({ person_id: ids.person, workspace_id: ids.ws, step_id: null, factor: 1.1, provenance: {} }); }, "a per-person time repeats"],
+      ["a repeated pair (one step twice, ids in another case)", (r, ids) => { r.push({ person_id: String(ids.person).toUpperCase(), workspace_id: ids.ws, step_id: ids.sA1, factor: 1.1, provenance: {} }); }, "a per-person time repeats"],
+    ];
+    for (const [what, edit, why] of cases) {
+      const c = damaged(edit);
+      expect(c.ok, what).toBe(false);
+      expect(c.errors, what).toEqual([`The backup is damaged: ${why}, so nothing was restored.`]);
+    }
+    const { b } = withFactors(true);
+    factorRows(b)[0]!.factor = "0.85";
+    expect(checkWorkspaceBundle(b).errors).toEqual([]);
+    expect(planOf(b).plan.person_capacity_factors[0]!.factor).toBe(0.85);
+    // The ends are allowed.
+    factorRows(b)[0]!.factor = 0.5;
+    factorRows(b)[1]!.factor = "2";
+    expect(checkWorkspaceBundle(b).errors).toEqual([]);
+  });
+
+  it("takes per-person times up to the limit and refuses one over, naming them", () => {
+    const L = WORKSPACE_IMPORT_LIMITS;
+    expect(L.capacityFactors).toBe(3000);
+    const { b, ids } = withFactors(true);
+    // 40 steps in the live version of Alpha, and enough people to make the times: a default each, then times on the 40 steps.
+    const alpha = b.processes.find((x) => x.id === ids.pA)!;
+    const live = (alpha.versions as Row[]).find((v) => v.live === true)!;
+    const stepIds: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const sid = id();
+      stepIds.push(sid);
+      (live.steps as Row[]).push({ id: sid, process_version_id: live.id, workspace_id: ids.ws, name: `s${i}` } as Row);
+    }
+    const people = b.company_model.people as Row[];
+    for (let i = 0; i < 120; i++) people.push({ ...people[0]!, id: id() });
+    const rows = factorRows(b);
+    rows.length = 0;
+    outer: for (const pr of people) {
+      for (const sid of [null, ...stepIds]) {
+        rows.push({ person_id: pr.id, workspace_id: ids.ws, step_id: sid, factor: 1.1, provenance: {} });
+        if (rows.length >= L.capacityFactors) break outer;
+      }
+    }
+    expect(rows).toHaveLength(L.capacityFactors);
+    const fits = checkWorkspaceBundle(recount(b));
+    expect(fits.errors).toEqual([]);
+    expect(planOf(recount(b)).summary.measures.capacityFactors).toBe(L.capacityFactors);
+    // One more: the next person's default.
+    const next = people.find((pr) => !rows.some((r) => r.person_id === pr.id))!;
+    rows.push({ person_id: next.id, workspace_id: ids.ws, step_id: null, factor: 1.1, provenance: {} });
+    const over = checkWorkspaceBundle(recount(b));
+    expect(over.ok).toBe(false);
+    expect(over.errors).toContain(`The backup has ${(L.capacityFactors + 1).toLocaleString("en-US")} per-person times; a restore takes at most ${L.capacityFactors.toLocaleString("en-US")}.`);
+    expect(restoreSizeWarning(recount(b))).toContain("per-person times; the limit is");
+  });
+
+  it("a bundle with no times plans an empty section and is otherwise a plan of the same shape as before", () => {
+    const { plan } = planOf(makeBundle().bundle);
+    expect(plan.person_capacity_factors).toEqual([]);
+    const { person_capacity_factors: _gone, ...rest } = plan;
+    expect(Object.keys(rest)).toEqual([
+      "format", "settings", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
+      "lever_settings", "analysis_rules", "clients", "sources", "processes", "scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services",
+      "client_assignments", "person_skills", "source_links", "suggestions", "proposals",
+    ]);
+    // The new key sits right after person_skills.
+    const keys = Object.keys(plan);
+    expect(keys[keys.indexOf("person_skills") + 1]).toBe("person_capacity_factors");
   });
 });

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 // Next loads this file as CommonJS (so `__dirname` is the project directory);
@@ -35,4 +36,33 @@ const nextConfig: NextConfig = {
   ],
 };
 
-export default nextConfig;
+// Source maps are made and uploaded only with all three build variables. Without a token the upload can't happen, and the SDK would
+// otherwise leave the maps it turned on (productionBrowserSourceMaps) in the public build.
+const sourceMaps = Boolean(process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT);
+
+/** Sentry (issue #44, ADR 0017): only with a DSN; source maps only with the three build variables, deleted after upload. */
+function withSentry(config: NextConfig): NextConfig {
+  // The browser's Sentry setup is injected here rather than imported by `instrumentation-client.ts` (which every build would include),
+  // so it still runs before hydration with a DSN, and without one the browser gets none of the SDK.
+  const injected = { ...config, instrumentationClientInject: [...(config.instrumentationClientInject ?? []), "./sentry.client.config.ts"] };
+  const wrapped = withSentryConfig(injected, {
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+    silent: !process.env.CI,
+    telemetry: false,
+    sourcemaps: { disable: !sourceMaps, deleteSourcemapsAfterUpload: true },
+    widenClientFileUpload: false,
+    // The list of the app's routes is for naming navigation spans; tracing is off, so the browser doesn't need it.
+    routeManifestInjection: false,
+    errorHandler: (err) => console.warn(`[sentry] source map upload failed; the build carries on: ${err.message}`),
+  });
+  // The wrapper also has Next write trace ids into every page (`clientTraceMetadata`) for continuing a trace in the browser.
+  // Tracing is off, so they would only be noise in the HTML.
+  const { clientTraceMetadata: _traceMeta, ...experimental } = wrapped.experimental ?? {};
+  void _traceMeta;
+  return { ...wrapped, experimental };
+}
+
+// `next.config.ts` can't use the `@/` alias, so it reads the variables directly (lib/monitoring/env.ts reads the same ones).
+export default process.env.NEXT_PUBLIC_SENTRY_DSN?.trim() ? withSentry(nextConfig) : nextConfig;
