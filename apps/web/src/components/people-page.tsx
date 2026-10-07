@@ -511,7 +511,7 @@ function PersonDetailBlock({ person, detail, bundle, editHref }: { person: Perso
           <ul>
             {factors.map((f) => (
               <li key={f.stepId ?? "every"}>
-                {f.stepName}: {f.factor} × normal ({factorWords(f.factor)})
+                {f.stepName}: {f.factor} × normal ({factorWords(f.factor)}){!f.entered && f.measuredItems > 0 ? ` · measured from ${f.measuredItems} visits` : ""}
               </li>
             ))}
           </ul>

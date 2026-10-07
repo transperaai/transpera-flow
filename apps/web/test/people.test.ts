@@ -192,6 +192,27 @@ describe("capacityFactorsShown", () => {
   });
 });
 
+describe("measured times (#227)", () => {
+  it("shows a measured time from 10 visits, with how many it rests on, and hides one from fewer", () => {
+    const b = larkspurBundle();
+    const [first, second] = b.steps;
+    b.workspace = { ...b.workspace, settings: { ...b.workspace.settings, capacity_factor_enabled: true } };
+    b.personCapacityFactors = [
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: first!.id, factor: 0.8, source: "measured", items: 12 },
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: second!.id, factor: 1.2, source: "measured", items: 4 },
+    ];
+    const names = new Map(b.steps.map((s) => [s.id, s.name]));
+    const all = personFactors(b, id.jess!, names);
+    expect(all.map((f) => [f.measuredItems, f.entered])).toEqual([
+      [12, false],
+      [4, false],
+    ]);
+    const shown = capacityFactorsShown(b.workspace.settings, all);
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toMatchObject({ factor: 0.8, measuredItems: 12 });
+  });
+});
+
 describe("factorWords", () => {
   it("reads a factor in words", () => {
     expect(factorWords(0.8)).toBe("20% faster");

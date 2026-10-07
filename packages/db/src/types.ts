@@ -65,6 +65,8 @@ export interface PersonCapacityFactorRow {
   step_id: string | null;
   factor: number;
   source: string;
+  /** How many visits a measured time rests on; null or absent when entered (#227). */
+  items?: number | null;
 }
 
 export interface WorkspaceRow {

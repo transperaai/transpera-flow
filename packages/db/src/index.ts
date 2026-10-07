@@ -13,6 +13,7 @@ export {
   qualifiedLeadsPerWeek,
   seasonalityCurve,
   speedsNormalisedFor,
+  hidesPay,
   toEngineModel,
   usesCapacityFactors,
   triangularRange,

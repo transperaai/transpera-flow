@@ -18,6 +18,9 @@ export function stepsFor(person: PersonDetail, data: WorkspaceSettingsData): Wor
   return stepsPersonCanDo(person.id, data.steps, data.personSkills, data.personRoles);
 }
 
+/** How many visits a measured time rests on (0 when not recorded); null when the time was entered (#227). */
+const measuredOf = (f: { source: string; items?: number | null } | undefined): number | null => (f && f.source === "measured" ? Number(f.items ?? 0) : null);
+
 /** Saves one time (the Server Action; a test stands in for it). */
 export type SaveFactor = typeof savePersonCapacityFactor;
 
@@ -27,6 +30,7 @@ function FactorField({
   stepId,
   label,
   value,
+  measured,
   now,
   onStored,
   saveFactor,
@@ -38,6 +42,8 @@ function FactorField({
   stepId: string | null;
   label: string;
   value: number | null;
+  /** The stored time was measured from a log (#227): how many visits it rests on (0 when not recorded), else null. A hand edit makes it entered. */
+  measured: number | null;
   now: number | null;
   /** The stored value changed: after a save, or when someone else's change showed up as a conflict. */
   onStored: (v: number | null) => void;
@@ -46,10 +52,17 @@ function FactorField({
   disabled: boolean;
   help: { description: string; example: string };
 }) {
+  // Editing a measured time by hand turns it `entered` (the database does that), so the line goes.
+  const [measuredNow, setMeasuredNow] = useState(measured);
   const save = async (base: number | null, next: number | null): Promise<SaveOutcome<number | null>> => {
     const outcome = await saveFactor(personId, stepId, base, next);
-    if (outcome.status === "saved") onStored(outcome.value);
-    else if (outcome.status === "conflict") onStored(outcome.theirs);
+    if (outcome.status === "saved") {
+      onStored(outcome.value);
+      setMeasuredNow(null);
+    } else if (outcome.status === "conflict") {
+      onStored(outcome.theirs);
+      setMeasuredNow(null);
+    }
     return outcome;
   };
   return (
@@ -63,7 +76,18 @@ function FactorField({
       step={0.05}
       placeholder={placeholder}
       disabled={disabled}
-      hint={now === null ? undefined : <span data-factor-words>{factorWords(now)}</span>}
+      hint={
+        now === null ? undefined : (
+          <>
+            <span data-factor-words>{factorWords(now)}</span>
+            {measuredNow !== null && (
+              <span data-factor-measured className="block text-muted-foreground">
+                {measuredNow > 0 ? `Measured from ${measuredNow} visits` : "Measured from a log"}
+              </span>
+            )}
+          </>
+        )
+      }
       help={help}
     />
   );
@@ -100,6 +124,7 @@ export function CapacityFactors({ person, data, saveFactor = savePersonCapacityF
           stepId={null}
           label="Every step"
           value={mine.find((f) => f.step_id === null)?.factor ?? null}
+          measured={measuredOf(mine.find((f) => f.step_id === null))}
           now={every}
           onStored={setOne(null)}
           saveFactor={saveFactor}
@@ -117,6 +142,7 @@ export function CapacityFactors({ person, data, saveFactor = savePersonCapacityF
             stepId={s.id}
             label={s.name}
             value={mine.find((f) => f.step_id === s.id)?.factor ?? null}
+            measured={measuredOf(mine.find((f) => f.step_id === s.id))}
             now={factorOf(s.id)}
             onStored={setOne(s.id)}
             saveFactor={saveFactor}
