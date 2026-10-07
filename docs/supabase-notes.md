@@ -436,6 +436,22 @@ On production, `authenticated` holds REFERENCES, TRIGGER and TRUNCATE on almost 
 privileges each migration grants, because Supabase's default privileges grant ALL on new tables to `anon` and
 `authenticated`. Plain Postgres in tests has no such defaults, so post-apply checks written locally expect only what the
 migration grants. The extra privileges can't be used through PostgREST (it has no TRUNCATE, and no function runs SQL a user
-supplies), so nothing is exposed today. A hardening follow-up could revoke them from both roles on every public table and
-change the default privileges; that touches every table, so it waits for Austin.
+supplies), so nothing is exposed today.
+
+**Fix (row 68, `20261224000000_revoke_unused_table_privileges`; approved by Austin on 7 Oct: "Yes, remove them"; NOT applied
+yet).** It revokes TRUNCATE, TRIGGER and REFERENCES (and MAINTAIN on Postgres 17) from `anon` and `authenticated` on every
+relation in `public`, and from the default privileges for tables `postgres` makes, so new tables get only SELECT, INSERT, UPDATE
+and DELETE from the defaults. No DML grant changes. Verified only against plain Postgres 16, in
+`packages/db/test/revoke-table-privileges.test.ts`, which first grants what Supabase's defaults would; on Supabase, check:
+- **`supabase_admin`'s default privileges** also grant ALL to both roles, but ALTER DEFAULT PRIVILEGES FOR ROLE x needs
+  membership in x, and `postgres` is not a member of `supabase_admin` on Supabase (not a superuser). The migration changes them
+  only when the applier is a member, and otherwise skips with a NOTICE. Preflight 3 shows which; expect the skip. Tables
+  `supabase_admin` makes in `public` (Supabase internals, not our migrations) still get the extra privileges; post-apply 1
+  finds them.
+- **MAINTAIN** (Postgres 17) is revoked only when `server_version_num` is 170000 or more, so the tests (Postgres 16) never run
+  that branch.
+- **Sequences** can hold only USAGE, SELECT and UPDATE, so there is nothing to revoke on them (`issues_seq_seq`, the only
+  one, keeps what it has).
+- Post-apply checks written against plain Postgres can now expect the same table privileges on Supabase as locally, for
+  tables `postgres` makes after this migration.
 
