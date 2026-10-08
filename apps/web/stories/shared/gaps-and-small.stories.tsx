@@ -77,7 +77,9 @@ export const StepBadges: StoryObj = {
   render: () => (
     <div data-process-map className="flex gap-6 p-4">
       {["a", "b", "c"].map((id) => (
-        <div key={id} data-id={id} className="react-flow__node relative w-40 rounded-lg border bg-card p-3">
+        // Inline position: React Flow's own `.react-flow__node { position: absolute }` beats the `relative` utility, which
+        // stacked the three cards on one spot (and their badges on each other).
+        <div key={id} data-id={id} className="react-flow__node w-40 rounded-lg border bg-card p-3" style={{ position: "relative" }}>
           Step {id.toUpperCase()}
         </div>
       ))}

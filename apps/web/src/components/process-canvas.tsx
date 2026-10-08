@@ -387,10 +387,12 @@ function RatingRow({ dot, label }: { dot: string; label: string }) {
 const tileClass = "relative rounded-lg shadow-token transition-[box-shadow,opacity] hover:shadow-md motion-reduce:transition-none";
 /**
  * The headline row mixes a mono value with a sans caption on one baseline, so its natural height moves by about a pixel with
- * the fonts' metrics (17 px before they load, 18 after). A fixed height keeps every tile the same size at any moment, so the
- * map frames itself (and a screenshot is cut) at the same height whether or not the fonts have arrived.
+ * the fonts' metrics (17 px before they load, 18 after). A minimum height keeps every tile the same size at any moment, so the
+ * map frames itself (and a screenshot is cut) at the same height whether or not the fonts have arrived. A minimum, not a fixed
+ * height: with a larger browser font size the value (`text-base`, in rem) is taller than 18 px, and the row must grow with it
+ * rather than spill onto the foot.
  */
-const headlineRowClass = "mt-1 flex h-[18px] min-w-0 items-baseline gap-1.5";
+const headlineRowClass = "mt-1 flex min-h-[18px] min-w-0 items-baseline gap-1.5";
 const footClass = "mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1 text-xs text-fg-2";
 
 function StepNode({ data, selected }: NodeProps<StepFlowNode>) {

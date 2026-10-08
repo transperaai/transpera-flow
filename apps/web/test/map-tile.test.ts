@@ -110,5 +110,11 @@ describe("tile contrast (AA, 4.5:1)", () => {
         expect(contrastRatio(hex(tokens, "--fg-2"), hex(tokens, `--rate-${r}-soft`))).toBeGreaterThanOrEqual(4.5);
       });
     }
+    // An unrated tile's fill, and the terminals' tones (their "Start"/"End" label and a lost end's name are --fg-2).
+    for (const fill of ["--panel", "--accent-soft", "--good-soft", "--panel-2"]) {
+      it(`--fg-2 on ${fill}, ${theme}`, () => {
+        expect(contrastRatio(hex(tokens, "--fg-2"), hex(tokens, fill))).toBeGreaterThanOrEqual(4.5);
+      });
+    }
   }
 });
