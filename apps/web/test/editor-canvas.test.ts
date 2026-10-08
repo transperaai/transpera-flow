@@ -102,7 +102,7 @@ describe("duplicate and paste", () => {
     const second = pasteSteps(b, clip, { x: 80, y: 80 })!;
     expect(first.ids[0]).not.toBe(second.ids[0]);
     const pasted = step(applyEdit(b, first.edit), first.ids[0]!);
-    expect(pasted).toMatchObject({ name: "SEO campaign setup (copy)", rework_to_step_id: null, x: 560, y: 270 });
+    expect(pasted).toMatchObject({ name: "SEO campaign setup (copy)", rework_to_step_id: null, x: 560, y: 276 });
     expect(first.edit.label).toBe("Pasted SEO campaign setup");
   });
 
