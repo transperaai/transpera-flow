@@ -11,6 +11,8 @@ import { COMPANY_ID, DISTINCTIVE_SETUP, DRAFT, FRESH_SLUG, SECRET_PEOPLE, UNKNOW
 const state = vi.hoisted(() => ({
   variant: "company map only" as FreshVariant,
   known: true,
+  /** Something is published, but the page was asked for a process that isn't one (only the calibration page asks by id). */
+  published: false,
   canEdit: true,
   setup: { roles: 0, people: 0, clients: 0, clientGroups: 0, processes: 0, published: 0, companyId: "00000000-0000-4000-8000-0000000000c1" as string | null },
   notFound: 0,
@@ -44,7 +46,7 @@ vi.mock("@/lib/data", async () => {
     loadProcessForEditing: async () => null,
     loadWorkspaceHead: async () => (state.known ? fixture.freshHead : null),
     loadWorkspaceOverview: async () => (state.known ? fixture.freshOverview(state.variant) : null),
-    loadPublishState: async () => (state.known ? fixture.freshPublishState(state.variant) : null),
+    loadPublishState: async () => (state.known ? { ...fixture.freshPublishState(state.variant), published: state.published } : null),
     loadCompanyId: async () => (state.known ? fixture.COMPANY_ID : null),
     loadWorkspaceSetup: async () => state.setup,
     loadWorkspaceLiveRevisionIds: async () => ({}),
@@ -66,7 +68,10 @@ async function resolve(node: ReactNode): Promise<ReactNode> {
   if (!isValidElement(node)) return node;
   const { type, props: p } = node as ReactElement<{ children?: ReactNode }>;
   if (typeof type === "function" && type.constructor.name === "AsyncFunction") return resolve(await (type as (p: unknown) => Promise<ReactNode>)(p));
-  return p.children === undefined ? node : cloneElement(node as ReactElement<{ children?: ReactNode }>, undefined, await resolve(p.children));
+  if (p.children === undefined) return node;
+  const children = await resolve(p.children);
+  // Spread, as JSX passes several children, so React doesn't warn about keys on a list it was never given.
+  return cloneElement(node as ReactElement<{ children?: ReactNode }>, undefined, ...(Array.isArray(p.children) ? (children as ReactNode[]) : [children]));
 }
 const html = async (page: Page, p: unknown = props()) => renderToStaticMarkup((await resolve(await page(p as never))) as ReactElement);
 
@@ -90,6 +95,7 @@ const USERS: [string, boolean][] = [
 beforeEach(() => {
   state.variant = "company map only";
   state.known = true;
+  state.published = false;
   state.canEdit = true;
   state.setup = { ...ZERO_SETUP };
   state.notFound = 0;
@@ -165,6 +171,13 @@ describe("Historical data with nothing published", () => {
     const out = await html((await import("@/app/w/[slug]/settings/calibration/page")).default as Page);
     expect(out).toContain("Calibrating compares a stage history, deals or time logs with a published process.");
     expect(out).toContain("Historical data");
+  });
+
+  it("still answers 404 for a ?process= that names no process once something is published", async () => {
+    state.published = true;
+    const page = (await import("@/app/w/[slug]/settings/calibration/page")).default as Page;
+    await expect(html(page, props(FRESH_SLUG, { process: UNKNOWN_ID }))).rejects.toThrow("NOT_FOUND");
+    expect(state.notFound).toBe(1);
   });
 });
 

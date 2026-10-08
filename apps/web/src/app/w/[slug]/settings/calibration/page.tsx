@@ -12,7 +12,7 @@ import { OtherImportsPanel } from "@/components/calibration/other-imports-panel"
 import { loadCalibrationPage } from "@/lib/calibration/data";
 import { loadClientCalibration } from "@/lib/calibration/client-data";
 import { loadImports, loadLeadSourceOptions } from "@/lib/calibration/import-data";
-import { loadPublishState, loadWorkspaceHead } from "@/lib/data";
+import { loadPublishState } from "@/lib/data";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
@@ -25,17 +25,17 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
   const { slug } = await props.params;
   const { process } = await props.searchParams;
   const [data, clientData] = await Promise.all([loadCalibrationPage(slug, typeof process === "string" ? process : undefined), loadClientCalibration(slug)]);
-  const head = data ? null : await loadWorkspaceHead(slug);
-  if (!data && !head) notFound();
-  const workspaceId = data ? data.workspaceId : head!.id;
-  const [canEdit, imports, leadSources, state] = await Promise.all([
+  // No process to calibrate: a 404 unless that is because nothing is published yet (a new client). With something published, a
+  // `?process=` that names no process of the workspace is still a 404, as it always was.
+  const state = data ? null : await loadPublishState(slug);
+  if (!data && (!state || state.published)) notFound();
+  const workspaceId = data ? data.workspaceId : state!.workspace.id;
+  const [canEdit, imports, leadSources] = await Promise.all([
     canEditWorkspace(workspaceId),
     loadImports(workspaceId),
-    // Nothing is published (a new client): the leads and invoices checks and the Imports card are workspace-wide and still work.
+    // Nothing is published: the leads and invoices checks and the Imports card are workspace-wide and still work.
     data ? Promise.resolve(data.stored.leadSources.map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }))) : loadLeadSourceOptions(workspaceId),
-    data ? null : loadPublishState(slug),
   ]);
-  if (!data && !state) notFound();
   const mode = canEdit ? "live" : "readonly";
   return (
     <Page
