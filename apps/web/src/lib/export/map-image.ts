@@ -9,7 +9,7 @@
 import { childrenOf, isGroup, type EdgeRow, type StepRow } from "@transpera-flow/db";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { formatHours } from "@/lib/format";
-import { CARD_SIZE, GROUP_CARD, GROUP_PADDING, TERMINAL_SIZE, openGroupSize, type Size } from "@/lib/map/groups";
+import { CARD_SIZE, GROUP_CARD, TERMINAL_SIZE, openGroupSize, type Size } from "@/lib/map/groups";
 import { LEGEND_ORDER } from "@/lib/map/rating";
 
 export interface MapPalette {
