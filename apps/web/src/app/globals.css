@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "../styles/tokens.css";
 @import "@xyflow/react/dist/base.css";
+@import "../styles/react-flow.css";
 
 /* shadcn's `dark:` classes follow the same scheme as tokens.css: the OS, unless data-theme says otherwise. */
 @custom-variant dark {
