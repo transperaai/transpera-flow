@@ -1,0 +1,252 @@
+--- a/apps/web/src/components/process-canvas.tsx
++++ b/apps/web/src/components/process-canvas.tsx
+@@ -575,7 +575,6 @@
+ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
+   const { id, data, selected, markerEnd, style } = props;
+   const { editor, handoffs } = useContext(CanvasContext);
+-  const zoom = useStore((s) => s.transform[2]);
+   const [path, labelX, labelY] = getSmoothStepPath(props);
+   const p = data?.probability ?? 1;
+   const tag = data?.tag ?? null;
+@@ -606,17 +605,9 @@
+         </EdgeLabelRenderer>
+         {editing && (
+           <EdgeLabelRenderer>
+-            <div
+-              className="nodrag nopan absolute"
+-              style={{
+-                transform: `translate(${labelX}px, ${labelY + 14}px) scale(${1 / zoom}) translate(-50%, 0)`,
+-                transformOrigin: "0 0",
+-                zIndex: 1002,
+-                pointerEvents: "all",
+-              }}
+-            >
++            <Unscaled x={labelX} y={labelY + 14} after="translate(-50%, 0)">
+               {handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />}
+-            </div>
++            </Unscaled>
+           </EdgeLabelRenderer>
+         )}
+       </>
+@@ -627,31 +618,49 @@
+       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={18} />
+       {(editing || text) && (
+         <EdgeLabelRenderer>
+-          <div
+-            className="nodrag nopan absolute"
+-            style={{
+-              // The editor stays readable at any zoom and sits above the nodes.
+-              // Read-only, the label sits just above the line at its start, in the gap beside the card, not on one at the middle of a short link.
+-              transform: editing
+-                ? `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, -50%)`
+-                : `translate(${props.sourceX + 4}px, ${props.sourceY - 2}px) translate(0, -100%)`,
+-              transformOrigin: "0 0",
+-              zIndex: editing ? 1002 : undefined,
+-              pointerEvents: "all",
+-            }}
+-          >
+-            {editing ? (
+-              handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />
+-            ) : (
++          {editing ? (
++            <Unscaled x={labelX} y={labelY} after="translate(-50%, -50%)">
++              {handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />}
++            </Unscaled>
++          ) : (
++            <div
++              className="nodrag nopan absolute"
++              style={{ transform: `translate(${props.sourceX + 4}px, ${props.sourceY - 2}px) translate(0, -100%)`, transformOrigin: "0 0", pointerEvents: "all" }}
++            >
+               <span title={text} className={`block truncate rounded-token bg-panel px-1 text-[11px] text-fg-2 ${handoffs ? "max-w-[9rem] font-sans" : "max-w-[5.5rem] font-mono tabular-nums"}`}>{text}</span>
+-            )}
+-          </div>
++            </div>
++          )}
+         </EdgeLabelRenderer>
+       )}
+     </>
+   );
+ }
+ 
++/** An edge editor that stays readable at any zoom: only it follows the zoom, not every edge. */
++function Unscaled({ x, y, after, children }: { x: number; y: number; after: string; children: ReactNode }) {
++  const zoom = useStore((s) => s.transform[2]);
++  return (
++    <div className="nodrag nopan absolute" style={{ transform: `translate(${x}px, ${y}px) scale(${1 / zoom}) ${after}`, transformOrigin: "0 0", zIndex: 1002, pointerEvents: "all" }}>
++      {children}
++    </div>
++  );
++}
++
++/** The zoom buttons, which alone follow the zoom. */
++function LiveZoomControls({ onOut, onFit, onIn }: { onOut: () => void; onFit: () => void; onIn: () => void }) {
++  const zoom = useStore((st) => st.transform[2]);
++  return <ZoomControls zoom={zoom} onOut={onOut} onFit={onFit} onIn={onIn} canOut={zoom > MIN_ZOOM + 0.001} canIn={zoom < MAX_ZOOM - 0.001} />;
++}
++
++/** A function that keeps its identity across renders and always calls the latest `fn`. */
++function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
++  const ref = useRef(fn);
++  useEffect(() => {
++    ref.current = fn;
++  });
++  return useCallback((...args: A) => ref.current(...args), []);
++}
++
+ /** A handoff line's label and removal, on the company map: no share or tag, the lines are pictures. */
+ function HandoffEditor({ editor, edgeId, label }: { editor: ProcessEditor; edgeId: string; label: string | null }) {
+   const [text, setText] = useState(label ?? "");
+@@ -1524,7 +1533,6 @@
+   // maps) the panel changing size. Adding a step, opening a group by hand or a highlight never moves the view.
+   const width = useStore((st) => st.width);
+   const height = useStore((st) => st.height);
+-  const zoom = useStore((st) => st.transform[2]);
+   const heightMode = heightProp ?? (editable ? "fill" : "auto");
+   const handZoomed = useRef(false);
+   const framed = useRef(false);
+@@ -1601,12 +1609,15 @@
+   }, [refitKey]);
+   const zoomBy = (direction: "in" | "out") => {
+     handZoomed.current = true;
+-    void flow.zoomTo(stepZoom(zoom, direction), { duration: 150 });
++    void flow.zoomTo(stepZoom(flow.getZoom(), direction), { duration: 150 });
+   };
+   const fitByHand = () => {
+     handZoomed.current = false;
+     fit(true);
+   };
++  const zoomOut = useStable(() => zoomBy("out"));
++  const zoomIn = useStable(() => zoomBy("in"));
++  const fitStable = useStable(fitByHand);
+ 
+   // Highlighted steps scroll into view when they are off screen.
+   useEffect(() => {
+@@ -1643,6 +1654,50 @@
+     if (id) focusStep(id);
+   };
+ 
++  // Stable handlers: React Flow copies each prop into its store on every render, and a new function wakes every subscriber.
++  const onNodesChangeStable = useStable(onNodesChange);
++  const onEdgesChangeStable = useStable(onEdgesChange);
++  const isValidConnectionStable = useStable((c) => !connectionProblem(bundle, c.source, c.target));
++  const onNodeDoubleClickStable = useStable((e, node) => {
++              if (!(e.target instanceof Element) || e.target.closest("input, select, .nokey")) return;
++              const field = e.target.closest("[data-field]")?.getAttribute("data-field") as InlineField | null;
++              startEditing(node.id, field ?? "name");
++            });
++  const onNodeContextMenuStable = useStable((e, node) => {
++              if (!editable) return;
++              e.preventDefault();
++              if (menuFor.current === node.id) return;
++              const rect = wrapper.current!.getBoundingClientRect();
++              // A context-menu key press arrives without a pointer position.
++              if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof Element) openMenuBelow(e.currentTarget, node.id);
++              else openMenu(node.id, e.clientX - rect.left, e.clientY - rect.top);
++            });
++  const onSelectionContextMenuStable = useStable((e, picked) => {
++              if (!editable || !picked.length) return;
++              e.preventDefault();
++              const rect = wrapper.current!.getBoundingClientRect();
++              openMenu(
++                picked[0]!.id,
++                e.clientX - rect.left,
++                e.clientY - rect.top,
++                picked.map((n) => n.id),
++              );
++            });
++  const onMoveStartStable = useStable((event) => {
++              // A drag, the wheel or a pinch moves the view by hand; the map stops following its panel.
++              if (event) handZoomed.current = true;
++              if (menuFor.current) closeMenu(false);
++            });
++  const onNodeClickStable = useStable((e, node) => {
++              // The group toggle and the issue badge are buttons of their own.
++              if (e.target instanceof Element && e.target.closest("button")) return;
++              if (!node.id.startsWith("ghost:")) onStepClick?.(node.id);
++              if (!editable && stepDetail) setDetailId(node.id);
++            });
++  const onPaneClickStable = useStable(() => setDetailId(null));
++  const onConnectStable = useStable(onConnect);
++  const onReconnectStable = useStable((old: BranchFlowEdge, c: Connection) => editor?.run((b) => reconnectEdge(b, old.id, c.source, c.target)));
++
+   return (
+     <CanvasContext.Provider value={canvasContext}>
+       <InlineEditContext.Provider value={inline}>
+@@ -1666,7 +1721,7 @@
+                 </div>
+               )}
+               {zoomControls && (
+-                <ZoomControls zoom={zoom} onOut={() => zoomBy("out")} onFit={fitByHand} onIn={() => zoomBy("in")} canOut={zoom > MIN_ZOOM + 0.001} canIn={zoom < MAX_ZOOM - 0.001} />
++                <LiveZoomControls onOut={zoomOut} onFit={fitStable} onIn={zoomIn} />
+               )}
+               {legend && <MapLegend badge={!!openIssues} />}
+               {(overflow.left || overflow.right) && (
+@@ -1730,36 +1785,14 @@
+             edges={edges}
+             nodeTypes={nodeTypes}
+             edgeTypes={edgeTypes}
+-            onNodesChange={onNodesChange}
+-            onEdgesChange={onEdgesChange}
+-            onConnect={editable ? onConnect : undefined}
+-            isValidConnection={(c) => !connectionProblem(bundle, c.source, c.target)}
+-            onReconnect={editable ? (old, c) => editor.run((b) => reconnectEdge(b, old.id, c.source, c.target)) : undefined}
+-            onNodeDoubleClick={(e, node) => {
+-              if (!(e.target instanceof Element) || e.target.closest("input, select, .nokey")) return;
+-              const field = e.target.closest("[data-field]")?.getAttribute("data-field") as InlineField | null;
+-              startEditing(node.id, field ?? "name");
+-            }}
+-            onNodeContextMenu={(e, node) => {
+-              if (!editable) return;
+-              e.preventDefault();
+-              if (menuFor.current === node.id) return;
+-              const rect = wrapper.current!.getBoundingClientRect();
+-              // A context-menu key press arrives without a pointer position.
+-              if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof Element) openMenuBelow(e.currentTarget, node.id);
+-              else openMenu(node.id, e.clientX - rect.left, e.clientY - rect.top);
+-            }}
+-            onSelectionContextMenu={(e, picked) => {
+-              if (!editable || !picked.length) return;
+-              e.preventDefault();
+-              const rect = wrapper.current!.getBoundingClientRect();
+-              openMenu(
+-                picked[0]!.id,
+-                e.clientX - rect.left,
+-                e.clientY - rect.top,
+-                picked.map((n) => n.id),
+-              );
+-            }}
++            onNodesChange={onNodesChangeStable}
++            onEdgesChange={onEdgesChangeStable}
++            onConnect={editable ? onConnectStable : undefined}
++            isValidConnection={isValidConnectionStable}
++            onReconnect={editable ? onReconnectStable : undefined}
++            onNodeDoubleClick={onNodeDoubleClickStable}
++            onNodeContextMenu={onNodeContextMenuStable}
++            onSelectionContextMenu={onSelectionContextMenuStable}
+             edgesReconnectable={editable}
+             nodesDraggable={editable}
+             nodesConnectable={editable}
+@@ -1773,20 +1806,11 @@
+             selectionMode={SelectionMode.Partial}
+             zoomOnDoubleClick={false}
+             // The menu belongs where it was opened; moving the map closes it.
+-            onMoveStart={(event) => {
+-              // A drag, the wheel or a pinch moves the view by hand; the map stops following its panel.
+-              if (event) handZoomed.current = true;
+-              if (menuFor.current) closeMenu(false);
+-            }}
++            onMoveStart={onMoveStartStable}
+             onMoveEnd={measureOverflow}
+             ariaLabelConfig={editable ? EDIT_ARIA : READ_ARIA}
+-            onNodeClick={(e, node) => {
+-              // The group toggle and the issue badge are buttons of their own.
+-              if (e.target instanceof Element && e.target.closest("button")) return;
+-              if (!node.id.startsWith("ghost:")) onStepClick?.(node.id);
+-              if (!editable && stepDetail) setDetailId(node.id);
+-            }}
+-            onPaneClick={() => setDetailId(null)}
++            onNodeClick={onNodeClickStable}
++            onPaneClick={onPaneClickStable}
+             // A read-only map sits in a page that scrolls: the wheel scrolls the page, and the map is dragged or zoomed with its buttons.
+             zoomOnScroll={editable}
+             preventScrolling={editable}
