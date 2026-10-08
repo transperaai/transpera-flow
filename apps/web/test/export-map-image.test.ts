@@ -28,7 +28,7 @@ describe("map image", () => {
     const first = bundle.steps.find((s) => s.kind === "task")!;
     const { svg } = buildMapImage({ ...base, rating: (id) => (id === first.id ? "risk" : null), issues: { [first.id]: 3 } });
     expect(svg).toContain(`data-step="${first.id}" data-rating="risk"`);
-    expect(svg).toMatch(/>3<\/text>/);
+    expect(svg).toContain(">3 issues</text>");
     expect((svg.match(/data-rating=/g) ?? []).length).toBe(1);
   });
 
@@ -39,7 +39,8 @@ describe("map image", () => {
     const input = { ...base, steps, edges: [], rating: (id: string) => (id === "a" ? ("bad" as const) : id === "b" ? ("risk" as const) : null), issues: { a: 1, b: 2 } };
     const closed = buildMapImage(input).svg;
     expect(closed).toContain('data-step="g1" data-rating="risk"');
-    expect(closed).toMatch(/>3<\/text>/);
+    expect(closed).toContain(">3 issues</text>");
+    expect(closed).toContain('stroke-dasharray="6 4"');
     const open = buildMapImage({ ...input, expanded: new Set(["g1"]) }).svg;
     expect(open).not.toContain('data-step="g1"');
     expect(open).toContain('data-step="a" data-rating="bad"');
@@ -95,19 +96,66 @@ describe("map image", () => {
     expect(buildMapImage({ ...base, steps: [a!, b!], edges: [edge] }).svg).toContain("40%");
   });
 
-  it("sizes start and end pills to their text and keeps whole line labels", () => {
+  it("sizes start and end tiles to their text (96 to 150 px), wraps a long name to two lines and keeps whole line labels", () => {
     const start: StepRow = { ...bundle.steps[0]!, id: "st", kind: "start", name: "A customer enquiry arrives by phone", x: 0, y: 0, parent_step_id: null };
+    const medium: StepRow = { ...start, id: "md", name: "Lead arrives" };
+    const short: StepRow = { ...start, id: "sh", name: "Go" };
     const task: StepRow = { ...bundle.steps[1]!, id: "tk", kind: "task", name: "T", x: 400, y: 0, parent_step_id: null };
     const edge = { ...bundle.edges[0]!, from_step_id: "st", to_step_id: "tk", label: "Signed contract and first payment received", probability: 1, condition_tag: null };
     const { svg } = buildMapImage({ ...base, steps: [start, task], edges: [edge], handoffs: true });
-    expect(svg).toContain("A customer enquiry arrives by phone");
-    const w = Number(/data-step="st"><rect[^>]* width="(\d+)"/.exec(svg)![1]);
-    expect(w).toBeGreaterThan(96);
-    expect(w).toBeGreaterThanOrEqual("A customer enquiry arrives by phone".length * 8);
+    // Two lines of the whole name, in a 150 px wide, 62 px tall tile.
+    expect(svg).toContain(">A customer enquiry</text>");
+    expect(svg).toContain(">arrives by phone</text>");
+    expect(/data-step="st"><rect[^>]* width="150" height="62"/.test(svg)).toBe(true);
+    const sized = (step: StepRow) => /data-step="[^"]*"><rect[^>]* width="(\d+)" height="(\d+)"/.exec(buildMapImage({ ...base, steps: [step], edges: [] }).svg)!.slice(1).map(Number);
+    expect(sized(short)).toEqual([96, 46]);
+    const [mw, mh] = sized(medium);
+    expect(mw).toBeGreaterThan(96);
+    expect(mw).toBeLessThan(150);
+    expect(mh).toBe(46);
     // The label is wrapped, not cut: every word is there and there is no ellipsis.
     const label = [...svg.matchAll(/<tspan[^>]*>([^<]*)<\/tspan>/g)].map((m) => m[1]).join(" ");
     expect(label).toBe("Signed contract and first payment received");
     expect(label).not.toContain("…");
+  });
+
+  describe("rating tiles", () => {
+    const [task, decision] = [bundle.steps.find((s) => s.kind === "task" && s.role_id)!, bundle.steps.find((s) => s.kind === "decision")!];
+    const text = (svg: string) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+
+    it("says the rating in words on a rated map, and 'NOTHING TO FIX' only when a rating callback is given", () => {
+      const rated = buildMapImage({ ...base, rating: (id) => (id === task.id ? "bad" : null) }).svg;
+      expect(text(rated)).toContain(RATING_LABELS.bad.toUpperCase());
+      expect(text(rated)).toContain("NOTHING TO FIX");
+      const plain = buildMapImage(base).svg;
+      expect(text(plain)).not.toContain("NOTHING TO FIX");
+      for (const label of Object.values(RATING_LABELS)) expect(text(plain)).not.toContain(label.toUpperCase());
+    });
+
+    it("fills and edges a tile in its rating, with no left stripe, and shows work for a staffed step and wait for one without", () => {
+      const { svg } = buildMapImage({ ...base, rating: (id) => (id === task.id ? "good" : null) });
+      const card = new RegExp(`<g data-step="${task.id}" data-rating="good"><rect [^>]*rx="12" fill="#faf3d9" stroke="#c9a227" stroke-width="1.5"/>`);
+      expect(svg).toMatch(card);
+      expect(svg).not.toMatch(/width="5" height="\d+" rx="2.5"/);
+      expect(text(svg)).toContain(`${Number(task.work_hours)} h work`);
+      expect(text(svg)).toContain(`${Number(decision.wait_hours)} h wait`);
+    });
+
+    it("draws START and END on terminals and 'N issues' as a pill in the destructive colour", () => {
+      const { svg } = buildMapImage({ ...base, issues: { [task.id]: 1 } });
+      expect(text(svg)).toContain("START");
+      expect(text(svg)).toContain("END");
+      expect(svg).toMatch(/rx="9" fill="#c93534" stroke="#ffffff" stroke-width="2"\/><text [^>]*fill="#ffffff">1 issue<\/text>/);
+      expect(buildMapImage({ ...base, issues: { [task.id]: 120 } }).svg).toContain(">99+ issues</text>");
+    });
+
+    it("says 'Worst inside' on a closed group", () => {
+      const group: StepRow = { ...bundle.steps[0]!, id: "g1", name: "G", kind: "group", x: 0, y: 0, parent_step_id: null };
+      const kid: StepRow = { ...bundle.steps[1]!, id: "a", kind: "task", parent_step_id: "g1", x: 24, y: 60 };
+      const { svg } = buildMapImage({ ...base, steps: [group, kid], edges: [], rating: (id) => (id === "a" ? "great" : null) });
+      expect(text(svg)).toContain("WORST INSIDE: GREAT");
+      expect(buildMapImage({ ...base, steps: [group, kid], edges: [], rating: () => null }).svg).toContain(">NOTHING TO FIX</text>");
+    });
   });
 
   it("copes with an empty map", () => {

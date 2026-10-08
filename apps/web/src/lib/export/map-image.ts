@@ -22,6 +22,9 @@ export interface MapPalette {
   fg2: string;
   fg3: string;
   crit: string;
+  /** Fill of an "N issues" pill, and the text on it. */
+  destructive: string;
+  critFg: string;
   rate: Record<Rating, { stripe: string; soft: string }>;
 }
 
@@ -36,6 +39,8 @@ export const LIGHT_PALETTE: MapPalette = {
   fg2: "#525252",
   fg3: "#6f6f6f",
   crit: "#e34948",
+  destructive: "#c93534",
+  critFg: "#ffffff",
   rate: {
     great: { stripe: "#2f9e60", soft: "#e6f4ec" },
     good: { stripe: "#c9a227", soft: "#faf3d9" },
@@ -116,9 +121,14 @@ export function wrapText(text: string, chars: number, max: number): string[] {
   return lines;
 }
 
-/** A start or end pill is as wide as its text needs (never narrower than the canvas's), so a long name isn't cut. */
+/** One line of at most `chars` characters, the last one an ellipsis when it was cut. */
+const clip = (text: string, chars: number): string => (text.length > chars ? `${text.slice(0, chars - 1)}…` : text);
+
+/** A start or end tile is as wide as its name needs (96 to 150 px, as on the canvas) and wraps a long name to two lines. */
 const terminalText = (s: StepRow): string => (s.name || (s.kind === "start" ? "Start" : "End")).slice(0, 40);
-const pillWidth = (s: StepRow): number => Math.max(TERMINAL_SIZE.width, Math.ceil(terminalText(s).length * 8 + 32));
+const terminalWidth = (s: StepRow): number => Math.min(150, Math.max(TERMINAL_SIZE.width, Math.ceil(terminalText(s).length * 7.5 + 24)));
+const terminalLines = (s: StepRow): string[] => wrapText(terminalText(s), Math.floor((terminalWidth(s) - 24) / 7), 2);
+const terminalSize = (s: StepRow): Size => ({ width: terminalWidth(s), height: terminalLines(s).length > 1 ? TERMINAL_SIZE.height + 16 : TERMINAL_SIZE.height });
 
 interface Box {
   step: StepRow;
@@ -155,7 +165,7 @@ function layout(steps: readonly StepRow[], expanded: ReadonlySet<string> | "all"
       for (const k of kids.get(s.id) ?? []) place(k, x, y, depth + 1, open ? null : box, next);
       return;
     }
-    const size = s.kind === "start" || s.kind === "end" ? { ...TERMINAL_SIZE, width: pillWidth(s) } : CARD_SIZE;
+    const size = s.kind === "start" || s.kind === "end" ? terminalSize(s) : CARD_SIZE;
     const box: Box = { step: s, x, y, w: size.width, h: size.height, open: false, depth };
     boxes.push(box);
     at.set(s.id, box);
@@ -273,32 +283,47 @@ export function buildMapImage(input: MapImageInput): MapImage {
     const ids = isGroup(s) ? [s.id, ...descendants(kids, s.id)] : [s.id];
     const rated = ids.map((id) => input.rating?.(id) ?? null).reduce<Rating | null>((worst, r) => (r && (!worst || rank(r) > rank(worst)) ? r : worst), null);
     const count = ids.reduce((n, id) => n + (input.issues?.[id] ?? 0), 0);
+    const hasRatings = input.rating !== undefined;
     if (s.kind === "start" || s.kind === "end") {
-      out.push(`<g data-step="${esc(s.id)}"><rect x="${x}" y="${y}" width="${b.w}" height="${b.h}" rx="${b.h / 2}" fill="${p.panel2}" stroke="${p.line2}"/>`);
-      out.push(`<text x="${x + b.w / 2}" y="${y + b.h / 2 + 4.5}" font-size="13" font-weight="600" text-anchor="middle" fill="${p.fg}">${esc(terminalText(s))}</text></g>`);
+      out.push(`<g data-step="${esc(s.id)}"><rect x="${x}" y="${y}" width="${b.w}" height="${b.h}" rx="12" fill="${p.panel2}" stroke="${p.line2}" stroke-width="1.5"/>`);
+      out.push(`<text x="${x + 12}" y="${y + 16}" font-size="10.5" font-weight="600" letter-spacing="0.6" fill="${p.fg2}">${s.kind === "start" ? "START" : "END"}</text>`);
+      terminalLines(s).forEach((l, i) => out.push(`<text x="${x + 12}" y="${y + 32 + i * 16}" font-size="13" font-weight="600" fill="${p.fg}">${esc(l)}</text>`));
+      out.push("</g>");
       continue;
     }
     const closedGroup = isGroup(s);
     const fill = rated ? p.rate[rated].soft : p.panel;
-    out.push(`<g data-step="${esc(s.id)}"${rated ? ` data-rating="${rated}"` : ""}>`);
-    out.push(`<rect x="${x}" y="${y}" width="${b.w}" height="${b.h}" rx="8" fill="${fill}" stroke="${p.line2}"/>`);
-    if (rated) out.push(`<rect x="${x}" y="${y + 4}" width="5" height="${b.h - 8}" rx="2.5" fill="${p.rate[rated].stripe}"/>`);
-    const tx = x + 16;
+    const stroke = rated ? p.rate[rated].stripe : p.line2;
+    out.push(`<g data-step="${esc(s.id)}"${rated ? ` data-rating="${rated}"` : ""}${closedGroup ? ' data-group="closed"' : ""}>`);
+    out.push(
+      `<rect x="${x}" y="${y}" width="${b.w}" height="${b.h}" rx="12" fill="${fill}" stroke="${stroke}" stroke-width="${closedGroup ? 2 : 1.5}"${closedGroup ? ' stroke-dasharray="6 4"' : ""}/>`,
+    );
+    if (hasRatings) {
+      const label = rated ? (closedGroup ? `Worst inside: ${RATING_LABELS[rated]}` : RATING_LABELS[rated]) : "Nothing to fix";
+      out.push(`<circle cx="${x + 14}" cy="${y + 15}" r="4" fill="${stroke}"/>`);
+      out.push(`<text x="${x + 23}" y="${y + 19}" font-size="10.5" font-weight="600" letter-spacing="0.6" fill="${p.fg2}">${esc(clip(label.toUpperCase(), 21))}</text>`);
+    }
+    const tx = x + 12;
     const nameLines = wrapText(s.name, 20, 2);
-    nameLines.forEach((l, i) => out.push(`<text x="${tx}" y="${y + 24 + i * 16}" font-size="13.5" font-weight="700" fill="${p.fg}">${esc(l)}</text>`));
-    const below = y + 24 + (nameLines.length - 1) * 16;
+    nameLines.forEach((l, i) => out.push(`<text x="${tx}" y="${y + (hasRatings ? 37 : 24) + i * 16}" font-size="13.5" font-weight="700" fill="${p.fg}">${esc(l)}</text>`));
+    out.push(`<line x1="${x + 10}" y1="${y + b.h - 25}" x2="${x + b.w - 10}" y2="${y + b.h - 25}" stroke="${p.line2}"/>`);
     if (closedGroup) {
       const n = stepsInside(kids, s.id);
-      out.push(`<text x="${tx}" y="${below + 20}" font-size="12" fill="${p.fg2}">${n} ${n === 1 ? "step" : "steps"} inside</text>`);
+      out.push(`<text x="${tx}" y="${y + b.h - 9}" font-size="11.5" fill="${p.fg2}">${n} ${n === 1 ? "step" : "steps"} inside</text>`);
     } else {
       const who = input.who?.(s) ?? (s.kind === "decision" ? "Decision" : s.kind === "wait" ? "Wait" : null);
-      if (who) out.push(`<text x="${tx}" y="${below + 19}" font-size="12" fill="${p.fg2}">${esc(wrapText(who, 26, 1)[0] ?? "")}</text>`);
-      const work = Number(s.work_hours) ? `${formatHours(Number(s.work_hours))} work` : "";
-      const wait = Number(s.wait_hours) ? `${formatHours(Number(s.wait_hours))} wait` : "";
-      if (work || wait) out.push(`<text x="${tx}" y="${y + b.h - 10}" font-size="11.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="${p.fg2}">${esc([work, wait].filter(Boolean).join("  "))}</text>`);
+      if (who) out.push(`<text x="${tx}" y="${y + b.h - 9}" font-size="11.5" fill="${p.fg2}">${esc(wrapText(who, 18, 1)[0] ?? "")}</text>`);
+      const staffed = Boolean(s.role_id || s.person_id);
+      const hours = Number(staffed ? s.work_hours : s.wait_hours);
+      const right = hours ? `${formatHours(hours)} ${staffed ? "work" : "wait"}` : "—";
+      out.push(`<text x="${x + b.w - 12}" y="${y + b.h - 9}" font-size="11.5" text-anchor="end" font-family="ui-monospace, Menlo, Consolas, monospace" fill="${p.fg2}">${esc(right)}</text>`);
     }
     if (count > 0) {
-      out.push(`<circle cx="${x + b.w}" cy="${y}" r="10" fill="${p.crit}"/><text x="${x + b.w}" y="${y + 4}" font-size="11" font-weight="700" text-anchor="middle" fill="#ffffff">${count > 99 ? "99+" : count}</text>`);
+      const text = `${count > 99 ? "99+" : count} ${count === 1 ? "issue" : "issues"}`;
+      const pw = Math.round(16 + text.length * 6.4);
+      const px = x + b.w - 10 - pw;
+      out.push(`<rect x="${px}" y="${y - 9}" width="${pw}" height="18" rx="9" fill="${p.destructive}" stroke="${p.panel}" stroke-width="2"/>`);
+      out.push(`<text x="${px + pw / 2}" y="${y + 4}" font-size="11" font-weight="700" text-anchor="middle" fill="${p.critFg}">${text}</text>`);
     }
     out.push("</g>");
   }
@@ -316,7 +341,7 @@ export function buildMapImage(input: MapImageInput): MapImage {
   };
   for (const r of LEGEND_ORDER) item(p.rate[r].stripe, RATING_LABELS[r], false);
   item(p.line2, "Nothing to fix", false);
-  item(p.crit, "Confirmed issues", true);
+  item(p.destructive, "Confirmed issues", true);
   out.push(`<text x="${PAD}" y="${ly + 34}" font-size="11" fill="${p.fg3}">${esc(FOOTER(input.date))}</text>`);
   out.push("</svg>");
   return { svg: out.join(""), width, height };
@@ -338,6 +363,8 @@ const TOKENS = {
   fg2: "--fg-2",
   fg3: "--fg-3",
   crit: "--crit",
+  destructive: "--destructive",
+  critFg: "--crit-fg",
 } as const;
 
 /** The page's colours now (light or dark), resolved to values an image can use. Browser only. */
