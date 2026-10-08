@@ -8,7 +8,7 @@
 // out of the way here. Pure: the same processes, stored map and open groups always give the same map.
 
 import { defaultCompanyPart, isGroup, type EdgeRow, type ProcessBundle, type ProcessPart, type StepRow } from "@transpera-flow/db";
-import { GROUP_CARD, GROUP_PADDING, openGroupSize, type Size } from "@/lib/map/groups";
+import { CARD_SIZE, GROUP_CARD, GROUP_PADDING, openGroupSize, type Size } from "@/lib/map/groups";
 
 /** Space between cards, side to side and top to bottom. */
 const GAP_X = 96;
@@ -111,7 +111,7 @@ function inside(part: ProcessPart, byProcess: ReadonlyMap<string, ProcessPart>, 
 /** Opening a group inside a process makes it bigger: what is to its right moves right, what is below it moves down. */
 function makeRoom(steps: StepRow[], groupId: string | null, expanded: ReadonlySet<string>, all: readonly StepRow[]): void {
   const kids = steps.filter((s) => (s.parent_step_id ?? null) === groupId);
-  const sizeOf = (s: StepRow): Size => (isGroup(s) && expanded.has(s.id) ? openGroupSize(all, s.id, expanded) : isGroup(s) ? GROUP_CARD : { width: 192, height: 92 });
+  const sizeOf = (s: StepRow): Size => (isGroup(s) && expanded.has(s.id) ? openGroupSize(all, s.id, expanded) : isGroup(s) ? GROUP_CARD : CARD_SIZE);
   const opened = kids.filter((s) => isGroup(s) && expanded.has(s.id)).sort((a, b) => Number(a.x) - Number(b.x) || Number(a.y) - Number(b.y));
   for (const g of opened) {
     const grown = sizeOf(g);
@@ -157,7 +157,7 @@ export function companyMap(base: ProcessBundle, parts: readonly ProcessPart[], e
     const parent = part.process.parent_process_id!;
     if (!placed.has(parent)) continue;
     const siblings = out.steps.filter((s) => s.parent_step_id === parent);
-    const right = Math.max(GROUP_PADDING.left, ...siblings.map((s) => Number(s.x) + (isGroup(s) ? GROUP_CARD.width : 192) + 40));
+    const right = Math.max(GROUP_PADDING.left, ...siblings.map((s) => Number(s.x) + (isGroup(s) ? GROUP_CARD.width : CARD_SIZE.width) + 40));
     out.steps.push(groupRow(template, part, { parent_step_id: parent, x: right, y: GROUP_PADDING.top }));
     placed.add(part.process.id);
     inside(part, byProcess, template, new Set([part.process.id]), out);

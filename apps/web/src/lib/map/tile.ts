@@ -6,6 +6,10 @@ import type { Rating } from "@transpera-flow/engine";
 import { formatHours, formatNumber } from "@/lib/format";
 import { RATING_STYLE } from "./rating";
 
+/** B's "N issues" pill on a tile's top-right edge (the issue badge and a closed group's count). */
+export const ISSUE_PILL_CLASS =
+  "absolute -top-2.5 right-2.5 z-10 flex h-5 items-center rounded-full border-2 border-panel bg-destructive px-2 text-[11px] leading-none font-bold text-crit-fg shadow-token";
+
 export interface HeadlineInput {
   /** The step has a role or a person (today's queue condition). */
   staffed: boolean;

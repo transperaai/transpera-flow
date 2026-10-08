@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { StepBadge } from "@/lib/issues/register";
+import { ISSUE_PILL_CLASS } from "@/lib/map/tile";
 
 export function StepIssueBadges({ badges, onOpen }: { badges: Record<string, StepBadge>; onOpen: (stepId: string) => void }) {
   const [hosts, setHosts] = useState<[string, HTMLElement][]>([]);
@@ -43,14 +44,14 @@ export function StepIssueBadges({ badges, onOpen }: { badges: Record<string, Ste
         title={label}
         aria-label={`${label}. Show in the Issues tab.`}
         // nodrag/nopan: React Flow leaves pointer events on the badge alone.
-        className={`nodrag nopan absolute -top-2.5 -right-2.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold shadow-token bg-crit text-crit-fg`}
+        className={`nodrag nopan ${ISSUE_PILL_CLASS}`}
         onClick={(e) => {
           e.stopPropagation();
           onOpen(id);
         }}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        {b.count}
+        {b.count} {b.count === 1 ? "issue" : "issues"}
       </button>,
       el,
       id,

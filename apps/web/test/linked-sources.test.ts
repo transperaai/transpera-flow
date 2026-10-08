@@ -125,7 +125,7 @@ describe("what the dialog may pick when a screen opens it", () => {
 
 describe("the step detail", () => {
   const step = { id: S1, process_id: P1, name: "Audit & proposal", work_hours: 6, wait_hours: 0, provenance: {} } as never;
-  const detail = (sourcesProp: string[]) => createElement(StepDetail, { step, who: "Maya", rating: null, extras: { insights: [], issues: [] }, sources: sourcesProp, onClose: () => {} });
+  const detail = (sourcesProp: string[]) => createElement(StepDetail, { step, who: "Maya", rating: null, reworkTo: null, extras: { insights: [], issues: [] }, sources: sourcesProp, onClose: () => {} });
 
   it("lists the step's linked sources with + Link where the page loads links, and the cited titles where it doesn't", () => {
     const withLinks = text(inProvider(detail(["A cited one"])));
