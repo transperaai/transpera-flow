@@ -30,6 +30,7 @@ export function ProcessesTable({
   hrefs,
   loadCard,
   actions,
+  empty,
 }: {
   rows: ProcessRowData[];
   /** Where each process opens, by id. */
@@ -38,6 +39,8 @@ export function ProcessesTable({
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
   /** A row's admin menu (rename, change type, archive), for editors. */
   actions?: (row: ProcessRowData) => ReactNode;
+  /** What stands in for the table when there are no processes (issue #243): an empty state with the way to add one. */
+  empty?: ReactNode;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [cards, setCards] = useState<Record<string, Card>>({});
@@ -58,6 +61,7 @@ export function ProcessesTable({
   };
 
   if (rows.length === 0) {
+    if (empty) return <>{empty}</>;
     return <p className="rounded-token border border-dashed border-line p-6 text-sm text-muted-foreground">No processes yet. Start one with New process.</p>;
   }
   return (

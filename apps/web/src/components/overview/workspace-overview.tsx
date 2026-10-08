@@ -1,19 +1,20 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isBlank } from "@transpera-flow/engine";
+import { createProcess } from "@/app/w/[slug]/process-actions";
+import { createUpload, previewUpload } from "@/app/w/[slug]/processes/upload-actions";
 import { Overview } from "@/components/overview/overview";
+import { StartOverview } from "@/components/overview/start-overview";
+import { setupChecklist } from "@/lib/overview/setup";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { aiConfigured, loadLatestAiViews, loadWorkspaceAiSettings, loadWorkspaceFindings } from "@/lib/ai/data";
 import { analysisBaseHash, isStale } from "@/lib/ai/model-hash";
 import { NARRATION_MODEL } from "@/lib/narration/anthropic";
-import { ShellHeader } from "@/components/shell/shell-header";
-import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
-import { Help } from "@/components/help";
 import { ShareButton } from "@/components/share/share-dialog";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
 import { createClient } from "@/lib/supabase/server";
@@ -22,12 +23,29 @@ import { createClient } from "@/lib/supabase/server";
 export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
   const live = await loadLiveProcess(slug);
   if (!live) {
+    // Nothing is published (a new client): the start page. Members and viewers get a plain sentence; counts only go to editors.
     const head = await loadWorkspaceHead(slug);
     if (!head) notFound();
-    const overview = await loadWorkspaceOverview(slug);
+    const [overview, canEdit] = await Promise.all([loadWorkspaceOverview(slug), canEditWorkspace(head.id)]);
     // The card to restore a backup: only for someone who can, and only while the workspace is empty (drafts count as not empty).
-    const canRestore = (await canEditWorkspace(head.id)) && (await workspaceIsEmpty(await createClient(), head.id));
-    return <EmptyOverview slug={slug} name={head.name} unpublished={overview?.processes ?? []} canRestore={canRestore} />;
+    const canRestore = canEdit && (await workspaceIsEmpty(await createClient(), head.id));
+    const setup = canEdit ? await loadWorkspaceSetup(head.id) : null;
+    const base = `/w/${slug}`;
+    const unpublished = (overview?.processes ?? []).filter((p) => !p.live);
+    const firstDraft = unpublished.find((p) => p.draft) ?? null;
+    return (
+      <StartOverview
+        slug={slug}
+        name={head.name}
+        canEdit={canEdit}
+        checklist={setup ? setupChecklist(setup, base, firstDraft) : null}
+        drafts={canEdit ? unpublished.map((p) => ({ id: p.id, name: p.name })) : []}
+        companyEditHref={setup?.companyId ? `${base}/p/${setup.companyId}/edit?from=${encodeURIComponent(base)}` : null}
+        create={canEdit ? createProcess.bind(null, head.id, slug) : undefined}
+        upload={canEdit ? { preview: previewUpload.bind(null, head.id, slug), create: createUpload.bind(null, head.id, slug) } : undefined}
+        canRestore={canRestore}
+      />
+    );
   }
   const ws = live.workspace.id;
   const [parts, company, issues, sources, canEdit, firstPrinciples, solutions, findings, aiSettings] = await Promise.all([
@@ -81,63 +99,5 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       share={canEdit ? <ShareButton slug={slug} kind="overview" targetId={null} what="The Overview" /> : undefined}
     />
     </SourceLinkingScope>
-  );
-}
-
-/** A workspace with no published process (a new one): what to do next, where the Overview will be. */
-export function EmptyOverview({ slug, name, unpublished, canRestore = false }: { slug: string; name: string; unpublished: { id: string; name: string; draft: boolean }[]; canRestore?: boolean }) {
-  const base = `/w/${slug}`;
-  return (
-    <div>
-      <ShellHeader title="Overview" />
-      <section className="mx-auto mt-6 w-full max-w-3xl rounded-token border border-dashed border-line p-6">
-        <h1 className="text-base font-bold">{name} has no published process yet</h1>
-        <p className="mt-2 text-fg-2">The Overview shows the company map, headline numbers and trends once a process is published.</p>
-        {unpublished.length > 0 && (
-          <>
-            <p className="mt-3 text-fg-2">These haven&apos;t been published yet:</p>
-            <ul className="mt-1 list-disc pl-5">
-              {unpublished.map((p) => (
-                <li key={p.id}>
-                  <Link href={`${base}/p/${p.id}`} className="font-semibold hover:underline">
-                    {p.name}
-                  </Link>
-                  {p.draft && <span className="ml-2 text-fg-3">has a draft</span>}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        <p className="mt-3 text-fg-2">
-          To get started, add roles under{" "}
-          <Link href={`${base}/settings`} className="underline">
-            People &amp; settings
-          </Link>
-          , then import a process with Claude (<code>set_active_workspace</code>, then <code>import_process</code>). Create a token under{" "}
-          <Link href="/settings/tokens" className="underline">
-            API tokens
-          </Link>{" "}
-          to connect it.
-        </p>
-      </section>
-      {canRestore && (
-        <section data-restore-card className="mx-auto mt-4 w-full max-w-3xl rounded-token border border-line p-6">
-          <h2 className="text-base font-bold">
-            Restore a backup
-            <Help
-              label="Restore a backup"
-              description="Every process comes back as a draft of its latest published version. Publish each to see its numbers. Older versions, history and solutions stay in the file."
-              example="Restore northbeam-workspace-2026-10-05.json into a new workspace made for Northbeam."
-            />
-          </h2>
-          <p className="mt-2 text-fg-2">Fill this new workspace from a JSON backup another workspace exported.</p>
-          <p className="mt-3">
-            <Link href={`${base}/restore`} className="font-semibold underline">
-              Choose a backup file
-            </Link>
-          </p>
-        </section>
-      )}
-    </div>
   );
 }
