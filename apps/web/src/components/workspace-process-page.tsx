@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { restoreProcess } from "@/app/w/[slug]/process-admin-actions";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
@@ -15,7 +15,7 @@ import { canEditWorkspace, currentUserId } from "@/lib/access-data";
 import { loadIdeaIssueIds, loadLastChange } from "@/lib/process-page/data";
 import { loadProcessFirstPrinciples } from "@/lib/first-principles/data";
 import { processRatings, trailOf } from "@/lib/processes/rows";
-import { loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
  * A process of the workspace on the canvas, at `/w/[slug]/p/[processId]` (any process, never-published ones
@@ -23,7 +23,12 @@ import { loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspa
  */
 export async function WorkspaceProcessPage({ slug, processId, version }: { slug: string; processId: string; version?: number | null }) {
   const process = await loadProcessForEditing(slug, processId);
-  if (!process) notFound();
+  if (!process) {
+    // The company map is read at the Overview, not at a process page of its own (it can't be simulated). Any other unknown id is a 404.
+    const head = await loadWorkspaceHead(slug);
+    if (head && (await loadCompanyId(head.id)) === processId) redirect(version ? `/w/${encodeURIComponent(slug)}?version=${version}` : `/w/${encodeURIComponent(slug)}`);
+    notFound();
+  }
   const { live, draft, processes } = process;
   // An archived process (issue #182) opens read only, with its date and, for editors, Restore.
   const archivedAt = live.process.archived_at ?? null;

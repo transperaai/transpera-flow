@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalibrationPanel } from "@/components/calibration/calibration-panel";
+import { createProcess } from "@/app/w/[slug]/process-actions";
+import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
 import { buttonVariants } from "@/components/ui/button";
 import { canEditWorkspace } from "@/lib/access-data";
@@ -9,7 +11,8 @@ import { ImportsHistory } from "@/components/calibration/imports-history";
 import { OtherImportsPanel } from "@/components/calibration/other-imports-panel";
 import { loadCalibrationPage } from "@/lib/calibration/data";
 import { loadClientCalibration } from "@/lib/calibration/client-data";
-import { loadImports } from "@/lib/calibration/import-data";
+import { loadImports, loadLeadSourceOptions } from "@/lib/calibration/import-data";
+import { loadPublishState, loadWorkspaceHead } from "@/lib/data";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
@@ -22,9 +25,17 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
   const { slug } = await props.params;
   const { process } = await props.searchParams;
   const [data, clientData] = await Promise.all([loadCalibrationPage(slug, typeof process === "string" ? process : undefined), loadClientCalibration(slug)]);
-  if (!data) notFound();
-  const [canEdit, imports] = await Promise.all([canEditWorkspace(data.workspaceId), loadImports(data.workspaceId)]);
-  const leadSources = data.stored.leadSources.map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }));
+  const head = data ? null : await loadWorkspaceHead(slug);
+  if (!data && !head) notFound();
+  const workspaceId = data ? data.workspaceId : head!.id;
+  const [canEdit, imports, leadSources, state] = await Promise.all([
+    canEditWorkspace(workspaceId),
+    loadImports(workspaceId),
+    // Nothing is published (a new client): the leads and invoices checks and the Imports card are workspace-wide and still work.
+    data ? Promise.resolve(data.stored.leadSources.map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }))) : loadLeadSourceOptions(workspaceId),
+    data ? null : loadPublishState(slug),
+  ]);
+  if (!data && !state) notFound();
   const mode = canEdit ? "live" : "readonly";
   return (
     <Page
@@ -38,6 +49,7 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
       }
     >
       <PhoneReadOnly>
+      {data ? (
       <CalibrationPanel
         mode={canEdit ? "live" : "readonly"}
         workspaceId={data.workspaceId}
@@ -50,6 +62,15 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
         personTimes={data.personTimes}
         previous={imports.previous}
       />
+      ) : (
+        <NotPublished
+          what="Calibrating compares a stage history, deals or time logs with a published process."
+          canEdit={canEdit}
+          base={`/w/${slug}`}
+          firstDraft={state!.firstDraft}
+          create={canEdit ? createProcess.bind(null, workspaceId, slug) : undefined}
+        />
+      )}
       {clientData && (
         <ClientCalibrationPanel
           mode={canEdit ? "live" : "readonly"}
@@ -61,7 +82,7 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
           previous={imports.previous}
         />
       )}
-      <OtherImportsPanel mode={mode} workspaceId={data.workspaceId} leadSources={leadSources} previous={imports.previous} />
+      <OtherImportsPanel mode={mode} workspaceId={workspaceId} leadSources={leadSources} previous={imports.previous} />
       <ImportsHistory imports={imports.imports} leadSources={leadSources} />
       </PhoneReadOnly>
     </Page>
