@@ -93,13 +93,14 @@ import type { Table } from "@/lib/editor/ops";
 import { laneLayout, type Lane } from "@/lib/editor/lanes";
 import { CARD_SIZE, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/groups";
 import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
-import { RATING_STYLE, ratingOfRank } from "@/lib/map/rating";
+import { ratingOfRank } from "@/lib/map/rating";
+import { ISSUE_PILL_CLASS, tileColours, tileHeadline } from "@/lib/map/tile";
 import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
 import { MapLegend, ZoomControls } from "./map/map-controls";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
-import { formatHours, formatNumber } from "@/lib/format";
+import { formatHours } from "@/lib/format";
 import { usePlayback } from "@/lib/playback/use-playback";
 import { InlineEditContext, NodeInlineEditor, type InlineEditing } from "./node-inline-editor";
 import { PlaybackBar } from "./playback-bar";
@@ -122,6 +123,8 @@ type StepNodeData = {
   role: RoleRow | null;
   person: PersonRow | null;
   avgQueue: number | null;
+  /** Hours an item queues before work starts, in this run; null without a run. */
+  avgWait: number | null;
   bottleneck: boolean;
   warning: string | null;
   editable: boolean;
@@ -150,6 +153,8 @@ type StepNodeData = {
   wasWait: string | null;
   /** The step's rating, which colours its card; null when it hasn't been rated. */
   rating: Rating | null;
+  /** The map has ratings, so a tile says what its rating is (even "Nothing to fix"). */
+  rated: boolean;
   /** Highlighting (issue #99): true outlined, false dimmed, null when nothing is highlighted. */
   lit: boolean | null;
 };
@@ -168,13 +173,13 @@ type GroupNodeData = {
   /** Only a group opens in place; a child process has a page of its own. */
   expandable: boolean;
   roll: RollUp;
-  /** The label of the worst rating among the steps inside, when the workspace has ratings. */
-  worstRating: string | null;
   warning: string | null;
   editable: boolean;
   change: ChangeKind | null;
   /** The worst rating inside, which colours a closed card. */
   rating: Rating | null;
+  /** The map has ratings, so a closed card says what its worst rating is (even "Nothing to fix"). */
+  rated: boolean;
   /** Highlighting: true outlined, false dimmed (closed cards only), null when nothing is highlighted. */
   lit: boolean | null;
 };
@@ -219,49 +224,50 @@ const CanvasContext = createContext<{ editor: ProcessEditor | null; restore: ((t
   handoffs: false,
 });
 
-const badgeClass = "pointer-events-none absolute -top-2 left-2 rounded-full border px-1.5 text-[10px] leading-4 font-semibold";
+const pillClass = "rounded-full border px-1.5 text-[10px] leading-4 font-semibold";
 
 /**
- * "New", "Changed" or "Removed" on a card in a draft; "Conflict" where sources
- * disagree and "Assumption" on unconfirmed values, each showing the quotes
- * behind it on hover (the inspector lists them in full on click).
+ * On a tile's top-left edge: "Bottleneck" for the run's bottleneck, then "New",
+ * "Changed" or "Removed" in a draft. Outside the flow, so they never change a tile's size.
  */
-function Badges({ change, estimate, conflict = false, quote = null }: { change: ChangeKind | null; estimate: boolean; conflict?: boolean; quote?: string | null }) {
+function TopPills({ change, bottleneck = false }: { change: ChangeKind | null; bottleneck?: boolean }) {
   const label = change === "added" ? "New" : change === "changed" ? "Changed" : change === "removed" ? "Removed" : null;
+  if (!label && !bottleneck) return null;
+  return (
+    <span aria-hidden className="pointer-events-none absolute -top-2.5 left-2.5 flex gap-1 whitespace-nowrap">
+      {bottleneck && (
+        <span title="The bottleneck in this run" className="rounded-full bg-destructive px-2 text-[10px] leading-[18px] font-semibold tracking-[0.02em] text-crit-fg">
+          Bottleneck
+        </span>
+      )}
+      {label && (
+        <span className={`${pillClass} ${change === "removed" ? "border-crit bg-crit-soft text-crit" : "border-edit bg-edit-soft text-fg"}`}>{label}</span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * On a tile's bottom-left edge: "Conflict" where sources disagree and "Assumption"
+ * on unconfirmed values, each showing the quotes behind it on hover (the
+ * inspector lists them in full on click).
+ */
+function FlagPills({ estimate, conflict = false, quote = null }: { estimate: boolean; conflict?: boolean; quote?: string | null }) {
+  if (!estimate && !conflict) return null;
   const why = quote ? `: ${quote}` : "";
   return (
-    <>
-      {label && (
-        <span
-          aria-hidden
-          className={`${badgeClass} ${change === "removed" ? "border-crit bg-crit-soft text-crit" : "border-edit bg-edit-soft text-fg"}`}
-        >
-          {label}
+    <span aria-hidden className="pointer-events-none absolute -bottom-2.5 left-2.5 flex gap-1">
+      {conflict && (
+        <span data-badge="conflict" title={`Sources disagree${why}`} className={`pointer-events-auto ${pillClass} border-crit bg-crit-soft text-fg`}>
+          Conflict
         </span>
       )}
-      {(estimate || conflict) && (
-        <span aria-hidden className={`pointer-events-none absolute -top-2 flex gap-1 ${label ? "right-6" : "left-2"}`}>
-          {conflict && (
-            <span
-              data-badge="conflict"
-              title={`Sources disagree${why}`}
-              className="pointer-events-auto rounded-full border border-crit bg-crit-soft px-1.5 text-[10px] leading-4 font-semibold text-fg"
-            >
-              Conflict
-            </span>
-          )}
-          {estimate && (
-            <span
-              data-badge="assumption"
-              title={`Unconfirmed assumption${why}`}
-              className="pointer-events-auto rounded-full border border-warn bg-warn-soft px-1.5 text-[10px] leading-4 font-semibold text-fg"
-            >
-              Assumption
-            </span>
-          )}
+      {estimate && (
+        <span data-badge="assumption" title={`Unconfirmed assumption${why}`} className={`pointer-events-auto ${pillClass} border-warn bg-warn-soft text-fg`}>
+          Assumption
         </span>
       )}
-    </>
+    </span>
   );
 }
 
@@ -317,15 +323,15 @@ const selectedRing = "outline-2 outline-offset-2 outline-edit";
 /** Highlighted cards get a heavy outline; the rest fade (issue #99). */
 const litClass = (lit: boolean | null) => (lit === true ? "!border-accent outline-2 outline-offset-1 outline-accent" : lit === false ? "opacity-40" : "");
 
-/** The coloured stripe down a card's left edge. */
-const Stripe = ({ rating }: { rating: Rating | null }) => (
-  <span aria-hidden data-rating={rating ?? "none"} className="absolute inset-y-0 left-0 w-1.5 rounded-l-token" style={{ background: rating ? RATING_STYLE[rating].stripe : "var(--line-2)" }} />
-);
+/** The name of the step a step's rework goes back to, or null when it is redone at the step itself. */
+const reworkToOf = (steps: readonly StepRow[], step: StepRow): string | null =>
+  step.rework_to_step_id && step.rework_to_step_id !== step.id ? (steps.find((s) => s.id === step.rework_to_step_id)?.name ?? null) : null;
 
 const percent = (p: number) => `${Math.round(p * 1000) / 10}%`;
 
 /** What a screen reader hears for a step. */
-function stepLabel({ step, role, person, warning, reworkTo, change, estimate, conflict, wasName, wasWho, wasWork, wasWait, rating }: StepNodeData): string {
+function stepLabel(data: StepNodeData): string {
+  const { step, role, person, warning, reworkTo, change, estimate, conflict, wasName, wasWho, wasWork, wasWait, rating, bottleneck } = data;
   const draft =
     change === "added"
       ? "new in this draft"
@@ -341,7 +347,7 @@ function stepLabel({ step, role, person, warning, reworkTo, change, estimate, co
               .filter(Boolean)
               .join("")}`
           : null;
-  const flags = [rating && `rated ${RATING_LABELS[rating]}`, draft, conflict && "sources disagree", estimate && "unconfirmed assumption", warning && `warning: ${warning}`];
+  const flags = [rating && `rated ${RATING_LABELS[rating]}`, bottleneck && "bottleneck", draft, conflict && "sources disagree", estimate && "unconfirmed assumption", warning && `warning: ${warning}`];
   if (step.kind === "start" || step.kind === "end") {
     return [step.name, step.kind === "start" ? "start" : `end, ${step.outcome}`, ...flags].filter(Boolean).join(", ");
   }
@@ -351,6 +357,7 @@ function stepLabel({ step, role, person, warning, reworkTo, change, estimate, co
     person ? `pinned to ${person.name}` : role?.name,
     `${formatHours(step.work_hours)} work`,
     `${formatHours(step.wait_hours)} wait`,
+    headlineOf(data).phrase,
     reworkTo && `${percent(Number(step.rework_rate))} rework back to ${reworkTo}`,
     ...flags,
   ]
@@ -358,59 +365,93 @@ function stepLabel({ step, role, person, warning, reworkTo, change, estimate, co
     .join(", ");
 }
 
+/** The one number on a step's tile (see lib/map/tile.ts). */
+function headlineOf({ role, person, avgWait, avgQueue, step }: StepNodeData) {
+  return tileHeadline({
+    staffed: role !== null || person !== null,
+    run: avgWait !== null && avgQueue !== null ? { avgWait, avgQueue } : null,
+    waitHours: Number(step.wait_hours),
+  });
+}
+
+/** The tile's rating row: a dot in the rating's colour, and the rating in words. */
+function RatingRow({ dot, label }: { dot: string; label: string }) {
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">
+      <i aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: dot }} />
+      <span className="truncate">{label}</span>
+    </p>
+  );
+}
+
+const tileClass = "relative rounded-lg shadow-token transition-[box-shadow,opacity] hover:shadow-md motion-reduce:transition-none";
+/**
+ * The headline row mixes a mono value with a sans caption on one baseline, so its natural height moves by about a pixel with
+ * the fonts' metrics (17 px before they load, 18 after). A minimum height keeps every tile the same size at any moment, so the
+ * map frames itself (and a screenshot is cut) at the same height whether or not the fonts have arrived. A minimum, not a fixed
+ * height: with a larger browser font size the value (`text-base`, in rem) is taller than 18 px, and the row must grow with it
+ * rather than spill onto the foot.
+ */
+const headlineRowClass = "mt-1 flex min-h-[18px] min-w-0 items-baseline gap-1.5";
+const footClass = "mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1 text-xs text-fg-2";
+
 function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
-  const { step, role, person, avgQueue, bottleneck, warning, editable, reworkTo, editing, pulse, ghost } = data;
+  const { step, role, person, bottleneck, warning, editable, editing, pulse, ghost } = data;
   const who = person?.name ?? role?.name;
+  const staffed = role !== null || person !== null;
+  const flagged = bottleneck && !editing && !ghost;
+  const colours = tileColours(data.rating, flagged);
+  const headline = headlineOf(data);
   return (
     <div
       data-lit={data.lit ?? undefined}
-      className={`relative rounded-token border bg-panel shadow-token transition-opacity ${editing ? "w-60 border-accent" : "w-48"} ${bottleneck && !editing && !ghost ? "border-crit ring-2 ring-crit/40" : editing ? "" : "border-line-2"} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      data-tile="step"
+      data-rating={data.rating ?? "none"}
+      className={`${tileClass} ${editing ? "w-60 border-[1.5px] border-accent bg-panel" : ghost ? "w-48 border-[1.5px] bg-panel px-2.5 py-2" : "w-48 border-[1.5px] px-2.5 pt-2 pb-2"} ${flagged ? "ring-[1.5px] ring-crit" : ""} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      style={editing || ghost ? undefined : { background: colours.background, borderColor: colours.borderColor }}
     >
       {pulse && !editing && (
-        <span aria-hidden className="bottleneck-pulse pointer-events-none absolute -inset-1.5 rounded-token border-2 border-crit" />
+        <span aria-hidden className="bottleneck-pulse pointer-events-none absolute -inset-1.5 rounded-lg border-2 border-crit" />
       )}
-      <Badges change={data.change} estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
+      <TopPills change={data.change} bottleneck={flagged} />
+      <FlagPills estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
       <Handle type="target" position={Position.Left} className={handleClass(editable && !ghost)} />
-      {!editing && !ghost && <Stripe rating={data.rating} />}
       {editing ? (
         <NodeInlineEditor step={step} focus={editing} />
       ) : ghost ? (
-        <div className="flex items-start justify-between gap-1 px-2.5 py-2">
+        <div className="flex items-start justify-between gap-1">
           <p className="font-semibold leading-tight text-fg-2 line-through">{step.name}</p>
           {data.restorable && <RestoreButton table="steps" id={step.id} what={step.name} />}
         </div>
       ) : (
-        <div className="py-2 pr-3 pl-4">
+        <>
+          {data.rated && <RatingRow dot={colours.dot} label={data.rating ? RATING_LABELS[data.rating] : "Nothing to fix"} />}
           {data.wasName !== null && <p className="text-[11px] leading-tight text-fg-3 line-through">{data.wasName}</p>}
-          <p data-field="name" className="text-sm leading-tight font-semibold">
+          <p data-field="name" className="mt-0.5 text-sm leading-tight font-semibold text-fg">
             {step.name}
           </p>
-          <div className="mt-0.5 flex items-baseline justify-between gap-2 text-[12.5px] text-fg-2">
+          <p className={headlineRowClass} title={headline.title}>
+            <span data-field={staffed ? undefined : "wait_hours"} className="font-mono text-base leading-none font-medium text-fg tabular-nums">
+              {headline.value}
+            </span>
+            <span className="min-w-0 truncate text-[11.5px] leading-4 text-fg-2">{headline.caption}</span>
+          </p>
+          {data.wasWait !== null && staffed && (
+            <p data-field="wait_hours" className="mt-0.5 font-mono text-[11px] text-fg-2 tabular-nums">
+              <Was was={data.wasWait}>{formatHours(step.wait_hours)} wait</Was>
+            </p>
+          )}
+          <div className={footClass} style={{ borderTopColor: colours.divider }}>
             <p data-field={person ? "person_id" : "role_id"} className="min-w-0 truncate">
               {who && <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full align-baseline" style={{ background: role?.color ?? "var(--line-2)" }} />}
               <Was was={data.wasWho}>{who ?? (step.kind === "decision" ? "Decision" : step.kind === "wait" ? "Wait" : "No role")}</Was>
               {person && <span className="text-fg-3"> · pinned</span>}
             </p>
-            {avgQueue !== null && (role || person) && (
-              <span title="Average queue" className={`shrink-0 text-xs tabular-nums ${bottleneck ? "font-semibold text-crit" : ""}`}>
-                queue {formatNumber(avgQueue)}
-              </span>
-            )}
-          </div>
-          <p className="mt-1 flex justify-between gap-1 font-mono text-xs text-fg-2 tabular-nums">
-            <span data-field="work_hours">
+            <span data-field="work_hours" className="shrink-0 font-mono tabular-nums">
               <Was was={data.wasWork}>{Number(step.work_hours) || data.wasWork ? `${formatHours(step.work_hours)} work` : "—"}</Was>
             </span>
-            <span data-field="wait_hours">
-              <Was was={data.wasWait}>{Number(step.wait_hours) || data.wasWait ? `${formatHours(step.wait_hours)} wait` : ""}</Was>
-            </span>
-          </p>
-          {reworkTo && Number(step.rework_rate) > 0 && (
-            <p className="mt-0.5 truncate text-[11px] text-fg-3" title={`Rework goes back to ${reworkTo}`}>
-              ↺ {percent(Number(step.rework_rate))} back to {reworkTo}
-            </p>
-          )}
-        </div>
+          </div>
+        </>
       )}
       {warning && <Warning text={warning} />}
       <Handle type="source" position={Position.Right} className={handleClass(editable && !ghost)} />
@@ -419,7 +460,7 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
 }
 
 function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
-  const { step, open, expandable, roll, worstRating, warning, editable } = data;
+  const { step, open, expandable, roll, warning, editable } = data;
   const { toggleGroup, handoffs } = useContext(CanvasContext);
   const toggle = expandable && (
     <button
@@ -431,7 +472,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
         toggleGroup(step.id);
       }}
       onDoubleClick={(e) => e.stopPropagation()}
-      className="nodrag nopan rounded-full border border-line bg-panel px-2 py-0.5 text-[11px] font-semibold text-fg hover:bg-panel-2"
+      className="nodrag nopan rounded-full border border-line bg-panel px-2 py-0 text-[11px] leading-4 font-semibold text-fg hover:bg-panel-2"
     >
       {open ? "Collapse" : "Expand"}
     </button>
@@ -460,37 +501,34 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       </div>
     );
   }
+  const colours = tileColours(data.rating, false);
   return (
     <div
-      className={`relative w-48 rounded-token border bg-panel shadow-token transition-opacity ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : "border-line-2"}`}
+      className={`${tileClass} w-48 border-2 border-dashed px-2.5 pt-2 pb-2 ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      style={{ background: colours.background, borderColor: colours.borderColor }}
       data-group="closed"
+      data-rating={data.rating ?? "none"}
       data-lit={data.lit ?? undefined}
     >
+      {roll.openIssues > 0 && (
+        <span title="Confirmed issues on the steps inside" className={ISSUE_PILL_CLASS}>
+          {roll.openIssues} {roll.openIssues === 1 ? "issue" : "issues"}
+        </span>
+      )}
       <Handle type="target" position={Position.Left} className={handleClass(editable)} />
-      <Stripe rating={data.rating} />
-      <div className="py-2 pr-3 pl-4">
-        <div className="flex items-start justify-between gap-2">
-          <p data-field="name" className="font-semibold leading-tight">
-            {step.name}
-          </p>
-          {toggle}
-        </div>
-        <p className="mt-0.5 text-xs text-fg-2">
-          {expandable ? "Group" : handoffs ? "Process" : "Child process"} · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
-        </p>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs text-fg-2 tabular-nums">
-          <span title="Hands-on time of every step inside, added up">{roll.handsOnHours ? `${formatHours(roll.handsOnHours)} work` : "no work entered"}</span>
-          {worstRating && (
-            <span className="rounded-full border border-line bg-panel px-1.5 font-sans text-[10px] font-semibold text-fg" title="The worst rating of the steps inside">
-              {worstRating}
-            </span>
-          )}
-          {roll.openIssues > 0 && (
-            <span className="rounded-full bg-crit px-1.5 font-sans text-[10px] font-semibold text-crit-fg" title="Confirmed issues on the steps inside">
-              {roll.openIssues} {roll.openIssues === 1 ? "issue" : "issues"}
-            </span>
-          )}
-        </p>
+      {data.rated && <RatingRow dot={colours.dot} label={data.rating ? `Worst inside: ${RATING_LABELS[data.rating]}` : "Nothing to fix"} />}
+      <p data-field="name" title={step.name} className="mt-0.5 line-clamp-2 text-sm leading-tight font-semibold text-fg">
+        {step.name}
+      </p>
+      <p className={headlineRowClass}>
+        <span className="font-mono text-base leading-none font-medium text-fg tabular-nums">{roll.steps}</span>
+        <span className="min-w-0 truncate text-[11.5px] leading-4 text-fg-2" title="Hands-on time of every step inside, added up">
+          {roll.steps === 1 ? "step" : "steps"} · {roll.handsOnHours ? `${formatHours(roll.handsOnHours)} work` : "no work entered"}
+        </span>
+      </p>
+      <div className={footClass} style={{ borderTopColor: colours.divider }}>
+        <span>{expandable ? "Group" : handoffs ? "Process" : "Child process"}</span>
+        {toggle}
       </div>
       {warning && <Warning text={warning} />}
       <Handle type="source" position={Position.Right} className={handleClass(editable)} />
@@ -506,21 +544,26 @@ function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
   return (
     <div
       data-lit={data.lit ?? undefined}
-      className={`relative border text-xs font-semibold transition-opacity ${editing ? "w-44 rounded-token border-accent bg-panel" : `rounded-full border-line-2 px-3 py-1.5 ${tone}`} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      data-tile="terminal"
+      className={`${tileClass} border-[1.5px] ${editing ? "w-44 border-accent bg-panel" : `w-max max-w-[150px] min-w-24 border-line-2 px-2.5 py-1.5 ${tone}`} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
     >
-      <Badges change={data.change} estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
+      <TopPills change={data.change} />
+      <FlagPills estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
       {step.kind !== "start" && <Handle type="target" position={Position.Left} className={handleClass(editable)} />}
       {editing ? (
         <NodeInlineEditor step={step} focus="name" />
       ) : ghost ? (
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 text-[13px] font-semibold">
           <span className="line-through">{step.name}</span>
           {data.restorable && <RestoreButton table="steps" id={step.id} what={step.name} />}
         </span>
       ) : (
-        <span data-field="name">
-          <Was was={data.wasName}>{step.name}</Was>
-        </span>
+        <>
+          <p className="text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">{step.kind === "start" ? "Start" : "End"}</p>
+          <p data-field="name" className={`text-[13px] leading-tight font-semibold break-words ${step.outcome === "lost" ? "text-fg-2" : "text-fg"}`}>
+            <Was was={data.wasName}>{step.name}</Was>
+          </p>
+        </>
       )}
       {warning && <Warning text={warning} />}
       {step.kind === "start" && <Handle type="source" position={Position.Right} className={handleClass(editable)} />}
@@ -1091,11 +1134,11 @@ function Canvas({
             open,
             expandable: isGroup(step),
             roll,
-            worstRating: worst?.label ?? null,
             warning: warnings.get(step.id) ?? null,
             editable,
             change: change && (change.kind !== "changed" || change.fields.length) ? change.kind : null,
             rating: worst ? ratingOfRank(worst.rank) : null,
+            rated: rating !== undefined,
             // An open group is a box around its steps: it can be outlined but never fades.
             lit: lit ? (open ? lit.has(step.id) || null : lit.has(step.id)) : null,
           };
@@ -1104,7 +1147,7 @@ function Canvas({
             type: "group",
             position: dragging.get(step.id) ?? { x: Number(step.x), y: Number(step.y) },
             selected: selected.has(step.id),
-            ariaLabel: `${step.name}, ${isGroup(step) ? "group" : handoffs ? "process" : "child process"} of ${roll.steps} ${roll.steps === 1 ? "step" : "steps"}${isGroup(step) ? (open ? ", open" : ", closed") : ""}`,
+            ariaLabel: `${step.name}, ${isGroup(step) ? "group" : handoffs ? "process" : "child process"} of ${roll.steps} ${roll.steps === 1 ? "step" : "steps"}${isGroup(step) ? (open ? ", open" : ", closed") : ""}${gdata.rated && gdata.rating ? `, worst inside: ${RATING_LABELS[gdata.rating]}` : ""}${roll.openIssues > 0 ? `, ${roll.openIssues} confirmed ${roll.openIssues === 1 ? "issue" : "issues"}` : ""}`,
             ...(step.parent_step_id ? { parentId: step.parent_step_id } : {}),
             // An open group is as big as its steps need: React Flow takes the size from here, and so shows it at once.
             ...(box ? { width: box.width, height: box.height, style: { width: box.width, height: box.height } } : {}),
@@ -1117,6 +1160,7 @@ function Canvas({
           role: step.role_id ? (roles.get(step.role_id) ?? null) : null,
           person: step.person_id ? (people.get(step.person_id) ?? null) : null,
           avgQueue: result?.steps[step.id]?.avgQueue ?? null,
+          avgWait: result?.steps[step.id]?.avgWait ?? null,
           bottleneck: result?.bnStep === step.id,
           warning: warnings.get(step.id) ?? null,
           editable,
@@ -1135,6 +1179,7 @@ function Canvas({
           wasWork: was(change, ["work_hours"], (l) => `${formatHours(l.work_hours)} work`),
           wasWait: was(change, ["wait_hours"], (l) => `${formatHours(l.wait_hours)} wait`),
           rating: ratingOfRank(rating?.(step.id)?.rank ?? -1),
+          rated: rating !== undefined,
           lit: lit ? lit.has(step.id) : null,
         };
         const node: StepFlowNode | TerminalFlowNode = {
@@ -1166,6 +1211,7 @@ function Canvas({
           role: step.role_id ? (roles.get(step.role_id) ?? null) : null,
           person: step.person_id ? (people.get(step.person_id) ?? null) : null,
           avgQueue: null,
+          avgWait: null,
           bottleneck: false,
           warning: null,
           editable: false,
@@ -1183,6 +1229,7 @@ function Canvas({
           wasWork: null,
           wasWait: null,
           rating: null,
+          rated: false,
           lit: null,
         };
         const id = ghostId(step.id);
@@ -1765,6 +1812,7 @@ function Canvas({
               step={detailStep}
               who={(detailStep.person_id ? namedForViewer(viewerOf(bundle), bundle.people).find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
               rating={ratingOfRank(rating?.(detailStep.id)?.rank ?? -1)}
+              reworkTo={reworkToOf(bundle.steps, detailStep)}
               extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
               sources={sourcesOf(detailStep, sourceTitles)}
               onClose={closeDetail}

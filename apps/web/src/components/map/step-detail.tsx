@@ -55,6 +55,7 @@ export function StepDetail({
   step,
   who,
   rating,
+  reworkTo,
   extras,
   sources,
   onClose,
@@ -62,6 +63,8 @@ export function StepDetail({
   step: StepRow;
   who: string | null;
   rating: Rating | null;
+  /** The name of the step rework goes back to; null when it is redone at this step. */
+  reworkTo: string | null;
   extras: StepExtras;
   sources: string[];
   onClose: () => void;
@@ -100,6 +103,14 @@ export function StepDetail({
         <dd className="tabular-nums">{Number(step.work_hours) ? formatHours(step.work_hours) : "Not entered"}</dd>
         <dt className="text-fg-3">Wait</dt>
         <dd className="tabular-nums">{Number(step.wait_hours) ? formatHours(step.wait_hours) : "None"}</dd>
+        {Number(step.rework_rate) > 0 && (
+          <>
+            <dt className="text-fg-3">Rework</dt>
+            <dd className="tabular-nums">
+              {Math.round(Number(step.rework_rate) * 1000) / 10}%{reworkTo ? ` back to ${reworkTo}` : ", redone at this step"}
+            </dd>
+          </>
+        )}
         <dt className="text-fg-3">Rating</dt>
         <dd className="flex items-center gap-1.5">
           {rating ? (

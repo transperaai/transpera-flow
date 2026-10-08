@@ -124,6 +124,36 @@ describe("the map's width", () => {
   }
 });
 
+describe("rating tiles (issue #242)", () => {
+  const tiles = (page: Page) => page.locator("[data-tile='step']");
+  const textOf = (page: Page) => tiles(page).evaluateAll((els) => els.map((e) => ({ id: e.closest(".react-flow__node")?.getAttribute("data-id") ?? "", text: (e as HTMLElement).innerText, who: e.querySelector("[data-field='role_id'],[data-field='person_id']")?.textContent ?? "" })));
+
+  it("shows a headline on every staffed tile, the Bottleneck flag on the bottleneck, and no busy figures", async () => {
+    const page = await mount({ run: true });
+    await settled(page);
+    const all = await textOf(page);
+    expect(all.length).toBeGreaterThan(3);
+    const staffed = all.filter((t) => !["Decision", "Wait", "No role"].includes(t.who.trim()));
+    expect(staffed.length).toBeGreaterThan(0);
+    for (const t of staffed) expect(t.text, t.who).toContain("waiting · queue");
+    const flagged = all.filter((t) => t.text.includes("Bottleneck"));
+    expect(flagged.map((t) => t.id)).toEqual([await page.evaluate(() => window.mapIds.audit)]);
+    for (const t of all) expect(t.text).not.toMatch(/%\s*busy|busy\s*%|£|\$/i);
+    // A read-only map with no ratings has no rating row.
+    expect(all.some((t) => /nothing to fix/i.test(t.text))).toBe(false);
+    await page.close();
+  }, 60_000);
+
+  it("names no one a member may not see", async () => {
+    const page = await mount({ run: true, member: true });
+    await settled(page);
+    const audit = (await textOf(page)).find((t) => t.text.includes("Bottleneck"))!;
+    expect(audit.who).toContain("A team member");
+    for (const t of await textOf(page)) expect(t.text).not.toMatch(/Priya Shah|Tom Reed|Maya Collins/);
+    await page.close();
+  }, 60_000);
+});
+
 describe("open groups and highlight", () => {
   it("keeps open groups in the state it is given, and follows that state", async () => {
     const page = await mount({ nested: true, controlled: true });
@@ -466,7 +496,7 @@ describe("the process library in an ordinary process's editor (B12 part 2)", () 
     // Every added link is in view, and none covers another.
     const added = await page.evaluate((names) => {
       return [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
-        .filter((e) => !names.includes(e.innerText.split("\n")[0] ?? ""))
+        .filter((e) => !names.includes(e.querySelector("[data-field='name']")?.textContent ?? ""))
         .map((e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; });
     }, before);
     const p = await panel(page);

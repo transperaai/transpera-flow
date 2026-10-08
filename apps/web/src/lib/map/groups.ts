@@ -11,8 +11,8 @@ export interface Size {
 }
 
 /** What a step card measures, before React Flow has measured it. */
-export const CARD_SIZE: Size = { width: 192, height: 92 };
-export const TERMINAL_SIZE: Size = { width: 96, height: 34 };
+export const CARD_SIZE: Size = { width: 192, height: 100 };
+export const TERMINAL_SIZE: Size = { width: 96, height: 46 };
 /** A closed group's card. */
 export const GROUP_CARD: Size = { width: 192, height: 124 };
 /** An open group with nothing in it yet. */

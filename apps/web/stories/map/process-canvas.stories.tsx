@@ -1,10 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
+import { StepIssueBadges } from "@/components/step-issue-badges";
+import { diffBundles } from "@/lib/drafts/diff";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { MemoryStore } from "@/lib/editor/store";
 import { demoBundle } from "@/lib/sources/demo";
+import type { StepBadge } from "@/lib/issues/register";
 import { companyBundle, northbeamRun, northbeamStepIds, ratingsByStep } from "../fixtures";
 
 const meta: Meta = { title: "Map/ProcessCanvas", parameters: { layout: "padded" } };
@@ -129,4 +132,108 @@ function EditableMap() {
 /** The Editor's map: editable, filling a 1200 x 560 panel. */
 export const Editable: StoryObj = {
   render: () => <EditableMap />,
+};
+
+/**
+ * Waits for the map to frame itself and hold still (the viewport unchanged for 30 frames, as `HighlightMap` does), and for
+ * every selector in `needs` to exist, then calls `ready`.
+ */
+function useSettled(needs: readonly string[], ready: () => void) {
+  useEffect(() => {
+    let frame = 0;
+    let last = "";
+    let still = 0;
+    let done = false;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      if (done) return;
+      const transform = document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? "";
+      still = transform && transform === last ? still + 1 : 0;
+      last = transform;
+      if (still >= 30 && needs.every((q) => document.querySelector(q))) {
+        settle = setTimeout(ready, 400);
+        return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      done = true;
+      cancelAnimationFrame(frame);
+      clearTimeout(settle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on mount
+  }, []);
+}
+
+/** Fixed badges for two steps: Audit has two confirmed issues (the worst a risk), Kickoff one (bad). */
+const BADGES: Record<string, StepBadge> = {
+  [northbeamStepIds.audit]: { count: 2, rating: "risk", titles: ["One strategist does every audit", "Proposals wait on one person"] },
+  [northbeamStepIds.kickoff]: { count: 1, rating: "bad", titles: ["Kickoff slips when the audit is late"] },
+};
+
+function NodeStatesMap() {
+  const { bundle, result } = northbeamRun();
+  const [pending, setPending] = useState(true);
+  useSettled(["[data-issue-badge]"], () => setPending(false));
+  // The run's own bottleneck is a step of another process, so name Audit the bottleneck to show the flag on a tile.
+  const run = useMemo(() => ({ ...result, bnStep: northbeamStepIds.audit }), [result]);
+  const cycle = useMemo(() => ratingsByStep(bundle), [bundle]);
+  // Every rating band on a step, and one step unrated.
+  const rating = useMemo(() => (id: string) => (id === northbeamStepIds.ppc ? null : cycle(id)), [cycle]);
+  return (
+    <div data-visual-pending={pending ? "" : undefined}>
+      <Block>
+        <ProcessCanvas
+          bundle={bundle}
+          result={run}
+          rating={rating}
+          selection={{ steps: [northbeamStepIds.onboard], edges: [] }}
+          openIssues={{ [northbeamStepIds.audit]: 2, [northbeamStepIds.kickoff]: 1 }}
+          showPlayback={false}
+        />
+        <StepIssueBadges badges={BADGES} onOpen={() => undefined} />
+      </Block>
+    </div>
+  );
+}
+
+/**
+ * Every state of a tile on one map (issue #242): each rating, unrated ("Nothing to fix"), the bottleneck (Audit), selected,
+ * issues, a conflict (Audit), an assumption (Kickoff), a decision nobody works, and the start and end tiles.
+ */
+export const NodeStates: StoryObj = {
+  tags: ["visual-phone"],
+  render: () => <NodeStatesMap />,
+};
+
+function DraftMap() {
+  const { bundle: live } = northbeamRun();
+  const [pending, setPending] = useState(true);
+  useSettled([], () => setPending(false));
+  const { draft, diff } = useMemo(() => {
+    const ids = northbeamStepIds;
+    const added = { ...live.steps.find((st) => st.id === ids.kickoff)!, id: "e0000000-0000-4000-8000-0000000000f1", name: "Send reminder", x: 750, y: 170, work_hours: 0.5, wait_hours: 2, assumption: false, conflict: false };
+    const steps = live.steps
+      .filter((st) => st.id !== ids.live)
+      .map((st) =>
+        st.id === ids.qualify ? { ...st, name: "Qualify enquiry" } : st.id === ids.discovery ? { ...st, work_hours: 2, wait_hours: 12 } : st,
+      )
+      .concat(added);
+    const edges = live.edges.filter((e) => e.from_step_id !== ids.live && e.to_step_id !== ids.live);
+    const draft = { ...live, steps, edges };
+    return { draft, diff: diffBundles(live, draft) };
+  }, [live]);
+  return (
+    <div data-visual-pending={pending ? "" : undefined}>
+      <Block>
+        <ProcessCanvas bundle={draft} diff={diff} showPlayback={false} />
+      </Block>
+    </div>
+  );
+}
+
+/** A draft against live: a renamed step (Changed), a step with new work and wait hours (Changed, the "Was" values), a new step (New) and a removed one (Removed ghost). */
+export const Draft: StoryObj = {
+  render: () => <DraftMap />,
 };
