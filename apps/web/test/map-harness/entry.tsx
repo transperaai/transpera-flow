@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
 import { createRoot } from "react-dom/client";
-import { defaultCompanyPart, northbeamBundle, northbeamStepIds, partOf, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
+import { defaultCompanyPart, northbeamBundle, northbeamStepIds, partOf, toEngineModel, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
+import { simulate } from "@transpera-flow/engine";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
 import { Palette } from "@/components/editor/palette";
 import { Inspector } from "@/components/editor/inspector";
@@ -36,6 +37,10 @@ export interface HarnessOptions {
   computing?: boolean;
   /** A process with nothing between start and end (issue #44): a read-only map says so, an editable one stays empty. */
   empty?: boolean;
+  /** A run of the process (30 simulations, seed 1) is handed to the map, so its tiles carry their headline numbers. */
+  run?: boolean;
+  /** Seen by a member: the Audit step is pinned to a named person, whom the map must not name. */
+  member?: boolean;
 }
 
 declare global {
@@ -109,12 +114,19 @@ function EditorKeys({ editor, bundle, selection, setSelection }: { editor: Proce
 
 function Harness({ options }: { options: HarnessOptions }) {
   const base = useMemo(() => {
-    const bundle = options.company ? companyBundle() : options.nested ? withDemoGroups(demoBundle()) : demoBundle();
+    let bundle = options.company ? companyBundle() : options.nested ? withDemoGroups(demoBundle()) : demoBundle();
+    if (options.member) {
+      const person = bundle.people[0]!;
+      bundle = { ...bundle, viewer: { seesEveryone: false, ownPersonId: null }, steps: bundle.steps.map((st) => (st.id === northbeamStepIds.audit ? { ...st, person_id: person.id } : st)) };
+    }
     if (!options.empty) return bundle;
     const ends = bundle.steps.filter((s) => s.kind === "start" || s.kind === "end");
     const kept = new Set(ends.map((s) => s.id));
     return { ...bundle, steps: ends, edges: bundle.edges.filter((e) => kept.has(e.from_step_id) && kept.has(e.to_step_id)) };
-  }, [options.nested, options.company, options.empty]);
+  }, [options.nested, options.company, options.empty, options.member]);
+  // The run's own bottleneck is a step of another process (the model holds all of Northbeam's), so none of this map's tiles
+  // would carry the flag; name the Audit step as the bottleneck to see the flag on a tile.
+  const result = useMemo(() => (options.run ? { ...simulate(toEngineModel(base), 30, 1), bnStep: northbeamStepIds.audit } : undefined), [base, options.run]);
   const editor = useMemo(() => (options.editable ? new ProcessEditor(base, new MemoryStore(base)) : null), [base, options.editable]);
   const state = useSyncExternalStore(editor ? editor.subscribe : never, editor ? editor.getState : () => null, () => null);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
@@ -158,6 +170,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         highlight={highlight}
         expanded={options.controlled ? open : undefined}
         onExpandedChange={options.controlled ? setOpen : undefined}
+        result={result}
         showPlayback={false}
         handoffs={options.company}
         hideAdd={options.palette}
