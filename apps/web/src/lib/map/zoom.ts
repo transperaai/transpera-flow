@@ -35,15 +35,23 @@ export const NO_PADDING: Padding = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /**
  * Where to put the map so `bounds` (in map units) is framed in `panel`: fitted (see `fitZoom`) and centred across when it
- * fits, or, when it is wider than the panel at 70%, pinned to the left so the rest is a scroll (drag) away. It always starts at the top.
+ * fits, or, when it is wider than the panel at 70%, pinned to the left so the rest is a scroll (drag) away. It starts at the
+ * top, unless `middle`: then a map that fits down the panel is centred down it too (a panel of a fixed, tall height, such as
+ * the Overview's company map or a map on the full screen, where hanging from the top would leave the foot empty).
  */
-export function fitViewport(bounds: { x: number; y: number; width: number; height: number }, panel: Box, pad: Padding = NO_PADDING): { x: number; y: number; zoom: number } {
+export function fitViewport(
+  bounds: { x: number; y: number; width: number; height: number },
+  panel: Box,
+  pad: Padding = NO_PADDING,
+  { middle = false }: { middle?: boolean } = {},
+): { x: number; y: number; zoom: number } {
   const room: Box = { width: panel.width - pad.left - pad.right, height: panel.height - pad.top - pad.bottom };
   const zoom = fitZoom(bounds, room);
-  // Across, a map that fits is centred; down, it hangs from the top, so a tall panel doesn't strand it in the middle.
+  // Across, a map that fits is centred; down, it hangs from the top, so a content-sized panel doesn't strand it in the middle.
+  const spare = room.height - bounds.height * zoom;
   return {
     x: bounds.width * zoom <= room.width ? pad.left + (room.width - bounds.width * zoom) / 2 - bounds.x * zoom : pad.left - bounds.x * zoom,
-    y: pad.top - bounds.y * zoom,
+    y: pad.top + (middle && spare > 0 ? spare / 2 : 0) - bounds.y * zoom,
     zoom,
   };
 }
@@ -56,6 +64,13 @@ export function stepZoom(zoom: number, direction: "in" | "out"): number {
 
 /** "85%". */
 export const zoomLabel = (zoom: number): string => `${Math.round(zoom * 100)}%`;
+
+/**
+ * The map area of a tall panel (`height="tall"`, the Overview's company map), as Tailwind classes so the server draws it at
+ * its final size (no jump when the map loads) and its skeleton can match it: three quarters of the screen's height, between
+ * 26 and 56 rem; on a phone (under 640 px) 60% of it, between 20 and 28 rem, so the page still scrolls past it.
+ */
+export const TALL_PANEL_CLASS = "h-[clamp(20rem,60svh,28rem)] sm:h-[clamp(26rem,75svh,56rem)]";
 
 /** A map panel that follows its map is never shorter than this (rem 16) or taller than this (rem 40) in pixels. */
 export const AUTO_HEIGHT = { min: 256, max: 640 } as const;

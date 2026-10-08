@@ -544,7 +544,8 @@ export function Overview({
                 playbackAbove
                 showLanes={false}
                 handoffs
-                height="auto"
+                // A fixed, tall share of the screen (Austin, 8 Oct: "make the company map bigger"), not the map's own height.
+                height="tall"
                 stepDetail={false}
                 onStepClick={openProcess}
                 computing={horizonModel !== null && horizonSim.status === "running" && horizonSim.run === null}

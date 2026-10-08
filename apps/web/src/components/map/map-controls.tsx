@@ -1,22 +1,31 @@
 "use client";
 
-// Controls and legend for the process map (issue #99): zoom -, Fit, +, and the four
+// Controls and legend for the process map (issue #99): zoom in, zoom out, fit and full screen on the map, and the four
 // rating colours (plus the red badge) with their plain names.
 
+import type { CSSProperties } from "react";
+import { ControlButton, Controls } from "@xyflow/react";
+import { Maximize2, Minimize2, Minus, Plus, Scan } from "lucide-react";
 import { RATING_LABELS } from "@transpera-flow/engine";
 import { LEGEND_ORDER, RATING_STYLE } from "@/lib/map/rating";
 import { zoomLabel } from "@/lib/map/zoom";
 
-const button =
-  "min-w-8 px-2 py-1 text-fg hover:bg-panel-2 disabled:cursor-not-allowed disabled:text-fg-3 disabled:hover:bg-transparent focus-visible:relative focus-visible:z-10";
-
-export function ZoomControls({
+/**
+ * The buttons on the map itself (issue #99, moved onto the map for Austin's "centre the screen" ask): zoom in, zoom out, fit
+ * (frame the whole map, never smaller than 70%), and, where offered, full screen; the zoom under them. React Flow's own
+ * `Controls` panel with our buttons in it (its built-in zoom and fit would bypass the map's framing, and its lock toggle is
+ * not wanted), styled from the tokens in `styles/map-controls.css`. Reading actions, so they stay on a phone.
+ */
+export function MapViewControls({
   zoom,
   onOut,
   onFit,
   onIn,
   canOut = true,
   canIn = true,
+  fullscreen = null,
+  className,
+  style,
 }: {
   zoom: number;
   onOut: () => void;
@@ -25,22 +34,45 @@ export function ZoomControls({
   /** False at the smallest or largest zoom, where the button does nothing. */
   canOut?: boolean;
   canIn?: boolean;
+  /** The full-screen toggle and whether the map is on the full screen now; null leaves the button out. */
+  fullscreen?: { on: boolean; toggle: () => void } | null;
+  className?: string;
+  style?: CSSProperties;
 }) {
   return (
-    <div role="group" aria-label="Zoom" className="flex items-stretch divide-x divide-line overflow-hidden rounded-token border border-line bg-panel text-xs">
-      <button type="button" onClick={onOut} disabled={!canOut} aria-label="Zoom out" title="Zoom out" className={button}>
-        −
-      </button>
-      <button type="button" onClick={onFit} title="Fit the map to this panel (never smaller than 70%)" className={`${button} font-semibold`}>
-        Fit
-      </button>
-      <button type="button" onClick={onIn} disabled={!canIn} aria-label="Zoom in" title="Zoom in" className={button}>
-        +
-      </button>
-      <span className="px-2 py-1 font-mono text-[11px] text-fg-2 tabular-nums" aria-live="polite" title="Current zoom">
+    <Controls
+      position="bottom-right"
+      showZoom={false}
+      showFitView={false}
+      showInteractive={false}
+      aria-label="Map view"
+      className={className}
+      style={style}
+    >
+      <ControlButton onClick={onIn} disabled={!canIn} aria-label="Zoom in" title="Zoom in" data-map-zoom="in">
+        <Plus aria-hidden />
+      </ControlButton>
+      <ControlButton onClick={onOut} disabled={!canOut} aria-label="Zoom out" title="Zoom out" data-map-zoom="out">
+        <Minus aria-hidden />
+      </ControlButton>
+      <ControlButton onClick={onFit} aria-label="Fit the map to view" title="Fit the map to view (never smaller than 70%)" data-map-zoom="fit">
+        <Scan aria-hidden />
+      </ControlButton>
+      {fullscreen && (
+        <ControlButton
+          onClick={fullscreen.toggle}
+          aria-label={fullscreen.on ? "Exit full screen" : "Full screen"}
+          aria-pressed={fullscreen.on}
+          title={fullscreen.on ? "Exit full screen (Esc)" : "Show the map on the full screen"}
+          data-map-zoom="fullscreen"
+        >
+          {fullscreen.on ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
+        </ControlButton>
+      )}
+      <span className="map-controls-zoom" aria-live="polite" title="Current zoom" data-map-zoom-level>
         {zoomLabel(zoom)}
       </span>
-    </div>
+    </Controls>
   );
 }
 

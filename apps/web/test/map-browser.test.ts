@@ -22,6 +22,7 @@ const LAYOUT_CSS = `
   .self-start { align-self: flex-start } .h-fit { height: fit-content }
   .w-48 { width: 12rem } .w-60 { width: 15rem } .h-full { height: 100% } .w-full { width: 100% }
   .border-b { border-bottom: 1px solid #ddd } .px-3 { padding: 0 .75rem } .py-2 { padding: .5rem 0 }
+  [data-map-height="tall"] [data-map-area] { height: 600px }
 `;
 
 beforeAll(async () => {
@@ -107,6 +108,94 @@ describe("framing the map", () => {
     await page.evaluate(() => window.mapApi.addStep());
     await page.waitForTimeout(600);
     expect(await view(page)).toBe(moved);
+    await page.close();
+  }, 60_000);
+});
+
+/** The viewport's x, y and zoom, from its transform. */
+const viewOf = async (page: Page) => {
+  const [, x, y, zoom] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(await view(page))!.map(Number);
+  return { x: x!, y: y!, zoom: zoom! };
+};
+
+describe("the buttons on the map", () => {
+  it("offers zoom in, zoom out, fit and full screen on a read-only map, labelled, and no lock toggle", async () => {
+    const page = await mount();
+    expect(await page.locator(".react-flow__controls[aria-label='Map view']").count()).toBe(1);
+    for (const name of ["Zoom in", "Zoom out", "Fit the map to view", "Full screen"]) expect(await page.getByRole("button", { name, exact: true }).count(), name).toBe(1);
+    expect(await page.locator(".react-flow__controls-interactive").count()).toBe(0);
+    // The old -, Fit and + in the bar above the map are gone: one set of buttons.
+    expect(await page.getByRole("button", { name: "Fit", exact: true }).count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("leaves full screen off an editable map, which has panels beside it", async () => {
+    const page = await mount({ editable: true });
+    expect(await page.getByRole("button", { name: "Zoom in", exact: true }).count()).toBe(1);
+    expect(await page.getByRole("button", { name: "Full screen", exact: true }).count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("zooms in and out by a step, and the zoom under the buttons follows", async () => {
+    const page = await mount();
+    const before = await viewOf(page);
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await page.waitForFunction((z) => !document.querySelector<HTMLElement>(".react-flow__viewport")!.style.transform.includes(`scale(${z})`), before.zoom);
+    await page.waitForTimeout(300);
+    const zoomed = await viewOf(page);
+    expect(zoomed.zoom).toBeCloseTo(Math.round((before.zoom + 0.15) * 100) / 100, 2);
+    expect(await page.locator("[data-map-zoom-level]").textContent()).toBe(`${Math.round(zoomed.zoom * 100)}%`);
+    // From the keyboard too: Tab reaches the buttons and Enter presses them.
+    await page.getByRole("button", { name: "Zoom out", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    expect((await viewOf(page)).zoom).toBeCloseTo(before.zoom, 2);
+    await page.close();
+  }, 60_000);
+
+  it("fit puts the map back where it was framed after it was moved and zoomed by hand", async () => {
+    const page = await mount();
+    await settled(page);
+    const framed = await viewOf(page);
+    // Drag the map along and zoom it.
+    const pane = (await page.locator(".react-flow__pane").boundingBox())!;
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(pane.x + pane.width / 2 - 300, pane.y + pane.height / 2 - 120, { steps: 8 });
+    await page.mouse.up();
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await page.waitForTimeout(400);
+    const moved = await viewOf(page);
+    expect(Math.abs(moved.x - framed.x) + Math.abs(moved.y - framed.y)).toBeGreaterThan(50);
+    await page.getByRole("button", { name: "Fit the map to view", exact: true }).click();
+    await page.waitForTimeout(600);
+    const refit = await viewOf(page);
+    expect(refit.zoom).toBeCloseTo(framed.zoom, 3);
+    expect(refit.x).toBeCloseTo(framed.x, 0);
+    expect(refit.y).toBeCloseTo(framed.y, 0);
+    await page.close();
+  }, 60_000);
+
+  it("centres the map down a tall panel (the Overview's company map), and fit keeps it there", async () => {
+    const page = await mount({ tall: true });
+    await settled(page);
+    const centred = async () => {
+      const pane = (await page.locator(".react-flow").boundingBox())!;
+      const nodes = await page.locator(".react-flow__node").evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })));
+      const top = Math.min(...nodes.map((n) => n.top)) - pane.y;
+      const bottom = pane.y + pane.height - Math.max(...nodes.map((n) => n.bottom));
+      return { top, bottom, height: pane.height };
+    };
+    const first = await centred();
+    expect(first.height).toBe(600);
+    // Equal room above and below, apart from the padding (24 px each way here).
+    expect(Math.abs(first.top - first.bottom)).toBeLessThanOrEqual(2);
+    await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: "Fit the map to view", exact: true }).click();
+    await page.waitForTimeout(600);
+    const refit = await centred();
+    expect(Math.abs(refit.top - refit.bottom)).toBeLessThanOrEqual(2);
     await page.close();
   }, 60_000);
 });

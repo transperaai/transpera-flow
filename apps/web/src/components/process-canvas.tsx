@@ -43,6 +43,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type Dispatch,
   type KeyboardEvent,
   type MouseEvent,
@@ -95,8 +96,8 @@ import { CARD_SIZE, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/gro
 import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ISSUE_PILL_CLASS, tileColours, tileHeadline } from "@/lib/map/tile";
-import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
-import { MapLegend, ZoomControls } from "./map/map-controls";
+import { MAX_ZOOM, MIN_ZOOM, TALL_PANEL_CLASS, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
+import { MapLegend, MapViewControls } from "./map/map-controls";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
@@ -810,8 +811,16 @@ function BranchEditor({ editor, edgeId, probability, tag }: { editor: ProcessEdi
 const nodeTypes = { step: StepNode, terminal: TerminalNode, group: GroupNode };
 const edgeTypes = { branch: BranchEdge };
 
-/** Room around the steps when framing them: the toolbar sits top left, playback along the foot, lane names on the left. */
-const fitPadding = (lanes: boolean, toolbar: boolean, playback: boolean): Padding => ({ top: toolbar ? 64 : 24, right: 24, bottom: playback ? 64 : 24, left: lanes ? 150 : 24 });
+/**
+ * Room around the steps when framing them: the toolbar sits top left, playback along the foot, lane names on the left, and
+ * the zoom buttons (32 px and a 10 px margin) down the right, so a fitted map never ends under them.
+ */
+const fitPadding = (lanes: boolean, toolbar: boolean, playback: boolean, controls: boolean): Padding => ({
+  top: toolbar ? 64 : 24,
+  right: controls ? 60 : 24,
+  bottom: playback ? 64 : 24,
+  left: lanes ? 150 : 24,
+});
 
 const noop = () => undefined;
 
@@ -904,7 +913,7 @@ interface CanvasProps {
    * Steps that aren't drawn (inside a closed group) are ignored; with none drawn the whole map is framed.
    */
   focus?: readonly string[] | null;
-  /** Show the -, Fit and + buttons in the bar above the map. Default true. */
+  /** Show the zoom in, zoom out, fit (and, read-only, full screen) buttons on the map. Default true. */
   zoomControls?: boolean;
   /** Show the playback bar over the foot of the map. Default true; embedded maps turn it off. */
   showPlayback?: boolean;
@@ -922,9 +931,10 @@ interface CanvasProps {
   showLanes?: boolean;
   /**
    * `fill`: as tall as the space it is given (the editor). `auto`: as tall as the map needs, from 16 to 40 rem,
-   * so a small map doesn't sit in a tall empty panel. Default `auto` when read-only, `fill` when editable.
+   * so a small map doesn't sit in a tall empty panel. `tall`: a fixed share of the screen's height (`TALL_PANEL_CLASS`),
+   * with the map centred in it (the Overview's company map). Default `auto` when read-only, `fill` when editable.
    */
-  height?: "auto" | "fill";
+  height?: "auto" | "fill" | "tall";
   /** A step (or closed group) was clicked, or Enter was pressed on it. */
   onStepClick?: (stepId: string) => void;
   /** Open the step's detail on a click, on a read-only map. Default true. */
@@ -938,6 +948,14 @@ interface CanvasProps {
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
 }
+
+const noSubscribe = () => () => undefined;
+const fullscreenEnabled = () => !!document.fullscreenEnabled;
+const serverFalse = () => false;
+const onFullscreenChange = (notify: () => void) => {
+  document.addEventListener("fullscreenchange", notify);
+  return () => document.removeEventListener("fullscreenchange", notify);
+};
 
 export function ProcessCanvas(props: CanvasProps) {
   return (
@@ -1525,7 +1543,12 @@ function Canvas({
   const width = useStore((st) => st.width);
   const height = useStore((st) => st.height);
   const zoom = useStore((st) => st.transform[2]);
-  const heightMode = heightProp ?? (editable ? "fill" : "auto");
+  // Full screen (read-only maps): the map fills the screen, as the Editor's fills its space, and is centred in it.
+  // Known only in the browser (an iPhone has no full screen for an element), so the server and hydration leave it out.
+  const canFullscreen = useSyncExternalStore(noSubscribe, fullscreenEnabled, serverFalse);
+  const fullscreen = useSyncExternalStore(onFullscreenChange, () => document.fullscreenElement !== null && document.fullscreenElement === wrapper.current, serverFalse);
+  const heightMode = fullscreen ? "fill" : (heightProp ?? (editable ? "fill" : "auto"));
+  const middle = fullscreen || heightMode === "tall";
   const handZoomed = useRef(false);
   const framed = useRef(false);
   const sizeRef = useRef({ width: 0, height: 0 });
@@ -1555,17 +1578,17 @@ function Canvas({
       // Room around what is framed, so a step or two is seen in its surroundings and not blown up to fill the panel.
       if (wanted.length) bounds = { x: bounds.x - 260, y: bounds.y - 140, width: bounds.width + 520, height: bounds.height + 280 };
       // A bar in its own strip above takes no room off the map.
-      const pad = fitPadding(lanes, editable, showPlayback && !playbackAbove);
+      const pad = fitPadding(lanes, editable, showPlayback && !playbackAbove, zoomControls);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
         panelHeight = autoPanelHeight(bounds, panel.width, pad);
         setAutoHeight(panelHeight);
       }
       if (!panelHeight) return;
-      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad), animate ? { duration: 200 } : undefined);
+      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, { middle }), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
-    [flow, lanes, editable, showPlayback, playbackAbove, heightMode, measureOverflow, focus],
+    [flow, lanes, editable, showPlayback, playbackAbove, zoomControls, heightMode, middle, measureOverflow, focus],
   );
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -1593,7 +1616,7 @@ function Canvas({
     return () => clearTimeout(timer);
   }, [fitTick]);
   // A read-only map follows its panel's width (and height, when that is fixed), unless it was moved by hand.
-  const refitKey = editable ? "" : heightMode === "auto" ? `${width}` : `${width}x${height}`;
+  const refitKey = editable && !fullscreen ? "" : heightMode === "auto" ? `${width}` : `${width}x${height}`;
   useEffect(() => {
     if (!refitKey || !framed.current || handZoomed.current) return;
     const timer = setTimeout(() => fitRef.current(false), 60);
@@ -1607,6 +1630,28 @@ function Canvas({
     handZoomed.current = false;
     fit(true);
   };
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void wrapper.current?.requestFullscreen().catch(() => undefined);
+  };
+  // Entering or leaving the full screen changes the panel completely: frame the map afresh, even if it was moved by hand.
+  const wasFullscreen = useRef(fullscreen);
+  useEffect(() => {
+    if (wasFullscreen.current === fullscreen) return;
+    wasFullscreen.current = fullscreen;
+    handZoomed.current = false;
+    setFitTick((t) => t + 1);
+  }, [fullscreen]);
+  // The playback bar floats over the foot of the map: the buttons sit above it, however tall it wraps.
+  const footRef = useRef<HTMLDivElement>(null);
+  const [footHeight, setFootHeight] = useState(0);
+  useEffect(() => {
+    const el = footRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setFootHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [showPlayback, playbackAbove]);
 
   // Highlighted steps scroll into view when they are off screen.
   useEffect(() => {
@@ -1653,20 +1698,19 @@ function Canvas({
           onDoubleClick={onDoubleClick}
           onKeyDownCapture={onKeyDownCapture}
           className={`relative isolate flex min-w-0 flex-col rounded-lg border bg-card ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
+          data-map-height={heightMode}
+          data-fullscreen={fullscreen ? "" : undefined}
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
-          {/* Above the map in the page, so Tab reaches these first: open or close every group, zoom, and what the colours mean. */}
-          {(zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups)) && (
+          {/* Above the map in the page, so Tab reaches these first: open or close every group, and what the colours mean. */}
+          {(legend || allGroups.length > 0 || (showLanes && !hasGroups)) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
               {((showLanes && !hasGroups) || allGroups.length > 0) && (
                 <div className="flex items-center gap-1.5">
                   {showLanes && !hasGroups && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
                   {allGroups.length > 0 && <GroupControls allOpen={allGroups.every((id) => expanded.has(id))} onToggle={toggleAllGroups} />}
                 </div>
-              )}
-              {zoomControls && (
-                <ZoomControls zoom={zoom} onOut={() => zoomBy("out")} onFit={fitByHand} onIn={() => zoomBy("in")} canOut={zoom > MIN_ZOOM + 0.001} canIn={zoom < MAX_ZOOM - 0.001} />
               )}
               {legend && <MapLegend badge={!!openIssues} />}
               {(overflow.left || overflow.right) && (
@@ -1687,7 +1731,11 @@ function Canvas({
               />
             </div>
           )}
-          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
+          <div
+            className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : heightMode === "tall" ? TALL_PANEL_CLASS : ""}`}
+            style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}
+            data-map-area
+          >
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
@@ -1714,7 +1762,7 @@ function Canvas({
           )}
           {/* Playback of the run (issue #14), over the foot of the map; before it in the page, for Tab. */}
           {showPlayback && !playbackAbove && (
-            <div className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
+            <div ref={footRef} className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
               <PlaybackBar
                 clock={playback.clock}
                 H={playback.index?.H ?? null}
@@ -1723,6 +1771,19 @@ function Canvas({
                 describe={playback.describe}
               />
             </div>
+          )}
+          {/* Zoom in, zoom out, fit and full screen, in the map's foot corner; before the map in the page, for Tab. */}
+          {zoomControls && !nothingToDraw && (
+            <MapViewControls
+              zoom={zoom}
+              onOut={() => zoomBy("out")}
+              onFit={fitByHand}
+              onIn={() => zoomBy("in")}
+              canOut={zoom > MIN_ZOOM + 0.001}
+              canIn={zoom < MAX_ZOOM - 0.001}
+              fullscreen={!editable && canFullscreen ? { on: fullscreen, toggle: toggleFullscreen } : null}
+              style={showPlayback && !playbackAbove && footHeight ? { bottom: footHeight + 10 } : undefined}
+            />
           )}
           <div className="absolute inset-0">
           <ReactFlow
