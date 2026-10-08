@@ -5,7 +5,7 @@ Read `docs/plans/builder-brief.md` first; its GitHub, branch and commit rules ap
 Build strictly from this brief. If the code doesn't match what it says, **ask; don't guess.** Every open question has a
 default (section 12). Use it.
 
-Issue: see the GitHub issue "Map: drag tiles in place, cleaner self-attaching lines, smoother animation" (sub-issue of #3).
+Issue: #249 (sub-issue of #3).
 **Start only after the `claude/map-controls` PR has merged** (section 11). Branch `claude/map-ux` from the `origin/main` that
 includes it. Use three PRs in this order: **A** (animation), **B** (lines), **C** (dragging, with the migration). Commit
 and push after every numbered step.
