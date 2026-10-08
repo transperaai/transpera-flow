@@ -41,6 +41,17 @@ describe("fitting the map to its panel", () => {
     expect(big.y + 50 * big.zoom).toBeCloseTo(56);
   });
 
+  it("centres a map that fits down a tall panel only when asked (the Overview's company map)", () => {
+    const bounds = { x: 0, y: 0, width: 400, height: 200 };
+    const pad = { top: 24, right: 60, bottom: 24, left: 24 };
+    expect(fitViewport(bounds, { width: 1000, height: 600 }, pad).y).toBe(24);
+    const middle = fitViewport(bounds, { width: 1000, height: 600 }, pad, { middle: true });
+    expect(middle.zoom).toBeCloseTo(1.15);
+    expect(middle.y).toBeCloseTo(24 + (600 - 48 - 200 * 1.15) / 2);
+    // A map taller than the panel at 70% still starts at the top.
+    expect(fitViewport({ x: 0, y: 0, width: 400, height: 3000 }, { width: 1000, height: 600 }, pad, { middle: true }).y).toBe(24);
+  });
+
   it("steps the zoom by buttons and stops at the ends", () => {
     expect(stepZoom(1, "in")).toBe(1.15);
     expect(stepZoom(1, "out")).toBe(0.85);

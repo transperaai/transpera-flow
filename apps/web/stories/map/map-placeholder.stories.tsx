@@ -20,6 +20,17 @@ export const Skeleton: StoryObj = {
   ),
 };
 
+/** The Overview's company map while it loads: as tall as the map will be (`height="tall"`), so nothing moves when it arrives. */
+export const SkeletonTall: StoryObj = {
+  name: "MapSkeleton tall",
+  tags: ["visual-phone"],
+  render: () => (
+    <div style={{ width: "100%", maxWidth: 1200 }}>
+      <MapSkeleton height="tall" />
+    </div>
+  ),
+};
+
 /** The chip on its own, in the corner of a box. */
 export const Chip: StoryObj = {
   name: "FirstRunStatus",

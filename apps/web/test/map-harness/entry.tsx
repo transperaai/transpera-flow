@@ -41,6 +41,8 @@ export interface HarnessOptions {
   run?: boolean;
   /** Seen by a member: the Audit step is pinned to a named person, whom the map must not name. */
   member?: boolean;
+  /** The Overview's tall panel (`height="tall"`); the page's CSS makes it 600 px, in place of the app's Tailwind class. */
+  tall?: boolean;
 }
 
 declare global {
@@ -177,6 +179,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
         computing={options.computing}
+        height={options.tall ? "tall" : undefined}
       />
       {options.palette && editor && options.company && (
         <aside aria-label="Inspector" style={{ width: 260, padding: 8 }}>
