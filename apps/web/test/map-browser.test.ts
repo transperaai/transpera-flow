@@ -176,6 +176,36 @@ describe("the buttons on the map", () => {
     await page.close();
   }, 60_000);
 
+  it("re-renders no tile or line while it zooms or fits (issue #249: the canvas followed every zoom frame)", async () => {
+    for (const options of [{}, { editable: true }, { company: true, editable: true }] as Partial<HarnessOptions>[]) {
+      const page = await mount(options);
+      await settled(page);
+      await page.waitForTimeout(300);
+      const counted = () => page.evaluate(() => ({ ...(window as unknown as { __mapRenderCounts: Record<string, number> }).__mapRenderCounts }));
+      // Counting on: every tile and line render from here adds one to its kind.
+      await page.evaluate(() => ((window as unknown as { __mapRenderCounts: object }).__mapRenderCounts = {}));
+      const before = await viewOf(page);
+      await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+      await page.waitForTimeout(400);
+      await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+      await page.waitForTimeout(400);
+      await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+      await page.waitForTimeout(400);
+      await page.getByRole("button", { name: "Fit the map to view", exact: true }).click();
+      await page.waitForTimeout(600);
+      expect((await viewOf(page)).zoom).toBeCloseTo(before.zoom, 3);
+      expect(await counted(), JSON.stringify(options)).toEqual({});
+      if (options.editable && !options.company) {
+        // The counter does count: an edit re-renders the tiles and lines.
+        await page.evaluate(() => window.mapApi.addStep());
+        await page.waitForTimeout(400);
+        const after = await counted();
+        expect(after.tile ?? 0).toBeGreaterThan(0);
+      }
+      await page.close();
+    }
+  }, 120_000);
+
   it("centres the map down a tall panel (the Overview's company map), and fit keeps it there", async () => {
     const page = await mount({ tall: true });
     await settled(page);

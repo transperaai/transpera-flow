@@ -4,41 +4,41 @@
 // rating colours (plus the red badge) with their plain names.
 
 import type { CSSProperties } from "react";
-import { ControlButton, Controls } from "@xyflow/react";
+import { ControlButton, Controls, useStore } from "@xyflow/react";
 import { Maximize2, Minimize2, Minus, Plus, Scan } from "lucide-react";
 import { RATING_LABELS } from "@transpera-flow/engine";
 import { LEGEND_ORDER, RATING_STYLE } from "@/lib/map/rating";
-import { zoomLabel } from "@/lib/map/zoom";
+import { MAX_ZOOM, MIN_ZOOM, zoomLabel } from "@/lib/map/zoom";
 
 /**
  * The buttons on the map itself (issue #99, moved onto the map for Austin's "centre the screen" ask): zoom in, zoom out, fit
  * (frame the whole map, never smaller than 70%), and, where offered, full screen; the zoom under them. React Flow's own
  * `Controls` panel with our buttons in it (its built-in zoom and fit would bypass the map's framing, and its lock toggle is
  * not wanted), styled from the tokens in `styles/map-controls.css`. Reading actions, so they stay on a phone.
+ *
+ * The only part of the map that reads the zoom (issue #249): so a zoom or fit animation re-renders these buttons, not the
+ * canvas, its tiles or its lines. Inside the map's ReactFlowProvider.
  */
 export function MapViewControls({
-  zoom,
   onOut,
   onFit,
   onIn,
-  canOut = true,
-  canIn = true,
   fullscreen = null,
   className,
   style,
 }: {
-  zoom: number;
   onOut: () => void;
   onFit: () => void;
   onIn: () => void;
-  /** False at the smallest or largest zoom, where the button does nothing. */
-  canOut?: boolean;
-  canIn?: boolean;
   /** The full-screen toggle and whether the map is on the full screen now; null leaves the button out. */
   fullscreen?: { on: boolean; toggle: () => void } | null;
   className?: string;
   style?: CSSProperties;
 }) {
+  const zoom = useStore((s) => s.transform[2]);
+  // At the smallest or largest zoom the button does nothing.
+  const canOut = zoom > MIN_ZOOM + 0.001;
+  const canIn = zoom < MAX_ZOOM - 0.001;
   return (
     <Controls
       position="bottom-right"
