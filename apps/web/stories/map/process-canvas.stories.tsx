@@ -98,12 +98,12 @@ function CompanyMap_() {
   const bundle = useMemo(() => companyBundle(), []);
   return (
     <Block>
-      <ProcessCanvas bundle={bundle} handoffs showPlayback={false} />
+      <ProcessCanvas bundle={bundle} handoffs showPlayback={false} height="tall" />
     </Block>
   );
 }
 
-/** The company map: process cards joined by labelled handoff lines. */
+/** The company map: process cards joined by labelled handoff lines, centred in the Overview's tall panel, with the zoom, fit and full-screen buttons. */
 export const CompanyMap: StoryObj = {
   tags: ["visual-phone"],
   render: () => <CompanyMap_ />,
