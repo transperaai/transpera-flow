@@ -100,7 +100,7 @@ import { MapLegend, ZoomControls } from "./map/map-controls";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
-import { formatHours, formatNumber } from "@/lib/format";
+import { formatHours } from "@/lib/format";
 import { usePlayback } from "@/lib/playback/use-playback";
 import { InlineEditContext, NodeInlineEditor, type InlineEditing } from "./node-inline-editor";
 import { PlaybackBar } from "./playback-bar";
