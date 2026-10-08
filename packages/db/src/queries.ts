@@ -390,6 +390,54 @@ export async function loadLiveCompanyPart(db: Db, workspaceId: string): Promise<
 }
 
 /**
+ * The workspace's company map process id, or null if it has none or it isn't visible (RLS: everyone in the workspace
+ * reads `processes`). For the pages that stand in for the company map's own URLs.
+ */
+export async function loadCompanyProcessId(db: Db, workspaceId: string): Promise<string | null> {
+  const r = await db.from("processes").select("id").eq("workspace_id", workspaceId).eq("is_company", true).maybeSingle();
+  if (r.error) throw r.error;
+  return r.data?.id ?? null;
+}
+
+/** What the start page ticks from: cheap counts of a workspace's set-up (editors only; members and viewers are never sent them). */
+export interface SetupCounts {
+  roles: number;
+  people: number;
+  clients: number;
+  clientGroups: number;
+  /** Ordinary, unarchived processes (the company map is not one). */
+  processes: number;
+  /** Those with a live revision. */
+  published: number;
+  companyId: string | null;
+}
+
+/** Counts for the start page's checklist, as the caller of `db` (RLS decides what it can count). Throws on a read error. */
+export async function loadSetupCounts(db: Db, workspaceId: string): Promise<SetupCounts> {
+  const count = (table: "roles" | "people" | "clients" | "client_groups") => db.from(table).select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId);
+  const ordinary = () => db.from("processes").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("is_company", false).is("archived_at", null);
+  const [roles, people, clients, clientGroups, processes, published, companyId] = await Promise.all([
+    count("roles"),
+    count("people"),
+    count("clients"),
+    count("client_groups"),
+    ordinary(),
+    ordinary().not("live_revision_id", "is", null),
+    loadCompanyProcessId(db, workspaceId),
+  ]);
+  for (const r of [roles, people, clients, clientGroups, processes, published]) if (r.error) throw r.error;
+  return {
+    roles: roles.count ?? 0,
+    people: people.count ?? 0,
+    clients: clients.count ?? 0,
+    clientGroups: clientGroups.count ?? 0,
+    processes: processes.count ?? 0,
+    published: published.count ?? 0,
+    companyId,
+  };
+}
+
+/**
  * Every process of the workspace at its live revision, for the Overview's company map (issue #100): the pipelines, the
  * servicing processes and the child processes, in creation order. Processes never published aren't on the map. As the
  * caller of `db` (RLS decides what is visible); a share link's snapshot (B3) builds it with the same function.
