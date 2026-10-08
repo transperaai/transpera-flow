@@ -58,3 +58,11 @@ export async function loadImports(workspaceId: string): Promise<ImportsData> {
   }
   return { imports, previous };
 }
+
+/** The workspace's lead sources, oldest first, for the lead checks (RLS: everyone in the workspace reads them). */
+export async function loadLeadSourceOptions(workspaceId: string): Promise<{ id: string; name: string; volumeWeek: number }[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("lead_sources").select("id, name, volume_week").eq("workspace_id", workspaceId).order("created_at").order("id");
+  if (error) throw error;
+  return (data ?? []).map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }));
+}

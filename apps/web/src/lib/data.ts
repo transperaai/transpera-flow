@@ -6,6 +6,9 @@ import {
   LEAD_SOURCE_COLUMNS,
   listProcesses,
   loadBlocks,
+  loadCompanyProcessId,
+  loadSetupCounts,
+  type SetupCounts,
   loadSolutionIssues,
   loadProposals,
   loadSolutions,
@@ -371,6 +374,28 @@ export async function loadWorkspaceOverview(
     workspace,
     processes: processes.map((p) => ({ id: p.id, name: p.name, kind: p.kind, live: p.live_revision_id !== null, draft: p.draft_revision_id !== null })),
   };
+}
+
+/** For a page with nothing published: the workspace, whether anything is published, and the oldest draft-only process. Null when the workspace doesn't exist or isn't visible. */
+export async function loadPublishState(
+  slug: string,
+): Promise<{ workspace: { id: string; name: string; slug: string }; published: boolean; firstDraft: { id: string; name: string } | null } | null> {
+  const overview = await loadWorkspaceOverview(slug);
+  if (!overview) return null;
+  const draft = overview.processes.find((p) => p.draft && !p.live);
+  return {
+    workspace: overview.workspace,
+    published: overview.processes.some((p) => p.live),
+    firstDraft: draft ? { id: draft.id, name: draft.name } : null,
+  };
+}
+
+/** The workspace's company map process id (null if it has none), for the URLs that stand in for the company map's own pages. */
+export const loadCompanyId = cache(async (workspaceId: string): Promise<string | null> => loadCompanyProcessId(await createClient(), workspaceId));
+
+/** Counts for the start page's checklist. Editors only: members and viewers are never sent them. */
+export async function loadWorkspaceSetup(workspaceId: string): Promise<SetupCounts> {
+  return loadSetupCounts(await createClient(), workspaceId);
 }
 
 export interface PersonDetail extends PersonRow {

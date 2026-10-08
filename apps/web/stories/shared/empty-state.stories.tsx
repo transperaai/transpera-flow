@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useEffect, useMemo, useState } from "react";
 import { ProcessCanvas } from "@/components/process-canvas";
 import { EmptyState } from "@/components/shell/empty-state";
+import { NotPublished } from "@/components/shell/not-published";
 import { Button } from "@/components/ui/button";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -24,6 +25,23 @@ export const WithAction: StoryObj = {
       This process has no steps.
     </EmptyState>
   ),
+};
+
+// A page with nothing published yet (issue #243): a new client, with only the company map or only drafts. Editors get the next step;
+// members and viewers get one sentence, and no name or count.
+const createProcess = async () => ({});
+const WHAT = "Issues are problems you confirm on a published process: its findings, or ones you log by hand.";
+
+export const NotPublishedEditor: StoryObj = {
+  render: () => <NotPublished what={WHAT} canEdit base="/w/acme" firstDraft={null} create={createProcess} />,
+};
+
+export const NotPublishedEditorWithDraft: StoryObj = {
+  render: () => <NotPublished what={WHAT} canEdit base="/w/acme" firstDraft={{ id: "p1", name: "Sales pipeline" }} create={createProcess} />,
+};
+
+export const NotPublishedReader: StoryObj = {
+  render: () => <NotPublished what={WHAT} canEdit={false} base="/w/acme" firstDraft={null} />,
 };
 
 /** A read-only map whose process has only start and end. Ready once the map has framed itself (`data-visual-pending`). */

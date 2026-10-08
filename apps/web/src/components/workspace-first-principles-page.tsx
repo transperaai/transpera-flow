@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { emptyFirstPrinciples, isBlank } from "@transpera-flow/engine";
 import { aiConfigured, loadAiViews } from "@/lib/ai/data";
 import { isUnpublished } from "@transpera-flow/db";
@@ -7,7 +7,7 @@ import { WorkspaceFirstPrinciplesFlow } from "@/components/first-principles/flow
 import type { FlowEditing } from "@/components/first-principles/first-principles-flow";
 import { ProcessNav } from "@/components/process-nav";
 import { canEditWorkspace } from "@/lib/access-data";
-import { loadProcessForEditing, loadWorkspaceIssues } from "@/lib/data";
+import { loadCompanyId, loadProcessForEditing, loadWorkspaceHead, loadWorkspaceIssues } from "@/lib/data";
 import { loadProcessFirstPrinciples } from "@/lib/first-principles/data";
 import { processRatings } from "@/lib/processes/rows";
 
@@ -18,7 +18,12 @@ import { processRatings } from "@/lib/processes/rows";
  */
 export async function WorkspaceFirstPrinciplesPage({ slug, processId }: { slug: string; processId: string }) {
   const process = await loadProcessForEditing(slug, processId);
-  if (!process) notFound();
+  if (!process) {
+    // First principles don't apply to the company map: it is judged against the main pipeline's (#175). Any other unknown id is a 404.
+    const head = await loadWorkspaceHead(slug);
+    if (head && (await loadCompanyId(head.id)) === processId) redirect(`/w/${encodeURIComponent(slug)}`);
+    notFound();
+  }
   const { live, draft, processes } = process;
   const canEdit = await canEditWorkspace(live.workspace.id);
   const unpublished = isUnpublished(live);
