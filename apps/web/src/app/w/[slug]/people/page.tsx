@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createProcess } from "@/app/w/[slug]/process-actions";
 import { PeoplePage } from "@/components/people-page";
 import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
@@ -26,7 +25,7 @@ export default async function WorkspacePeoplePage(props: PageProps<"/w/[slug]/pe
           canEdit={canEdit}
           base={base}
           firstDraft={state.firstDraft}
-          create={canEdit ? createProcess.bind(null, state.workspace.id, slug) : undefined}
+          // No create action here: the People page changes nothing (role-gating.test.ts). An editor starts a process from Processes.
         />
         {canEdit && (
           <p className="mt-3 text-sm">

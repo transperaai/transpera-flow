@@ -109,9 +109,10 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
       expect(out).toMatch(/data-not-published|data-start-overview/);
     });
 
-    it.each(PAGES)("%s gives an edit button to editors and none to readers", async (_path, load) => {
+    it.each(PAGES)("%s gives an edit button to editors and none to readers", async (path, load) => {
       const out = await html(await load());
-      if (canEdit) expect(out).toContain("data-edit-entry");
+      // The People page has no action to call (role-gating.test.ts), so with no draft to open its editors get links only.
+      if (canEdit && !(path === "/people" && variant === "company map only")) expect(out).toContain("data-edit-entry");
       else expect(out).not.toContain("data-edit-entry");
     });
 
