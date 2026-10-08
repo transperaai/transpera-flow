@@ -5,6 +5,7 @@ import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { stepWarnings } from "@/lib/editor/commands";
 import { addAfter, groupProblem, groupSteps, membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
 import { applyEdit, invertEdit } from "@/lib/editor/ops";
+import { CARD_SIZE } from "@/lib/map/groups";
 import { demoBundle } from "@/lib/sources/demo";
 
 // Placing steps and grouping them in the Editor (issue #104).
@@ -19,7 +20,7 @@ const from = (b: ProcessBundle, id: string) => b.edges.filter((e) => e.from_step
 describe("adding where the person is looking", () => {
   const cardBox = (b: ProcessBundle, id: string) => {
     const s = stepsOf(b, id);
-    return { l: Number(s.x), t: Number(s.y), r: Number(s.x) + 192, b: Number(s.y) + 92 };
+    return { l: Number(s.x), t: Number(s.y), r: Number(s.x) + CARD_SIZE.width, b: Number(s.y) + CARD_SIZE.height };
   };
   const clear = (b: ProcessBundle, id: string) =>
     b.steps
@@ -35,20 +36,20 @@ describe("adding where the person is looking", () => {
     const view = { x: 5000, y: 3000 };
     const { edit, id } = addAfter(b, null, "task", view);
     const s = stepsOf(applyEdit(b, edit), id);
-    expect([Number(s.x) + 96, Number(s.y) + 46]).toEqual([5000, 3000]);
+    expect([Number(s.x) + CARD_SIZE.width / 2, Number(s.y) + CARD_SIZE.height / 2]).toEqual([5000, 3000]);
   });
 
   it("moves to the nearest free place when the centre is taken, without touching another step", () => {
     const b = flat();
     const taken = stepsOf(b, ids.seo);
-    const view = { x: Number(taken.x) + 96, y: Number(taken.y) + 46 };
+    const view = { x: Number(taken.x) + CARD_SIZE.width / 2, y: Number(taken.y) + CARD_SIZE.height / 2 };
     for (const kind of ["task", "decision", "wait"] as const) {
       const { edit, id } = addAfter(b, null, kind, view);
       const after = applyEdit(b, edit);
       expect(clear(after, id)).toBe(true);
       const s = stepsOf(after, id);
       // Near: within a step or two of where it was meant to go.
-      expect(Math.hypot(Number(s.x) + 96 - view.x, Number(s.y) + 46 - view.y)).toBeLessThan(260);
+      expect(Math.hypot(Number(s.x) + CARD_SIZE.width / 2 - view.x, Number(s.y) + CARD_SIZE.height / 2 - view.y)).toBeLessThan(260);
     }
   });
 
@@ -56,16 +57,16 @@ describe("adding where the person is looking", () => {
     const b = flat();
     const taken = stepsOf(b, ids.seo);
     const view = {
-      x: Number(taken.x) + 96,
-      y: Number(taken.y) + 46,
+      x: Number(taken.x) + CARD_SIZE.width / 2,
+      y: Number(taken.y) + CARD_SIZE.height / 2,
       visible: { left: Number(taken.x) - 400, top: Number(taken.y) - 300, right: Number(taken.x) + 600, bottom: Number(taken.y) + 300 },
     };
     const { edit, id } = addAfter(b, null, "task", view);
     const s = stepsOf(applyEdit(b, edit), id);
     expect(Number(s.x)).toBeGreaterThanOrEqual(view.visible.left);
     expect(Number(s.y)).toBeGreaterThanOrEqual(view.visible.top);
-    expect(Number(s.x) + 192).toBeLessThanOrEqual(view.visible.right);
-    expect(Number(s.y) + 92).toBeLessThanOrEqual(view.visible.bottom);
+    expect(Number(s.x) + CARD_SIZE.width).toBeLessThanOrEqual(view.visible.right);
+    expect(Number(s.y) + CARD_SIZE.height).toBeLessThanOrEqual(view.visible.bottom);
   });
 
   it("keeps a step added inside a group beside the selected step, not at the view's centre", () => {
