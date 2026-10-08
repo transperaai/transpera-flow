@@ -177,7 +177,7 @@ export const LARKSPUR_PIPELINE: { steps: LarkspurStep[]; edges: LarkspurEdge[] }
     },
     { key: "workshop", name: "Brand workshop", kind: "task", role: "strat", work: 4, wait: 8, rework: 0, tool: "Miro", x: 290, y: 290 },
     { key: "social_setup", name: "Social set-up & first calendar", kind: "task", role: "social", work: 6, wait: 8, rework: 0.1, tool: "Later, Canva", x: 520, y: 180 },
-    { key: "content_plan", name: "Content plan & first articles", kind: "task", role: "copy", work: 12, wait: 16, rework: 0.2, tool: "Google Docs", x: 520, y: 290 },
+    { key: "content_plan", name: "Content plan & first articles", kind: "task", role: "copy", work: 12, wait: 16, rework: 0.2, tool: "Google Docs", x: 520, y: 310 },
     {
       key: "web_design",
       name: "Website design",
@@ -189,7 +189,7 @@ export const LARKSPUR_PIPELINE: { steps: LarkspurStep[]; edges: LarkspurEdge[] }
       workDist: { kind: "lognormal", cv: 0.5 },
       tool: "Figma",
       x: 520,
-      y: 400,
+      y: 440,
     },
     {
       key: "web_build",
