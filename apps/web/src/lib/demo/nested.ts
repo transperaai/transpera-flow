@@ -17,10 +17,22 @@ const GROUPS: { id: string; name: string; steps: string[]; entry: string }[] = [
   { id: DEMO_GROUP_IDS.setup, name: "Campaign set-up", steps: [ids.seo, ids.ppc, ids.live], entry: ids.seo },
 ];
 
+const NESTED_AT: Record<string, { x: number; y: number }> = {
+  [ids.kickoff]: { x: 290, y: 374 },
+  [ids.seo]: { x: 520, y: 290 },
+  [ids.ppc]: { x: 520, y: 436 },
+};
+
 /** The bundle with two groups: steps inside them are placed relative to their box, and the start step leads into the first. */
 export function withDemoGroups(bundle: ProcessBundle): ProcessBundle {
   const template = bundle.steps[0]!;
-  let steps = [...bundle.steps];
+  // The closed "Campaign set-up" card sits 56 px above its highest step, so at the flat map's positions it would cover the
+  // line from Client decision back to Contract & onboarding (y ≈ 220). Its steps and Kickoff (whose branch labels need
+  // room between SEO and PPC) move down here, in the nested view only.
+  let steps = bundle.steps.map((s) => {
+    const at = NESTED_AT[s.id];
+    return at ? { ...s, ...at } : s;
+  });
   for (const g of GROUPS) {
     const inside = steps.filter((s) => g.steps.includes(s.id));
     const x = Math.min(...inside.map((s) => Number(s.x))) - GROUP_PADDING.left;
@@ -52,8 +64,6 @@ export function withDemoGroups(bundle: ProcessBundle): ProcessBundle {
     };
     steps = [...steps.map((s) => (g.steps.includes(s.id) ? { ...s, parent_step_id: g.id, x: Number(s.x) - x, y: Number(s.y) - y } : s)), group];
   }
-  // Lost sat between the two groups' steps; the boxes take that room, so it moves clear of them.
-  steps = steps.map((st) => (st.id === ids.lost ? { ...st, x: 520, y: -70 } : st));
   const edges: EdgeRow[] = bundle.edges.map((e) => (e.from_step_id === ids.start ? { ...e, to_step_id: DEMO_GROUP_IDS.conversation } : e));
   return { ...bundle, steps, edges };
 }

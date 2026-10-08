@@ -49,8 +49,8 @@ export const NORTHBEAM_SERVICING: NorthbeamServicingProcess[] = [
     slaHours: 40,
     steps: [
       { key: "report_strat", name: "Set the month's priorities", kind: "task", role: "strat", work: 1.5, wait: 0, tool: "Notion", x: 60, y: 50 },
-      { key: "report_seo", name: "SEO work & report data", kind: "task", role: "seo", work: 16, wait: 0, tool: "Ahrefs, Looker Studio", x: 290, y: -10 },
-      { key: "report_ppc", name: "PPC optimisation & report data", kind: "task", role: "ppc", work: 19, wait: 0, tool: "Google Ads, Looker Studio", x: 290, y: 110 },
+      { key: "report_seo", name: "SEO work & report data", kind: "task", role: "seo", work: 16, wait: 0, tool: "Ahrefs, Looker Studio", x: 290, y: -22 },
+      { key: "report_ppc", name: "PPC optimisation & report data", kind: "task", role: "ppc", work: 19, wait: 0, tool: "Google Ads, Looker Studio", x: 290, y: 120 },
       { key: "report_am", name: "Write & send the report", kind: "task", role: "am", work: 3, wait: 0, tool: "Google Docs", x: 520, y: 50 },
       { key: "report_fin", name: "Invoice", kind: "task", role: "fin", work: 1.2, wait: 0, tool: "Xero", x: 750, y: 50 },
       { key: "report_start", name: "Month starts", kind: "start", role: null, work: 0, wait: 0, tool: null, x: -150, y: 50 },
