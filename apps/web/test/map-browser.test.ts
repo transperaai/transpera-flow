@@ -38,6 +38,7 @@ beforeAll(async () => {
   });
   script = out.outputFiles[0]!.text;
   css = readFileSync(createRequire(import.meta.url).resolve("@xyflow/react/dist/style.css"), "utf8");
+  css += readFileSync(fileURLToPath(new URL("../src/styles/react-flow.css", import.meta.url)), "utf8");
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 120_000);
 
@@ -150,6 +151,22 @@ describe("rating tiles (issue #242)", () => {
     const audit = (await textOf(page)).find((t) => t.text.includes("Bottleneck"))!;
     expect(audit.who).toContain("A team member");
     for (const t of await textOf(page)) expect(t.text).not.toMatch(/Priya Shah|Tom Reed|Maya Collins/);
+    await page.close();
+  }, 60_000);
+});
+
+describe("group tiles (issue #242)", () => {
+  it("draws no second box around a closed group: React Flow's group node style is reset", async () => {
+    const page = await mount({ nested: true });
+    const groups = page.locator(".react-flow__node-group");
+    expect(await groups.count()).toBeGreaterThan(0);
+    const looks = await groups.evaluateAll((els) =>
+      els.map((el) => {
+        const s = getComputedStyle(el);
+        return { border: s.borderTopWidth, padding: s.paddingTop, background: s.backgroundColor, shadow: s.boxShadow };
+      }),
+    );
+    for (const look of looks) expect(look).toEqual({ border: "0px", padding: "0px", background: "rgba(0, 0, 0, 0)", shadow: "none" });
     await page.close();
   }, 60_000);
 });
