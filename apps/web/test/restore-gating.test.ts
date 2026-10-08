@@ -9,8 +9,9 @@ const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8"
 
 describe("the restore card and page", () => {
   it("shows the card only to someone who can edit, in an empty workspace", () => {
-    const overview = read("components/overview/workspace-overview.tsx");
-    expect(overview).toContain("const canRestore = (await canEditWorkspace(head.id)) && (await workspaceIsEmpty(await createClient(), head.id));");
+    const page = read("components/overview/workspace-overview.tsx");
+    expect(page).toContain("const canRestore = canEdit && (await workspaceIsEmpty(await createClient(), head.id));");
+    const overview = read("components/overview/start-overview.tsx");
     expect(overview).toContain("{canRestore && (");
     expect(overview).toContain("Restore a backup");
     expect(overview).toContain("Fill this new workspace from a JSON backup another workspace exported.");
