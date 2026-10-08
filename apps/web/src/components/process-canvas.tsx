@@ -385,6 +385,12 @@ function RatingRow({ dot, label }: { dot: string; label: string }) {
 }
 
 const tileClass = "relative rounded-lg shadow-token transition-[box-shadow,opacity] hover:shadow-md motion-reduce:transition-none";
+/**
+ * The headline row mixes a mono value with a sans caption on one baseline, so its natural height moves by about a pixel with
+ * the fonts' metrics (17 px before they load, 18 after). A fixed height keeps every tile the same size at any moment, so the
+ * map frames itself (and a screenshot is cut) at the same height whether or not the fonts have arrived.
+ */
+const headlineRowClass = "mt-1 flex h-[18px] min-w-0 items-baseline gap-1.5";
 const footClass = "mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1 text-xs text-fg-2";
 
 function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
@@ -422,7 +428,7 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
           <p data-field="name" className="mt-0.5 text-sm leading-tight font-semibold text-fg">
             {step.name}
           </p>
-          <p className="mt-1 flex min-w-0 items-baseline gap-1.5" title={headline.title}>
+          <p className={headlineRowClass} title={headline.title}>
             <span data-field={staffed ? undefined : "wait_hours"} className="font-mono text-base leading-none font-medium text-fg tabular-nums">
               {headline.value}
             </span>
@@ -512,7 +518,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       <p data-field="name" title={step.name} className="mt-0.5 line-clamp-2 text-sm leading-tight font-semibold text-fg">
         {step.name}
       </p>
-      <p className="mt-1 flex min-w-0 items-baseline gap-1.5">
+      <p className={headlineRowClass}>
         <span className="font-mono text-base leading-none font-medium text-fg tabular-nums">{roll.steps}</span>
         <span className="min-w-0 truncate text-[11.5px] leading-4 text-fg-2" title="Hands-on time of every step inside, added up">
           {roll.steps === 1 ? "step" : "steps"} · {roll.handsOnHours ? `${formatHours(roll.handsOnHours)} work` : "no work entered"}
