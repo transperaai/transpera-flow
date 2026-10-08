@@ -38,6 +38,7 @@ export function ProcessesList({
   loadCard,
   archived = [],
   admin,
+  empty,
 }: {
   rows: ProcessRowData[];
   hrefs: Record<string, string>;
@@ -46,6 +47,8 @@ export function ProcessesList({
   archived?: ArchivedProcess[];
   /** Rename, change type, archive and restore (owners and editors); absent for viewers and the demo. */
   admin?: ProcessAdminOps;
+  /** Shown in place of the table when there are no processes in use (issue #243). */
+  empty?: ReactNode;
 }) {
   const router = useRouter();
   const [view, setView] = useState<"active" | "archived">("active");
@@ -101,6 +104,7 @@ export function ProcessesList({
           rows={rows}
           hrefs={hrefs}
           loadCard={loadCard}
+          empty={empty}
           actions={admin ? (r) => <RowMenu row={r} onPick={(mode) => setOpen({ mode, row: r })} /> : undefined}
         />
       ) : (
