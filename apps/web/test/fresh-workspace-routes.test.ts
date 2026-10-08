@@ -1,7 +1,7 @@
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { COMPANY_ID, DISTINCTIVE_SETUP, DRAFT, FRESH_SLUG, SECRET_PEOPLE, UNKNOWN_ID, VARIANTS, ZERO_SETUP, freshHead, freshOverview, freshPublishState, type FreshVariant } from "./fresh-workspace-fixture";
+import { COMPANY_ID, DISTINCTIVE_SETUP, DRAFT, FRESH_SLUG, SECRET_PEOPLE, UNKNOWN_ID, VARIANTS, ZERO_SETUP, type FreshVariant } from "./fresh-workspace-fixture";
 
 // A new client's workspace (issue #243) has a company map and perhaps drafts, and nothing published. No page may answer 404 for
 // it; the pages say "nothing published yet" or show the start page. An unknown workspace or process id still gives a 404. The loaders
