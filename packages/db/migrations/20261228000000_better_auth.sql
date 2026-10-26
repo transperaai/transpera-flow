@@ -136,6 +136,7 @@ $$;
 --     reconcile_access doesn't put it back.
 --   * records the provider accounts in auth.identities (p_identities: [{provider, provider_id, hd?, tid?}]), which is where the
 --     per-workspace domain joins (ADR 0003) read Google's hosted-domain claim. Only a provider's own ID token reaches it.
+--   * first runs public.reconcile_access(user), the per-workspace lists and domain joins that /auth/callback used to trigger.
 create function private.sync_deployment_access(p_user uuid, p_bootstrap_admins text[] default '{}', p_identities jsonb default '[]')
 returns text
 language plpgsql security definer
@@ -162,6 +163,11 @@ begin
   set raw_app_meta_data = coalesce(u.raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('agency_admin', new_role = 'admin'),
       last_sign_in_at = now()
   where u.id = p_user;
+
+  -- What the old /auth/callback did after every sign-in (ADR 0003): per-workspace pre-assigned emails and domain joins. It runs
+  -- first, so a workspace's own list entry (say owner) is in place before the deployment role is added without lowering it.
+  -- It touches only 'access_list' and 'domain' memberships.
+  perform public.reconcile_access(p_user);
 
   if new_role in ('editor', 'viewer') then
     -- The enum is declared agency_admin, owner, editor, member, viewer, so a smaller role is a stronger one.

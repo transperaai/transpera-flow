@@ -232,6 +232,15 @@ export interface DemandSettings {
   workspace_id: string;
 }
 
+export interface DeploymentAccess {
+  created_at: Generated<string>;
+  created_by: Generated<string | null>;
+  id: Generated<string>;
+  kind: string;
+  role: string;
+  value: string;
+}
+
 export interface Edges {
   condition_tag: string | null;
   created_at: Generated<string>;
@@ -924,6 +933,7 @@ export interface DB {
   clients: Clients;
   datasets: Datasets;
   demand_settings: DemandSettings;
+  deployment_access: DeploymentAccess;
   edges: Edges;
   findings: Findings;
   first_principles: FirstPrinciples;

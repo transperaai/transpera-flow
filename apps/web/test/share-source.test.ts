@@ -46,7 +46,7 @@ describe("the visitor's page", () => {
 describe("the proxy and the headers", () => {
   it("lets /s through signed out, and nothing else new", () => {
     const proxy = read("src/proxy.ts");
-    expect(proxy).toMatch(/const PUBLIC_PATHS = \["\/login", "\/auth", "\/demo", "\/privacy", "\/s"\];/);
+    expect(proxy).toMatch(/const PUBLIC_PATHS = \["\/login", "\/auth", "\/api\/auth", "\/demo", "\/privacy", "\/s"\];/);
   });
 
   it("sets Referrer-Policy, Cache-Control and X-Robots-Tag for /s/:path*", () => {

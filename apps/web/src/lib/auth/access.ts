@@ -60,7 +60,7 @@ export function idTokenClaims(idToken: string | null | undefined): Record<string
   if (!payload) return {};
   try {
     const parsed: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

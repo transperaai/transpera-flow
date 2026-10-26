@@ -1,27 +1,19 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Json } from "@transpera-flow/db";
 import { redirectToGoogle } from "@/lib/auth/google-sign-in";
-import { AFTER_SIGN_IN_COOKIE, AFTER_SIGN_IN_MAX_AGE_SECONDS, SHARE_TOKEN } from "@/lib/share/after-sign-in";
+import { SHARE_TOKEN } from "@/lib/share/after-sign-in";
 import { parsePlayIdea, type PlayResult } from "@/lib/share/play-input";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * "Continue with Google" on a restricted link: remember the link for ten minutes, then the same Google hand-off as the login
- * page. /auth/callback sends the visitor back to the link when the cookie is there. A malformed token goes nowhere.
+ * "Continue with Google" on a restricted link: the same Google hand-off as the login page, returning to the link afterwards
+ * (`/s/<token>` is Better Auth's callbackURL). A malformed token goes nowhere.
  */
 export async function signInToOpen(token: string): Promise<void> {
   if (typeof token !== "string" || !SHARE_TOKEN.test(token)) redirect("/login");
-  (await cookies()).set(AFTER_SIGN_IN_COOKIE, `/s/${token}`, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: AFTER_SIGN_IN_MAX_AGE_SECONDS,
-  });
-  await redirectToGoogle();
+  await redirectToGoogle(`/s/${token}`);
 }
 
 /**

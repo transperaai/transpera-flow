@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AFTER_SIGN_IN_COOKIE, SHARE_TOKEN, afterSignInPath } from "@/lib/share/after-sign-in";
+import { SHARE_TOKEN } from "@/lib/share/after-sign-in";
 import { daysFromNow, parseEmails, parseShareInput, MAX_EMAILS, type ShareInput } from "@/lib/share/input";
 import { openedText, shareDate, shareStatus, showsFinancials, showsPeople, whoText } from "@/lib/share/format";
 import { isInternalHref } from "@/components/share/inert-links";
@@ -94,57 +94,25 @@ describe("parseShareInput", () => {
   });
 });
 
-describe("afterSignInPath (the callback's cookie check)", () => {
+describe("the share link's sign-in", () => {
   const token = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde";
-  it("has a 43-character token and a fixed cookie name", () => {
+  it("takes a 43-character base64url token and nothing else", () => {
     expect(token).toHaveLength(43);
     expect(SHARE_TOKEN.test(token)).toBe(true);
-    expect(AFTER_SIGN_IN_COOKIE).toBe("tf_after_sign_in");
-  });
-  it("accepts only /s/<43 token characters>, plain or URL-encoded", () => {
-    expect(afterSignInPath(`/s/${token}`)).toBe(`/s/${token}`);
-    expect(afterSignInPath(encodeURIComponent(`/s/${token}`))).toBe(`/s/${token}`);
-  });
-  it("ignores everything else: no open redirect", () => {
-    for (const bad of [
-      null,
-      undefined,
-      "",
-      "/",
-      "/w/northbeam",
-      `/s/${token}x`,
-      `/s/${token.slice(1)}`,
-      `/s/${token}/`,
-      `/s/${token}?next=https://evil.example`,
-      `//evil.example/s/${token}`,
-      `https://evil.example/s/${token}`,
-      `/s/${token}\n/login`,
-      `/s/${token.slice(0, 42)}!`,
-      "/%2e%2e/s",
-      "%",
-    ]) {
-      expect(afterSignInPath(bad as string | null | undefined), String(bad)).toBeNull();
+    for (const bad of ["", `${token}x`, token.slice(1), `${token}/`, `${token}\n`, `${token.slice(0, 42)}!`, "/%2e%2e/s"]) {
+      expect(SHARE_TOKEN.test(bad), bad).toBe(false);
     }
   });
-});
 
-describe("the callback and the sign-in action use it", () => {
-  it("reads the cookie before the query is cleared, honours only the checked path, and always drops it", async () => {
-    const { readFileSync } = await import("node:fs");
-    const route = readFileSync(new URL("../src/app/auth/callback/route.ts", import.meta.url), "utf8");
-    expect(route.indexOf("afterSignInPath(request.cookies.get(AFTER_SIGN_IN_COOKIE)")).toBeGreaterThan(0);
-    expect(route.indexOf("afterSignInPath(")).toBeLessThan(route.indexOf("url.search = \"\""));
-    expect(route).toContain('url.pathname = back ?? "/"');
-    expect(route).toContain("response.cookies.delete(AFTER_SIGN_IN_COOKIE)");
-    // No `next` query parameter: Supabase's redirect allow-list would need changing.
-    expect(route).not.toMatch(/searchParams\.get\("next"\)/);
+  it("returns to /s/<token> through Better Auth's callbackURL, built only from a checked token", async () => {
+    const { readFileSync, existsSync } = await import("node:fs");
     const action = readFileSync(new URL("../src/app/s/[token]/actions.ts", import.meta.url), "utf8");
-    expect(action).toMatch(/httpOnly:\s*true/);
-    expect(action).toMatch(/sameSite:\s*"lax"/);
-    expect(action).toMatch(/path:\s*"\/"/);
-    expect(action).toMatch(/maxAge:\s*AFTER_SIGN_IN_MAX_AGE_SECONDS/);
-    expect(action).toContain('process.env.NODE_ENV === "production"');
     expect(action).toContain("SHARE_TOKEN.test(token)");
+    expect(action.indexOf("SHARE_TOKEN.test(token)")).toBeLessThan(action.indexOf("redirectToGoogle("));
+    expect(action).toContain("redirectToGoogle(`/s/${token}`)");
+    // The cookie and the /auth/callback route that read it are gone.
+    expect(action).not.toContain("cookies");
+    expect(existsSync(new URL("../src/app/auth/callback/route.ts", import.meta.url))).toBe(false);
   });
 });
 

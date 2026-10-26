@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ASSIGNABLE_ROLES, selectablePeople } from "@/lib/access";
+import { loadDeploymentAccess } from "@/lib/deployment-access";
 import { currentUserId, loadAccessSettings, type WorkspaceMember } from "@/lib/access-data";
 import {
   addDomain,
@@ -21,6 +22,7 @@ import {
   updateEmail,
 } from "./actions";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
+import { WhoCanSignIn } from "./who-can-sign-in";
 
 const SOURCE_LABEL: Record<WorkspaceMember["source"], string> = {
   access_list: "Pre-assigned email",
@@ -82,6 +84,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   if (!settings) notFound();
   const { workspace, domains, emails, members, people, isAgencyAdmin } = settings;
   const userId = await currentUserId();
+  const signInView = await loadDeploymentAccess();
   const listed = new Map(emails.map((e) => [e.email, e]));
   const personName = new Map(people.map((p) => [p.id, p.name]));
 
@@ -117,6 +120,8 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
+
+      {signInView && <WhoCanSignIn slug={slug} view={signInView} />}
 
       <Card role="region" aria-labelledby="domains-heading">
         <CardHeader>

@@ -42,7 +42,9 @@ const sync = async (id: string, admins: string[] = [], identities: unknown[] = [
   (await db.client.query("select private.sync_deployment_access($1, $2, $3) as r", [id, admins, JSON.stringify(identities)])).rows[0]
     .r as string | null;
 
-const workspaceIds = async () => (await db.client.query("select id from workspaces order by id")).rows.map((r) => r.id as string);
+// beforeAll makes at least four workspaces.
+const workspaceIds = async () =>
+  (await db.client.query("select id from workspaces order by id")).rows.map((r) => r.id as string) as [string, string, string, string, ...string[]];
 const memberships = async (id: string) =>
   (await db.client.query("select workspace_id, role, source, active from memberships where user_id = $1", [id])).rows as {
     workspace_id: string;
@@ -333,6 +335,16 @@ describe("private.sync_deployment_access", () => {
       ]);
       const ok = await db.client.query("select private_qualifies as q from (select public.qualifies_for_domain($1, 'client.com') as private_qualifies) s", [id]);
       expect(ok.rows[0].q).toBe(true);
+    });
+
+    it("applies a workspace's own pre-assigned role first, so the deployment role never lowers it", async () => {
+      const [ws, other] = await workspaceIds();
+      const id = await signUp("pre@client.com");
+      await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'pre@client.com', 'owner')", [ws]);
+      expect(await sync(id)).toBe("viewer");
+      const byWs = Object.fromEntries((await memberships(id)).map((r) => [r.workspace_id, r]));
+      expect(byWs[ws]).toMatchObject({ role: "owner", source: "access_list" });
+      expect(byWs[other]).toMatchObject({ role: "viewer", source: "manual" });
     });
 
     it("drops the hosted domain when a later sign-in has none, and records a Microsoft tenant", async () => {
