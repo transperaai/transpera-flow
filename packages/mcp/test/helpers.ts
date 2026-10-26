@@ -88,3 +88,13 @@ export function post(options: McpHandlerOptions, headers: Record<string, string>
     options,
   );
 }
+
+/** The error a database call fails with (a `pg` error: `code` is its SQLSTATE), or null when it succeeds. */
+export async function errorOf(run: () => Promise<unknown>): Promise<(Error & { code?: string }) | null> {
+  try {
+    await run();
+    return null;
+  } catch (e) {
+    return e as Error & { code?: string };
+  }
+}

@@ -1,51 +1,31 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { payFreeIssueFields, reserveAiRun, saveAiAnalysis, setFindingStatus, storeProposedFindings, type ProposedFinding } from "@transpera-flow/db";
-import { generateApiToken, type McpHandlerOptions } from "../src";
-import { call, connect, signJwt } from "./helpers";
+import { generateApiToken, hashApiToken, type McpHandlerOptions } from "../src";
+import type { Db } from "@transpera-flow/db";
+import { call, connect, errorOf, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// Findings (issue #175, B17; migration 20261205000000) as the web app and the connector reach them: over PostgREST with
-// Supabase's table privileges and RLS. Every member reads findings; owners and editors add them by hand and accept, edit or
+// Findings (issue #175, B17; migration 20261205000000) as the web app and the connector reach them: through Kysely as the
+// signed-in user, with the table privileges and RLS. Every member reads findings; owners and editors add them by hand and accept, edit or
 // dismiss them; a viewer creates and changes none; anon reads nothing; nobody reaches another workspace's; nobody deletes
 // one; an "AI" finding needs an analysis its writer ran. And the connector's coverage: every fact, finding and issue an
 // analysis needs is readable over MCP (get_facts, list_findings, list_issues, get_analysis, list_sources, list_solutions).
 // And B20 (#197): Claude proposes findings over the connector (propose_finding), which an editor accepts in the app.
-// Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
 
+let env: McpTestDb;
 let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", other: "", editor: "", viewer: "", stranger: "", process: "", role: "" };
 const tokens = { editor: "", viewer: "", stranger: "" };
-let editor: SupabaseClient;
-let viewer: SupabaseClient;
-let stranger: SupabaseClient;
-let anon: SupabaseClient;
+let editor: Db;
+let viewer: Db;
+let stranger: Db;
+let anon: Db;
 let options: McpHandlerOptions;
-
-function client(token: string): SupabaseClient {
-  return createClient("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
-
-const toPostgrest: typeof fetch = (input, init) => {
-  if (input instanceof Request) throw new Error("expected supabase-js to pass a URL string");
-  return fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
-};
 
 async function apiToken(userId: string) {
   const { token, hash } = generateApiToken();
@@ -55,12 +35,10 @@ async function apiToken(userId: string) {
 
 const manual = (title: string, extra: Record<string, unknown> = {}) => ({ workspace_id: ids.ws, process_id: ids.process, origin: "manual", status: "accepted", rating: "bad", type: "delay", title, ...extra });
 
-describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () => {
+describe("findings and the connector", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug, settings) select 'Findings Co', $1, settings from workspaces where settings ? 'horizon_weeks' order by created_at limit 1 returning id", [`findings-${tag}`])).id as string;
     ids.other = (await one("insert into workspaces (name, slug) values ('Elsewhere', $1) returning id", [`findings-other-${tag}`])).id as string;
@@ -72,22 +50,17 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     const person = (await one("insert into people (workspace_id, name, fte) values ($1, 'Maya Collins', 1) returning id", [ids.ws])).id as string;
     await admin.query("insert into person_roles (person_id, role_id, workspace_id) values ($1, $2, $3)", [person, ids.role, ids.ws]);
     await admin.query("insert into lead_sources (workspace_id, name, volume_week, conversion_to_qualified) values ($1, 'Referrals', 10, 1)", [ids.ws]);
-    const jwt = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    editor = client(jwt(ids.editor));
-    viewer = client(jwt(ids.viewer));
-    stranger = client(jwt(ids.stranger));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    options = { supabaseUrl: SUPABASE_URL, supabaseKey: signJwt({ role: "anon", iss: "test" }, JWT_SECRET), fetch: toPostgrest };
+    editor = env.dbAs(userClaims(ids.editor));
+    viewer = env.dbAs(userClaims(ids.viewer));
+    stranger = env.dbAs(userClaims(ids.stranger));
+    anon = env.dbAs(null);
+    options = env.options;
     tokens.editor = await apiToken(ids.editor);
     tokens.viewer = await apiToken(ids.viewer);
     const { token, hash } = generateApiToken();
     await admin.query("insert into api_tokens (user_id, token_hash, label, active_workspace_id) values ($1, $2, 'e2e', $3)", [ids.stranger, hash, ids.other]);
     tokens.stranger = token;
     const deadline = Date.now() + 60_000;
-    while ((await editor.from("workspaces").select("id").eq("id", ids.ws)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
     // A small published process the editor builds over the connector, so the engine has something to measure.
     const mcp = await connect(tokens.editor, options);
     expect(await call(mcp, "create_process", { name: "Sales" })).toMatchObject({ ok: true });
@@ -98,51 +71,42 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
   }, 120_000);
 
   afterAll(async () => {
-    // Only this suite's own workspaces (the database is shared): their rows go with them.
-    for (const ws of [ids.ws, ids.other]) {
-      if (!ws) continue;
-      // Its processes first (their steps hold its roles), never the company map, which goes with the workspace.
-      await admin.query("delete from processes where workspace_id = $1 and not is_company", [ws]);
-      await admin.query("delete from workspaces where id = $1", [ws]);
-      await admin.query("delete from audit_log where workspace_id = $1", [ws]);
-    }
-    await admin?.end();
+    await env?.close();
   });
 
   it("lets an editor add a finding by hand (accepted at once, stamped as them), edit it and dismiss it; nobody deletes it", async () => {
-    const added = await editor.from("findings").insert(manual("Proposals wait for one person", { created_by: ids.viewer, why: "Founders go elsewhere." })).select("*").single();
-    expect(added.error).toBeNull();
-    expect(added.data).toMatchObject({ origin: "manual", status: "accepted", created_by: ids.editor, decided_by: ids.editor });
-    const id = added.data!.id as string;
-    expect((await editor.from("findings").update({ title: "Proposals wait a week for one person" }).eq("id", id).select("title")).data).toEqual([{ title: "Proposals wait a week for one person" }]);
-    expect((await editor.from("findings").update({ status: "dismissed" }).eq("id", id).select("status, decided_by")).data).toEqual([{ status: "dismissed", decided_by: ids.editor }]);
-    const del = await editor.from("findings").delete().eq("id", id).select("id");
-    expect(del.error?.message ?? "").toMatch(/permission denied/);
+    const added = await editor.insertInto("findings").values(manual("Proposals wait for one person", { created_by: ids.viewer, why: "Founders go elsewhere." }) as never).returningAll().executeTakeFirstOrThrow();
+    expect(added).toMatchObject({ origin: "manual", status: "accepted", created_by: ids.editor, decided_by: ids.editor });
+    const id = added.id as string;
+    expect(await editor.updateTable("findings").set({ title: "Proposals wait a week for one person" }).where("id", "=", id).returning("title").execute()).toEqual([{ title: "Proposals wait a week for one person" }]);
+    expect(await editor.updateTable("findings").set({ status: "dismissed" }).where("id", "=", id).returning(["status", "decided_by"]).execute()).toEqual([{ status: "dismissed", decided_by: ids.editor }]);
+    const del = await errorOf(() => editor.deleteFrom("findings").where("id", "=", id).returning("id").execute());
+    expect(del?.message ?? "").toMatch(/permission denied/);
     expect((await one("select status from findings where id = $1", [id])).status).toBe("dismissed");
   });
 
   it("lets a viewer read findings but not add, accept, edit or dismiss one", async () => {
     const id = (await one("insert into findings (workspace_id, process_id, origin, status, rating, type, title) values ($1, $2, 'manual', 'accepted', 'bad', 'delay', 'Slow replies') returning id", [ids.ws, ids.process])).id as string;
-    expect((await viewer.from("findings").select("title").eq("id", id)).data).toEqual([{ title: "Slow replies" }]);
-    expect((await viewer.from("findings").insert(manual("Viewer's own"))).error?.message).toMatch(/row-level security/);
-    expect((await viewer.from("findings").update({ status: "dismissed" }).eq("id", id).select("id")).data).toEqual([]);
-    expect((await viewer.from("findings").update({ title: "Theirs" }).eq("id", id).select("id")).data).toEqual([]);
+    expect(await viewer.selectFrom("findings").select("title").where("id", "=", id).execute()).toEqual([{ title: "Slow replies" }]);
+    expect((await errorOf(() => viewer.insertInto("findings").values(manual("Viewer's own") as never).execute()))?.message).toMatch(/row-level security/);
+    expect(await viewer.updateTable("findings").set({ status: "dismissed" }).where("id", "=", id).returning("id").execute()).toEqual([]);
+    expect(await viewer.updateTable("findings").set({ title: "Theirs" }).where("id", "=", id).returning("id").execute()).toEqual([]);
     expect((await one("select title, status from findings where id = $1", [id]))).toEqual({ title: "Slow replies", status: "accepted" });
   });
 
   it("gives anon nothing and another workspace's owner nothing", async () => {
     await one("insert into findings (workspace_id, process_id, origin, status, rating, type, title) values ($1, $2, 'manual', 'accepted', 'bad', 'delay', 'Private') returning id", [ids.ws, ids.process]);
-    const a = await anon.from("findings").select("id");
-    expect(a.error?.message ?? "").toMatch(/permission denied/);
-    expect((await anon.from("findings").insert(manual("Anon"))).error).not.toBeNull();
-    expect((await stranger.from("findings").select("id").eq("workspace_id", ids.ws)).data).toEqual([]);
-    expect((await stranger.from("findings").insert(manual("Theirs"))).error).not.toBeNull();
-    expect((await stranger.from("findings").update({ title: "x" }).eq("workspace_id", ids.ws).select("id")).data).toEqual([]);
+    const a = await errorOf(() => anon.selectFrom("findings").select("id").execute());
+    expect(a?.message ?? "").toMatch(/permission denied/);
+    expect(await errorOf(() => anon.insertInto("findings").values(manual("Anon") as never).execute())).not.toBeNull();
+    expect(await stranger.selectFrom("findings").select("id").where("workspace_id", "=", ids.ws).execute()).toEqual([]);
+    expect(await errorOf(() => stranger.insertInto("findings").values(manual("Theirs") as never).execute())).not.toBeNull();
+    expect(await stranger.updateTable("findings").set({ title: "x" }).where("workspace_id", "=", ids.ws).returning("id").execute()).toEqual([]);
   });
 
   it("refuses an AI finding no analysis of the writer's made", async () => {
-    const r = await editor.from("findings").insert(manual("AI says", { origin: "ai", status: "proposed", ai_key: "ai:insight:abcdefabcdef" }));
-    expect(r.error?.message).toMatch(/must come from an analysis you ran/);
+    const r = await errorOf(() => editor.insertInto("findings").values(manual("AI says", { origin: "ai", status: "proposed", ai_key: "ai:insight:abcdefabcdef" }) as never).execute());
+    expect(r?.message).toMatch(/must come from an analysis you ran/);
   });
 
   it("reads every fact, finding and issue an analysis needs over the connector, as a viewer", async () => {
@@ -164,15 +128,15 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       )
     ).rows[0].id as string;
     await admin.query("commit");
-    const accepted = (await editor.from("findings").insert(manual("Proposals are written twice")).select("id").single()).data!.id as string;
+    const accepted = (await editor.insertInto("findings").values(manual("Proposals are written twice") as never).returning("id").executeTakeFirstOrThrow()).id as string;
     const acknowledged = await editor
-      .from("issues")
-      .insert({ workspace_id: ids.ws, process_id: ids.process, title: "Proposals are written twice", type: "delay", severity: "warning", source: "promoted", detected_key: `finding:by_hand:${accepted}` })
-      .select("id, number")
-      .single();
-    expect(acknowledged.error).toBeNull();
-    const byHand = await editor.from("issues").insert({ workspace_id: ids.ws, process_id: ids.process, title: "Invoices go out late", type: "delay", severity: "warning", source: "manual" }).select("id").single();
-    expect(byHand.error).toBeNull();
+      .insertInto("issues")
+      .values({ workspace_id: ids.ws, process_id: ids.process, title: "Proposals are written twice", type: "delay", severity: "warning", source: "promoted", detected_key: `finding:by_hand:${accepted}` })
+      .returning(["id", "number"])
+      .executeTakeFirstOrThrow();
+    expect(acknowledged).toBeTruthy();
+    const byHand = await editor.insertInto("issues").values({ workspace_id: ids.ws, process_id: ids.process, title: "Invoices go out late", type: "delay", severity: "warning", source: "manual" }).returning("id").executeTakeFirstOrThrow();
+    expect(byHand).toBeTruthy();
 
     const all = await call<{ findings: { id: string; status: string; origin: string; rests_on: { key: string }[]; issue: { id: string } | null }[] }>(mcpViewer, "list_findings", { status: ["proposed", "accepted", "dismissed", "superseded"] });
     expect(all.ok, JSON.stringify(all)).toBe(true);
@@ -183,7 +147,7 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     // Every fact a finding rests on is one get_facts reads.
     expect(p.rests_on.map((c) => c.key)).toEqual([fact.key]);
     expect(facts.data.facts.map((f) => f.key)).toContain(p.rests_on[0]!.key);
-    expect(all.data.findings.find((f) => f.id === accepted)).toMatchObject({ origin: "by_hand", issue: { id: acknowledged.data!.id } });
+    expect(all.data.findings.find((f) => f.id === accepted)).toMatchObject({ origin: "by_hand", issue: { id: acknowledged.id } });
 
     const issues = await call<{ issues: { id: string }[] }>(mcpViewer, "list_issues", {});
     expect(issues.ok).toBe(true);
@@ -212,9 +176,9 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     const run = async (findings: ProposedFinding[]) => {
       // One run a minute per process: age the earlier runs, as a minute passing would.
       await admin.query("update ai_runs set started_at = started_at - interval '2 minutes' where process_id = $1", [ids.process]);
-      const reserved = await reserveAiRun(editor as never, ids.ws, ids.process, "manual");
+      const reserved = await reserveAiRun(editor, ids.ws, ids.process, "manual");
       if (reserved.status !== "ok") throw new Error(`reserve: ${reserved.status}`);
-      const analysisId = await saveAiAnalysis(editor as never, {
+      const analysisId = await saveAiAnalysis(editor, {
         run_id: reserved.runId,
         workspace_id: ids.ws,
         process_id: ids.process,
@@ -234,7 +198,7 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
         person_labels: {},
       });
       if (!analysisId) throw new Error("the analysis wasn't saved");
-      const out = await storeProposedFindings(editor as never, { workspaceId: ids.ws, analysisId, runId: reserved.runId, scope: ids.process, findings });
+      const out = await storeProposedFindings(editor, { workspaceId: ids.ws, analysisId, runId: reserved.runId, scope: ids.process, findings });
       return { analysisId, runId: reserved.runId, out };
     };
     const status = async () =>
@@ -257,9 +221,9 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     expect(now[B.aiKey]).toMatchObject({ status: "superseded", run_id: first.runId });
     // A superseded proposal can't be accepted or dismissed.
     const bId = (await one("select id from findings where workspace_id = $1 and ai_key = $2", [ids.ws, B.aiKey])).id as string;
-    for (const s of ["accepted", "dismissed"] as const) expect(await setFindingStatus(editor as never, bId, s)).toMatchObject({ status: "invalid", message: expect.stringContaining("later analysis replaced") });
+    for (const s of ["accepted", "dismissed"] as const) expect(await setFindingStatus(editor, bId, s)).toMatchObject({ status: "invalid", message: expect.stringContaining("later analysis replaced") });
     const aId = (await one("select id from findings where workspace_id = $1 and ai_key = $2", [ids.ws, A.aiKey])).id as string;
-    expect(await setFindingStatus(editor as never, aId, "accepted")).toMatchObject({ status: "saved" });
+    expect(await setFindingStatus(editor, aId, "accepted")).toMatchObject({ status: "saved" });
     // A third run proposes B again (it is back for review) and leaves A, which a person accepted, as it is.
     const third = await run([A, B]);
     expect(third.out).toEqual({ added: 0, renewed: 1, superseded: 0 });
@@ -417,13 +381,12 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       evidence: old,
       evidence_metrics: { overtime_hours_week: 4, overtime_cost: 1040 },
     });
-    const saved = await editor.from("issues").insert(fields).select("id").single();
-    expect(saved.error).toBeNull();
+    const saved = await editor.insertInto("issues").values(fields as never).returning("id").executeTakeFirstOrThrow();
 
     const mcp = await connect(token, options);
     const listed = await call<{ issues: { id: string; evidence: string | null; evidence_metrics: Record<string, number> }[] }>(mcp, "list_issues", {});
     expect(listed.ok, JSON.stringify(listed)).toBe(true);
-    const row = listed.data.issues.find((i) => i.id === saved.data!.id)!;
+    const row = listed.data.issues.find((i) => i.id === saved.id)!;
     expect(row.evidence).toContain("overtime on average within the 10% cap. The cap is used up.");
     expect(row.evidence_metrics).toEqual({ overtime_hours_week: 4 });
     expect(JSON.stringify(listed)).not.toMatch(/overtime_cost|costing about/);
@@ -439,12 +402,11 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
     let memberToken: string;
     let strangerWsToken: string;
     const proposal = (extra: Record<string, unknown> = {}) => ({ process: "Sales", title: "Proposals wait for one strategist", rating: "bad", type: "delay", facts: [facts[0]!.key], ...extra });
-    const raw = (method: string, path: string, token: string, body?: unknown) =>
-      fetch(`${POSTGREST_URL}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${options.supabaseKey}`, "x-api-token": token, "content-type": "application/json", prefer: "return=representation" },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
+    /** What an API token reaches the database as: its owner, with the token's id in the claims (as the endpoint builds them). */
+    const asToken = async (token: string) => {
+      const tokenId = (await admin.query("select id from api_tokens where token_hash = $1", [hashApiToken(token)])).rows[0].id as string;
+      return env.dbAs(userClaims(ids.editor, { api_token_id: tokenId }));
+    };
 
     beforeAll(async () => {
       mcpEditor = await connect(tokens.editor, options);
@@ -504,23 +466,25 @@ describe.skipIf(!POSTGREST_URL)("findings over PostgREST and the connector", () 
       expect(JSON.stringify(asViewer)).not.toContain("Maya");
 
       // A person accepts it in the app (the editor's session); the connector then lists it as accepted.
-      expect(await setFindingStatus(editor as never, id, "accepted")).toMatchObject({ status: "saved", finding: { status: "accepted", proposed_via: "connector", decided_by: ids.editor } });
+      expect(await setFindingStatus(editor, id, "accepted")).toMatchObject({ status: "saved", finding: { status: "accepted", proposed_via: "connector", decided_by: ids.editor } });
       const after = await call<{ findings: { id: string; status: string; proposed_via: string }[] }>(mcpEditor, "list_findings", { status: ["accepted"] });
       expect(after.data.findings.find((f) => f.id === id)).toMatchObject({ status: "accepted", proposed_via: "connector" });
     }, 120_000);
 
-    it("can't be used to skip review: a token straight against PostgREST can neither accept a proposal nor add an accepted finding", async () => {
+    it("can't be used to skip review: a token straight against the database can neither accept a proposal nor add an accepted finding", async () => {
       const made = await call<Proposed>(mcpEditor, "propose_finding", proposal({ title: "Review can't be skipped" }));
       expect(made.ok, JSON.stringify(made)).toBe(true);
       const id = made.data.finding.id;
-      const patch = await raw("PATCH", `/findings?id=eq.${id}`, tokens.editor, { status: "accepted" });
-      // PostgREST answers 42501 with 401 for a request whose JWT role is anon (the token's identity is set by the pre-request hook).
-      expect([401, 403]).toContain(patch.status);
-      expect(await patch.text()).toContain("not over the API");
-      const hand = await raw("POST", "/findings", tokens.editor, manual("Added over the API"));
-      expect([401, 403]).toContain(hand.status);
-      const accepted = await raw("POST", "/findings", tokens.editor, manual("Born accepted", { origin: "ai", status: "accepted", ai_key: "ai:insight:zzzzzzzzzzzz" }));
-      expect([401, 403]).toContain(accepted.status);
+      const viaToken = await asToken(tokens.editor);
+      const patch = await errorOf(() => viaToken.updateTable("findings").set({ status: "accepted" }).where("id", "=", id).execute());
+      expect(patch?.code).toBe("42501");
+      expect(patch?.message).toContain("not over the API");
+      const hand = await errorOf(() => viaToken.insertInto("findings").values(manual("Added over the API") as never).execute());
+      expect(hand?.code).toBe("42501");
+      const accepted = await errorOf(() =>
+        viaToken.insertInto("findings").values(manual("Born accepted", { origin: "ai", status: "accepted", ai_key: "ai:insight:zzzzzzzzzzzz" }) as never).execute(),
+      );
+      expect(accepted?.code).toBe("42501");
       expect((await one("select status from findings where id = $1", [id])).status).toBe("proposed");
       expect(Number((await one("select count(*) from findings where workspace_id = $1 and title in ('Added over the API', 'Born accepted')", [ids.ws])).count)).toBe(0);
     }, 60_000);
