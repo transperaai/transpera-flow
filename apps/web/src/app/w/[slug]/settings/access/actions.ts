@@ -2,10 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { accessErrorMessage, isAssignableRole, normalizeDomain, normalizeEmail, personLinkProblem } from "@/lib/access";
-import { getSessionUser } from "@/lib/auth/session";
+import { pgError } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 import { deleteDeploymentRule, insertDeploymentRule, updateDeploymentRole } from "@/lib/deployment-access";
 import { deploymentErrorMessage, isDeploymentRole, normalizeRuleValue } from "@/lib/deployment-rules";
-import { createClient } from "@/lib/supabase/server";
 
 // Every action runs as the signed-in user; RLS (owner or agency admin only)
 // decides whether the change is allowed, and database triggers apply it to
@@ -14,13 +14,14 @@ import { createClient } from "@/lib/supabase/server";
 type DbError = { code?: string; message: string };
 
 async function signedInClient() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  return supabase;
+  if (!(await getSessionUser())) redirect("/login");
+  return getDb();
 }
+
+const dbError = (e: unknown): DbError => {
+  const { code, message } = pgError(e);
+  return { code, message: message ?? "" };
+};
 
 function done(slug: string, error: DbError | null, notice: string): never {
   const params = new URLSearchParams(error ? { error: accessErrorMessage(error) } : { notice });
@@ -30,9 +31,13 @@ function done(slug: string, error: DbError | null, notice: string): never {
 const text = (form: FormData, key: string) => String(form.get(key) ?? "");
 
 /** Updates and deletes that RLS filters out match no rows instead of failing; report those too. */
-function outcome({ data, error }: { data: unknown[] | null; error: DbError | null }): DbError | null {
-  if (error) return error;
-  return data && data.length > 0 ? null : { code: "42501", message: "no rows changed" };
+async function outcome(run: () => Promise<unknown[]>): Promise<DbError | null> {
+  try {
+    const data = await run();
+    return data.length > 0 ? null : { code: "42501", message: "no rows changed" };
+  } catch (e) {
+    return dbError(e);
+  }
 }
 
 function roleFrom(slug: string, form: FormData) {
@@ -42,82 +47,86 @@ function roleFrom(slug: string, form: FormData) {
 }
 
 export async function addDomain(slug: string, workspaceId: string, form: FormData) {
-  const supabase = await signedInClient();
+  const db = await signedInClient();
   const domain = normalizeDomain(text(form, "domain"));
-  const { error } = await supabase.from("workspace_domains").insert({ workspace_id: workspaceId, domain });
+  let error: DbError | null = null;
+  try {
+    await db.insertInto("workspace_domains").values({ workspace_id: workspaceId, domain }).execute();
+  } catch (e) {
+    error = dbError(e);
+  }
   done(slug, error, `Added ${domain}.`);
 }
 
 export async function removeDomain(slug: string, form: FormData) {
-  const supabase = await signedInClient();
-  const result = await supabase.from("workspace_domains").delete().eq("id", text(form, "id")).select("id");
-  done(slug, outcome(result), "Removed the domain. People who joined through it no longer have access.");
+  const db = await signedInClient();
+  const result = await outcome(() => db.deleteFrom("workspace_domains").where("id", "=", text(form, "id")).returning("id").execute());
+  done(slug, result, "Removed the domain. People who joined through it no longer have access.");
 }
 
 export async function addEmail(slug: string, workspaceId: string, form: FormData) {
-  const supabase = await signedInClient();
+  const db = await signedInClient();
   const email = normalizeEmail(text(form, "email"));
   const role = roleFrom(slug, form);
   const personId = text(form, "person_id") || null;
-  const { error } = await supabase
-    .from("workspace_access_emails")
-    .insert({ workspace_id: workspaceId, email, role, person_id: personId });
+  let error: DbError | null = null;
+  try {
+    await db.insertInto("workspace_access_emails").values({ workspace_id: workspaceId, email, role, person_id: personId }).execute();
+  } catch (e) {
+    error = dbError(e);
+  }
   done(slug, error, `Added ${email} as ${role}.`);
 }
 
 export async function updateEmail(slug: string, form: FormData) {
-  const supabase = await signedInClient();
+  const db = await signedInClient();
   const role = roleFrom(slug, form);
   const personId = text(form, "person_id") || null;
-  const result = await supabase
-    .from("workspace_access_emails")
-    .update({ role, person_id: personId })
-    .eq("id", text(form, "id"))
-    .select("id");
-  done(slug, outcome(result), "Saved.");
+  const result = await outcome(() => db.updateTable("workspace_access_emails").set({ role, person_id: personId }).where("id", "=", text(form, "id")).returning("id").execute());
+  done(slug, result, "Saved.");
 }
 
 export async function removeEmail(slug: string, form: FormData) {
-  const supabase = await signedInClient();
-  const result = await supabase.from("workspace_access_emails").delete().eq("id", text(form, "id")).select("id");
-  done(slug, outcome(result), "Removed from the list. If they had signed in, they have lost access.");
+  const db = await signedInClient();
+  const result = await outcome(() => db.deleteFrom("workspace_access_emails").where("id", "=", text(form, "id")).returning("id").execute());
+  done(slug, result, "Removed from the list. If they had signed in, they have lost access.");
 }
 
 /** Role change for a member who is not on the list (joined by domain or added by hand). */
 export async function setMemberRole(slug: string, form: FormData) {
-  const supabase = await signedInClient();
+  const db = await signedInClient();
   const role = roleFrom(slug, form);
-  const result = await supabase.from("memberships").update({ role }).eq("id", text(form, "id")).select("id");
-  done(slug, outcome(result), "Role updated.");
+  const result = await outcome(() => db.updateTable("memberships").set({ role }).where("id", "=", text(form, "id")).returning("id").execute());
+  done(slug, result, "Role updated.");
 }
 
 /** Links a member (however they joined) to their person record, or clears the link. Members on the list take it from the list row. */
 export async function setMemberPerson(slug: string, form: FormData) {
-  const supabase = await signedInClient();
+  const db = await signedInClient();
   const personId = text(form, "person_id") || null;
   const id = text(form, "id");
   if (personId) {
     // One membership per person, enforced here rather than in the database (see personLinkProblem).
-    const { data: mine } = await supabase.from("memberships").select("workspace_id").eq("id", id).maybeSingle();
+    const mine = await db.selectFrom("memberships").select("workspace_id").where("id", "=", id).executeTakeFirst().catch(() => undefined);
     if (mine) {
       const [others, list] = await Promise.all([
-        supabase.from("memberships").select("id, person_id, active").eq("workspace_id", mine.workspace_id).eq("person_id", personId),
-        supabase.from("workspace_access_emails").select("person_id").eq("workspace_id", mine.workspace_id).eq("person_id", personId),
+        db.selectFrom("memberships").select(["id", "person_id", "active"]).where("workspace_id", "=", mine.workspace_id).where("person_id", "=", personId).execute().catch(() => []),
+        db.selectFrom("workspace_access_emails").select("person_id").where("workspace_id", "=", mine.workspace_id).where("person_id", "=", personId).execute().catch(() => []),
       ]);
-      const problem = personLinkProblem(id, personId, others.data ?? [], list.data ?? []);
+      const problem = personLinkProblem(id, personId, others, list);
       if (problem) redirect(`/w/${encodeURIComponent(slug)}/settings/access?${new URLSearchParams({ error: problem })}`);
     }
   }
-  const result = await supabase.from("memberships").update({ person_id: personId }).eq("id", id).select("id");
-  done(slug, outcome(result), personId ? "Linked to the person." : "Unlinked from the person.");
+  const result = await outcome(() => db.updateTable("memberships").set({ person_id: personId }).where("id", "=", id).returning("id").execute());
+  done(slug, result, personId ? "Linked to the person." : "Unlinked from the person.");
 }
 
 /** Deactivated members keep their row (so a domain can't re-add them) but get no access. */
 export async function setMemberActive(slug: string, form: FormData) {
-  const supabase = await signedInClient();
+  const db = await signedInClient();
   const active = text(form, "active") === "true";
-  const result = await supabase.from("memberships").update({ active }).eq("id", text(form, "id")).select("id");
-  done(slug, outcome(result), active ? "Access restored." : "Access removed.");
+  const result = await outcome(() => db.updateTable("memberships").set({ active }).where("id", "=", text(form, "id")).returning("id").execute());
+  done(slug, result, active ? "Access restored." : "Access removed.");
 }
 
 // "Who can sign in" (deployment-wide, agency admins only). These run on the new data layer (getDb), as the signed-in user; RLS on

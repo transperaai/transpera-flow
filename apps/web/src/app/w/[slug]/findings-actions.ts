@@ -14,7 +14,7 @@ import {
   type FindingRow,
   type FindingWrite,
 } from "@transpera-flow/db";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 
 // Findings (issue #175, B17): add one by hand, edit one, accept or dismiss one. As the signed-in user: RLS lets owners and
 // editors write and nobody delete; the database stamps who and when.
@@ -50,7 +50,7 @@ const invalid: FindingWrite = { status: "invalid", message: "That isn't valid." 
 export async function createFinding(workspaceId: string, draft: unknown): Promise<FindingWrite> {
   const d = parseDraft(draft);
   if (typeof workspaceId !== "string" || !UUID.test(workspaceId) || !d) return invalid;
-  return createManualFinding(await createClient(), workspaceId, d);
+  return createManualFinding(await getDb(), workspaceId, d);
 }
 
 /** The finding as the reader it is for sees it: its labels named. A failed read of the team leaves it with its labels, which never show a name. */
@@ -66,9 +66,9 @@ async function named(db: Db, row: FindingRow): Promise<FindingRow> {
 export async function editFinding(id: string, draft: unknown, accept: boolean): Promise<FindingWrite> {
   const d = parseDraft(draft);
   if (typeof id !== "string" || !UUID.test(id) || !d) return invalid;
-  const db = await createClient();
+  const db = await getDb();
   // What is stored, and who the labels stand for.
-  const { data: row } = await db.from("findings").select("workspace_id, title, evidence, why, person_labels").eq("id", id).maybeSingle();
+  const row = await db.selectFrom("findings").select(["workspace_id", "title", "evidence", "why", "person_labels"]).where("id", "=", id).executeTakeFirst().catch(() => undefined);
   const labels = readPersonLabels(row?.person_labels);
   let team: Awaited<ReturnType<typeof loadTeam>> | null = null;
   if (row && Object.keys(labels).length) {
@@ -96,7 +96,7 @@ export async function editFinding(id: string, draft: unknown, accept: boolean): 
 
 export async function decideFinding(id: string, status: "accepted" | "dismissed"): Promise<FindingWrite> {
   if (typeof id !== "string" || !UUID.test(id) || (status !== "accepted" && status !== "dismissed")) return invalid;
-  const db = await createClient();
+  const db = await getDb();
   const decided = await setFindingStatus(db, id, status);
   return decided.status === "saved" ? { status: "saved", finding: await named(db, decided.finding) } : decided;
 }

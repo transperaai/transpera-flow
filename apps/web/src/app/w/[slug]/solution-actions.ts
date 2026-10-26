@@ -1,12 +1,16 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { SOLUTION_ISSUE_COLUMNS, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
+import type { BlockBundle, Json, ProcessBundle, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
 import { serverVerdict, type CopyRun } from "@/lib/solutions/server-verdict";
 import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 import { isId } from "@/lib/sources/validate";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb, pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
+
+const SOLUTION_ISSUE_COLS = ["solution_id", "issue_id", "workspace_id", "auto_verdict", "holds_pct", "auto_note", "user_verdict", "user_notes", "created_at", "updated_at", "created_by"] as const;
 
 // Saving a solution (issue #114, A49). `save_solution` creates the solution and its links in one transaction, as the
 // signed-in user through row-level security (owners and editors write; everyone in the workspace reads). It writes only
@@ -26,7 +30,8 @@ const leversOf = (stored: unknown): ScenarioPatch[] => {
   return p.ok ? p.patches : [];
 };
 
-function failure(error: { code?: string; message?: string }) {
+function failure(e: unknown) {
+  const error = { code: pgCode(e), message: (e as { message?: string } | null)?.message };
   const m = error.message ?? "";
   if (/issue is closed/.test(m)) return { status: "error", message: "That issue is already resolved, marked won't fix or dismissed, so a solution can't be linked to it." } as const;
   if (/only a detection/.test(m)) return { status: "error", message: "That issue is only a detection. Acknowledge it as an issue first." } as const;
@@ -51,16 +56,15 @@ export async function createSolution(workspaceId: unknown, input: unknown, ideaI
   if (ideaId !== undefined && ideaId !== null && !isId(ideaId)) return invalid;
   const parsed = parseSolutionInput(input);
   if (!parsed.ok) return { status: "error", message: parsed.error };
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
   const v = parsed.value;
   const links: { issue_id: string; auto_verdict: string | null; holds_pct: number | null; auto_note: string }[] = [];
   // The copy is simulated once, for all the issues it is linked to.
   let base: ProcessBundle | undefined;
   let run: CopyRun | undefined;
   for (const l of v.links) {
-    const r = await serverVerdict({ db: supabase, workspaceId, processId: v.processId, baseRevisionId: v.baseRevisionId, copy: v.copy, levers: v.levers, issueId: l.issueId, base, run });
+    const r = await serverVerdict({ db, workspaceId, processId: v.processId, baseRevisionId: v.baseRevisionId, copy: v.copy, levers: v.levers, issueId: l.issueId, base, run });
     if (!r.ok) return { status: "error", message: r.message };
     base = r.base;
     run = r.run;
@@ -73,17 +77,21 @@ export async function createSolution(workspaceId: unknown, input: unknown, ideaI
     p_base_revision: v.baseRevisionId,
     p_name: v.name,
     p_steps: v.copy as unknown as Json,
-    p_changed: v.changedStepIds as unknown as Json,
+    p_changed: v.changedStepIds,
     p_levers: v.levers as unknown as Json,
-    p_links: links as unknown as Json,
+    p_links: links,
   };
-  const { data, error } = typeof ideaId === "string" ? await supabase.rpc("build_proposal", { ...args, p_proposal: ideaId }) : await supabase.rpc("save_solution", args);
-  if (error) return failure(error);
+  let data;
+  try {
+    data = typeof ideaId === "string" ? await rpc(db, "build_proposal", { ...args, p_proposal: ideaId }) : await rpc(db, "save_solution", args);
+  } catch (e) {
+    return failure(e);
+  }
   // The sidebar's pending count lives in the shared layout, which navigation doesn't re-render.
   if (typeof ideaId === "string") refresh();
   const solution = data as unknown as SolutionRow;
-  const { data: saved } = await supabase.from("solution_issues").select(SOLUTION_ISSUE_COLUMNS).eq("solution_id", solution.id);
-  return { status: "ok", solution, links: (saved ?? []) as unknown as SolutionIssueRow[] };
+  const saved = await db.selectFrom("solution_issues").select(SOLUTION_ISSUE_COLS).where("solution_id", "=", solution.id).execute().catch(() => []);
+  return { status: "ok", solution, links: saved as unknown as SolutionIssueRow[] };
 }
 
 export type LinkSolutionResult = { status: "ok"; link: SolutionIssueRow } | { status: "error"; message: string };
@@ -94,29 +102,35 @@ export type LinkSolutionResult = { status: "ok"; link: SolutionIssueRow } | { st
  */
 export async function linkSolutionToIssue(workspaceId: unknown, solutionId: unknown, issueId: unknown): Promise<LinkSolutionResult> {
   if (!isId(workspaceId) || !isId(solutionId) || !isId(issueId)) return invalid;
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
-  const { data: sol } = await supabase.from("solutions").select("id, process_id, base_revision_id, steps, lever_changes").eq("id", solutionId).eq("workspace_id", workspaceId).maybeSingle();
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
+  const sol = await db
+    .selectFrom("solutions")
+    .select(["id", "process_id", "base_revision_id", "steps", "lever_changes"])
+    .where("id", "=", solutionId)
+    .where("workspace_id", "=", workspaceId)
+    .executeTakeFirst()
+    .catch(() => undefined);
   if (!sol) return { status: "error", message: "That solution isn't there any more." };
-  const r = await serverVerdict({ db: supabase, workspaceId, processId: sol.process_id, baseRevisionId: sol.base_revision_id, copy: sol.steps as unknown as BlockBundle, levers: leversOf(sol.lever_changes), issueId });
+  const r = await serverVerdict({ db, workspaceId, processId: sol.process_id, baseRevisionId: sol.base_revision_id, copy: sol.steps as unknown as BlockBundle, levers: leversOf(sol.lever_changes), issueId });
   if (!r.ok) return { status: "error", message: r.message };
   const checked = r.verdict.status !== "unchecked";
-  const { data, error } = await supabase
-    .from("solution_issues")
-    .insert({
-      solution_id: solutionId,
-      issue_id: issueId,
-      workspace_id: workspaceId,
-      auto_verdict: checked ? r.verdict.status : null,
-      holds_pct: checked ? r.verdict.holdsPct : null,
-      auto_note: r.verdict.note.slice(0, 1000),
-    })
-    .select(SOLUTION_ISSUE_COLUMNS)
-    .single();
-  if (error) {
-    if (error.code === "23505") return { status: "error", message: "That solution is already linked to this issue." };
-    return failure(error);
+  try {
+    const data = await db
+      .insertInto("solution_issues")
+      .values({
+        solution_id: solutionId,
+        issue_id: issueId,
+        workspace_id: workspaceId,
+        auto_verdict: checked ? r.verdict.status : null,
+        holds_pct: checked ? r.verdict.holdsPct : null,
+        auto_note: r.verdict.note.slice(0, 1000),
+      })
+      .returning(SOLUTION_ISSUE_COLS)
+      .executeTakeFirstOrThrow();
+    return { status: "ok", link: data as unknown as SolutionIssueRow };
+  } catch (e) {
+    if (pgCode(e) === "23505") return { status: "error", message: "That solution is already linked to this issue." };
+    return failure(e);
   }
-  return { status: "ok", link: data as unknown as SolutionIssueRow };
 }

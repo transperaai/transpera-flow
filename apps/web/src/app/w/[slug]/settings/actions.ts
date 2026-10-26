@@ -15,7 +15,8 @@ import {
   type ClientGroupField,
 } from "@/lib/client-groups";
 import { isTagList, parseNewService, parseServiceField, type ServiceField } from "@/lib/services";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb, pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Writes from the workspace settings page. Every write runs as the signed-in
 // user through RLS; these checks only reject malformed input early.
@@ -55,9 +56,7 @@ const invalid = { status: "error", message: "That value isn't valid." } as const
 const isScalar = (v: unknown): v is Scalar => v === null || ["string", "number", "boolean"].includes(typeof v);
 
 async function signedIn(): Promise<boolean> {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return Boolean(data?.claims?.sub);
+  return Boolean(await getSessionUser());
 }
 
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
@@ -170,24 +169,32 @@ export async function saveClientGroupField(
   if (!isId(workspaceId) || !isId(serviceId) || !isClientGroupField(field) || value === null || !CLIENT_GROUP_FIELDS[field](value)) return invalid;
   if (!(base === null || isFiniteNumber(base))) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
-  const { data: existing, error: readError } = await supabase.from("client_groups").select("id").eq("service_id", serviceId).maybeSingle();
-  if (readError) return { status: "error", message: "Couldn't save. Try again." };
+  const db = await getDb();
+  let existing;
+  try {
+    existing = await db.selectFrom("client_groups").select("id").where("service_id", "=", serviceId).executeTakeFirst();
+  } catch {
+    return { status: "error", message: "Couldn't save. Try again." };
+  }
   if (existing) return saveField("client_groups", { service_id: serviceId }, field, base, value);
-  const { data: service, error: serviceError } = await supabase
-    .from("services")
-    .select("price, churn_monthly_base, tenure_months")
-    .eq("id", serviceId)
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (serviceError || !service) return { status: "not_found" };
-  const { error } = await supabase
-    .from("client_groups")
-    .insert({ workspace_id: workspaceId, service_id: serviceId, ...newGroupDefaults(service), [field]: value });
-  if (error) {
+  const service = await db
+    .selectFrom("services")
+    .select(["price", "churn_monthly_base", "tenure_months"])
+    .where("id", "=", serviceId)
+    .where("workspace_id", "=", workspaceId)
+    .executeTakeFirst()
+    .catch(() => undefined);
+  if (!service) return { status: "not_found" };
+  try {
+    await db
+      .insertInto("client_groups")
+      .values({ workspace_id: workspaceId, service_id: serviceId, ...newGroupDefaults(service), [field]: value })
+      .execute();
+  } catch (e) {
+    const code = pgCode(e);
     // Someone set this group up a moment ago: ask for a fresh look rather than overwrite them.
-    if (error.code === "23505") return { status: "error", message: "Someone just set this up. Reload to see it." };
-    return { status: "error", message: error.code === "42501" ? "You don't have permission to change this." : "Couldn't save. Try again." };
+    if (code === "23505") return { status: "error", message: "Someone just set this up. Reload to see it." };
+    return { status: "error", message: code === "42501" ? "You don't have permission to change this." : "Couldn't save. Try again." };
   }
   return { status: "saved", value };
 }
@@ -208,10 +215,10 @@ export interface ActionResult {
   error?: string;
 }
 
-const failure = (error: { code?: string } | null): ActionResult =>
-  error?.code === "42501"
+const failure = (e: unknown): ActionResult =>
+  pgCode(e) === "42501"
     ? { error: "You don't have permission to do that." }
-    : error?.code === "23514"
+    : pgCode(e) === "23514"
       ? { error: "Some of those values aren't allowed." }
       : { error: "Couldn't save. Try again." };
 
@@ -220,18 +227,19 @@ export async function createPerson(workspaceId: string, _prev: ActionResult, for
   const roleId = String(form.get("role_id") ?? "");
   if (!isId(workspaceId) || !text(name)) return { error: "Enter a name." };
   if (roleId && !isId(roleId)) return { error: "Pick a role." };
-  const supabase = await createClient();
-  const { data: person, error } = await supabase
-    .from("people")
-    .insert({ workspace_id: workspaceId, name })
-    .select("id")
-    .single();
-  if (error) return failure(error);
+  const db = await getDb();
+  let person;
+  try {
+    person = await db.insertInto("people").values({ workspace_id: workspaceId, name }).returning("id").executeTakeFirstOrThrow();
+  } catch (e) {
+    return failure(e);
+  }
   if (roleId) {
-    const { error: roleError } = await supabase
-      .from("person_roles")
-      .insert({ person_id: person.id, role_id: roleId, workspace_id: workspaceId });
-    if (roleError) return failure(roleError);
+    try {
+      await db.insertInto("person_roles").values({ person_id: person.id, role_id: roleId, workspace_id: workspaceId }).execute();
+    } catch (e) {
+      return failure(e);
+    }
   }
   refresh();
   return {};
@@ -249,20 +257,25 @@ export async function addLeave(
   if (!isId(personId) || !isId(workspaceId)) return { error: "Couldn't save. Try again." };
   if (!isDate(start) || !isDate(end)) return { error: "Enter the first and last day." };
   if (end < start) return { error: "The last day must be on or after the first." };
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("person_leave")
-    .insert({ person_id: personId, workspace_id: workspaceId, start_date: start, end_date: end, note });
-  if (error) return failure(error);
+  const db = await getDb();
+  try {
+    await db.insertInto("person_leave").values({ person_id: personId, workspace_id: workspaceId, start_date: start, end_date: end, note }).execute();
+  } catch (e) {
+    return failure(e);
+  }
   refresh();
   return {};
 }
 
 export async function removeLeave(leaveId: string): Promise<ActionResult> {
   if (!isId(leaveId)) return { error: "Couldn't remove it. Try again." };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("person_leave").delete().eq("id", leaveId).select("id");
-  if (error) return failure(error);
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("person_leave").where("id", "=", leaveId).returning("id").execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return { error: "That leave was already removed, or you can't edit it." };
   refresh();
   return {};
@@ -293,28 +306,37 @@ export async function createService(workspaceId: string, _prev: ActionResult, fo
   if (!isId(workspaceId)) return { error: "Couldn't save. Try again." };
   const service = parseNewService(form);
   if ("error" in service) return service;
-  const supabase = await createClient();
+  const db = await getDb();
   // The first service takes every arrival; later ones start at a share of 0,
   // so adding one doesn't change the simulation until its share is set.
-  const { count, error: countError } = await supabase
-    .from("services")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId);
-  if (countError) return failure(countError);
+  let count: number;
+  try {
+    const counted = await db.selectFrom("services").select((eb) => eb.fn.countAll<number>().as("count")).where("workspace_id", "=", workspaceId).executeTakeFirstOrThrow();
+    count = Number(counted.count);
+  } catch (e) {
+    return failure(e);
+  }
   // The churn sensitivity starts at the PRD's estimated default (§6.3.5), so it is marked as an
   // estimate (the robustness check perturbs it, issue #79) rather than stamped entered.
   const provenance = { churn_health_sensitivity: { source: "estimated", at: new Date().toISOString(), note: "Default" } };
-  const { error } = await supabase.from("services").insert({ workspace_id: workspaceId, ...service, mix_share: count ? 0 : 1, provenance });
-  if (error) return failure(error);
+  try {
+    await db.insertInto("services").values({ workspace_id: workspaceId, ...service, mix_share: count ? 0 : 1, provenance: jsonb(provenance) }).execute();
+  } catch (e) {
+    return failure(e);
+  }
   refresh();
   return {};
 }
 
 export async function removeService(serviceId: string): Promise<ActionResult> {
   if (!isId(serviceId)) return { error: "Couldn't remove it. Try again." };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("services").delete().eq("id", serviceId).select("id");
-  if (error) return failure(error);
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("services").where("id", "=", serviceId).returning("id").execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return { error: "That service was already removed, or you can't edit it." };
   refresh();
   return {};
@@ -336,19 +358,24 @@ export async function createRole(workspaceId: string, _prev: ActionResult, form:
   if (!isId(workspaceId)) return { error: "Couldn't save. Try again." };
   const role = parseNewRole(form);
   if ("error" in role) return role;
-  const supabase = await createClient();
-  const { error } = await supabase.from("roles").insert({ workspace_id: workspaceId, name: role.name });
-  if (error) return error.code === "23505" ? { error: `There is already a role called '${role.name}'.` } : failure(error);
+  const db = await getDb();
+  try {
+    await db.insertInto("roles").values({ workspace_id: workspaceId, name: role.name }).execute();
+  } catch (e) {
+    return pgCode(e) === "23505" ? { error: `There is already a role called '${role.name}'.` } : failure(e);
+  }
   refresh();
   return {};
 }
 
 export async function removeRole(roleId: string): Promise<ActionResult> {
   if (!isId(roleId)) return { error: "Couldn't remove it. Try again." };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("roles").delete().eq("id", roleId).select("id");
-  if (error) {
-    return error.code === "23503" ? { error: "That role is still used by steps, people, clients or a service's fallback load. Make it inactive instead." } : failure(error);
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("roles").where("id", "=", roleId).returning("id").execute();
+  } catch (e) {
+    return pgCode(e) === "23503" ? { error: "That role is still used by steps, people, clients or a service's fallback load. Make it inactive instead." } : failure(e);
   }
   if (!data.length) return { error: "That role was already removed, or you can't edit it." };
   refresh();
@@ -378,18 +405,25 @@ export async function createLeadSource(workspaceId: string, _prev: ActionResult,
   if (!isId(workspaceId)) return { error: "Couldn't save. Try again." };
   const source = parseNewLeadSource(form);
   if ("error" in source) return source;
-  const supabase = await createClient();
-  const { error } = await supabase.from("lead_sources").insert({ workspace_id: workspaceId, ...source });
-  if (error) return failure(error);
+  const db = await getDb();
+  try {
+    await db.insertInto("lead_sources").values({ workspace_id: workspaceId, ...source }).execute();
+  } catch (e) {
+    return failure(e);
+  }
   refresh();
   return {};
 }
 
 export async function removeLeadSource(sourceId: string): Promise<ActionResult> {
   if (!isId(sourceId)) return { error: "Couldn't remove it. Try again." };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("lead_sources").delete().eq("id", sourceId).select("id");
-  if (error) return failure(error);
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("lead_sources").where("id", "=", sourceId).returning("id").execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return { error: "That lead source was already removed, or you can't edit it." };
   refresh();
   return {};
@@ -404,7 +438,7 @@ export async function removeLeadSource(sourceId: string): Promise<ActionResult> 
  */
 async function saveOrInsert(
   save: () => Promise<SaveOutcome<number>>,
-  insert: () => PromiseLike<{ error: { code?: string } | null }>,
+  insert: () => Promise<unknown>,
   fallback: number,
   base: number,
   value: number,
@@ -413,12 +447,16 @@ async function saveOrInsert(
     const outcome = await save();
     if (outcome.status !== "not_found") return outcome;
     if (base !== fallback) return { status: "conflict", theirs: fallback };
-    const { error } = await insert();
-    if (!error) return { status: "saved", value };
-    // A viewer, or a workspace the user can't edit: as for an update.
-    if (error.code === "42501") return { status: "not_found" };
-    // 23505: another insert got there first; loop to save against it.
-    if (error.code !== "23505") return { status: "error", message: "Couldn't save. Try again." };
+    try {
+      await insert();
+      return { status: "saved", value };
+    } catch (e) {
+      const code = pgCode(e);
+      // A viewer, or a workspace the user can't edit: as for an update.
+      if (code === "42501") return { status: "not_found" };
+      // 23505: another insert got there first; loop to save against it.
+      if (code !== "23505") return { status: "error", message: "Couldn't save. Try again." };
+    }
   }
   return { status: "error", message: "Couldn't save. Try again." };
 }
@@ -432,10 +470,10 @@ export async function saveSeasonality(
 ): Promise<SaveOutcome<number | null>> {
   if (!isId(workspaceId) || !isMonth(month) || !isFiniteNumber(base) || !isMultiplier(value)) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
+  const db = await getDb();
   const outcome = await saveOrInsert(
     () => saveField<number>("seasonality", { workspace_id: workspaceId, month: String(month) }, "multiplier", base, value),
-    () => supabase.from("seasonality").insert({ workspace_id: workspaceId, month, multiplier: value }),
+    () => db.insertInto("seasonality").values({ workspace_id: workspaceId, month, multiplier: value }).execute(),
     1,
     base,
     value,
@@ -447,9 +485,12 @@ export async function saveSeasonality(
 /** Remove the seasonality curve: every month back to 1. */
 export async function resetSeasonality(workspaceId: string): Promise<ActionResult> {
   if (!isId(workspaceId)) return { error: "Couldn't reset it. Try again." };
-  const supabase = await createClient();
-  const { error } = await supabase.from("seasonality").delete().eq("workspace_id", workspaceId);
-  if (error) return failure(error);
+  const db = await getDb();
+  try {
+    await db.deleteFrom("seasonality").where("workspace_id", "=", workspaceId).execute();
+  } catch (e) {
+    return failure(e);
+  }
   refresh();
   return {};
 }
@@ -458,10 +499,10 @@ export async function resetSeasonality(workspaceId: string): Promise<ActionResul
 export async function saveGrowth(workspaceId: string, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
   if (!isId(workspaceId) || !isFiniteNumber(base) || !isGrowth(value)) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
+  const db = await getDb();
   const outcome = await saveOrInsert(
     () => saveField<number>("demand_settings", { workspace_id: workspaceId }, "growth_monthly", base, value),
-    () => supabase.from("demand_settings").insert({ workspace_id: workspaceId, growth_monthly: value }),
+    () => db.insertInto("demand_settings").values({ workspace_id: workspaceId, growth_monthly: value }).execute(),
     0,
     base,
     value,
@@ -481,21 +522,29 @@ export interface MarketActionResult extends ActionResult {
 export async function createMarketCondition(workspaceId: string, sourceId: string | null): Promise<MarketActionResult> {
   if (!isId(workspaceId) || (sourceId !== null && !isId(sourceId))) return { error: "Couldn't save. Try again." };
   if (!(await signedIn())) return { error: signedOut.message };
-  const supabase = await createClient();
-  const query = supabase
-    .from("market_conditions")
-    .select("name, leads, conv, cycle, price, churn, hire, pay")
-    .eq("workspace_id", workspaceId);
-  const { data: from, error: readError } = await (sourceId ? query.eq("id", sourceId) : query.eq("preset", "stable")).maybeSingle();
-  if (readError) return failure(readError);
+  const db = await getDb();
+  let from;
+  try {
+    const query = db
+      .selectFrom("market_conditions")
+      .select(["name", "leads", "conv", "cycle", "price", "churn", "hire", "pay"])
+      .where("workspace_id", "=", workspaceId);
+    from = await (sourceId ? query.where("id", "=", sourceId) : query.where("preset", "=", "stable")).executeTakeFirst();
+  } catch (e) {
+    return failure(e);
+  }
   if (!from) return { error: "That market is gone. Reload the page." };
   const { name, ...values } = from;
-  const { data, error } = await supabase
-    .from("market_conditions")
-    .insert({ workspace_id: workspaceId, ...values, name: sourceId ? copyName({ name }) : copyName(undefined) })
-    .select("id")
-    .single();
-  if (error) return failure(error);
+  let data;
+  try {
+    data = await db
+      .insertInto("market_conditions")
+      .values({ workspace_id: workspaceId, ...values, name: sourceId ? copyName({ name }) : copyName(undefined) })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+  } catch (e) {
+    return failure(e);
+  }
   refresh();
   return { id: data.id };
 }
@@ -505,10 +554,17 @@ export async function saveMarketField(conditionId: string, field: string, value:
   const parsed = parseConditionField(conditionId, field, value);
   if (!parsed) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("market_conditions").update({ [parsed.field]: parsed.value } as { name?: string } & Partial<Record<MarketFactorKey, number>>).eq("id", parsed.id).select("id, workspace_id");
-  if (error) {
-    return { status: "error", message: error.code === "42501" ? "You don't have permission to change this." : "Couldn't save. Try again." };
+  const db = await getDb();
+  let data;
+  try {
+    data = await db
+      .updateTable("market_conditions")
+      .set({ [parsed.field]: parsed.value } as { name?: string } & Partial<Record<MarketFactorKey, number>>)
+      .where("id", "=", parsed.id)
+      .returning(["id", "workspace_id"])
+      .execute();
+  } catch (e) {
+    return { status: "error", message: pgCode(e) === "42501" ? "You don't have permission to change this." : "Couldn't save. Try again." };
   }
   // A preset, or a row you can't edit, matches no row for an update.
   if (!data.length) return { status: "not_found" };
@@ -519,12 +575,14 @@ export async function saveMarketField(conditionId: string, field: string, value:
 export async function removeMarketCondition(conditionId: string): Promise<ActionResult> {
   if (!isId(conditionId)) return { error: "Couldn't remove it. Try again." };
   if (!(await signedIn())) return { error: signedOut.message };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("market_conditions").delete().eq("id", conditionId).select("id");
-  if (error) {
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("market_conditions").where("id", "=", conditionId).returning("id").execute();
+  } catch (e) {
     // 23503: the schedule refers to it.
-    if (error.code === "23503") return { error: "This market is on your schedule. Remove it from the schedule first." };
-    return failure(error);
+    if (pgCode(e) === "23503") return { error: "This market is on your schedule. Remove it from the schedule first." };
+    return failure(e);
   }
   if (!data.length) return { error: "That market was already removed, or it is a preset, or you can't edit it." };
   refresh();
@@ -535,12 +593,16 @@ export async function addMarketChange(workspaceId: string, _prev: ActionResult, 
   const parsed = parseChange(workspaceId, form.get("condition_id"), Number(form.get("from_month")), Number(form.get("to_month")));
   if ("error" in parsed) return parsed;
   if (!(await signedIn())) return { error: signedOut.message };
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("market_schedule")
-    .insert({ workspace_id: parsed.workspaceId, condition_id: parsed.conditionId, from_month: parsed.from, to_month: parsed.to });
-  // 23P01: the months overlap another change (the table's trigger).
-  if (error) return error.code === "23P01" ? { error: "Those months overlap another change. Remove it first, or pick other months." } : failure(error);
+  const db = await getDb();
+  try {
+    await db
+      .insertInto("market_schedule")
+      .values({ workspace_id: parsed.workspaceId, condition_id: parsed.conditionId, from_month: parsed.from, to_month: parsed.to })
+      .execute();
+  } catch (e) {
+    // 23P01: the months overlap another change (the table's trigger).
+    return pgCode(e) === "23P01" ? { error: "Those months overlap another change. Remove it first, or pick other months." } : failure(e);
+  }
   refresh();
   return {};
 }
@@ -548,9 +610,13 @@ export async function addMarketChange(workspaceId: string, _prev: ActionResult, 
 export async function removeMarketChange(changeId: string): Promise<ActionResult> {
   if (!isId(changeId)) return { error: "Couldn't remove it. Try again." };
   if (!(await signedIn())) return { error: signedOut.message };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("market_schedule").delete().eq("id", changeId).select("id, workspace_id");
-  if (error) return failure(error);
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("market_schedule").where("id", "=", changeId).returning(["id", "workspace_id"]).execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return { error: "That change was already removed, or you can't edit it." };
   refresh();
   return {};

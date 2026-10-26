@@ -1,10 +1,13 @@
 "use server";
 
-import { SCENARIO_COLUMNS, type Json, type ScenarioRow } from "@transpera-flow/db";
+import type { ScenarioRow } from "@transpera-flow/db";
 import { parsePatches } from "@transpera-flow/engine";
 import { isId, parseScenarioInput } from "@/lib/scenarios/validate";
 import type { RemoveScenarioResult, SaveScenarioResult } from "@/lib/scenarios/store";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb, pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
+
+const SCENARIO_COLS = ["id", "workspace_id", "name", "description", "patch", "parent_scenario_id"] as const;
 
 // Saving and deleting scenarios (issue #15). Every write runs as the signed-in
 // user through RLS (editors, owners and agency admins may write; everyone in
@@ -16,44 +19,51 @@ const signedOut = { status: "error", message: "Your session has ended. Sign in a
 const forbidden = { status: "error", message: "You don't have permission to change scenarios here." } as const;
 
 async function signedInClient() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims?.sub ? supabase : null;
+  return (await getSessionUser()) ? getDb() : null;
 }
 
-const failure = (error: { code?: string }) =>
-  error.code === "42501"
+const failure = (e: unknown) => {
+  const code = pgCode(e);
+  return code === "42501"
     ? forbidden
-    : error.code === "23514"
+    : code === "23514"
       ? ({ status: "error", message: "Some of those changes aren't allowed." } as const)
-      : error.code === "23503"
+      : code === "23503"
         ? ({ status: "error", message: "The scenario you copied no longer exists." } as const)
         : ({ status: "error", message: "Couldn't save. Try again." } as const);
+};
 
 /** Save a new scenario (from the levers, or a duplicate) in the workspace. */
 export async function createScenario(workspaceId: unknown, input: unknown): Promise<SaveScenarioResult> {
   if (!isId(workspaceId)) return { status: "error", message: "That scenario isn't valid." };
   const parsed = parseScenarioInput(input);
   if (!parsed.ok) return { status: "error", message: parsed.error };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   const { patch, ...rest } = parsed.value;
-  const { data, error } = await supabase
-    .from("scenarios")
-    .insert({ ...rest, patch: patch as unknown as Json, workspace_id: workspaceId })
-    .select(SCENARIO_COLUMNS)
-    .single();
-  if (error) return failure(error);
-  return { status: "ok", scenario: data as unknown as ScenarioRow };
+  try {
+    const data = await db
+      .insertInto("scenarios")
+      .values({ ...rest, patch: jsonb(patch), workspace_id: workspaceId })
+      .returning(SCENARIO_COLS)
+      .executeTakeFirstOrThrow();
+    return { status: "ok", scenario: data as unknown as ScenarioRow };
+  } catch (e) {
+    return failure(e);
+  }
 }
 
 /** Delete a scenario. A row that is gone, or that the user may not delete, reads as forbidden. */
 export async function deleteScenario(id: unknown): Promise<RemoveScenarioResult> {
   if (!isId(id)) return { status: "error", message: "That scenario isn't valid." };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data, error } = await supabase.from("scenarios").delete().eq("id", id).select("id");
-  if (error) return failure(error);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let data;
+  try {
+    data = await db.deleteFrom("scenarios").where("id", "=", id).returning("id").execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return forbidden;
   return { status: "ok" };
 }
@@ -69,14 +79,14 @@ export async function updateScenarioPatch(id: unknown, patch: unknown): Promise<
   const parsed = parsePatches(patch);
   if (!parsed.ok) return { status: "error", message: parsed.error };
   if (!parsed.patches.length) return { status: "error", message: "A scenario needs at least one change." };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data, error } = await supabase
-    .from("scenarios")
-    .update({ patch: parsed.patches as unknown as Json })
-    .eq("id", id)
-    .select(SCENARIO_COLUMNS);
-  if (error) return failure(error);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let data;
+  try {
+    data = await db.updateTable("scenarios").set({ patch: jsonb(parsed.patches) }).where("id", "=", id).returning(SCENARIO_COLS).execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return forbidden;
   return { status: "ok", scenario: data[0] as unknown as ScenarioRow };
 }

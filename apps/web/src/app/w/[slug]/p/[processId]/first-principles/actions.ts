@@ -2,8 +2,9 @@
 
 import { normalizeFirstPrinciples } from "@transpera-flow/engine";
 import { saveFirstPrinciples } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import type { FpSaveResult } from "@/lib/first-principles/types";
-import { createClient } from "@/lib/supabase/server";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Saves a process's first principles (issue #119, A54). Runs as the signed-in user through RLS: owners and editors
 // write, everyone else is refused. The answers go into the process's draft, which this opens if there isn't one
@@ -22,13 +23,16 @@ export async function saveFirstPrinciplesAction(
   if (!UUID.test(workspaceId) || !UUID.test(processId) || !(version === null || typeof version === "string") || !(revisionId === null || UUID.test(revisionId))) {
     return { status: "error", message: "That isn't valid." };
   }
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
+  if (!(await getSessionUser())) return { status: "error", message: "Your session has ended. Sign in again." };
+  const db = await getDb();
 
-  const opened = await supabase.rpc("open_draft", { target_process: processId });
-  if (opened.error) return { status: "error", message: "Couldn't open a draft to save into. Try again." };
-  const draft = opened.data as { status: string; revision_id?: string };
+  let opened;
+  try {
+    opened = await rpc(db, "open_draft", { target_process: processId });
+  } catch {
+    return { status: "error", message: "Couldn't open a draft to save into. Try again." };
+  }
+  const draft = opened as unknown as { status: string; revision_id?: string };
   // open_draft locks the process for update, so one the user may read but not edit is not found.
   if (draft.status !== "ok" || !draft.revision_id) return { status: "error", message: "Only owners and editors can change first principles." };
   const draftId = draft.revision_id;
@@ -37,7 +41,7 @@ export async function saveFirstPrinciplesAction(
   // No draft when the page loaded, so there was no row of the draft's own to have a version of.
   const base = revisionId === null ? null : version;
 
-  const outcome = await saveFirstPrinciples(supabase, { workspaceId, processId, revisionId: draftId }, normalizeFirstPrinciples(input), base);
+  const outcome = await saveFirstPrinciples(db, { workspaceId, processId, revisionId: draftId }, normalizeFirstPrinciples(input), base);
   switch (outcome.status) {
     case "saved":
       return { status: "saved", version: outcome.version, revisionId: draftId };

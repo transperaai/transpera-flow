@@ -1,12 +1,13 @@
 "use server";
 
-import { ISSUE_STATUSES, loadIssue, loadIssueEvents, payFreeIssueFields, resolveIssue, saveIssue, storedStatus, uiStatus, type IssueEventRow, type IssueLinkRef, type IssueStatus, type Json, type StoredIssueStatus } from "@transpera-flow/db";
+import { ISSUE_STATUSES, loadIssue, loadIssueEvents, payFreeIssueFields, resolveIssue, saveIssue, storedStatus, uiStatus, type IssueEventRow, type IssueLinkRef, type IssueStatus, type Db, type Json, type StoredIssueStatus } from "@transpera-flow/db";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField, saveFields } from "@/lib/fields/server";
 import { ALREADY_RESOLVED, ALREADY_TRACKED, type RemoveIssueResult, type SaveIssueResult } from "@/lib/issues/store";
 import { cleanFieldValue, isId, isIssueField, parseIssueInput, parsePromoteInput, parseResolveInput, parseSaveInput, type Scalar } from "@/lib/issues/validate";
 import { sourcesRemovedBySave } from "@/lib/sources/links";
-import { createClient } from "@/lib/supabase/server";
+import { pgError } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Logging, tracking, editing and deleting issues (issue #17, reworked in #112). Every write runs
 // as the signed-in user through RLS (editors, owners and agency admins may
@@ -22,10 +23,8 @@ const signedOut = { status: "error", message: "Your session has ended. Sign in a
 const forbidden = { status: "error", message: "You don't have permission to change issues here." } as const;
 const invalid = { status: "error", message: "That issue isn't valid." } as const;
 
-async function signedInClient() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims?.sub ? supabase : null;
+async function signedInClient(): Promise<Db | null> {
+  return (await getSessionUser()) ? getDb() : null;
 }
 
 const failure = (error: { code?: string; message?: string }) =>
@@ -55,21 +54,23 @@ async function write(
   workspaceId: string,
   args: { id?: string; fields: Record<string, Json | undefined>; links?: IssueLinkRef[]; owners?: string[]; sources?: string[] },
 ): Promise<SaveIssueResult> {
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   // The issue's own list of sources before the save: the sources this save takes off it are the ones whose links go too (A53). A link
   // made elsewhere meanwhile (another tab, the MCP link_source) is not on that list and stays.
   const before =
     args.id && args.sources
-      ? ((await supabase.from("issue_sources").select("source_id").eq("issue_id", args.id)).data ?? []).map((r) => r.source_id)
+      ? (await db.selectFrom("issue_sources").select("source_id").where("issue_id", "=", args.id).execute().catch(() => [])).map((r) => r.source_id)
       : [];
-  const saved = await saveIssue(supabase, { workspaceId, ...args });
+  const saved = await saveIssue(db, { workspaceId, ...args });
   if ("error" in saved) return failure(saved.error);
   if (args.sources && args.id) {
     const removed = sourcesRemovedBySave(before, args.sources);
-    if (removed.length) await supabase.from("source_links").delete().eq("kind", "issue").eq("issue_id", saved.id).in("source_id", removed);
+    if (removed.length) {
+      await db.deleteFrom("source_links").where("kind", "=", "issue").where("issue_id", "=", saved.id).where("source_id", "in", removed).execute().catch(() => undefined);
+    }
   }
-  const issue = await loadIssue(supabase, workspaceId, saved.id);
+  const issue = await loadIssue(db, workspaceId, saved.id);
   return issue ? { status: "ok", issue } : forbidden;
 }
 
@@ -168,10 +169,14 @@ async function saveStatus(id: string, base: Scalar, next: Scalar): Promise<SaveO
 /** Delete an issue. A row that is gone, or that the user may not delete, reads as forbidden. */
 export async function deleteIssue(id: unknown): Promise<RemoveIssueResult> {
   if (!isId(id)) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data, error } = await supabase.from("issues").delete().eq("id", id).select("id");
-  if (error) return failure(error);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let data;
+  try {
+    data = await db.deleteFrom("issues").where("id", "=", id).returning("id").execute();
+  } catch (e) {
+    return failure(pgError(e));
+  }
   if (!data.length) return forbidden;
   return { status: "ok" };
 }
@@ -184,11 +189,11 @@ export async function resolveIssueAction(workspaceId: unknown, id: unknown, how:
   if (!isId(workspaceId) || !isId(id)) return invalid;
   const parsed = parseResolveInput({ how, note, solutionId });
   if (!parsed.ok) return { status: "error", message: parsed.error };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const done = await resolveIssue(supabase, { workspaceId, id, how: parsed.value.how, note: parsed.value.note, solutionId: parsed.value.solutionId });
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const done = await resolveIssue(db, { workspaceId, id, how: parsed.value.how, note: parsed.value.note, solutionId: parsed.value.solutionId });
   if ("error" in done) return failure(done.error);
-  const issue = await loadIssue(supabase, workspaceId, id);
+  const issue = await loadIssue(db, workspaceId, id);
   return issue ? { status: "ok", issue } : forbidden;
 }
 
@@ -201,6 +206,6 @@ export async function reopenIssue(workspaceId: unknown, id: unknown): Promise<Sa
 /** An issue's history, oldest first, for the Issue page to refresh after a change. */
 export async function issueEvents(workspaceId: unknown, id: unknown): Promise<IssueEventRow[]> {
   if (!isId(workspaceId) || !isId(id)) return [];
-  const supabase = await signedInClient();
-  return supabase ? loadIssueEvents(supabase, workspaceId, id) : [];
+  const db = await signedInClient();
+  return db ? loadIssueEvents(db, workspaceId, id) : [];
 }

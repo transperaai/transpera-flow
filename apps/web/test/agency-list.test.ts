@@ -76,7 +76,7 @@ describe("pickHeadline and sameHeadline", () => {
   it("recordHeadline writes when the numbers changed, even with the same revisions inside the hour, and sends only the five fields", () => {
     const source = read("app/w/[slug]/headline-actions.ts");
     expect(source).toMatch(/fresh && sameHeadline\(/);
-    expect(source).toContain("numbers: { ...pickHeadline(numbers) }");
+    expect(source).toContain("numbers: jsonb({ ...pickHeadline(numbers) })");
     expect(source).not.toContain("...numbers,");
     // The database stamps who and when; the browser doesn't get to say.
     expect(source).not.toMatch(/computed_at:|computed_by:/);

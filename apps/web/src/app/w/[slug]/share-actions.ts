@@ -8,7 +8,8 @@ import { ShareBuildError, loadShareData, loadShareSecrets, shareSnapshotLeaks, t
 import { canEditWorkspace } from "@/lib/access-data";
 import { isId } from "@/lib/editor/validate";
 import { parseShareInput } from "@/lib/share/input";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb, pgError } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Making, refreshing and turning off share links (issue #32, B3; docs/adr/0016-share-links.md). The server builds the snapshot as the
 // signed-in editor (so RLS and `share_team_capacity` decide what it may read), redacts it, checks it again here, and saves it;
@@ -22,12 +23,10 @@ const forbidden: ShareError = { status: "error", message: "Only owners and edito
 const generic: ShareError = { status: "error", message: "Couldn't save. Try again." };
 const unsafe: ShareError = { status: "error", message: "Couldn't make a safe copy of this page. Nothing was shared." };
 
-const WORKSPACE_COLUMNS = "id, name, slug, settings" as const;
+const WORKSPACE_COLUMNS = ["id", "name", "slug", "settings"] as const;
 
-async function signedInClient() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims?.sub ? supabase : null;
+async function signedInClient(): Promise<Db | null> {
+  return (await getSessionUser()) ? getDb() : null;
 }
 
 /** The address the app is served from, as the browser sees it (the link is built on it). */
@@ -57,10 +56,10 @@ function refusal(error: { code?: string; message?: string; details?: string }): 
 }
 
 /** Builds the snapshot and runs the app's own leak check on it. A string for a problem to show; the snapshot otherwise. */
-async function buildSnapshot(supabase: Db, workspace: { id: string; name: string; slug: string; settings: unknown }, target: { kind: ShareKind; id: string | null }, toggles: { people: boolean; financials: boolean }) {
+async function buildSnapshot(db: Db, workspace: { id: string; name: string; slug: string; settings: unknown }, target: { kind: ShareKind; id: string | null }, toggles: { people: boolean; financials: boolean }) {
   try {
-    const snapshot = await loadShareData(supabase, workspace, target, toggles);
-    const leaks = shareSnapshotLeaks(snapshot, await loadShareSecrets(supabase, workspace.id), toggles);
+    const snapshot = await loadShareData(db, workspace, target, toggles);
+    const leaks = shareSnapshotLeaks(snapshot, await loadShareSecrets(db, workspace.id), toggles);
     if (leaks.length) {
       // The kinds of problem, never the values.
       console.error("share snapshot refused by the leak check:", leaks.join(", "));
@@ -80,9 +79,9 @@ async function buildSnapshot(supabase: Db, workspace: { id: string; name: string
  */
 export async function createShareLink(slug: unknown, input: unknown): Promise<ShareResult> {
   if (typeof slug !== "string") return generic;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data: workspace } = await supabase.from("workspaces").select(WORKSPACE_COLUMNS).eq("slug", slug).maybeSingle();
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const workspace = await db.selectFrom("workspaces").select(WORKSPACE_COLUMNS).where("slug", "=", slug).executeTakeFirst().catch(() => undefined);
   if (!workspace) return { status: "error", message: "That workspace isn't there any more. Reload the page." };
   if (!(await canEditWorkspace(workspace.id))) return forbidden;
 
@@ -90,25 +89,31 @@ export async function createShareLink(slug: unknown, input: unknown): Promise<Sh
   if (!parsed.ok) return { status: "error", message: parsed.message };
   const v = parsed.value;
 
-  const built = await buildSnapshot(supabase as unknown as Db, workspace, { kind: v.kind, id: v.targetId }, { people: v.people, financials: v.financials });
+  const built = await buildSnapshot(db, workspace, { kind: v.kind, id: v.targetId }, { people: v.people, financials: v.financials });
   if (!built.snapshot) return { status: "error", message: built.error };
 
   const token = randomBytes(32).toString("base64url");
-  const { error } = await supabase.from("share_links").insert({
-    workspace_id: workspace.id,
-    token_hash: createHash("sha256").update(token).digest("hex"),
-    kind: v.kind,
-    target_id: v.targetId,
-    mode: v.play ? "play" : "view",
-    show_people: v.people,
-    show_financials: v.financials,
-    allowed_emails: v.emails,
-    expires_at: v.expiresAt,
-    label: v.label,
-    snapshot: built.snapshot as never,
-    engine_version: ENGINE_VERSION,
-  });
-  if (error) return refusal(error);
+  try {
+    await db
+      .insertInto("share_links")
+      .values({
+        workspace_id: workspace.id,
+        token_hash: createHash("sha256").update(token).digest("hex"),
+        kind: v.kind,
+        target_id: v.targetId,
+        mode: v.play ? "play" : "view",
+        show_people: v.people,
+        show_financials: v.financials,
+        allowed_emails: v.emails,
+        expires_at: v.expiresAt,
+        label: v.label,
+        snapshot: jsonb(built.snapshot),
+        engine_version: ENGINE_VERSION,
+      })
+      .execute();
+  } catch (e) {
+    return refusal(pgError(e));
+  }
   revalidatePath(`/w/${slug}/share`);
   return { status: "ok", url: `${await originOf()}/s/${token}` };
 }
@@ -116,27 +121,32 @@ export async function createShareLink(slug: unknown, input: unknown): Promise<Sh
 /** Rebuilds a link's copy from today's page. The link, its settings and its address stay the same. */
 export async function refreshShareLink(slug: unknown, id: unknown): Promise<ShareResult> {
   if (typeof slug !== "string" || !isId(id)) return generic;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data: workspace } = await supabase.from("workspaces").select(WORKSPACE_COLUMNS).eq("slug", slug).maybeSingle();
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const workspace = await db.selectFrom("workspaces").select(WORKSPACE_COLUMNS).where("slug", "=", slug).executeTakeFirst().catch(() => undefined);
   if (!workspace) return { status: "error", message: "That workspace isn't there any more. Reload the page." };
   if (!(await canEditWorkspace(workspace.id))) return forbidden;
-  const { data: row } = await supabase
-    .from("share_links")
-    .select("id, kind, target_id, show_people, show_financials, revoked_at")
-    .eq("id", id)
-    .eq("workspace_id", workspace.id)
-    .maybeSingle();
+  const row = await db
+    .selectFrom("share_links")
+    .select(["id", "kind", "target_id", "show_people", "show_financials", "revoked_at"])
+    .where("id", "=", id)
+    .where("workspace_id", "=", workspace.id)
+    .executeTakeFirst()
+    .catch(() => undefined);
   if (!row) return { status: "error", message: "That link isn't there any more. Reload the page." };
   if (row.revoked_at) return { status: "error", message: "This link was turned off." };
 
-  const built = await buildSnapshot(supabase as unknown as Db, workspace, { kind: row.kind as ShareKind, id: row.target_id }, { people: row.show_people, financials: row.show_financials });
+  const built = await buildSnapshot(db, workspace, { kind: row.kind as ShareKind, id: row.target_id }, { people: row.show_people, financials: row.show_financials });
   if (!built.snapshot) {
     return { status: "error", message: "build" in built && built.build ? "That page no longer exists, so the link keeps its last copy." : built.error };
   }
-  const { data, error } = await supabase.from("share_links").update({ snapshot: built.snapshot as never, engine_version: ENGINE_VERSION }).eq("id", id).select("id");
-  if (error) return refusal(error);
-  if (!data?.length) return forbidden;
+  let data;
+  try {
+    data = await db.updateTable("share_links").set({ snapshot: jsonb(built.snapshot), engine_version: ENGINE_VERSION }).where("id", "=", id).returning("id").execute();
+  } catch (e) {
+    return refusal(pgError(e));
+  }
+  if (!data.length) return forbidden;
   revalidatePath(`/w/${slug}/share`);
   return { status: "ok" };
 }
@@ -144,11 +154,15 @@ export async function refreshShareLink(slug: unknown, id: unknown): Promise<Shar
 /** Turns a link off for everyone, straight away. It can't be turned back on. */
 export async function revokeShareLink(slug: unknown, id: unknown): Promise<ShareResult> {
   if (typeof slug !== "string" || !isId(id)) return generic;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data, error } = await supabase.from("share_links").update({ revoked_at: new Date().toISOString() }).eq("id", id).is("revoked_at", null).select("id");
-  if (error) return refusal(error);
-  if (!data?.length) return { status: "error", message: "That link is already off, or you can't change it." };
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let data;
+  try {
+    data = await db.updateTable("share_links").set({ revoked_at: new Date().toISOString() }).where("id", "=", id).where("revoked_at", "is", null).returning("id").execute();
+  } catch (e) {
+    return refusal(pgError(e));
+  }
+  if (!data.length) return { status: "error", message: "That link is already off, or you can't change it." };
   revalidatePath(`/w/${slug}/share`);
   return { status: "ok" };
 }

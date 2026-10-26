@@ -1,9 +1,10 @@
 "use server";
 
-import { BLOCK_COLUMNS, type BlockRow, type Json } from "@transpera-flow/db";
+import type { BlockRow } from "@transpera-flow/db";
 import { parseBlockInput, type SaveBlockResult } from "@/lib/blocks/save";
 import { isId } from "@/lib/sources/validate";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb, pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Saving a block to the library (issue #116). The write runs as the signed-in user through row-level security (owners and
 // editors may write; everyone in the workspace may read). The checks in lib/blocks/save.ts only reject malformed input
@@ -18,19 +19,20 @@ export async function createBlock(workspaceId: unknown, input: unknown): Promise
   if (!isId(workspaceId)) return invalid;
   const parsed = parseBlockInput(input);
   if (!parsed.ok) return { status: "error", message: parsed.error };
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
   const { name, description, bundle } = parsed.value;
-  const { data, error } = await supabase
-    .from("blocks")
-    .insert({ workspace_id: workspaceId, name, description, type: "manual", steps: bundle as unknown as Json })
-    .select(BLOCK_COLUMNS)
-    .single();
-  if (error) {
-    if (error.code === "42501") return forbidden;
-    if (error.code === "23514") return { status: "error", message: "Some of those values aren't allowed." };
+  try {
+    const data = await db
+      .insertInto("blocks")
+      .values({ workspace_id: workspaceId, name, description, type: "manual", steps: jsonb(bundle) })
+      .returning(["id", "workspace_id", "name", "description", "type", "steps", "created_at", "updated_at"])
+      .executeTakeFirstOrThrow();
+    return { status: "ok", block: data as unknown as BlockRow };
+  } catch (e) {
+    const code = pgCode(e);
+    if (code === "42501") return forbidden;
+    if (code === "23514") return { status: "error", message: "Some of those values aren't allowed." };
     return { status: "error", message: "Couldn't save the block. Try again." };
   }
-  return { status: "ok", block: data as unknown as BlockRow };
 }

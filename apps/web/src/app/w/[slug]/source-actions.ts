@@ -2,12 +2,11 @@
 
 import {
   MAX_SOURCE_FILE_BYTES,
-  SOURCE_COLUMNS,
-  SOURCE_LINK_COLUMNS,
   linkColumns,
   loadSourceBody,
   loadSourceFile,
   searchSources,
+  type Db,
   type SourceFile,
   type SourceLinkRow,
   type SourceListRow,
@@ -21,7 +20,13 @@ import { PAGE_SIZE, parseLibraryQuery } from "@/lib/sources/library";
 import { linkJson, parseNewSource, parseTarget } from "@/lib/sources/links";
 import type { AttachFileResult, FileLinkResult, LinkSourceResult, RemoveSourceResult, SaveSourceResult } from "@/lib/sources/store";
 import { cleanSourceField, formatSpeakers, isId, isSourceField, parseSpeakers, type Scalar } from "@/lib/sources/validate";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { pgError } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server"; // step 4: Storage only
+
+const SOURCE_COLS = ["id", "workspace_id", "kind", "title", "speakers", "recorded_at", "body", "file_url", "created_at", "updated_at"] as const;
+const SOURCE_LINK_COLS = ["id", "workspace_id", "source_id", "kind", "process_id", "step_id", "insight_key", "issue_id", "solution_id", "created_at", "created_by"] as const;
 
 // Adding, editing and deleting sources (issue #21). Every write runs as the
 // signed-in user through RLS (editors, owners and agency admins may write;
@@ -33,13 +38,19 @@ const signedOut = { status: "error", message: "Your session has ended. Sign in a
 const forbidden = { status: "error", message: "You don't have permission to change sources here." } as const;
 const invalid = { status: "error", message: "That source isn't valid." } as const;
 
-async function signedInClient() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims?.sub ? supabase : null;
+async function signedInClient(): Promise<Db | null> {
+  return (await getSessionUser()) ? getDb() : null;
 }
 
-const failure = (error: { code?: string; message?: string }) =>
+/** Storage (step 4 replaces it): a client for the bucket calls only. The signed-in check has already happened. */
+const storageClient = () => createClient();
+
+const failure = (e: unknown) => {
+  const error = pgError(e);
+  return failureOf(error);
+};
+
+const failureOf = (error: { code?: string; message?: string }) =>
   error.code === "42501"
     ? forbidden
     : error.code === "22023" && error.message
@@ -61,22 +72,25 @@ export async function createSource(workspaceId: unknown, input: unknown, links: 
   if (!isId(workspaceId)) return invalid;
   const parsed = parseNewSource(input, links);
   if (!parsed.ok) return { status: "error", message: parsed.error };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   const { input: fields, links: targets } = parsed.value;
-  const { data: id, error } = await supabase.rpc("add_source", {
-    p_workspace: workspaceId,
-    p_source: { ...fields },
-    p_links: targets.map(linkJson),
-  });
-  if (error || !id) return failure(error ?? {});
-  const [made, madeLinks] = await Promise.all([
-    supabase.from("sources").select(SOURCE_COLUMNS).eq("id", id).single(),
-    supabase.from("source_links").select(SOURCE_LINK_COLUMNS).eq("source_id", id).order("created_at").order("id"),
-  ]);
-  if (made.error) return failure(made.error);
-  if (madeLinks.error) return failure(madeLinks.error);
-  return { status: "ok", source: made.data as unknown as SourceRow, links: madeLinks.data as unknown as SourceLinkRow[] };
+  let id;
+  try {
+    id = await rpc(db, "add_source", { p_workspace: workspaceId, p_source: { ...fields }, p_links: targets.map(linkJson) });
+  } catch (e) {
+    return failure(e);
+  }
+  if (!id) return failure({});
+  try {
+    const [made, madeLinks] = await Promise.all([
+      db.selectFrom("sources").select(SOURCE_COLS).where("id", "=", id as string).executeTakeFirstOrThrow(),
+      db.selectFrom("source_links").select(SOURCE_LINK_COLS).where("source_id", "=", id as string).orderBy("created_at").orderBy("id").execute(),
+    ]);
+    return { status: "ok", source: made as unknown as SourceRow, links: madeLinks as unknown as SourceLinkRow[] };
+  } catch (e) {
+    return failure(e);
+  }
 }
 
 /** Link an existing source to one more process, step, insight, issue or solution. */
@@ -84,23 +98,31 @@ export async function linkSource(sourceId: unknown, target: unknown): Promise<Li
   if (!isId(sourceId)) return invalid;
   const parsed = parseTarget(target);
   if (!parsed.ok) return { status: "error", message: parsed.error };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   // The link carries its source's workspace: read it (RLS: only a member sees the source), then insert as the user.
-  const { data: found, error: readError } = await supabase.from("sources").select("workspace_id").eq("id", sourceId).maybeSingle();
-  if (readError) return failure(readError);
+  let found;
+  try {
+    found = await db.selectFrom("sources").select("workspace_id").where("id", "=", sourceId).executeTakeFirst();
+  } catch (e) {
+    return failure(e);
+  }
   if (!found) return { status: "error", message: "That source isn't there any more." };
-  const { data, error } = await supabase
-    .from("source_links")
-    .insert({ workspace_id: found.workspace_id, source_id: sourceId, ...linkColumns(parsed.value) })
-    .select(SOURCE_LINK_COLUMNS)
-    .single();
-  if (error) return failure(error);
-  const link = data as unknown as SourceLinkRow;
+  let link: SourceLinkRow;
+  try {
+    const data = await db
+      .insertInto("source_links")
+      .values({ workspace_id: found.workspace_id, source_id: sourceId, ...linkColumns(parsed.value) })
+      .returning(SOURCE_LINK_COLS)
+      .executeTakeFirstOrThrow();
+    link = data as unknown as SourceLinkRow;
+  } catch (e) {
+    return failure(e);
+  }
   // An issue keeps its own list of sources too (`issue_sources`, which its history logs): keep it in step. Best effort: a
   // detected issue has no list to add to, and the link is already there.
   if (link.kind === "issue" && link.issue_id) {
-    await supabase.from("issue_sources").insert({ issue_id: link.issue_id, source_id: link.source_id, workspace_id: link.workspace_id });
+    await db.insertInto("issue_sources").values({ issue_id: link.issue_id, source_id: link.source_id, workspace_id: link.workspace_id }).execute().catch(() => undefined);
   }
   return { status: "ok", link };
 }
@@ -110,21 +132,30 @@ export async function unlinkSource(linkId: unknown): Promise<RemoveSourceResult>
   // A source on an issue's own list that has no link row shows as a link with a made-up id: taking it off is taking it off the list.
   const listed = typeof linkId === "string" ? /^issue-source:([0-9a-f-]{36}):([0-9a-f-]{36})$/i.exec(linkId) : null;
   if (listed && isId(listed[1]) && isId(listed[2])) {
-    const supabase = await signedInClient();
-    if (!supabase) return signedOut;
-    const { data, error } = await supabase.from("issue_sources").delete().eq("issue_id", listed[1]).eq("source_id", listed[2]).select("issue_id");
-    if (error) return failure(error);
-    return data?.length ? { status: "ok" } : forbidden;
+    const db = await signedInClient();
+    if (!db) return signedOut;
+    try {
+      const data = await db.deleteFrom("issue_sources").where("issue_id", "=", listed[1]).where("source_id", "=", listed[2]).returning("issue_id").execute();
+      return data.length ? { status: "ok" } : forbidden;
+    } catch (e) {
+      return failure(e);
+    }
   }
   if (!isId(linkId)) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data, error } = await supabase.from("source_links").delete().eq("id", linkId).select("id, kind, issue_id, source_id");
-  if (error) return failure(error);
-  if (!data?.length) return forbidden;
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let data;
+  try {
+    data = await db.deleteFrom("source_links").where("id", "=", linkId).returning(["id", "kind", "issue_id", "source_id"]).execute();
+  } catch (e) {
+    return failure(e);
+  }
+  if (!data.length) return forbidden;
   // Taking a source off an issue takes it off the issue's own list as well, or the issue would still show it.
   const gone = data[0]!;
-  if (gone.kind === "issue" && gone.issue_id) await supabase.from("issue_sources").delete().eq("issue_id", gone.issue_id).eq("source_id", gone.source_id);
+  if (gone.kind === "issue" && gone.issue_id) {
+    await db.deleteFrom("issue_sources").where("issue_id", "=", gone.issue_id).where("source_id", "=", gone.source_id).execute().catch(() => undefined);
+  }
   return { status: "ok" };
 }
 
@@ -145,13 +176,18 @@ export async function saveSourceField(id: unknown, field: unknown, base: unknown
 /** Delete a source. Values citing it keep their quotes; the Sources page shows them as citing a deleted source. */
 export async function deleteSource(id: unknown): Promise<RemoveSourceResult> {
   if (!isId(id)) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data, error } = await supabase.from("sources").delete().eq("id", id).select("id, file_path");
-  if (error) return failure(error);
-  if (!data?.length) return forbidden;
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let data;
+  try {
+    data = await db.deleteFrom("sources").where("id", "=", id).returning(["id", "file_path"]).execute();
+  } catch (e) {
+    return failure(e);
+  }
+  if (!data.length) return forbidden;
   // Its original file goes with it (best effort: an editor may delete it; a file left behind is unreachable from the app).
-  if (data[0]!.file_path) await supabase.storage.from(BUCKET).remove([data[0]!.file_path]);
+  // step 4: Storage
+  if (data[0]!.file_path) await (await storageClient()).storage.from(BUCKET).remove([data[0]!.file_path]);
   return { status: "ok" };
 }
 
@@ -163,10 +199,10 @@ export async function searchSourcesPage(workspaceId: unknown, query: unknown, of
   const from = typeof offset === "number" && Number.isInteger(offset) && offset >= 0 && offset <= 1_000_000 ? offset : null;
   const size = typeof limit === "number" && Number.isInteger(limit) && limit >= 1 && limit <= 200 ? limit : PAGE_SIZE;
   if (!isId(workspaceId) || !q || from === null) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   try {
-    const page = await searchSources(supabase, workspaceId, {
+    const page = await searchSources(db, workspaceId, {
       search: q.search,
       ...(q.kind !== "all" ? { kind: q.kind } : {}),
       ...(q.processId !== "all" ? { processId: q.processId } : {}),
@@ -184,10 +220,10 @@ export async function searchSourcesPage(workspaceId: unknown, query: unknown, of
 /** A source's full text, read when it is opened. */
 export async function readSourceBody(sourceId: unknown): Promise<{ status: "ok"; body: string | null } | { status: "error"; message: string }> {
   if (!isId(sourceId)) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   try {
-    return { status: "ok", body: await loadSourceBody(supabase, sourceId) };
+    return { status: "ok", body: await loadSourceBody(db, sourceId) };
   } catch {
     return { status: "error", message: "Couldn't load the text. Try again." };
   }
@@ -196,10 +232,10 @@ export async function readSourceBody(sourceId: unknown): Promise<{ status: "ok";
 /** A source's original file (its name, kind and size), read when it is opened. */
 export async function readSourceFile(sourceId: unknown): Promise<{ status: "ok"; file: SourceFile | null } | { status: "error"; message: string }> {
   if (!isId(sourceId)) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   try {
-    return { status: "ok", file: await loadSourceFile(supabase, sourceId) };
+    return { status: "ok", file: await loadSourceFile(db, sourceId) };
   } catch {
     return { status: "error", message: "Couldn't load the file's details. Try again." };
   }
@@ -219,14 +255,19 @@ const BUCKET = "sources";
  */
 export async function attachSourceFile(sourceId: unknown, path: unknown, name: unknown): Promise<AttachFileResult> {
   if (!isId(sourceId) || typeof name !== "string") return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const { data: source, error: readError } = await supabase.from("sources").select("id, workspace_id, file_path").eq("id", sourceId).maybeSingle();
-  if (readError) return failure(readError);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  let source;
+  try {
+    source = await db.selectFrom("sources").select(["id", "workspace_id", "file_path"]).where("id", "=", sourceId).executeTakeFirst();
+  } catch (e) {
+    return failure(e);
+  }
   if (!source) return { status: "error", message: "That source isn't there any more." };
   const where = parseStoragePath(path, source.workspace_id, source.id);
   // Only a new upload for this very source (never the file it already keeps).
   if (!where || where.path === source.file_path) return invalid;
+  const supabase = await storageClient(); // step 4: Storage
   const storage = supabase.storage.from(BUCKET);
   const refuse = async (message: string): Promise<AttachFileResult> => {
     await storage.remove([where.path]);
@@ -245,16 +286,19 @@ export async function attachSourceFile(sourceId: unknown, path: unknown, name: u
   if (!read.ok) return refuse(read.error);
 
   const file: SourceFile = { path: where.path, name: displayName(name), type: read.type, size: blob.size };
-  const { data, error } = await supabase
-    .from("sources")
-    .update({ file_path: file.path, file_name: file.name, file_type: file.type, file_size: file.size, body: read.text || null })
-    .eq("id", sourceId)
-    .select("id");
-  if (error) {
+  let data;
+  try {
+    data = await db
+      .updateTable("sources")
+      .set({ file_path: file.path, file_name: file.name, file_type: file.type, file_size: file.size, body: read.text || null })
+      .where("id", "=", sourceId)
+      .returning("id")
+      .execute();
+  } catch (e) {
     await storage.remove([where.path]);
-    return failure(error);
+    return failure(e);
   }
-  if (!data?.length) return refuse(forbidden.message);
+  if (!data.length) return refuse(forbidden.message);
   if (source.file_path && source.file_path !== where.path) await storage.remove([source.file_path]);
   return { status: "ok", file, body: read.text || null };
 }
@@ -265,11 +309,12 @@ export async function attachSourceFile(sourceId: unknown, path: unknown, name: u
  */
 export async function sourceFileLink(sourceId: unknown): Promise<FileLinkResult> {
   if (!isId(sourceId)) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const file = await loadSourceFile(supabase, sourceId).catch(() => null);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const file = await loadSourceFile(db, sourceId).catch(() => null);
   if (!file) return { status: "error", message: "This source has no file." };
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(file.path, 60, { download: file.name });
+  // step 4: Storage
+  const { data, error } = await (await storageClient()).storage.from(BUCKET).createSignedUrl(file.path, 60, { download: file.name });
   if (error || !data?.signedUrl) return { status: "error", message: "Couldn't get the file. Try again." };
   return { status: "ok", url: data.signedUrl };
 }
