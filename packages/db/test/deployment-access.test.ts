@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -147,6 +147,8 @@ describe("deployment_access table", () => {
     const user = { sub: randomUUID(), role: "authenticated" };
     await expect(db.as(user, (c) => c.query("select private.sync_deployment_access($1)", [user.sub]))).rejects.toThrow(/permission denied/);
     await expect(db.as(user, (c) => c.query("select private.deployment_role('a@client.com', true)"))).rejects.toThrow(/permission denied/);
+    await expect(db.as(user, (c) => c.query("select private.may_sign_in('a@client.com', true)"))).rejects.toThrow(/permission denied/);
+    await expect(db.as(null, (c) => c.query("select private.may_sign_in('a@client.com', true)"))).rejects.toThrow(/permission denied/);
     await expect(db.as(null, (c) => c.query("select * from better_auth.\"user\""))).rejects.toThrow(/permission denied/);
   });
 });
@@ -220,12 +222,35 @@ describe("private.sync_deployment_access", () => {
          ($1, $5, 'owner', 'manual'), ($2, $5, 'member', 'domain'), ($3, $5, 'viewer', 'access_list'), ($4, $5, 'agency_admin', 'manual')`,
       [ws1, ws2, ws3, ws4, id],
     );
-    expect(await sync(id)).toBe("editor"); // agency.io
+    // The lists still back the domain and access_list rows, so reconcile_access keeps them.
+    await db.client.query("insert into workspace_domains (workspace_id, domain) values ($1, 'agency.io')", [ws2]);
+    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'mixed@agency.io', 'viewer')", [ws3]);
+    expect(await sync(id, [], [{ provider: "google", provider_id: "g-mixed", hd: "agency.io" }])).toBe("editor"); // agency.io
     const byWs = Object.fromEntries((await memberships(id)).map((r) => [r.workspace_id, r]));
     expect(byWs[ws1]).toMatchObject({ role: "owner", source: "manual" });
-    expect(byWs[ws2]).toMatchObject({ role: "editor", source: "manual" });
-    expect(byWs[ws3]).toMatchObject({ role: "editor", source: "manual" });
+    // Raised, but still attached to the lists: the source is kept.
+    expect(byWs[ws2]).toMatchObject({ role: "editor", source: "domain" });
+    expect(byWs[ws3]).toMatchObject({ role: "editor", source: "access_list" });
     expect(byWs[ws4]).toMatchObject({ role: "agency_admin" });
+  });
+
+  it("re-applies the floor at every sign-in, after the lists have had their say", async () => {
+    const [ws] = await workspaceIds();
+    const id = await signUp("floor@agency.io");
+    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'floor@agency.io', 'viewer')", [ws]);
+    expect(await sync(id)).toBe("editor");
+    const listed = async () => (await memberships(id)).find((r) => r.workspace_id === ws);
+    expect(await listed()).toMatchObject({ role: "editor", source: "access_list" });
+    // The list changes (its trigger reconciles): the row follows the list again until the next sign-in.
+    await db.client.query("update workspace_access_emails set role = 'viewer', person_id = null where email = 'floor@agency.io'");
+    await db.client.query("select public.reconcile_access($1)", [id]);
+    expect(await listed()).toMatchObject({ role: "viewer", source: "access_list" });
+    await sync(id);
+    expect(await listed()).toMatchObject({ role: "editor", source: "access_list" });
+    // Taken off the list: reconcile removes the list row, and the floor puts a manual one back.
+    await db.client.query("delete from workspace_access_emails where email = 'floor@agency.io'");
+    await sync(id);
+    expect(await listed()).toMatchObject({ role: "editor", source: "manual" });
   });
 
   it("never lowers an owner or an editor to viewer, and keeps a member above viewer", async () => {
@@ -337,6 +362,21 @@ describe("private.sync_deployment_access", () => {
       expect(ok.rows[0].q).toBe(true);
     });
 
+    it("joins a workspace by domain on the very first sign-in (identities are recorded before the lists run)", async () => {
+      const [ws] = await workspaceIds();
+      await db.client.query("insert into deployment_access (kind, value, role) values ('domain', 'joiners.io', 'viewer')");
+      await db.client.query("insert into workspace_domains (workspace_id, domain) values ($1, 'joiners.io')", [ws]);
+      const id = await signUp("first@joiners.io");
+      expect(await sync(id, [], [{ provider: "google", provider_id: "g-join", hd: "joiners.io" }])).toBe("viewer");
+      expect((await memberships(id)).find((r) => r.workspace_id === ws)).toMatchObject({ role: "member", source: "domain" });
+    });
+
+    it("stores the address the provider's token names, falling back to the user's", async () => {
+      const id = await signUp("named@client.com");
+      await sync(id, [], [{ provider: "google", provider_id: "g-named", email: "Other@Client.com" }]);
+      expect((await identityData(id))[0].identity_data.email).toBe("other@client.com");
+    });
+
     it("applies a workspace's own pre-assigned role first, so the deployment role never lowers it", async () => {
       const [ws, other] = await workspaceIds();
       const id = await signUp("pre@client.com");
@@ -370,5 +410,73 @@ describe("private.sync_deployment_access", () => {
       await sync(id, [], [{ provider: "google", provider_id: "g-none", hd: "elsewhere.org" }]);
       expect(await identityData(id)).toEqual([]);
     });
+  });
+});
+
+describe("guests: outsiders listed on a live restricted share link (B3)", () => {
+  const sha = (t: string) => createHash("sha256").update(t).digest("hex");
+  let ws = "";
+  async function link(emails: string[], over: { people?: boolean; expires?: string | null; revoked?: boolean } = {}) {
+    const people = over.people ?? true;
+    const { rows } = await db.client.query(
+      `insert into share_links (workspace_id, token_hash, kind, show_people, allowed_emails, expires_at, snapshot, engine_version)
+       values ($1, $2, 'overview', $3, $4, $5, $6::jsonb, '1') returning id`,
+      [ws, sha(randomUUID()), people, emails, over.expires === undefined ? new Date(Date.now() + 86400_000).toISOString() : over.expires,
+        JSON.stringify({ v: 1, kind: "overview", toggles: { people, financials: false } })],
+    );
+    if (over.revoked) await db.client.query("update share_links set revoked_at = now() where id = $1", [rows[0].id]);
+    return rows[0].id as string;
+  }
+  const maySignIn = async (email: string, verified = true, admins: string[] = []) =>
+    (await db.client.query("select private.may_sign_in($1, $2, $3) as r", [email, verified, admins])).rows[0].r as string | null;
+
+  beforeAll(async () => {
+    [ws] = await workspaceIds();
+    await link(["guest@outside.org", "lead@client.com"]);
+    await link(["open@outside.org"], { people: false, expires: null });
+    await link(["revoked@outside.org"], { revoked: true });
+  });
+
+  it("lets a listed, verified outsider in as a guest, and nobody else", async () => {
+    expect(await maySignIn("Guest@Outside.org")).toBe("guest");
+    expect(await maySignIn("guest@outside.org", false)).toBeNull();
+    expect(await maySignIn("other@outside.org")).toBeNull();
+    // An open link (no toggle) asks for no sign-in, so its list lets no one in; nor does a revoked link.
+    expect(await maySignIn("open@outside.org")).toBeNull();
+    expect(await maySignIn("revoked@outside.org")).toBeNull();
+    // A deployment role wins over guest.
+    expect(await maySignIn("lead@client.com")).toBe("editor");
+    expect(await maySignIn("guest@outside.org", true, ["guest@outside.org"])).toBe("admin");
+  });
+
+  it("stops letting them in when the link expires", async () => {
+    const id = await link(["brief@outside.org"]);
+    expect(await maySignIn("brief@outside.org")).toBe("guest");
+    // The before-write trigger refuses a past expiry, so age the row with triggers off.
+    await db.client.query("alter table share_links disable trigger user");
+    try {
+      await db.client.query("update share_links set expires_at = now() - interval '1 minute' where id = $1", [id]);
+    } finally {
+      await db.client.query("alter table share_links enable trigger user");
+    }
+    expect(await maySignIn("brief@outside.org")).toBeNull();
+  });
+
+  it("gives a guest no memberships and no agency admin, but records the identity the share link checks", async () => {
+    const id = await signUp("guest@outside.org");
+    await db.client.query(`update auth.users set raw_app_meta_data = '{"agency_admin": true}' where id = $1`, [id]);
+    // Even a pre-assigned list entry isn't applied: the membership sync doesn't run for a guest.
+    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'guest@outside.org', 'viewer')", [ws]);
+    await db.client.query("delete from memberships where user_id = $1", [id]);
+    expect(await sync(id, [], [{ provider: "google", provider_id: "g-guest", email: "guest@outside.org" }])).toBe("guest");
+    expect(await memberships(id)).toEqual([]);
+    expect(await agencyFlag(id)).toBe(false);
+    const ident = (await db.client.query("select provider, identity_data ->> 'email' as e from auth.identities where user_id = $1", [id])).rows;
+    expect(ident).toEqual([{ provider: "google", e: "guest@outside.org" }]);
+    // The home page's resolve_my_access doesn't reconcile for a guest's claims, and does for everyone else's.
+    const claims = (guest: boolean) => ({ sub: id, role: "authenticated", email: "guest@outside.org", app_metadata: { agency_admin: false, ...(guest ? { guest: true } : {}) } });
+    expect(await db.as(claims(true), async (c) => (await c.query("select * from resolve_my_access()")).rows)).toEqual([]);
+    expect(await db.as(claims(false), async (c) => (await c.query("select * from resolve_my_access()")).rows)).toHaveLength(1);
+    await db.client.query("delete from workspace_access_emails where email = 'guest@outside.org'");
   });
 });

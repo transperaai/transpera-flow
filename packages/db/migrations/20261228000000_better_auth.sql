@@ -6,8 +6,9 @@
 -- 2. `better_auth.sync_auth_user()` mirrors every Better Auth user into `auth.users`, so the 62 foreign keys to it, and every
 --    policy that reads auth.uid(), keep working.
 -- 3. `public.deployment_access` is the deployment's sign-in list (domains and named emails, each with a role), and two
---    SECURITY DEFINER functions apply it: `private.deployment_role` decides a role, `private.sync_deployment_access` applies it
---    once per sign-in. Neither is executable by anon or authenticated; the app calls them on its owner connection.
+--    SECURITY DEFINER functions apply it: `private.deployment_role` decides a role, `private.may_sign_in` adds 'guest' for an
+--    outsider listed on a live restricted share link, `private.sync_deployment_access` applies it once per sign-in. None is
+--    executable by anon or authenticated; the app calls them on its owner connection.
 
 -- ---------------------------------------------------------------------------
 -- Better Auth tables (generated)
@@ -128,15 +129,54 @@ begin
 end;
 $$;
 
--- Applies a user's access, once per sign-in, in the caller's transaction. Returns the role, or null (changing nothing) when the
--- address is no longer on the list:
---   * admin: auth.users.raw_app_meta_data.agency_admin = true, as make-agency-admin.sql does; any other role clears the flag.
---   * editor / viewer: a membership at that role in every workspace. An existing one is never lowered (an owner stays owner),
---     never removed and never reactivated; a lower one is raised and detached from the access lists (source 'manual'), so
---     reconcile_access doesn't put it back.
---   * records the provider accounts in auth.identities (p_identities: [{provider, provider_id, hd?, tid?}]), which is where the
---     per-workspace domain joins (ADR 0003) read Google's hosted-domain claim. Only a provider's own ID token reaches it.
---   * first runs public.reconcile_access(user), the per-workspace lists and domain joins that /auth/callback used to trigger.
+-- Who may sign in at all: the deployment role, or 'guest' for a verified address that no rule names but that a live restricted
+-- share link lists (B3: the link's allowed emails must keep working for outsiders). A guest gets no role anywhere: no
+-- memberships, no agency admin, and the sign-in sync doesn't run for them; their session only matters on /s/<token>, where
+-- public.open_share_link and public.submit_play_proposal decide what they see. Null means refuse.
+create function private.may_sign_in(p_email text, p_email_verified boolean, p_bootstrap_admins text[] default '{}')
+returns text
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  e text := lower(btrim(coalesce(p_email, '')));
+  r text := private.deployment_role(p_email, p_email_verified, p_bootstrap_admins);
+begin
+  if r is not null then
+    return r;
+  end if;
+  if not coalesce(p_email_verified, false) or e = '' then
+    return null;
+  end if;
+  -- Live and restricted, exactly as open_share_link reads it (allowed_emails are stored lower-case). Both modes: a restricted
+  -- play link asks for the same sign-in.
+  if exists (
+    select 1 from public.share_links s
+    where (s.show_people or s.show_financials)
+      and s.revoked_at is null
+      and (s.expires_at is null or s.expires_at > now())
+      and e = any (s.allowed_emails)
+  ) then
+    return 'guest';
+  end if;
+  return null;
+end;
+$$;
+
+-- Applies a user's access, once per sign-in, in the caller's transaction. Returns the role ('guest' included), or null (changing
+-- nothing) when the address may no longer sign in:
+--   * records the provider accounts in auth.identities (p_identities: [{provider, provider_id, email?, hd?, tid?}]), first, so the
+--     domain joins below already see this sign-in's hosted domain, and open_share_link sees the Google identity. Only a
+--     provider's own ID token reaches it. `email` is the address the provider's token names (the user's own when absent).
+--   * admin: auth.users.raw_app_meta_data.agency_admin = true, as make-agency-admin.sql does; any other role, guest included,
+--     clears the flag.
+--   * guest: nothing else. No reconcile, no memberships.
+--   * runs public.reconcile_access(user), the per-workspace lists and domain joins that /auth/callback used to trigger, so a
+--     workspace's own list entry (say owner) is in place first.
+--   * editor / viewer, then: the deployment role is a floor in every workspace. A missing membership is added (source 'manual'); a
+--     lower one is raised and keeps its source, so it stays attached to the lists (reconcile_access may lower it again when a list
+--     changes, and the next sign-in raises it again). An existing one is never lowered (an owner stays owner), never removed and
+--     never reactivated.
 create function private.sync_deployment_access(p_user uuid, p_bootstrap_admins text[] default '{}', p_identities jsonb default '[]')
 returns text
 language plpgsql security definer
@@ -152,34 +192,16 @@ begin
   if not found then
     return null;
   end if;
-  new_role := private.deployment_role(user_email, user_confirmed, p_bootstrap_admins);
+  new_role := private.may_sign_in(user_email, user_confirmed, p_bootstrap_admins);
   if new_role is null then
     return null;
   end if;
 
   perform set_config('transpera.actor_kind', 'system', true);
 
-  update auth.users u
-  set raw_app_meta_data = coalesce(u.raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('agency_admin', new_role = 'admin'),
-      last_sign_in_at = now()
-  where u.id = p_user;
-
-  -- What the old /auth/callback did after every sign-in (ADR 0003): per-workspace pre-assigned emails and domain joins. It runs
-  -- first, so a workspace's own list entry (say owner) is in place before the deployment role is added without lowering it.
-  -- It touches only 'access_list' and 'domain' memberships.
-  perform public.reconcile_access(p_user);
-
-  if new_role in ('editor', 'viewer') then
-    -- The enum is declared agency_admin, owner, editor, member, viewer, so a smaller role is a stronger one.
-    insert into public.memberships as m (workspace_id, user_id, role, source)
-    select w.id, p_user, new_role::public.membership_role, 'manual' from public.workspaces w
-    on conflict (workspace_id, user_id) do update
-      set role = excluded.role, source = 'manual'
-      where m.active and excluded.role < m.role;
-  end if;
-
   for i in
-    select * from jsonb_to_recordset(coalesce(p_identities, '[]'::jsonb)) as x (provider text, provider_id text, hd text, tid text)
+    select * from jsonb_to_recordset(coalesce(p_identities, '[]'::jsonb))
+      as x (provider text, provider_id text, email text, hd text, tid text)
   loop
     continue when i.provider not in ('google', 'microsoft') or coalesce(i.provider_id, '') = '';
     insert into auth.identities as ident (user_id, provider, provider_id, identity_data, last_sign_in_at)
@@ -187,7 +209,7 @@ begin
       p_user, i.provider, i.provider_id,
       jsonb_strip_nulls(jsonb_build_object(
         'sub', i.provider_id,
-        'email', user_email,
+        'email', coalesce(nullif(lower(btrim(i.email)), ''), user_email),
         'custom_claims', case
           when nullif(i.hd, '') is not null then jsonb_build_object('hd', i.hd)
           when nullif(i.tid, '') is not null then jsonb_build_object('tid', i.tid)
@@ -198,11 +220,56 @@ begin
       where ident.user_id = excluded.user_id;
   end loop;
 
+  update auth.users u
+  set raw_app_meta_data = coalesce(u.raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('agency_admin', new_role = 'admin'),
+      last_sign_in_at = now()
+  where u.id = p_user;
+
+  if new_role <> 'guest' then
+    -- What the old /auth/callback did after every sign-in (ADR 0003): per-workspace pre-assigned emails and domain joins. It
+    -- touches only 'access_list' and 'domain' memberships.
+    perform public.reconcile_access(p_user);
+  end if;
+
+  if new_role in ('editor', 'viewer') then
+    -- The enum is declared agency_admin, owner, editor, member, viewer, so a smaller role is a stronger one.
+    insert into public.memberships as m (workspace_id, user_id, role, source)
+    select w.id, p_user, new_role::public.membership_role, 'manual' from public.workspaces w
+    on conflict (workspace_id, user_id) do update
+      set role = excluded.role
+      where m.active and excluded.role < m.role;
+  end if;
+
   perform set_config('transpera.actor_kind', '', true);
   return new_role;
 end;
 $$;
 
+-- The home page's "resolve my access" (ADR 0003) for a session whose claims mark a guest (apps/web/src/lib/db/claims.ts): it
+-- returns their memberships without reconciling, so a guest never joins a workspace by domain or list from there. Unchanged
+-- for everyone else.
+create or replace function public.resolve_my_access()
+returns table (workspace_id uuid, role public.membership_role, source text)
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null then
+    raise exception 'not signed in' using errcode = '42501';
+  end if;
+  if not coalesce((auth.jwt() -> 'app_metadata' ->> 'guest')::boolean, false) then
+    perform set_config('transpera.actor_kind', 'system', true);
+    perform public.reconcile_access(uid);
+    perform set_config('transpera.actor_kind', '', true);
+  end if;
+  return query
+    select m.workspace_id, m.role, m.source from public.memberships m where m.user_id = uid and m.active;
+end;
+$$;
+
 -- Functions are executable by PUBLIC by default. The sync takes any user id, so only the owner connection may call these.
 revoke execute on function private.deployment_role(text, boolean, text[]) from public, anon, authenticated;
+revoke execute on function private.may_sign_in(text, boolean, text[]) from public, anon, authenticated;
 revoke execute on function private.sync_deployment_access(uuid, text[], jsonb) from public, anon, authenticated;
