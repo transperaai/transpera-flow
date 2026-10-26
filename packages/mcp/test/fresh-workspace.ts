@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import { signJwt } from "./helpers";
+import type { Claims } from "@transpera-flow/db/client";
 
 // A workspace exactly as a new client leaves `create_workspace`: the company map, the agency admin's membership and the seeded
 // scenarios, and nothing else (no roles, people, clients or processes). For the tests that pin the fresh-client path (issue #243).
@@ -11,16 +11,16 @@ export interface FreshWorkspace {
   wsId: string;
   slug: string;
   companyId: string;
-  users: Record<FreshUser, { id: string; jwt: string }>;
+  users: Record<FreshUser, { id: string; claims: Claims }>;
 }
 
 const MEMBERSHIPS = { owner: "owner", editor: "editor", member: "member", viewer: "viewer" } as const;
 
 /**
  * Makes a user for each way of being in a workspace, has the agency admin create the workspace through `create_workspace` over SQL
- * (as that user, under RLS: the production path), and adds the other four. `secret` signs the users' JWTs for PostgREST.
+ * (as that user, under RLS: the production path), and adds the other four. Each user comes with the claims their queries run under.
  */
-export async function createFreshWorkspace(admin: pg.Client, secret: string): Promise<FreshWorkspace> {
+export async function createFreshWorkspace(admin: pg.Client): Promise<FreshWorkspace> {
   const tag = randomUUID().slice(0, 8);
   const slug = `fresh-${tag}`;
   const ids = {} as Record<FreshUser, string>;
@@ -32,7 +32,7 @@ export async function createFreshWorkspace(admin: pg.Client, secret: string): Pr
       k === "agency" ? { agency_admin: true } : {},
     ]);
   }
-  const claims = (k: FreshUser) => ({ sub: ids[k], role: "authenticated", aud: "authenticated", app_metadata: k === "agency" ? { agency_admin: true } : {} });
+  const claims = (k: FreshUser): Claims => ({ sub: ids[k], role: "authenticated", aud: "authenticated", app_metadata: k === "agency" ? { agency_admin: true } : {} });
 
   // The agency admin creates it: the function runs as the caller, so RLS checks both inserts.
   await admin.query("begin");
@@ -51,7 +51,7 @@ export async function createFreshWorkspace(admin: pg.Client, secret: string): Pr
   }
   const companyId = (await admin.query("select id from processes where workspace_id = $1 and is_company", [wsId])).rows[0].id as string;
   const users = Object.fromEntries(
-    (Object.keys(ids) as FreshUser[]).map((k) => [k, { id: ids[k], jwt: signJwt(claims(k), secret) }]),
+    (Object.keys(ids) as FreshUser[]).map((k) => [k, { id: ids[k], claims: claims(k) }]),
   ) as FreshWorkspace["users"];
   return { wsId, slug, companyId, users };
 }
