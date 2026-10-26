@@ -113,8 +113,10 @@ describe("the Editor and the Settings", () => {
     expect(page).toContain('mode={data.canEdit ? "live" : "readonly"}');
     expect(page).toContain("canEdit={data.canEdit}");
     const data = read("lib/data.ts");
-    expect(data).toContain("canEdit: canEdit.data === true,");
-    expect(data).toContain("canManage: canManage.data === true,");
+    expect(data).toContain('rpc(db, "can_edit_workspace", { ws }),');
+    expect(data).toContain('rpc(db, "can_manage_workspace", { ws }),');
+    expect(data).toContain("canEdit: canEdit === true,");
+    expect(data).toContain("canManage: canManage === true,");
     for (const file of ["roles", "services", "demand", "market", "people"]) {
       expect(read(`app/w/[slug]/settings/${file}-settings.tsx`), file).toMatch(/canEdit/);
     }
@@ -126,7 +128,9 @@ describe("the Editor and the Settings", () => {
   });
 
   it("Access is for owners and agency admins: the page 404s without can_manage_workspace and the link is hidden", () => {
-    expect(read("lib/access-data.ts")).toContain("if (!canManage.data) return null;");
+    const access = read("lib/access-data.ts");
+    expect(access).toContain('rpc(db, "can_manage_workspace", { ws }),');
+    expect(access).toContain("if (!canManage) return null;");
     expect(read(PAGE("settings/access"))).toContain("if (!settings) notFound();");
     expect(read("lib/shell/nav.ts")).toContain("access: canManage");
   });

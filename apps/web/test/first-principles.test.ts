@@ -235,7 +235,7 @@ describe("restoring a version (A40) asks first when the draft has answers of its
     const action = readFileSync(join(__dirname, "..", "src", "app", "w", "[slug]", "p", "[processId]", "history", "actions.ts"), "utf8");
     const check = action.indexOf("mustAskBeforeRestore(replaceDraft");
     expect(check).toBeGreaterThan(-1);
-    expect(check).toBeLessThan(action.indexOf('rpc("restore_version"'));
+    expect(check).toBeLessThan(action.search(/rpc\(\w+(\.\w+)*, "restore_version"/));
     expect(action).toContain("firstPrinciplesDraftChanged(");
     expect(action).toContain('return { status: "draft_exists" }');
   });
