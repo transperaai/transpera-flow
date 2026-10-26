@@ -405,7 +405,7 @@ function SourcePanel({
             Open the original{s.kind === "screenshot" ? " screenshot" : ""}
           </a>
         ) : (
-          <p className="text-fg-3">{canEdit ? "No link to the original. Add one under Details and edit." : "No link to the original."}</p>
+          <p className="text-fg-3">{canEdit ? "No link to the original. Add one in the details below." : "No link to the original."}</p>
         )}
       </section>
       <section aria-label="Cited in" className="flex flex-col gap-1">

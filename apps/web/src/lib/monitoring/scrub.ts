@@ -20,7 +20,7 @@ const UUID_WHOLE = new RegExp(`^${UUID}$`);
 export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app).
   "access", "ai", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "churn-drivers", "demo", "edit",
-  "export", "first-principles", "forecast", "history", "issues", "levers", "library", "login", "market", "mcp", "monitoring-check",
+  "export", "first-principles", "forecast", "history", "issues", "levers", "library", "login", "logo", "market", "mcp", "monitoring-check",
   "narrate", "overview", "p", "people", "privacy", "processes", "restore", "s", "settings", "share", "signout", "solutions",
   "sources", "suggestions", "tokens", "w",
   // Next's build files.

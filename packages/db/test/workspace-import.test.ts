@@ -519,7 +519,8 @@ describe("what is left out stays out", () => {
     expect(await n("suggestion_proposals", ws)).toBe(await n("suggestion_proposals", source, "status = 'pending'"));
     expect(await n("suggestions", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
     expect(await n("suggestion_proposals", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
-    expect(await n("sources", ws, "file_path is not null or file_name is not null or file_type is not null or file_size is not null")).toBe(0);
+    // A source keeps its link to the original (the uploaded files and their columns are gone: step 4).
+    expect(await n("sources", ws, "file_url is not null")).toBe(await n("sources", source, "file_url is not null"));
     // Steps and edges: those of the live versions of the source's processes.
     const live = "revision_id in (select live_revision_id from processes where workspace_id = $1 and not is_company and live_revision_id is not null)";
     const drafts = "revision_id in (select draft_revision_id from processes where workspace_id = $1 and not is_company and draft_revision_id is not null)";
