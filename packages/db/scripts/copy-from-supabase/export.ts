@@ -35,8 +35,10 @@ export interface ExportOptions {
   out: string;
   source: SqlSource;
   sourceInfo: Manifest["source"];
-  /** Rows per query. Default 500. */
+  /** Rows per query at most. Default 500. */
   pageSize?: number;
+  /** Fewer rows per query for a table whose widest row's text is big: about this many bytes a page. Default 4 MB. */
+  pageBytes?: number;
   /** Where public `branding` objects can be fetched from (`<base>/branding/<name>`); without it nothing is downloaded. */
   storageBase?: string;
   log?: (line: string) => void;
@@ -76,6 +78,7 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
   const { source } = options;
   const log = options.log ?? (() => {});
   const pageSize = options.pageSize ?? 500;
+  const pageBytes = options.pageBytes ?? 4 * 1024 * 1024;
   const dir = prepareOutDir(options.out);
   const problems: string[] = [];
 
@@ -138,19 +141,24 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
     const orderBy = pk.length > 0 ? pk.map(quoteIdent).join(", ") : selected.map((c) => `${quoteIdent(c)}::text`).join(", ");
     const list = wanted ? selected.map(quoteIdent).join(", ") : "*";
 
-    const expected = Number((await source.query(`select count(*)::int as n from ${qualified(name)}`))[0]!.n);
+    const [stats] = await source.query(
+      `select count(*)::int as n, coalesce(max(octet_length(t::text)), 0)::bigint::text as widest from ${qualified(name)} t`,
+    );
+    const expected = Number(stats!.n);
+    // Big rows (reports.pdf holds whole PDFs, as hex) come a few per page, so one answer stays near pageBytes of row text.
+    const rowsPerPage = Math.max(1, Math.min(pageSize, Math.floor(pageBytes / Math.max(1, Number(stats!.widest)))));
     const parts: string[] = [];
     let read = 0;
-    for (let offset = 0; offset < expected || offset === 0; offset += pageSize) {
+    for (let offset = 0; offset < expected || offset === 0; offset += rowsPerPage) {
       const [page] = await source.query(
         `select count(*)::int as n, coalesce(json_agg(t), '[]'::json)::text as j
-           from (select ${list} from ${qualified(name)} order by ${orderBy} limit ${pageSize} offset ${offset}) t`,
+           from (select ${list} from ${qualified(name)} order by ${orderBy} limit ${rowsPerPage} offset ${offset}) t`,
       );
       const n = Number(page!.n);
       read += n;
       // The page's JSON text is kept as it came, so numbers keep every digit.
       if (n > 0) parts.push(str(page!.j).trim().slice(1, -1));
-      if (n < pageSize) break;
+      if (n < rowsPerPage) break;
     }
     const text = `[${parts.join(",\n")}]`;
     const after = Number((await source.query(`select count(*)::int as n from ${qualified(name)}`))[0]!.n);

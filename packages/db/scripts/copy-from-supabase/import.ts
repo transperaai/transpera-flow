@@ -292,9 +292,25 @@ async function tryReplica(client: Queryable, force: boolean): Promise<{ ok: bool
   }
 }
 
-const chunks = <T>(items: T[], size: number): T[][] => {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+/** A row's JSON is at most this long in one statement's parameter, so a table of big rows (reports.pdf) goes in small batches. */
+const CHUNK_BYTES = 8 * 1024 * 1024;
+
+/** `rows` as JSON arrays of at most `size` rows and about CHUNK_BYTES characters each (a single bigger row goes alone). */
+const chunks = (rows: Row[], size: number): string[] => {
+  const out: string[] = [];
+  let part: string[] = [];
+  let length = 0;
+  for (const row of rows) {
+    const text = JSON.stringify(row);
+    if (part.length > 0 && (part.length >= size || length + text.length > CHUNK_BYTES)) {
+      out.push(`[${part.join(",")}]`);
+      part = [];
+      length = 0;
+    }
+    part.push(text);
+    length += text.length + 1;
+  }
+  if (part.length > 0) out.push(`[${part.join(",")}]`);
   return out;
 };
 
@@ -314,7 +330,7 @@ async function insertRows(
     select ${columns.map((c) => (nulled.has(c) ? "null" : `r.${quoteIdent(c)}`)).join(", ")}
     from json_populate_recordset(null::${q}, $1::json) as r`;
   let n = 0;
-  for (const chunk of chunks(rows, chunkSize)) n += (await client.query(sql, [JSON.stringify(chunk)])).rowCount ?? 0;
+  for (const chunk of chunks(rows, chunkSize)) n += (await client.query(sql, [chunk])).rowCount ?? 0;
   if (n !== rows.length) throw new Error(`${table}: inserted ${n} of ${rows.length} rows`);
   return n;
 }
@@ -334,7 +350,7 @@ async function fillDeferred(client: Queryable, table: string, columns: string[],
   const cols = [...nulled];
   const sql = `update ${q} t set ${cols.map((c) => `${quoteIdent(c)} = r.${quoteIdent(c)}`).join(", ")}
     from json_populate_recordset(null::${q}, $1::json) as r where ${pk.map((c) => `t.${quoteIdent(c)} = r.${quoteIdent(c)}`).join(" and ")}`;
-  for (const chunk of chunks(rows, chunkSize)) await client.query(sql, [JSON.stringify(chunk)]);
+  for (const chunk of chunks(rows, chunkSize)) await client.query(sql, [chunk]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -350,7 +366,15 @@ async function copyToBetterAuth(client: Queryable, report: ImportReport, chunkSi
   // auth.users' created_at and updated_at are in the export but not in the target's auth.users, so they are read from the export.
   const stamps = new Map(sourceUsers.map((u) => [u.id as string, u]));
   const stamp = (v: unknown) => (typeof v === "string" && v !== "" ? v : now);
-  const users = (await client.query("select id, email, email_confirmed_at, raw_user_meta_data from auth.users order by email, id")).rows;
+  // Better Auth keeps one user per address. Should two auth.users share one (any case), the one Google signs in to wins, then
+  // a confirmed one; the other is reported.
+  const users = (
+    await client.query(
+      `select u.id, u.email, u.email_confirmed_at, u.raw_user_meta_data from auth.users u
+        order by lower(btrim(u.email)), exists (select 1 from auth.identities i where i.user_id = u.id and i.provider = 'google') desc,
+                 u.email_confirmed_at is null, u.id`,
+    )
+  ).rows;
   const seen = new Set<string>();
   const made = new Set<string>();
   const rows: Row[] = [];

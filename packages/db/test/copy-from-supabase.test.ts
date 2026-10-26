@@ -328,6 +328,24 @@ describe("export", () => {
       await src.close();
     }
   });
+
+  it("reads a table of wide rows a row or two at a time", async () => {
+    const dir = join(tmp(), "narrow");
+    const src = await postgresSource(source.url);
+    const queries: string[] = [];
+    const counting = { query: (sql: string) => (queries.push(sql), src.query(sql)), close: () => src.close() };
+    try {
+      const { manifest } = await runExport({ out: dir, source: counting, sourceInfo: { kind: "url" }, pageBytes: 1500 });
+      // Each workspace row's text is a few hundred bytes, so a page holds only a handful instead of 500.
+      const workspacePages = queries.filter((q) => /json_agg\(t\)/.test(q) && q.includes('from "public"."workspaces"')).length;
+      expect(workspacePages).toBeGreaterThan(1);
+      for (const name of Object.keys(manifest.tables)) {
+        expect(JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")), name).toEqual(JSON.parse(readFileSync(join(exportDir, `${name}.json`), "utf8")));
+      }
+    } finally {
+      await src.close();
+    }
+  });
 });
 
 describe("export as a role that row-level security applies to", () => {
