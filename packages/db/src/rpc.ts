@@ -36,7 +36,8 @@ function jsonArgsOf(db: Kysely<DB>, name: string): Promise<Set<string>> {
 async function call(db: Kysely<DB>, name: string, args: object | undefined) {
   if (!IDENT.test(name)) throw new Error(`rpc: bad function name ${name}`);
   const entries = Object.entries(args ?? {}).filter(([, v]) => v !== undefined);
-  const json = entries.some(([, v]) => v !== null && typeof v === "object") ? await jsonArgsOf(db, name) : new Set<string>();
+  // Looked up for every call, so a string meant for a jsonb argument is always a JSON string, whatever the other arguments are.
+  const json = entries.some(([, v]) => v !== null) ? await jsonArgsOf(db, name) : new Set<string>();
   const named = entries.map(([k, v]) => {
     if (!IDENT.test(k)) throw new Error(`rpc: bad argument name ${k}`);
     return sql`${sql.id(k)} => ${json.has(k) && v !== null ? JSON.stringify(v) : v}`;

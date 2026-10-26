@@ -59,4 +59,8 @@ describe("rpc arguments", () => {
     expect(await anyRpc(db.dbAs(null), "zz_json", { j: [1, { a: "x" }], ids: [id, id] })).toEqual({ j: [1, { a: "x" }], n: 2 });
     expect(await anyRpc(db.dbAs(null), "zz_json", { j: { k: [true] } })).toEqual({ j: { k: [true] }, n: 0 });
   });
+  it("sends a string to a jsonb argument as a JSON string, whatever the other arguments are, as PostgREST did", async () => {
+    expect(await anyRpc(db.dbAs(null), "zz_json", { j: "[1]" })).toEqual({ j: "[1]", n: 0 });
+    expect(await anyRpc(db.dbAs(null), "zz_json", { j: "[1]", ids: ["a0000000-0000-4000-8000-0000000000bb"] })).toEqual({ j: "[1]", n: 1 });
+  });
 });
