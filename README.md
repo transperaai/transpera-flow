@@ -56,6 +56,9 @@ pnpm --filter @transpera-flow/db gen:types          # db-types.ts, json-columns.
 and production steps are in [`docs/production-migrations.md`](docs/production-migrations.md); notes on what was checked only
 against plain Postgres are in [`docs/supabase-notes.md`](docs/supabase-notes.md).
 
+Standing up a deployment for a new client (Vercel project, Neon database, Google or Microsoft sign-in): follow
+[`docs/new-client.md`](docs/new-client.md); `bash scripts/new-client.sh` walks the dashboard steps.
+
 ## Checks
 
 ```sh
