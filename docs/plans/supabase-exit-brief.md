@@ -383,7 +383,8 @@ then delete the branch.
 ### 7c. Cutover (needs Austin's go-ahead and a short freeze)
 
 1. Freeze: Austin agrees a window when nobody edits.
-2. Fresh export from Supabase, then import into Neon `main`, then verify.
+2. Empty Neon `main` (it holds QA data from the preview): drop the app schemas and re-run `migrate` (Opus default,
+   26 Oct; the import refuses a target with data). Then a fresh export from Supabase, import into `main`, and verify.
 3. Austin adds **Production** to the Neon connection in Vercel (Storage → `transpera-flow-db` → Projects). Opus sets
    `APP_DATABASE_URL` for Production, as was done for Preview.
 4. Merge the integration branch to `main` through a PR, after Austin's QA on the preview. Vercel deploys production.
