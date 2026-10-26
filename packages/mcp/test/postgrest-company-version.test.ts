@@ -1,19 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadCompanyPartVersion, loadLiveCompanyPart, type Db } from "@transpera-flow/db";
-import { signJwt } from "./helpers";
+import { startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// The Overview's "view an old version of the company map" (QA wave 1), as the web app reads it: loadCompanyPartVersion over PostgREST,
+// The Overview's "view an old version of the company map" (QA wave 1), as the web app reads it: loadCompanyPartVersion through Kysely,
 // as an editor. A published version (live or earlier) comes back whole; a draft, a number only another process has, and another
-// workspace's map all read as not found. Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
+// workspace's map all read as not found. Runs on a throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 let db: Db;
 const ids = { ws: "", otherWs: "", company: "", v1: "", v2: "", v3: "", process: "" };
@@ -41,12 +37,10 @@ async function companyMap(ws: string, label: string) {
   return { company, revisions: out };
 }
 
-describe.skipIf(!POSTGREST_URL)("viewing an earlier company map over PostgREST (editor)", () => {
+describe("viewing an earlier company map (editor)", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug) values ('Map Co', $1) returning id", [`map-${tag}`])).id as string;
     ids.otherWs = (await one("insert into workspaces (name, slug) values ('Other Co', $1) returning id", [`other-${tag}`])).id as string;
@@ -63,24 +57,11 @@ describe.skipIf(!POSTGREST_URL)("viewing an earlier company map over PostgREST (
     ids.company = mine.company;
     [ids.v1, ids.v2, ids.v3] = mine.revisions as [string, string, string];
 
-    const session = signJwt({ sub: editor, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    // supabase-js talks to <url>/rest/v1; PostgREST here serves from its root.
-    db = createClient("http://postgrest.invalid", session, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: {
-        headers: { authorization: `Bearer ${session}` },
-        fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-      },
-    }) as unknown as Db;
-    const deadline = Date.now() + 60_000;
-    while ((await loadLiveCompanyPart(db, ids.ws).catch(() => null)) === null) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    db = env.dbAs(userClaims(editor));
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   const names = (part: { steps: { name: string }[] } | null) => part?.steps.map((s) => s.name);
