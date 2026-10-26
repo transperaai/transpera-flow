@@ -285,6 +285,8 @@ Verified only against plain Postgres (`packages/db/test/manual-entry.test.ts`) a
 
 ## Process archive and source files in Storage (issue #182, migration 20261204000000)
 
+> **Superseded for the files (26 Oct 2026, migration 20261230000000, step 4):** uploads are gone; a source's original is a link (`file_url`). The file columns, `private.source_file_guard`, `private.storage_workspace` and the three `sources:` policies were dropped. The `sources` bucket row and its objects were left for step 7 to list. The archive part of this section still applies.
+
 Verified only against plain Postgres (`packages/db/test/process-archive.test.ts`, `packages/db/test/source-files.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-process-admin.test.ts`), not against a Supabase project. Storage was stood in for by `packages/db/test/sql/storage-shim.sql`: the `storage.buckets` and `storage.objects` columns the migration uses, RLS on both, and the grants a Supabase project has. Queries as `authenticated` (with the JWT's claims) or `anon` against that stand-in are what Supabase's Storage API runs for an upload (insert, with `owner_id` set to the caller), a download or signed link (select) and a delete. Check on the real project:
 
 - [ ] **The migration can write to `storage`.** It inserts the `sources` bucket into `storage.buckets` and creates three policies on `storage.objects` as `postgres`, as Supabase's own docs do from the SQL editor. If the apply is refused (on newer projects `storage` tables are owned by `supabase_storage_admin`), create the bucket in the dashboard (private, 10 MB, the five MIME types) and run the three `create policy` statements from the SQL editor.
@@ -348,6 +350,8 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 
 
 ## Client branding (#34, migration 20261214000000)
+
+> **Superseded for the logo (26 Oct 2026, migration 20261230000000, step 4):** the logo is a row of `workspace_logos` (256 KB at most), served by `app/api/branding/[workspaceId]/logo` through `public.workspace_logo(uuid)`. The `branding` bucket's policies, the logo guard and the `logo_path` key are gone; the bucket row and its objects were left for step 7. Verified only against plain Postgres (`packages/db/test/workspace-logos.test.ts`, `apps/web/test/branding-logo-route.test.ts`): nothing in it depends on Supabase.
 
 A public `branding` bucket (512 KB; PNG, JPEG, WebP), three policies on `storage.objects` for owners and agency admins (read, upload, delete; no update), `workspaces.branding` and a logo guard. Verified only against plain Postgres and the storage shim (`sql/storage-shim.sql`). The guard does not rely on `storage.objects.owner_id` (B19's live check of it is still open); it reads `storage.objects.metadata` (`mimetype`, `size`), which the shim fills in by hand and Supabase Storage sets on upload. To verify on Supabase:
 
