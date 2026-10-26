@@ -45,3 +45,18 @@ describe("rpc", () => {
     await expect(anyRpc(db.dbAs(null), "zz_void(); drop table x; --")).rejects.toThrow(/bad function name/);
   });
 });
+
+describe("rpc arguments", () => {
+  beforeAll(async () => {
+    await db.client.query(`
+      create function public.zz_json(j jsonb, ids uuid[] default '{}') returns jsonb language sql
+        as $$ select jsonb_build_object('j', j, 'n', cardinality(ids)) $$;
+      grant execute on function public.zz_json to anon;
+    `);
+  });
+  it("sends an array to a jsonb argument as JSON, and to a uuid[] argument as a Postgres array", async () => {
+    const id = "a0000000-0000-4000-8000-0000000000bb";
+    expect(await anyRpc(db.dbAs(null), "zz_json", { j: [1, { a: "x" }], ids: [id, id] })).toEqual({ j: [1, { a: "x" }], n: 2 });
+    expect(await anyRpc(db.dbAs(null), "zz_json", { j: { k: [true] } })).toEqual({ j: { k: [true] }, n: 0 });
+  });
+});
