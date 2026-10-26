@@ -1,9 +1,10 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { applyCompat, applyMigrations, type CompatOptions } from "../src/migrations";
 
-// Creates a throwaway database, loads the auth and storage shims, every migration and the
-// seed, and lets tests run queries as a given user (RLS applies).
+// Creates a throwaway database, applies the compat layer, every migration and the seed with the
+// same code the migrate script runs on Neon, and lets tests run queries as a given user (RLS applies).
 
 const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
 const dir = (p: string) => new URL(p, import.meta.url);
@@ -18,10 +19,16 @@ export interface TestDb {
 }
 
 export interface TestDbOptions {
-  /** Also load a stand-in for Supabase Realtime's publication and realtime.messages (./sql/realtime-shim.sql). */
+  /** The Realtime stand-in (publication and realtime.messages) loads by default; `false` leaves it out. */
   realtime?: boolean;
   /** Give anon, authenticated and service_role full privileges on every table made from now on, as a Supabase project does. */
   supabaseDefaultPrivileges?: boolean;
+}
+
+/** The compat layer and legacy shims (as in production), plus the test-only grants. Run before any migration. */
+export async function loadShims(client: pg.Client, options: CompatOptions = {}): Promise<void> {
+  await applyCompat(client, options);
+  await client.query(readFileSync(dir("./sql/test-extras.sql"), "utf8"));
 }
 
 export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb> {
@@ -36,17 +43,11 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
   const client = new pg.Client({ connectionString: url.toString() });
   await client.connect();
 
-  await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
-  await client.query(readFileSync(dir("./sql/storage-shim.sql"), "utf8"));
+  await loadShims(client, { realtimeShim: options.realtime });
   if (options.supabaseDefaultPrivileges) {
     await client.query("alter default privileges in schema public grant all on tables to anon, authenticated, service_role");
   }
-  if (options.realtime) await client.query(readFileSync(dir("./sql/realtime-shim.sql"), "utf8"));
-  const migrations = readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
-  for (const file of migrations) {
-    await client.query(readFileSync(dir(`../supabase/migrations/${file}`), "utf8"));
-  }
-  await client.query(readFileSync(dir("../supabase/seed.sql"), "utf8"));
+  await applyMigrations(client, { seed: true });
 
   return {
     client,

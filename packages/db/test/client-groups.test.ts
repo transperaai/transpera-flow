@@ -148,7 +148,7 @@ describe("per-field saves", () => {
 });
 
 describe("the migration's backfill from named clients", () => {
-  const migration = readFileSync(new URL("../supabase/migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
   const backfill = /(insert into public\.client_groups[\s\S]*?on conflict \(service_id\) do nothing;)/.exec(migration)![1]!;
 
   it("rolls the active named clients up per service, and never changes a group that exists", async () => {
@@ -204,7 +204,7 @@ describe("the migration's backfill from named clients", () => {
 });
 
 describe("the production data alignment block", () => {
-  const migration = readFileSync(new URL("../supabase/migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
   const block = migration
     .slice(migration.indexOf("-- Production data alignment"))
     .split("\n")

@@ -435,7 +435,7 @@ describe("who archived it, and what still needs it", () => {
 
 describe("the rollback in the header", () => {
   it("undoes the migration (with the six replaced bodies re-created, as it says), passes preflight 3 again, and the migration applies again", async () => {
-    const read = (f: string) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8");
+    const read = (f: string) => readFileSync(new URL(`../migrations/${f}`, import.meta.url), "utf8");
     const migration = read("20261204000000_process_admin_source_files.sql");
     const everywhere = read("20261130000000_process_library_everywhere.sql");
     const drafts = read("20261006000000_drafts.sql");

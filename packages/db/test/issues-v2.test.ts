@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assembleIssues, storedStatus, uiStatus, type IssueStatus, NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, northbeamIssues, northbeamPersonIds, northbeamSourceIds, northbeamStepIds } from "../src";
-import { createTestDb, createUser, type TestDb } from "./harness";
+import { createTestDb, createUser, loadShims, type TestDb } from "./harness";
 
 // Issues v2 (issue #112, A47): links to a process or several steps, several owners, targets, the four statuses, a
 // stable number per workspace, linked sources, the history log, row-level security on the new tables, and the
@@ -35,10 +35,10 @@ describe("migrating existing issues", () => {
     url.pathname = `/${name}`;
     client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
-    await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
+    await loadShims(client);
     // Everything before this migration: the schema as production has it.
-    for (const f of readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql") && f < MIGRATION).sort()) {
-      await client.query(readFileSync(dir(`../supabase/migrations/${f}`), "utf8"));
+    for (const f of readdirSync(dir("../migrations")).filter((f) => f.endsWith(".sql") && f < MIGRATION).sort()) {
+      await client.query(readFileSync(dir(`../migrations/${f}`), "utf8"));
     }
     await client.query("insert into workspaces (id, name, slug) values ($1, 'Old Co', 'old-co')", [ws]);
     await client.query("insert into processes (id, workspace_id, name) values ($1, $2, 'Pipeline')", [proc, ws]);
@@ -63,7 +63,7 @@ describe("migrating existing issues", () => {
     await ins(ids.c, "2026-09-03T09:00:00Z", { process_id: proc, type: "spof", source: "promoted", detected_key: `spof:step:${stepA}`, severity: "serious", status: "dismissed", title: "C" });
     await ins(ids.d, "2026-09-04T09:00:00Z", { type: "idea", severity: "warning", status: "open", title: "D" });
     before = Object.fromEntries((await client.query("select * from issues")).rows.map((r) => [r.id, r]));
-    await client.query(readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8"));
+    await client.query(readFileSync(dir(`../migrations/${MIGRATION}`), "utf8"));
   });
 
   afterAll(async () => {

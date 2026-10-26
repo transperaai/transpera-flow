@@ -329,7 +329,7 @@ describe("team_capacity with a hand-written provenance", () => {
 
 /** The text between a function's `$$` marks, as pg_proc.prosrc holds it. */
 function body(file: string, name: string): string {
-  const sql = readFileSync(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
+  const sql = readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8");
   const at = sql.search(new RegExp(`^create (or replace )?function ${name.replace(".", "\\.")}\\(`, "m"));
   expect(at, `${name} in ${file}`).toBeGreaterThan(-1);
   const start = sql.indexOf("$$", at) + 2;
@@ -390,7 +390,7 @@ function diff(oldBody: string, newBody: string): { dropped: string[]; added: str
 }
 
 describe("the migration file", () => {
-  const sql = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+  const sql = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
 
   for (const f of FUNCTIONS) {
     it(`${f.name}: the live md5 is this migration's, the header states both md5s, and the body is the previous one plus marked #227 lines`, async () => {
@@ -441,7 +441,7 @@ describe("the migration file", () => {
       await own.client.query(rollback);
       expect(await oq("select to_regclass('public.capacity_factor_proposals') as t")).toEqual([{ t: null }]);
       // Preflight 1, as the header prints it, now gives exactly what it expects before the migration.
-      const pre1 = /^-- {8}(select n\.nspname \|\| '\.' \|\| p\.proname, md5\(p\.prosrc\), p\.prosecdef, p\.proconfig .*;)$/m.exec(readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8"))![1]!;
+      const pre1 = /^-- {8}(select n\.nspname \|\| '\.' \|\| p\.proname, md5\(p\.prosrc\), p\.prosecdef, p\.proconfig .*;)$/m.exec(readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8"))![1]!;
       expect((await own.client.query({ text: pre1, rowMode: "array" })).rows).toEqual(
         FUNCTIONS.map((f) => f.name)
           .sort()

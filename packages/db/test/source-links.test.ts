@@ -17,7 +17,7 @@ import {
   type StepRow,
   unionIssueSources,
 } from "../src";
-import { createTestDb, createUser, type TestDb } from "./harness";
+import { createTestDb, createUser, loadShims, type TestDb } from "./harness";
 
 // Sources must link (issue #118, A53, migration 20261124500000_source_links.sql): the link table under row-level
 // security, adding a source only with a link, the unlinked count, the check on step links, and the copy of today's
@@ -31,7 +31,7 @@ const interview = northbeamSourceIds.strategyInterview;
 const notes = northbeamSourceIds.salesNotes;
 const issue = northbeamIssues()[1]!.id;
 
-const migrationText = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
+const migrationText = readFileSync(dir(`../migrations/${MIGRATION}`), "utf8");
 
 /** The SQL of one preflight query (P5, P7, P8) as written in the migration's header: its lines indented by eight spaces or more. */
 function preflight(n: number): string {
@@ -91,10 +91,10 @@ describe("migrating today's step citations", () => {
     url.pathname = `/${name}`;
     client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
-    await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
+    await loadShims(client);
     // Everything before this migration: the schema as production has it.
-    for (const f of readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql") && f < MIGRATION).sort()) {
-      await client.query(readFileSync(dir(`../supabase/migrations/${f}`), "utf8"));
+    for (const f of readdirSync(dir("../migrations")).filter((f) => f.endsWith(".sql") && f < MIGRATION).sort()) {
+      await client.query(readFileSync(dir(`../migrations/${f}`), "utf8"));
     }
     await client.query("insert into workspaces (id, name, slug) values ($1, 'Old Co', 'old-co'), ($2, 'Other Co', 'other-co')", [w1, w2]);
     await client.query("insert into processes (id, workspace_id, name) values ($1, $2, 'Pipeline')", [proc, w1]);
@@ -128,7 +128,7 @@ describe("migrating today's step citations", () => {
     beforeSteps = (await client.query("select * from steps order by revision_id, id")).rows;
     beforeSources = (await client.query("select * from sources order by id")).rows;
     beforeIssueSources = (await client.query("select * from issue_sources order by issue_id, source_id")).rows;
-    await client.query(readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8"));
+    await client.query(readFileSync(dir(`../migrations/${MIGRATION}`), "utf8"));
   });
 
   afterAll(async () => {
@@ -210,10 +210,9 @@ describe("the rollback in the header", () => {
     url.pathname = `/${name}`;
     client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
-    await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
-    await client.query(readFileSync(dir("./sql/storage-shim.sql"), "utf8"));
-    for (const f of readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql")).sort()) {
-      await client.query(readFileSync(dir(`../supabase/migrations/${f}`), "utf8"));
+    await loadShims(client);
+    for (const f of readdirSync(dir("../migrations")).filter((f) => f.endsWith(".sql")).sort()) {
+      await client.query(readFileSync(dir(`../migrations/${f}`), "utf8"));
     }
     await client.query("create schema supabase_migrations; create table supabase_migrations.schema_migrations (version text primary key, name text, statements text[])");
     await client.query("insert into supabase_migrations.schema_migrations (version, name) values ('20261124500000', 'source_links')");

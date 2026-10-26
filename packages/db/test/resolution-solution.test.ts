@@ -250,7 +250,7 @@ describe("your verdict and notes on a solution are logged on the issue", () => {
 
 describe("the migration's header", () => {
   it("rolls back as written, restoring A48's log function in full", async () => {
-    const sql = readFileSync(new URL("../supabase/migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
+    const sql = readFileSync(new URL("../migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
     const header = sql.slice(sql.indexOf("-- Rollback"), sql.indexOf("\nalter table public.issues add column"));
     const steps = header
       .split("\n")
@@ -258,7 +258,7 @@ describe("the migration's header", () => {
       .map((l) => l.slice(5))
       .join("\n");
     const body = steps.slice(steps.indexOf("begin;") + 6, steps.indexOf("commit;")).replace(/delete from supabase_migrations\.schema_migrations[^;]*;/, "");
-    const a48 = readFileSync(new URL("../supabase/migrations/20261121500000_issue_resolution.sql", import.meta.url), "utf8");
+    const a48 = readFileSync(new URL("../migrations/20261121500000_issue_resolution.sql", import.meta.url), "utf8");
     const fn = (s: string, at: number) => s.slice(at, s.indexOf("\n$$;", at) + 4);
     const restored = fn(body, body.indexOf("create or replace function private.log_issue_change()"));
     const original = fn(a48, a48.lastIndexOf("create or replace function private.log_issue_change()"));
@@ -280,7 +280,7 @@ describe("the migration's header", () => {
   });
 
   it("the production apply file carries the migration byte for byte, inside a lock timeout", () => {
-    const body = readFileSync(new URL("../supabase/migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
+    const body = readFileSync(new URL("../migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
     const apply = readFileSync(new URL("../scripts/apply/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
     expect(apply).toContain("begin;\nset local lock_timeout = '5s';\n\n" + body + "\ninsert into supabase_migrations.schema_migrations");
     expect(apply).toContain("array[$mig$" + body + "$mig$]);\n\ncommit;\n");

@@ -67,7 +67,7 @@ describe("create_workspace", () => {
     // The seeded Northbeam workspace predates the AUD default and is still in pounds...
     expect((await db.client.query("select settings ->> 'currency' as currency from workspaces where id = $1", [ws])).rows[0].currency).toBe("GBP");
     // ...and nothing in the migration could have changed it: it only redefines create_workspace.
-    const sql = readFileSync(new URL("../supabase/migrations/20261113000000_cost_per_month.sql", import.meta.url), "utf8")
+    const sql = readFileSync(new URL("../migrations/20261113000000_cost_per_month.sql", import.meta.url), "utf8")
       .split("\n")
       .filter((line) => !line.trim().startsWith("--"))
       .join("\n");

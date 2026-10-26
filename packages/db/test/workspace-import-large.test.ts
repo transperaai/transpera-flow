@@ -200,7 +200,7 @@ async function mini(): Promise<Mini> {
 
 
 const L = WORKSPACE_IMPORT_LIMITS;
-const sqlOf = (name: string) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 const OLD_MIGRATION = "20261207000000_import_workspace_bundle.sql";
 const NEW_MIGRATION = "20261215000000_bigger_restores.sql";
 /** The latest migration that defines `import_workspace_bundle` (#228 replaced B21's body, which NEW_MIGRATION still holds). */
@@ -559,7 +559,7 @@ describe("the function and the migration", () => {
 
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const dir = new URL("../", import.meta.url);
-    const mig = readFileSync(new URL(`supabase/migrations/${NEW_MIGRATION}`, dir), "utf8").trimEnd();
+    const mig = readFileSync(new URL(`migrations/${NEW_MIGRATION}`, dir), "utf8").trimEnd();
     const apply = readFileSync(new URL(`scripts/apply/${NEW_MIGRATION}`, dir), "utf8");
     expect(apply).toContain("\nbegin;\nset local lock_timeout");
     expect(apply.split(mig).length - 1).toBe(2);

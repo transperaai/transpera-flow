@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SHARE_NON_TEXT_KEYS } from "../src/share";
 
 describe("share links: the leak check's helpers and lists", () => {
-  const migrationText = readFileSync(join(__dirname, "..", "supabase/migrations/20261220000000_share_links.sql"), "utf8");
+  const migrationText = readFileSync(join(__dirname, "..", "migrations/20261220000000_share_links.sql"), "utf8");
 
   it("preflight 1, the post-apply checks and the rollback cover every helper the migration creates", () => {
     const created = [...migrationText.matchAll(/^create function (?:private|public)\.(\w+)\(/gm)].map((m) => m[1]!);
@@ -27,7 +27,7 @@ describe("share links: the leak check's helpers and lists", () => {
   it("the database's list of keys that are no text is the app's (B4's migration replaced the function with one more key, hiddenLevers)", () => {
     // The newest definition of `private.share_snapshot_problem` is the one that counts: B4's (20261221000000) copies B3's and adds a
     // key; the money-rule follow-up (20261224500000) copies B4's and keeps its list.
-    const read = (f: string) => readFileSync(join(__dirname, "..", "supabase/migrations", f), "utf8");
+    const read = (f: string) => readFileSync(join(__dirname, "..", "migrations", f), "utf8");
     const lists = [migrationText, read("20261221000000_play_links.sql"), read("20261224500000_share_money_rule.sql")].map((text) => {
       const m = /^  non_text_keys constant text\[\] := array\[([^\]]*)\]/m.exec(text)!;
       return [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
@@ -45,10 +45,10 @@ describe("share links: the leak check's helpers and lists", () => {
 // header, docs/production-migrations.md). They must say the same thing, and it must be true of the files on disk.
 const root = join(__dirname, "..");
 const VERSION = "20261220000000";
-const migration = readFileSync(join(root, `supabase/migrations/${VERSION}_share_links.sql`), "utf8");
+const migration = readFileSync(join(root, `migrations/${VERSION}_share_links.sql`), "utf8");
 const apply = readFileSync(join(root, `scripts/apply/${VERSION}_share_links.sql`), "utf8");
 const ledger = readFileSync(join(root, "../../docs/production-migrations.md"), "utf8");
-const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.slice(0, 14)).sort();
+const versions = readdirSync(join(root, "migrations")).map((f) => f.slice(0, 14)).sort();
 
 describe("share links: row 64 of the production ledger", () => {
   it("it is on disk once, and nothing on disk is between it and the 20261219000000 it is applied after", () => {

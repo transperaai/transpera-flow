@@ -11,9 +11,9 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 
 let db: TestDb;
 let editor: { id: string; claims: Record<string, unknown> };
-const migration = readFileSync(new URL("../supabase/migrations/20261126000000_company_map.sql", import.meta.url), "utf8");
-const editing = readFileSync(new URL("../supabase/migrations/20261127500000_company_map_editing.sql", import.meta.url), "utf8");
-const everywhere = readFileSync(new URL("../supabase/migrations/20261130000000_process_library_everywhere.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../migrations/20261126000000_company_map.sql", import.meta.url), "utf8");
+const editing = readFileSync(new URL("../migrations/20261127500000_company_map_editing.sql", import.meta.url), "utf8");
+const everywhere = readFileSync(new URL("../migrations/20261130000000_process_library_everywhere.sql", import.meta.url), "utf8");
 
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows;
 
@@ -299,9 +299,9 @@ describe("the backfill", () => {
         .join("\n")
         .replace(`delete from supabase_migrations.schema_migrations where version = '${version}';`, "");
     const defn = (sql: string, name: string) => sql.match(new RegExp(`^create (?:or replace )?function ${name}\\([\\s\\S]*?\\n\\$\\$;`, "m"))![0].replace(/^create function/, "create or replace function");
-    const nested = readFileSync(new URL("../supabase/migrations/20261108000000_nested_processes.sql", import.meta.url), "utf8");
+    const nested = readFileSync(new URL("../migrations/20261108000000_nested_processes.sql", import.meta.url), "utf8");
     const restored = defn(nested, "private\\.check_step_nesting");
-    const history = readFileSync(new URL("../supabase/migrations/20261118000000_process_history.sql", import.meta.url), "utf8");
+    const history = readFileSync(new URL("../migrations/20261118000000_process_history.sql", import.meta.url), "utf8");
     const duplicate = defn(history, "public\\.duplicate_version");
     // Slice 2's rollback: what its header says to re-create, from the files it names.
     const rollBackEditing = [

@@ -1028,7 +1028,7 @@ describe("the fifth round: tags, ids, names and money", () => {
   });
 
   it("B3 follow-up: the words that make a number an identifier are the database's (the same list in the migration's money rule)", () => {
-    const sql = readFileSync(join(__dirname, "..", "supabase/migrations/20261224500000_share_money_rule.sql"), "utf8");
+    const sql = readFileSync(join(__dirname, "..", "migrations/20261224500000_share_money_rule.sql"), "utf8");
     const body = sql.slice(sql.search(/^create or replace function private\.share_snapshot_problem\(/m));
     const lists = [...body.matchAll(/\(\?<!\(\^\|\[\^a-z\]\)\(([a-z|]+)\)\[\[:space:\]\]\+\)/g)].map((m) => m[1]!);
     // The standard words guard every plain-number form; version words both 1- or 2-digit forms; place words only the whole one.

@@ -755,7 +755,7 @@ describe("SQL and TS agree", () => {
 
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const dir = new URL("../", import.meta.url);
-    const mig = readFileSync(new URL("supabase/migrations/20261207000000_import_workspace_bundle.sql", dir), "utf8").trimEnd();
+    const mig = readFileSync(new URL("migrations/20261207000000_import_workspace_bundle.sql", dir), "utf8").trimEnd();
     const apply = readFileSync(new URL("scripts/apply/20261207000000_import_workspace_bundle.sql", dir), "utf8");
     expect(apply).toContain("\nbegin;\nset local lock_timeout");
     expect(apply.split(mig).length - 1).toBe(2);

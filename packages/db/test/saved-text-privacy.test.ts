@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loadShims } from "./harness";
 
 // Saved text carries no pay and no real names (issue #30, B1 2b; migration 20261207700000). Applies every migration before
 // this one, seeds the leaks (overtime issues that state money, AI text that names people), applies it, and checks what was
@@ -61,11 +62,10 @@ beforeAll(async () => {
   url.pathname = `/${name}`;
   client = new pg.Client({ connectionString: url.toString() });
   await client.connect();
-  await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
-  await client.query(readFileSync(dir("./sql/storage-shim.sql"), "utf8"));
+  await loadShims(client);
   // Everything before this migration: the schema as production has it.
-  for (const f of readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql") && f < MIGRATION).sort()) {
-    await client.query(readFileSync(dir(`../supabase/migrations/${f}`), "utf8"));
+  for (const f of readdirSync(dir("../migrations")).filter((f) => f.endsWith(".sql") && f < MIGRATION).sort()) {
+    await client.query(readFileSync(dir(`../migrations/${f}`), "utf8"));
   }
   await client.query("insert into auth.users (id, email) values ($1, 'ed@example.com')", [user]);
   await client.query("insert into workspaces (id, name, slug) values ($1, 'Old Co', 'old-co'), ($2, 'Other Co', 'other-co')", [ws, ws2]);
@@ -158,7 +158,7 @@ beforeAll(async () => {
   oldAnalysisBefore = (await client.query("select * from ai_analyses where id = $1", [oldAnalysis])).rows[0];
   handBefore = (await client.query("select * from findings where id = $1", [handFinding])).rows[0];
   triggersBefore = await triggerStates();
-  await client.query(readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8"));
+  await client.query(readFileSync(dir(`../migrations/${MIGRATION}`), "utf8"));
 }, 120_000);
 
 afterAll(async () => {
@@ -277,7 +277,7 @@ describe("saved AI text", () => {
   });
 
   it("has a post-apply check 7 that finds no name-derived key left, and sees one that is", async () => {
-    const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
+    const header = readFileSync(dir(`../migrations/${MIGRATION}`), "utf8");
     const lines = header.split("--   7. No key is derived from a name any more.")[1]!.split("\n");
     const from = lines.slice(lines.findIndex((l) => l.startsWith("--        select")));
     const sql = from.slice(0, from.findIndex((l) => !l.startsWith("--        "))).map((l) => l.replace(/^--        /, "")).join("\n");
@@ -300,7 +300,7 @@ describe("saved AI text", () => {
   });
 
   it("has a post-apply check 4 that sees a name after a JSON escape, and finds none left after the migration", async () => {
-    const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
+    const header = readFileSync(dir(`../migrations/${MIGRATION}`), "utf8");
     const block = header.split("--   4. No AI text still holds")[1]!.split("--   5.")[0]!.split("\n").filter((l) => l.startsWith("--        ")).map((l) => l.replace(/^--        /, "")).join("\n");
     const counts = async () => (await client.query({ text: block, rowMode: "array" })).rows[0]!.map(Number);
     expect(await counts()).toEqual([0, 0]);
@@ -350,7 +350,7 @@ describe("the migration", () => {
 
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const base = new URL("../", import.meta.url);
-    const mig = readFileSync(new URL(`supabase/migrations/${MIGRATION}`, base), "utf8").trimEnd();
+    const mig = readFileSync(new URL(`migrations/${MIGRATION}`, base), "utf8").trimEnd();
     const apply = readFileSync(new URL(`scripts/apply/${MIGRATION}`, base), "utf8");
     expect(apply).toContain("\nbegin;\nset local lock_timeout = '5s';");
     expect(apply.split(mig).length - 1).toBe(2);
@@ -376,7 +376,7 @@ describe("the migration", () => {
   });
 
   it("can be put back by the rollback in its header: names return, deleted people read 'A team member'", async () => {
-    const header = readFileSync(dir(`../supabase/migrations/${MIGRATION}`), "utf8");
+    const header = readFileSync(dir(`../migrations/${MIGRATION}`), "utf8");
     // The ROLLBACK block of the header, uncommented.
     const block = header.split("-- ROLLBACK")[1]!.split("\n").slice(1).filter((l) => l.startsWith("--   ")).map((l) => l.replace(/^--   /, "")).join("\n");
     const sql = block.replace(/^begin;/m, "").replace(/^commit;/m, "");

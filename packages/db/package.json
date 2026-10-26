@@ -15,7 +15,8 @@
     "./calibration": "./src/calibration.ts",
     "./csv-import": "./src/csv-import.ts",
     "./workspace-import": "./src/workspace-import.ts",
-    "./money": "./src/money.ts"
+    "./money": "./src/money.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "lint": "eslint .",
@@ -24,10 +25,13 @@
     "gen:seed": "node --experimental-strip-types scripts/gen-seed.ts",
     "gen:import-schema": "node --experimental-strip-types scripts/gen-import-schema.ts",
     "gen:bootstrap": "node --experimental-strip-types scripts/gen-bootstrap.ts",
-    "gen:types": "npx supabase gen types typescript --linked --workdir . --schema public > src/database.types.ts"
+    "gen:types": "node --experimental-strip-types scripts/gen-types.ts",
+    "migrate": "node --experimental-strip-types scripts/migrate.ts"
   },
   "dependencies": {
-    "@transpera-flow/engine": "workspace:*"
+    "@transpera-flow/engine": "workspace:*",
+    "kysely": "0.29.7",
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.117.2",
@@ -35,7 +39,7 @@
     "@types/pg": "^8.23.1",
     "ajv": "^8.20.0",
     "eslint": "^9.39.5",
-    "pg": "^8.23.0",
+    "kysely-codegen": "0.20.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.71.0",
     "vitest": "^5.0.2"

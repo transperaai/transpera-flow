@@ -103,7 +103,7 @@ describe("Realtime setup", () => {
   });
 
   it("does nothing on plain Postgres (no publication, no realtime schema)", async () => {
-    const plain = await createTestDb();
+    const plain = await createTestDb({ realtime: false });
     try {
       const r = await plain.client.query("select count(*)::int as n from pg_publication");
       expect(r.rows[0].n).toBe(0);

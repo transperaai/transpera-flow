@@ -10,7 +10,7 @@ import { createTestDb, type TestDb } from "./harness";
 // header's checks and rollback.
 
 const FILE = "20261224000000_revoke_unused_table_privileges.sql";
-const migration = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+const migration = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
 const applyFile = readFileSync(new URL(`../scripts/apply/${FILE}`, import.meta.url), "utf8");
 const EXTRA = ["TRUNCATE", "TRIGGER", "REFERENCES", "MAINTAIN"];
 const RELKINDS = "('r', 'p', 'v', 'm', 'f')";

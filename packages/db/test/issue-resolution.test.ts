@@ -99,7 +99,7 @@ describe("resolve_issue", () => {
   });
 
   it("the header's rollback works as written: with the columns gone, status changes still log", async () => {
-    const sql = readFileSync(new URL("../supabase/migrations/20261121500000_issue_resolution.sql", import.meta.url), "utf8");
+    const sql = readFileSync(new URL("../migrations/20261121500000_issue_resolution.sql", import.meta.url), "utf8");
     const header = sql.slice(sql.indexOf("-- Rollback"), sql.indexOf("\nalter table public.issues\n  add column"));
     const steps = header
       .split("\n")
@@ -112,7 +112,7 @@ describe("resolve_issue", () => {
     // The function must come back before the columns go.
     expect(body.indexOf("create or replace function private.log_issue_change()")).toBeLessThan(body.indexOf("drop column resolved_how"));
     // Rollbacks run newest first: A50's migration (20261125000000) sits on top of this one, and its trigger reads `resolved_how`.
-    const newer = readFileSync(new URL("../supabase/migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
+    const newer = readFileSync(new URL("../migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
     const newerSteps = newer
       .slice(newer.indexOf("-- Rollback"), newer.indexOf("\nalter table public.issues add column"))
       .split("\n")

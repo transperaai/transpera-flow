@@ -12,11 +12,11 @@ import { headerRollback } from "./header-rollback";
 const VERSION = "20261221000000";
 const FILE = `${VERSION}_play_links.sql`;
 const root = join(__dirname, "..");
-const migrations = (f: string) => readFileSync(join(root, "supabase/migrations", f), "utf8");
+const migrations = (f: string) => readFileSync(join(root, "migrations", f), "utf8");
 const migration = migrations(FILE);
 const apply = readFileSync(join(root, "scripts/apply", FILE), "utf8");
 const ledger = readFileSync(join(root, "../../docs/production-migrations.md"), "utf8");
-const versions = readdirSync(join(root, "supabase/migrations")).map((f) => f.slice(0, 14)).sort();
+const versions = readdirSync(join(root, "migrations")).map((f) => f.slice(0, 14)).sort();
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 

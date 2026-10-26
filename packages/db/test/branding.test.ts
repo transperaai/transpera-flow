@@ -330,7 +330,7 @@ describe("the rollback in the header", () => {
   const FILE = "20261214000000_client_branding.sql";
   // Last in the file: it removes the column the other tests use, then puts everything back.
   it("undoes the migration, deletes the version row, and the migration applies again", async () => {
-    const migration = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+    const migration = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
     // The harness doesn't record versions (production does): make the table and the row the rollback must remove.
     await q("create schema if not exists supabase_migrations");
     await q("create table if not exists supabase_migrations.schema_migrations (version text primary key, name text, statements text[])");
@@ -358,7 +358,7 @@ describe("the rollback in the header", () => {
 
   it("the apply file carries the rollback twice (header and statement) and the same migration", () => {
     const apply = readFileSync(new URL("../scripts/apply/20261214000000_client_branding.sql", import.meta.url), "utf8");
-    const migration = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+    const migration = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
     const del = "--   delete from supabase_migrations.schema_migrations where version = '20261214000000';";
     expect(apply.split(del)).toHaveLength(3);
     expect(apply).toContain(`array[$mig$${migration.trimEnd()}\n$mig$]`);

@@ -18,7 +18,7 @@ const person = northbeamPersonIds["Rosa Diaz"]!;
 const sam = northbeamPersonIds["Sam Patel"]!;
 const STEP = northbeamStepIds.audit;
 
-const migrationSql = (file: string) => readFileSync(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
+const migrationSql = (file: string) => readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8");
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** What `pg_proc.prosrc` holds for `private.audit_company_write`: the text between the `$$` marks of the one live definition. */
 const bodyOf = (sql: string) => {

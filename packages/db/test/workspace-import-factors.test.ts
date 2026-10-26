@@ -460,7 +460,7 @@ describe("import_workspace_bundle and per-person times", () => {
 
 // ---------------------------------------------------------------------------------------------------------------------------
 
-const sqlOf = (name: string) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */
 const bodyOf = (sql: string) => {
@@ -601,7 +601,7 @@ describe("the function and the migration", () => {
 
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const dir = new URL("../", import.meta.url);
-    const mig = readFileSync(new URL(`supabase/migrations/${FILE}`, dir), "utf8").trimEnd();
+    const mig = readFileSync(new URL(`migrations/${FILE}`, dir), "utf8").trimEnd();
     const apply = readFileSync(new URL(`scripts/apply/${FILE}`, dir), "utf8");
     expect(apply).toContain("\nbegin;\nset local lock_timeout = '5s';");
     expect(apply.split(mig).length - 1).toBe(2);

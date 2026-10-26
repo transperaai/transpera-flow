@@ -393,13 +393,13 @@ describe("save_capacity_factor_switch", () => {
 
 describe("the migration file", () => {
   it("states in its preflight the md5 of the body it replaces, and in its post-apply check the md5 of the body it installs", async () => {
-    const sql = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+    const sql = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
     const old = /Expect one row: t, f, ([0-9a-f]{32})/.exec(sql)![1]!;
     const next = /then team_capacity's new md5, ([0-9a-f]{32}):/.exec(sql)![1]!;
     expect(old).not.toBe(next);
     // #227 (20261227000000) replaced team_capacity again: its preflight expects exactly the body this migration installs, and the
     // live body is the one its post-apply check states.
-    const latest = readFileSync(new URL("../supabase/migrations/20261227000000_calibrate_capacity_factors.sql", import.meta.url), "utf8");
+    const latest = readFileSync(new URL("../migrations/20261227000000_calibrate_capacity_factors.sql", import.meta.url), "utf8");
     expect(/public\.team_capacity ([0-9a-f]{32}) t \{search_path=""\}:/.exec(latest)![1]).toBe(next);
     const live = /new md5 ([0-9a-f]{32})\./.exec(latest.slice(latest.indexOf("Replaces the body of 20261223000000")))![1]!;
     const md5 = async () => (await db.client.query("select md5(prosrc) as m from pg_proc where pronamespace = 'public'::regnamespace and proname = 'team_capacity'")).rows[0].m;
@@ -409,7 +409,7 @@ describe("the migration file", () => {
   it("the header's rollback, run as written, leaves the old team_capacity (md5 as the preflight states) and nothing else of it behind", async () => {
     const own = await createTestDb();
     try {
-      const sql = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+      const sql = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
       const old = /Expect one row: t, f, ([0-9a-f]{32})/.exec(sql)![1]!;
       const q = async (text: string, params: unknown[] = []) => (await own.client.query(text, params)).rows;
       await q("create schema if not exists supabase_migrations");
@@ -444,7 +444,7 @@ describe("the migration file", () => {
 
   it("the apply file carries the migration twice (as SQL and as the statement row) and the rollback twice", () => {
     const apply = readFileSync(new URL(`../scripts/apply/${FILE}`, import.meta.url), "utf8");
-    const migration = readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), "utf8");
+    const migration = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
     expect(apply).toContain(`array[$mig$${migration.trimEnd()}\n$mig$]`);
     expect(apply).toContain("begin;\nset local lock_timeout");
     expect(apply.trimEnd().endsWith("commit;")).toBe(true);
