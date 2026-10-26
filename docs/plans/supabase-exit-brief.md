@@ -319,6 +319,14 @@ is in `workspaces.branding` (`20261214000000`). Storage is called from `app/w/[s
 - **Docs:** README, CLAUDE.md and `apps/web` docs describe Neon, Better Auth and `pnpm --filter @transpera-flow/db
   migrate`. `docs/production-migrations.md` starts a Neon section. The privacy page names Neon (database, Sydney) and
   Vercel (hosting) instead of Supabase, and says sign-in is Google, handled by the app.
+- **Statement time limits (regression found in the step 3 review).** PostgREST applied each role's `statement_timeout`
+  (Supabase: anon 3 s, authenticated 8 s) and a function's own `set statement_timeout` from `proconfig` (for example, the
+  40 s on `import_workspace_bundle`). `set_config('role', …)` applies neither. The ClaimsDriver's claims statement sets
+  `statement_timeout` for the transaction (anon 3 s, authenticated 8 s). `rpc`/`rpcRows` read the function's
+  `proconfig` timeout in the same cached catalog lookup as the json arguments, and when there is one, they run
+  `set_config('statement_timeout', …, true)` and the call on one connection (`db.connection()`), in that order. Tests:
+  `pg_sleep` past the limit is cancelled (57014), and a function with its own longer limit isn't. Heavy tests that
+  legitimately run longer get a function-level setting, not a raised default.
 - The Supabase environment variables in Vercel are removed after cutover, not in this step.
 
 ## Step 7: data copy and cutover
