@@ -184,7 +184,7 @@ describe("the browser bundle without a DSN", () => {
 
 describe("next.config.ts", () => {
   const source = read("next.config.ts");
-  const FIELDS = ["headers", "outputFileTracingIncludes", "outputFileTracingRoot", "redirects", "serverExternalPackages", "transpilePackages"];
+  const FIELDS = ["headers", "outputFileTracingRoot", "redirects", "transpilePackages"];
 
   it("is not wrapped without a DSN: today's fields only, no source maps for the browser, and no client config injected", async () => {
     vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "");
@@ -193,7 +193,7 @@ describe("next.config.ts", () => {
     expect(config).not.toHaveProperty("productionBrowserSourceMaps");
     expect(config).not.toHaveProperty("instrumentationClientInject");
     expect(config.transpilePackages).toEqual(["@transpera-flow/engine", "@transpera-flow/db", "@transpera-flow/mcp"]);
-    expect(config.serverExternalPackages).toEqual(["unpdf"]);
+    expect(config).not.toHaveProperty("serverExternalPackages"); // unpdf went with the file uploads (step 4)
   });
 
   it("wraps with Sentry only when the DSN is set", () => {

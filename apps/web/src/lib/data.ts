@@ -68,6 +68,7 @@ import {
   type StepRow,
   type WorkspaceRow,
   type WorkspaceSettings,
+  loadWorkspaceLogoSha,
 } from "@transpera-flow/db";
 import type { HeadlineNumbers } from "./overview/headline";
 import { roleUsage, type RoleUsage } from "./roles";
@@ -113,6 +114,9 @@ export const loadWorkspaceHead = cache(async (slug: string): Promise<(Pick<Works
   const db = await getDb();
   return (await db.selectFrom("workspaces").select(["id", "name", "slug", "branding"]).where("slug", "=", slug).executeTakeFirst()) ?? null;
 });
+
+/** The hash of a workspace's logo, or null when it has none: what the shell builds the logo's URL from (RLS: members read it). */
+export const loadLogoSha = cache(async (workspaceId: string): Promise<string | null> => loadWorkspaceLogoSha(await getDb(), workspaceId));
 
 /** The workspace's sources (RLS: everyone in the workspace can read them). */
 export async function loadWorkspaceSources(workspaceId: string): Promise<SourceRow[]> {

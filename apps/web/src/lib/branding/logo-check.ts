@@ -1,7 +1,7 @@
 // Client branding (issue #34): what a logo file must be. Checked by content (magic bytes), never by file name or declared
 // type, in the browser before upload and again on the server after it. Pure and framework-free.
 
-export const MAX_LOGO_BYTES = 524_288; // 512 KB (the bucket's limit too)
+export const MAX_LOGO_BYTES = 262_144; // 256 KB (workspace_logos' limit too)
 export const LOGO_MIN_PX = 16;
 export const LOGO_MAX_PX = 2048;
 export type LogoType = "png" | "jpg" | "webp";
@@ -10,7 +10,7 @@ export type LogoCheck = { ok: true; type: LogoType; width: number; height: numbe
 
 export const LOGO_ERRORS = {
   type: "Use a PNG, JPG or WebP image. SVG isn't accepted because it can carry scripts.",
-  big: "That image is over 512 KB.",
+  big: "That image is over 256 KB.",
   large: "That image is too large: up to 2048 × 2048 pixels.",
   small: "That image is too small: at least 16 pixels each side.",
   animated: "Use a still image, not an animation.",

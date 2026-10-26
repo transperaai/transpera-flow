@@ -1,61 +1,49 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorld, signInAs, signOut, type World } from "./action-harness";
 
 // The server half of client branding (issue #34, B5): a failing accent is refused with the nearest passing colour in the message
 // and never reaches the database; a passing one is saved lower-cased under `branding.accent` or `branding.accent_dark`; a logo
-// is read back as the signed-in user, checked by content, kept (deleting the logo it replaces) or deleted. The workspace row is in
-// a real database (the owner changes it, anyone else is told they may not); Storage is faked until step 4 drops it: the policies
-// themselves are tested in packages/db/test/branding.test.ts.
-
-const fake = vi.hoisted(() => ({
-  object: null as null | Blob,
-  removed: [] as string[][],
-}));
+// is checked by content, then its bytes are kept in `workspace_logos` (step 4) against the hash of the one it replaces. The
+// workspace row is in a real database (the owner changes it, anyone else is told they may not); the table's policies themselves
+// are tested in packages/db/test/workspace-logos.test.ts.
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ refresh: vi.fn() }));
 vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
-// Storage only (step 4): the database calls go to the real database.
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    storage: {
-      from: () => ({
-        download: async () => (fake.object ? { data: fake.object, error: null } : { data: null, error: { message: "not found" } }),
-        remove: async (paths: string[]) => {
-          fake.removed.push(paths);
-          return { data: [], error: null };
-        },
-      }),
-    },
-  }),
-}));
 
 const { attachWorkspaceLogo, removeWorkspaceLogo, saveBrandAccent } = await import("@/app/w/[slug]/settings/branding/actions");
 
 const OTHER = "a0000000-0000-4000-8000-000000000002";
-const U1 = "11111111-2222-4333-8444-555555555551";
-const U2 = "11111111-2222-4333-8444-555555555552";
 let world: World;
 let WS: string;
-let NEW: string;
-let OLD: string;
 
 beforeAll(async () => {
   world = await createWorld("brandco");
   WS = world.workspaceId;
-  NEW = `${WS}/${U1}.png`;
-  OLD = `${WS}/${U2}.png`;
 }, 120_000);
 
 afterAll(async () => {
   await world?.tdb.close();
 });
 
-/** The browser's upload to the branding bucket, as the database sees it: an object owned by the uploader (a logo path must name one). */
-const upload = (path: string, owner = world.users.owner) =>
-  world.tdb.client.query("insert into storage.objects (bucket_id, name, owner, owner_id, metadata) values ('branding', $1, $2::uuid, $2, '{\"size\": 1234, \"mimetype\": \"image/png\"}') on conflict do nothing", [path, owner.id]);
 const branding = async () => (await world.tdb.client.query("select branding from workspaces where id = $1", [WS])).rows[0].branding as Record<string, unknown>;
 const setBranding = (value: Record<string, unknown>) => world.tdb.client.query("update workspaces set branding = $2::jsonb where id = $1", [WS, JSON.stringify(value)]);
+const logoRow = async () => (await world.tdb.client.query("select mime, bytes, sha256 from workspace_logos where workspace_id = $1", [WS])).rows[0] as { mime: string; bytes: Buffer; sha256: string } | undefined;
+const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+/** What the browser sends: the workspace, the hash of the logo it replaces (blank for none) and the file. */
+const form = (workspaceId: string, base: string | null, bytes: Uint8Array | null, name = "logo.png") => {
+  const f = new FormData();
+  f.set("workspaceId", workspaceId);
+  f.set("base", base ?? "");
+  if (bytes) f.set("file", new File([new Uint8Array(bytes)], name));
+  return f;
+};
+/** A logo already kept, put there as the owner of the database (no RLS). */
+const keep = async (bytes: Uint8Array) => {
+  await world.tdb.client.query("insert into workspace_logos (workspace_id, mime, bytes, sha256) values ($1, 'image/png', $2, $3) on conflict (workspace_id) do update set mime = excluded.mime, bytes = excluded.bytes, sha256 = excluded.sha256", [WS, Buffer.from(bytes), sha(bytes)]);
+  return sha(bytes);
+};
 
 const u32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
 const chunk = (type: string, data: number[]) => [...u32(data.length), ...[...type].map((c) => c.charCodeAt(0)), ...data, 0, 0, 0, 0];
@@ -63,10 +51,8 @@ const pngBytes = (w = 64, h = 64) => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x
 const jpegBytes = () => Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46, 0xff, 0xc0, 0x00, 0x0b, 8, 0, 64, 0, 64, 1, 0x11, 0, 0xff, 0xda, 0x00, 0x02]);
 
 beforeEach(async () => {
-  fake.object = null;
-  fake.removed = [];
   await setBranding({});
-  await world.tdb.client.query("delete from storage.objects where bucket_id = 'branding'");
+  await world.tdb.client.query("delete from workspace_logos");
   signInAs(world, "owner");
 });
 
@@ -136,127 +122,107 @@ describe("saveBrandAccent", () => {
 });
 
 describe("attachWorkspaceLogo", () => {
-  it("refuses a path outside the workspace's folder without removing anything", async () => {
+  it("refuses malformed form data", async () => {
     const invalid = { status: "error", message: "That value isn't valid." };
-    for (const path of [`${OTHER}/${U1}.png`, `${WS}/x/${U1}.png`, `${WS}/${U1}.svg`, "../x.png", 5, null]) {
-      expect(await attachWorkspaceLogo(WS, path, null), String(path)).toEqual(invalid);
-    }
-    expect(await attachWorkspaceLogo("nope", NEW, null)).toEqual(invalid);
-    expect(fake.removed).toEqual([]);
+    expect(await attachWorkspaceLogo(null)).toEqual(invalid);
+    expect(await attachWorkspaceLogo({ workspaceId: WS })).toEqual(invalid);
+    expect(await attachWorkspaceLogo(form("nope", null, pngBytes()))).toEqual(invalid);
+    expect(await attachWorkspaceLogo(form(WS, "not-a-hash", pngBytes()))).toEqual(invalid);
+    expect(await attachWorkspaceLogo(form(WS, null, null))).toEqual(invalid);
+    expect(await logoRow()).toBeUndefined();
+  });
+
+  it("keeps a checked logo as bytes, with its type and hash, and answers with the hash and the route's URL", async () => {
+    const bytes = pngBytes();
+    const out = await attachWorkspaceLogo(form(WS, null, bytes));
+    expect(out).toEqual({ status: "ok", sha: sha(bytes), url: `/api/branding/${WS}/logo?v=${sha(bytes).slice(0, 12)}` });
+    const row = await logoRow();
+    expect(row?.mime).toBe("image/png");
+    expect(row?.sha256).toBe(sha(bytes));
+    expect(new Uint8Array(row!.bytes)).toEqual(bytes);
+    // The branding column keeps no logo path.
     expect(await branding()).toEqual({});
   });
 
-  it("keeps a checked logo, saves its path against the old one, and deletes the logo it replaces", async () => {
-    await upload(OLD);
-    await setBranding({ logo_path: OLD });
-    await upload(NEW);
-    fake.object = new Blob([pngBytes()]);
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
-    expect(await attachWorkspaceLogo(WS, NEW, OLD)).toEqual({ status: "ok", path: NEW, url: null });
-    vi.unstubAllEnvs();
-    expect(await branding()).toEqual({ logo_path: NEW });
-    expect(fake.removed).toEqual([[OLD]]);
+  it("stores the type the bytes say, whatever the file is called", async () => {
+    const bytes = jpegBytes();
+    expect((await attachWorkspaceLogo(form(WS, null, bytes, "logo.png"))).status).toBe("ok");
+    expect((await logoRow())?.mime).toBe("image/jpeg");
   });
 
-  it("a first logo has nothing to delete", async () => {
-    await upload(NEW);
-    fake.object = new Blob([pngBytes()]);
-    expect((await attachWorkspaceLogo(WS, NEW, null)).status).toBe("ok");
-    expect(fake.removed).toEqual([]);
-    expect(await branding()).toEqual({ logo_path: NEW });
+  it("replaces a logo against the hash of the one it replaces", async () => {
+    const old = await keep(pngBytes(32, 32));
+    const next = pngBytes(64, 64);
+    expect(await attachWorkspaceLogo(form(WS, old, next))).toMatchObject({ status: "ok", sha: sha(next) });
+    expect((await logoRow())?.sha256).toBe(sha(next));
   });
 
-  it("returns the public URL when the project's URL is set", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://abc.supabase.co");
-    await upload(NEW);
-    fake.object = new Blob([pngBytes()]);
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toEqual({ status: "ok", path: NEW, url: `https://abc.supabase.co/storage/v1/object/public/branding/${NEW}` });
-    vi.unstubAllEnvs();
+  it("on a conflict says so, and the logo someone else kept stays (for a first logo too)", async () => {
+    const theirs = await keep(pngBytes(48, 48));
+    const changed = { status: "error", message: "Someone else changed the logo. Reload to see it." };
+    expect(await attachWorkspaceLogo(form(WS, "0".repeat(64), pngBytes()))).toEqual(changed);
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toEqual(changed);
+    expect((await logoRow())?.sha256).toBe(theirs);
   });
 
-  it("refuses bad content and removes the upload", async () => {
-    fake.object = new Blob(['<svg xmlns="http://www.w3.org/2000/svg"></svg>']);
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toMatchObject({ status: "error", message: expect.stringMatching(/^Use a PNG, JPG or WebP image/) });
-    expect(fake.removed).toEqual([[NEW]]);
-    expect(await branding()).toEqual({});
+  it("refuses bad content, SVG included, and keeps nothing", async () => {
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    expect(await attachWorkspaceLogo(form(WS, null, svg, "logo.svg"))).toMatchObject({ status: "error", message: expect.stringMatching(/^Use a PNG, JPG or WebP image/) });
+    expect(await logoRow()).toBeUndefined();
   });
 
-  it("refuses an image that is too large in pixels and removes the upload", async () => {
-    fake.object = new Blob([pngBytes(5000, 5000)]);
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toEqual({ status: "error", message: "That image is too large: up to 2048 × 2048 pixels." });
-    expect(fake.removed).toEqual([[NEW]]);
+  it("refuses an image that is too large in pixels", async () => {
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes(5000, 5000)))).toEqual({ status: "error", message: "That image is too large: up to 2048 × 2048 pixels." });
+    expect(await logoRow()).toBeUndefined();
   });
 
-  it("refuses a file over 512 KB and removes the upload", async () => {
-    fake.object = new Blob([new Uint8Array(524_289)]);
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toEqual({ status: "error", message: "That image is over 512 KB." });
-    expect(fake.removed).toEqual([[NEW]]);
+  it("refuses a file over 256 KB, and takes one of exactly 256 KB", async () => {
+    expect(await attachWorkspaceLogo(form(WS, null, new Uint8Array(262_145)))).toEqual({ status: "error", message: "That image is over 256 KB." });
+    expect(await logoRow()).toBeUndefined();
+    const edge = new Uint8Array(262_144);
+    edge.set(pngBytes());
+    expect((await attachWorkspaceLogo(form(WS, null, edge))).status).toBe("ok");
   });
 
-  it("refuses an extension that doesn't match the content (a JPEG named .png) and removes the upload", async () => {
-    fake.object = new Blob([jpegBytes()]);
-    expect((await attachWorkspaceLogo(WS, NEW, null)).status).toBe("error");
-    expect(fake.removed).toEqual([[NEW]]);
-    expect(await branding()).toEqual({});
-  });
-
-  it("removes the upload when it can't be read back", async () => {
-    fake.object = null;
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toMatchObject({ status: "error" });
-    expect(fake.removed).toEqual([[NEW]]);
-  });
-
-  it("on a conflict removes the new upload and says so; the old logo stays", async () => {
-    const theirs = `${WS}/33333333-3333-4333-8333-333333333333.png`;
-    await upload(theirs);
-    await setBranding({ logo_path: theirs });
-    await upload(NEW);
-    fake.object = new Blob([pngBytes()]);
-    expect(await attachWorkspaceLogo(WS, NEW, OLD)).toEqual({ status: "error", message: "Someone else changed the logo. Reload to see it." });
-    expect(fake.removed).toEqual([[NEW]]);
-    expect(await branding()).toEqual({ logo_path: theirs });
-  });
-
-  it("when the caller may not change the workspace, removes the new upload", async () => {
+  it("only owners and agency admins may change the logo", async () => {
     signInAs(world, "editor");
-    await upload(NEW, world.users.editor);
-    fake.object = new Blob([pngBytes()]);
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
-    expect(fake.removed).toEqual([[NEW]]);
-    expect(await branding()).toEqual({});
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
+    signInAs(world, "viewer");
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
+    expect(await logoRow()).toBeUndefined();
+    signInAs(world, "admin");
+    expect((await attachWorkspaceLogo(form(WS, null, pngBytes()))).status).toBe("ok");
   });
 
-  it("when the database refuses, removes the new upload", async () => {
-    // Nothing was uploaded under this name, so the database refuses a logo path that names no object.
-    fake.object = new Blob([pngBytes()]);
-    expect(await attachWorkspaceLogo(WS, NEW, null)).toMatchObject({ status: "error" });
-    expect(fake.removed).toEqual([[NEW]]);
-    expect(await branding()).toEqual({});
+  it("asks for a signed-in person", async () => {
+    signOut(world);
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/session has ended/) });
+    expect(await logoRow()).toBeUndefined();
+  });
+
+  it("another workspace's id changes nothing here", async () => {
+    expect((await attachWorkspaceLogo(form(OTHER, null, pngBytes()))).status).toBe("error");
+    expect(await logoRow()).toBeUndefined();
   });
 });
 
 describe("removeWorkspaceLogo", () => {
-  it("saves null, then deletes the object", async () => {
-    await upload(OLD);
-    await setBranding({ logo_path: OLD });
-    expect(await removeWorkspaceLogo(WS, OLD)).toEqual({ status: "ok", path: null, url: null });
-    expect((await branding()).logo_path ?? null).toBeNull();
-    expect(fake.removed).toEqual([[OLD]]);
+  it("deletes the logo if it is still the one the person saw", async () => {
+    const old = await keep(pngBytes());
+    expect(await removeWorkspaceLogo(WS, old)).toEqual({ status: "ok", sha: null, url: null });
+    expect(await logoRow()).toBeUndefined();
   });
 
-  it("deletes nothing when the save didn't happen", async () => {
-    await setBranding({ logo_path: NEW });
-    expect(await removeWorkspaceLogo(WS, OLD)).toMatchObject({ status: "error" });
+  it("leaves a logo someone else changed, and one an editor may not remove", async () => {
+    const old = await keep(pngBytes());
+    expect(await removeWorkspaceLogo(WS, "0".repeat(64))).toEqual({ status: "error", message: "Someone else changed the logo. Reload to see it." });
     signInAs(world, "editor");
-    await setBranding({ logo_path: OLD });
-    expect(await removeWorkspaceLogo(WS, OLD)).toMatchObject({ status: "error" });
-    expect(await branding()).toEqual({ logo_path: OLD });
-    expect(fake.removed).toEqual([]);
+    expect(await removeWorkspaceLogo(WS, old)).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
+    expect((await logoRow())?.sha256).toBe(old);
   });
 
-  it("refuses a path from another workspace", async () => {
-    expect(await removeWorkspaceLogo(WS, `${OTHER}/${U1}.png`)).toEqual({ status: "error", message: "That value isn't valid." });
+  it("refuses what isn't a hash", async () => {
     expect(await removeWorkspaceLogo(WS, null)).toEqual({ status: "error", message: "That value isn't valid." });
-    expect(fake.removed).toEqual([]);
+    expect(await removeWorkspaceLogo(WS, `${OTHER}/x.png`)).toEqual({ status: "error", message: "That value isn't valid." });
   });
 });

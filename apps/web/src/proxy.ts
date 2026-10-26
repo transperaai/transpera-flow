@@ -5,6 +5,9 @@ import { authEnv } from "@/lib/auth/env";
 // "/s" is a share link's page (B3): it opens signed out; a restricted link asks for sign-in itself. "/api/auth" is Better Auth.
 const PUBLIC_PATHS = ["/login", "/auth", "/api/auth", "/demo", "/privacy", "/s"];
 
+// "/api/branding/<workspace id>/logo" (the logo route), and nothing else under /api/branding.
+const LOGO_PATH = /^\/api\/branding\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/logo$/i;
+
 /**
  * Sends visitors without a session cookie to /login. This is the fast, optimistic check: it only looks for the cookie. The
  * session itself is validated against the database in `getSessionUser()`, which every page and action goes through.
@@ -15,6 +18,9 @@ export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   // The MCP endpoint authenticates with an API token, not a session cookie.
   if (path === "/api/mcp") return NextResponse.next({ request });
+  // A workspace's logo (step 4): share-link visitors, who are signed out, see it. Only this exact shape; the route answers from
+  // a SECURITY DEFINER function that returns nothing but the logo.
+  if (LOGO_PATH.test(path)) return NextResponse.next({ request });
 
   if (!getSessionCookie(request) && !PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
     const url = request.nextUrl.clone();

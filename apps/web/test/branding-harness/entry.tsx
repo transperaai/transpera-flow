@@ -21,7 +21,7 @@ declare global {
 }
 
 const WS = "0d5f6f0e-0000-4000-8000-000000000001";
-const NEW_LOGO = `${WS}/11111111-2222-4333-8444-555555555555.png`;
+const NEW_SHA = "0123456789abcdef".repeat(4);
 // A 1x1 transparent PNG: loads, so the sidebar tile and the previews show an <img>.
 const PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
@@ -41,19 +41,20 @@ window.mountBranding = ({ mode, branding = {}, logoUrl = null, upload = "ok" }) 
       mode={mode}
       workspaceId={WS}
       name="Northbeam Digital"
-      branding={readBranding(branding, WS)}
+      branding={readBranding(branding)}
       logoUrl={logoUrl}
+      logoSha={logoUrl ? NEW_SHA : null}
       saveAccent={async (_ws, theme, base, value) => {
         log("accent", theme, base, value);
         return { status: "saved", value };
       }}
       removeLogo={async (_ws, base) => {
         log("remove", base);
-        return { status: "ok", path: null, url: null };
+        return { status: "ok", sha: null, url: null };
       }}
       uploadLogo={async (_ws, base, file) => {
         log("upload", file.name, file.type, file.size, base);
-        return upload === "ok" ? { status: "ok", path: NEW_LOGO, url: PIXEL } : { status: "error", message: "That image is over 512 KB." };
+        return upload === "ok" ? { status: "ok", sha: NEW_SHA, url: PIXEL } : { status: "error", message: "That image is over 256 KB." };
       }}
     />,
   );
@@ -66,7 +67,7 @@ window.setBrandStyle = (raw) => {
     document.body.appendChild(host);
     styleRoot = createRoot(host);
   }
-  const css = raw === null ? null : brandingCss(readBranding(raw, WS) as Branding);
+  const css = raw === null ? null : brandingCss(readBranding(raw) as Branding);
   // As the workspace layout renders it: a plain <style>, no href or precedence.
   styleRoot.render(css ? <style data-brand="">{css}</style> : null);
   return css;

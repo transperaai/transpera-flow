@@ -5,7 +5,7 @@ import { Page } from "@/components/shell/page";
 import { buttonVariants } from "@/components/ui/button";
 import { canManageWorkspace } from "@/lib/access-data";
 import { logoUrl, readBranding } from "@/lib/branding/branding";
-import { loadWorkspaceHead } from "@/lib/data";
+import { loadLogoSha, loadWorkspaceHead } from "@/lib/data";
 import { removeWorkspaceLogo, saveBrandAccent } from "./actions";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 
@@ -18,7 +18,8 @@ export default async function BrandingSettingsRoute(props: PageProps<"/w/[slug]/
   const head = await loadWorkspaceHead(slug);
   if (!head) notFound();
   const canManage = await canManageWorkspace(head.id);
-  const branding = readBranding(head.branding, head.id);
+  const branding = readBranding(head.branding);
+  const logoSha = await loadLogoSha(head.id);
   return (
     <Page
       title="Branding"
@@ -36,7 +37,8 @@ export default async function BrandingSettingsRoute(props: PageProps<"/w/[slug]/
         workspaceId={head.id}
         name={head.name}
         branding={branding}
-        logoUrl={logoUrl(branding.logoPath, process.env.NEXT_PUBLIC_SUPABASE_URL)}
+        logoSha={logoSha}
+        logoUrl={logoUrl(head.id, logoSha)}
         saveAccent={saveBrandAccent}
         removeLogo={removeWorkspaceLogo}
       />
