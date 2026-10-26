@@ -96,8 +96,26 @@ export function WhoCanSignIn({ slug, view }: { slug: string; view: DeploymentAcc
             <option value="domain">Domain</option>
             <option value="email">Email</option>
           </NativeSelect>
+          <Help
+            label="Kind"
+            description="A domain lets in everyone whose verified work email ends with it (not subdomains). An email names one person, and beats their domain."
+            example="Domain acme.com for the whole company; email sam@gmail.com for a contractor."
+            className="self-center"
+          />
           <Input name="value" required placeholder="acme.com or name@acme.com" aria-label="Domain or email" className="w-full sm:w-72" />
+          <Help
+            label="Domain or email"
+            description="The domain (the part after the @) or the full address. Free email providers like gmail.com can only be added as a single email."
+            example="northbeam.example, or maya@northbeam.example."
+            className="self-center"
+          />
           <RuleRoleSelect />
+          <Help
+            label="Role"
+            description="Admin sees and manages every workspace and this list. Editor and viewer are added to every workspace at that role; someone already higher keeps their role."
+            example="Make the client's domain viewers and their lead an editor."
+            className="self-center"
+          />
           <Button type="submit">Add</Button>
         </form>
       </CardContent>
