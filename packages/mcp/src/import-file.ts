@@ -16,6 +16,7 @@ import {
   type ProcessFile,
   type SimulationGap,
 } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { normalizeName } from "./building";
 import { importNewProcess, type ImportBundle, type ImportBundleResult, type ImportEdgeJson, type ImportStepJson, type ProcessJson } from "./building-tools";
 import { planFileExtras, type ExtrasPlan, type FileIds, type SuggestionView } from "./file-extras";
@@ -25,11 +26,6 @@ import { ToolError } from "./result";
 type Named = { id: string; name: string };
 
 const KIND = { step: "task", decision: "decision", wait: "wait", start: "start", end: "end" } as const;
-
-const check = <T>(r: { data: T | null; error: unknown }): T => {
-  if (r.error) throw r.error;
-  return r.data as T;
-};
 
 /** What the preview shows beyond the file itself: the company's roles, which of the file's roles it has, and name clashes. */
 export interface ImportPreview {
@@ -62,8 +58,8 @@ export interface ImportPreview {
 
 /** The company's roles and people, as the ones a file can name. */
 async function lookups(ctx: ToolContext, workspaceId: string): Promise<{ roles: Named[]; people: Named[] }> {
-  const roles = check(await ctx.db.from("roles").select("id, name").eq("workspace_id", workspaceId).eq("active", true).order("name")) as Named[];
-  const people = check(await ctx.db.from("people").select("id, name").eq("workspace_id", workspaceId).order("name")) as Named[];
+  const roles = await ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", workspaceId).where("active", "=", true).orderBy("name").execute();
+  const people = await ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", workspaceId).orderBy("name").execute();
   return { roles, people };
 }
 
@@ -78,7 +74,8 @@ async function processNamed(ctx: ToolContext, workspaceId: string, name: string)
 /** Everything the preview needs to know about the company to show what an upload would do. */
 export async function previewProcessFile(ctx: ToolContext, workspaceId: string, file: ProcessFile, name?: string): Promise<ImportPreview> {
   const ws = await resolveWorkspace(ctx, workspaceId, []);
-  const { data: canEdit } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
+  // The old call ignored an error here (canEdit then read as false), so keep that.
+  const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: ws.id }).catch(() => null);
   const { roles, people } = await lookups(ctx, ws.id);
   const matchedRoles: ImportPreview["matchedRoles"] = [];
   const unknownRoles: string[] = [];
@@ -329,8 +326,11 @@ export async function importProcessFile(ctx: ToolContext, file: ProcessFile, opt
   warnings.push(...out.warnings);
 
   // The change log: "Imported from <file or link>". A failure here doesn't undo a process that was made.
-  const { error } = await ctx.db.rpc("log_process_import", { target_process: out.process.id, import_source: opts.source });
-  if (error) warnings.push("The process was made, but the activity log entry for the import couldn't be written.");
+  try {
+    await rpc(ctx.db, "log_process_import", { target_process: out.process.id, import_source: opts.source });
+  } catch {
+    warnings.push("The process was made, but the activity log entry for the import couldn't be written.");
+  }
 
   return {
     process: { id: out.process.id, name: out.process.name },

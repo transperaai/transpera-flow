@@ -2,20 +2,13 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateApiToken, type McpHandlerOptions } from "../src";
-import { call, connect, signJwt } from "./helpers";
+import { call, connect, startTestDb, type McpTestDb } from "./helpers";
 
-// End to end for the process-building tools (issue #24), as in production:
-// MCP client → handleMcpRequest → supabase-js → PostgREST with the
-// pre-request hook → Postgres with every migration and RLS. Runs against the
-// database postgrest-db.ts prepares (see postgrest.test.ts), in a workspace
-// of its own so it can run beside that suite. Skipped unless POSTGREST_URL is set.
+// End to end for the process-building tools (issue #24), as in production: MCP client → handleMcpRequest → token lookup in app
+// code → Kysely under the token owner's claims → Postgres with every migration and RLS. Runs on a throwaway database
+// (test/helpers.ts), in a workspace of its own.
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
-
+let env: McpTestDb;
 let admin: pg.Client;
 let options: McpHandlerOptions;
 let workspaceId: string;
@@ -26,11 +19,6 @@ let strangerToken: string;
 let consultantRoleId: string;
 /** The processes `onPublished` (the web app starts AI analysis there, A46) was told about. */
 const publishedIds: string[] = [];
-
-const toPostgrest: typeof fetch = (input, init) => {
-  if (input instanceof Request) throw new Error("expected supabase-js to pass a URL string");
-  return fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
-};
 
 async function createUser(email: string) {
   const id = randomUUID();
@@ -70,12 +58,10 @@ async function stepsOf(revisionId: string) {
   })[];
 }
 
-describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts only, as the user)", () => {
+describe("MCP process building (drafts only, as the user)", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
 
     workspaceId = (await admin.query("insert into workspaces (name, slug) values ('Build Co', 'build-co') returning id")).rows[0].id;
     consultantRoleId = (await admin.query("insert into roles (workspace_id, name) values ($1, 'Consultant') returning id", [workspaceId])).rows[0].id;
@@ -90,21 +76,11 @@ describe.skipIf(!POSTGREST_URL)("MCP process building over PostgREST (drafts onl
     viewerToken = await issueToken(viewerId);
     strangerToken = await issueToken(strangerId);
 
-    options = { supabaseUrl: SUPABASE_URL, supabaseKey: signJwt({ role: "anon", iss: "test" }, JWT_SECRET), fetch: toPostgrest, onPublished: (_db, processId) => void publishedIds.push(processId) };
-
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const res = await fetch(`${POSTGREST_URL}/workspaces?select=id`, {
-        headers: { authorization: `Bearer ${options.supabaseKey}`, "x-api-token": editorToken },
-      }).catch(() => null);
-      if (res?.status === 200 && ((await res.json()) as unknown[]).length === 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    options = { ...env.options, onPublished: (_db, processId) => void publishedIds.push(processId) };
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   let sourceA: string;

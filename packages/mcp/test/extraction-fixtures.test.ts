@@ -3,7 +3,7 @@ import { lintRun, readRun, type Run } from "./extraction-fixtures";
 
 // The Tidewater dry run's recorded tool calls, checked against the interview
 // transcripts with no database (issue #27): quotes verbatim, numbers cited or
-// reasoned, suggestions in the right shape. postgrest-extraction.test.ts
+// reasoned, suggestions in the right shape. db-extraction.test.ts
 // replays the same files against a real database.
 
 const clone = (run: Run): Run => JSON.parse(JSON.stringify(run));

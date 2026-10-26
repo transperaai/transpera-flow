@@ -35,11 +35,6 @@ const workspaceArg = z
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 const revisionArg = z.enum(["live", "draft"]).optional().describe("Which revision to use (default live).");
 
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
-
 /**
  * Apply scenario overrides (the same `{path, op, value}` patches saved
  * scenarios hold) to the model. A patch that can't be applied (unknown path,
@@ -125,10 +120,13 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     ({ workspace }) =>
       runTool(async () => {
         const target = matchWorkspace(await visibleWorkspaces(ctx.db), workspace);
-        const updated = check(
-          await ctx.db.from("api_tokens").update({ active_workspace_id: target.id }).eq("token_hash", ctx.tokenHash).select("id"),
-        );
-        if (!updated?.length) throw new ToolError("token", "Could not update this API token");
+        const updated = await ctx.db
+          .updateTable("api_tokens")
+          .set({ active_workspace_id: target.id })
+          .where("token_hash", "=", ctx.tokenHash)
+          .returning("id")
+          .execute();
+        if (!updated.length) throw new ToolError("token", "Could not update this API token");
         ctx.activeWorkspaceId = target.id;
         return { id: target.id, name: target.name, slug: target.slug };
       }),
@@ -148,12 +146,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         const [processes, company, roles, people] = await Promise.all([
           listProcesses(ctx.db, ws.id),
           loadLiveCompanyPart(ctx.db, ws.id),
-          ctx.db.from("roles").select("id, name, headcount, default_cost_rate, active").eq("workspace_id", ws.id).order("name"),
-          ctx.db.from("people").select("id, name, fte, capacity_hours_week, active").eq("workspace_id", ws.id).order("name"),
+          ctx.db.selectFrom("roles").select(["id", "name", "headcount", "default_cost_rate", "active"]).where("workspace_id", "=", ws.id).orderBy("name").execute(),
+          ctx.db.selectFrom("people").select(["id", "name", "fte", "capacity_hours_week", "active"]).where("workspace_id", "=", ws.id).orderBy("name").execute(),
         ]);
         const revisionIds = processes.flatMap((p) => [p.live_revision_id, p.draft_revision_id]).filter((id): id is string => !!id);
         const revisions = revisionIds.length
-          ? check(await ctx.db.from("process_revisions").select("id, number").in("id", revisionIds))
+          ? await ctx.db.selectFrom("process_revisions").select(["id", "number"]).where("id", "in", revisionIds).execute()
           : [];
         const number = (id: string | null) => revisions.find((r) => r.id === id)?.number ?? null;
         assumptions.push("No runs are stored yet, so there are no baseline KPIs; call run_scenario for current numbers.");
@@ -186,8 +184,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
                 }),
               }
             : null,
-          roles: check(roles),
-          people: check(people),
+          roles,
+          people,
           last_baseline_run: null,
         };
       }),

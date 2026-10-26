@@ -1,8 +1,8 @@
 // Analysis tools (docs/PRD.md §7.1; issue #26): save_scenario,
 // compare_scenarios, check_robustness, get_bottlenecks, log_issue and
 // list_issues. Like the v1 read tools they act as the token's user: every
-// query goes through the context's Supabase client, so RLS decides what is
-// visible and who may write (docs/adr/0002-mcp-acts-as-user-via-pre-request.md).
+// query goes through the context's database handle, which runs as the token's user, so RLS decides what is
+// visible and who may write (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 // Simulations use the live revision only (the PRD gives these tools no
 // `revision`), run on this thread, and are capped in time where they can run
 // long. Text comes from the engine's templates, never a language model.
@@ -19,12 +19,12 @@ import {
   loadProcessBundle,
   loadScenarios,
   ModelError,
-  SCENARIO_COLUMNS,
   toEngineModel,
   type Json,
   type ProcessBundle,
   type ScenarioRow,
 } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { absenceTest, applyPatches, detectIssues, ENGINE_VERSION, isBlocking, ISSUE_TYPES, MAX_PATCHES, PATCH_OPS, RATINGS, STORED_SEVERITIES, ratingOfStored, resolveMoney, shadowPricesFor, simulate, successMeasureSource, storedOfRating, toRatingConfig, withoutDisabledRules, type EngineModel } from "@transpera-flow/engine";
 import { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, type NamedScenario } from "./analysis";
 import { resolveProcess, resolveWorkspace, revisionIdFor, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
@@ -64,11 +64,6 @@ const startDateArg = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .optional()
   .describe("ISO date the run starts on; people's start/end dates and leave are measured from it (default today)");
-
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
 
 /** A write RLS or a check constraint refused, as a ToolError the caller can act on. */
 function writeError(error: { code?: string; message?: string }, what: string): ToolError {
@@ -140,7 +135,7 @@ const header = (l: Loaded) => ({
 export async function processSteps(ctx: ToolContext, proc: ProcessWithDraft): Promise<{ id: string; name: string }[]> {
   const ids = [proc.live_revision_id, proc.draft_revision_id].filter((id): id is string => !!id);
   if (!ids.length) return [];
-  const rows = check(await ctx.db.from("steps").select("id, name, revision_id").in("revision_id", ids));
+  const rows = await ctx.db.selectFrom("steps").select(["id", "name", "revision_id"]).where("revision_id", "in", ids).execute();
   const byId = new Map<string, { id: string; name: string }>();
   for (const r of rows.filter((r) => r.revision_id === proc.live_revision_id)) byId.set(r.id, { id: r.id, name: r.name });
   for (const r of rows) if (!byId.has(r.id)) byId.set(r.id, { id: r.id, name: r.name });
@@ -198,13 +193,16 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
         const existing = await loadScenarios(ctx.db, ws.id);
         const clash = existing.find((s) => s.name.trim().toLowerCase() === args.name.trim().toLowerCase());
         if (clash) throw new ToolError("name_taken", `A scenario called '${clash.name}' already exists`, [{ id: clash.id, name: clash.name }]);
-        const { data, error } = await ctx.db
-          .from("scenarios")
-          .insert({ workspace_id: ws.id, name: args.name.trim(), description: args.description?.trim() || null, patch: args.overrides as unknown as Json })
-          .select(SCENARIO_COLUMNS)
-          .single();
-        if (error) throw writeError(error, "save scenarios");
-        const row = data as unknown as ScenarioRow;
+        let row: ScenarioRow;
+        try {
+          row = (await ctx.db
+            .insertInto("scenarios")
+            .values({ workspace_id: ws.id, name: args.name.trim(), description: args.description?.trim() || null, patch: JSON.stringify(args.overrides) as unknown as Json })
+            .returning(["id", "workspace_id", "name", "description", "patch", "parent_scenario_id"])
+            .executeTakeFirstOrThrow()) as unknown as ScenarioRow;
+        } catch (error) {
+          throw writeError(error as { code?: string; message?: string }, "save scenarios");
+        }
         return { workspace: { id: ws.id, name: ws.name }, scenario: { id: row.id, name: row.name, description: row.description, patch: row.patch } };
       }),
   );
@@ -395,23 +393,27 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         // Refuse before any name lookup: a caller who can't edit may not read other people, so a lookup would answer not_found (B1 2/3).
-        const { data: canEdit, error: accessError } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
-        if (accessError) throw writeError(accessError, "log issues");
+        let canEdit: boolean;
+        try {
+          canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: ws.id });
+        } catch (accessError) {
+          throw writeError(accessError as { code?: string; message?: string }, "log issues");
+        }
         if (canEdit !== true) throw writeError({ code: "42501" }, "log issues");
         const client = args.client
-          ? matchNamed(check(await ctx.db.from("clients").select("id, name").eq("workspace_id", ws.id).order("name")), args.client, "client", ` in '${ws.name}'`)
+          ? matchNamed(await ctx.db.selectFrom("clients").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute(), args.client, "client", ` in '${ws.name}'`)
           : null;
         let proc: ProcessWithDraft | null = null;
         if (args.process || args.step) proc = await resolveProcess(ctx, ws, args.process, assumptions);
         const step = args.step && proc ? matchNamed(await processSteps(ctx, proc), args.step, "step", ` in '${proc.name}'`) : null;
         const needPeople = args.person || args.owner;
         const people = needPeople
-          ? check(await ctx.db.from("people").select("id, name").eq("workspace_id", ws.id).order("name"))
+          ? await ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute()
           : [];
         const person = args.person ? matchNamed(people, args.person, "person", ` in '${ws.name}'`) : null;
         const owner = args.owner ? matchNamed(people, args.owner, "person", ` in '${ws.name}'`) : null;
         const role = args.role
-          ? matchNamed(check(await ctx.db.from("roles").select("id, name").eq("workspace_id", ws.id).order("name")), args.role, "role", ` in '${ws.name}'`)
+          ? matchNamed(await ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute(), args.role, "role", ` in '${ws.name}'`)
           : null;
         const scenario = args.scenario ? matchNamed(await loadScenarios(ctx.db, ws.id), args.scenario, "saved scenario", ` in '${ws.name}'`) : null;
         const rating = args.rating ?? (args.severity ? ratingOfStored(args.severity) : "good");
@@ -482,12 +484,12 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
         const [issues, scenarios, people, roles, processes, clients] = await Promise.all([
           loadIssuesForReader(ctx.db, ws.id),
           loadScenarios(ctx.db, ws.id),
-          ctx.db.from("people").select("id, name").eq("workspace_id", ws.id),
-          ctx.db.from("roles").select("id, name").eq("workspace_id", ws.id),
+          ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", ws.id).execute(),
+          ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", ws.id).execute(),
           listProcesses(ctx.db, ws.id),
-          ctx.db.from("clients").select("id, name").eq("workspace_id", ws.id).order("name"),
+          ctx.db.selectFrom("clients").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute(),
         ]);
-        const client = args.client ? matchNamed(check(clients), args.client, "client", ` in '${ws.name}'`) : null;
+        const client = args.client ? matchNamed(clients, args.client, "client", ` in '${ws.name}'`) : null;
         const wanted = args.status ? normaliseStatus(args.status) : null;
         // A dismissed insight is not an issue, so it is never listed.
         const filtered = issues.filter(isVisibleIssue).filter(
@@ -505,9 +507,9 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
           if (!id) return null;
           return { id, name: list?.find((x) => x.id === id)?.name ?? null };
         };
-        const personOf = nameIn(check(people));
-        const roleOf = nameIn(check(roles));
-        const clientOf = nameIn(check(clients));
+        const personOf = nameIn(people);
+        const roleOf = nameIn(roles);
+        const clientOf = nameIn(clients);
         const scenarioOf = nameIn(scenarios);
         const processOf = nameIn(processes);
         const tracked = filtered.map((i) => ({

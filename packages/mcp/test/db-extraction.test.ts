@@ -6,33 +6,26 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EVIDENCE_COLUMNS } from "@transpera-flow/db";
 import { generateApiToken, type McpHandlerOptions } from "../src";
 import { readRun, substitute, type Run } from "./extraction-fixtures";
-import { call, connect, signJwt } from "./helpers";
+import { call, connect, startTestDb, type McpTestDb } from "./helpers";
 
 // The extraction skill's dry run end to end (issue #27): the recorded tool
 // calls of .agents/skills/extract-process/SKILL.md on the invented Tidewater
 // Digital interviews (docs/extraction/examples/tidewater), replayed as in
-// production: MCP client → handleMcpRequest → supabase-js → PostgREST with the
-// pre-request hook → Postgres with every migration and RLS. Runs in a
-// workspace of its own beside the other PostgREST suites, and is skipped
-// unless POSTGREST_URL is set (see postgrest.test.ts). Set
+// production: MCP client → handleMcpRequest → token lookup in app code → Kysely
+// under the token owner's claims → Postgres with every migration and RLS. Runs on
+// a throwaway database in a workspace of its own (test/helpers.ts). Set
 // EXTRACTION_RESPONSES_FILE to keep the observed responses (the summaries in
 // the example folder are written from them).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
 
 type Row = Record<string, unknown>;
 type Result = { tool: string; ok: boolean; data: any; assumptions: string[]; error?: { code: string; message: string } }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+let env: McpTestDb;
 let admin: pg.Client;
 let options: McpHandlerOptions;
 let workspaceId = "";
 let editorToken = "";
-const anonKey = () => signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
-const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 const insertId = async (sql: string, params: unknown[]) => (await admin.query(sql, params)).rows[0].id as string;
 const observed: Record<string, Result[]> = {};
 
@@ -78,12 +71,10 @@ async function snapshot(revisionId: string) {
 
 const pending = async () => Number((await admin.query("select count(*) as n from suggestions where workspace_id = $1 and status = 'pending'", [workspaceId])).rows[0].n);
 
-describe.skipIf(!POSTGREST_URL)("extraction dry run (Tidewater Digital) over PostgREST", () => {
+describe("extraction dry run (Tidewater Digital)", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
 
     // The preconditions of docs/extraction/examples/tidewater/README.md.
     const slug = `tidewater-${randomUUID().slice(0, 8)}`;
@@ -115,20 +106,13 @@ describe.skipIf(!POSTGREST_URL)("extraction dry run (Tidewater Digital) over Pos
     const { token, hash } = generateApiToken();
     await admin.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'e2e')", [editorId, hash]);
     editorToken = token;
-    options = { supabaseUrl: SUPABASE_URL, supabaseKey: anonKey(), fetch: toPostgrest };
+    options = env.options;
 
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const res = await fetch(`${POSTGREST_URL}/workspaces?select=id`, { headers: { authorization: `Bearer ${anonKey()}`, "x-api-token": editorToken } }).catch(() => null);
-      if (res?.status === 200 && ((await res.json()) as unknown[]).length === 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
   });
 
   afterAll(async () => {
     if (process.env.EXTRACTION_RESPONSES_FILE) writeFileSync(process.env.EXTRACTION_RESPONSES_FILE, JSON.stringify(observed, null, 2));
-    await admin?.end();
+    await env?.close();
   });
 
   let liveBefore: Awaited<ReturnType<typeof snapshot>>;

@@ -5,7 +5,7 @@
 // database backs this up: an API-token request can't write the company-model
 // tables or review suggestions (migration 20261015000000_suggestions.sql).
 // Like every tool, these act as the token's user under RLS
-// (docs/adr/0002-mcp-acts-as-user-via-pre-request.md).
+// (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -18,8 +18,6 @@ import {
   loadIssues,
   loadProposals,
   loadSuggestions,
-  PROPOSAL_ROW_COLUMNS,
-  SUGGESTION_ROW_COLUMNS,
   type CompanyModel,
   type EvidenceCitation,
   type IssueLinkRef,
@@ -100,16 +98,16 @@ const companySettings = {
   horizon_weeks: z.number().int().min(1).max(104).optional(),
 };
 
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
+type DbError = { code?: string; message?: string };
+
+const SUGGESTION_FIELDS = ["id", "workspace_id", "target_table", "target_id", "patch", "evidence", "note", "status", "created_via", "import_source", "applied", "review_note", "reviewed_by", "reviewed_at", "created_at", "created_by"] as const;
+const PROPOSAL_FIELDS = ["id", "workspace_id", "kind", "title", "detail", "payload", "evidence", "note", "issue_id", "status", "created_via", "import_source", "proposer_name", "share_link_id", "applied", "review_note", "reviewed_by", "reviewed_at", "created_at", "created_by"] as const;
 
 /** Evidence must cite this workspace's sources. */
 async function checkSources(ctx: ToolContext, ws: WorkspaceRef, evidence: EvidenceCitation[]): Promise<void> {
   const ids = [...new Set(evidence.map((e) => e.source_id))];
   if (!ids.length) return;
-  const found = check(await ctx.db.from("sources").select("id").eq("workspace_id", ws.id).in("id", ids)).map((r) => r.id);
+  const found = (await ctx.db.selectFrom("sources").select("id").where("workspace_id", "=", ws.id).where("id", "in", ids).execute()).map((r) => r.id);
   const missing = ids.filter((id) => !found.includes(id));
   if (missing.length) throw new ToolError("not_found", `No source in '${ws.name}' has the id ${missing.join(", ")}; add it with add_source first`);
 }
@@ -124,20 +122,25 @@ async function store(ctx: ToolContext, ws: WorkspaceRef, model: CompanyModel, bu
   await checkSources(ctx, ws, built.proposals.flatMap((p) => p.evidence));
   let rows: SuggestionRow[] = [];
   if (built.proposals.length) {
-    const { data, error } = await ctx.db
-      .from("suggestions")
-      .insert(
-        built.proposals.map((p) => ({
-          workspace_id: ws.id,
-          target_table: p.target_table,
-          target_id: p.target_id,
-          patch: p.patch as unknown as Json,
-          evidence: p.evidence as unknown as Json,
-          note: p.note,
-        })),
-      )
-      .select(SUGGESTION_ROW_COLUMNS);
-    if (error) {
+    let data: unknown;
+    try {
+      data = await ctx.db
+        .insertInto("suggestions")
+        .values(
+          built.proposals.map((p) => ({
+            workspace_id: ws.id,
+            target_table: p.target_table,
+            target_id: p.target_id,
+            patch: p.patch as unknown as Json,
+            // A JSON array: node-postgres would send a JS array as a Postgres array.
+            evidence: JSON.stringify(p.evidence) as unknown as Json,
+            note: p.note,
+          })),
+        )
+        .returning([...SUGGESTION_FIELDS])
+        .execute();
+    } catch (e) {
+      const error = e as DbError;
       if (error.code === "42501") throw new ToolError("forbidden", "You don't have permission to suggest changes in this workspace (editors and owners can).");
       if (error.code === "23514") throw new ToolError("invalid_input", `Some of those values aren't allowed: ${error.message}`);
       throw new ToolError("write_failed", `Couldn't save the suggestion: ${error.message}`);
@@ -157,21 +160,25 @@ async function store(ctx: ToolContext, ws: WorkspaceRef, model: CompanyModel, bu
 /** Store one proposal, as the user, and describe it. */
 async function storeProposal(ctx: ToolContext, ws: WorkspaceRef, p: ProposalInsert, what: string) {
   await checkSources(ctx, ws, p.evidence);
-  const { data, error } = await ctx.db
-    .from("suggestion_proposals")
-    .insert({
-      workspace_id: ws.id,
-      kind: p.kind,
-      title: p.title,
-      detail: p.detail,
-      payload: p.payload as unknown as Json,
-      evidence: p.evidence as unknown as Json,
-      note: p.note,
-      issue_id: p.issue_id,
-    })
-    .select(PROPOSAL_ROW_COLUMNS)
-    .single();
-  if (error) {
+  let data: unknown;
+  try {
+    data = await ctx.db
+      .insertInto("suggestion_proposals")
+      .values({
+        workspace_id: ws.id,
+        kind: p.kind,
+        title: p.title,
+        detail: p.detail,
+        payload: p.payload as unknown as Json,
+        // A JSON array: node-postgres would send a JS array as a Postgres array.
+        evidence: JSON.stringify(p.evidence) as unknown as Json,
+        note: p.note,
+        issue_id: p.issue_id,
+      })
+      .returning([...PROPOSAL_FIELDS])
+      .executeTakeFirstOrThrow();
+  } catch (e) {
+    const error = e as DbError;
     if (error.code === "42501") throw new ToolError("forbidden", "You don't have permission to propose changes in this workspace (editors and owners can).");
     if (error.code === "23514") throw new ToolError("invalid_input", `Some of those values aren't allowed: ${error.message}`);
     if (error.code === "23503") throw new ToolError("not_found", "The issue this idea is for no longer exists.");

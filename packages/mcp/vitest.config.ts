@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
-    // The PostgREST end-to-end test waits for PostgREST to pick up a fresh database.
+    // Every end-to-end suite builds its own throwaway database (every migration and the seed) first.
     hookTimeout: 120_000,
     testTimeout: 60_000,
   },

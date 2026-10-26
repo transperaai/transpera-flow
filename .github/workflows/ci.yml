@@ -28,8 +28,6 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      POSTGREST_URL: http://localhost:3000
-      POSTGREST_JWT_SECRET: ci-only-postgrest-jwt-secret-for-throwaway-tests
       NEXT_TELEMETRY_DISABLED: 1
     steps:
       - uses: actions/checkout@v4
@@ -43,21 +41,7 @@ jobs:
         run: pnpm --filter @transpera-flow/engine exec playwright-core install --with-deps chromium
       - run: pnpm lint
       - run: pnpm typecheck
-      # Supabase's Data API server (PostgREST, the version Supabase runs) for
-      # the MCP end-to-end test, started once its database is ready. The JWT
-      # secret only signs test tokens for this throwaway container.
-      - name: Start PostgREST for the MCP end-to-end test
-        run: |
-          (cd packages/mcp && node --experimental-strip-types test/postgrest-db.ts)
-          docker run -d --name postgrest --network host \
-            -e PGRST_DB_URI=postgres://authenticator:authenticator@localhost:5432/transpera_flow_postgrest \
-            -e PGRST_DB_SCHEMAS=public -e PGRST_DB_ANON_ROLE=anon -e PGRST_SERVER_PORT=3000 \
-            -e PGRST_JWT_SECRET="$POSTGREST_JWT_SECRET" \
-            postgrest/postgrest:v14.18
       - run: pnpm test
-      - name: PostgREST logs
-        if: always()
-        run: docker logs postgrest || true
       - run: pnpm --filter @transpera-flow/web build
       # The build above has no Sentry variable: the "no DSN, no change" path, so the browser bundle must hold none of the SDK.
       - name: No Sentry SDK in the browser bundle without a DSN

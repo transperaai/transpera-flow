@@ -1,43 +1,31 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Db } from "@transpera-flow/db";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { calibrate, type CalibrationResult } from "@transpera-flow/engine";
-import { calibrationInput, loadProcessBundle, splitCsv, type Database, type ProcessRow } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
+import { calibrationInput, loadProcessBundle, splitCsv, type ProcessRow } from "@transpera-flow/db";
 import { applyNameMap, importDetails, readImport, suggestMapping, suggestNameMap } from "@transpera-flow/db/csv-import";
-import { signJwt } from "./helpers";
+import { errorOf, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// Importing historical data (issue #40, migration 20261216000000) as the web app does it: over PostgREST, signed in, with
-// Supabase's default privileges and RLS. An editor reads a deals export from a CRM (its stage names are not the model's), matches
+// Importing historical data (issue #40, migration 20261216000000) as the web app does it: through Kysely, signed in,
+// under RLS. An editor reads a deals export from a CRM (its stage names are not the model's), matches
 // the columns and the names, converts it into a step log, calibrates against the live model and records the import under its own
 // kind with `record_calibration_import`. A member reads the record: the kind, the column map and counts only, never a deal,
 // a person or an amount. A viewer's `record_dataset` leaves nothing. Runs in its own workspace.
-// Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
+// Runs on a throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", proc: "", rev: "", role: "", source: "", qualify: "", won: "", lost: "", start: "" };
-let editor: SupabaseClient<Database>;
-let member: SupabaseClient<Database>;
-let viewer: SupabaseClient<Database>;
-let anon: SupabaseClient<Database>;
-
-function client(token: string): SupabaseClient<Database> {
-  return createClient<Database>("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
+let editor: Db;
+let member: Db;
+let viewer: Db;
+let anon: Db;
 
 const SETTINGS = { hours_per_week: 40, currency: "AUD", horizon_weeks: 13, leads_per_week: 5, active_clients: 0, churn_monthly: 0, retainer: 1000 };
 
@@ -55,22 +43,20 @@ function dealsFile(): string {
 }
 
 async function bundle(revisionId: string) {
-  const { data: ws } = await editor.from("workspaces").select("id, name, slug, settings").eq("id", ids.ws).single();
-  const { data: proc } = await editor.from("processes").select("*").eq("id", ids.proc).single();
-  return loadProcessBundle(editor, ws!, proc as unknown as ProcessRow, revisionId);
+  const ws = await editor.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", ids.ws).executeTakeFirstOrThrow();
+  const proc = await editor.selectFrom("processes").selectAll().where("id", "=", ids.proc).executeTakeFirstOrThrow();
+  return loadProcessBundle(editor, ws, proc as unknown as ProcessRow, revisionId);
 }
 
-describe.skipIf(!POSTGREST_URL)("importing a deals file over PostgREST", () => {
+describe("importing a deals file", () => {
   let result: CalibrationResult;
   let rowCount = 0;
   let columnMap: Record<string, string> = {};
   let details: unknown;
 
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug, settings) values ('Import Co', $1, $2) returning id", [`import-${tag}`, SETTINGS])).id as string;
     ids.role = (await one("insert into roles (workspace_id, name) values ($1, 'Sales') returning id", [ids.ws])).id as string;
@@ -99,20 +85,14 @@ describe.skipIf(!POSTGREST_URL)("importing a deals file over PostgREST", () => {
     const [ed, mb, vw] = [randomUUID(), randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6)", [ed, `imp-editor-${tag}@example.com`, mb, `imp-member-${tag}@example.com`, vw, `imp-viewer-${tag}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member'), ($1, $4, 'viewer')", [ids.ws, ed, mb, vw]);
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    editor = client(token(ed));
-    member = client(token(mb));
-    viewer = client(token(vw));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await editor.from("processes").select("id").eq("id", ids.proc)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    editor = env.dbAs(userClaims(ed));
+    member = env.dbAs(userClaims(mb));
+    viewer = env.dbAs(userClaims(vw));
+    anon = env.dbAs(null);
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   const datasets = async () => Number((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n);
@@ -158,14 +138,13 @@ describe.skipIf(!POSTGREST_URL)("importing a deals file over PostgREST", () => {
 
   it("records nothing for a member, a viewer or anon", async () => {
     const before = await datasets();
-    for (const who of [member, viewer, anon]) expect((await who.rpc("record_calibration_import", args([`arrivals:${ids.source}`]))).error).not.toBeNull();
+    for (const who of [member, viewer, anon]) expect(await errorOf(() => rpc(who, "record_calibration_import", args([`arrivals:${ids.source}`])))).not.toBeNull();
     expect(await datasets()).toBe(before);
   });
 
   it("records the import as an editor under its own kind and applies the ticked key", async () => {
-    const out = await editor.rpc("record_calibration_import", args([`arrivals:${ids.source}`]));
-    expect(out.error).toBeNull();
-    const data = out.data as { status: string; dataset_id: string; calibration_id: string; results: { key: string; status: string }[] };
+    const out = await rpc(editor, "record_calibration_import", args([`arrivals:${ids.source}`]));
+    const data = out as { status: string; dataset_id: string; calibration_id: string; results: { key: string; status: string }[] };
     expect(data).toMatchObject({ status: "ok", results: [{ key: `arrivals:${ids.source}`, status: "applied" }] });
     expect((await one("select kind, process_id from datasets where id = $1", [data.dataset_id]))).toEqual({ kind: "deals", process_id: ids.proc });
     const live = await bundle(ids.rev);
@@ -175,27 +154,25 @@ describe.skipIf(!POSTGREST_URL)("importing a deals file over PostgREST", () => {
   });
 
   it("lets a member read the record: the kind, the column map and counts only", async () => {
-    const seen = await member.from("datasets").select("id, kind, file_name, row_count, column_map, details, process_id").eq("workspace_id", ids.ws).eq("kind", "deals");
-    expect(seen.error).toBeNull();
-    expect(seen.data).toHaveLength(1);
-    const row = seen.data![0]!;
+    const seen = await member.selectFrom("datasets").select(["id", "kind", "file_name", "row_count", "column_map", "details", "process_id"]).where("workspace_id", "=", ids.ws).where("kind", "=", "deals").execute();
+    expect(seen).toHaveLength(1);
+    const row = seen[0]!;
     expect(row).toMatchObject({ kind: "deals", file_name: "hubspot-deals.csv", row_count: 48, column_map: columnMap });
     expect(row.details).toMatchObject({ delimiter: ",", encoding: "utf-8", headerRow: 1, lines: 48, rows: 48, leftOut: 0, nameMatches: { matched: 48, leftOut: 0 } });
     expect(JSON.stringify(row)).not.toMatch(/ACME-SECRET|Jane Secretperson|£9\d{3}|Qualified lead/);
     // Nothing selects who imported it into the page's view, and nobody can change it.
-    expect((await member.from("datasets").update({ details: {} }).eq("id", row.id)).error).not.toBeNull();
-    expect((await anon.from("datasets").select("id")).data ?? []).toEqual([]);
+    expect(await errorOf(() => member.updateTable("datasets").set({ details: {} }).where("id", "=", row.id).execute())).not.toBeNull();
+    expect(await anon.selectFrom("datasets").select("id").execute().catch(() => [])).toEqual([]);
   });
 
   it("leaves nothing when a viewer, a member or anon records leads over record_dataset", async () => {
     const before = await datasets();
     const call = { p_workspace: ids.ws, p_kind: "leads", p_file_name: "leads.csv", p_column_map: { created: "Created", source: "Source" }, p_row_count: 10, p_details: {} };
-    for (const who of [viewer, member, anon]) expect((await who.rpc("record_dataset", call)).error).not.toBeNull();
+    for (const who of [viewer, member, anon]) expect(await errorOf(() => rpc(who, "record_dataset", call))).not.toBeNull();
     expect(await datasets()).toBe(before);
-    const ok = await editor.rpc("record_dataset", call);
-    expect(ok.error).toBeNull();
-    expect(typeof ok.data).toBe("string");
+    const ok = await rpc(editor, "record_dataset", call);
+    expect(typeof ok).toBe("string");
     expect(await datasets()).toBe(before + 1);
-    expect((await editor.rpc("record_dataset", { ...call, p_kind: "deals" })).error).not.toBeNull();
+    expect(await errorOf(() => rpc(editor, "record_dataset", { ...call, p_kind: "deals" }))).not.toBeNull();
   });
 });

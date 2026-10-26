@@ -2,23 +2,18 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateApiToken, type McpHandlerOptions } from "../src";
-import { call, connect, signJwt } from "./helpers";
+import { rpc } from "@transpera-flow/db/client";
+import { call, connect, errorOf, startTestDb, tokenDbFor, userClaims, type McpTestDb } from "./helpers";
 
-// The proposal tools end to end (issue #117, A52), as in production: MCP client → handleMcpRequest → supabase-js →
-// PostgREST (pre-request hook) → Postgres with every migration. They write proposals only: no issue and no solution
-// appears until a person accepts or builds it. Runs in its own workspace. Skipped unless POSTGREST_URL is set (CI
-// sets it; see postgrest.test.ts).
+// The proposal tools end to end (issue #117, A52), as in production: MCP client → handleMcpRequest → token lookup in
+// app code → Kysely under the token owner's claims → Postgres with every migration. They write proposals only: no issue and no solution
+// appears until a person accepts or builds it. Runs on a throwaway database (test/helpers.ts),
+// in its own workspace.
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
 
+let env: McpTestDb;
 let admin: pg.Client;
 let options: McpHandlerOptions;
-const anonKey = () => signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
-const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 
 const ids = { ws: "", proc: "", rev: "", step: "", issue: "", closed: "", source: "", editor: "", viewer: "" };
 let editorToken = "";
@@ -39,12 +34,10 @@ async function issueToken(userId: string) {
 const insertId = async (sql: string, params: unknown[]) => (await admin.query(sql, params)).rows[0].id as string;
 const count = async (table: string) => (await admin.query(`select count(*)::int as n from ${table} where workspace_id = $1`, [ids.ws])).rows[0].n as number;
 
-describe.skipIf(!POSTGREST_URL)("proposal tools over PostgREST", () => {
+describe("proposal tools", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
 
     const slug = `propose-co-${randomUUID().slice(0, 8)}`;
     ids.ws = await insertId("insert into workspaces (name, slug) values ('Propose Co', $1) returning id", [slug]);
@@ -65,19 +58,12 @@ describe.skipIf(!POSTGREST_URL)("proposal tools over PostgREST", () => {
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ids.editor, ids.viewer]);
     editorToken = await issueToken(ids.editor);
     viewerToken = await issueToken(ids.viewer);
-    options = { supabaseUrl: SUPABASE_URL, supabaseKey: anonKey(), fetch: toPostgrest };
+    options = env.options;
 
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const res = await fetch(`${POSTGREST_URL}/workspaces?select=id`, { headers: { authorization: `Bearer ${anonKey()}`, "x-api-token": editorToken } }).catch(() => null);
-      if (res?.status === 200 && (await res.json()).length === 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   it("proposes an issue and a solution idea, and writes no issue and no solution", async () => {
@@ -163,24 +149,14 @@ describe.skipIf(!POSTGREST_URL)("proposal tools over PostgREST", () => {
   it("a token can't review: a person accepts in the app, and that creates the issue", async () => {
     const pending = (await admin.query("select id from suggestion_proposals where workspace_id = $1 and kind = 'issue' and status = 'pending' and title = 'Enquiries wait two days for a reply'", [ids.ws])).rows[0].id;
     // With the token: refused.
-    const viaToken = await fetch(`${POSTGREST_URL}/rpc/review_proposals`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${anonKey()}`, "x-api-token": editorToken, "content-type": "application/json" },
-      body: JSON.stringify({ ids: [pending], decision: "accept" }),
-    });
-    expect(viaToken.status).toBeGreaterThanOrEqual(400);
+    const viaToken = await errorOf(async () => rpc((await tokenDbFor(env, ids.editor)).db, "review_proposals", { ids: [pending], decision: "accept" }));
+    expect(viaToken).not.toBeNull();
     expect((await admin.query("select status from suggestion_proposals where id = $1", [pending])).rows[0].status).toBe("pending");
 
     // As the signed-in person: accepted, through the Acknowledge path.
     const issuesBefore = await count("issues");
-    const session = signJwt({ sub: ids.editor, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    const res = await fetch(`${POSTGREST_URL}/rpc/review_proposals`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${session}`, "content-type": "application/json" },
-      body: JSON.stringify({ ids: [pending], decision: "accept" }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject([{ id: pending, status: "accepted" }]);
+    const res = await rpc(env.dbAs(userClaims(ids.editor)), "review_proposals", { ids: [pending], decision: "accept" });
+    expect(res).toMatchObject([{ id: pending, status: "accepted" }]);
     expect(await count("issues")).toBe(issuesBefore + 1);
     const made = (await admin.query("select title, severity, type, source from issues where workspace_id = $1 and title = 'Enquiries wait two days for a reply'", [ids.ws])).rows[0];
     expect(made).toEqual({ title: "Enquiries wait two days for a reply", severity: "serious", type: "delay", source: "manual" });

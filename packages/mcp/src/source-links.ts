@@ -116,7 +116,13 @@ export async function resolveLinks(ctx: ToolContext, workspace: { id: string; na
  */
 export async function recordIssueSources(ctx: ToolContext, workspaceId: string, sourceId: string, targets: readonly SourceLinkTarget[]): Promise<void> {
   for (const t of targets) {
-    if (t.kind === "issue") await ctx.db.from("issue_sources").insert({ issue_id: t.issueId, source_id: sourceId, workspace_id: workspaceId });
+    if (t.kind === "issue") {
+      try {
+        await ctx.db.insertInto("issue_sources").values({ issue_id: t.issueId, source_id: sourceId, workspace_id: workspaceId }).execute();
+      } catch {
+        // Best effort, as before: the old call ignored the `{ error }` it got back.
+      }
+    }
   }
 }
 
