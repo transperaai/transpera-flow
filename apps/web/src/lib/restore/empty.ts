@@ -6,15 +6,21 @@ import type { Db } from "@transpera-flow/db";
 
 const TABLES = ["roles", "people", "services", "client_groups", "clients", "lead_sources", "churn_drivers", "market_schedule", "issues", "sources", "blocks", "solutions", "suggestions", "suggestion_proposals"] as const;
 
+/**
+ * One statement for all sixteen questions: the Overview asks this on every load for editors, and each statement outside a
+ * transaction costs three round trips (ClaimsDriver), so asking table by table was dozens of round trips to Neon.
+ */
 export async function workspaceIsEmpty(db: Db, workspaceId: string): Promise<boolean> {
-  const has = async (table: (typeof TABLES)[number] | "processes" | "market_conditions", narrow?: { column: "is_company" | "preset"; isNull?: boolean; value?: boolean }) => {
-    let q = db.selectFrom(table).select("id").where("workspace_id", "=", workspaceId);
-    if (narrow?.column === "is_company") q = q.where("is_company" as never, "=", narrow.value as never);
-    if (narrow?.column === "preset") q = q.where("preset" as never, "is", null);
-    return (await q.limit(1).executeTakeFirst()) !== undefined;
-  };
-  if (await has("processes", { column: "is_company", value: false })) return false;
-  if (await has("market_conditions", { column: "preset", isNull: true })) return false;
-  for (const t of TABLES) if (await has(t)) return false;
-  return true;
+  const row = await db
+    .selectNoFrom((eb) =>
+      eb
+        .or([
+          eb.exists(eb.selectFrom("processes").select("id").where("workspace_id", "=", workspaceId).where("is_company", "=", false)),
+          eb.exists(eb.selectFrom("market_conditions").select("id").where("workspace_id", "=", workspaceId).where("preset", "is", null)),
+          ...TABLES.map((t) => eb.exists(eb.selectFrom(t).select("id").where("workspace_id", "=", workspaceId))),
+        ])
+        .as("busy"),
+    )
+    .executeTakeFirstOrThrow();
+  return row.busy !== true;
 }

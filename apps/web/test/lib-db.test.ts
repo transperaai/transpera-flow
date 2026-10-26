@@ -282,6 +282,17 @@ describe("restore/empty", () => {
     await tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Someone')", [fresh]);
     expect(await workspaceIsEmpty(current, fresh)).toBe(false);
   });
+
+  it("asks in one statement, and sees the last table it checks", async () => {
+    actAs("agency");
+    const other = (await tdb.client.query("insert into workspaces (name, slug) values ('Other', 'other-empty') returning id")).rows[0].id as string;
+    let statements = 0;
+    const counting = current.withPlugin({ transformQuery: ({ node }) => (statements++, node), transformResult: async ({ result }) => result });
+    expect(await workspaceIsEmpty(counting, other)).toBe(true);
+    expect(statements).toBe(1);
+    await tdb.client.query("insert into suggestion_proposals (workspace_id, kind, title) values ($1, 'issue', 'An idea')", [other]);
+    expect(await workspaceIsEmpty(current, other)).toBe(false);
+  });
 });
 
 describe("calibration reads", () => {
