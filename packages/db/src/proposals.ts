@@ -4,7 +4,7 @@
 // the Acknowledge path (`save_issue`) inside that function.
 
 import type { Db } from "./queries";
-import { rpc } from "./client";
+import { rpc } from "./rpc";
 import { columns } from "./columns";
 import { pgCode } from "./pg-error";
 import type { ProposalRow, ProposalStatus } from "./types";

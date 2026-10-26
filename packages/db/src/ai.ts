@@ -1,6 +1,6 @@
 import type { Json } from "./database.types";
 import type { Db } from "./queries";
-import { rpc } from "./client";
+import { rpc } from "./rpc";
 import { pgCode } from "./pg-error";
 import type { AiAnalysisRow, AiAnalysisStatus, AiAnalysisTrigger } from "./types";
 

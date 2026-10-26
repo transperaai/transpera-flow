@@ -1,7 +1,7 @@
 import type { LinkTargets } from "./source-links";
 import type { Kysely } from "kysely";
 import type { DB } from "./db-types";
-import { rpc, rpcRows } from "./client";
+import { rpc, rpcRows } from "./rpc";
 import { columns } from "./columns";
 import { pgCode } from "./pg-error";
 import { shareToggles } from "./share-reader";
