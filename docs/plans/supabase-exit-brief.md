@@ -331,22 +331,68 @@ is in `workspaces.branding` (`20261214000000`). Storage is called from `app/w/[s
 
 ## Step 7: data copy and cutover
 
-1. **Freeze**: Austin agrees a window. Production shows a read-only banner (env flag), or simply nobody edits.
-2. **Export** (needs Austin to allow production reads: auto mode blocks `prod-sql.sh`): for every `public` table,
-   plus `auth.users` and `auth.identities`, in dependency order, use `select json_agg(t) from <table> t` via the Management
-   API, saved to the scratchpad and never committed. The data is expected to be small; check the database size first.
-3. **Import** into Neon with the runner's schema already applied: insert as the owner with
-   `session_replication_role = replica` (no triggers or FKs during load), then reset sequences.
-   Existing users keep their uuid: `auth.users` rows are copied, and for each, a `better_auth."user"` row with the same
-   id plus an `account` row (`providerId 'google'`, `accountId` = the Google sub from `auth.identities.provider_id`), so their
-   next Google sign-in lands on the same user.
-4. **Verify**: row counts per table match, the DB test suite runs against a Neon branch of the copy, and Austin signs in
-   on the preview and checks Northbeam and one client workspace.
-5. **Switch**: merge the integration PR to `main`. Production env has `DATABASE_URL`, `BETTER_AUTH_*` and `GOOGLE_*`.
-   Redeploy.
-6. **Rollback**: Vercel instant rollback to the last Supabase deployment. The Supabase project is untouched, so it's
-   immediately consistent; writes made on Neon after the switch would be lost, so keep the watch window short. Keep the
-   Supabase project for 30 days after a clean cutover, then Austin deletes it.
+### 7a. Tooling (built and rehearsed before cutover; no production access needed to build it)
+
+`packages/db/scripts/copy-from-supabase/`:
+- **`export.ts`**: reads a source database at row 72 (Supabase) and writes one JSON file per table to a local directory
+  outside the repo (`--out`, never committed). Two sources:
+  - `--supabase <ref>`: the Management API's `POST /v1/projects/{ref}/database/query` with `SUPABASE_ACCESS_TOKEN`. Every
+    query is a read-only `select`.
+  - `--url <postgres url>`: tests and rehearsals.
+  Tables are every `public` table plus `auth.users` and `auth.identities`. Each is read in pages ordered by primary key
+  (`select coalesce(json_agg(t), '[]') from (select * from x order by pk limit N offset M) t`), so no response is
+  too large. It also writes `manifest.json` (row counts per table, the source's max migration version, and the time) and
+  `storage.json` (bucket, name, size and content type of every `storage.objects` row). For the `branding` bucket (public)
+  it downloads each object's bytes from `https://<ref>.supabase.co/storage/v1/object/public/branding/<name>`, which
+  needs no key. The private `sources` bucket is listed only.
+- **`import.ts`**: loads an export into a target already migrated to the current head, through `--url` (the owner).
+  - Rows go in with `json_populate_recordset(null::public.x, $1)`. Columns the target no longer has (the sources file
+    columns, `workspaces.branding.logo_path`) are dropped. A column the target has that the source didn't gets its
+    default.
+  - Trigger and foreign-key handling: try `set session_replication_role = replica` first. If Neon refuses it, insert in
+    foreign-key dependency order (topological sort from `pg_constraint`), with user triggers disabled per table
+    (`alter table … disable trigger user`) and re-enabled after. Cycles and self-references load with the column null,
+    then an update.
+  - Audit and history triggers must not fire for copied rows.
+  - Sequences are reset to `max(...)`.
+  - `auth.users`/`auth.identities` copy as is. For each user it creates `better_auth."user"` (same id, email, name, and
+    `emailVerified` from `email_confirmed_at`). For each Google identity it creates `better_auth.account`
+    (`providerId 'google'`, `accountId` = `identities.provider_id`), so the next sign-in lands on the same user.
+  - Logos: each workspace's current `branding.logo_path` object goes into `workspace_logos`, with its sha256. A logo
+    over the 512 KB check is reported, not loaded.
+  - **Deployment access** (Opus default; Austin can change it before cutover): a named-email rule per existing user.
+    Agency admins get `admin`; owners and editors anywhere get `editor`; everyone else gets `viewer`. Guests aren't
+    seeded.
+  - Everything runs in one transaction, and `--dry-run` rolls it back after printing the report.
+- **`verify.ts`**: compares the manifest's counts with the target's, table by table (allowing for the rows `import.ts`
+  adds), checks foreign keys with a full validation pass, and prints a short report.
+- **Tests (local Postgres):**
+  - Build a "Supabase-like" source: the shims plus migrations up to `20261227000000`, with the seed and a few
+    users, identities, a logo in `storage.objects`, and a source with file columns.
+  - Export with `--url`, import into a fresh database at head, then verify. Assert the counts, a user's
+    Better Auth account, the logo row, that the file columns are gone, the deployment-access rows, and that the
+    `audit_log` row count didn't grow from the copy.
+  - Then sign in as a copied user through `createDb` claims and read their workspace under RLS.
+
+### 7b. Rehearsal on a Neon branch (Opus, before cutover)
+
+Create a Neon branch `rehearsal` from `main` through the Neon API. Export from Supabase, which needs Austin to allow
+production reads, because auto mode blocks them. Import into the branch, verify, point a local or preview check at it,
+then delete the branch.
+
+### 7c. Cutover (needs Austin's go-ahead and a short freeze)
+
+1. Freeze: Austin agrees a window when nobody edits.
+2. Fresh export from Supabase, then import into Neon `main`, then verify.
+3. Austin adds **Production** to the Neon connection in Vercel (Storage → `transpera-flow-db` → Projects). Opus sets
+   `APP_DATABASE_URL` for Production, as was done for Preview.
+4. Merge the integration branch to `main` through a PR, after Austin's QA on the preview. Vercel deploys production.
+5. Smoke test: sign in on `https://transpera-flow.vercel.app`, open Northbeam and one client workspace, and check that
+   MCP lists processes with an existing token.
+6. **Rollback:** Vercel instant rollback to the last Supabase deployment. Supabase is untouched, but writes made on Neon
+   after the switch would be lost, so keep the watch window short. Keep the Supabase project for 30 days, then Austin
+   deletes it. After that, remove the Supabase redirect URI and the old secret from the Google client, and the
+   `NEXT_PUBLIC_SUPABASE_*` variables from Vercel.
 
 ## Step 8: per-client deployment template (outline)
 
