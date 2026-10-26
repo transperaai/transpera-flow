@@ -21,6 +21,10 @@ beforeAll(async () => {
     create function public.zz_sleep_rows(s float8) returns table (n int, m int) language sql set statement_timeout = '6s' as 'select 1, 2 from (select pg_sleep(s)) x';
     create function public.zz_limit() returns text language sql as $$select current_setting('statement_timeout')$$;
     create function public.zz_limit_long() returns text language sql set statement_timeout = '45s' as $$select current_setting('statement_timeout')$$;
+    create function public.zz_limit_bare() returns text language sql set statement_timeout = 5000 as $$select current_setting('statement_timeout')$$;
+    create function public.zz_sleep_over(s float8) returns text language sql set statement_timeout = 0 as 'select pg_sleep(s)::text';
+    create function public.zz_sleep_over(s float8, x int) returns text language sql set statement_timeout = '1s' as 'select pg_sleep(s)::text';
+    create function public.zz_limit_fail() returns text language plpgsql set statement_timeout = '45s' as $$begin raise exception 'zz failed' using errcode = 'P0001'; end$$;
     grant execute on all functions in schema public to anon, authenticated;
   `);
 });
@@ -93,5 +97,36 @@ describe("a function's own statement timeout", () => {
       "select proconfig from pg_proc where pronamespace = 'public'::regnamespace and proname = 'import_workspace_bundle'",
     );
     expect(rows[0]!.proconfig).toContain("statement_timeout=40s");
+  });
+
+  it("reads a unit-less limit as milliseconds, as Postgres does", async () => {
+    expect(await anyRpc(db.dbAs(null), "zz_limit_bare")).toBe("5s");
+  });
+
+  it("among overloads takes the longest, and 0 (no limit) is longer than any (anon: 3 s; overloads: none and 1 s)", async () => {
+    expect(await anyRpc(db.dbAs(null), "zz_sleep_over", { s: 3.5 })).toBe("");
+    expect(await limit(db.dbAs(null))).toBe("3s");
+  }, 10_000);
+
+  it("is not left behind when the call fails: on the pool, on a db.connection(), or rolled back to a savepoint", async () => {
+    const d = db.dbAs(null);
+    await expect(anyRpc(d, "zz_limit_fail")).rejects.toMatchObject({ code: "P0001" });
+    expect(await limit(d)).toBe("3s");
+
+    const afterRollback = await d.connection().execute(async (c) => {
+      await expect(c.transaction().execute((trx) => anyRpc(trx, "zz_limit_fail"))).rejects.toMatchObject({ code: "P0001" });
+      return limit(c);
+    });
+    expect(afterRollback).toBe("3s");
+
+    const trx = await db.dbAs(user).startTransaction().execute();
+    try {
+      const sp = await trx.savepoint("before_call").execute();
+      await expect(anyRpc(sp, "zz_limit_fail")).rejects.toMatchObject({ code: "P0001" });
+      await sp.rollbackToSavepoint("before_call").execute();
+      expect(await limit(trx)).toBe("8s");
+    } finally {
+      await trx.rollback().execute();
+    }
   });
 });

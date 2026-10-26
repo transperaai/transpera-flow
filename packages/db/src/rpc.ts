@@ -25,10 +25,15 @@ interface FunctionInfo {
 const functionInfo = new Map<string, Promise<FunctionInfo>>();
 
 const UNIT_MS: Record<string, number> = { us: 0.001, ms: 1, s: 1000, min: 60_000, h: 3_600_000, d: 86_400_000 };
-/** A statement_timeout value in milliseconds (a bare number is ms, as in Postgres); NaN when not recognised. */
+/**
+ * A statement_timeout value in milliseconds (a bare number is ms, as in Postgres; 0 is no limit, so Infinity); -1 when not
+ * recognised, so a value Postgres would read some other way never wins over one this can read.
+ */
 function timeoutMs(value: string): number {
   const m = /^\s*(\d+(?:\.\d+)?)\s*(us|ms|s|min|h|d)?\s*$/.exec(value);
-  return m ? Number(m[1]) * UNIT_MS[m[2] ?? "ms"]! : NaN;
+  if (!m) return -1;
+  const ms = Number(m[1]) * UNIT_MS[m[2] ?? "ms"]!;
+  return ms === 0 ? Infinity : ms;
 }
 
 function functionInfoOf(db: Kysely<DB>, name: string): Promise<FunctionInfo> {
@@ -44,7 +49,7 @@ function functionInfoOf(db: Kysely<DB>, name: string): Promise<FunctionInfo> {
       .then((r) => {
         // Overloads share a name here; the longest limit among them applies to all of them.
         const limits = r.rows.flatMap((x) => (x.config ?? []).flatMap((c) => (c.startsWith("statement_timeout=") ? [c.slice(18)] : [])));
-        limits.sort((a, b) => timeoutMs(b) - timeoutMs(a) || 0);
+        limits.sort((a, b) => (timeoutMs(a) === timeoutMs(b) ? 0 : timeoutMs(b) > timeoutMs(a) ? 1 : -1));
         return { jsonArgs: new Set(r.rows.flatMap((x) => x.json_args)), statementTimeout: limits[0] };
       });
     found.catch(() => functionInfo.delete(name));
