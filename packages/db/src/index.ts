@@ -5,6 +5,7 @@ export * from "./calibration";
 export type { Database, Json } from "./database.types";
 export type { DB } from "./db-types";
 export type { Claims } from "./client";
+export { columns, type SplitColumns } from "./columns";
 export {
   ModelError,
   engineChurnDrivers,

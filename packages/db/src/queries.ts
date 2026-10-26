@@ -1,7 +1,11 @@
 import type { LinkTargets } from "./source-links";
 import type { Kysely } from "kysely";
 import type { DB } from "./db-types";
-import type { Database, Json } from "./database.types";
+import { rpc, rpcRows } from "./client";
+import { columns } from "./columns";
+import { pgCode } from "./pg-error";
+import { shareToggles } from "./share-reader";
+import type { Json } from "./database.types";
 import type { CompanyModel, SnapshotProcess } from "./company";
 import type { CitingRow } from "./evidence";
 import { uiStatus, type StoredIssueStatus } from "./issue-status";
@@ -58,12 +62,6 @@ import type {
 
 export type Db = Kysely<DB>;
 
-/** Rows a query returned, or its error thrown. */
-function rows<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
-
 /** The `ServiceRow` columns. */
 export const SERVICE_COLUMNS =
   "id, workspace_id, name, pricing_model, price, margin, tenure_months, churn_monthly_base, churn_health_sensitivity, mix_share, entry_process_id, path_tags, fallback_ongoing_load, active" as const;
@@ -86,9 +84,9 @@ export async function loadServicingContext(
 ): Promise<{ servicingLinks: ServiceServicingRow[]; otherProcesses: ProcessPart[] }> {
   const [processes, links, heldHere] = await Promise.all([
     listProcesses(db, workspaceId),
-    db.from("service_servicing").select(SERVICE_SERVICING_COLUMNS).eq("workspace_id", workspaceId).order("id"),
+    db.selectFrom("service_servicing").select(columns(SERVICE_SERVICING_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("id").execute(),
     // The processes this revision links to (a draft may hold one its live version does not yet: B12).
-    revisionId ? db.from("steps").select("child_process_id").eq("revision_id", revisionId).not("child_process_id", "is", null) : { data: [], error: null },
+    revisionId ? db.selectFrom("steps").select("child_process_id").where("revision_id", "=", revisionId).where("child_process_id", "is not", null).execute() : [],
   ]);
   const live = processes.filter((p) => p.id !== process.id && p.live_revision_id);
   // A child process runs inside its parent, so it is never the pipeline a servicing process runs beside.
@@ -97,7 +95,7 @@ export async function loadServicingContext(
   // The child processes (any depth) of this process and of those, which the steps holding them are simulated through.
   const reached = new Set([process.id, ...base.map((p) => p.id)]);
   const children: typeof live = [];
-  for (const h of (rows(heldHere) ?? []) as { child_process_id: string | null }[]) {
+  for (const h of heldHere as { child_process_id: string | null }[]) {
     const p = live.find((x) => x.id === h.child_process_id);
     if (p && !reached.has(p.id)) {
       reached.add(p.id);
@@ -118,14 +116,14 @@ export async function loadServicingContext(
   const revisionIds = wanted.map((p) => p.live_revision_id!);
   const [revisions, steps, edges] = revisionIds.length
     ? await Promise.all([
-        db.from("process_revisions").select("id, workspace_id, process_id, number, status").in("id", revisionIds),
-        db.from("steps").select("*").in("revision_id", revisionIds),
-        db.from("edges").select("*").in("revision_id", revisionIds),
+        db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]).where("id", "in", revisionIds).execute(),
+        db.selectFrom("steps").selectAll().where("revision_id", "in", revisionIds).execute(),
+        db.selectFrom("edges").selectAll().where("revision_id", "in", revisionIds).execute(),
       ])
-    : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
-  const stepRows = (rows(steps) ?? []) as StepRow[];
-  const edgeRows = (rows(edges) ?? []) as EdgeRow[];
-  const revisionRows = (rows(revisions) ?? []) as ProcessRevisionRow[];
+    : [[], [], []];
+  const stepRows = steps as unknown as StepRow[];
+  const edgeRows = edges as unknown as EdgeRow[];
+  const revisionRows = revisions as ProcessRevisionRow[];
   const otherProcesses: ProcessPart[] = [];
   // The pipeline first: a servicing bundle runs beside it.
   for (const p of pipeline ? [pipeline, ...wanted.filter((w) => w !== pipeline)] : wanted) {
@@ -141,7 +139,7 @@ export async function loadServicingContext(
     });
   }
   // recurrence and provenance are jsonb; the table's check limits recurrence to RecurrenceJson.
-  return { servicingLinks: (rows(links) ?? []) as unknown as ServiceServicingRow[], otherProcesses };
+  return { servicingLinks: links as unknown as ServiceServicingRow[], otherProcesses };
 }
 
 /** The `ClientRow`, `ClientServiceRow` and `ClientAssignmentRow` columns. */
@@ -175,11 +173,12 @@ export interface TeamInputs {
  * here: reading `person_capacity_factors` directly would bypass `shareReaderDb` and put an editor's times into a share snapshot.
  */
 export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs> {
-  const r = await db.rpc("team_capacity", { ws: workspaceId });
-  if (r.error) throw r.error;
+  // A share link reads through `shareReaderDb`, which swaps in `share_team_capacity` (labels or names, no pay, no times).
+  const toggles = shareToggles.get(db);
+  const data = toggles ? await rpc(db, "share_team_capacity", { ws: workspaceId, show_people: toggles.people }) : await rpc(db, "team_capacity", { ws: workspaceId });
   // The function's documented shape (migration 20261207500000): sees_everyone, own_person_id and one array per table, in
   // the columns of PersonRow, PersonRoleRow, PersonSkillRow, PersonLeaveRow and ClientAssignmentRow.
-  const t = r.data as unknown as {
+  const t = data as unknown as {
     sees_everyone: boolean;
     own_person_id: string | null;
     people: PersonRow[];
@@ -211,14 +210,14 @@ export async function loadClients(
   team?: TeamInputs,
 ): Promise<{ clients: ClientRow[]; clientServices: ClientServiceRow[]; clientAssignments: ClientAssignmentRow[] }> {
   const [clients, clientServices, clientAssignments] = await Promise.all([
-    db.from("clients").select(CLIENT_COLUMNS).eq("workspace_id", workspaceId).order("name").order("id"),
-    db.from("client_services").select(CLIENT_SERVICE_COLUMNS).eq("workspace_id", workspaceId),
+    db.selectFrom("clients").select(columns(CLIENT_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("name").orderBy("id").execute(),
+    db.selectFrom("client_services").select(columns(CLIENT_SERVICE_COLUMNS)).where("workspace_id", "=", workspaceId).execute(),
     team ? team.clientAssignments : loadTeam(db, workspaceId).then((t) => t.clientAssignments),
   ]);
   return {
     // provenance is jsonb; ClientRow gives it its shape.
-    clients: (rows(clients) ?? []) as ClientRow[],
-    clientServices: rows(clientServices) ?? [],
+    clients: clients as unknown as ClientRow[],
+    clientServices,
     clientAssignments,
   };
 }
@@ -228,9 +227,9 @@ export const CLIENT_GROUP_COLUMNS = "id, workspace_id, service_id, client_count,
 
 /** A workspace's client groups (clients counted per service), by creation order. */
 export async function loadClientGroups(db: Db, workspaceId: string): Promise<ClientGroupRow[]> {
-  const r = await db.from("client_groups").select(CLIENT_GROUP_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("id");
+  const r = await db.selectFrom("client_groups").select(columns(CLIENT_GROUP_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute();
   // provenance is jsonb; ProvenanceMap is its app-side shape.
-  return (rows(r) ?? []) as ClientGroupRow[];
+  return r as unknown as ClientGroupRow[];
 }
 
 /** The `ChurnDriverRow` columns. */
@@ -238,9 +237,9 @@ export const CHURN_DRIVER_COLUMNS = "id, workspace_id, driver, name, description
 
 /** The churn drivers a workspace has set, built-ins first (by creation order), then its own by name. */
 export async function loadChurnDrivers(db: Db, workspaceId: string): Promise<ChurnDriverRow[]> {
-  const r = await db.from("churn_drivers").select(CHURN_DRIVER_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("id");
+  const r = await db.selectFrom("churn_drivers").select(columns(CHURN_DRIVER_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute();
   // driver is check-constrained to ChurnDriverKey; provenance is jsonb.
-  return (rows(r) ?? []) as ChurnDriverRow[];
+  return r as unknown as ChurnDriverRow[];
 }
 
 /** The `LeadSourceRow`, `SeasonalityRow` and `DemandSettingsRow` columns. */
@@ -255,13 +254,13 @@ export const MARKET_SCHEDULE_COLUMNS = "id, workspace_id, from_month, to_month, 
 /** A workspace's market conditions (presets first, then its own by name) and its 24-month schedule in month order. */
 export async function loadMarket(db: Db, workspaceId: string): Promise<{ marketConditions: MarketConditionRow[]; marketSchedule: MarketScheduleRow[] }> {
   const [conditions, schedule] = await Promise.all([
-    db.from("market_conditions").select(MARKET_CONDITION_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("id"),
-    db.from("market_schedule").select(MARKET_SCHEDULE_COLUMNS).eq("workspace_id", workspaceId).order("from_month").order("id"),
+    db.selectFrom("market_conditions").select(columns(MARKET_CONDITION_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute(),
+    db.selectFrom("market_schedule").select(columns(MARKET_SCHEDULE_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("from_month").orderBy("id").execute(),
   ]);
   return {
     // preset is check-constrained to MarketPreset.
-    marketConditions: (rows(conditions) ?? []) as MarketConditionRow[],
-    marketSchedule: rows(schedule) ?? [],
+    marketConditions: conditions as unknown as MarketConditionRow[],
+    marketSchedule: schedule,
   };
 }
 
@@ -277,28 +276,28 @@ export async function loadProcessBundle(
   const teamLoad = loadTeam(db, ws);
   const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance] =
     await Promise.all([
-      db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("id", revisionId).single(),
-      db.from("roles").select("*").eq("workspace_id", ws),
-      db.from("steps").select("*").eq("revision_id", revisionId),
-      db.from("edges").select("*").eq("revision_id", revisionId),
+      db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]).where("id", "=", revisionId).executeTakeFirstOrThrow(),
+      db.selectFrom("roles").selectAll().where("workspace_id", "=", ws).execute(),
+      db.selectFrom("steps").selectAll().where("revision_id", "=", revisionId).execute(),
+      db.selectFrom("edges").selectAll().where("revision_id", "=", revisionId).execute(),
       teamLoad,
       // Services' and settings' provenance: the robustness check perturbs only estimated values (issue #79).
-      db.from("services").select(`${SERVICE_COLUMNS}, provenance`).eq("workspace_id", ws),
-      db.from("lead_sources").select(LEAD_SOURCE_COLUMNS).eq("workspace_id", ws),
-      db.from("seasonality").select(SEASONALITY_COLUMNS).eq("workspace_id", ws),
-      db.from("demand_settings").select(DEMAND_SETTINGS_COLUMNS).eq("workspace_id", ws).maybeSingle(),
+      db.selectFrom("services").select([...columns(SERVICE_COLUMNS), "provenance"]).where("workspace_id", "=", ws).execute(),
+      db.selectFrom("lead_sources").select(columns(LEAD_SOURCE_COLUMNS)).where("workspace_id", "=", ws).execute(),
+      db.selectFrom("seasonality").select(columns(SEASONALITY_COLUMNS)).where("workspace_id", "=", ws).execute(),
+      db.selectFrom("demand_settings").select(columns(DEMAND_SETTINGS_COLUMNS)).where("workspace_id", "=", ws).executeTakeFirst(),
       teamLoad.then((t) => loadClients(db, ws, t)),
       loadClientGroups(db, ws),
       loadChurnDrivers(db, ws),
       // The company map runs nothing: it needs no other processes (the Editor draws its cards from the live processes it is given).
       process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process, revisionId),
       loadMarket(db, ws),
-      db.from("workspaces").select("provenance").eq("id", ws).maybeSingle(),
+      db.selectFrom("workspaces").select("provenance").where("id", "=", ws).executeTakeFirst(),
     ]);
-  const wsProvenance = rows(settingsProvenance)?.provenance;
+  const wsProvenance = settingsProvenance?.provenance;
 
   // Split or replaced steps stay in the revision for scenarios to re-point, never drawn or simulated (./retired.ts).
-  const { steps: inUse, retired } = partitionSteps((rows(steps) ?? []) as StepRow[]);
+  const { steps: inUse, retired } = partitionSteps(steps as unknown as StepRow[]);
   // The casts narrow text columns that check constraints already limit, and the settings jsonb.
   return {
     workspace: {
@@ -310,11 +309,11 @@ export async function loadProcessBundle(
       ...(wsProvenance ? { provenance: wsProvenance as ProvenanceMap } : {}),
     },
     process,
-    revision: rows(revision) as ProcessRevisionRow,
-    roles: rows(roles) ?? [],
+    revision: revision as ProcessRevisionRow,
+    roles,
     steps: inUse,
     retired,
-    edges: rows(edges) ?? [],
+    edges: edges as unknown as EdgeRow[],
     people: team.people,
     personRoles: team.personRoles,
     personSkills: team.personSkills,
@@ -322,11 +321,11 @@ export async function loadProcessBundle(
     personCapacityFactors: team.personCapacityFactors,
     viewer: team.viewer,
     // pricing_model is check-constrained; fallback_ongoing_load is jsonb.
-    services: (rows(services) ?? []) as ServiceRow[],
+    services: services as unknown as ServiceRow[],
     // Provenance is jsonb; LeadSourceRow and the others give it its shape.
-    leadSources: (rows(leadSources) ?? []) as LeadSourceRow[],
-    seasonality: (rows(seasonality) ?? []) as SeasonalityRow[],
-    demand: rows(demand) as DemandSettingsRow | null,
+    leadSources: leadSources as unknown as LeadSourceRow[],
+    seasonality: seasonality as unknown as SeasonalityRow[],
+    demand: (demand ?? null) as DemandSettingsRow | null,
     ...roster,
     clientGroups,
     churnDrivers,
@@ -352,8 +351,14 @@ export interface Placement {
  * process is held in at most one live version (the database refuses a second on publish), so this is where each one sits.
  */
 export async function listPlacements(db: Db, workspaceId: string): Promise<Placement[]> {
-  const r = await db.from("process_placements").select("process_id, holder_process_id, holder_name, holder_is_company").eq("workspace_id", workspaceId).order("process_id").order("holder_process_id");
-  return (rows(r) ?? []).flatMap((p) =>
+  const r = await db
+    .selectFrom("process_placements")
+    .select(["process_id", "holder_process_id", "holder_name", "holder_is_company"])
+    .where("workspace_id", "=", workspaceId)
+    .orderBy("process_id")
+    .orderBy("holder_process_id")
+    .execute();
+  return r.flatMap((p) =>
     p.process_id && p.holder_process_id ? [{ processId: p.process_id, holderId: p.holder_process_id, holderName: p.holder_name ?? "", holderIsCompany: p.holder_is_company === true }] : [],
   );
 }
@@ -372,13 +377,13 @@ export async function listProcesses(
   workspaceId: string,
   { includeCompany = false, includeArchived = false }: { includeCompany?: boolean; includeArchived?: boolean } = {},
 ): Promise<(ProcessRow & { draft_revision_id: string | null; archived_at: string | null })[]> {
-  let q = db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id`).eq("workspace_id", workspaceId);
-  if (!includeCompany) q = q.eq("is_company", false);
+  let q = db.selectFrom("processes").select([...columns(PROCESS_COLUMNS), "draft_revision_id"]).where("workspace_id", "=", workspaceId);
+  if (!includeCompany) q = q.where("is_company", "=", false);
   // An archived process (B19, migration 20261204000000) is off every list, the map and the simulation until it is restored.
-  if (!includeArchived) q = q.is("archived_at", null);
-  const [r, placements] = await Promise.all([q.order("created_at").order("id"), listPlacements(db, workspaceId)]);
+  if (!includeArchived) q = q.where("archived_at", "is", null);
+  const [r, placements] = await Promise.all([q.orderBy("created_at").orderBy("id").execute(), listPlacements(db, workspaceId)]);
   const parentOf = new Map(placements.filter((p) => !p.holderIsCompany).map((p) => [p.processId, p.holderId]));
-  return (rows(r) as (ProcessRow & { draft_revision_id: string | null; archived_at: string | null })[]).map((p) => ({ ...p, parent_process_id: parentOf.get(p.id) ?? null }));
+  return (r as unknown as (ProcessRow & { draft_revision_id: string | null; archived_at: string | null })[]).map((p) => ({ ...p, parent_process_id: parentOf.get(p.id) ?? null }));
 }
 
 /**
@@ -395,9 +400,8 @@ export async function loadLiveCompanyPart(db: Db, workspaceId: string): Promise<
  * reads `processes`). For the pages that stand in for the company map's own URLs.
  */
 export async function loadCompanyProcessId(db: Db, workspaceId: string): Promise<string | null> {
-  const r = await db.from("processes").select("id").eq("workspace_id", workspaceId).eq("is_company", true).maybeSingle();
-  if (r.error) throw r.error;
-  return r.data?.id ?? null;
+  const r = await db.selectFrom("processes").select("id").where("workspace_id", "=", workspaceId).where("is_company", "=", true).executeTakeFirst();
+  return r?.id ?? null;
 }
 
 /** What the start page ticks from: cheap counts of a workspace's set-up (editors only; members and viewers are never sent them). */
@@ -415,25 +419,31 @@ export interface SetupCounts {
 
 /** Counts for the start page's checklist, as the caller of `db` (RLS decides what it can count). Throws on a read error. */
 export async function loadSetupCounts(db: Db, workspaceId: string): Promise<SetupCounts> {
-  const count = (table: "roles" | "people" | "clients" | "client_groups") => db.from(table).select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId);
-  const ordinary = () => db.from("processes").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("is_company", false).is("archived_at", null);
+  const count = async (table: "roles" | "people" | "clients" | "client_groups") =>
+    Number((await db.selectFrom(table).select((eb) => eb.fn.countAll<string>().as("count")).where("workspace_id", "=", workspaceId).executeTakeFirstOrThrow()).count);
+  const ordinary = () =>
+    db
+      .selectFrom("processes")
+      .select((eb) => eb.fn.countAll<string>().as("count"))
+      .where("workspace_id", "=", workspaceId)
+      .where("is_company", "=", false)
+      .where("archived_at", "is", null);
   const [roles, people, clients, clientGroups, processes, published, companyId] = await Promise.all([
     count("roles"),
     count("people"),
     count("clients"),
     count("client_groups"),
-    ordinary(),
-    ordinary().not("live_revision_id", "is", null),
+    ordinary().executeTakeFirstOrThrow(),
+    ordinary().where("live_revision_id", "is not", null).executeTakeFirstOrThrow(),
     loadCompanyProcessId(db, workspaceId),
   ]);
-  for (const r of [roles, people, clients, clientGroups, processes, published]) if (r.error) throw r.error;
   return {
-    roles: roles.count ?? 0,
-    people: people.count ?? 0,
-    clients: clients.count ?? 0,
-    clientGroups: clientGroups.count ?? 0,
-    processes: processes.count ?? 0,
-    published: published.count ?? 0,
+    roles,
+    people,
+    clients,
+    clientGroups,
+    processes: Number(processes.count),
+    published: Number(published.count),
     companyId,
   };
 }
@@ -448,16 +458,13 @@ export async function loadLiveParts(db: Db, workspaceId: string): Promise<Proces
   const ids = live.map((p) => p.live_revision_id!);
   if (!ids.length) return [];
   const [revisions, steps, edges] = await Promise.all([
-    db.from("process_revisions").select("id, workspace_id, process_id, number, status").in("id", ids),
-    db.from("steps").select("*").in("revision_id", ids),
-    db.from("edges").select("*").in("revision_id", ids),
+    db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]).where("id", "in", ids).execute(),
+    db.selectFrom("steps").selectAll().where("revision_id", "in", ids).execute(),
+    db.selectFrom("edges").selectAll().where("revision_id", "in", ids).execute(),
   ]);
-  if (revisions.error) throw revisions.error;
-  if (steps.error) throw steps.error;
-  if (edges.error) throw edges.error;
   const parts: ProcessPart[] = [];
   for (const p of live) {
-    const revision = (revisions.data as ProcessRevisionRow[]).find((r) => r.id === p.live_revision_id);
+    const revision = (revisions as ProcessRevisionRow[]).find((r) => r.id === p.live_revision_id);
     if (!revision) continue;
     const { draft_revision_id, ...process } = p;
     void draft_revision_id;
@@ -465,8 +472,8 @@ export async function loadLiveParts(db: Db, workspaceId: string): Promise<Proces
       process,
       revision,
       // Split or replaced steps are never drawn or simulated.
-      steps: partitionSteps((steps.data as unknown as StepRow[]).filter((s) => s.revision_id === revision.id)).steps,
-      edges: (edges.data as unknown as EdgeRow[]).filter((e) => e.revision_id === revision.id),
+      steps: partitionSteps((steps as unknown as StepRow[]).filter((s) => s.revision_id === revision.id)).steps,
+      edges: (edges as unknown as EdgeRow[]).filter((e) => e.revision_id === revision.id),
     });
   }
   return parts;
@@ -482,28 +489,30 @@ export async function loadCompanyPartVersion(db: Db, workspaceId: string, number
 }
 
 async function loadCompanyPartAt(db: Db, workspaceId: string, number: number | null): Promise<ProcessPart | null> {
-  const found = await db.from("processes").select(`${PROCESS_COLUMNS}, draft_revision_id`).eq("workspace_id", workspaceId).eq("is_company", true).maybeSingle();
-  if (found.error) throw found.error;
-  const company = found.data as unknown as (ProcessRow & { draft_revision_id: string | null }) | null;
+  const found = await db
+    .selectFrom("processes")
+    .select([...columns(PROCESS_COLUMNS), "draft_revision_id"])
+    .where("workspace_id", "=", workspaceId)
+    .where("is_company", "=", true)
+    .executeTakeFirst();
+  const company = (found ?? null) as unknown as (ProcessRow & { draft_revision_id: string | null }) | null;
   if (!company?.live_revision_id) return null;
-  const { data: revision, error } =
+  const revisionQuery = db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]);
+  const revision =
     number === null
-      ? await db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("id", company.live_revision_id).maybeSingle()
-      : await db.from("process_revisions").select("id, workspace_id, process_id, number, status").eq("process_id", company.id).eq("number", number).in("status", ["published", "superseded"]).maybeSingle();
-  if (error) throw error;
+      ? await revisionQuery.where("id", "=", company.live_revision_id).executeTakeFirst()
+      : await revisionQuery.where("process_id", "=", company.id).where("number", "=", number).where("status", "in", ["published", "superseded"]).executeTakeFirst();
   if (!revision) return null;
   const [steps, edges] = await Promise.all([
-    db.from("steps").select("*").eq("revision_id", revision.id).order("y").order("x").order("id"),
-    db.from("edges").select("*").eq("revision_id", revision.id).order("id"),
+    db.selectFrom("steps").selectAll().where("revision_id", "=", revision.id).orderBy("y").orderBy("x").orderBy("id").execute(),
+    db.selectFrom("edges").selectAll().where("revision_id", "=", revision.id).orderBy("id").execute(),
   ]);
-  if (steps.error) throw steps.error;
-  if (edges.error) throw edges.error;
   const { draft_revision_id: _draft, ...process } = company;
   return {
     process,
     revision: revision as ProcessRevisionRow,
-    steps: steps.data as unknown as StepRow[],
-    edges: edges.data as unknown as EdgeRow[],
+    steps: steps as unknown as StepRow[],
+    edges: edges as unknown as EdgeRow[],
   };
 }
 
@@ -562,8 +571,7 @@ export async function loadProcessBySlug(
   slug: string,
   { draft = true, processId, includeCompany = false }: { draft?: boolean; processId?: string; includeCompany?: boolean } = {},
 ): Promise<{ live: ProcessBundle; draft: ProcessBundle | null; processes: ProcessListing[] } | null> {
-  const { data: workspace, error } = await db.from("workspaces").select("id, name, slug, settings").eq("slug", slug).maybeSingle();
-  if (error) throw error;
+  const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("slug", "=", slug).executeTakeFirst();
   if (!workspace) return null;
   // An archived process still opens by its id (its history is kept), but is never in the list or the default.
   const everything = await listProcesses(db, workspace.id, { includeCompany, includeArchived: Boolean(processId) });
@@ -591,18 +599,18 @@ export const SCENARIO_COLUMNS = "id, workspace_id, name, description, patch, par
 
 /** A workspace's saved scenarios, oldest first. */
 export async function loadScenarios(db: Db, workspaceId: string): Promise<ScenarioRow[]> {
-  const r = await db.from("scenarios").select(SCENARIO_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("name");
+  const r = await db.selectFrom("scenarios").select(columns(SCENARIO_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("name").execute();
   // The database checks patch's shape (private.is_scenario_patch).
-  return rows(r) as unknown as ScenarioRow[];
+  return r as unknown as ScenarioRow[];
 }
 
 export const BLOCK_COLUMNS = "id, workspace_id, name, description, type, steps, created_at, updated_at" as const;
 
 /** A workspace's block library, oldest first. */
 export async function loadBlocks(db: Db, workspaceId: string): Promise<BlockRow[]> {
-  const r = await db.from("blocks").select(BLOCK_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("id");
+  const r = await db.selectFrom("blocks").select(columns(BLOCK_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute();
   // The database checks that steps is an object with steps and edges arrays; type is check-constrained to BlockType.
-  return (rows(r) ?? []) as unknown as BlockRow[];
+  return r as unknown as BlockRow[];
 }
 
 export const ISSUE_COLUMNS =
@@ -671,14 +679,14 @@ export function assembleIssues(
  */
 export async function loadIssues(db: Db, workspaceId: string): Promise<IssueRow[]> {
   const [issues, links, owners, sources, linked] = await Promise.all([
-    db.from("issues").select(ISSUE_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).order("id"),
-    db.from("issue_links").select("issue_id, process_id, step_id").eq("workspace_id", workspaceId).order("created_at").order("id"),
-    db.from("issue_owners").select("issue_id, person_id").eq("workspace_id", workspaceId).order("created_at").order("person_id"),
-    db.from("issue_sources").select("issue_id, source_id").eq("workspace_id", workspaceId).order("created_at").order("source_id"),
-    db.from("source_links").select("issue_id, source_id").eq("workspace_id", workspaceId).eq("kind", "issue").order("created_at").order("id"),
+    db.selectFrom("issues").select(columns(ISSUE_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at", "desc").orderBy("id").execute(),
+    db.selectFrom("issue_links").select(["issue_id", "process_id", "step_id"]).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute(),
+    db.selectFrom("issue_owners").select(["issue_id", "person_id"]).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("person_id").execute(),
+    db.selectFrom("issue_sources").select(["issue_id", "source_id"]).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("source_id").execute(),
+    db.selectFrom("source_links").select(["issue_id", "source_id"]).where("workspace_id", "=", workspaceId).where("kind", "=", "issue").orderBy("created_at").orderBy("id").execute(),
   ]);
   // Check constraints limit type, severity, status and source to IssueRow's unions.
-  return assembleIssues(rows(issues) as unknown as IssueTableRow[], rows(links), rows(owners), unionIssueSources(rows(sources), rows(linked).flatMap((l) => (l.issue_id ? [{ issue_id: l.issue_id, source_id: l.source_id }] : []))));
+  return assembleIssues(issues as unknown as IssueTableRow[], links, owners, unionIssueSources(sources, linked.flatMap((l) => (l.issue_id ? [{ issue_id: l.issue_id, source_id: l.source_id }] : []))));
 }
 
 /**
@@ -686,8 +694,14 @@ export async function loadIssues(db: Db, workspaceId: string): Promise<IssueRow[
  * "no", so the caller gets the less revealing view.
  */
 export async function readerSeesPeople(db: Db, workspaceId: string): Promise<boolean> {
-  const r = await db.rpc("can_see_people", { ws: workspaceId });
-  return !r.error && r.data === true;
+  // A share link answers with its People toggle (see `shareReaderDb`).
+  const toggles = shareToggles.get(db);
+  if (toggles) return toggles.people;
+  try {
+    return (await rpc(db, "can_see_people", { ws: workspaceId })) === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -700,22 +714,27 @@ export async function loadIssuesForReader(db: Db, workspaceId: string): Promise<
   return sees ? issues : issues.map((i) => hideAiIssueKey(i, false));
 }
 
+/** A thrown database error as the `{ code, message }` that supabase-js handed back as `error`. */
+function errorOf(e: unknown): { code?: string; message?: string } {
+  return { code: pgCode(e), message: e instanceof Error ? e.message : String(e) };
+}
+
 /** One issue with its relations, or null if it isn't there (or isn't readable). */
 export async function loadIssue(db: Db, workspaceId: string, issueId: string): Promise<IssueRow | null> {
   const [issues, links, owners, sources, linked] = await Promise.all([
-    db.from("issues").select(ISSUE_COLUMNS).eq("workspace_id", workspaceId).eq("id", issueId),
-    db.from("issue_links").select("issue_id, process_id, step_id").eq("issue_id", issueId).order("created_at").order("id"),
-    db.from("issue_owners").select("issue_id, person_id").eq("issue_id", issueId).order("created_at").order("person_id"),
-    db.from("issue_sources").select("issue_id, source_id").eq("issue_id", issueId).order("created_at").order("source_id"),
-    db.from("source_links").select("issue_id, source_id").eq("issue_id", issueId).eq("kind", "issue").order("created_at").order("id"),
+    db.selectFrom("issues").select(columns(ISSUE_COLUMNS)).where("workspace_id", "=", workspaceId).where("id", "=", issueId).execute(),
+    db.selectFrom("issue_links").select(["issue_id", "process_id", "step_id"]).where("issue_id", "=", issueId).orderBy("created_at").orderBy("id").execute(),
+    db.selectFrom("issue_owners").select(["issue_id", "person_id"]).where("issue_id", "=", issueId).orderBy("created_at").orderBy("person_id").execute(),
+    db.selectFrom("issue_sources").select(["issue_id", "source_id"]).where("issue_id", "=", issueId).orderBy("created_at").orderBy("source_id").execute(),
+    db.selectFrom("source_links").select(["issue_id", "source_id"]).where("issue_id", "=", issueId).where("kind", "=", "issue").orderBy("created_at").orderBy("id").execute(),
   ]);
-  return assembleIssues(rows(issues) as unknown as IssueTableRow[], rows(links), rows(owners), unionIssueSources(rows(sources), rows(linked).flatMap((l) => (l.issue_id ? [{ issue_id: l.issue_id, source_id: l.source_id }] : []))))[0] ?? null;
+  return assembleIssues(issues as unknown as IssueTableRow[], links, owners, unionIssueSources(sources, linked.flatMap((l) => (l.issue_id ? [{ issue_id: l.issue_id, source_id: l.source_id }] : []))))[0] ?? null;
 }
 
 /** An issue's history, oldest first. */
 export async function loadIssueEvents(db: Db, workspaceId: string, issueId: string): Promise<IssueEventRow[]> {
-  const r = await db.from("issue_events").select(ISSUE_EVENT_COLUMNS).eq("workspace_id", workspaceId).eq("issue_id", issueId).order("seq");
-  return rows(r) as unknown as IssueEventRow[];
+  const r = await db.selectFrom("issue_events").select(columns(ISSUE_EVENT_COLUMNS)).where("workspace_id", "=", workspaceId).where("issue_id", "=", issueId).orderBy("seq").execute();
+  return r as unknown as IssueEventRow[];
 }
 
 /**
@@ -728,11 +747,14 @@ export async function resolveIssue(
 ): Promise<{ id: string } | { error: { code?: string; message?: string } }> {
   const base = { p_workspace: args.workspaceId, p_id: args.id, p_how: args.how, p_status: args.status ?? "resolved" };
   // With a solution (A50) the six-argument function; without one the five-argument function, so resolving works with or without it.
-  const { data, error } = args.solutionId
-    ? await db.rpc("resolve_issue", { ...base, p_note: args.note ?? "", p_solution: args.solutionId })
-    : await db.rpc("resolve_issue", { ...base, p_note: args.note ?? undefined });
-  if (error) return { error };
-  return { id: (data as { id: string }).id };
+  try {
+    const data = args.solutionId
+      ? await rpc(db, "resolve_issue", { ...base, p_note: args.note ?? "", p_solution: args.solutionId } as never)
+      : await rpc(db, "resolve_issue", { ...base, p_note: args.note ?? undefined });
+    return { id: (data as { id: string }).id };
+  } catch (e) {
+    return { error: errorOf(e) };
+  }
 }
 
 /** What `save_issue` takes: the columns to set, and the links, owners and sources to replace (omit to leave as they are). */
@@ -749,16 +771,19 @@ export interface SaveIssueArgs {
 /** Create or edit an issue with its links, owners and sources in one transaction (one history entry). Returns the stored issue's id. */
 export async function saveIssue(db: Db, args: SaveIssueArgs): Promise<{ id: string } | { error: { code?: string; message?: string } }> {
   const fields = Object.fromEntries(Object.entries(args.fields).filter(([, v]) => v !== undefined)) as Record<string, Json>;
-  const { data, error } = await db.rpc("save_issue", {
-    p_workspace: args.workspaceId,
-    ...(args.id ? { p_id: args.id } : {}),
-    p_fields: fields,
-    ...(args.links ? { p_links: args.links as unknown as Json } : {}),
-    ...(args.owners ? { p_owners: [...args.owners] } : {}),
-    ...(args.sources ? { p_sources: [...args.sources] } : {}),
-  });
-  if (error) return { error };
-  return { id: (data as { id: string }).id };
+  try {
+    const data = await rpc(db, "save_issue", {
+      p_workspace: args.workspaceId,
+      ...(args.id ? { p_id: args.id } : {}),
+      p_fields: fields,
+      ...(args.links ? { p_links: args.links as unknown as Json } : {}),
+      ...(args.owners ? { p_owners: [...args.owners] } : {}),
+      ...(args.sources ? { p_sources: [...args.sources] } : {}),
+    });
+    return { id: (data as { id: string }).id };
+  } catch (e) {
+    return { error: errorOf(e) };
+  }
 }
 
 /**
@@ -766,8 +791,8 @@ export async function saveIssue(db: Db, args: SaveIssueArgs): Promise<{ id: stri
  * its process's live revision changes, so the screens that list insights compare against this (`isDismissalCurrent`).
  */
 export async function loadLiveRevisionIds(db: Db, workspaceId: string): Promise<Record<string, string>> {
-  const r = await db.from("processes").select("id, live_revision_id").eq("workspace_id", workspaceId).eq("is_company", false);
-  return Object.fromEntries(rows(r).flatMap((p) => (p.live_revision_id ? [[p.id, p.live_revision_id]] : [])));
+  const r = await db.selectFrom("processes").select(["id", "live_revision_id"]).where("workspace_id", "=", workspaceId).where("is_company", "=", false).execute();
+  return Object.fromEntries(r.flatMap((p) => (p.live_revision_id ? [[p.id, p.live_revision_id]] : [])));
 }
 
 /** The `SourceRow` columns. */
@@ -776,14 +801,15 @@ export const SOURCE_COLUMNS = "id, workspace_id, kind, title, speakers, recorded
 /** The workspace's sources, most recent first (RLS: everyone in the workspace can read them). */
 export async function loadSources(db: Db, workspaceId: string): Promise<SourceRow[]> {
   const r = await db
-    .from("sources")
-    .select(SOURCE_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .order("recorded_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .order("id");
+    .selectFrom("sources")
+    .select(columns(SOURCE_COLUMNS))
+    .where("workspace_id", "=", workspaceId)
+    .orderBy("recorded_at", (ob) => ob.desc().nullsLast())
+    .orderBy("created_at", "desc")
+    .orderBy("id")
+    .execute();
   // The check constraint limits kind to SourceRow's union.
-  return rows(r) as unknown as SourceRow[];
+  return r as unknown as SourceRow[];
 }
 
 /** What the Sources library asks for: every part is optional, and the words are values (never built into a query string). */
@@ -811,7 +837,7 @@ export const SOURCES_PAGE_SIZE = 50;
  * title, speakers and text; RLS decides what is visible). Rows carry a short excerpt, never the full text.
  */
 export async function searchSources(db: Db, workspaceId: string, q: SourceSearch = {}): Promise<SourcePage> {
-  const r = await db.rpc("search_sources", {
+  const data = await rpcRows(db, "search_sources", {
     p_workspace: workspaceId,
     ...(q.search?.trim() ? { p_search: q.search } : {}),
     ...(q.kind ? { p_kind: q.kind } : {}),
@@ -821,34 +847,30 @@ export async function searchSources(db: Db, workspaceId: string, q: SourceSearch
     p_limit: q.limit ?? SOURCES_PAGE_SIZE,
     p_offset: q.offset ?? 0,
   });
-  if (r.error) throw r.error;
-  const list = (r.data ?? []) as unknown as (SourceListRow & { total: number })[];
+  const list = (data ?? []) as unknown as (SourceListRow & { total: number })[];
   return { rows: list.map(({ total: _total, ...row }) => row), total: list.length ? Number(list[0]!.total) : 0 };
 }
 
 /** How many sources the workspace has (RLS applies), whatever the library's filters say. */
 export async function countSources(db: Db, workspaceId: string): Promise<number> {
-  const r = await db.from("sources").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId);
-  if (r.error) throw r.error;
-  return r.count ?? 0;
+  const r = await db.selectFrom("sources").select((eb) => eb.fn.countAll<string>().as("count")).where("workspace_id", "=", workspaceId).executeTakeFirstOrThrow();
+  return Number(r.count);
 }
 
-/** Which of these sources still exist (RLS applies). In batches: every id goes into the request's URL, which PostgREST limits. */
+/** Which of these sources still exist (RLS applies). In batches, so a long list stays a short statement. */
 export async function existingSourceIds(db: Db, ids: readonly string[]): Promise<Set<string>> {
   const found = new Set<string>();
   for (let i = 0; i < ids.length; i += 100) {
-    const r = await db.from("sources").select("id").in("id", ids.slice(i, i + 100));
-    if (r.error) throw r.error;
-    for (const row of r.data ?? []) found.add(row.id);
+    const r = await db.selectFrom("sources").select("id").where("id", "in", ids.slice(i, i + 100)).execute();
+    for (const row of r) found.add(row.id);
   }
   return found;
 }
 
 /** One source's full text, read when it is opened. Null when it has none, or is not visible. */
 export async function loadSourceBody(db: Db, sourceId: string): Promise<string | null> {
-  const r = await db.from("sources").select("body").eq("id", sourceId).maybeSingle();
-  if (r.error) throw r.error;
-  return r.data?.body ?? null;
+  const r = await db.selectFrom("sources").select("body").where("id", "=", sourceId).executeTakeFirst();
+  return r?.body ?? null;
 }
 
 /** The original file kept for a source (B19, migration 20261204000000): where it is in Storage, its name, type and size. */
@@ -869,24 +891,24 @@ export const MAX_SOURCE_FILE_BYTES = 10 * 1024 * 1024;
 
 /** A source's original file, or null when it has none (or isn't visible). */
 export async function loadSourceFile(db: Db, sourceId: string): Promise<SourceFile | null> {
-  const r = await db.from("sources").select("file_path, file_name, file_type, file_size").eq("id", sourceId).maybeSingle();
-  if (r.error) throw r.error;
-  const f = r.data;
+  const f = await db.selectFrom("sources").select(["file_path", "file_name", "file_type", "file_size"]).where("id", "=", sourceId).executeTakeFirst();
   if (!f?.file_path || !f.file_name || !f.file_type || f.file_size == null) return null;
   return { path: f.file_path, name: f.file_name, type: f.file_type as SourceFileType, size: f.file_size };
 }
 
 /** The tours of the editor the signed-in person has dismissed (`process`, `company`); RLS shows only their own. */
 export async function loadDismissedTours(db: Db): Promise<string[]> {
-  const r = await db.from("user_tours").select("tour");
-  if (r.error) throw r.error;
-  return (r.data ?? []).map((t) => t.tour);
+  const r = await db.selectFrom("user_tours").select("tour").execute();
+  return r.map((t) => t.tour);
 }
 
 /** Remember that the signed-in person dismissed a tour, so it never opens on its own for them again. */
 export async function dismissTour(db: Db, tour: "process" | "company"): Promise<void> {
-  const r = await db.from("user_tours").upsert({ tour }, { onConflict: "user_id,tour", ignoreDuplicates: true });
-  if (r.error) throw r.error;
+  await db
+    .insertInto("user_tours")
+    .values({ tour })
+    .onConflict((oc) => oc.columns(["user_id", "tour"]).doNothing())
+    .execute();
 }
 
 /** The `SourceLinkRow` columns. */
@@ -894,19 +916,19 @@ export const SOURCE_LINK_COLUMNS = "id, workspace_id, source_id, kind, process_i
 
 /** What every source of the workspace is linked to, oldest link first (RLS: everyone in the workspace can read them). */
 export async function loadSourceLinks(db: Db, workspaceId: string): Promise<SourceLinkRow[]> {
-  const r = await db.from("source_links").select(SOURCE_LINK_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("id");
+  const r = await db.selectFrom("source_links").select(columns(SOURCE_LINK_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute();
   // The check constraint limits kind to SourceLinkRow's union.
-  return rows(r) as unknown as SourceLinkRow[];
+  return r as unknown as SourceLinkRow[];
 }
 
 /** The names of steps by their stable ids, from whichever version holds them (the latest written wins). For links to steps that are in no current version. */
 export async function loadStepNames(db: Db, ids: readonly string[]): Promise<{ id: string; name: string }[]> {
   const seen = new Set<string>();
   const out: { id: string; name: string }[] = [];
-  // In batches: every id goes into the request's URL, which PostgREST limits.
+  // In batches, so a long list stays a short statement.
   for (let i = 0; i < ids.length; i += 100) {
-    const r = await db.from("steps").select("id, name, updated_at").in("id", ids.slice(i, i + 100)).order("updated_at", { ascending: false });
-    for (const s of rows(r)) if (!seen.has(s.id)) out.push({ id: s.id, name: (seen.add(s.id), s.name) });
+    const r = await db.selectFrom("steps").select(["id", "name", "updated_at"]).where("id", "in", ids.slice(i, i + 100)).orderBy("updated_at", "desc").execute();
+    for (const s of r) if (!seen.has(s.id)) out.push({ id: s.id, name: (seen.add(s.id), s.name) });
   }
   return out;
 }
@@ -923,19 +945,21 @@ export async function loadLinkTargets(db: Db, workspaceId: string): Promise<Link
     return id ? [id] : [];
   });
   const [steps, issues, solutions] = await Promise.all([
-    revisions.length ? db.from("steps").select("id, name, process_id, replaced_by").in("revision_id", revisions).order("created_at").order("id") : Promise.resolve({ data: [], error: null }),
-    db.from("issues").select("id, number, title, status, detected_key").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).order("id"),
-    db.from("solutions").select("id, name").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).order("id"),
+    revisions.length
+      ? db.selectFrom("steps").select(["id", "name", "process_id", "replaced_by"]).where("revision_id", "in", revisions).orderBy("created_at").orderBy("id").execute()
+      : Promise.resolve([]),
+    db.selectFrom("issues").select(["id", "number", "title", "status", "detected_key"]).where("workspace_id", "=", workspaceId).orderBy("created_at", "desc").orderBy("id").execute(),
+    db.selectFrom("solutions").select(["id", "name"]).where("workspace_id", "=", workspaceId).orderBy("created_at", "desc").orderBy("id").execute(),
   ]);
   const seen = new Set<string>();
   const sees = await readerSeesPeople(db, workspaceId);
-  const live = rows(issues).filter((i) => i.status !== "dismissed").map((i) => hideAiIssueKey(i, sees));
+  const live = issues.filter((i) => i.status !== "dismissed").map((i) => hideAiIssueKey(i, sees));
   return {
     processes: processes.map((p) => ({ id: p.id, name: p.name })),
-    steps: rows(steps).flatMap((s) => (s.replaced_by.length === 0 && !seen.has(s.id) && seen.add(s.id) ? [{ id: s.id, processId: s.process_id, name: s.name }] : [])),
+    steps: steps.flatMap((s) => (s.replaced_by.length === 0 && !seen.has(s.id) && seen.add(s.id) ? [{ id: s.id, processId: s.process_id, name: s.name }] : [])),
     insights: live.flatMap((i) => (i.detected_key ? [{ key: i.detected_key, title: i.title }] : [])),
     issues: live.map((i) => ({ id: i.id, number: i.number, title: i.title })),
-    solutions: rows(solutions).map((s) => ({ id: s.id, name: s.name })),
+    solutions: solutions.map((s) => ({ id: s.id, name: s.name })),
   };
 }
 
@@ -955,15 +979,15 @@ export async function loadCitingRows(db: Db, workspaceId: string): Promise<Citin
   }
   const [steps, leadSources, seasonality, demand] = await Promise.all([
     revisions.size
-      ? db.from("steps").select("id, name, process_id, revision_id, provenance, replaced_by").in("revision_id", [...revisions.keys()])
-      : Promise.resolve({ data: [], error: null }),
-    db.from("lead_sources").select("id, name, provenance").eq("workspace_id", workspaceId),
-    db.from("seasonality").select("id, month, provenance").eq("workspace_id", workspaceId),
-    db.from("demand_settings").select("workspace_id, provenance").eq("workspace_id", workspaceId),
+      ? db.selectFrom("steps").select(["id", "name", "process_id", "revision_id", "provenance", "replaced_by"]).where("revision_id", "in", [...revisions.keys()]).execute()
+      : Promise.resolve([]),
+    db.selectFrom("lead_sources").select(["id", "name", "provenance"]).where("workspace_id", "=", workspaceId).execute(),
+    db.selectFrom("seasonality").select(["id", "month", "provenance"]).where("workspace_id", "=", workspaceId).execute(),
+    db.selectFrom("demand_settings").select(["workspace_id", "provenance"]).where("workspace_id", "=", workspaceId).execute(),
   ]);
   return [
     // Retired steps (split or replaced, issue #16) are no longer part of the process.
-    ...partitionSteps(rows(steps)).steps.map((s) => ({
+    ...partitionSteps(steps).steps.map((s) => ({
       table: "steps",
       id: s.id,
       name: s.name,
@@ -971,14 +995,14 @@ export async function loadCitingRows(db: Db, workspaceId: string): Promise<Citin
       revision: revisions.get(s.revision_id)!,
       provenance: s.provenance,
     })),
-    ...rows(leadSources).map((l) => ({ table: "lead_sources", id: l.id, name: l.name, provenance: l.provenance })),
-    ...rows(seasonality).map((m) => ({
+    ...leadSources.map((l) => ({ table: "lead_sources", id: l.id, name: l.name, provenance: l.provenance })),
+    ...seasonality.map((m) => ({
       table: "seasonality",
       id: m.id,
       name: `Seasonality: ${MONTHS[m.month - 1] ?? m.month}`,
       provenance: m.provenance,
     })),
-    ...rows(demand).map((d) => ({ table: "demand_settings", id: d.workspace_id, name: "Demand growth", provenance: d.provenance })),
+    ...demand.map((d) => ({ table: "demand_settings", id: d.workspace_id, name: "Demand growth", provenance: d.provenance })),
   ];
 }
 
@@ -995,12 +1019,12 @@ export async function loadCompanyModel(
   // People are in name order for those who see everyone (team_capacity orders them), as the table query was.
   const teamLoad = loadTeam(db, ws);
   const [roles, team, services, leadSources, seasonality, demand, roster] = await Promise.all([
-    db.from("roles").select("*").eq("workspace_id", ws).order("name"),
+    db.selectFrom("roles").selectAll().where("workspace_id", "=", ws).orderBy("name").execute(),
     teamLoad,
-    db.from("services").select(`${SERVICE_COLUMNS}, provenance`).eq("workspace_id", ws).order("name"),
-    db.from("lead_sources").select(LEAD_SOURCE_COLUMNS).eq("workspace_id", ws).order("created_at").order("id"),
-    db.from("seasonality").select(SEASONALITY_COLUMNS).eq("workspace_id", ws).order("month"),
-    db.from("demand_settings").select(DEMAND_SETTINGS_COLUMNS).eq("workspace_id", ws).maybeSingle(),
+    db.selectFrom("services").select([...columns(SERVICE_COLUMNS), "provenance"]).where("workspace_id", "=", ws).orderBy("name").execute(),
+    db.selectFrom("lead_sources").select(columns(LEAD_SOURCE_COLUMNS)).where("workspace_id", "=", ws).orderBy("created_at").orderBy("id").execute(),
+    db.selectFrom("seasonality").select(columns(SEASONALITY_COLUMNS)).where("workspace_id", "=", ws).orderBy("month").execute(),
+    db.selectFrom("demand_settings").select(columns(DEMAND_SETTINGS_COLUMNS)).where("workspace_id", "=", ws).executeTakeFirst(),
     teamLoad.then((t) => loadClients(db, ws, t)),
   ]);
   // The casts give jsonb columns (settings, provenance) their shapes and narrow check-constrained text.
@@ -1012,15 +1036,15 @@ export async function loadCompanyModel(
       settings: workspace.settings as WorkspaceSettings,
       ...(workspace.provenance ? { provenance: workspace.provenance as ProvenanceMap } : {}),
     },
-    roles: rows(roles) ?? [],
+    roles,
     people: team.people,
     personRoles: team.personRoles,
     personLeave: team.personLeave,
     viewer: team.viewer,
-    services: (rows(services) ?? []) as ServiceRow[],
-    leadSources: (rows(leadSources) ?? []) as LeadSourceRow[],
-    seasonality: (rows(seasonality) ?? []) as SeasonalityRow[],
-    demand: rows(demand) as DemandSettingsRow | null,
+    services: services as unknown as ServiceRow[],
+    leadSources: leadSources as unknown as LeadSourceRow[],
+    seasonality: seasonality as unknown as SeasonalityRow[],
+    demand: (demand ?? null) as DemandSettingsRow | null,
     ...roster,
   };
 }
@@ -1030,7 +1054,7 @@ export async function loadLiveRevisions(db: Db, workspaceId: string): Promise<Sn
   const processes = await listProcesses(db, workspaceId);
   const ids = processes.flatMap((p) => (p.live_revision_id ? [p.live_revision_id] : []));
   if (!ids.length) return [];
-  const revisions = rows(await db.from("process_revisions").select("id, number").in("id", ids));
+  const revisions = await db.selectFrom("process_revisions").select(["id", "number"]).where("id", "in", ids).execute();
   return processes.flatMap((p) => {
     const r = revisions.find((x) => x.id === p.live_revision_id);
     return r ? [{ id: p.id, name: p.name, revision_id: r.id, revision: r.number }] : [];
@@ -1042,11 +1066,11 @@ export const SUGGESTION_ROW_COLUMNS =
 
 /** The workspace's suggestions, newest first; optionally only one status. */
 export async function loadSuggestions(db: Db, workspaceId: string, status?: SuggestionStatus): Promise<SuggestionRow[]> {
-  let q = db.from("suggestions").select(SUGGESTION_ROW_COLUMNS).eq("workspace_id", workspaceId);
-  if (status) q = q.eq("status", status);
-  const r = await q.order("created_at", { ascending: false }).order("id").limit(500);
+  let q = db.selectFrom("suggestions").select(columns(SUGGESTION_ROW_COLUMNS)).where("workspace_id", "=", workspaceId);
+  if (status) q = q.where("status", "=", status);
+  const r = await q.orderBy("created_at", "desc").orderBy("id").limit(500).execute();
   // Check constraints limit the text columns; patch, evidence and applied are jsonb.
-  return rows(r) as unknown as SuggestionRow[];
+  return r as unknown as SuggestionRow[];
 }
 
 export const RUN_COLUMNS =
@@ -1055,20 +1079,21 @@ export const RUN_COLUMNS =
 /** The workspace's saved runs, newest first. */
 export async function loadRuns(db: Db, workspaceId: string): Promise<RunRow[]> {
   const r = await db
-    .from("runs")
-    .select(RUN_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: false })
-    .order("id")
-    .limit(200);
+    .selectFrom("runs")
+    .select(columns(RUN_COLUMNS))
+    .where("workspace_id", "=", workspaceId)
+    .orderBy("created_at", "desc")
+    .orderBy("id")
+    .limit(200)
+    .execute();
   // params_snapshot and results are jsonb; RunRow gives them their shapes.
-  return rows(r) as unknown as RunRow[];
+  return r as unknown as RunRow[];
 }
 
 /** One saved run, or null if it isn't visible. */
 export async function loadRun(db: Db, id: string): Promise<RunRow | null> {
-  const r = await db.from("runs").select(RUN_COLUMNS).eq("id", id).maybeSingle();
-  return rows(r) as unknown as RunRow | null;
+  const r = await db.selectFrom("runs").select(columns(RUN_COLUMNS)).where("id", "=", id).executeTakeFirst();
+  return (r ?? null) as unknown as RunRow | null;
 }
 
 export const SOLUTION_COLUMNS = "id, workspace_id, process_id, base_revision_id, name, notes, steps, changed_step_ids, lever_changes, created_at, updated_at, created_by" as const;
@@ -1076,11 +1101,11 @@ export const SOLUTION_ISSUE_COLUMNS = "solution_id, issue_id, workspace_id, auto
 
 /** A workspace's solutions, newest first: optionally only those that change one process. */
 export async function loadSolutions(db: Db, workspaceId: string, processId?: string): Promise<SolutionRow[]> {
-  let q = db.from("solutions").select(SOLUTION_COLUMNS).eq("workspace_id", workspaceId);
-  if (processId) q = q.eq("process_id", processId);
-  const r = await q.order("created_at", { ascending: false }).order("id");
+  let q = db.selectFrom("solutions").select(columns(SOLUTION_COLUMNS)).where("workspace_id", "=", workspaceId);
+  if (processId) q = q.where("process_id", "=", processId);
+  const r = await q.orderBy("created_at", "desc").orderBy("id").execute();
   // The database checks the shapes of steps, changed_step_ids and lever_changes.
-  return (rows(r) ?? []) as unknown as SolutionRow[];
+  return r as unknown as SolutionRow[];
 }
 
 /** The `ForecastPlanRow` columns. */
@@ -1088,17 +1113,18 @@ export const FORECAST_PLAN_COLUMNS = "id, workspace_id, name, markers, created_a
 
 /** A workspace's forecast plans by name (RLS: only owners, editors and agency admins read them). Empty, with a log line, if they can't be read. */
 export async function loadForecastPlans(db: Db, workspaceId: string): Promise<ForecastPlanRow[]> {
-  const r = await db.from("forecast_plans").select(FORECAST_PLAN_COLUMNS).eq("workspace_id", workspaceId).order("name").order("id");
-  if (r.error) {
-    console.error("Couldn't load the forecast plans; showing none.", r.error.message);
+  try {
+    const r = await db.selectFrom("forecast_plans").select(columns(FORECAST_PLAN_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("name").orderBy("id").execute();
+    // The database checks the shape of markers.
+    return r as unknown as ForecastPlanRow[];
+  } catch (e) {
+    console.error("Couldn't load the forecast plans; showing none.", e instanceof Error ? e.message : e);
     return [];
   }
-  // The database checks the shape of markers.
-  return (r.data ?? []) as unknown as ForecastPlanRow[];
 }
 
 /** The issues each of a workspace's solutions solves, with their verdicts. */
 export async function loadSolutionIssues(db: Db, workspaceId: string): Promise<SolutionIssueRow[]> {
-  const r = await db.from("solution_issues").select(SOLUTION_ISSUE_COLUMNS).eq("workspace_id", workspaceId).order("created_at").order("issue_id");
-  return (rows(r) ?? []) as unknown as SolutionIssueRow[];
+  const r = await db.selectFrom("solution_issues").select(columns(SOLUTION_ISSUE_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("issue_id").execute();
+  return r as unknown as SolutionIssueRow[];
 }

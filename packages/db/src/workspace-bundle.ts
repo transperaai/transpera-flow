@@ -16,6 +16,7 @@
 
 import { restoreSizeWarning } from "./workspace-import";
 import { ENGINE_VERSION } from "@transpera-flow/engine";
+import { sql } from "kysely";
 import type { Db } from "./queries";
 
 export const WORKSPACE_BUNDLE_FORMAT = "transpera-workspace/1";
@@ -150,7 +151,7 @@ export interface ReaderOptions {
 }
 
 /**
- * A reader over a Supabase client acting as the signed-in user, in a stable order. It asks for the next rows after what it
+ * A reader over a `Db` acting as the signed-in user, in a stable order. It asks for the next rows after what it
  * has, and stops only on an empty page, so an API that returns fewer rows than asked (a lower max-rows) can't truncate it.
  */
 export function supabaseReader(db: Db, options: ReaderOptions = {}): TableReader {
@@ -160,16 +161,12 @@ export function supabaseReader(db: Db, options: ReaderOptions = {}): TableReader
     const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table);
     if (!spec) throw new Error(`Not a bundle table: ${table}`);
     const all: Row[] = [];
+    // Table and column names come from BUNDLE_TABLES (code), never from a caller, and go in as identifiers.
+    const select = spec.columns ? sql.join(spec.columns.split(",").map((c) => sql.id(c.trim()))) : sql.raw("*");
+    const order = sql.join(spec.order.map((c) => sql.id(c)));
     for (;;) {
-      let q = (db as unknown as { from: (t: string) => { select: (c: string) => { eq: (c: string, v: string) => { order: (c: string) => unknown } } } })
-        .from(table)
-        .select(spec.columns ?? "*")
-        .eq("workspace_id", workspaceId) as unknown as { order: (c: string) => unknown };
-      for (const col of spec.order) q = q.order(col) as typeof q;
-      const from = all.length;
-      const { data, error } = await (q as unknown as { range: (a: number, b: number) => Promise<{ data: Row[] | null; error: { message: string } | null }> }).range(from, from + pageSize - 1);
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) break;
+      const { rows: data } = await sql<Row>`select ${select} from ${sql.table(table)} where ${sql.id("workspace_id")} = ${workspaceId} order by ${order} limit ${pageSize} offset ${all.length}`.execute(db);
+      if (data.length === 0) break;
       all.push(...data);
       if (all.length > maxRows) throw new BundleTooLargeError(`${table} has more than ${maxRows} rows`);
     }
@@ -350,9 +347,8 @@ export async function exportWorkspaceBundle(
 /** The reader of the `workspaces` row, as the signed-in user. */
 export function supabaseWorkspaceReader(db: Db): (id: string) => Promise<Row | null> {
   return async (id) => {
-    const { data, error } = await db.from("workspaces").select("id, name, slug, plan, settings, provenance").eq("id", id).maybeSingle();
-    if (error) throw new Error(error.message);
-    return (data as Row | null) ?? null;
+    const data = await db.selectFrom("workspaces").select(["id", "name", "slug", "plan", "settings", "provenance"]).where("id", "=", id).executeTakeFirst();
+    return (data as Row | undefined) ?? null;
   };
 }
 

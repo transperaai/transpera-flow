@@ -1,74 +1,71 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BUNDLE_TABLES, BundleTooLargeError, supabaseReader, type Db } from "../src";
+import { createTestDb, createUser, type TestDb } from "./harness";
 
-// The Supabase reader pages (the API returns at most 1000 rows a request), orders stably and filters to the workspace.
+// The bundle reader pages through a table, orders stably and filters to the workspace, against Postgres as a real
+// owner. (Supabase's API returned at most 1000 rows a request, so the reader never trusted a short page to mean the end;
+// it still stops only on an empty page, and the tests below page in small steps to prove it.)
 
-function fakeDb(total: number, serverMax = Infinity) {
-  const calls: { table: string; select: string; eq: [string, string]; order: string[]; range: [number, number] }[] = [];
-  const db = {
-    from(table: string) {
-      const call = { table, select: "", eq: ["", ""] as [string, string], order: [] as string[], range: [0, 0] as [number, number] };
-      const q = {
-        select(c: string) {
-          call.select = c;
-          return q;
-        },
-        eq(c: string, v: string) {
-          call.eq = [c, v];
-          return q;
-        },
-        order(c: string) {
-          call.order.push(c);
-          return q;
-        },
-        async range(a: number, b: number) {
-          call.range = [a, b];
-          calls.push({ ...call, order: [...call.order] });
-          const rows = Array.from({ length: Math.max(0, Math.min(b + 1, total, a + serverMax) - a) }, (_, i) => ({ id: a + i, workspace_id: "w" }));
-          return { data: rows, error: null };
-        },
-      };
-      return q;
-    },
-  };
-  return { db: db as unknown as Db, calls };
-}
+let tdb: TestDb;
+let db: Db;
+let ws: string;
+let otherWs: string;
+
+beforeAll(async () => {
+  tdb = await createTestDb();
+  ws = (await tdb.client.query("insert into workspaces (name, slug) values ('Reader', 'reader-ws') returning id")).rows[0].id;
+  otherWs = (await tdb.client.query("insert into workspaces (name, slug) values ('Elsewhere', 'reader-other') returning id")).rows[0].id;
+  const owner = await createUser(tdb, "owner@bundle-reader.example.com");
+  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, owner.id]);
+  db = tdb.dbAs(owner.claims as never);
+  await tdb.client.query("insert into roles (workspace_id, name) select $1, 'Role ' || g from generate_series(1, 2005) g", [ws]);
+  await tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Not ours')", [otherWs]);
+  await tdb.client.query(
+    "insert into suggestion_proposals (workspace_id, kind, title, payload, created_via, import_source, proposer_email) select $1, 'issue', 'Idea ' || g, '{}', 'upload', 'x', 'visitor@example.com' from generate_series(1, 3) g",
+    [ws],
+  );
+});
+afterAll(async () => {
+  await tdb?.close();
+});
 
 describe("supabaseReader", () => {
   it("reads every page, scoped to the workspace and in a stable order", async () => {
-    const { db, calls } = fakeDb(2005);
-    const rows = await supabaseReader(db)("steps", "w");
+    const rows = await supabaseReader(db)("roles", ws);
     expect(rows).toHaveLength(2005);
-    expect(calls.map((c) => c.range)).toEqual([[0, 999], [1000, 1999], [2000, 2999], [2005, 3004]]);
-    expect(calls.every((c) => c.eq[0] === "workspace_id" && c.eq[1] === "w")).toBe(true);
-    expect(calls[0]!.order).toEqual(["id"]);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(2005);
+    expect(rows.every((r) => r.workspace_id === ws)).toBe(true);
+    const ids = rows.map((r) => r.id as string);
+    expect(ids).toEqual([...ids].sort());
   });
 
-  it("is not truncated by an API that returns fewer rows than asked (a lower max-rows), whatever the page size", async () => {
-    const { db, calls } = fakeDb(250, 100);
-    const rows = await supabaseReader(db, { pageSize: 1000 })("steps", "w");
-    expect(rows).toHaveLength(250);
-    expect(new Set(rows.map((r) => r.id)).size).toBe(250);
-    expect(calls.map((c) => c.range[0])).toEqual([0, 100, 200, 250]);
-    const small = fakeDb(7);
-    expect(await supabaseReader(small.db, { pageSize: 2 })("steps", "w")).toHaveLength(7);
+  it("is not truncated whatever the page size", async () => {
+    for (const pageSize of [1000, 100, 7, 1]) {
+      const rows = await supabaseReader(db, { pageSize })("suggestion_proposals", ws);
+      expect(rows, `page size ${pageSize}`).toHaveLength(3);
+      expect(new Set(rows.map((r) => r.id)).size).toBe(3);
+    }
+    const all = await supabaseReader(db, { pageSize: 250 })("roles", ws);
+    expect(all).toHaveLength(2005);
+    expect(new Set(all.map((r) => r.id)).size).toBe(2005);
   });
 
   it("says so, instead of running out of memory, when a table is too large", async () => {
-    await expect(supabaseReader(fakeDb(50).db, { pageSize: 10, maxRows: 30 })("steps", "w")).rejects.toBeInstanceOf(BundleTooLargeError);
-    await expect(supabaseReader(fakeDb(50).db, { pageSize: 10, maxRows: 30 })("steps", "w")).rejects.toThrow(/too large to export/);
+    await expect(supabaseReader(db, { pageSize: 10, maxRows: 30 })("roles", ws)).rejects.toBeInstanceOf(BundleTooLargeError);
+    await expect(supabaseReader(db, { pageSize: 10, maxRows: 30 })("roles", ws)).rejects.toThrow(/too large to export/);
   });
 
-  it("stops on the first empty page, and never asks for a column the app can't read", async () => {
-    const { db, calls } = fakeDb(3);
-    expect(await supabaseReader(db)("suggestion_proposals", "w")).toHaveLength(3);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]!.select).not.toContain("proposer_email");
-    expect(calls[0]!.select).toBe(BUNDLE_TABLES.suggestion_proposals.columns);
+  it("reads an empty table as no rows, and never asks for a column the app can't read", async () => {
+    expect(await supabaseReader(db)("roles", otherWs)).toEqual([]);
+    const rows = await supabaseReader(db)("suggestion_proposals", ws);
+    expect(rows).toHaveLength(3);
+    const columns = BUNDLE_TABLES.suggestion_proposals.columns.split(",").map((c) => c.trim());
+    expect(columns).not.toContain("proposer_email");
+    expect(Object.keys(rows[0]!).sort()).toEqual([...columns].sort());
   });
 
   it("refuses a table that is not part of a bundle", async () => {
-    await expect(supabaseReader(fakeDb(0).db)("api_tokens", "w")).rejects.toThrow(/Not a bundle table/);
-    await expect(supabaseReader(fakeDb(0).db)("memberships", "w")).rejects.toThrow(/Not a bundle table/);
+    await expect(supabaseReader(db)("api_tokens", ws)).rejects.toThrow(/Not a bundle table/);
+    await expect(supabaseReader(db)("memberships", ws)).rejects.toThrow(/Not a bundle table/);
   });
 });

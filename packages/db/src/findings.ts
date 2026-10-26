@@ -1,6 +1,8 @@
 import type { Json } from "./database.types";
 import type { PersonLabels } from "./person-labels";
 import type { Db } from "./queries";
+import { columns } from "./columns";
+import { pgCode } from "./pg-error";
 import { FINDING_TYPES, type FindingCitation, type FindingRating, type FindingRow, type FindingStatus, type FindingType } from "./types";
 
 // Findings storage (issue #175, B17; decision D40; migration 20261205000000). Reads and writes run as the signed-in user,
@@ -40,13 +42,15 @@ export function readCitations(json: Json | unknown): FindingCitation[] {
 
 /** Every finding of a workspace that a page may show or review (dismissed and superseded ones stay in the table, unread). */
 export async function loadFindings(db: Db, workspaceId: string, statuses: readonly FindingStatus[] = ["proposed", "accepted"]): Promise<FindingRow[]> {
-  const { data, error } = await db
-    .from("findings")
-    .select(FINDING_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .in("status", [...statuses])
-    .order("created_at", { ascending: true });
-  if (error) throw error;
+  // `in ()` is not SQL (PostgREST read an empty list as matching nothing).
+  if (!statuses.length) return [];
+  const data = await db
+    .selectFrom("findings")
+    .select(columns(FINDING_COLUMNS))
+    .where("workspace_id", "=", workspaceId)
+    .where("status", "in", [...statuses])
+    .orderBy("created_at", "asc")
+    .execute();
   return data as unknown as FindingRow[];
 }
 
@@ -86,40 +90,55 @@ const draftColumns = (d: FindingDraft) => ({
 
 export type FindingWrite = { status: "saved"; finding: FindingRow } | { status: "invalid"; message: string } | { status: "forbidden" } | { status: "error"; message: string };
 
-const failed = (error: { code?: string; message?: string }): FindingWrite =>
-  error.code === "42501" ? { status: "forbidden" } : error.code === "23514" ? { status: "invalid", message: error.message ?? "That isn't allowed." } : { status: "error", message: "Couldn't save. Try again." };
+const failed = (error: unknown): FindingWrite => {
+  const code = pgCode(error);
+  const message = error instanceof Error ? error.message : undefined;
+  return code === "42501" ? { status: "forbidden" } : code === "23514" ? { status: "invalid", message: message ?? "That isn't allowed." } : { status: "error", message: "Couldn't save. Try again." };
+};
 
 /** Add a finding by hand (it starts accepted). */
 export async function createManualFinding(db: Db, workspaceId: string, d: FindingDraft): Promise<FindingWrite> {
   const problem = findingDraftProblem(d);
   if (problem) return { status: "invalid", message: problem };
-  const { data, error } = await db
-    .from("findings")
-    .insert({ workspace_id: workspaceId, origin: "manual", status: "accepted", ...draftColumns(d) })
-    .select(FINDING_COLUMNS)
-    .single();
-  if (error) return failed(error);
-  return { status: "saved", finding: data as unknown as FindingRow };
+  try {
+    const data = await db
+      .insertInto("findings")
+      .values({ workspace_id: workspaceId, origin: "manual", status: "accepted", ...draftColumns(d) })
+      .returning(columns(FINDING_COLUMNS))
+      .executeTakeFirstOrThrow();
+    return { status: "saved", finding: data as unknown as FindingRow };
+  } catch (e) {
+    return failed(e);
+  }
 }
 
 /** Edit a finding (AI or by hand), optionally deciding it in the same write: an edited proposal can be accepted at once. */
 export async function updateFinding(db: Db, id: string, d: FindingDraft, status?: "accepted"): Promise<FindingWrite> {
   const problem = findingDraftProblem(d);
   if (problem) return { status: "invalid", message: problem };
-  const { data, error } = await db
-    .from("findings")
-    .update({ ...draftColumns(d), ...(status ? { status } : {}) })
-    .eq("id", id)
-    .select(FINDING_COLUMNS);
-  if (error) return failed(error);
+  let data;
+  try {
+    data = await db
+      .updateTable("findings")
+      .set({ ...draftColumns(d), ...(status ? { status } : {}) })
+      .where("id", "=", id)
+      .returning(columns(FINDING_COLUMNS))
+      .execute();
+  } catch (e) {
+    return failed(e);
+  }
   if (!data.length) return { status: "forbidden" };
   return { status: "saved", finding: data[0] as unknown as FindingRow };
 }
 
 /** Accept or dismiss a finding (or accept a dismissed one again). */
 export async function setFindingStatus(db: Db, id: string, status: "accepted" | "dismissed"): Promise<FindingWrite> {
-  const { data, error } = await db.from("findings").update({ status }).eq("id", id).select(FINDING_COLUMNS);
-  if (error) return failed(error);
+  let data;
+  try {
+    data = await db.updateTable("findings").set({ status }).where("id", "=", id).returning(columns(FINDING_COLUMNS)).execute();
+  } catch (e) {
+    return failed(e);
+  }
   if (!data.length) return { status: "forbidden" };
   return { status: "saved", finding: data[0] as unknown as FindingRow };
 }
@@ -157,52 +176,64 @@ export async function storeProposedFindings(
   const keys = [...new Set(wanted.map((f) => f.aiKey))];
   const where = (processId: string | null, key: string) => `${processId ?? ""}|${key}`;
   const known = new Map<string, { id: string; status: FindingStatus }>();
-  if (keys.length) {
-    const same = await db.from("findings").select("id, ai_key, process_id, status").eq("workspace_id", input.workspaceId).eq("origin", "ai").in("ai_key", keys);
-    if (same.error) return { error: same.error.message };
-    for (const r of same.data) known.set(where(r.process_id, r.ai_key ?? ""), { id: r.id, status: r.status as FindingStatus });
+  // supabase-js returned `{ error }`; this function reports a failed statement as `{ error: message }` too.
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  try {
+    if (keys.length) {
+      const same = await db
+        .selectFrom("findings")
+        .select(["id", "ai_key", "process_id", "status"])
+        .where("workspace_id", "=", input.workspaceId)
+        .where("origin", "=", "ai")
+        .where("ai_key", "in", keys)
+        .execute();
+      for (const r of same) known.set(where(r.process_id, r.ai_key ?? ""), { id: r.id, status: r.status as FindingStatus });
+    }
+    const content = (f: ProposedFinding) => ({
+      step_id: f.stepId,
+      rating: f.rating,
+      type: f.type,
+      title: f.title.slice(0, FINDING_LIMITS.title),
+      evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
+      why: f.why.slice(0, FINDING_LIMITS.why),
+      facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
+      person_labels: f.personLabels as unknown as Json,
+      analysis_id: input.analysisId,
+      run_id: input.runId,
+      status: "proposed",
+    });
+    const fresh = wanted.filter((f) => !known.has(where(f.processId, f.aiKey)));
+    const again = wanted.flatMap((f) => {
+      const r = known.get(where(f.processId, f.aiKey));
+      return r && (r.status === "proposed" || r.status === "superseded") ? [{ id: r.id, f }] : [];
+    });
+    if (fresh.length) {
+      await db
+        .insertInto("findings")
+        .values(fresh.map((f) => ({ workspace_id: input.workspaceId, process_id: f.processId, origin: "ai", ai_key: f.aiKey, ...content(f) })))
+        .execute();
+    }
+    for (const { id, f } of again) {
+      await db.updateTable("findings").set(content(f)).where("id", "=", id).execute();
+    }
+    // The proposals still open in this scope (made by an analysis stored against it) that an earlier run made.
+    const open = await db
+      .selectFrom("findings")
+      .innerJoin("ai_analyses", "ai_analyses.id", "findings.analysis_id")
+      .select(["findings.id", "findings.run_id"])
+      .where("findings.workspace_id", "=", input.workspaceId)
+      .where("findings.origin", "=", "ai")
+      .where("findings.status", "=", "proposed")
+      .where("ai_analyses.process_id", "=", input.scope)
+      .execute();
+    const stale = open.filter((r) => r.run_id !== input.runId).map((r) => r.id);
+    if (stale.length) {
+      await db.updateTable("findings").set({ status: "superseded" }).where("id", "in", stale).execute();
+    }
+    return { added: fresh.length, renewed: again.length, superseded: stale.length };
+  } catch (e) {
+    return { error: message(e) };
   }
-  const content = (f: ProposedFinding) => ({
-    step_id: f.stepId,
-    rating: f.rating,
-    type: f.type,
-    title: f.title.slice(0, FINDING_LIMITS.title),
-    evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
-    why: f.why.slice(0, FINDING_LIMITS.why),
-    facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
-    person_labels: f.personLabels as unknown as Json,
-    analysis_id: input.analysisId,
-    run_id: input.runId,
-    status: "proposed",
-  });
-  const fresh = wanted.filter((f) => !known.has(where(f.processId, f.aiKey)));
-  const again = wanted.flatMap((f) => {
-    const r = known.get(where(f.processId, f.aiKey));
-    return r && (r.status === "proposed" || r.status === "superseded") ? [{ id: r.id, f }] : [];
-  });
-  if (fresh.length) {
-    const { error } = await db.from("findings").insert(fresh.map((f) => ({ workspace_id: input.workspaceId, process_id: f.processId, origin: "ai", ai_key: f.aiKey, ...content(f) })));
-    if (error) return { error: error.message };
-  }
-  for (const { id, f } of again) {
-    const { error } = await db.from("findings").update(content(f)).eq("id", id);
-    if (error) return { error: error.message };
-  }
-  // The proposals still open in this scope (made by an analysis stored against it) that an earlier run made.
-  const open = await db
-    .from("findings")
-    .select("id, run_id, ai_analyses!inner(process_id)")
-    .eq("workspace_id", input.workspaceId)
-    .eq("origin", "ai")
-    .eq("status", "proposed")
-    .eq("ai_analyses.process_id", input.scope);
-  if (open.error) return { error: open.error.message };
-  const stale = open.data.filter((r) => r.run_id !== input.runId).map((r) => r.id);
-  if (stale.length) {
-    const { error } = await db.from("findings").update({ status: "superseded" }).in("id", stale);
-    if (error) return { error: error.message };
-  }
-  return { added: fresh.length, renewed: again.length, superseded: stale.length };
 }
 
 /** What Claude proposes over the connector (B20): a finding with its place, words, the facts and sources it cites, and the labels it uses. */
@@ -234,29 +265,31 @@ export async function proposeConnectorFinding(db: Db, input: ConnectorFindingInp
   if (problem) return { status: "invalid", message: problem };
   // Never drop a citation silently: a finding rests on what it says it rests on.
   if (input.facts.length > FINDING_LIMITS.facts) return { status: "invalid", message: `A finding can rest on at most ${FINDING_LIMITS.facts} facts and quotes together.` };
-  const { data, error } = await db
-    .from("findings")
-    .insert({
-      workspace_id: input.workspaceId,
-      process_id: input.processId,
-      step_id: input.stepId,
-      origin: "ai",
-      status: "proposed",
-      rating: input.rating,
-      type: input.type,
-      title: input.title.trim(),
-      evidence: input.evidence.trim(),
-      why: input.why.trim(),
-      facts: input.facts as unknown as Json,
-      source_ids: input.sourceIds,
-      person_labels: input.personLabels as unknown as Json,
-    })
-    .select(FINDING_COLUMNS)
-    .single();
-  if (error) {
-    if (error.code === "23505") return { status: "duplicate" };
-    if (error.code === "54000") return { status: "limit", message: (error.message ?? "").replace(/^findings: /, "") };
-    return failed(error);
+  try {
+    const data = await db
+      .insertInto("findings")
+      .values({
+        workspace_id: input.workspaceId,
+        process_id: input.processId,
+        step_id: input.stepId,
+        origin: "ai",
+        status: "proposed",
+        rating: input.rating,
+        type: input.type,
+        title: input.title.trim(),
+        evidence: input.evidence.trim(),
+        why: input.why.trim(),
+        facts: input.facts as unknown as Json,
+        source_ids: input.sourceIds,
+        person_labels: input.personLabels as unknown as Json,
+      })
+      .returning(columns(FINDING_COLUMNS))
+      .executeTakeFirstOrThrow();
+    return { status: "saved", finding: data as unknown as FindingRow };
+  } catch (e) {
+    const code = pgCode(e);
+    if (code === "23505") return { status: "duplicate" };
+    if (code === "54000") return { status: "limit", message: (e instanceof Error ? e.message : "").replace(/^findings: /, "") };
+    return failed(e);
   }
-  return { status: "saved", finding: data as unknown as FindingRow };
 }
