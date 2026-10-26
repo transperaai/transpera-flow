@@ -229,9 +229,8 @@ rest.
 ## Where Larkspur lives
 
 - Engine: `larkspurModel()` from `packages/engine/src/fixtures/larkspur.ts`, built from `larkspur-data.ts`.
-- Seed: `larkspurBundle()` in `packages/db/src/fixtures/larkspur.ts`, in `seed.sql` and `bootstrap.sql` beside
-  Northbeam (slug `larkspur`), so it loads locally (`supabase db reset`) and on preview branches, which run the
-  seed. `packages/db/test/larkspur.test.ts` checks the rows resolve on 5 October 2026 to exactly
+- Seed: `larkspurBundle()` in `packages/db/src/fixtures/larkspur.ts`, in `seed.sql` beside Northbeam (slug
+  `larkspur`), so it loads wherever the seed does (`pnpm --filter @transpera-flow/db migrate --seed`, and the tests). `packages/db/test/larkspur.test.ts` checks the rows resolve on 5 October 2026 to exactly
   `larkspurModel()`; `database.test.ts` checks the seeded database round-trips to the same model.
 - App: `/demo/larkspur`, read-only from the fixtures, on any deployment.
 - Production: not loaded. It is a test and demo agency; add it by hand only if wanted.

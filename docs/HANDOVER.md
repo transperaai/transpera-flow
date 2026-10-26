@@ -146,42 +146,42 @@ as in the app).
 
 ## Operations
 
-**Production SQL** (Supabase project `vgsjkpwvxkpqvyazwcyq`, via the Management API; allowed in
-`.claude/settings.json`):
+**Database SQL** (psql on `DATABASE_URL`, the owner's connection string, stopping at the first error):
 
 ```sh
-bash packages/db/scripts/prod-sql.sh -c "select 1"
-bash packages/db/scripts/prod-sql.sh -f apply.sql
+bash packages/db/scripts/db-sql.sh -c "select 1"
+bash packages/db/scripts/db-sql.sh -f checks.sql
 ```
 
+`db-sql.sh` replaces `prod-sql.sh` (Supabase's Management API). Use it for preflight and post-apply checks, not to apply
+migrations. The app's queries connect as `authenticator` (`APP_DATABASE_URL`), made by
+`packages/db/scripts/create-app-login.sql`; see `docs/production-migrations.md`.
+
 **Applying a migration:**
-1. Before merging the PR, write an apply file:
-   - `begin;`
-   - the migration's SQL
-   - `insert into supabase_migrations.schema_migrations (version, name, statements) values ('<version>', '<name>', array[$mig$<the migration SQL>$mig$]);`
-   - `commit;`
-2. Run preflight queries for anything that could fail on real data.
-3. Apply the file.
-4. Verify: tables, row-level security, policies, and the `schema_migrations` row.
-5. Merge the PR, then update the log.
+1. Run preflight queries for anything that could fail on real data (`db-sql.sh -c` or `-f`).
+2. `pnpm --filter @transpera-flow/db migrate --dry-run` lists what is pending; `pnpm --filter @transpera-flow/db migrate`
+   applies it. Each file runs in its own transaction and is recorded in `public.schema_migrations`; two runs at once wait
+   for each other. There is no apply file and no `supabase_migrations` row any more. The runner sets no `lock_timeout`
+   (`prod-sql.sh` did), so a migration that takes a strong lock on a busy table sets its own (`set local lock_timeout = '5s';`).
+3. Verify: tables, row-level security, policies, and the `schema_migrations` row.
+4. Merge the PR, then update the log in `docs/production-migrations.md`.
 
 - **Migration order:** migrations apply in file-name order. A migration landing after a later-numbered one
   must be renumbered.
 - **`save_fields`:** each migration that redefines `save_fields` must copy the **latest** definition and
   append to its allow-list, because the last definition wins.
+- After changing a function or table, regenerate `db-types.ts`, `json-columns.ts` and `function-types.ts` with
+  `pnpm --filter @transpera-flow/db gen:types`; a test fails if `function-types.ts` is stale.
 
 **CI:**
-- The GitHub `check` job runs lint, typecheck, tests, the build, and the PostgREST end-to-end tests. Each PR
+- The GitHub `check` job runs lint, typecheck, tests, the build, and the end-to-end tests. Each PR
   also gets a Vercel preview.
 - In the cloud container there is no `gh`; use the GitHub MCP tools. Squash-merge with the full head SHA as
   `expectedHeadSha`. Branch protection requires the `check` status: merging while it runs returns 405.
-- Per ticket: build, Opus review, fixes, merge `origin/main` (regenerate `bootstrap.sql` with
-  `pnpm --filter @transpera-flow/db gen:bootstrap`, never by hand), CI green, production preflight, apply
-  (`prod-sql.sh -f <apply file>`, which sets `lock_timeout`), post-apply checks, mark the row applied and push, CI, merge,
-  comment on the issue.
-- `prod-sql.sh` gotchas: errors come back as curl exit 22 with a 400; `[]` means success. Write SQL to a file first. Function
-  bodies store `can''t`, so a `like` against them needs `can''''t`; cast `"char"` columns (`tgenabled::text`); compare
-  `proconfig` with `array['search_path=""']`.
+- Per ticket: build, Opus review, fixes, merge `origin/main` (regenerate generated files with their `gen:*` script, never by
+  hand), CI green, production preflight (`db-sql.sh`), apply (`migrate`), post-apply checks, mark the row applied and push,
+  CI, merge, comment on the issue.
+- Catalog gotchas: cast `"char"` columns (`tgenabled::text`); compare `proconfig` with `array['search_path=""']`.
 - `apps/web/test/format.test.ts` (£27.4K) fails only in the cloud container (ICU); it passes in CI.
 - **Container restarts** stop background agents mid-task (it happened once this session). Agents that pushed after every
   step lost nothing; re-launch a fresh agent with what's pushed and what's left. Postgres stops too: restart it with the
@@ -205,6 +205,7 @@ password to `postgres`.
 
 **Secrets:**
 - `SUPABASE_ACCESS_TOKEN` is set in the cloud environment.
+- `APP_DATABASE_URL` (the `authenticator` login) is set for Vercel Preview; never print it or `DATABASE_URL`.
 - `ANTHROPIC_API_KEY` is set in Vercel (Production and Preview) for narration (#29). Without it, "explain this run" prints
   the templated text.
 
