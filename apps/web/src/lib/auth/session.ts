@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { createDb } from "@transpera-flow/db/client";
 import { claimsFor, type ClaimsUser } from "@/lib/db/claims";
 import { appPool, authPool } from "@/lib/db/pool";
+import { currentAccess } from "./access";
 import { authEnv } from "./env";
 import { getAuth } from "./server";
 
@@ -25,20 +26,11 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   if (!env) return null;
   const session = await getAuth().api.getSession({ headers: await headers() });
   if (!session) return null;
-  const { rows } = await authPool().query(
-    `select u.email,
-            coalesce((u.raw_app_meta_data ->> 'agency_admin')::boolean, false) as agency_admin,
-            private.may_sign_in(u.email, u.email_confirmed_at is not null, $2::text[]) as role
-     from auth.users u where u.id = $1`,
-    [session.user.id, env.adminEmails],
-  );
-  const row = rows[0];
-  if (!row || !row.role) return null;
+  const access = await currentAccess(authPool(), session.user.id, env.adminEmails);
+  if (!access) return null;
   return {
     id: session.user.id,
-    email: String(row.email),
-    agencyAdmin: row.agency_admin === true && row.role === "admin",
-    guest: row.role === "guest",
+    ...access,
     name: session.user.name?.trim() || null,
   };
 });

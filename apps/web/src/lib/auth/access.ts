@@ -90,3 +90,31 @@ export async function loadIdentities(db: Queryable, userId: string): Promise<Ide
     };
   });
 }
+
+/** Who a signed-in user is now, by the deployment's list: what the web session and an MCP token both act as. */
+export interface CurrentAccess {
+  email: string;
+  /** Counts only while the list still says admin, so a demotion takes effect at the next request. */
+  agencyAdmin: boolean;
+  /** Signed in only for a restricted share link (B3): no role anywhere. */
+  guest: boolean;
+}
+
+/**
+ * The user's access as of now, or null when they may no longer sign in (taken off the list, or unknown). Checked on every web
+ * request (`getSessionUser`) and every MCP request, so removing someone from the list ends their session and their API tokens
+ * at the next request, and the agency-admin flag `auth.users` keeps from the last sign-in is honoured only while they are
+ * still an admin. Runs on the owner pool: `private.may_sign_in` isn't executable by anon or authenticated.
+ */
+export async function currentAccess(db: Queryable, userId: string, adminEmails: string[]): Promise<CurrentAccess | null> {
+  const { rows } = await db.query(
+    `select u.email,
+            coalesce((u.raw_app_meta_data ->> 'agency_admin')::boolean, false) as agency_admin,
+            private.may_sign_in(u.email, u.email_confirmed_at is not null, $2::text[]) as role
+     from auth.users u where u.id = $1`,
+    [userId, adminEmails],
+  );
+  const row = rows[0];
+  if (!row || !row.role) return null;
+  return { email: String(row.email), agencyAdmin: row.agency_admin === true && row.role === "admin", guest: row.role === "guest" };
+}

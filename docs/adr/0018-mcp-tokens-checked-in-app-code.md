@@ -19,6 +19,10 @@ a `ClaimsDriver` that sets the role and `request.jwt.claims` for each statement 
   the owner's id, email and agency-admin flag, the token's id, its active workspace and whether the request is allowed. An
   unknown or revoked token, or a banned owner, returns no rows. It takes the hash, so the token itself never reaches SQL, and
   only `anon` may execute it. Its answer is a 401 (no rows) or a 429 with `Retry-After`; there is no "hook missing" state.
+- **The owner is re-checked against the sign-in list on every request**, as a browser session is (`currentAccess` in
+  `apps/web/src/lib/auth/access.ts`, passed as `checkUser`): someone taken off the deployment's list is refused with a 401,
+  a demoted admin stops being an agency admin, and a guest's claims say so. `mcp_token_lookup`'s `agency_admin` is only the
+  flag the last sign-in recorded.
 - **Every tool runs as the owner.** The handler builds claims with the app's own `claimsFor` (the one place claims are made):
   `{ sub, role: "authenticated", email, app_metadata, api_token_id }`, and gives the tools `createDb(pool, claims)`. RLS, the
   SECURITY DEFINER functions and the `api_token_id` checks in SQL (a token may not review suggestions, accept findings or

@@ -32,7 +32,8 @@ export async function startTestDb(testOptions: TestDbOptions = {}, handlerOption
   return {
     t,
     pool,
-    options: { pool, claimsFor, ...handlerOptions },
+    // The web route re-checks the owner against the sign-in list (apps/web/test covers it); here the lookup's answer stands.
+    options: { pool, claimsFor, checkUser: async (user) => user, ...handlerOptions },
     dbAs: (claims) => t.dbAs(claims),
     async close() {
       await pool.end();

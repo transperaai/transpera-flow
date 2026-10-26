@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { proxy } from "@/proxy";
 import {
   ACCESS_DENIED_CODE,
+  currentAccess,
   idTokenClaims,
   loadIdentities,
   signInRole,
@@ -229,6 +230,21 @@ describe("the access functions the Better Auth hooks call", () => {
     const { rows } = await db.client.query("select identity_data from auth.identities where user_id = $1", [id]);
     expect(rows[0].identity_data.custom_claims).toEqual({ hd: "client.com" });
     expect(Number((await db.client.query("select count(*) from memberships where user_id = $1", [id])).rows[0].count)).toBeGreaterThan(0);
+  });
+
+  it("re-checks a signed-in user's access on each request: removed, demoted and guest (web sessions and MCP tokens)", async () => {
+    const id = await signUp("ops@client.com");
+    await db.client.query(`insert into deployment_access (kind, value, role) values ('email', 'ops@client.com', 'admin')`);
+    expect(await syncSignIn(q(), id, [], [])).toBe("admin");
+    expect(await currentAccess(q(), id, [])).toEqual({ email: "ops@client.com", agencyAdmin: true, guest: false });
+    // Demoted: auth.users still says agency_admin until the next sign-in, and that no longer counts.
+    await db.client.query(`update deployment_access set role = 'editor' where value = 'ops@client.com'`);
+    expect(await currentAccess(q(), id, [])).toEqual({ email: "ops@client.com", agencyAdmin: false, guest: false });
+    // Taken off the list (the domain rule is removed too): refused, though their memberships remain.
+    await db.client.query(`delete from deployment_access where value in ('ops@client.com', 'client.com')`);
+    expect(await currentAccess(q(), id, [])).toBeNull();
+    await db.client.query(`insert into deployment_access (kind, value, role) values ('domain', 'client.com', 'viewer')`);
+    expect(await currentAccess(q(), randomUUID(), [])).toBeNull();
   });
 
   it("records a Microsoft tenant, and a personal Google account with no hosted domain", async () => {

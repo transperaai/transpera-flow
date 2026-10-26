@@ -15,6 +15,8 @@ export interface TokenUser {
   id: string;
   email: string;
   agencyAdmin: boolean;
+  /** Signed in only for a restricted share link (B3): claims mark them so nothing joins them to a workspace. */
+  guest?: boolean;
 }
 
 export interface McpHandlerOptions {
@@ -22,6 +24,12 @@ export interface McpHandlerOptions {
   pool: Pool;
   /** The one place claims are built (apps/web/src/lib/db/claims.ts `claimsFor`). */
   claimsFor: (user: TokenUser, extra: { apiTokenId: string }) => Claims | null;
+  /**
+   * The token's owner as the deployment's sign-in list sees them now (the web route's `currentAccess`, the same check every web
+   * request makes): null refuses the token, so someone taken off the list loses their tokens too, and an admin who was demoted
+   * stops acting as one. The flag `mcp_token_lookup` returns is only what the last sign-in recorded.
+   */
+  checkUser: (user: TokenUser) => Promise<TokenUser | null>;
   /** For tests: the current date. */
   now?: () => Date;
   /** Called with the token's db and the process id after `publish_process` made a version live (A46: AI analysis). */
@@ -74,7 +82,9 @@ export async function handleMcpRequest(request: Request, options: McpHandlerOpti
     return jsonRpcError(429, "Rate limit exceeded for this API token", { "retry-after": String(use.retry_after_seconds || 60) });
   }
 
-  const claims = options.claimsFor({ id: use.user_id, email: use.email ?? "", agencyAdmin: use.agency_admin }, { apiTokenId: use.token_id });
+  const user = await options.checkUser({ id: use.user_id, email: use.email ?? "", agencyAdmin: use.agency_admin });
+  if (!user) return unauthorized("This API token's owner no longer has access to this deployment");
+  const claims = options.claimsFor(user, { apiTokenId: use.token_id });
   if (!claims) throw new Error("claimsFor returned no claims for a signed-in token owner");
   const db = createDb(options.pool, claims);
 

@@ -109,6 +109,40 @@ describe("handleMcpRequest", () => {
     expect(seen).toEqual([expect.objectContaining({ sub: userId, role: "authenticated", email: "handler@example.com", api_token_id: id })]);
   });
 
+  it("refuses a token whose owner may no longer sign in, without running anything", async () => {
+    const token = await issueToken(admin, userId);
+    let built = false;
+    const options = {
+      ...env.options,
+      checkUser: async () => null,
+      claimsFor: (...a: Parameters<typeof env.options.claimsFor>) => ((built = true), env.options.claimsFor(...a)),
+    };
+    const res = await post(options, { authorization: `Bearer ${token}` });
+    expect(res.status).toBe(401);
+    expect(await res.text()).toMatch(/no longer has access/);
+    expect(built).toBe(false);
+  });
+
+  it("builds the claims from the re-checked owner, not the flag the last sign-in left (a demoted admin, a guest)", async () => {
+    const formerAdmin = await createUser(admin, "former-admin@example.com", { agency_admin: true });
+    const token = await issueToken(admin, formerAdmin);
+    const seen: unknown[] = [];
+    const options = {
+      ...env.options,
+      checkUser: async (user: Parameters<typeof env.options.checkUser>[0]) => {
+        expect(user.agencyAdmin).toBe(true);
+        return { ...user, agencyAdmin: false, guest: true };
+      },
+      claimsFor: (...a: Parameters<typeof env.options.claimsFor>) => {
+        const claims = env.options.claimsFor(...a);
+        seen.push(claims);
+        return claims;
+      },
+    };
+    expect((await post(options, { authorization: `Bearer ${token}` })).status).toBe(200);
+    expect(seen).toEqual([expect.objectContaining({ sub: formerAdmin, app_metadata: { agency_admin: false, guest: true } })]);
+  });
+
   it("only accepts POST (stateless server)", async () => {
     const { handleMcpRequest } = await import("../src");
     const res = await handleMcpRequest(new Request(ENDPOINT, { method: "GET" }), env.options);
