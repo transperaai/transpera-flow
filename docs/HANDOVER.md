@@ -7,6 +7,12 @@ new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
+**26 Oct 2026: the direction changed. Read `docs/plans/rework-direction.md` first.** Each client gets its own
+deployment (not multi-tenant). The app moves off Supabase to Neon with Better Auth: Google now, Microsoft later, with
+company-domain and named-email roles. Uploads are dropped for reference links, live editing is dropped, and hosting stays
+on Vercel. The next session starts the move off Supabase (no feature cutting yet; Austin's manual QA and strip list come later). Supabase was restored on 26 Oct
+after a free-plan pause. PR #248 is open; issue #249 is parked.
+
 ## Where things stand
 
 **Milestone A** (redesign A31–A58, #96–#123): merged as #125–#160; see git history and #1 for the per-ticket log.
