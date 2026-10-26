@@ -52,6 +52,7 @@ Settings → Environment Variables. "Sensitive" variables cannot be read back af
 | `APP_DATABASE_URL` | `authenticator` connection the app's queries use | Production, Preview | Yes | Claude via API |
 | `BETTER_AUTH_SECRET` | Signs sessions; 32+ random characters. Without it (or `DATABASE_URL`) the app runs in demo mode | Production, Preview | Yes | Claude via API, generated, never printed |
 | `OAUTH_PROXY_SECRET` | Signs the preview-to-alias sign-in hand-off | Production, Preview | Yes | Claude via API, generated, never printed |
+| `PREVIEW_ALIAS_URL` | The stable preview alias, if you made one (for example `https://acme-flow-next.vercel.app`). Only this deployment's own alias is trusted | Production, Preview | No | Claude via API |
 | `BETTER_AUTH_URL` | This deployment's own URL. Production: the production URL. Preview: the stable preview alias | Production, Preview (different values) | No | Claude via API (Austin may in the dashboard) |
 | `AUTH_PROVIDERS` | `google` (default), or `google,microsoft` | Production, Preview | No | Claude via API |
 | `ACCESS_ADMIN_EMAILS` | Comma-separated addresses that always sign in as Admin (first admin) | Production, Preview | No | Claude via API |

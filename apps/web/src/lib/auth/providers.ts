@@ -1,11 +1,14 @@
 import type { ProviderId } from "./env";
 
-// Preview deployments sign in through the stable alias (oAuthProxy).
-export const PREVIEW_ALIAS = "https://transpera-flow-next.vercel.app";
+/** This deployment's stable preview alias (`PREVIEW_ALIAS_URL`), which previews sign in through (oAuthProxy); per deployment. */
+export function previewAlias(env: Record<string, string | undefined> = process.env): string | undefined {
+  const url = env.PREVIEW_ALIAS_URL?.trim().replace(/\/+$/, "");
+  return url && /^https:\/\/[a-z0-9.-]+$/i.test(url) ? url : undefined;
+}
 
 /**
- * Origins Better Auth accepts for callback URLs, Origin headers and the oAuthProxy's return leg: its own base URL, the preview
- * alias, and this deployment's own Vercel URLs (per-commit and branch). Not a `transpera-flow-*.vercel.app` wildcard: anyone
+ * Origins Better Auth accepts for callback URLs, Origin headers and the oAuthProxy's return leg: its own base URL, this
+ * deployment's preview alias if it has one, and this deployment's own Vercel URLs (per-commit and branch). Not a `transpera-flow-*.vercel.app` wildcard: anyone
  * can name a Vercel project `transpera-flow-<anything>`, which would make every such site a trusted redirect target.
  */
 export function trustedOrigins(baseUrl: string | undefined, env: Record<string, string | undefined> = process.env): string[] {
@@ -13,7 +16,8 @@ export function trustedOrigins(baseUrl: string | undefined, env: Record<string, 
     .map((host) => host?.trim())
     .filter((host): host is string => !!host && /^[a-z0-9.-]+$/i.test(host))
     .map((host) => `https://${host}`);
-  return [...new Set([...(baseUrl ? [baseUrl] : []), PREVIEW_ALIAS, ...own])];
+  const alias = previewAlias(env);
+  return [...new Set([...(baseUrl ? [baseUrl] : []), ...(alias ? [alias] : []), ...own])];
 }
 
 /**

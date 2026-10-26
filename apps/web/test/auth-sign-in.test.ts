@@ -12,7 +12,7 @@ import {
   type Queryable,
 } from "@/lib/auth/access";
 import { authEnv, parseEmails, parseProviders } from "@/lib/auth/env";
-import { incomingRequest, PREVIEW_ALIAS, socialProviders, trustedOrigins } from "@/lib/auth/providers";
+import { incomingRequest, previewAlias, socialProviders, trustedOrigins } from "@/lib/auth/providers";
 import { claimsFor } from "@/lib/db/claims";
 import { deploymentErrorMessage, normalizeRuleValue } from "@/lib/deployment-rules";
 import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
@@ -123,13 +123,19 @@ describe("sign-in settings", () => {
   });
 
   it("trusts its own URL, the preview alias and this deployment's Vercel URLs, and no wildcard", () => {
-    expect(trustedOrigins("https://transpera-flow.vercel.app", {})).toEqual(["https://transpera-flow.vercel.app", PREVIEW_ALIAS]);
-    expect(PREVIEW_ALIAS).toBe("https://transpera-flow-next.vercel.app");
-    expect(trustedOrigins(undefined, {})).toEqual([PREVIEW_ALIAS]);
+    const ALIAS = "https://transpera-flow-next.vercel.app";
+    const withAlias = { PREVIEW_ALIAS_URL: `${ALIAS}/` };
+    expect(trustedOrigins("https://transpera-flow.vercel.app", {})).toEqual(["https://transpera-flow.vercel.app"]);
+    expect(trustedOrigins("https://transpera-flow.vercel.app", withAlias)).toEqual(["https://transpera-flow.vercel.app", ALIAS]);
+    expect(trustedOrigins(undefined, withAlias)).toEqual([ALIAS]);
     expect(
-      trustedOrigins(PREVIEW_ALIAS, { VERCEL_URL: "transpera-flow-abc-team.vercel.app", VERCEL_BRANCH_URL: "transpera-flow-git-x-team.vercel.app" }),
-    ).toEqual([PREVIEW_ALIAS, "https://transpera-flow-abc-team.vercel.app", "https://transpera-flow-git-x-team.vercel.app"]);
-    expect(trustedOrigins(undefined, { VERCEL_URL: "evil.io/x" })).toEqual([PREVIEW_ALIAS]);
+      trustedOrigins(ALIAS, { ...withAlias, VERCEL_URL: "transpera-flow-abc-team.vercel.app", VERCEL_BRANCH_URL: "transpera-flow-git-x-team.vercel.app" }),
+    ).toEqual([ALIAS, "https://transpera-flow-abc-team.vercel.app", "https://transpera-flow-git-x-team.vercel.app"]);
+    expect(trustedOrigins(undefined, { VERCEL_URL: "evil.io/x" })).toEqual([]);
+    // Another client's deployment trusts no alias but its own; a malformed one is ignored.
+    expect(previewAlias({})).toBeUndefined();
+    expect(previewAlias({ PREVIEW_ALIAS_URL: "http://insecure.example" })).toBeUndefined();
+    expect(previewAlias({ PREVIEW_ALIAS_URL: "https://x.example/path" })).toBeUndefined();
   });
 
   it("rebuilds the incoming request for a direct auth.api call", () => {
