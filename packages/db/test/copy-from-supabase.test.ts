@@ -1,20 +1,22 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect as tcpConnect, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyMigrations } from "../src/migrations";
+import { WebSocketServer } from "ws";
+import { applyCompat, applyMigrations, migrationFiles } from "../src/migrations";
+import { connectTarget } from "../scripts/copy-from-supabase/connect.ts";
 import { planLoad, type ForeignKey } from "../scripts/copy-from-supabase/foreign-keys.ts";
 import { postgresSource, runExport } from "../scripts/copy-from-supabase/export.ts";
 import { formatReport, runImport, type ImportReport } from "../scripts/copy-from-supabase/import.ts";
 import { runVerify } from "../scripts/copy-from-supabase/verify.ts";
-import { assertReadOnlySelect, brandingFile, managementApiSource, type Manifest } from "../scripts/copy-from-supabase/shared.ts";
+import { assertReadOnlySelect, brandingFile, managementApiSource, parseRowsExactly, type Manifest } from "../scripts/copy-from-supabase/shared.ts";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // Step 7a of the move off Supabase: scripts/copy-from-supabase/. The source is "Supabase-like": the shims and the migrations up to
@@ -43,6 +45,12 @@ let storageBase = "";
 const logos: Record<string, { workspace: string; path: string; bytes: Buffer; mime: string }> = {};
 const users: Record<string, { id: string; email: string; claims: Record<string, unknown> }> = {};
 let sourceAuditRows = 0;
+/** Queries whose answers must be the same, text for text, on the source and on every target: values a JavaScript number would change. */
+const EXACT = [
+  "select id, fte::text, capacity_hours_week::text, cost_rate::text from people order by id",
+  "select seq, tx::text from issue_events order by seq",
+  "select id, diff::text from audit_log where target_table <> 'deployment_access' order by id",
+];
 
 const q = (db: TestDb) => async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows;
 
@@ -93,6 +101,23 @@ beforeAll(async () => {
   }
   // Audit rows the copy must not add to: written by hand (the operator's own writes are not audited) and by a signed-in change.
   await s("insert into audit_log (workspace_id, actor_kind, action, target_table, target_id) values ($1, 'system', 'update', 'workspaces', $1)", [NORTHBEAM]);
+
+  // Supabase's auth.users has created_at and updated_at, which the target's does not: Better Auth's createdAt is taken from them.
+  await s("alter table auth.users add column created_at timestamptz default now(), add column updated_at timestamptz default now()");
+  await s("update auth.users set created_at = '2025-03-04 05:06:07.123456+00', updated_at = '2025-06-07 08:09:10+00' where id = $1", [users.owner.id]);
+
+  // Values that do not survive a JavaScript number: more digits than a double holds, an int8 above 2^53, a numeric's scale
+  // (1.50), NaN and Infinity, and the same inside jsonb.
+  const people = (await s("select id from people where workspace_id = $1 order by id limit 3", [NORTHBEAM])).map((r) => r.id as string);
+  await s("update people set fte = 1.50, cost_rate = 12345678901234567890.123456789012345678 where id = $1", [people[0]]);
+  await s("update people set capacity_hours_week = 'NaN', cost_rate = 0.1000 where id = $1", [people[1]]);
+  await s("update people set capacity_hours_week = 'Infinity' where id = $1", [people[2]]);
+  await s("update issue_events set tx = 9007199254740993 where seq = (select min(seq) from issue_events)");
+  await s(
+    `insert into audit_log (workspace_id, actor_kind, action, target_table, target_id, diff)
+     values ($1, 'system', 'update', 'workspaces', $1, '{"big": 123456789012345678901234567890, "rate": 0.10, "n": 9007199254740993}')`,
+    [NORTHBEAM],
+  );
 
   // A source with its uploaded original (the file columns step 4 drops).
   const sourceId = randomUUID();
@@ -251,6 +276,8 @@ describe("export", () => {
       "raw_app_meta_data",
       "raw_user_meta_data",
       "banned_until",
+      "created_at",
+      "updated_at",
     ]);
     expect(Object.keys((JSON.parse(readFileSync(join(exportDir, "auth.identities.json"), "utf8")) as Record<string, unknown>[])[0]!)).not.toContain("email");
   });
@@ -276,6 +303,14 @@ describe("export", () => {
     try {
       await expect(runExport({ out: join(scripts, "out"), source: src, sourceInfo: { kind: "url" } })).rejects.toThrow(/inside the repository/);
       await expect(runExport({ out: exportDir, source: src, sourceInfo: { kind: "url" } })).rejects.toThrow(/not empty/);
+      // A folder at the repository's root whose name starts with "..", and a symlink from outside that leads back in.
+      const repo = fileURLToPath(new URL("../../../", import.meta.url));
+      await expect(runExport({ out: join(repo, "..copy-out"), source: src, sourceInfo: { kind: "url" } })).rejects.toThrow(/inside the repository/);
+      expect(existsSync(join(repo, "..copy-out"))).toBe(false);
+      const link = join(tmp(), "link");
+      symlinkSync(scripts, link);
+      await expect(runExport({ out: join(link, "out"), source: src, sourceInfo: { kind: "url" } })).rejects.toThrow(/inside the repository/);
+      expect(existsSync(join(scripts, "out"))).toBe(false);
     } finally {
       await src.close();
     }
@@ -295,11 +330,51 @@ describe("export", () => {
   });
 });
 
+describe("export as a role that row-level security applies to", () => {
+  it("refuses, rather than export only the rows the role can see", async () => {
+    const role = `copy_reader_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const admin = new pg.Client({ connectionString: ADMIN_URL });
+    await admin.connect();
+    try {
+      await admin.query(`create role ${role} login password 'x' nosuperuser nobypassrls`);
+      for (const schema of ["public", "auth", "storage"]) {
+        await source.client.query(`grant usage on schema ${schema} to ${role}`);
+        await source.client.query(`grant select on all tables in schema ${schema} to ${role}`);
+      }
+      const url = new URL(source.url);
+      url.username = role;
+      url.password = "x";
+      const src = await postgresSource(url.toString());
+      try {
+        await expect(runExport({ out: join(tmp(), "rls"), source: src, sourceInfo: { kind: "url" } })).rejects.toThrow(
+          /row-level security applies to this role on .*public\.workspaces/,
+        );
+      } finally {
+        await src.close();
+      }
+    } finally {
+      await source.client.query(`drop owned by ${role}`);
+      await admin.query(`drop role if exists ${role}`);
+      await admin.end();
+    }
+  });
+});
+
+describe("parseRowsExactly", () => {
+  it("writes every number back as it was read", () => {
+    const text = '[{"a":12345678901234567890.123456789,"b":1.50,"c":9007199254740993,"d":[0.10,-0],"e":{"x":1e400},"f":"1.50","g":null}]';
+    expect(JSON.stringify(parseRowsExactly(text))).toBe(text);
+    expect(() => parseRowsExactly('{"a":1}')).toThrow(/array/);
+  });
+});
+
 describe("export through the Management API", () => {
   let api: Server;
   let base = "";
   const seen: { auth: string | undefined; path: string | undefined; query: string }[] = [];
   let throttle = 0;
+  /** Run once against the source just before the API answers the first query matching `when` (a write the freeze should have stopped). */
+  let interfere: { when: RegExp; sql: string } | undefined;
 
   beforeAll(async () => {
     api = createServer((req, res) => {
@@ -317,13 +392,21 @@ describe("export through the Management API", () => {
           res.writeHead(429, { "retry-after": "0" }).end("{}");
           return;
         }
-        source.client.query(query).then(
+        const before = interfere?.when.test(query) ? interfere.sql : undefined;
+        if (before) interfere = undefined;
+        (before ? source.client.query(before).then(() => source.client.query("select pg_stat_force_next_flush()")) : Promise.resolve())
+          .then(() => source.client.query(query))
+          .then(
           (r) => res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify(r.rows)),
           (e: Error) => res.writeHead(400).end(JSON.stringify({ message: e.message })),
         );
       });
     });
     await new Promise<void>((r) => api.listen(0, "127.0.0.1", r));
+    // The source's own writes (the fixtures) reach the statistics up to seconds later; flush them so they don't count as writes
+    // made during the export.
+    await source.client.query("select pg_stat_force_next_flush()");
+    await source.client.query("select 1");
     base = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
   });
   afterAll(() => {
@@ -334,7 +417,8 @@ describe("export through the Management API", () => {
     const dir = join(tmp(), "api");
     throttle = 1; // the first answer is a 429, which is retried
     const src = managementApiSource({ ref: "abcdefghijklmnopqrst", token: "test-token", apiBase: base, retryDelayMs: 0 });
-    const { manifest } = await runExport({ out: dir, source: src, sourceInfo: { kind: "supabase", ref: "abcdefghijklmnopqrst" }, pageSize: 25 });
+    const { manifest, problems } = await runExport({ out: dir, source: src, sourceInfo: { kind: "supabase", ref: "abcdefghijklmnopqrst" }, pageSize: 25 });
+    expect(problems).toEqual([]);
     expect(seen.length).toBeGreaterThan(20);
     expect(new Set(seen.map((s) => s.auth))).toEqual(new Set(["Bearer test-token"]));
     expect(new Set(seen.map((s) => s.path))).toEqual(new Set(["/v1/projects/abcdefghijklmnopqrst/database/query"]));
@@ -343,6 +427,18 @@ describe("export through the Management API", () => {
     for (const name of Object.keys(manifest.tables)) {
       expect(JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")), name).toEqual(JSON.parse(readFileSync(join(exportDir, `${name}.json`), "utf8")));
     }
+  });
+
+  it("reports a table written to while the export ran, even when its row count did not change", async () => {
+    const src = managementApiSource({ ref: "abcdefghijklmnopqrst", token: "test-token", apiBase: base, retryDelayMs: 0 });
+    // An update that changes nothing visible: the row count and the data stay the same, so only the write counters show it.
+    interfere = {
+      when: /from "public"\."workspaces" order by/,
+      sql: "update auth.identities set updated_at = updated_at where id = (select min(id::text)::uuid from auth.identities)",
+    };
+    const { problems } = await runExport({ out: join(tmp(), "api-changed"), source: src, sourceInfo: { kind: "supabase", ref: "abcdefghijklmnopqrst" }, pageSize: 25 });
+    expect(interfere).toBeUndefined();
+    expect(problems).toEqual([expect.stringMatching(/^auth\.identities: 1 row write\(s\) while the export ran/)]);
   });
 
   it("sends nothing that is not a select, and does not echo the token in an error", async () => {
@@ -373,6 +469,10 @@ async function expectCopied(target: TestDb, report: ImportReport, preexistingAud
   expect((await t("select count(*)::int as n from audit_log where target_table = 'deployment_access'"))[0]!.n).toBe(preexistingAudit);
   expect((await t("select count(*)::int as n from audit_log where diff ? 'old' and diff -> 'old' ? 'branding'"))[0]!.n).toBe(0);
 
+  // Numbers arrive digit for digit.
+  for (const sql of EXACT) expect(await t(sql), sql).toEqual(await s(sql));
+  expect((await t("select tx::text as tx from issue_events where tx > 9007199254740992"))[0]).toEqual({ tx: "9007199254740993" });
+
   // auth.users and identities arrive as they were; sync_auth_user did not rewrite them.
   const authRows = "select id, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data from auth.users order by id";
   expect(await t(authRows)).toEqual(await s(authRows));
@@ -388,6 +488,10 @@ async function expectCopied(target: TestDb, report: ImportReport, preexistingAud
     { accountId: owner.id, providerId: "google", userId: owner.id },
   ]);
   expect((await t(`select "emailVerified" from better_auth."user" where id = $1`, [users.unconfirmed!.id]))[0]).toEqual({ emailVerified: false });
+  // createdAt and updatedAt are the Supabase user's, not the time of the copy.
+  expect(
+    (await t(`select "createdAt" = '2025-03-04 05:06:07.123456+00' as c, "updatedAt" = '2025-06-07 08:09:10+00' as u from better_auth."user" where id = $1`, [owner.id]))[0],
+  ).toEqual({ c: true, u: true });
   expect((await t(`select name from better_auth."user" where id = $1`, [users.editor!.id]))[0]).toEqual({ name: "editor" });
   expect((await t(`select count(*)::int as n from better_auth."user"`))[0]!.n).toBe(6);
   expect((await t(`select count(*)::int as n from better_auth.account`))[0]!.n).toBe(3);
@@ -416,6 +520,7 @@ async function expectCopied(target: TestDb, report: ImportReport, preexistingAud
   expect(cols.map((c) => c.column_name)).toEqual(expect.arrayContaining(["file_url", "title"]));
   expect(await t("select title, body from sources where title = 'Interview notes'")).toEqual([{ title: "Interview notes", body: "body text" }]);
   expect(report.droppedColumns["public.sources"]).toEqual(["file_path", "file_name", "file_type", "file_size"]);
+  expect(report.droppedColumns["auth.users"]).toEqual(["created_at", "updated_at"]);
   expect((await t("select count(*)::int as n from workspaces where branding ? 'logo_path'"))[0]!.n).toBe(0);
   expect((await t("select branding from workspaces where id = $1", [fine.workspace]))[0]!.branding).toEqual({ accent: "#112233" });
   expect((await t("select branding from workspaces where id = $1", [NORTHBEAM]))[0]!.branding).toEqual({ accent: "#aa00aa", accent_dark: "#00aaaa" });
@@ -525,6 +630,95 @@ describe("import, the rest", () => {
     await expect(runImport(source.client, { dir: exportDir })).rejects.toThrow(/not at the current head/);
   });
 
+  it("fails, writing nothing, when another session holds a lock on a table it writes", async () => {
+    const target = await emptyTarget();
+    const other = new pg.Client({ connectionString: target.url });
+    await other.connect();
+    try {
+      await other.query("begin");
+      await other.query("lock table auth.users in row exclusive mode");
+      await expect(runImport(target.client, { dir: exportDir, lockTimeout: "200ms" })).rejects.toThrow(/lock timeout/);
+      await other.query("rollback");
+    } finally {
+      await other.end();
+    }
+    expect(await count(target, "workspaces")).toBe(0);
+    expect((await target.client.query("select count(*)::int as n from pg_trigger where not tgisinternal and tgenabled <> 'O'")).rows[0].n).toBe(0);
+  });
+
+  it("leaves the target untouched, triggers on, when a row is refused after the fallback switched them off", async () => {
+    // A copy of the export with one person's fte past the table's check (fte <= 1.5): people load late, after every trigger is off.
+    const dir = join(tmp(), "bad-row");
+    cpSync(exportDir, dir, { recursive: true });
+    rmSync(join(dir, "import-report.json"), { force: true });
+    const file = join(dir, "public.people.json");
+    const text = readFileSync(file, "utf8");
+    expect(text).toContain('"fte":1.50');
+    writeFileSync(file, text.replace('"fte":1.50', '"fte":5'));
+    const target = await emptyTarget();
+    await expect(runImport(target.client, { dir, forceFallback: true })).rejects.toThrow(/people_fte_check|check constraint/);
+    expect((await target.client.query("select count(*)::int as n from pg_trigger where not tgisinternal and tgenabled <> 'O'")).rows[0].n).toBe(0);
+    for (const table of ["auth.users", "better_auth.user", "public.workspaces", "public.people", "public.deployment_access"]) {
+      expect(await count(target, table), table).toBe(0);
+    }
+  });
+
+  it("imports and verifies through @neondatabase/serverless over a WebSocket, as from the cloud container", async () => {
+    // Neon's WebSocket proxy, locally: each socket carries the Postgres protocol to the address in its query string.
+    const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const relayed: string[] = [];
+    wss.on("connection", (ws, req) => {
+      const address = new URL(req.url ?? "", "http://relay").searchParams.get("address") ?? "";
+      relayed.push(address);
+      const [host, port] = address.split(":");
+      const tcp = tcpConnect(Number(port), host!);
+      tcp.on("data", (d) => ws.send(d));
+      tcp.on("close", () => ws.close());
+      tcp.on("error", () => ws.close());
+      ws.on("message", (d) => tcp.write(d as Buffer));
+      ws.on("close", () => tcp.destroy());
+    });
+    await new Promise<void>((r) => wss.once("listening", () => r()));
+    const relay = `127.0.0.1:${(wss.address() as AddressInfo).port}`;
+    const neonWs = { secure: false, wsProxy: (host: string, port: number | string) => `${relay}/v2?address=${host}:${port}` };
+
+    // The migrations take the same route (scripts/migrate.ts --driver neon-ws), into a database with nothing in it.
+    const bare = `copy_neon_ws_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const admin = new pg.Client({ connectionString: ADMIN_URL });
+    await admin.connect();
+    try {
+      await admin.query(`create database ${bare}`);
+      const bareUrl = new URL(ADMIN_URL);
+      bareUrl.pathname = `/${bare}`;
+      const migrating = await connectTarget(bareUrl.toString(), "neon-ws", neonWs);
+      try {
+        await applyCompat(migrating.client);
+        expect((await applyMigrations(migrating.client)).files).toEqual(migrationFiles());
+      } finally {
+        await migrating.close();
+      }
+    } finally {
+      await admin.query(`drop database if exists ${bare} with (force)`);
+      await admin.end();
+    }
+
+    const target = await emptyTarget();
+    const conn = await connectTarget(target.url, "neon-ws", neonWs);
+    let report: ImportReport;
+    try {
+      expect(conn.client).not.toBeInstanceOf(pg.Client);
+      report = await runImport(conn.client, { dir: exportDir, forceFallback: true, chunkSize: 50 });
+      expect(report.path).toBe("fallback");
+      const verified = await runVerify(conn.client, exportDir);
+      expect(verified.lines.filter((l) => l.status === "FAIL")).toEqual([]);
+      expect(relayed.length).toBeGreaterThan(0);
+    } finally {
+      await conn.close();
+      await new Promise<void>((r) => wss.close(() => r()));
+    }
+    await expectCopied(target, report);
+  }, 120_000);
+
   it("falls back for real when the database refuses the replica role (42501), as a non-superuser owner is", async () => {
     const owner = `copy_owner_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const target = await emptyTarget();
@@ -604,12 +798,16 @@ describe("verify", () => {
     await target.client.query("begin");
     await target.client.query("set local session_replication_role = replica");
     await target.client.query("delete from public.workspaces where id = $1", [LARKSPUR]);
+    // And a value changed in place, which no count shows.
+    await target.client.query("update public.people set cost_rate = 12345678901234567000 where cost_rate = 12345678901234567890.123456789012345678");
     await target.client.query("commit");
     await target.client.query("alter table public.roles disable trigger user");
     expect((await target.client.query(fixture)).rows[0].people).toBe(before);
     const bad = await run("verify.ts", "--in", exportDir, "--url", target.url);
     expect(bad.code).toBe(1);
     expect(bad.out).toMatch(/FAIL public\.workspaces: \d+ rows, export had \d+/);
+    expect(bad.out).toMatch(/FAIL public\.people: 1 exported row\(s\) are missing or differ/);
+    expect(bad.out).toMatch(/ok   public\.issue_events: every exported row is in the target unchanged/);
     expect(bad.out).toMatch(/FAIL .*\.roles_workspace_id_fkey: \d+ row\(s\) reference a missing public\.workspaces/);
     expect(bad.out).toMatch(/FAIL 1 user trigger\(s\) are not enabled|FAIL \d+ user trigger\(s\) are not enabled/);
     expect(bad.out).toMatch(/VERIFY FAILED/);

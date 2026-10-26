@@ -502,9 +502,19 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
 - Not checked on Neon (Postgres 18): whether `neondb_owner` may `set session_replication_role = replica`. The local test of the refusal
   uses a non-superuser that owns the tables, which is what Neon's owner is for ownership, but not for `neon_superuser`'s extra rights.
   Both import paths are tested; the report says which one ran.
-- JSON numbers pass through the JavaScript parser on import, so a `numeric` with more than about 15 significant digits, or an `int8`
-  above 2^53, would lose precision. The export keeps the database's own text, and nothing in the schema is that wide (not proven
-  against production's data).
+- Numbers keep the database's own text end to end: the export writes `json_agg`'s text as it came, and the import parses with
+  `JSON.rawJSON`, so a `numeric` keeps its digits and scale (`1.50` stays `1.50`) and an `int8` above 2^53 is exact (it did not,
+  before the 26 Oct review: `1.50` became `1.5` and 20-digit numerics were rounded, and `copy:verify` passed). `copy:verify` now
+  compares every exported row with the target's, as row text, in SQL. Tested on Postgres 16 with NaN, Infinity, a 38-digit
+  numeric and a 2^53+1 bigint, plain and in jsonb.
+- `--driver neon-ws` (import, verify and `migrate`) was tested only through a local WebSocket-to-TCP relay standing in for Neon's
+  proxy, not against Neon. Not checked: the agent proxy's `HttpsProxyAgent` route with this code (the 26 Oct Neon check used the
+  same pieces by hand), and how long one transaction may stay open over it for a large import.
+- The export's check that the freeze held reads `pg_stat_all_tables` before and after, through the Management API. Not checked:
+  that Supabase lets `postgres` read it there, and how late Supabase's Postgres 17 counts a write (Postgres flushes these counters
+  up to about a second, at worst ten, after the write). Its refusal of a role subject to row-level security uses
+  `row_security_active()`; not checked that Supabase's `postgres` passes it on every table (it has BYPASSRLS on Supabase as far
+  as known, and the export refuses rather than reads short if not).
 
 ### Copy tooling on Neon (checked 26 Oct)
 

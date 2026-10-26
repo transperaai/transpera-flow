@@ -1,13 +1,17 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Code shared by export.ts, import.ts and verify.ts (docs/plans/supabase-exit-brief.md, step 7a). Only node built-ins and
 // `pg` are used and only erasable TypeScript syntax, so the scripts run under `node --experimental-strip-types`.
 
-/** The part of pg.Client used here. */
+/**
+ * The part of a Postgres client used here: a `pg.Client`, a `pg.PoolClient`, or the client `@neondatabase/serverless`'s
+ * Pool hands out (see connect.ts). One connection: the import's transaction lives on it.
+ */
 export interface Queryable {
-  query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pg's rows are `any`; callers read them as they know them.
+  query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount?: number | null }>;
 }
 
 /** The migration the Supabase production database was at when the export was designed (brief: "row 72"). */
@@ -83,6 +87,22 @@ export function readManifest(dir: string): Manifest {
   return readJson<Manifest>(join(dir, MANIFEST_FILE));
 }
 
+/**
+ * Parses an exported table file without letting a number pass through a JavaScript double: every number is kept as the
+ * database's own text (JSON.rawJSON), so `JSON.stringify` writes it back digit for digit. Otherwise a `numeric` with more than
+ * about 15 significant digits, an `int8` above 2^53, or a `numeric` written as 1.50 (which would come back as 1.5) would change.
+ */
+export function parseRowsExactly(text: string): Record<string, unknown>[] {
+  const json = JSON as unknown as { rawJSON?: (text: string) => unknown };
+  if (typeof json.rawJSON !== "function") throw new Error("this Node has no JSON.rawJSON (Node 21 or later is needed to keep numbers exact)");
+  const rawJSON = json.rawJSON;
+  const reviver = (_key: string, value: unknown, context?: { source?: string }) =>
+    typeof value === "number" ? rawJSON(context!.source!) : value;
+  const rows = JSON.parse(text, reviver as (key: string, value: unknown) => unknown) as unknown;
+  if (!Array.isArray(rows)) throw new Error("a table file must hold a JSON array of rows");
+  return rows as Record<string, unknown>[];
+}
+
 export function readJson<T>(path: string): T {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -100,9 +120,14 @@ export function writePrivate(path: string, data: string | Uint8Array): void {
 /** A new, empty export directory, owner-only (0700), and not inside the repository (exports hold real people's data). */
 export function prepareOutDir(out: string): string {
   const dir = resolve(out);
-  const repo = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
-  const rel = relative(repo, dir);
-  if (rel === "" || (!rel.startsWith("..") && !rel.startsWith(sep))) {
+  const repo = realpathSync(resolve(fileURLToPath(new URL("../../../../", import.meta.url))));
+  // Compared through symlinks: the deepest part of the path that exists, resolved, plus the rest.
+  let existing = dir;
+  while (!existsSync(existing)) existing = dirname(existing);
+  const real = join(realpathSync(existing), relative(existing, dir));
+  const rel = relative(repo, real);
+  const outside = rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+  if (!outside) {
     throw new Error(`--out ${dir} is inside the repository; an export holds real data and must stay outside it`);
   }
   if (existsSync(dir) && readdirSync(dir).length > 0) throw new Error(`--out ${dir} is not empty`);

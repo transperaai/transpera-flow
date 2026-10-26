@@ -1,15 +1,17 @@
 // Loads an export (export.ts) into a database already migrated to the current head, in one transaction
 // (docs/plans/supabase-exit-brief.md, step 7a).
-//   node --experimental-strip-types scripts/copy-from-supabase/import.ts --in <dir> [--url <target postgres url>] [--dry-run] [--no-replica]
+//   node --experimental-strip-types scripts/copy-from-supabase/import.ts --in <dir> [--url <target postgres url>] [--driver pg|neon-ws]
+//       [--dry-run] [--no-replica]
 // The target is the owner connection (DATABASE_URL when --url is absent) and must hold no data yet, apart from deployment_access.
 // --dry-run prints the report and rolls everything back. --no-replica skips `set session_replication_role = replica`, taking the
-// path used when the database refuses it (Neon): foreign-key order, user triggers disabled per table.
+// path used when the database refuses it (Neon): foreign-key order, user triggers disabled per table. --driver neon-ws connects
+// through @neondatabase/serverless over a WebSocket (connect.ts), for a machine without TCP access to Neon.
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import pg from "pg";
 import { migrationFiles } from "../../src/migrations.ts";
+import { DRIVERS, connectTarget, type Driver } from "./connect.ts";
 import { listForeignKeys, planLoad, type ForeignKey } from "./foreign-keys.ts";
 import {
   EXPECTED_SOURCE_VERSION,
@@ -19,6 +21,7 @@ import {
   STORAGE_FILE,
   brandingFile,
   isMain,
+  parseRowsExactly,
   qualified,
   quoteIdent,
   quoteLiteral,
@@ -29,6 +32,7 @@ import {
   tableFile,
   usageError,
   writePrivate,
+  type Queryable,
   type StorageObject,
 } from "./shared.ts";
 
@@ -40,6 +44,8 @@ export interface ImportOptions {
   forceFallback?: boolean;
   /** Rows per insert. Default 500. */
   chunkSize?: number;
+  /** How long to wait for a table lock before failing, as Postgres reads it. Default 15s. */
+  lockTimeout?: string;
   log?: (line: string) => void;
 }
 
@@ -88,7 +94,7 @@ const EMAIL_RULE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const BETTER_AUTH_TABLES = ["better_auth.user", "better_auth.account"];
 const ADDED_TABLES = ["public.workspace_logos", "public.deployment_access"];
 
-export async function runImport(client: pg.Client, options: ImportOptions): Promise<ImportReport> {
+export async function runImport(client: Queryable, options: ImportOptions): Promise<ImportReport> {
   const log = options.log ?? (() => {});
   const chunkSize = options.chunkSize ?? 500;
   const manifest = readManifest(options.dir);
@@ -110,13 +116,8 @@ export async function runImport(client: pg.Client, options: ImportOptions): Prom
   for (const name of exported) {
     if (!targetColumns.has(name)) throw new Error(`the target has no table ${name}, so its ${manifest.tables[name]!.rows} rows have nowhere to go`);
   }
-  const notEmpty: string[] = [];
-  for (const name of [...exported, ...BETTER_AUTH_TABLES, "public.workspace_logos"]) {
-    // A rule someone added to deployment_access through the app is audited, and that is the one audit row a target may hold.
-    const where = name === "public.audit_log" ? " where target_table <> 'deployment_access'" : "";
-    if ((await client.query(`select exists (select 1 from ${qualified(name)}${where}) as e`)).rows[0]!.e) notEmpty.push(name);
-  }
-  if (notEmpty.length > 0) throw new Error(`the target already has rows in ${notEmpty.join(", ")}; import into a freshly migrated database`);
+  const mustBeEmpty = [...exported, ...BETTER_AUTH_TABLES, "public.workspace_logos"];
+  await assertEmpty(client, mustBeEmpty);
   const disabled = (
     await client.query(
       `select count(*)::int as n from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
@@ -129,14 +130,19 @@ export async function runImport(client: pg.Client, options: ImportOptions): Prom
   // Reading every file up front finds a missing or damaged one before the transaction starts.
   const data = new Map<string, Row[]>();
   for (const name of exported) {
-    const rows = JSON.parse(readFileSync(join(options.dir, tableFile(name)), "utf8")) as Row[];
+    const rows = parseRowsExactly(readFileSync(join(options.dir, tableFile(name)), "utf8")) as Row[];
     if (rows.length !== manifest.tables[name]!.rows) throw new Error(`${tableFile(name)} holds ${rows.length} rows, the manifest says ${manifest.tables[name]!.rows}`);
+    // Only the manifest's columns are loaded, so a key it doesn't list would be dropped without a word.
+    const listed = new Set(manifest.tables[name]!.columns);
+    const unlisted = new Set(rows.flatMap((r) => Object.keys(r).filter((k) => !listed.has(k))));
+    if (unlisted.size > 0) throw new Error(`${tableFile(name)} has columns the manifest does not list: ${[...unlisted].join(", ")}`);
     data.set(name, rows);
   }
   const droppedColumns: ImportReport["droppedColumns"] = {};
   for (const name of exported) {
     const have = targetColumns.get(name)!;
-    const gone = manifest.tables[name]!.columns.filter((c) => !have.some((t) => t.name === c && !t.generated));
+    // A column the target computes itself (generated) is recomputed from the copied ones, so it is not lost.
+    const gone = manifest.tables[name]!.columns.filter((c) => !have.some((t) => t.name === c));
     if (gone.length > 0) droppedColumns[name] = gone;
     const absent = have.filter((t) => t.required && !manifest.tables[name]!.columns.includes(t.name));
     if (absent.length > 0) throw new Error(`${name}: the target requires ${absent.map((a) => a.name).join(", ")}, which the export does not have`);
@@ -163,12 +169,17 @@ export async function runImport(client: pg.Client, options: ImportOptions): Prom
   await client.query("begin");
   try {
     await client.query("set local statement_timeout = 0");
+    // Nothing else may write these tables until the commit (a preview deployment signing someone in, say). Waiting long for
+    // that lock, or for the stronger one `disable trigger` takes, fails the import instead of hanging it.
+    await client.query("select set_config('lock_timeout', $1, true)", [options.lockTimeout ?? "15s"]);
+    const written = [...exported, ...BETTER_AUTH_TABLES, ...ADDED_TABLES];
+    await client.query(`lock table ${written.map(qualified).join(", ")} in exclusive mode`);
+    await assertEmpty(client, mustBeEmpty);
     const replica = await tryReplica(client, options.forceFallback === true);
     report.path = replica.ok ? "replica" : "fallback";
     report.pathReason = replica.reason;
     log(`path: ${report.path} (${report.pathReason})`);
 
-    const written = [...exported, ...BETTER_AUTH_TABLES, ...ADDED_TABLES];
     let order = exported;
     let deferred: ForeignKey[] = [];
     if (!replica.ok) {
@@ -204,7 +215,7 @@ export async function runImport(client: pg.Client, options: ImportOptions): Prom
     }
     for (const fill of fills) await fill();
 
-    await copyToBetterAuth(client, report, chunkSize);
+    await copyToBetterAuth(client, report, chunkSize, data.get("auth.users") ?? []);
     await copyLogos(client, report, logoPaths, storage, options.dir);
     await seedDeploymentAccess(client, report);
     report.sequences = await resetSequences(client);
@@ -238,7 +249,17 @@ interface Column {
   required: boolean;
 }
 
-async function loadColumns(client: pg.Client): Promise<Map<string, Column[]>> {
+/** Throws when any of `tables` has a row (audit_log may hold the audit of deployment_access rules added through the app). */
+async function assertEmpty(client: Queryable, tables: string[]): Promise<void> {
+  const notEmpty: string[] = [];
+  for (const name of tables) {
+    const where = name === "public.audit_log" ? " where target_table <> 'deployment_access'" : "";
+    if ((await client.query(`select exists (select 1 from ${qualified(name)}${where}) as e`)).rows[0]!.e) notEmpty.push(name);
+  }
+  if (notEmpty.length > 0) throw new Error(`the target already has rows in ${notEmpty.join(", ")}; import into a freshly migrated database`);
+}
+
+async function loadColumns(client: Queryable): Promise<Map<string, Column[]>> {
   const { rows } = await client.query(
     `select n.nspname as schema, c.relname as tbl, a.attname as col, a.attgenerated <> '' as generated, a.attidentity = 'a' as identity_always,
             a.attnotnull and not a.atthasdef and a.attidentity = '' and a.attgenerated = '' as required
@@ -257,7 +278,7 @@ async function loadColumns(client: pg.Client): Promise<Map<string, Column[]>> {
 }
 
 /** `set local session_replication_role = replica`, which switches off foreign-key checks and every ordinary trigger; the fallback when the role may not. */
-async function tryReplica(client: pg.Client, force: boolean): Promise<{ ok: boolean; reason: string }> {
+async function tryReplica(client: Queryable, force: boolean): Promise<{ ok: boolean; reason: string }> {
   if (force) return { ok: false, reason: "forced by --no-replica" };
   await client.query("savepoint try_replica");
   try {
@@ -279,7 +300,7 @@ const chunks = <T>(items: T[], size: number): T[][] => {
 
 /** Inserts `rows` through json_populate_recordset, naming only `columns`: a column the export lacks takes the target's default. */
 async function insertRows(
-  client: pg.Client,
+  client: Queryable,
   table: string,
   columns: string[],
   rows: Row[],
@@ -299,7 +320,7 @@ async function insertRows(
 }
 
 /** Sets the columns that loaded as null (a self-reference or a cycle), by primary key, once every table is in. */
-async function fillDeferred(client: pg.Client, table: string, columns: string[], nulled: Set<string>, rows: Row[], chunkSize: number): Promise<void> {
+async function fillDeferred(client: Queryable, table: string, columns: string[], nulled: Set<string>, rows: Row[], chunkSize: number): Promise<void> {
   const q = qualified(table);
   const [schema, name] = splitName(table);
   const pk = (
@@ -324,8 +345,11 @@ async function fillDeferred(client: pg.Client, table: string, columns: string[],
  * One better_auth."user" per auth.users row that has an email, and one better_auth.account per Google identity. auth.users is
  * already loaded as it was, which is why the sync_auth_user trigger must not run for these inserts (it would rewrite auth.users).
  */
-async function copyToBetterAuth(client: pg.Client, report: ImportReport, chunkSize: number): Promise<void> {
+async function copyToBetterAuth(client: Queryable, report: ImportReport, chunkSize: number, sourceUsers: Row[]): Promise<void> {
   const now = new Date().toISOString();
+  // auth.users' created_at and updated_at are in the export but not in the target's auth.users, so they are read from the export.
+  const stamps = new Map(sourceUsers.map((u) => [u.id as string, u]));
+  const stamp = (v: unknown) => (typeof v === "string" && v !== "" ? v : now);
   const users = (await client.query("select id, email, email_confirmed_at, raw_user_meta_data from auth.users order by email, id")).rows;
   const seen = new Set<string>();
   const made = new Set<string>();
@@ -351,8 +375,8 @@ async function copyToBetterAuth(client: pg.Client, report: ImportReport, chunkSi
       email,
       emailVerified: u.email_confirmed_at != null,
       image: text(meta.avatar_url) ?? text(meta.picture),
-      createdAt: now,
-      updatedAt: now,
+      createdAt: stamp(stamps.get(id)?.created_at),
+      updatedAt: stamp(stamps.get(id)?.updated_at ?? stamps.get(id)?.created_at),
     });
   }
   const userCols = ["id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt"];
@@ -388,7 +412,7 @@ async function copyToBetterAuth(client: pg.Client, report: ImportReport, chunkSi
 
 const EXTENSION_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
 
-async function copyLogos(client: pg.Client, report: ImportReport, logoPaths: { workspaceId: string; path: string }[], storage: StorageObject[], dir: string): Promise<void> {
+async function copyLogos(client: Queryable, report: ImportReport, logoPaths: { workspaceId: string; path: string }[], storage: StorageObject[], dir: string): Promise<void> {
   for (const { workspaceId, path } of logoPaths) {
     const skip = (reason: string) => report.logos.skipped.push({ workspaceId, path, reason });
     const object = storage.find((o) => o.bucket === "branding" && o.name === path);
@@ -434,7 +458,7 @@ async function copyLogos(client: pg.Client, report: ImportReport, logoPaths: { w
  * A named-email rule per user (brief, 7a): agency admins get admin; owners and editors anywhere get editor; everyone else
  * viewer. A user whose email already has a rule keeps it. Guests aren't seeded (they are not users here).
  */
-async function seedDeploymentAccess(client: pg.Client, report: ImportReport): Promise<void> {
+async function seedDeploymentAccess(client: Queryable, report: ImportReport): Promise<void> {
   const users = (
     await client.query(
       `select u.email, coalesce(u.raw_app_meta_data ->> 'agency_admin', '') = 'true' as admin,
@@ -472,7 +496,7 @@ async function seedDeploymentAccess(client: pg.Client, report: ImportReport): Pr
 }
 
 /** Every sequence owned by a public column goes to that column's maximum, so the next insert doesn't repeat a copied value. */
-async function resetSequences(client: pg.Client): Promise<Record<string, number>> {
+async function resetSequences(client: Queryable): Promise<Record<string, number>> {
   const { rows } = await client.query(
     `select s.relname as seq, t.relname as tbl, a.attname as col
        from pg_class s join pg_namespace sn on sn.oid = s.relnamespace
@@ -524,14 +548,21 @@ export function formatReport(report: ImportReport): string[] {
 
 async function main(): Promise<boolean> {
   const { values } = parseArgs({
-    options: { in: { type: "string" }, url: { type: "string" }, "dry-run": { type: "boolean" }, "no-replica": { type: "boolean" } },
+    options: {
+      in: { type: "string" },
+      url: { type: "string" },
+      driver: { type: "string" },
+      "dry-run": { type: "boolean" },
+      "no-replica": { type: "boolean" },
+    },
     strict: true,
   });
-  if (!values.in) usageError("Usage: import.ts --in <export dir> [--url <target postgres url>] [--dry-run] [--no-replica]");
+  if (!values.in) usageError("Usage: import.ts --in <export dir> [--url <target postgres url>] [--driver pg|neon-ws] [--dry-run] [--no-replica]");
   const url = values.url ?? process.env.DATABASE_URL;
   if (!url) usageError("give --url <target postgres url> or set DATABASE_URL");
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
+  const driver = (values.driver ?? "pg") as Driver;
+  if (!DRIVERS.includes(driver)) usageError(`--driver must be one of ${DRIVERS.join(", ")}`);
+  const { client, close } = await connectTarget(url, driver);
   try {
     const report = await runImport(client, {
       dir: values.in,
@@ -543,7 +574,7 @@ async function main(): Promise<boolean> {
     if (!report.dryRun) writePrivate(join(values.in, REPORT_FILE), JSON.stringify(report, null, 2));
     return true;
   } finally {
-    await client.end();
+    await close();
   }
 }
 

@@ -1,16 +1,17 @@
-// Checks a target after import.ts (docs/plans/supabase-exit-brief.md, step 7a): the manifest's row counts, the Better Auth
+// Checks a target after import.ts (docs/plans/supabase-exit-brief.md, step 7a): the manifest's row counts, that every exported
+// row is in the target with the same values (compared in SQL from the file's own text, so not through JavaScript), the Better Auth
 // copies, the deployment-access rules, the logos, the sequences, that no trigger was left off, and that every foreign key
 // resolves (a full anti-join per key: a constraint that was loaded unchecked is marked valid, so VALIDATE CONSTRAINT would skip it).
-//   node --experimental-strip-types scripts/copy-from-supabase/verify.ts --in <dir> [--url <target postgres url>]
+//   node --experimental-strip-types scripts/copy-from-supabase/verify.ts --in <dir> [--url <target postgres url>] [--driver pg|neon-ws]
 // Exits 1 when anything is wrong. It only reads.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import pg from "pg";
 import { migrationFiles } from "../../src/migrations.ts";
+import { DRIVERS, connectTarget, type Driver } from "./connect.ts";
 import type { ImportReport } from "./import.ts";
 import { danglingSql, listForeignKeys } from "./foreign-keys.ts";
-import { REPORT_FILE, isMain, qualified, quoteIdent, readJson, readManifest, runMain, usageError } from "./shared.ts";
+import { REPORT_FILE, isMain, qualified, quoteIdent, readJson, readManifest, runMain, tableFile, usageError, type Queryable } from "./shared.ts";
 
 export interface VerifyLine {
   status: "ok" | "FAIL" | "info";
@@ -26,7 +27,7 @@ export interface VerifyResult {
 const ADDED_TABLES = new Set(["public.workspace_logos", "public.deployment_access"]);
 const EMAIL_RULE = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
-export async function runVerify(client: pg.Client, dir: string): Promise<VerifyResult> {
+export async function runVerify(client: Queryable, dir: string): Promise<VerifyResult> {
   const manifest = readManifest(dir);
   const reportPath = join(dir, REPORT_FILE);
   const report = existsSync(reportPath) ? readJson<ImportReport>(reportPath) : null;
@@ -48,6 +49,26 @@ export async function runVerify(client: pg.Client, dir: string): Promise<VerifyR
     const n = await one(`select count(*)::int as n from ${qualified(name)}${where}`);
     const exact = !ADDED_TABLES.has(name);
     check(exact ? n === rows : n >= rows, `${name}: ${n} rows, export had ${rows}${exact ? "" : " (import may add more)"}`);
+  }
+
+  // Content: every exported row, read into the target's row type from the file's own text, has an identical row in the target
+  // (compared as the row's text, so 1.50 and 1.5 differ). Columns the target lacks are left out (the import drops them), and so
+  // are those it generates; workspaces.branding is compared without logo_path, which the import moves to workspace_logos.
+  const targetColumns = await comparableColumns(client);
+  for (const [name, { rows, columns }] of Object.entries(manifest.tables)) {
+    if (rows === 0) continue;
+    const have = targetColumns.get(name) ?? new Set<string>();
+    const cols = columns.filter((c) => have.has(c));
+    const expr = (alias: string, side: "file" | "target") =>
+      `row(${cols.map((c) => (side === "file" && name === "public.workspaces" && c === "branding" ? `${alias}."branding" - 'logo_path'` : `${alias}.${quoteIdent(c)}`)).join(", ")})::text`;
+    const missing = await one(
+      `select count(*)::int as n from (
+         select ${expr("f", "file")} from json_populate_recordset(null::${qualified(name)}, $1::json) f
+         except all
+         select ${expr("t", "target")} from ${qualified(name)} t) x`,
+      [readFileSync(join(dir, tableFile(name)), "utf8")],
+    );
+    check(missing === 0, `${name}: ${missing === 0 ? "every exported row is in the target unchanged" : `${missing} exported row(s) are missing or differ`} (${cols.length} columns compared)`);
   }
 
   // Better Auth
@@ -143,13 +164,29 @@ export async function runVerify(client: pg.Client, dir: string): Promise<VerifyR
   return { ok: lines.every((l) => l.status !== "FAIL"), lines };
 }
 
+/** The target's stored (not generated) columns per `schema.table`. */
+async function comparableColumns(client: Queryable): Promise<Map<string, Set<string>>> {
+  const { rows } = await client.query(
+    `select n.nspname || '.' || c.relname as t, a.attname as col
+       from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
+      where c.relkind = 'r' and a.attnum > 0 and not a.attisdropped and a.attgenerated = '' and n.nspname in ('public', 'auth', 'better_auth')`,
+  );
+  const out = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!out.has(r.t as string)) out.set(r.t as string, new Set());
+    out.get(r.t as string)!.add(r.col as string);
+  }
+  return out;
+}
+
 async function main(): Promise<boolean> {
-  const { values } = parseArgs({ options: { in: { type: "string" }, url: { type: "string" } }, strict: true });
-  if (!values.in) usageError("Usage: verify.ts --in <export dir> [--url <target postgres url>]");
+  const { values } = parseArgs({ options: { in: { type: "string" }, url: { type: "string" }, driver: { type: "string" } }, strict: true });
+  if (!values.in) usageError("Usage: verify.ts --in <export dir> [--url <target postgres url>] [--driver pg|neon-ws]");
   const url = values.url ?? process.env.DATABASE_URL;
   if (!url) usageError("give --url <target postgres url> or set DATABASE_URL");
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
+  const driver = (values.driver ?? "pg") as Driver;
+  if (!DRIVERS.includes(driver)) usageError(`--driver must be one of ${DRIVERS.join(", ")}`);
+  const { client, close } = await connectTarget(url, driver);
   try {
     await client.query("begin read only");
     const { ok, lines } = await runVerify(client, values.in);
@@ -157,7 +194,8 @@ async function main(): Promise<boolean> {
     console.log(ok ? "VERIFIED" : `VERIFY FAILED (${lines.filter((l) => l.status === "FAIL").length} problem(s))`);
     return ok;
   } finally {
-    await client.end();
+    await client.query("rollback").catch(() => {});
+    await close();
   }
 }
 

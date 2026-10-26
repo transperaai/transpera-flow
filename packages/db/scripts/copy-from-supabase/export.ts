@@ -49,11 +49,15 @@ export interface ExportResult {
   problems: string[];
 }
 
-/** A read-only Postgres source: one repeatable-read transaction, so every page sees the same data. */
+/**
+ * A read-only Postgres source: one repeatable-read transaction, so every page sees the same data. `row_security = off` makes a
+ * query that row-level security would filter fail instead of quietly returning fewer rows (runExport also refuses such a role).
+ */
 export async function postgresSource(url: string): Promise<SqlSource> {
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   await client.query("begin isolation level repeatable read read only");
+  await client.query("set local row_security = off");
   return {
     async query(sql) {
       assertReadOnlySelect(sql);
@@ -82,6 +86,21 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
   ).map((r) => tableName("public", str(r.tablename)));
   const tables = [...publicTables, ...Object.keys(AUTH_COLUMNS)];
 
+  // Row-level security would hide rows from a role that is subject to it, and the count would agree with what was read, so a
+  // short export would look whole. Supabase's `postgres` (the Management API's role) bypasses it; anything else is refused.
+  const storagePresent = (await source.query("select to_regclass('storage.objects')::text as t"))[0]!.t != null;
+  const filtered: string[] = [];
+  for (const name of [...tables, ...(storagePresent ? ["storage.objects"] : [])]) {
+    const [{ a }] = (await source.query(`select row_security_active(${quoteLiteral(qualified(name))}::regclass) as a`)) as [{ a: unknown }];
+    if (a === true || a === "t") filtered.push(name);
+  }
+  if (filtered.length > 0) {
+    throw new Error(`row-level security applies to this role on ${filtered.join(", ")}, so rows could be missing; export as a role that bypasses it (Supabase's postgres)`);
+  }
+  // Writes counted per table from here to the end: a freeze that didn't hold shows up even when the row counts still agree
+  // (an update, or an insert and a delete). Only the Management API source can see one: --url reads a single snapshot.
+  const writesBefore = await writeCounters(source);
+
   const manifest: Manifest = {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -93,9 +112,12 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
 
   for (const name of tables) {
     const [schema, table] = splitName(name);
+    // From the catalog, not information_schema, which leaves out columns the role has no privilege on (`select *` would still
+    // read them, and the import would then drop them as unlisted).
     const columns = (
       await source.query(
-        `select column_name from information_schema.columns where table_schema = ${quoteLiteral(schema)} and table_name = ${quoteLiteral(table)} order by ordinal_position`,
+        `select a.attname as column_name from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = ${quoteLiteral(schema)} and c.relname = ${quoteLiteral(table)} and a.attnum > 0 and not a.attisdropped order by a.attnum`,
       )
     ).map((r) => str(r.column_name));
     const wanted = AUTH_COLUMNS[name];
@@ -131,7 +153,10 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
       if (n < pageSize) break;
     }
     const text = `[${parts.join(",\n")}]`;
-    if (read !== expected) problems.push(`${name}: counted ${expected} rows but read ${read} (it changed while being exported)`);
+    const after = Number((await source.query(`select count(*)::int as n from ${qualified(name)}`))[0]!.n);
+    if (read !== expected || after !== expected) {
+      problems.push(`${name}: counted ${expected} rows, read ${read}, then counted ${after} (it changed while being exported)`);
+    }
     if ((JSON.parse(text) as unknown[]).length !== read) throw new Error(`${name}: the exported JSON does not hold ${read} rows`);
     writePrivate(join(dir, tableFile(name)), text);
     manifest.tables[name] = { rows: read, columns: selected };
@@ -147,7 +172,7 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
   const logTable = logs.supabase ? "supabase_migrations.schema_migrations" : logs.repo ? "public.schema_migrations" : null;
   if (logTable) manifest.maxMigration = ((await source.query(`select max(version)::text as v from ${logTable}`))[0]!.v as string | null) ?? null;
 
-  const objects = await listStorage(source, pageSize);
+  const objects = storagePresent ? await listStorage(source, pageSize) : [];
   manifest.storage.objects = objects.length;
   if (options.storageBase) {
     for (const o of objects.filter((x) => x.bucket === "branding")) {
@@ -159,15 +184,29 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
       } else manifest.storage.brandingDownloaded++;
     }
   }
+  const writesAfter = await writeCounters(source);
+  for (const name of [...tables, "storage.objects"]) {
+    const before = writesBefore.get(name);
+    const after = writesAfter.get(name);
+    if (before !== undefined && after !== undefined && before !== after) {
+      problems.push(`${name}: ${BigInt(after) - BigInt(before)} row write(s) while the export ran (Postgres counts a write up to a few seconds late); export again once nothing writes`);
+    }
+  }
   writePrivate(join(dir, STORAGE_FILE), JSON.stringify(objects, null, 2));
   writePrivate(join(dir, MANIFEST_FILE), JSON.stringify(manifest, null, 2));
   log(`storage: ${objects.length} objects (${manifest.storage.brandingDownloaded} branding downloaded, ${manifest.storage.brandingFailed} failed)`);
   return { dir, manifest, problems };
 }
 
+/** Rows inserted, updated and deleted per table since the statistics were reset, as `schema.table` -> a decimal string. */
+async function writeCounters(source: SqlSource): Promise<Map<string, string>> {
+  const rows = await source.query(
+    "select schemaname || '.' || relname as t, (n_tup_ins + n_tup_upd + n_tup_del)::text as w from pg_stat_all_tables where schemaname in ('public', 'auth', 'storage')",
+  );
+  return new Map(rows.map((r) => [str(r.t), str(r.w)]));
+}
+
 async function listStorage(source: SqlSource, pageSize: number): Promise<StorageObject[]> {
-  const present = (await source.query("select to_regclass('storage.objects')::text as t"))[0]!.t;
-  if (!present) return [];
   const objects: StorageObject[] = [];
   for (let offset = 0; ; offset += pageSize) {
     const rows = await source.query(
