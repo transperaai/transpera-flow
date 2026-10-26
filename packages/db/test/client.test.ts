@@ -22,7 +22,7 @@ let pool: pg.Pool;
 let member: { id: string; claims: Claims };
 let stranger: { id: string; claims: Claims };
 
-const as = (u: { claims: Claims } | null): Kysely<DB> => createDb(pool, u?.claims ?? null);
+const as = (u: { claims: Record<string, unknown> } | null): Kysely<DB> => createDb(pool, (u?.claims as Claims | undefined) ?? null);
 const workspaceNames = async (kdb: Kysely<DB>) => (await kdb.selectFrom("workspaces").select("name").execute()).map((r) => r.name);
 
 beforeAll(async () => {
@@ -53,12 +53,12 @@ describe("claims", () => {
     expect((await workspaceNames(as(admin))).length).toBeGreaterThan(1);
   });
 
-  it("runs as anon with no claims, and RLS returns no rows", async () => {
+  it("runs as anon with no claims, and tables are closed to it", async () => {
     const kdb = as(null);
     const { rows } = await sql<{ uid: string | null; who: string }>`select auth.uid() as uid, current_user as who`.execute(kdb);
     expect(rows).toEqual([{ uid: null, who: "anon" }]);
-    // The visibility check itself: a table anon may read, with a policy that matches nothing for it.
-    expect((await sql`select * from public.use_api_token('not-a-token')`.execute(kdb)).rows).toBeDefined();
+    // anon holds no table privileges at all (20261224000000_revoke_unused_table_privileges.sql): refused, not empty.
+    await expect(workspaceNames(kdb)).rejects.toMatchObject({ code: "42501" });
   });
 
   it("does not leak one query's role or claims into the next on the same connection", async () => {
@@ -69,10 +69,9 @@ describe("claims", () => {
     expect(after[0]!.who).toBe("anon");
     const owner = await pool.connect();
     try {
-      expect((await owner.query("select current_user as who, current_setting('request.jwt.claims', true) as c")).rows[0]).toEqual({
-        who: "postgres",
-        c: null,
-      });
+      // The setting was transaction-local: it reads as unset (or empty once set in this session), never as the claims.
+      const r = (await owner.query("select current_user as who, current_setting('request.jwt.claims', true) as c")).rows[0];
+      expect({ who: r.who, c: r.c ?? "" }).toEqual({ who: "postgres", c: "" });
     } finally {
       owner.release();
     }
@@ -130,13 +129,11 @@ describe("transactions", () => {
 
   it("supports savepoints inside a transaction", async () => {
     const before = await nameOf();
-    await as(member)
-      .transaction()
-      .execute(async (trx) => {
-        const sp = await trx.savepoint("sp1").execute();
-        await sp.updateTable("workspaces").set({ name: "Inner" }).where("id", "=", ws).execute();
-        await sp.rollbackToSavepoint("sp1").execute();
-      });
+    const trx = await as(member).startTransaction().execute();
+    const sp = await trx.savepoint("sp1").execute();
+    await sp.updateTable("workspaces").set({ name: "Inner" }).where("id", "=", ws).execute();
+    await sp.rollbackToSavepoint("sp1").execute();
+    await sp.commit().execute();
     expect(await nameOf()).toBe(before);
   });
 });

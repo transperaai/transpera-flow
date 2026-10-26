@@ -82,7 +82,19 @@ class ClaimsConnection implements DatabaseConnection {
   /** Set when the connection failed in a way that makes it unfit for reuse. */
   broken: Error | undefined;
 
-  constructor(readonly client: pg.PoolClient) {}
+  // The pool stops listening for errors on a checked-out client; without a listener a dropped connection would crash the process.
+  readonly onError = (err: Error) => {
+    this.broken = err;
+  };
+
+  constructor(readonly client: pg.PoolClient) {
+    client.on("error", this.onError);
+  }
+
+  release() {
+    this.client.off("error", this.onError);
+    this.client.release(this.broken);
+  }
 
   async executeQuery<R>(compiled: CompiledQuery): Promise<QueryResult<R>> {
     try {
@@ -97,7 +109,6 @@ class ClaimsConnection implements DatabaseConnection {
     }
   }
 
-  // eslint-disable-next-line require-yield
   async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
     throw new Error("Streaming queries are not supported");
   }
@@ -182,12 +193,12 @@ class ClaimsDriver implements Driver {
         // Postgres turns a commit of an aborted transaction into a rollback, so a failed statement needs no special case.
         await c.client.query("commit");
       } catch (err) {
-        c.broken = isBroken(err) ? asError(err) : undefined;
-        c.client.release(c.broken);
+        if (isBroken(err)) c.broken = asError(err);
+        c.release();
         throw err;
       }
     }
-    c.client.release(c.broken);
+    c.release();
   }
 
   /** The pool is shared and outlives every Kysely instance; the owner ends it. */

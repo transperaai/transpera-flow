@@ -1,7 +1,7 @@
 # Supabase: things to check when we connect a real project
 
 Everything database-related has so far been verified only against **plain
-Postgres 16 with a small auth stand-in** (`packages/db/test/sql/auth-shim.sql`),
+Postgres 16 with a small auth stand-in** (`packages/db/sql/compat.sql`),
 because Supabase's Docker images couldn't be pulled in the build environment.
 When we move to a real Supabase project, work through this list; some items
 may need code or migration changes.
@@ -12,7 +12,7 @@ may need code or migration changes.
 2. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to Vercel
    (and to `apps/web/.env.local` for local dev). See `apps/web/.env.example`.
 3. Apply migrations and seed. Either:
-   - **SQL editor (works from a phone):** paste `packages/db/supabase/bootstrap.sql`
+   - **SQL editor (works from a phone):** paste `packages/db/bootstrap.sql`
      into a new query and run it once. It contains every migration, the seed, and
      the migration-history rows so the CLI stays in sync afterwards.
    - **CLI:** `npx supabase link --workdir packages/db` then
@@ -50,7 +50,7 @@ Project `vgsjkpwvxkpqvyazwcyq`, Postgres 17, production at https://transpera-flo
 
 | Area | What we assumed | What to verify on Supabase |
 |---|---|---|
-| Postgres version | Tested on Postgres 16; `config.toml` says 15 | Match `db.major_version` in `packages/db/supabase/config.toml` to the project's version; nothing in the migration is version-specific as far as we know. |
+| Postgres version | Tested on Postgres 16; `config.toml` (removed in the Neon move) said 15 | Match `db.major_version` in the project's settings to the project's version; nothing in the migration is version-specific as far as we know. |
 | `auth.uid()` / `auth.jwt()` | The shim mirrors Supabase's definitions (reads `request.jwt.claims`) | RLS tests pass against the real functions. Run the RLS suite against a Supabase branch/local stack once available. |
 | Agency admin flag | Read from `app_metadata.agency_admin` in the JWT | The flag only appears in the JWT after the user's session refreshes; confirm sign-out/in picks it up. `raw_app_meta_data` column name in `make-agency-admin.sql` matches the current `auth.users` schema. |
 | Grants | Migration grants table privileges to `authenticated` and revokes from `anon` | Supabase re-applies default privileges to `anon` for **new** tables. Every future migration must keep RLS on and repeat the revoke, or anon inherits privileges (RLS still blocks rows, but keep it tight). |
@@ -460,3 +460,11 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
 - Post-apply checks written against plain Postgres can now expect the same table privileges on Supabase as locally, for
   tables `postgres` makes after this migration.
 
+
+## Neon move, step 1 (verified only on plain Postgres 16, not Neon)
+
+- `packages/db/sql/compat.sql`, `legacy-shims.sql`, `scripts/migrate.ts` and `createDb` / the ClaimsDriver (`src/client.ts`) were
+  run only against a local Postgres 16 as a superuser. Not checked on Neon: that its login role can `create role ... bypassrls`
+  (compat.sql skips it with a notice if not), `create publication` and `grant anon, authenticated, service_role to current_user`;
+  that `set_config('role', ...)` works through its pooled (PgBouncer) endpoint in a transaction; and the round-trip cost
+  (measured locally: 0.6 ms per `createDb` query against 0.2 ms for a bare query).

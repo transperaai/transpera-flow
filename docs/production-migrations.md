@@ -1,6 +1,6 @@
 # Production migrations
 
-Every migration in `packages/db/supabase/migrations/`, in the order production applies them (the order of
+Every migration in `packages/db/migrations/`, in the order production applies them (the order of
 `version` in `supabase_migrations.schema_migrations`, which is the order of the file names). Keep this table up to
 date when a migration lands or is applied.
 
