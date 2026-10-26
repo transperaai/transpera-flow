@@ -6,7 +6,8 @@ import type { DB } from "./db-types";
 
 type Functions = Database["public"]["Functions"];
 type FnName = keyof Functions & string;
-type FnArgs<N extends FnName> = Functions[N] extends { Args: infer A } ? A : never;
+// Distributes over an overloaded function's signatures, so any one of their argument lists is accepted.
+type FnArgs<N extends FnName> = Functions[N] extends infer F ? (F extends { Args: infer A } ? A : never) : never;
 type FnReturns<N extends FnName> = Functions[N] extends { Returns: infer R } ? R : never;
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;

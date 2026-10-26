@@ -749,7 +749,7 @@ export async function resolveIssue(
   // With a solution (A50) the six-argument function; without one the five-argument function, so resolving works with or without it.
   try {
     const data = args.solutionId
-      ? await rpc(db, "resolve_issue", { ...base, p_note: args.note ?? "", p_solution: args.solutionId } as never)
+      ? await rpc(db, "resolve_issue", { ...base, p_note: args.note ?? "", p_solution: args.solutionId })
       : await rpc(db, "resolve_issue", { ...base, p_note: args.note ?? undefined });
     return { id: (data as { id: string }).id };
   } catch (e) {
