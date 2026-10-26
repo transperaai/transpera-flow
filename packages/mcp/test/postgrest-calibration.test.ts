@@ -1,41 +1,29 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Db } from "@transpera-flow/db";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { calibrate, estimatedParameters, provenanceFromRows, simulate, STABLE_MARKET, type CalibrationResult } from "@transpera-flow/engine";
-import { calibrationInput, loadProcessBundle, parseStepLog, toEngineModel, type Database, type ProcessRow } from "@transpera-flow/db";
-import { signJwt } from "./helpers";
+import { rpc } from "@transpera-flow/db/client";
+import { calibrationInput, loadProcessBundle, parseStepLog, toEngineModel, type ProcessRow } from "@transpera-flow/db";
+import { errorOf, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// Calibration from historical data (issue #41, migration 20261202000000) as the web app does it: over PostgREST, signed in,
-// with Supabase's default privileges and RLS. An editor stores the dataset record and the calibration and applies the
+// Calibration from historical data (issue #41, migration 20261202000000) as the web app does it: through Kysely, signed in,
+// under RLS. An editor stores the dataset record and the calibration and applies the
 // proposals they tick; the measured values reach the live model only when the draft is published. Then the model the engine
 // runs has the measured lead volume (so the market's Stable level, 100% of today, is the measured one), and the robustness
 // check no longer perturbs what was measured. A viewer and an anonymous caller apply nothing. Runs in its own workspace.
-// Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
+// Runs on a throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", proc: "", rev: "", role: "", source: "", qualify: "", decide: "", won: "", lost: "", start: "" };
-let editor: SupabaseClient<Database>;
-let viewer: SupabaseClient<Database>;
-let anon: SupabaseClient<Database>;
-
-function client(token: string): SupabaseClient<Database> {
-  return createClient<Database>("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
+let editor: Db;
+let viewer: Db;
+let anon: Db;
 
 const SETTINGS = { hours_per_week: 40, currency: "AUD", horizon_weeks: 13, leads_per_week: 5, active_clients: 0, churn_monthly: 0, retainer: 1000 };
 
@@ -57,21 +45,19 @@ function log(): string {
 }
 
 async function bundle(revisionId: string) {
-  const { data: ws } = await editor.from("workspaces").select("id, name, slug, settings").eq("id", ids.ws).single();
-  const { data: proc } = await editor.from("processes").select("*").eq("id", ids.proc).single();
-  return loadProcessBundle(editor, ws!, proc as unknown as ProcessRow, revisionId);
+  const ws = await editor.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", ids.ws).executeTakeFirstOrThrow();
+  const proc = await editor.selectFrom("processes").selectAll().where("id", "=", ids.proc).executeTakeFirstOrThrow();
+  return loadProcessBundle(editor, ws, proc as unknown as ProcessRow, revisionId);
 }
 
-describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
+describe("calibration", () => {
   let result: CalibrationResult;
   let calibrationId = "";
   let datasetId = "";
 
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug, settings) values ('Calibrate Co', $1, $2) returning id", [`calibrate-${tag}`, SETTINGS])).id as string;
     ids.role = (await one("insert into roles (workspace_id, name) values ($1, 'Sales') returning id", [ids.ws])).id as string;
@@ -103,22 +89,16 @@ describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
     const [ed, vw] = [randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `cal-editor-${tag}@example.com`, vw, `cal-viewer-${tag}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    editor = client(token(ed));
-    viewer = client(token(vw));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await editor.from("processes").select("id").eq("id", ids.proc)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    editor = env.dbAs(userClaims(ed));
+    viewer = env.dbAs(userClaims(vw));
+    anon = env.dbAs(null);
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
-  it("computes the proposals from the live model as loaded over PostgREST", async () => {
+  it("computes the proposals from the live model as loaded", async () => {
     const live = await bundle(ids.rev);
     const parsed = parseStepLog(log());
     expect(parsed.errors).toEqual([]);
@@ -142,35 +122,33 @@ describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
   });
 
   it("stores the dataset and the calibration as an editor; the viewer and anon can't", async () => {
-    const d = await editor.from("datasets").insert({ workspace_id: ids.ws, kind: "step_log", process_id: ids.proc, file_name: "enquiries.csv", column_map: parseStepLog(log()).columns, row_count: result.rows }).select("id").single();
-    expect(d.error).toBeNull();
-    datasetId = d.data!.id;
-    const c = await editor.from("calibrations").insert({ workspace_id: ids.ws, dataset_id: datasetId, process_id: ids.proc, results: result as never }).select("id, applied").single();
-    expect(c.error).toBeNull();
-    expect(c.data!.applied).toBe(false);
-    calibrationId = c.data!.id;
-    expect((await viewer.from("datasets").insert({ workspace_id: ids.ws, kind: "step_log", file_name: "x.csv", row_count: 1 })).error).not.toBeNull();
-    expect((await anon.from("calibrations").select("id")).data ?? []).toEqual([]);
-    expect((await viewer.from("calibrations").select("id")).data).toEqual([{ id: calibrationId }]);
+    const d = await editor.insertInto("datasets").values({ workspace_id: ids.ws, kind: "step_log", process_id: ids.proc, file_name: "enquiries.csv", column_map: parseStepLog(log()).columns as never, row_count: result.rows }).returning("id").executeTakeFirstOrThrow();
+    datasetId = d.id;
+    const c = await editor.insertInto("calibrations").values({ workspace_id: ids.ws, dataset_id: datasetId, process_id: ids.proc, results: result as never }).returning(["id", "applied"]).executeTakeFirstOrThrow();
+    expect(c.applied).toBe(false);
+    calibrationId = c.id;
+    expect(await errorOf(() => viewer.insertInto("datasets").values({ workspace_id: ids.ws, kind: "step_log", file_name: "x.csv", row_count: 1 }).execute())).not.toBeNull();
+    // Anon has no access to the table at all: the database refuses the read, so it sees nothing either way.
+    expect(await anon.selectFrom("calibrations").select("id").execute().catch(() => [])).toEqual([]);
+    expect(await viewer.selectFrom("calibrations").select("id").execute()).toEqual([{ id: calibrationId }]);
   });
 
   it("applies nothing for a viewer or anon", async () => {
     const keys = [`work:${ids.qualify}`];
-    const v = await viewer.rpc("apply_calibration", { p_calibration: calibrationId, p_keys: keys });
-    expect(v.data).toEqual({ status: "not_found" });
-    const a = await anon.rpc("apply_calibration", { p_calibration: calibrationId, p_keys: keys });
-    expect(a.error).not.toBeNull();
+    const v = await rpc(viewer, "apply_calibration", { p_calibration: calibrationId, p_keys: keys });
+    expect(v).toEqual({ status: "not_found" });
+    const a = await errorOf(() => rpc(anon, "apply_calibration", { p_calibration: calibrationId, p_keys: keys }));
+    expect(a).not.toBeNull();
     expect((await one("select draft_revision_id from processes where id = $1", [ids.proc])).draft_revision_id).toBeNull();
   });
 
   it("records and applies in one call as the page does; a viewer's call leaves no record", async () => {
     const before = Number((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n);
     const args = { p_workspace: ids.ws, p_process: ids.proc, p_file_name: "again.csv", p_column_map: {}, p_row_count: result.rows, p_results: result as never, p_keys: [`rework:${ids.qualify}`] };
-    expect((await viewer.rpc("record_calibration", args)).error).not.toBeNull();
+    expect(await errorOf(() => rpc(viewer, "record_calibration", args))).not.toBeNull();
     expect((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n).toBe(before);
-    const out = await editor.rpc("record_calibration", args);
-    expect(out.error).toBeNull();
-    expect(out.data).toMatchObject({ status: "ok", results: [{ key: `rework:${ids.qualify}`, status: "applied" }] });
+    const out = await rpc(editor, "record_calibration", args);
+    expect(out).toMatchObject({ status: "ok", results: [{ key: `rework:${ids.qualify}`, status: "applied" }] });
     expect((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n).toBe(before + 1);
   });
 
@@ -178,15 +156,14 @@ describe.skipIf(!POSTGREST_URL)("calibration over PostgREST", () => {
     const keys = result.proposals.filter((p) => p.set && p.changed).map((p) => p.key);
     // Half the clients signed, as the model already said: that one is not a change, so not offered.
     expect(keys.sort()).toEqual([`arrivals:${ids.source}`, `routing:${ids.qualify}`, `wait:${ids.decide}`, `work:${ids.qualify}`].sort());
-    const out = await editor.rpc("apply_calibration", { p_calibration: calibrationId, p_keys: keys });
-    expect(out.error).toBeNull();
-    const applied = out.data as { results: { key: string; status: string }[]; draft: { revision_id: string } };
+    const out = await rpc(editor, "apply_calibration", { p_calibration: calibrationId, p_keys: keys });
+    const applied = out as { results: { key: string; status: string }[]; draft: { revision_id: string } };
     expect(applied.results.every((r) => r.status === "applied")).toBe(true);
     // Live is untouched until publish (the lead volume is a company fact: it changed live).
     const before = toEngineModel(await bundle(ids.rev));
     expect(before.steps.find((s) => s.id === ids.qualify)!.work).toBe(0.5);
 
-    expect((await editor.rpc("publish_process", { target_process: ids.proc, accept_estimates: true })).error).toBeNull();
+    await rpc(editor, "publish_process", { target_process: ids.proc, accept_estimates: true });
     const live = await bundle(applied.draft.revision_id);
     const model = toEngineModel(live);
     expect(model.steps.find((s) => s.id === ids.qualify)!.work).toBe(1.5);

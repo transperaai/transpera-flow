@@ -1,43 +1,31 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Db } from "@transpera-flow/db";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { calibrate, proposePersonTimes, type CalibrationResult } from "@transpera-flow/engine";
-import { calibrationInput, loadProcessBundle, splitCsv, type Database, type ProcessRow } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
+import { calibrationInput, loadProcessBundle, splitCsv, type ProcessRow } from "@transpera-flow/db";
 import { applyNameMapEntries, importDetails, personValues, readImport, suggestMapping, suggestNameMap, timeLogPersonVisits } from "@transpera-flow/db/csv-import";
-import { signJwt } from "./helpers";
+import { errorOf, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // Per-person times measured from a time log that names people (issue #227, migration 20261227000000), as the web app does it:
-// over PostgREST, signed in, with Supabase's default privileges and RLS. An editor with Per-person times switched on reads a time
+// through Kysely, signed in, under RLS. An editor with Per-person times switched on reads a time
 // log, matches the people, computes proposals with `proposePersonTimes`, records the import and applies one. A member reads the
 // calibration and finds no person in it, and no rows in `capacity_factor_proposals`. Runs in its own workspace.
-// Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
+// Runs on a throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", proc: "", rev: "", role: "", qualify: "", won: "", lost: "", start: "", sam: "", jo: "" };
-let editor: SupabaseClient<Database>;
-let member: SupabaseClient<Database>;
-let anon: SupabaseClient<Database>;
+let editor: Db;
+let member: Db;
+let anon: Db;
 /** This file's own accounts, removed afterwards. */
 const accounts: string[] = [];
-
-function client(token: string): SupabaseClient<Database> {
-  return createClient<Database>("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
 
 const SETTINGS = { hours_per_week: 40, currency: "AUD", horizon_weeks: 13, leads_per_week: 5, active_clients: 0, churn_monthly: 0, retainer: 1000, capacity_factor_enabled: true };
 
@@ -52,21 +40,19 @@ function timeLogFile(): string {
 }
 
 async function bundle(revisionId: string) {
-  const { data: ws } = await editor.from("workspaces").select("id, name, slug, settings").eq("id", ids.ws).single();
-  const { data: proc } = await editor.from("processes").select("*").eq("id", ids.proc).single();
-  return loadProcessBundle(editor, ws!, proc as unknown as ProcessRow, revisionId);
+  const ws = await editor.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", ids.ws).executeTakeFirstOrThrow();
+  const proc = await editor.selectFrom("processes").selectAll().where("id", "=", ids.proc).executeTakeFirstOrThrow();
+  return loadProcessBundle(editor, ws, proc as unknown as ProcessRow, revisionId);
 }
 
-describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST", () => {
+describe("per-person times from a time log", () => {
   let results: CalibrationResult;
   let factors: ReturnType<typeof proposePersonTimes>["proposals"] = [];
   let details: unknown;
 
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug, settings) values ('Person Times Co', $1, $2) returning id", [`ptimes-${tag}`, SETTINGS])).id as string;
     ids.role = (await one("insert into roles (workspace_id, name) values ($1, 'Sales') returning id", [ids.ws])).id as string;
@@ -96,15 +82,9 @@ describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST
     accounts.push(ed, mb);
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `pt-editor-${tag}@example.com`, mb, `pt-member-${tag}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [ids.ws, ed, mb]);
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    editor = client(token(ed));
-    member = client(token(mb));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await editor.from("processes").select("id").eq("id", ids.proc)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    editor = env.dbAs(userClaims(ed));
+    member = env.dbAs(userClaims(mb));
+    anon = env.dbAs(null);
   });
 
   afterAll(async () => {
@@ -114,7 +94,7 @@ describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST
       await admin.query("delete from audit_log where workspace_id = $1", [ids.ws]);
       await admin.query("delete from auth.users where id = any ($1)", [accounts]);
     }
-    await admin?.end();
+    await env?.close();
   });
 
   it("reads the log, matches the people and computes a time for each", async () => {
@@ -168,14 +148,13 @@ describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST
 
   it("refuses a member and anon, and records nothing", async () => {
     const before = Number((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n);
-    for (const who of [member, anon]) expect((await who.rpc("record_calibration_import", args([factors[0]!.key]))).error).not.toBeNull();
+    for (const who of [member, anon]) expect(await errorOf(() => rpc(who, "record_calibration_import", args([factors[0]!.key])))).not.toBeNull();
     expect(Number((await one("select count(*)::int n from datasets where workspace_id = $1", [ids.ws])).n)).toBe(before);
   });
 
   it("records as an editor and applies the ticked time, measured and linked to the dataset", async () => {
-    const out = await editor.rpc("record_calibration_import", args([factors[0]!.key]));
-    expect(out.error).toBeNull();
-    const data = out.data as { status: string; dataset_id: string; calibration_id: string; results: { key: string; status: string }[] };
+    const out = await rpc(editor, "record_calibration_import", args([factors[0]!.key]));
+    const data = out as { status: string; dataset_id: string; calibration_id: string; results: { key: string; status: string }[] };
     expect(data).toMatchObject({ status: "ok", results: [{ key: factors[0]!.key, status: "applied" }] });
     const live = await bundle(ids.rev);
     const mine = (live.personCapacityFactors ?? []).filter((f) => f.person_id === ids.sam);
@@ -185,20 +164,18 @@ describe.skipIf(!POSTGREST_URL)("per-person times from a time log over PostgREST
     expect(stored.factor).toBe(0.8);
     expect((stored.provenance as Record<string, Record<string, unknown>>).factor).toMatchObject({ source: "measured", dataset_id: data.dataset_id, calibration_id: data.calibration_id, n: 12 });
     // Both proposals are kept, where the editor reads them.
-    const kept = await editor.from("capacity_factor_proposals").select("person_id, step_id").eq("calibration_id", data.calibration_id);
-    expect(kept.data).toHaveLength(2);
+    const kept = await editor.selectFrom("capacity_factor_proposals").select(["person_id", "step_id"]).where("calibration_id", "=", data.calibration_id).execute();
+    expect(kept).toHaveLength(2);
   });
 
   it("lets a member read the calibration and finds no person in it, and none of the proposals", async () => {
-    const cals = await member.from("calibrations").select("*").eq("workspace_id", ids.ws);
-    expect(cals.error).toBeNull();
-    expect(cals.data!.length).toBeGreaterThan(0);
-    const text = JSON.stringify(cals.data);
+    const cals = await member.selectFrom("calibrations").selectAll().where("workspace_id", "=", ids.ws).execute();
+    expect(cals.length).toBeGreaterThan(0);
+    const text = JSON.stringify(cals);
     for (const needle of [ids.sam, ids.jo, "Sam Lee", "SAM LEE", "Jo L", "Jo Long", "capacity_factors"]) expect(text, needle).not.toContain(needle);
-    const hidden = await member.from("capacity_factor_proposals").select("*").eq("workspace_id", ids.ws);
-    expect(hidden.error).toBeNull();
-    expect(hidden.data).toEqual([]);
-    expect((await anon.from("capacity_factor_proposals").select("*")).data ?? []).toEqual([]);
-    expect((await editor.from("capacity_factor_proposals").update({ step_id: ids.qualify }).eq("workspace_id", ids.ws)).error).not.toBeNull();
+    const hidden = await member.selectFrom("capacity_factor_proposals").selectAll().where("workspace_id", "=", ids.ws).execute();
+    expect(hidden).toEqual([]);
+    expect(await anon.selectFrom("capacity_factor_proposals").selectAll().execute().catch(() => [])).toEqual([]);
+    expect(await errorOf(() => editor.updateTable("capacity_factor_proposals").set({ step_id: ids.qualify }).where("workspace_id", "=", ids.ws).execute())).not.toBeNull();
   });
 });

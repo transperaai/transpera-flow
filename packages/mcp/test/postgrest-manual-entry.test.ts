@@ -1,48 +1,33 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Db } from "@transpera-flow/db";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { signJwt } from "./helpers";
+import { startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// Adding things by hand, part 1 (issue #182, B19; migration 20261201000000), as the web app writes it: over PostgREST with
+// Adding things by hand, part 1 (issue #182, B19; migration 20261201000000), as the web app writes it: with
 // Supabase's default table privileges and RLS. An editor adds a client, edits it field by field, sets its services and who
 // looks after it, makes it inactive, and can't delete it; deletes a saved scenario and a solution (whose links land in the
 // audit log and on each issue's history). An owner changes the workspace's name and currency; an editor can't. A viewer
 // and an anonymous caller change nothing. Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", service: "", role: "", person: "", process: "", revision: "", issue: "" };
-let owner: SupabaseClient;
-let editor: SupabaseClient;
-let viewer: SupabaseClient;
-let anon: SupabaseClient;
+let owner: Db;
+let editor: Db;
+let viewer: Db;
+let anon: Db;
 
-function client(token: string): SupabaseClient {
-  return createClient("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
+const save = (c: Db, target: string, key: object, base: object, changes: object) => c.rpc("save_fields", { target, key, base, changes });
 
-const save = (c: SupabaseClient, target: string, key: object, base: object, changes: object) => c.rpc("save_fields", { target, key, base, changes });
-
-describe.skipIf(!POSTGREST_URL)("adding things by hand over PostgREST", () => {
+describe("adding things by hand", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug, settings) values ('Manual Co', $1, '{\"currency\": \"AUD\"}') returning id", [`manual-${tag}`])).id as string;
     const [ow, ed, vw] = [randomUUID(), randomUUID(), randomUUID()];
@@ -56,16 +41,10 @@ describe.skipIf(!POSTGREST_URL)("adding things by hand over PostgREST", () => {
     await admin.query("update process_revisions set status = 'published' where id = $1", [ids.revision]);
     await admin.query("update processes set live_revision_id = $1 where id = $2", [ids.revision, ids.process]);
     ids.issue = (await one("insert into issues (workspace_id, process_id, title, type, severity, source) values ($1, $2, 'Slow replies', 'delay', 'warning', 'manual') returning id", [ids.ws, ids.process])).id as string;
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    owner = client(token(ow));
-    editor = client(token(ed));
-    viewer = client(token(vw));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await editor.from("workspaces").select("id").eq("id", ids.ws)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    owner = env.dbAs(userClaims(ow));
+    editor = env.dbAs(userClaims(ed));
+    viewer = env.dbAs(userClaims(vw));
+    anon = env.dbAs(null);
   });
 
   afterAll(async () => {
@@ -74,7 +53,7 @@ describe.skipIf(!POSTGREST_URL)("adding things by hand over PostgREST", () => {
       await admin.query("delete from workspaces where id = $1", [ids.ws]);
       await admin.query("delete from audit_log where workspace_id = $1", [ids.ws]);
     }
-    await admin?.end();
+    await env?.close();
   });
 
   it("an editor adds a client, edits it, sets its services and account director, and makes it inactive; nobody deletes it", async () => {

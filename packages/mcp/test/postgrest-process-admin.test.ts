@@ -1,40 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { listProcesses, loadSourceFile } from "@transpera-flow/db";
+import type { Db } from "@transpera-flow/db";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { signJwt } from "./helpers";
+import { startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// Adding things by hand, part 2 (issue #182, B19 2/2; migration 20261204000000), as the web app writes it: over PostgREST with
+// Adding things by hand, part 2 (issue #182, B19 2/2; migration 20261204000000), as the web app writes it: with
 // Supabase's default table privileges and RLS. An editor makes a process of either kind, renames it, changes its kind, archives
 // it (it leaves `listProcesses`, the company map gets a system version) and restores it; archiving a process inside another is
 // refused with the database's plain message. An editor keeps a file's details on a source. A viewer and an anonymous caller
 // change nothing. (Storage's own policies are tested in packages/db/test/source-files.test.ts: PostgREST doesn't serve the
 // storage schema.) Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", company: "", editor: "" };
-let editor: SupabaseClient;
-let viewer: SupabaseClient;
-let anon: SupabaseClient;
-
-function client(token: string): SupabaseClient {
-  return createClient("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
+let editor: Db;
+let viewer: Db;
+let anon: Db;
 
 /** Make a process as the app does (an insert as the editor), and publish a first version, linking `children` in it. */
 async function made(name: string, kind: "pipeline" | "servicing", children: string[] = []): Promise<string> {
@@ -60,12 +47,10 @@ const mapCards = async () =>
     (r) => r.child_process_id as string,
   );
 
-describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST", () => {
+describe("process admin and source files", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug) values ('Admin Co', $1) returning id", [`admin-${tag}`])).id as string;
     ids.company = (await one("select id from processes where workspace_id = $1 and is_company", [ids.ws])).id as string;
@@ -73,15 +58,9 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
     ids.editor = ed;
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `adm-editor-${tag}@example.com`, vw, `adm-viewer-${tag}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    editor = client(token(ed));
-    viewer = client(token(vw));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await editor.from("workspaces").select("id").eq("id", ids.ws)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    editor = env.dbAs(userClaims(ed));
+    viewer = env.dbAs(userClaims(vw));
+    anon = env.dbAs(null);
   });
 
   afterAll(async () => {
@@ -90,7 +69,7 @@ describe.skipIf(!POSTGREST_URL)("process admin and source files over PostgREST",
       await admin.query("delete from workspaces where id = $1", [ids.ws]);
       await admin.query("delete from audit_log where workspace_id = $1", [ids.ws]);
     }
-    await admin?.end();
+    await env?.close();
   });
 
   it("an editor makes either kind, renames it, changes its kind, archives and restores it; the lists and the map follow", async () => {
