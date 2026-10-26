@@ -18,7 +18,7 @@ export interface TokenUser {
 }
 
 export interface McpHandlerOptions {
-  /** The app's pool (apps/web/src/lib/db/pool.ts `appPool()`), created with `createPool` so values parse as PostgREST once sent them. */
+  /** The app's pool (apps/web/src/lib/db/pool.ts `appPool()`), created with `createPool` so numbers and dates parse as the app expects. */
   pool: Pool;
   /** The one place claims are built (apps/web/src/lib/db/claims.ts `claimsFor`). */
   claimsFor: (user: TokenUser, extra: { apiTokenId: string }) => Claims | null;

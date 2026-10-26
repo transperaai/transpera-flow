@@ -96,7 +96,7 @@ describe("the process library", () => {
     expect(theirs).not.toBeNull();
     const self = await errorOf(() => editor.insertInto("steps").values(card(draft, ids.company, "Company map", 700)).execute());
     expect(self).not.toBeNull();
-    // A process held by another may be linked in a draft (B12 part 2); publishing is refused (postgrest-process-library-everywhere.test.ts).
+    // A process held by another may be linked in a draft (B12 part 2); publishing is refused (db-process-library-everywhere.test.ts).
     await rpc(editor, "discard_draft", { target_process: ids.company });
   });
 

@@ -101,7 +101,7 @@ export async function errorOf(run: () => Promise<unknown>): Promise<(Error & { c
 
 /**
  * A database handle for a user as an API token reaches it through the endpoint: their identity, as the app's `claimsFor` builds
- * it, with the token's id in the claims. (This is what the pre-request hook gave a token's request over PostgREST.)
+ * it, with the token's id in the claims.
  */
 export async function tokenDbFor(env: McpTestDb, userId: string, { agencyAdmin = false, email = "" } = {}) {
   const token = await issueToken(env.t.client, userId, "e2e");

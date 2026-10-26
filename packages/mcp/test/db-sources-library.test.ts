@@ -173,7 +173,7 @@ describe("the sources library", () => {
   });
 
   it("reads a full text on its own: a member can, another workspace's member and anon cannot", async () => {
-    const read = (c: Db) => c.selectFrom("sources").select("body").where("id", "=", src.sop).execute();
+    const read = (c: Db) => c.selectFrom("sources").select("body").where("id", "=", src.sop!).execute();
     expect(await read(editor)).toEqual([{ body: LONG }]);
     expect(await read(outsider)).toEqual([]);
     expect(await read(anon).catch(() => [])).toEqual([]);

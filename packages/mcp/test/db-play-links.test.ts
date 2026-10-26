@@ -50,7 +50,7 @@ describe("play links", () => {
     memberSession = env.dbAs(userClaims(users.member));
     visitorSession = env.dbAs(userClaims(users.visitor));
     anon = env.dbAs(null);
-    // The editor as an API token reaches the database: their claims, with the token's id (what the pre-request hook gave over PostgREST).
+    // The editor as an API token reaches the database: their claims, with the token's id.
     apiSession = (await tokenDbFor(env, users.editor)).db;
     personName = (await admin.query("select name from people where workspace_id = $1 order by created_at, id limit 1", [ws])).rows[0].name as string;
     // A real step of another workspace, which the link doesn't show.
@@ -137,7 +137,7 @@ describe("play links", () => {
     const { token } = await makeLink();
     expect(await submit(anon, token)).toEqual({ status: "ok" });
     const one = (await admin.query("select id from suggestion_proposals where workspace_id = $1 and created_via = 'play_link' limit 1", [ws])).rows[0].id as string;
-    // PostgREST answered these with 401, 403 or 404; the database's own answer is SQLSTATE 42501 (permission denied, or row-level security).
+    // The database refuses each with SQLSTATE 42501 (permission denied, or row-level security).
     const refused = async (run: () => Promise<unknown>, what: string) => {
       const err = await errorOf(run);
       expect(err, what).not.toBeNull();

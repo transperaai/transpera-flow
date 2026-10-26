@@ -60,7 +60,6 @@ describe("findings and the connector", () => {
     const { token, hash } = generateApiToken();
     await admin.query("insert into api_tokens (user_id, token_hash, label, active_workspace_id) values ($1, $2, 'e2e', $3)", [ids.stranger, hash, ids.other]);
     tokens.stranger = token;
-    const deadline = Date.now() + 60_000;
     // A small published process the editor builds over the connector, so the engine has something to measure.
     const mcp = await connect(tokens.editor, options);
     expect(await call(mcp, "create_process", { name: "Sales" })).toMatchObject({ ok: true });

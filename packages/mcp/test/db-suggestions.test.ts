@@ -2,24 +2,18 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateApiToken, type McpHandlerOptions } from "../src";
-import { call, connect, signJwt } from "./helpers";
+import type { Db } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
+import { call, connect, errorOf, startTestDb, tokenDbFor, userClaims, type McpTestDb } from "./helpers";
 
 // The company-model suggestion tools end to end (issue #25), as in production:
-// MCP client → handleMcpRequest → supabase-js → PostgREST (pre-request hook)
-// → Postgres with every migration. Runs in its own workspace so the other
-// PostgREST suite's Northbeam numbers are untouched. Skipped unless
-// POSTGREST_URL is set (CI sets it; see postgrest.test.ts).
+// MCP client → handleMcpRequest → token lookup in app code → Kysely under the
+// token owner's claims → Postgres with every migration. Runs on a throwaway database (test/helpers.ts), in its own workspace.
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
 
+let env: McpTestDb;
 let admin: pg.Client;
 let options: McpHandlerOptions;
-const anonKey = () => signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
-const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 
 const ids = { ws: "", role: "", other: "", person: "", service: "", client: "", lead: "", source: "", editor: "", viewer: "" };
 let editorToken = "";
@@ -49,12 +43,10 @@ async function companyRows() {
   return out;
 }
 
-describe.skipIf(!POSTGREST_URL)("company-model suggestion tools over PostgREST", () => {
+describe("company-model suggestion tools", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
 
     const slug = `suggest-co-${randomUUID().slice(0, 8)}`;
     ids.ws = await insertId("insert into workspaces (name, slug, settings) values ('Suggest Co', $1, $2) returning id", [
@@ -76,22 +68,12 @@ describe.skipIf(!POSTGREST_URL)("company-model suggestion tools over PostgREST",
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ids.editor, ids.viewer]);
     editorToken = await issueToken(ids.editor);
     viewerToken = await issueToken(ids.viewer);
-    options = { supabaseUrl: SUPABASE_URL, supabaseKey: anonKey(), fetch: toPostgrest };
+    options = env.options;
 
-    // Wait for PostgREST (the other suite may be starting it up too).
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const res = await fetch(`${POSTGREST_URL}/workspaces?select=id`, { headers: { authorization: `Bearer ${anonKey()}`, "x-api-token": editorToken } }).catch(
-        () => null,
-      );
-      if (res?.status === 200 && (await res.json()).length === 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   it("each company tool creates suggestions and changes no live data", async () => {
@@ -151,10 +133,10 @@ describe.skipIf(!POSTGREST_URL)("company-model suggestion tools over PostgREST",
     await viewer.close();
 
     // The token can't write roles directly either.
-    const headers = { authorization: `Bearer ${anonKey()}`, "x-api-token": editorToken, "content-type": "application/json" };
-    const direct = await fetch(`${POSTGREST_URL}/roles`, { method: "POST", headers, body: JSON.stringify({ workspace_id: ids.ws, name: "Sneaky" }) });
-    expect([401, 403]).toContain(direct.status);
-    expect((await direct.json()).message).toMatch(/only by review/);
+    const asToken = (await tokenDbFor(env, ids.editor)).db;
+    const direct = await errorOf(() => asToken.insertInto("roles").values({ workspace_id: ids.ws, name: "Sneaky" }).execute());
+    expect(direct?.code).toBe("42501");
+    expect(direct?.message).toMatch(/only by review/);
 
     // A step naming a role that isn't there yet can't be imported.
     const process_json = {
@@ -179,14 +161,8 @@ describe.skipIf(!POSTGREST_URL)("company-model suggestion tools over PostgREST",
 
     const rows = (await admin.query("select id from suggestions where workspace_id = $1 and target_table = 'roles' and status = 'pending'", [ids.ws])).rows;
     expect(rows).toHaveLength(1);
-    const session = signJwt({ sub: ids.editor, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    const res = await fetch(`${POSTGREST_URL}/rpc/review_suggestions`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${session}`, "content-type": "application/json" },
-      body: JSON.stringify({ ids: [rows[0].id], decision: "accept" }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject([{ id: rows[0].id, status: "accepted" }]);
+    const res = await rpc(env.dbAs(userClaims(ids.editor)), "review_suggestions", { ids: [rows[0].id], decision: "accept" });
+    expect(res).toMatchObject([{ id: rows[0].id, status: "accepted" }]);
     const role = (await admin.query("select id, active from roles where workspace_id = $1 and name = 'Copywriter'", [ids.ws])).rows[0];
     expect(role.active).toBe(true);
 
@@ -210,43 +186,30 @@ describe.skipIf(!POSTGREST_URL)("company-model suggestion tools over PostgREST",
     await editor.close();
   });
 
-  it("an API token can't write the company model or review suggestions through the Data API", async () => {
-    const headers = { authorization: `Bearer ${anonKey()}`, "x-api-token": editorToken, "content-type": "application/json" };
-    const patch = await fetch(`${POSTGREST_URL}/people?id=eq.${ids.person}`, { method: "PATCH", headers, body: JSON.stringify({ fte: 0.5 }) });
-    // PostgREST answers 42501 with 401 when the request's own JWT is anon (the hook switched it to the user).
-    expect([401, 403]).toContain(patch.status);
-    expect((await patch.json()).message).toMatch(/only by review/);
+  it("an API token can't write the company model or review suggestions directly", async () => {
+    const asToken = (await tokenDbFor(env, ids.editor)).db;
+    const patch = await errorOf(() => asToken.updateTable("people").set({ fte: 0.5 }).where("id", "=", ids.person).execute());
+    expect(patch?.code).toBe("42501");
+    expect(patch?.message).toMatch(/only by review/);
     const [pending] = (await admin.query("select id from suggestions where workspace_id = $1 and status = 'pending' limit 1", [ids.ws])).rows;
-    const review = await fetch(`${POSTGREST_URL}/rpc/review_suggestions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ ids: [pending.id], decision: "accept" }),
-    });
-    expect([401, 403]).toContain(review.status);
-    expect((await review.json()).message).toMatch(/reviewed by a person/);
+    const review = await errorOf(() => rpc(asToken, "review_suggestions", { ids: [pending.id], decision: "accept" }));
+    expect(review?.code).toBe("42501");
+    expect(review?.message).toMatch(/reviewed by a person/);
     expect((await admin.query("select fte::float8 from people where id = $1", [ids.person])).rows[0].fte).toBe(1);
   });
 
-  it("a signed-in editor accepts and rejects through the Data API, as the app does", async () => {
-    const session = signJwt({ sub: ids.editor, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    const rpc = async (body: object) => {
-      const res = await fetch(`${POSTGREST_URL}/rpc/review_suggestions`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${session}`, "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      expect(res.status).toBe(200);
-      return res.json();
-    };
+  it("a signed-in editor accepts and rejects through the database, as the app does", async () => {
+    const editorDb: Db = env.dbAs(userClaims(ids.editor));
+    const review = async (body: { ids: string[]; decision: string; note?: string }) => rpc(editorDb, "review_suggestions", body);
     const lead = (await admin.query("select id from suggestions where workspace_id = $1 and target_id = $2", [ids.ws, ids.lead])).rows[0].id;
     const company = (await admin.query("select id from suggestions where workspace_id = $1 and target_table = 'workspaces'", [ids.ws])).rows[0].id;
-    expect(await rpc({ ids: [lead], decision: "accept" })).toMatchObject([{ id: lead, status: "accepted" }]);
+    expect(await review({ ids: [lead], decision: "accept" })).toMatchObject([{ id: lead, status: "accepted" }]);
     const row = (await admin.query("select volume_week::float8 as v, provenance from lead_sources where id = $1", [ids.lead])).rows[0];
     expect(row.v).toBe(9);
     expect(row.provenance.volume_week).toMatchObject({ source: "estimated", by: ids.editor, suggestion_id: lead, evidence: [{ quote: "the website brings in nine a week now" }] });
     // Company settings need an owner: the editor's accept fails and leaves it pending; rejecting is recorded.
-    expect(await rpc({ ids: [company], decision: "accept" })).toMatchObject([{ id: company, status: "failed" }]);
-    expect(await rpc({ ids: [company], decision: "reject", note: "Not yet" })).toMatchObject([{ id: company, status: "rejected" }]);
+    expect(await review({ ids: [company], decision: "accept" })).toMatchObject([{ id: company, status: "failed" }]);
+    expect(await review({ ids: [company], decision: "reject", note: "Not yet" })).toMatchObject([{ id: company, status: "rejected" }]);
     const audit = (
       await admin.query("select actor_kind, action, diff -> 'suggestion_id' as sid from audit_log where workspace_id = $1 and target_table = 'lead_sources'", [ids.ws])
     ).rows;

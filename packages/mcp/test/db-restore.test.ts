@@ -47,7 +47,6 @@ describe("restoring a backup", () => {
     ownerId = randomUUID();
     await q("insert into auth.users (id, email) values ($1, $2)", [ownerId, `restore-owner-${ownerId}@example.com`]);
     await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [workspaceId, ownerId]);
-    const owner = clientFor(ownerId);
   });
 
   afterAll(async () => {

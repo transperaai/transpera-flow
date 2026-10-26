@@ -6,7 +6,7 @@ import { generateApiToken, hashApiToken, looksLikeApiToken, TOOL_NAMES } from ".
 import { ENDPOINT, connect, createUser, issueToken, post, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // The endpoint's own behaviour against a throwaway database: the token check (app code calling public.mcp_token_lookup as
-// `anon`), the status codes, and the claims every query runs under. Data access is covered end to end in postgrest.test.ts.
+// `anon`), the status codes, and the claims every query runs under. Data access is covered end to end in end-to-end.test.ts.
 
 let env: McpTestDb;
 let admin: pg.Client;

@@ -1,7 +1,7 @@
 // The Tidewater dry run for the extraction skill (issue #27,
 // .agents/skills/extract-process/SKILL.md): two invented interview
 // transcripts, and the ordered tool calls a run of the skill makes on each
-// (run-1.json, run-2.json). The tests replay them (postgrest-extraction.test.ts)
+// (run-1.json, run-2.json). The tests replay them (db-extraction.test.ts)
 // and lint them against the transcripts (extraction-fixtures.test.ts).
 
 import { readFileSync } from "node:fs";
