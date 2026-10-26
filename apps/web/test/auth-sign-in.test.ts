@@ -4,9 +4,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { proxy } from "@/proxy";
 import {
   ACCESS_DENIED_CODE,
-  deploymentRole,
   idTokenClaims,
   loadIdentities,
+  signInRole,
   syncSignIn,
   type Queryable,
 } from "@/lib/auth/access";
@@ -125,6 +125,9 @@ describe("sign-in settings", () => {
 
 describe("claims", () => {
   const user = { id: "u-1", email: "a@x.io", agencyAdmin: true };
+  it("marks a guest, who is never an agency admin", () => {
+    expect(claimsFor({ ...user, guest: true })?.app_metadata).toEqual({ agency_admin: false, guest: true });
+  });
   it("builds the Supabase-shaped claims, and null when signed out", () => {
     expect(claimsFor(user)).toEqual({ sub: "u-1", role: "authenticated", email: "a@x.io", app_metadata: { agency_admin: true } });
     expect(claimsFor({ ...user, agencyAdmin: false })?.app_metadata).toEqual({ agency_admin: false });
@@ -188,13 +191,13 @@ describe("the access functions the Better Auth hooks call", () => {
   const jwt = (payload: unknown) => `h.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.s`;
 
   it("decides a role before the user exists (the user-create hook)", async () => {
-    expect(await deploymentRole(q(), "someone@client.com", true, [])).toBe("viewer");
-    expect(await deploymentRole(q(), "lead@client.com", true, [])).toBe("editor");
-    expect(await deploymentRole(q(), "stranger@else.org", true, [])).toBeNull();
-    expect(await deploymentRole(q(), "someone@client.com", false, [])).toBeNull();
-    expect(await deploymentRole(q(), "", true, [])).toBeNull();
-    expect(await deploymentRole(q(), undefined, true, [])).toBeNull();
-    expect(await deploymentRole(q(), "boot@else.org", true, ["boot@else.org"])).toBe("admin");
+    expect(await signInRole(q(), "someone@client.com", true, [])).toBe("viewer");
+    expect(await signInRole(q(), "lead@client.com", true, [])).toBe("editor");
+    expect(await signInRole(q(), "stranger@else.org", true, [])).toBeNull();
+    expect(await signInRole(q(), "someone@client.com", false, [])).toBeNull();
+    expect(await signInRole(q(), "", true, [])).toBeNull();
+    expect(await signInRole(q(), undefined, true, [])).toBeNull();
+    expect(await signInRole(q(), "boot@else.org", true, ["boot@else.org"])).toBe("admin");
   });
 
   it("refuses an unknown email at sign-in and changes nothing (the session-create hook)", async () => {

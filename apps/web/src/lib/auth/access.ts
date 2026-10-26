@@ -3,6 +3,8 @@
 // never as a signed-in user.
 
 export type DeploymentRole = "admin" | "editor" | "viewer";
+/** A deployment role, or `guest`: an outsider listed on a live restricted share link, with no role anywhere (B3). */
+export type SignInRole = DeploymentRole | "guest";
 
 /** What the login page shows when nothing on the access list matches. */
 export const ACCESS_DENIED_CODE = "not_on_access_list";
@@ -23,38 +25,41 @@ export interface IdentityInput {
   tid?: string;
 }
 
-/** The role an address gets, or null when it is not on the access list. Used before the user exists. */
-export async function deploymentRole(
+/** The role an address signs in with (`guest` included), or null when it may not sign in. Used before the user exists. */
+export async function signInRole(
   db: Queryable,
   email: string | null | undefined,
   emailVerified: boolean,
   adminEmails: string[],
-): Promise<DeploymentRole | null> {
+): Promise<SignInRole | null> {
   if (!email) return null;
-  const { rows } = await db.query("select private.deployment_role($1, $2, $3::text[]) as role", [email, emailVerified, adminEmails]);
-  return (rows[0]?.role as DeploymentRole | null) ?? null;
+  const { rows } = await db.query("select private.may_sign_in($1, $2, $3::text[]) as role", [email, emailVerified, adminEmails]);
+  return (rows[0]?.role as SignInRole | null) ?? null;
 }
 
 /**
- * Once per sign-in: decides the role again, and in one transaction sets the agency-admin flag, adds editor/viewer to every
- * workspace (never lowering a membership) and records the provider identities. Returns null, changing nothing, when the
- * user's access was removed.
+ * Once per sign-in: decides the role again, and in one transaction records the provider identities, sets the agency-admin flag,
+ * and (not for a guest) runs the workspace lists and raises every workspace to at least editor/viewer. Returns null, changing
+ * nothing, when the user may no longer sign in.
  */
 export async function syncSignIn(
   db: Queryable,
   userId: string,
   adminEmails: string[],
   identities: IdentityInput[],
-): Promise<DeploymentRole | null> {
+): Promise<SignInRole | null> {
   const { rows } = await db.query("select private.sync_deployment_access($1, $2::text[], $3::jsonb) as role", [
     userId,
     adminEmails,
     JSON.stringify(identities),
   ]);
-  return (rows[0]?.role as DeploymentRole | null) ?? null;
+  return (rows[0]?.role as SignInRole | null) ?? null;
 }
 
-/** The claims in a JWT's payload, unverified: the token is one Better Auth stored from a code exchange with the provider. */
+/**
+ * The claims in a JWT's payload. The signature isn't checked again: Better Auth stored the token from its own TLS code exchange
+ * with the provider (or verified it on an id-token sign-in), so `hd` and `tid` are the provider's.
+ */
 export function idTokenClaims(idToken: string | null | undefined): Record<string, unknown> {
   const payload = idToken?.split(".")[1];
   if (!payload) return {};

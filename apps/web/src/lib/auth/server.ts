@@ -5,7 +5,7 @@ import { nextCookies } from "better-auth/next-js";
 import { oAuthProxy } from "better-auth/plugins";
 import { PostgresDialect } from "kysely";
 import { authPool } from "@/lib/db/pool";
-import { ACCESS_DENIED_CODE, ACCESS_DENIED_MESSAGE, deploymentRole, loadIdentities, syncSignIn } from "./access";
+import { ACCESS_DENIED_CODE, ACCESS_DENIED_MESSAGE, loadIdentities, signInRole, syncSignIn } from "./access";
 import { authEnv, type AuthEnv } from "./env";
 import { socialProviders, trustedOrigins } from "./providers";
 
@@ -31,9 +31,10 @@ function createAuth(env: AuthEnv) {
     databaseHooks: {
       user: {
         create: {
-          // A first sign-in is refused unless the address is on the access list. Nothing is written.
+          // A first sign-in is refused unless the address is on the access list (or a live restricted share link lists it: a
+          // guest). Nothing is written.
           before: async (user) => {
-            const role = await deploymentRole(pool, user.email, user.emailVerified === true, env.adminEmails);
+            const role = await signInRole(pool, user.email, user.emailVerified === true, env.adminEmails);
             if (!role) throw denied();
           },
         },

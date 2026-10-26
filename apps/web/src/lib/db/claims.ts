@@ -5,11 +5,13 @@ export interface ClaimsUser {
   id: string;
   email: string;
   agencyAdmin: boolean;
+  /** Signed in only for a restricted share link (B3): no role anywhere. */
+  guest?: boolean;
 }
 
 /**
  * The only place JWT claims are built: what `auth.jwt()` and `auth.uid()` see inside a query. Supabase-shaped, so the
- * existing RLS policies and SECURITY DEFINER functions work unchanged. Signed out is `null` (role `anon`). The MCP route adds
+ * existing RLS policies and SECURITY DEFINER functions work unchanged. A guest is never an agency admin. Signed out is `null` (role `anon`). The MCP route adds
  * `api_token_id` (step 3b).
  */
 export function claimsFor(user: ClaimsUser | null, extra: { apiTokenId?: string } = {}): Claims | null {
@@ -18,7 +20,8 @@ export function claimsFor(user: ClaimsUser | null, extra: { apiTokenId?: string 
     sub: user.id,
     role: "authenticated",
     email: user.email,
-    app_metadata: { agency_admin: user.agencyAdmin },
+    // `guest` stops resolve_my_access from joining a guest to workspaces (migration 20261228000000).
+    app_metadata: { agency_admin: user.agencyAdmin && !user.guest, ...(user.guest ? { guest: true } : {}) },
     ...(extra.apiTokenId ? { api_token_id: extra.apiTokenId } : {}),
   };
 }

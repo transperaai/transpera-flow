@@ -10,13 +10,15 @@ import { getAuth } from "./server";
 export interface SessionUser extends ClaimsUser {
   /** The profile name Google or Microsoft gave, or null. */
   name: string | null;
+  /** Signed in only for a restricted share link (B3): no memberships, so RLS shows them no workspace. */
+  guest: boolean;
 }
 
 /**
  * The signed-in user, or null (also in demo mode). Cached for the request. The session cookie is validated against the
  * database by Better Auth, and the user's access is checked again here, so removing someone from the access list ends their
  * session at the next request, not only at the next sign-in. The agency-admin flag is read from `auth.users`, where the
- * sign-in sync keeps it.
+ * sign-in sync keeps it, and counts only while the list still says admin: a demotion takes effect at the next request too.
  */
 export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const env = authEnv();
@@ -26,7 +28,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const { rows } = await authPool().query(
     `select u.email,
             coalesce((u.raw_app_meta_data ->> 'agency_admin')::boolean, false) as agency_admin,
-            private.deployment_role(u.email, u.email_confirmed_at is not null, $2::text[]) as role
+            private.may_sign_in(u.email, u.email_confirmed_at is not null, $2::text[]) as role
      from auth.users u where u.id = $1`,
     [session.user.id, env.adminEmails],
   );
@@ -35,7 +37,8 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   return {
     id: session.user.id,
     email: String(row.email),
-    agencyAdmin: row.agency_admin === true,
+    agencyAdmin: row.agency_admin === true && row.role === "admin",
+    guest: row.role === "guest",
     name: session.user.name?.trim() || null,
   };
 });
