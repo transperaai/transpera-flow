@@ -9,6 +9,7 @@ do $$
 declare
   r text;
   can_bypass boolean;
+  pg16 boolean := current_setting('server_version_num')::int >= 160000;
 begin
   select rolsuper or rolbypassrls into can_bypass from pg_roles where rolname = current_user;
   foreach r in array array['anon', 'authenticated', 'service_role'] loop
@@ -24,10 +25,19 @@ begin
     exception when unique_violation or duplicate_object then
       null;
     end;
-    -- So the app login can `set role`. A concurrent grant of the same membership fails with an internal error; the
-    -- other session's grant is the one we wanted.
+    -- So the app login can `set role`. From Postgres 16 a role that creates another (Neon's neondb_owner creating these)
+    -- already holds it with admin option only: no SET, no INHERIT, so `set role` is refused. What matters is a grant with
+    -- SET; INHERIT stays off so the owner doesn't quietly take on these roles' privileges. Before 16 membership is enough.
+    -- A concurrent grant of the same membership fails with an internal error; the other session's grant is the one we wanted.
     begin
-      if not exists (
+      if pg16 then
+        if not exists (
+          select from pg_auth_members m
+          where m.roleid = to_regrole(r) and m.member = to_regrole(current_user) and m.set_option
+        ) then
+          execute format('grant %I to current_user with set true, inherit false', r);
+        end if;
+      elsif not exists (
         select from pg_auth_members m
         where m.roleid = to_regrole(r) and m.member = to_regrole(current_user)
       ) then

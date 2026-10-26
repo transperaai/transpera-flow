@@ -264,6 +264,47 @@ describe("migration runner", () => {
     }
   });
 
+  it("lets a non-superuser owner (Neon's neondb_owner) set role after compat.sql", async () => {
+    // From Postgres 16 a role that creates anon/authenticated holds them with admin option only (no SET, no INHERIT),
+    // which is what Neon's neondb_owner ends up with. Reproduce that grant, then let compat.sql run as the owner.
+    const owner = "transpera_flow_test_owner";
+    const admin = new pg.Client({ connectionString: ADMIN_URL });
+    await admin.connect();
+    const name = `transpera_flow_test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    try {
+      await admin.query(`do $$ begin
+        create role ${owner} login password 'owner' createrole createdb;
+      exception when duplicate_object or unique_violation then null; end $$`);
+      await admin.query(`revoke anon, authenticated, service_role from ${owner} cascade`);
+      await admin.query(`grant anon, authenticated, service_role to ${owner} with admin true, set false, inherit false`);
+      await admin.query(`create database ${name} owner ${owner}`);
+      databases.push(name);
+    } finally {
+      await admin.end();
+    }
+    const u = new URL(urlOf(name));
+    u.username = owner;
+    u.password = "owner";
+    const c = new pg.Client({ connectionString: u.toString() });
+    await c.connect();
+    try {
+      await expect(c.query("set role authenticated")).rejects.toMatchObject({ code: "42501" });
+      await applyCompat(c);
+      await applyCompat(c);
+      const grants = await c.query(
+        `select r.rolname as role, m.set_option, m.inherit_option from pg_auth_members m join pg_roles r on r.oid = m.roleid
+         where m.member = current_user::regrole and m.grantor = current_user::regrole order by 1`,
+      );
+      expect(grants.rows).toEqual(
+        ["anon", "authenticated", "service_role"].map((role) => ({ role, set_option: true, inherit_option: false })),
+      );
+      await c.query("set role authenticated");
+      expect((await c.query("select current_user as who")).rows[0].who).toBe("authenticated");
+    } finally {
+      await c.end();
+    }
+  });
+
   it("stops at a failing migration and records only what committed", async () => {
     const name = await emptyDatabase();
     const c = new pg.Client({ connectionString: urlOf(name) });
