@@ -2,6 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { accessErrorMessage, isAssignableRole, normalizeDomain, normalizeEmail, personLinkProblem } from "@/lib/access";
+import { getSessionUser } from "@/lib/auth/session";
+import { deleteDeploymentRule, insertDeploymentRule, updateDeploymentRole } from "@/lib/deployment-access";
+import { deploymentErrorMessage, isDeploymentRole, normalizeRuleValue } from "@/lib/deployment-rules";
 import { createClient } from "@/lib/supabase/server";
 
 // Every action runs as the signed-in user; RLS (owner or agency admin only)
@@ -115,4 +118,38 @@ export async function setMemberActive(slug: string, form: FormData) {
   const active = text(form, "active") === "true";
   const result = await supabase.from("memberships").update({ active }).eq("id", text(form, "id")).select("id");
   done(slug, outcome(result), active ? "Access restored." : "Access removed.");
+}
+
+// "Who can sign in" (deployment-wide, agency admins only). These run on the new data layer (getDb), as the signed-in user; RLS on
+// public.deployment_access decides, and a change applies at the person's next request (getSessionUser checks the list again).
+
+async function deploymentDone(slug: string, work: () => Promise<number | void>, notice: string): Promise<never> {
+  if (!(await getSessionUser())) redirect("/login");
+  let error: DbError | null = null;
+  try {
+    const changed = await work();
+    if (changed === 0) error = { code: "42501", message: "no rows changed" };
+  } catch (e) {
+    error = e as DbError;
+  }
+  const params = new URLSearchParams(error ? { error: deploymentErrorMessage(error) } : { notice });
+  redirect(`/w/${encodeURIComponent(slug)}/settings/access?${params}`);
+}
+
+export async function addDeploymentRule(slug: string, form: FormData) {
+  const kind = text(form, "kind") === "email" ? "email" : "domain";
+  const role = text(form, "role");
+  if (!isDeploymentRole(role)) return deploymentDone(slug, () => Promise.reject({ message: "invalid role" }), "");
+  const value = normalizeRuleValue(kind, text(form, "value"));
+  await deploymentDone(slug, () => insertDeploymentRule({ kind, value, role }), `${value} can now sign in as ${role}.`);
+}
+
+export async function setDeploymentRole(slug: string, form: FormData) {
+  const role = text(form, "role");
+  if (!isDeploymentRole(role)) return deploymentDone(slug, () => Promise.reject({ message: "invalid role" }), "");
+  await deploymentDone(slug, () => updateDeploymentRole(text(form, "id"), role), "Saved.");
+}
+
+export async function removeDeploymentRule(slug: string, form: FormData) {
+  await deploymentDone(slug, () => deleteDeploymentRule(text(form, "id")), "Removed. They are signed out at their next page load.");
 }

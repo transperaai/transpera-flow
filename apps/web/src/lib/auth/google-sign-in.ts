@@ -1,20 +1,31 @@
 import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { authEnv, type ProviderId } from "./env";
+import { getAuth } from "./server";
 
 /**
- * Hands off to Google, which returns to /auth/callback. Shared by the login page and a share link's sign-in (B3), so both ask for
- * the same scopes. Never returns: it redirects to Google, or to /login with the reason.
+ * Hands off to the provider, which returns through /api/auth/callback/<provider> and then to `callbackURL` (a path on this site).
+ * Shared by the login page and a share link's sign-in (B3), so both ask for the same scopes. Never returns: it redirects to the
+ * provider, or to /login with the reason. A refused sign-in (not on the access list) also lands on /login, from the callback.
  */
-export async function redirectToGoogle(): Promise<never> {
-  const origin = (await headers()).get("origin") ?? "";
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    // openid makes Google return an ID token, which carries the hosted-domain (hd) claim used for domain joins.
-    options: { redirectTo: `${origin}/auth/callback`, scopes: "openid" },
-  });
-  if (error || !data.url) redirect(`/login?error=${encodeURIComponent(error?.message ?? "Google sign-in is unavailable.")}`);
-  redirect(data.url);
+export async function redirectToProvider(provider: ProviderId, callbackURL = "/"): Promise<never> {
+  const env = authEnv();
+  if (!env || !env.providers.includes(provider)) redirect(`/login?error=${encodeURIComponent("That sign-in method is unavailable.")}`);
+  let url: string | undefined;
+  let message = "Sign-in is unavailable.";
+  try {
+    const result = await getAuth().api.signInSocial({
+      body: { provider, callbackURL, errorCallbackURL: "/login" },
+      headers: await headers(),
+    });
+    url = result.url;
+  } catch (error) {
+    console.error("sign-in: could not start", error);
+    if (error instanceof Error && error.message) message = error.message;
+  }
+  if (!url) redirect(`/login?error=${encodeURIComponent(message)}`);
+  redirect(url);
 }
+
+export const redirectToGoogle = (callbackURL = "/") => redirectToProvider("google", callbackURL);

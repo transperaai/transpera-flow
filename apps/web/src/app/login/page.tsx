@@ -2,13 +2,15 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { ACCESS_DENIED_CODE, ACCESS_DENIED_MESSAGE } from "@/lib/auth/access";
+import { authEnv } from "@/lib/auth/env";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  // Render per request: Supabase settings are read at runtime, not build time.
+  // Render per request: sign-in settings are read at runtime, not build time.
   await connection();
-  if (!supabaseEnv()) redirect("/demo");
+  const env = authEnv();
+  if (!env) redirect("/demo");
   const { error } = await searchParams;
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-4 py-16">
@@ -21,12 +23,16 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       </div>
       {error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Sign-in failed: {error} Please try again.</AlertDescription>
+          <AlertDescription>
+            {error === ACCESS_DENIED_CODE
+              ? `${ACCESS_DENIED_MESSAGE}. Ask the person who runs it to add you, then try again.`
+              : `Sign-in failed: ${error} Please try again.`}
+          </AlertDescription>
         </Alert>
       ) : null}
       <Card>
         <CardContent>
-          <LoginForm />
+          <LoginForm providers={env.providers} />
         </CardContent>
       </Card>
       <a href="/privacy" className="text-xs text-muted-foreground underline underline-offset-2">

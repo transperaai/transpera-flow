@@ -1,40 +1,28 @@
-import { createServerClient } from "@supabase/ssr";
+import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { authEnv } from "@/lib/auth/env";
 
-// "/s" is a share link's page (B3): it opens signed out; a restricted link asks for Google sign-in itself.
-const PUBLIC_PATHS = ["/login", "/auth", "/demo", "/privacy", "/s"];
+// "/s" is a share link's page (B3): it opens signed out; a restricted link asks for sign-in itself. "/api/auth" is Better Auth.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/auth", "/demo", "/privacy", "/s"];
 
-/** Refreshes the Supabase session on every request and guards signed-in pages. */
-export async function proxy(request: NextRequest) {
-  const env = supabaseEnv();
-  if (!env) return NextResponse.next({ request });
-  // The MCP endpoint authenticates with an API token, not a session cookie.
-  if (request.nextUrl.pathname === "/api/mcp") return NextResponse.next({ request });
-
-  let response = NextResponse.next({ request });
-  const supabase = createServerClient(env.url, env.key, {
-    cookies: {
-      getAll: () => request.cookies.getAll(),
-      setAll: (toSet) => {
-        for (const { name, value } of toSet) request.cookies.set(name, value);
-        response = NextResponse.next({ request });
-        for (const { name, value, options } of toSet) response.cookies.set(name, value, options);
-      },
-    },
-  });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+/**
+ * Sends visitors without a session cookie to /login. This is the fast, optimistic check: it only looks for the cookie. The
+ * session itself is validated against the database in `getSessionUser()`, which every page and action goes through.
+ */
+export function proxy(request: NextRequest) {
+  // Demo mode: no sign-in settings, so nothing to guard.
+  if (!authEnv()) return NextResponse.next({ request });
   const path = request.nextUrl.pathname;
-  if (!user && !PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
+  // The MCP endpoint authenticates with an API token, not a session cookie.
+  if (path === "/api/mcp") return NextResponse.next({ request });
+
+  if (!getSessionCookie(request) && !PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
     return NextResponse.redirect(url);
   }
-  return response;
+  return NextResponse.next({ request });
 }
 
 export const config = {

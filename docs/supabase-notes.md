@@ -486,3 +486,15 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
   connection string fetched from the Neon API (`/projects/{id}/connection_uri`) into a private scratch file, never
   printed. The repo's `applyCompat`/`applyMigrations` accept that client unchanged. Vercel functions connect over TCP
   as normal.
+
+## Neon move, step 2: Better Auth (verified only on plain Postgres 16 and against the installed package types, not Neon or Google)
+
+- Row 73 (`20261228000000_better_auth.sql`), `private.deployment_role`, `private.sync_deployment_access`, the `better_auth.sync_auth_user`
+  trigger and the Better Auth instance (`apps/web/src/lib/auth/server.ts`) were run only against a local Postgres 16 as a superuser,
+  with the user and session created through Better Auth's internal adapter (`apps/web/test/auth-hooks.test.ts`), never through a real
+  Google or Microsoft sign-in. Not checked: Neon's pooled endpoint with `schemaName: "better_auth"` (the pool sends no `search_path`
+  startup option); the `oAuthProxy` redirect from a per-commit preview through `transpera-flow-next.vercel.app`; that Google's ID
+  token carries `hd` into `better_auth.account."idToken"` and so into `auth.identities`; the Microsoft `tid` claim.
+- A bare `pg` Pool given as `database` cannot take `schemaName` (the types only offer it with `{ dialect, type }` or `{ db, type }`), so
+  the instance passes `new PostgresDialect({ pool })` with `type: "postgres"`, `schemaName: "better_auth"` and `transaction: true`.
+- The migration's Better Auth DDL is what `auth generate` 1.7.13 emitted for that configuration (already schema-qualified, uuid ids).
