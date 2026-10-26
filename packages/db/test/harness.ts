@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import type { Kysely } from "kysely";
 import { applyCompat, applyMigrations, type CompatOptions } from "../src/migrations";
+import { createDb, createPool, type Claims } from "../src/client";
+import type { DB } from "../src/db-types";
 
 // Creates a throwaway database, applies the compat layer, every migration and the seed with the
 // same code the migrate script runs on Neon, and lets tests run queries as a given user (RLS applies).
@@ -15,6 +18,8 @@ export interface TestDb {
   url: string;
   /** Run `fn` as `authenticated` with the given JWT claims, inside a rolled-back transaction. */
   as<T>(claims: Record<string, unknown> | null, fn: (c: pg.Client) => Promise<T>): Promise<T>;
+  /** A `Db` acting as `claims`' user (null: signed out), as the app's getDb() gives one. Changes are committed. */
+  dbAs(claims: Claims | null): Kysely<DB>;
   close(): Promise<void>;
 }
 
@@ -49,9 +54,14 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
   }
   await applyMigrations(client, { seed: true });
 
+  let pool: pg.Pool | undefined;
   return {
     client,
     url: url.toString(),
+    dbAs(claims) {
+      pool ??= createPool(url.toString(), { max: 4 });
+      return createDb(pool, claims);
+    },
     async as(claims, fn) {
       await client.query("begin");
       try {
@@ -63,6 +73,7 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
       }
     },
     async close() {
+      await pool?.end();
       await client.end();
       const a = new pg.Client({ connectionString: ADMIN_URL });
       await a.connect();

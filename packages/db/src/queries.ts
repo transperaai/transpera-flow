@@ -1,5 +1,6 @@
 import type { LinkTargets } from "./source-links";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Kysely } from "kysely";
+import type { DB } from "./db-types";
 import type { Database, Json } from "./database.types";
 import type { CompanyModel, SnapshotProcess } from "./company";
 import type { CitingRow } from "./evidence";
@@ -55,7 +56,7 @@ import type {
 // token). Both pass a client that acts as the user, so RLS decides what is
 // visible; the service-role key is never used here.
 
-export type Db = SupabaseClient<Database>;
+export type Db = Kysely<DB>;
 
 /** Rows a query returned, or its error thrown. */
 function rows<T>(r: { data: T | null; error: unknown }): T {

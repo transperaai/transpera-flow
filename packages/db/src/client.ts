@@ -10,7 +10,9 @@ import {
   type Driver,
   type QueryResult,
   type TransactionSettings,
+  sql,
 } from "kysely";
+import type { Database } from "./database.types";
 import type { DB } from "./db-types";
 
 // Query layer for the move off Supabase (docs/plans/supabase-exit-brief.md, step 1). Authorization stays in Postgres: every
@@ -298,4 +300,42 @@ function dialect(pool: pg.Pool, claims: Claims | null): Dialect {
 /** A query builder that runs every statement as `claims`' user (null: signed out, role `anon`), with RLS applying. */
 export function createDb(pool: pg.Pool, claims: Claims | null): Kysely<DB> {
   return new Kysely<DB>({ dialect: dialect(pool, claims) });
+}
+
+// --- Calling SQL functions the way supabase-js `.rpc()` did. ---
+
+type Functions = Database["public"]["Functions"];
+type FnName = keyof Functions & string;
+type FnArgs<N extends FnName> = Functions[N] extends { Args: infer A } ? A : never;
+type FnReturns<N extends FnName> = Functions[N] extends { Returns: infer R } ? R : never;
+
+const IDENT = /^[a-z_][a-z0-9_]*$/;
+
+/** `public.name(k => v, …)` with named arguments; undefined ones are left out so their defaults apply, as PostgREST did. */
+function call(name: string, args: object | undefined) {
+  if (!IDENT.test(name)) throw new Error(`rpc: bad function name ${name}`);
+  const named = Object.entries(args ?? {})
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => {
+      if (!IDENT.test(k)) throw new Error(`rpc: bad argument name ${k}`);
+      return sql`${sql.id(k)} => ${v}`;
+    });
+  return sql`${sql.id("public")}.${sql.id(name)}(${sql.join(named)})`;
+}
+
+/**
+ * A function returning one value or row (or void): what `.rpc()` gave as `data`. The result goes through to_json, so
+ * numbers, JSON and timestamps come back exactly as PostgREST rendered them.
+ */
+export async function rpc<N extends FnName>(db: Kysely<DB>, name: N, args?: FnArgs<N>): Promise<FnReturns<N>> {
+  const fn = call(name, args);
+  const { rows } = await sql<{ r: unknown }>`select to_json(f) as r from ${fn} as f`.execute(db);
+  return (rows[0]?.r ?? null) as FnReturns<N>;
+}
+
+/** A set-returning function (`returns setof …` / `returns table`): its rows, as `.rpc()` gave them. */
+export async function rpcRows<N extends FnName>(db: Kysely<DB>, name: N, args?: FnArgs<N>): Promise<FnReturns<N>> {
+  const fn = call(name, args);
+  const { rows } = await sql<{ r: unknown }>`select coalesce(json_agg(f), '[]'::json) as r from ${fn} as f`.execute(db);
+  return rows[0]!.r as FnReturns<N>;
 }
