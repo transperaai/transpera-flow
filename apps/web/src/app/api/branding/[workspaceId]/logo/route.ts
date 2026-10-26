@@ -10,6 +10,8 @@ import { getDb } from "@/lib/auth/session";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CACHE = "public, max-age=300";
+// `?v=` naming the current hash is an address that never changes, so the CDN keeps it and the database isn't asked again.
+const IMMUTABLE = "public, max-age=31536000, immutable";
 
 /** Whether an If-None-Match header names this ETag (a list, `*`, and weak validators included). */
 function matches(header: string | null, etag: string): boolean {
@@ -29,7 +31,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/branding/[wo
   const etag = `"${logo.sha256}"`;
   const headers = {
     ETag: etag,
-    "Cache-Control": CACHE,
+    "Cache-Control": new URL(request.url).searchParams.get("v") === logo.sha256.slice(0, 12) ? IMMUTABLE : CACHE,
     // The bytes are an image and nothing else: never sniffed into a page, never allowed to run anything.
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",

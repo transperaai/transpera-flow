@@ -37,8 +37,9 @@ beforeEach(async () => {
 
 const keep = (bytes = PNG, mime = "image/png") =>
   world.tdb.client.query("insert into workspace_logos (workspace_id, mime, bytes, sha256) values ($1, $2, $3, $4)", [WS, mime, bytes, createHash("sha256").update(bytes).digest("hex")]);
-const get = (id: string, headers: Record<string, string> = {}) =>
-  GET(new Request(`http://localhost/api/branding/${id}/logo?v=${SHA.slice(0, 12)}`, { headers }), { params: Promise.resolve({ workspaceId: id }) } as never);
+const get = (id: string, headers: Record<string, string> = {}, v: string | null = SHA.slice(0, 12)) =>
+  GET(new Request(`http://localhost/api/branding/${id}/logo${v === null ? "" : `?v=${v}`}`, { headers }), { params: Promise.resolve({ workspaceId: id }) } as never);
+const IMMUTABLE = "public, max-age=31536000, immutable";
 
 describe("GET /api/branding/[workspaceId]/logo", () => {
   it("serves the logo to anyone, signed out too: its type, its bytes, the hash as ETag and a cache lifetime", async () => {
@@ -47,7 +48,7 @@ describe("GET /api/branding/[workspaceId]/logo", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
     expect(res.headers.get("etag")).toBe(`"${SHA}"`);
-    expect(res.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(res.headers.get("cache-control")).toBe(IMMUTABLE);
     expect(res.headers.get("content-length")).toBe(String(PNG.length));
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(Buffer.compare(Buffer.from(await res.arrayBuffer()), PNG)).toBe(0);
@@ -67,10 +68,17 @@ describe("GET /api/branding/[workspaceId]/logo", () => {
       const res = await get(WS, { "if-none-match": header });
       expect(res.status, header).toBe(304);
       expect(res.headers.get("etag"), header).toBe(`"${SHA}"`);
-      expect(res.headers.get("cache-control"), header).toBe("public, max-age=300");
+      expect(res.headers.get("cache-control"), header).toBe(IMMUTABLE);
       expect(await res.text(), header).toBe("");
     }
     expect((await get(WS, { "if-none-match": '"0000"' })).status).toBe(200);
+  });
+
+  it("keeps a URL for good only when its ?v= names the current logo; otherwise for five minutes", async () => {
+    await keep();
+    expect((await get(WS)).headers.get("cache-control")).toBe(IMMUTABLE);
+    expect((await get(WS, {}, null)).headers.get("cache-control")).toBe("public, max-age=300");
+    expect((await get(WS, {}, "000000000000")).headers.get("cache-control")).toBe("public, max-age=300");
   });
 
   it("a replaced logo has a new ETag, so the old one no longer gets a 304", async () => {
