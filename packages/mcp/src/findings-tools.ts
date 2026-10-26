@@ -2,7 +2,7 @@
 // (AI's, proposed until someone accepts them, and those added by hand), the latest AI analysis, the sources and the
 // solutions. With get_process (the model), run_scenario (runs), list_issues (issues) and get_first_principles, Claude
 // outside the app can make the same assessment the app's "Analyse" makes. Every tool reads as the token's user: RLS
-// decides what is visible (docs/adr/0002-mcp-acts-as-user-via-pre-request.md). Read-only. Every list is bounded: facts are
+// decides what is visible (docs/adr/0018-mcp-tokens-checked-in-app-code.md). Read-only. Every list is bounded: facts are
 // the worst first up to a limit with their sentences trimmed, findings and sources come a page at a time with the total,
 // and solutions leave out their copied maps.
 
@@ -176,13 +176,17 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
           .where("workspace_id", "=", ws.id)
           .where("status", "in", statuses)
           .$if(!!proc, (qb) => qb.where("process_id", "=", proc!.id));
-        const res = await matching
+        const [res, counted] = await Promise.all([
+          matching
           .select(["id", "process_id", "step_id", "origin", "status", "rating", "type", "title", "evidence", "why", "facts", "person_labels", "source_ids", "edited", "proposed_via", "created_at", "decided_at"])
           .orderBy("created_at")
           .orderBy("id")
           .limit(page.limit)
           .offset(page.offset)
-          .execute();
+          .execute(),
+          matching.select((eb) => eb.fn.countAll<number>().as("count")).executeTakeFirstOrThrow(),
+        ]);
+        const total = Number(counted.count);
         // AI text is stored with labels ("Team member A"); the token's owner gets names where they may see them (B1 2b).
         const team = await loadTeam(ctx.db, ws.id);
         const rows = (res as unknown as Pick<FindingRow, "id" | "process_id" | "step_id" | "origin" | "status" | "rating" | "type" | "title" | "evidence" | "why" | "facts" | "person_labels" | "source_ids" | "edited" | "proposed_via" | "created_at" | "decided_at">[]).map((r) => nameFinding(r, team));
@@ -212,7 +216,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
             decided_at: f.decided_at,
           };
         });
-        return { workspace: { id: ws.id, name: ws.name }, count: findings.length, ...paged(res.count ?? findings.length, page, findings.length), findings };
+        return { workspace: { id: ws.id, name: ws.name }, count: findings.length, ...paged(total, page, findings.length), findings };
       }),
   );
 

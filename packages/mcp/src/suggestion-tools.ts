@@ -5,7 +5,7 @@
 // database backs this up: an API-token request can't write the company-model
 // tables or review suggestions (migration 20261015000000_suggestions.sql).
 // Like every tool, these act as the token's user under RLS
-// (docs/adr/0002-mcp-acts-as-user-via-pre-request.md).
+// (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";

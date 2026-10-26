@@ -4,7 +4,7 @@
 // list_templates and create_from_template.
 //
 // Every one acts as the token's user through RLS
-// (docs/adr/0002-mcp-acts-as-user-via-pre-request.md) and writes only into the
+// (docs/adr/0018-mcp-tokens-checked-in-app-code.md) and writes only into the
 // process's draft revision, which it opens (or continues) with `open_draft`
 // (docs/adr/0004-drafts-as-revisions.md); the live revision is never edited,
 // and the database refuses it too (`edit_drafts_only`). Writes are ordinary
@@ -355,7 +355,7 @@ async function processForStep(ctx: ToolContext, ws: WorkspaceRef, args: { proces
   const processes = await listProcesses(ctx.db, ws.id);
   if (processes.length <= 1) return undefined;
   const revisions = processes.flatMap((p) => [p.live_revision_id, p.draft_revision_id]).filter((id): id is string => !!id);
-  const rows = await ctx.db.selectFrom("steps").select("process_id").where("id", "=", args.step.trim()).where("revision_id", "in", revisions).execute();
+  const rows = revisions.length ? await ctx.db.selectFrom("steps").select("process_id").where("id", "=", args.step.trim()).where("revision_id", "in", revisions).execute() : [];
   const ids = [...new Set(rows.map((r) => r.process_id))];
   if (ids.length === 1) {
     assumptions.push(`No process given; using '${processes.find((p) => p.id === ids[0])?.name}', which has that step.`);

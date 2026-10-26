@@ -1,8 +1,8 @@
 // Analysis tools (docs/PRD.md §7.1; issue #26): save_scenario,
 // compare_scenarios, check_robustness, get_bottlenecks, log_issue and
 // list_issues. Like the v1 read tools they act as the token's user: every
-// query goes through the context's Supabase client, so RLS decides what is
-// visible and who may write (docs/adr/0002-mcp-acts-as-user-via-pre-request.md).
+// query goes through the context's database handle, which runs as the token's user, so RLS decides what is
+// visible and who may write (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 // Simulations use the live revision only (the PRD gives these tools no
 // `revision`), run on this thread, and are capped in time where they can run
 // long. Text comes from the engine's templates, never a language model.
