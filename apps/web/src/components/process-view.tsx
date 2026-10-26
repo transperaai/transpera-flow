@@ -54,8 +54,6 @@ import { EDIT_ONLY } from "@/lib/phone";
  */
 export type EditMode = ScreenMode;
 
-/** Who you are on the public demo, where nobody signs in. */
-
 /** A bundle's engine model, the same object while the model is unchanged (moving a step doesn't change it). */
 export function useEngineModel(bundle: ProcessBundle, weeks: number | null, levers?: readonly ScenarioPatch[]): { model: EngineModel | null; error: string | null } {
   const resolved = useMemo(() => {

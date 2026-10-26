@@ -54,7 +54,6 @@ import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
 
-
 /** What block mode edits: the workspace's roles and people (so steps can be given to them), and one new step on an empty map. */
 function blockScratch(base: ProcessBundle): ProcessBundle {
   const step = { ...newStepRow(base, "task", null, 24, 56), name: "New step" };
