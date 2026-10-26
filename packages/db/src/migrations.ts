@@ -38,6 +38,8 @@ export interface MigrateOptions {
   dryRun?: boolean;
   /** After a run that applied migrations, load seed.sql (local dev and tests only). */
   seed?: boolean;
+  /** Stop after this migration version (inclusive): files with a later version are neither applied nor listed. Tests use it to build an older schema. */
+  upTo?: string;
 }
 
 export interface MigrateResult {
@@ -50,9 +52,10 @@ export interface MigrateResult {
 const LOCK_KEY = 7_204_190_826; // arbitrary, fixed
 
 export async function applyMigrations(db: Queryable, options: MigrateOptions = {}): Promise<MigrateResult> {
-  const all = migrationFiles();
-  const dup = all.map(versionOf).find((v, i, vs) => vs.indexOf(v) !== i);
+  const every = migrationFiles();
+  const dup = every.map(versionOf).find((v, i, vs) => vs.indexOf(v) !== i);
   if (dup) throw new Error(`two migration files share version ${dup}`);
+  const all = every.filter((f) => options.upTo === undefined || versionOf(f) <= options.upTo);
   if (options.dryRun) {
     // A dry run changes nothing, not even the log table: no table means everything is pending.
     const exists = (await db.query("select to_regclass('public.schema_migrations') as t")).rows[0]!.t !== null;

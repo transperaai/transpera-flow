@@ -25,7 +25,10 @@
     "gen:seed": "node --experimental-strip-types scripts/gen-seed.ts",
     "gen:import-schema": "node --experimental-strip-types scripts/gen-import-schema.ts",
     "gen:types": "node --experimental-strip-types scripts/gen-types.ts",
-    "migrate": "node --experimental-strip-types scripts/migrate.ts"
+    "migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "copy:export": "node --experimental-strip-types scripts/copy-from-supabase/export.ts",
+    "copy:import": "node --experimental-strip-types scripts/copy-from-supabase/import.ts",
+    "copy:verify": "node --experimental-strip-types scripts/copy-from-supabase/verify.ts"
   },
   "dependencies": {
     "@transpera-flow/engine": "workspace:*",

@@ -33,6 +33,10 @@ export interface TestDbOptions {
    * run with it, to show the migrations leave the right privileges whichever way a database starts.
    */
   supabaseDefaultPrivileges?: boolean;
+  /** Apply migrations only up to this version (inclusive), for a database as an older release left it. */
+  upTo?: string;
+  /** Load seed.sql after the migrations (the default); `false` leaves the database empty, as a fresh deployment's is. */
+  seed?: boolean;
 }
 
 /** The compat layer and legacy shims (as in production), plus the test-only grants. Run before any migration. */
@@ -57,7 +61,7 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
   if (options.supabaseDefaultPrivileges) {
     await client.query("alter default privileges in schema public grant all on tables to anon, authenticated, service_role");
   }
-  await applyMigrations(client, { seed: true });
+  await applyMigrations(client, { seed: options.seed !== false, upTo: options.upTo });
 
   let pool: pg.Pool | undefined;
   return {
