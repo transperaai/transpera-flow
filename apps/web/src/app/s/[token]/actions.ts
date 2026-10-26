@@ -5,7 +5,9 @@ import type { Json } from "@transpera-flow/db";
 import { redirectToGoogle } from "@/lib/auth/google-sign-in";
 import { SHARE_TOKEN } from "@/lib/share/after-sign-in";
 import { parsePlayIdea, type PlayResult } from "@/lib/share/play-input";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { pgError } from "@/app/action-db";
+import { getDb } from "@/lib/auth/session";
 
 /**
  * "Continue with Google" on a restricted link: the same Google hand-off as the login page, returning to the link afterwards
@@ -34,17 +36,20 @@ export async function submitPlayIdea(token: unknown, input: unknown): Promise<Pl
   const parsed = parsePlayIdea(input, { needEmail: false });
   if (!parsed.ok) return { status: "error", message: parsed.message };
   const v = parsed.value;
-  const db = await createClient();
-  const { data, error } = await db.rpc("submit_play_proposal", {
-    token,
-    title: v.title,
-    note: v.note,
-    name: v.name,
-    email: v.email ?? "",
-    issue: v.issue,
-    levers: v.levers as unknown as Json,
-  });
-  if (error) {
+  const db = await getDb();
+  let data;
+  try {
+    data = await rpc(db, "submit_play_proposal", {
+      token,
+      title: v.title,
+      note: v.note,
+      name: v.name,
+      email: v.email ?? "",
+      issue: v.issue,
+      levers: v.levers as unknown as Json,
+    });
+  } catch (e) {
+    const error = pgError(e);
     if (error.code === "22023" && error.message) return { status: "error", message: error.message };
     return { status: "error", message: "Couldn't send. Try again." };
   }

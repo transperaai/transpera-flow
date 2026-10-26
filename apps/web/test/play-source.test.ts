@@ -17,8 +17,8 @@ describe("play mode keeps nothing and writes nowhere but through the one functio
   it("the Server Action calls only submit_play_proposal, revalidates nothing, and never logs the token", () => {
     const actions = read("src/app/s/[token]/actions.ts");
     const send = actions.slice(actions.indexOf("export async function submitPlayIdea"));
-    expect(send.match(/\.rpc\("([a-z_]+)"/g)).toEqual(['.rpc("submit_play_proposal"']);
-    expect(send).not.toMatch(/\.from\(|revalidate|refresh\(|console\./);
+    expect(send.match(/\brpc(?:Rows)?\(\s*\w+,\s*"([a-z_]+)"/g)).toEqual(['rpc(db, "submit_play_proposal"']);
+    expect(send).not.toMatch(/\.(selectFrom|insertInto|updateTable|deleteFrom)\(|\.from\(|revalidate|refresh\(|console\./);
     expect(actions).toMatch(/^"use server";/);
   });
 
