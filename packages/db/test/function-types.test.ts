@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateFunctionTypes } from "../scripts/function-types";
-import { createTestDb, type TestDb } from "./harness";
+import { rpc, rpcRows, type Claims } from "../src/client";
+import { createTestDb, createUser, type TestDb } from "./harness";
 
 let db: TestDb;
 beforeAll(async () => {
@@ -30,5 +31,28 @@ describe("function-types.ts", () => {
     expect(src).toMatch(/zz_row: \{ Args: never; Returns: \{ id: string; .*settings: Json.*\} \};/);
     expect(src).toContain("zz_out: { Args: { a: number }; Returns: { total: number; label: string } };");
     expect(src).toContain("resolve_issue: { Args: { p_workspace: string; p_id: string; p_how: string; p_note?: string; p_status?: string }; Returns: Json }\n    | {");
+  });
+
+  it("types as `| null` the `returns table` columns that do come back null (outer joins, nullable columns)", async () => {
+    const src = readFileSync(new URL("../src/function-types.ts", import.meta.url), "utf8");
+    const admin = await createUser(db, "nullable-columns@transpera.example", { agency_admin: true });
+    const d = db.dbAs(admin.claims as Claims);
+    const ws = await rpc(d, "create_workspace", { ws_name: "Nullable columns", ws_slug: "nullable-columns" });
+
+    // A new workspace has no headline numbers yet (left join).
+    const listed = (await rpcRows(d, "agency_workspace_list")).find((r) => r.id === ws)!;
+    expect(listed).toMatchObject({ numbers: null, computed_at: null });
+    expect(src).toMatch(/agency_workspace_list: .*last_activity: string \| null; numbers: Json \| null; computed_at: string \| null/);
+
+    // A member who has never signed in, with no person linked.
+    const member = (await rpcRows(d, "workspace_members", { ws })).find((r) => r.user_id === admin.id);
+    expect(member).toMatchObject({ person_id: null, last_sign_in_at: null });
+    expect(src).toMatch(/workspace_members: .*email: string \| null;.*person_id: string \| null; last_sign_in_at: string \| null/);
+
+    // A source with no recording date or file.
+    await d.insertInto("sources").values({ workspace_id: ws, kind: "notes", title: "No date" }).execute();
+    const [source] = await rpcRows(d, "search_sources", { p_workspace: ws });
+    expect(source).toMatchObject({ recorded_at: null, file_url: null });
+    expect(src).toMatch(/search_sources: .*recorded_at: string \| null; file_url: string \| null;/);
   });
 });

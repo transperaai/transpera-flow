@@ -35,9 +35,14 @@ const STRINGS = new Set([
 // `returns table (…)` columns carry no nullability in the catalog, so they are plain unless listed here: a column the
 // function fills from a nullable column or an outer join. Checked by hand against each function's SQL.
 const NULLABLE_TABLE_COLUMNS: Record<string, readonly string[]> = {
+  // greatest() of subqueries over no rows; the headline is a left join.
+  agency_workspace_list: ["last_activity", "numbers", "computed_at"],
   mcp_token_lookup: ["email", "active_workspace_id"],
   report_download: ["pdf"],
   revision_history: ["author_kind", "author_name", "changes", "note", "published_at"],
+  search_sources: ["recorded_at", "file_url"],
+  // auth.users.email and last_sign_in_at (never signed in) and memberships.person_id are nullable.
+  workspace_members: ["email", "person_id", "last_sign_in_at"],
 };
 
 // Arguments with no default that the function nevertheless accepts as null (the catalog can't say): typed `| null`.

@@ -7,7 +7,7 @@ import type { Json } from "./db-types";
 
 export interface Functions {
   add_source: { Args: { p_workspace: string; p_source: Json; p_links: Json }; Returns: string };
-  agency_workspace_list: { Args: never; Returns: { id: string; name: string; slug: string; open_risk_issues: number; last_activity: string; numbers: Json; computed_at: string }[] };
+  agency_workspace_list: { Args: never; Returns: { id: string; name: string; slug: string; open_risk_issues: number; last_activity: string | null; numbers: Json | null; computed_at: string | null }[] };
   apply_calibration: { Args: { p_calibration: string; p_keys: string[] }; Returns: Json };
   build_proposal: { Args: { p_proposal: string; p_workspace: string; p_process: string; p_base_revision: string; p_name: string; p_steps: Json; p_changed: Json; p_levers: Json; p_links: Json }; Returns: Json };
   can_edit_workspace: { Args: { ws: string }; Returns: boolean };
@@ -53,7 +53,7 @@ export interface Functions {
   save_issue: { Args: { p_workspace: string; p_fields: Json; p_id?: string; p_links?: Json; p_owners?: string[]; p_sources?: string[] }; Returns: Json };
   save_links: { Args: { target: string; owner: Json; member: string; base: Json; next: Json }; Returns: Json };
   save_solution: { Args: { p_workspace: string; p_process: string; p_base_revision: string; p_name: string; p_steps: Json; p_changed?: Json; p_levers?: Json; p_links?: Json }; Returns: Json };
-  search_sources: { Args: { p_workspace: string; p_search?: string; p_kind?: string; p_process?: string; p_unlinked?: boolean; p_sort?: string; p_limit?: number; p_offset?: number }; Returns: { id: string; workspace_id: string; kind: string; title: string; speakers: string[]; recorded_at: string; file_url: string; created_at: string; updated_at: string; excerpt: string; has_body: boolean; total: number }[] };
+  search_sources: { Args: { p_workspace: string; p_search?: string; p_kind?: string; p_process?: string; p_unlinked?: boolean; p_sort?: string; p_limit?: number; p_offset?: number }; Returns: { id: string; workspace_id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; file_url: string | null; created_at: string; updated_at: string; excerpt: string; has_body: boolean; total: number }[] };
   share_team_capacity: { Args: { ws: string; show_people: boolean }; Returns: Json };
   submit_play_proposal: { Args: { token: string; title: string; note: string | null; name: string; email: string; issue: string | null; levers: Json }; Returns: Json };
   take_link_fetch: { Args: never; Returns: number };
@@ -61,7 +61,7 @@ export interface Functions {
   unlinked_source_count: { Args: { p_workspace: string }; Returns: number };
   use_api_token: { Args: { token: string }; Returns: Json };
   workspace_logo: { Args: { p_workspace: string }; Returns: { mime: string; bytes: string; sha256: string }[] };
-  workspace_members: { Args: { ws: string }; Returns: { membership_id: string; user_id: string; email: string; role: "agency_admin" | "owner" | "editor" | "member" | "viewer"; source: string; active: boolean; person_id: string; last_sign_in_at: string; created_at: string }[] };
+  workspace_members: { Args: { ws: string }; Returns: { membership_id: string; user_id: string; email: string | null; role: "agency_admin" | "owner" | "editor" | "member" | "viewer"; source: string; active: boolean; person_id: string | null; last_sign_in_at: string | null; created_at: string }[] };
   workspace_role: { Args: { ws: string }; Returns: "agency_admin" | "owner" | "editor" | "member" | "viewer" };
 }
 

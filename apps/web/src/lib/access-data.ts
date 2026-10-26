@@ -65,7 +65,8 @@ export async function loadAccessSettings(slug: string): Promise<AccessSettings |
     members: (members ?? []).map((m) => ({
       membershipId: m.membership_id,
       userId: m.user_id,
-      email: m.email,
+      // auth.users.email is nullable, though the Better Auth mirror always sets it.
+      email: m.email ?? "",
       role: m.role,
       source: m.source as WorkspaceMember["source"],
       active: m.active,

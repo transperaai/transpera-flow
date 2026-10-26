@@ -155,7 +155,7 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
     ]);
     // actor_kind is check-constrained; diff is jsonb.
     changes = log as unknown as AuditEntry[];
-    for (const m of members ?? []) people[m.user_id] = m.email;
+    for (const m of members ?? []) if (m.email) people[m.user_id] = m.email;
     // The steps the log names (a skill's, a per-person time's). A step id is stable across a process's versions, so it has one row per
     // revision: newest first, the first name per id wins (a draft's copy counts as newest, so an unpublished rename can show; only
     // owners and agency admins read this). At most 50 entries, so at most 50 ids; the page-at-a-time read is kept from when a
