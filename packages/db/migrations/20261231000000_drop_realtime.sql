@@ -15,7 +15,9 @@ do $$
 declare
   t text;
 begin
-  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+  -- A FOR ALL TABLES publication (someone switched Realtime on for everything) lists every table and refuses `drop table`;
+  -- nothing of ours was added to it, so it is left alone.
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime' and not puballtables) then
     foreach t in array array['steps', 'edges', 'processes'] loop
       if exists (
         select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t

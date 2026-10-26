@@ -55,6 +55,19 @@ describe("Realtime is dropped", () => {
     }
   });
 
+  it("applies where supabase_realtime is a FOR ALL TABLES publication, and leaves it as it is", async () => {
+    const other = await createTestDb({ realtime: true });
+    try {
+      const { readFileSync } = await import("node:fs");
+      const sql = readFileSync(new URL("../migrations/20261231000000_drop_realtime.sql", import.meta.url), "utf8");
+      await other.client.query("drop publication supabase_realtime; create publication supabase_realtime for all tables");
+      await expect(other.client.query(sql)).resolves.toBeDefined();
+      expect((await other.client.query("select puballtables from pg_publication where pubname = 'supabase_realtime'")).rows).toEqual([{ puballtables: true }]);
+    } finally {
+      await other.close();
+    }
+  });
+
   it("applies again without effect", async () => {
     const { readFileSync } = await import("node:fs");
     const sql = readFileSync(new URL("../migrations/20261231000000_drop_realtime.sql", import.meta.url), "utf8");
