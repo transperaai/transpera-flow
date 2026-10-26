@@ -179,9 +179,18 @@ plugin for preview URLs).
 `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET`/`MICROSOFT_TENANT_ID` (the client's tenant id restricts sign-in to that
 tenant). It is wired and unit-tested but not enabled anywhere yet. Secrets: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`.
 
+**Preview sign-in.** Google allows only fixed redirect URIs, and production keeps running Supabase code until cutover, so
+it can't act as the OAuth proxy yet. The integration branch therefore gets a stable alias, `transpera-flow-next.vercel.app`
+(a Vercel project domain bound to the branch; Opus adds it through the Vercel API). Its callback goes on the Google
+client, and `BETTER_AUTH_URL` for Preview is that alias. Add the `oAuthProxy` plugin with `productionURL` from
+`BETTER_AUTH_URL` and `secret` from `OAUTH_PROXY_SECRET`, and set `trustedOrigins` to the alias plus
+`https://transpera-flow-*.vercel.app`, so per-commit preview URLs sign in through the alias. After cutover, production
+takes over as the proxy.
+
 **App changes**
-- `apps/web/src/lib/auth/server.ts` (new): the `betterAuth()` instance, its own `pg` Pool on `DATABASE_URL` with
-  `search_path=better_auth`. `apps/web/src/app/api/auth/[...all]/route.ts`: the Better Auth handler.
+- `apps/web/src/lib/auth/server.ts` (new): the `betterAuth()` instance, its own `pg` Pool on `DATABASE_URL`, with
+  `database.schemaName: "better_auth"`. Don't use a `search_path` startup option: Neon's pooled connections reject
+  startup parameters. `apps/web/src/app/api/auth/[...all]/route.ts`: the Better Auth handler.
 - `apps/web/src/lib/auth/session.ts` (new): `getSessionUser()` (cached per request with React `cache`) returns
   `{ id, email, agencyAdmin }` or null. `getDb()` returns `createDb(pool, claimsFor(user))`. This replaces
   `lib/supabase/server.ts` `createClient()` as the thing call sites import (steps 3c and 3d switch them).
@@ -269,7 +278,8 @@ to the OAuth app, `pnpm --filter @transpera-flow/db migrate`, and a first sign-i
    **Neon** (Serverless Postgres) → Continue.
 2. Region **Sydney (aws-ap-southeast-2)**, plan **Free**, name `transpera-flow-db` → Create.
 3. On "Connect project", choose environments **Development** and **Preview** only (not Production until cutover), and
-   leave the prefix empty so the variable is `DATABASE_URL` → Connect.
+   leave the prefix empty so the variable is `DATABASE_URL`. If it offers to create a database branch for each preview
+   deployment, leave that **off**. → Connect.
 4. Tell Claude "Neon is created". Claude finds it through the Neon API that's already connected here, applies the
    migrations, and checks it. You never copy a connection string.
 
@@ -278,17 +288,18 @@ Use the Google Cloud project that already holds the OAuth client Supabase uses t
 1. https://console.cloud.google.com/apis/credentials → pick that project → **Create credentials → OAuth client ID** →
    type **Web application**, name `Transpera Flow`.
 2. **Authorised JavaScript origins:** `https://transpera-flow.vercel.app` and `http://localhost:3000`.
-3. **Authorised redirect URIs:** `https://transpera-flow.vercel.app/api/auth/callback/google` and
-   `http://localhost:3000/api/auth/callback/google`. Previews sign in through the production URL (Better Auth's
-   OAuth proxy), so no per-preview URI is needed.
+   Also add `https://transpera-flow-next.vercel.app` (the preview alias for this work).
+3. **Authorised redirect URIs:** `https://transpera-flow.vercel.app/api/auth/callback/google`,
+   `https://transpera-flow-next.vercel.app/api/auth/callback/google` and `http://localhost:3000/api/auth/callback/google`.
+   Other preview URLs sign in through the alias (Better Auth's OAuth proxy), so they need no URI of their own.
 4. **Create**. Leave the dialog open and, in another tab, open Vercel → transpera-flow → Settings → **Environment Variables**:
    add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (tick **Sensitive**) for **Preview** and **Development**. Paste
    them straight from Google into Vercel, not into chat.
 5. **OAuth consent screen** (Google Auth Platform → Branding/Audience): app name "Transpera Flow", user type
    **External**, publishing status **In production**. The scopes are only `openid email profile`, so Google needs no
    verification.
-6. Tell Claude "Google is set". Claude sets `BETTER_AUTH_SECRET` (random, generated and sent straight to Vercel via its
-   API, never printed), `BETTER_AUTH_URL` and `ACCESS_ADMIN_EMAILS=austinsmith1704@gmail.com`.
+6. Tell Claude "Google is set". Claude sets `BETTER_AUTH_SECRET` and `OAUTH_PROXY_SECRET` (random, generated and sent
+   straight to Vercel via its API, never printed), `BETTER_AUTH_URL` and `ACCESS_ADMIN_EMAILS=austinsmith1704@gmail.com`.
 
 One OAuth client serves every client deployment: each new deployment adds its own redirect URI (step 8). A client that
 wants its own consent-screen name gets its own client later.
