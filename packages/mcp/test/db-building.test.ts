@@ -369,6 +369,41 @@ describe("MCP process building (drafts only, as the user)", () => {
     await editor.close();
   });
 
+  it("add_source keeps a link to the original, list_sources shows it, and anything that isn't a web link is refused", async () => {
+    const editor = await connect(editorToken, options);
+    const link = "https://drive.google.com/file/d/abc123/view";
+    const made = await call<{ source: { id: string; file_url: string | null; body_length: number } }>(editor, "add_source", {
+      title: "Reference: onboarding SOP",
+      kind: "sop",
+      body: "1. Send the welcome pack.",
+      file_url: `  ${link}  `,
+      links: [{ process: "Sales pipeline" }],
+    });
+    expect(made.ok, JSON.stringify(made)).toBe(true);
+    expect(made.data.source).toMatchObject({ file_url: link, body_length: 25 });
+    expect((await admin.query("select file_url, body from sources where id = $1", [made.data.source.id])).rows).toEqual([{ file_url: link, body: "1. Send the welcome pack." }]);
+    // A source with no link to an original has none, and the text alone is unchanged.
+    const plain = await call<{ source: { id: string; file_url: string | null } }>(editor, "add_source", { title: "Reference: no original", links: [{ process: "Sales pipeline" }] });
+    expect(plain.data.source.file_url).toBeNull();
+    // The link comes back with the sources, to the editor and to a viewer alike.
+    const listed = await call<{ sources: { title: string; file_url: string | null }[] }>(editor, "list_sources", { limit: 200 });
+    expect(listed.data.sources.filter((x) => x.title.startsWith("Reference:")).map((x) => [x.title, x.file_url])).toEqual([
+      ["Reference: onboarding SOP", link],
+      ["Reference: no original", null],
+    ]);
+    const before = Number((await admin.query("select count(*) from sources where workspace_id = $1", [workspaceId])).rows[0].count);
+    for (const bad of ["drive.google.com/file/1", "ftp://example.com/x", "javascript:alert(1)", "https://example.com/has space", `https://example.com/${"a".repeat(2000)}`]) {
+      const refused = await editor.callTool({ name: "add_source", arguments: { title: "Reference: bad", file_url: bad, links: [{ process: "Sales pipeline" }] } }).catch((e: Error) => e);
+      expect(refused instanceof Error ? refused.message : JSON.stringify(refused), bad).toMatch(/invalid|pattern|too_big|Too big|isError/i);
+    }
+    expect(Number((await admin.query("select count(*) from sources where workspace_id = $1", [workspaceId])).rows[0].count)).toBe(before);
+    await editor.close();
+    const viewer = await connect(viewerToken, options);
+    const seen = await call<{ sources: { title: string; file_url: string | null }[] }>(viewer, "list_sources", { limit: 200 });
+    expect(seen.data.sources.find((x) => x.title === "Reference: onboarding SOP")?.file_url).toBe(link);
+    await viewer.close();
+  });
+
   it("add_source needs links (or link_later), resolves them by name, and link_source adds more", async () => {
     const editor = await connect(editorToken, options);
     const issueNumber = (await admin.query("insert into issues (workspace_id, type, title) values ($1, 'manual', 'Slow proposals') returning number", [workspaceId])).rows[0].number as number;

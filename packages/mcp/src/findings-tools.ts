@@ -471,7 +471,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
     {
       title: "List sources",
       description:
-        "The workspace's sources (interview transcripts, notes, SOPs, data) and what each is linked to (a process, a step, an issue, a solution). " +
+        "The workspace's sources (interview transcripts, notes, SOPs, data), the link to each one's original (file_url) and what each is linked to (a process, a step, an issue, a solution). " +
         `Each source's text is included up to ${MAX_SOURCE_TEXT} characters (text_truncated says when there is more). Filter by process. ` +
         `Oldest first, a page at a time (${DEFAULT_PAGE} by default): total and next_offset say when there are more.`,
       inputSchema: { process: z.string().optional().describe("Only sources linked to this process or its steps (id or name)."), workspace: workspaceArg, ...pageArgs },
@@ -494,7 +494,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const matching = ctx.db.selectFrom("sources").where("workspace_id", "=", ws.id).$if(!!wanted, (qb) => qb.where("id", "in", wanted!));
         const [rows, counted] = await Promise.all([
           matching
-            .select(["id", "kind", "title", "speakers", "recorded_at", "body", "created_at"])
+            .select(["id", "kind", "title", "speakers", "recorded_at", "body", "file_url", "created_at"])
             .orderBy("created_at")
             .orderBy("id")
             .limit(page.limit)
@@ -511,6 +511,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
             title: s.title,
             speakers: s.speakers,
             recorded_at: s.recorded_at,
+            file_url: s.file_url,
             text: (s.body ?? "").slice(0, MAX_SOURCE_TEXT),
             text_truncated: (s.body ?? "").length > MAX_SOURCE_TEXT,
             links: linkRows.filter((l) => l.source_id === s.id).map(({ source_id, ...l }) => (void source_id, l)),
