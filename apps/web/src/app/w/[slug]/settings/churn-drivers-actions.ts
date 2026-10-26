@@ -3,7 +3,8 @@
 import { CHURN_DRIVER_SPECS, CUSTOM_DRIVER_VALUE, type BuiltinChurnDriverId } from "@transpera-flow/engine";
 import { MAX_CUSTOM_DRIVERS, NEW_DRIVER_NAME, parseDriverPatch } from "@/lib/churn-drivers";
 import { isId } from "@/lib/services";
-import { createClient } from "@/lib/supabase/server";
+import { pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Writes from Settings, Churn drivers (A56). Every write runs as the signed-in user through RLS: owners and
 // editors write, everyone else is refused; these checks only reject malformed input early. A driver is saved as a
@@ -12,20 +13,18 @@ import { createClient } from "@/lib/supabase/server";
 
 export type DriverResult = { status: "saved"; rowId: string } | { status: "error"; message: string };
 
-const failed = (error: { code?: string } | null): DriverResult => ({
+const failed = (e: unknown): DriverResult => ({
   status: "error",
   message:
-    error?.code === "42501"
+    pgCode(e) === "42501"
       ? "You don't have permission to change this."
-      : error?.code === "23514"
+      : pgCode(e) === "23514"
         ? "That isn't allowed. A workspace can have up to 25 drivers of its own, and each value has a range."
         : "Couldn't save. Try again.",
 });
 
 async function signedIn(): Promise<boolean> {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return Boolean(data?.claims?.sub);
+  return Boolean(await getSessionUser());
 }
 
 const invalid: DriverResult = { status: "error", message: "That value isn't valid." };
@@ -39,11 +38,15 @@ export async function saveChurnDriver(workspaceId: string, key: string, patch: u
   const parsed = parseDriverPatch(key, patch);
   if (!isId(workspaceId) || !parsed) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
+  const db = await getDb();
 
   const update = async (id: string): Promise<DriverResult> => {
-    const { data, error } = await supabase.from("churn_drivers").update(parsed).eq("id", id).eq("workspace_id", workspaceId).select("id");
-    if (error) return failed(error);
+    let data;
+    try {
+      data = await db.updateTable("churn_drivers").set(parsed).where("id", "=", id).where("workspace_id", "=", workspaceId).returning("id").execute();
+    } catch (e) {
+      return failed(e);
+    }
     return data.length ? { status: "saved", rowId: id } : { status: "error", message: "That driver was removed, or you can't change it." };
   };
 
@@ -51,8 +54,12 @@ export async function saveChurnDriver(workspaceId: string, key: string, patch: u
 
   const builtin = key as BuiltinChurnDriverId;
   const existing = async () => {
-    const { data, error } = await supabase.from("churn_drivers").select("id").eq("workspace_id", workspaceId).eq("driver", builtin).maybeSingle();
-    return { id: data?.id ?? null, error };
+    try {
+      const data = await db.selectFrom("churn_drivers").select("id").where("workspace_id", "=", workspaceId).where("driver", "=", builtin).executeTakeFirst();
+      return { id: data?.id ?? null, error: null as unknown };
+    } catch (error) {
+      return { id: null, error };
+    }
   };
   const found = await existing();
   if (found.error) return failed(found.error);
@@ -60,56 +67,70 @@ export async function saveChurnDriver(workspaceId: string, key: string, patch: u
 
   // First change: the row starts from the default for everything the edit doesn't set.
   const spec = CHURN_DRIVER_SPECS[builtin];
-  const { data, error } = await supabase
-    .from("churn_drivers")
-    .insert({
-      workspace_id: workspaceId,
-      driver: builtin,
-      weight: parsed.weight ?? 1,
-      enabled: parsed.enabled ?? spec.defaultEnabled,
-      value: parsed.value !== undefined ? parsed.value : spec.defaultValue,
-      month: builtin === "price" ? (parsed.month ?? 1) : null,
-    })
-    .select("id")
-    .single();
-  if (error) {
+  try {
+    const data = await db
+      .insertInto("churn_drivers")
+      .values({
+        workspace_id: workspaceId,
+        driver: builtin,
+        weight: parsed.weight ?? 1,
+        enabled: parsed.enabled ?? spec.defaultEnabled,
+        value: parsed.value !== undefined ? parsed.value : spec.defaultValue,
+        month: builtin === "price" ? (parsed.month ?? 1) : null,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    return { status: "saved", rowId: data.id };
+  } catch (error) {
     // Someone set it up a moment ago: apply this edit to their row.
-    if (error.code === "23505") {
+    if (pgCode(error) === "23505") {
       const again = await existing();
       return again.id ? update(again.id) : failed(error);
     }
     return failed(error);
   }
-  return { status: "saved", rowId: data.id };
 }
 
 /** Add a driver of your own, starting as "New driver" at weight 1 with 20% extra churn; the person renames it. */
 export async function addChurnDriver(workspaceId: string): Promise<DriverResult> {
   if (!isId(workspaceId)) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
-  const { count, error: countError } = await supabase
-    .from("churn_drivers")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .is("driver", null);
-  if (countError) return failed(countError);
-  if ((count ?? 0) >= MAX_CUSTOM_DRIVERS) return { status: "error", message: `You can have up to ${MAX_CUSTOM_DRIVERS} drivers of your own.` };
-  const { data, error } = await supabase
-    .from("churn_drivers")
-    .insert({ workspace_id: workspaceId, name: NEW_DRIVER_NAME, weight: 1, enabled: true, value: CUSTOM_DRIVER_VALUE.default })
-    .select("id")
-    .single();
-  if (error) return failed(error);
-  return { status: "saved", rowId: data.id };
+  const db = await getDb();
+  let count: number;
+  try {
+    const counted = await db
+      .selectFrom("churn_drivers")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .where("workspace_id", "=", workspaceId)
+      .where("driver", "is", null)
+      .executeTakeFirstOrThrow();
+    count = Number(counted.count);
+  } catch (e) {
+    return failed(e);
+  }
+  if (count >= MAX_CUSTOM_DRIVERS) return { status: "error", message: `You can have up to ${MAX_CUSTOM_DRIVERS} drivers of your own.` };
+  try {
+    const data = await db
+      .insertInto("churn_drivers")
+      .values({ workspace_id: workspaceId, name: NEW_DRIVER_NAME, weight: 1, enabled: true, value: CUSTOM_DRIVER_VALUE.default })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    return { status: "saved", rowId: data.id };
+  } catch (e) {
+    return failed(e);
+  }
 }
 
 /** Remove a driver of your own. */
 export async function removeChurnDriver(workspaceId: string, rowId: string): Promise<DriverResult> {
   if (!isId(workspaceId) || !isId(rowId)) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("churn_drivers").delete().eq("id", rowId).eq("workspace_id", workspaceId).is("driver", null).select("id");
-  if (error) return failed(error);
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("churn_drivers").where("id", "=", rowId).where("workspace_id", "=", workspaceId).where("driver", "is", null).returning("id").execute();
+  } catch (e) {
+    return failed(e);
+  }
   return data.length ? { status: "saved", rowId } : { status: "error", message: "That driver was already removed, or you can't change it." };
 }

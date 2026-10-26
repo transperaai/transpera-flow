@@ -7,7 +7,8 @@ import { MAX_LOGO_BYTES, checkLogo, LOGO_ERRORS } from "@/lib/branding/logo-chec
 import { isId } from "@/lib/clients";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField } from "@/lib/fields/server";
-import { createClient } from "@/lib/supabase/server";
+import { getDb, getSessionUser } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server"; // step 4: Storage only
 
 // Client branding (issue #34, B5), from Settings -> Branding: the workspace's accent colour and logo. As the signed-in user
 // through row-level security (never the service-role key): owners and agency admins change the workspace; the storage policies
@@ -21,9 +22,7 @@ const OWNERS_ONLY = "Only workspace owners can change the branding.";
 const CHANGED = "Someone else changed the logo. Reload to see it.";
 
 async function signedInClient() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims?.sub ? supabase : null;
+  return (await getSessionUser()) ? getDb() : null;
 }
 
 /** A logo path in this workspace's own folder, or null. */
@@ -63,9 +62,8 @@ export async function attachWorkspaceLogo(workspaceId: unknown, path: unknown, b
   const newPath = ownPath(path, workspaceId);
   // Nothing outside this workspace's folder is touched, not even to clean up.
   if (!newPath) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const storage = supabase.storage.from(BUCKET);
+  if (!(await signedInClient())) return signedOut;
+  const storage = (await createClient()).storage.from(BUCKET); // step 4: Storage
   const refuse = async (message: string): Promise<LogoResult> => {
     await storage.remove([newPath]);
     return { status: "error", message };
@@ -101,13 +99,12 @@ export async function removeWorkspaceLogo(workspaceId: unknown, base: unknown): 
   if (!isId(workspaceId)) return invalid;
   const oldPath = ownPath(base, workspaceId);
   if (!oldPath) return invalid;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  if (!(await signedInClient())) return signedOut;
   const out = await saveField("workspaces", { id: workspaceId }, "branding.logo_path", oldPath, null);
   if (out.status === "conflict") return { status: "error", message: CHANGED };
   if (out.status === "not_found") return { status: "error", message: OWNERS_ONLY };
   if (out.status === "error") return out;
-  await supabase.storage.from(BUCKET).remove([oldPath]);
+  await (await createClient()).storage.from(BUCKET).remove([oldPath]); // step 4: Storage
   refresh();
   return { status: "ok", path: null, url: null };
 }

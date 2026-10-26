@@ -3,7 +3,9 @@
 import { isId } from "@/lib/editor/validate";
 import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
 import { mustAskBeforeRestore } from "@/lib/history/restore-check";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Writes and reads of the History screen (issue #105). Every call runs as the signed-in user. The database functions
 // decide who may do what and say "not_found" for a process or version the caller can't edit: duplicate_version
@@ -24,9 +26,7 @@ const forbidden = { status: "error", message: "You don't have permission to chan
 const failed = { status: "error", message: "Couldn't do that. Try again." } as const;
 
 async function signedIn() {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  return claims?.claims?.sub ? ({ ok: true, supabase } as const) : ({ ok: false } as const);
+  return (await getSessionUser()) ? ({ ok: true, db: await getDb() } as const) : ({ ok: false } as const);
 }
 
 /** Copy a published version into the process's draft. Live is unchanged until the draft is published. */
@@ -36,12 +36,16 @@ export async function restoreVersion(processId: string, revisionId: string, repl
   if (!session.ok) return signedOut;
   // The database looks at the draft's steps and edges; a draft whose first principles differ from live's has changes too (A54).
   if (!replaceDraft) {
-    const { data: proc } = await session.supabase.from("processes").select("live_revision_id, draft_revision_id").eq("id", processId).maybeSingle();
+    const proc = await session.db.selectFrom("processes").select(["live_revision_id", "draft_revision_id"]).where("id", "=", processId).executeTakeFirst().catch(() => undefined);
     const differ = proc?.live_revision_id && proc.draft_revision_id ? await firstPrinciplesDraftChanged(processId, proc.live_revision_id, proc.draft_revision_id) : false;
     if (mustAskBeforeRestore(replaceDraft, Boolean(proc?.draft_revision_id), differ)) return { status: "draft_exists" };
   }
-  const { data, error } = await session.supabase.rpc("restore_version", { target_process: processId, source_revision: revisionId, replace_draft: replaceDraft });
-  if (error) return error.code === "42501" ? forbidden : failed;
+  let data;
+  try {
+    data = await rpc(session.db, "restore_version", { target_process: processId, source_revision: revisionId, replace_draft: replaceDraft });
+  } catch (e) {
+    return pgCode(e) === "42501" ? forbidden : failed;
+  }
   const r = data as { status: string; number?: number; unlinked_children?: number; skipped_holders?: number; added_holders?: number };
   if (r.status === "restored") return { status: "restored", number: r.number ?? 0, unlinkedChildren: r.unlinked_children ?? 0, skippedHolders: r.skipped_holders ?? 0, addedHolders: r.added_holders ?? 0 };
   if (r.status === "draft_exists") return { status: "draft_exists" };
@@ -59,10 +63,14 @@ export async function duplicateVersion(processId: string, revisionId: string, na
   const session = await signedIn();
   if (!session.ok) return signedOut;
   // The version must belong to the process on this page, so a stale link can't copy something else.
-  const { data: revision } = await session.supabase.from("process_revisions").select("process_id").eq("id", revisionId).maybeSingle();
+  const revision = await session.db.selectFrom("process_revisions").select("process_id").where("id", "=", revisionId).executeTakeFirst().catch(() => undefined);
   if (!revision || revision.process_id !== processId) return invalid;
-  const { data, error } = await session.supabase.rpc("duplicate_version", { source_revision: revisionId, new_name: clean });
-  if (error) return error.code === "42501" ? forbidden : failed;
+  let data;
+  try {
+    data = await rpc(session.db, "duplicate_version", { source_revision: revisionId, new_name: clean });
+  } catch (e) {
+    return pgCode(e) === "42501" ? forbidden : failed;
+  }
   const r = data as { status: string; process_id?: string };
   if (r.status === "duplicated" && r.process_id) return { status: "duplicated", processId: r.process_id };
   if (r.status === "name_taken") return { status: "error", message: `There is already a process called '${clean}'.` };

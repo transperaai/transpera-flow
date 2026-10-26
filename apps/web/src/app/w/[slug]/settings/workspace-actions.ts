@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField } from "@/lib/fields/server";
 import { CLIENT_FIELDS, isId } from "@/lib/clients";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/auth/session";
 
 // The workspace's name and currency (issue #182, B19), from Settings. As the signed-in user through row-level security:
 // owners and agency admins change the workspace; the database also checks both values (20261201000000).
@@ -13,9 +13,7 @@ const invalid = { status: "error", message: "That value isn't valid." } as const
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
 
 async function signedIn(): Promise<boolean> {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return Boolean(data?.claims?.sub);
+  return Boolean(await getSessionUser());
 }
 
 /** The workspace's name, as everyone in it sees it. Owners only. */

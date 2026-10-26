@@ -7,7 +7,8 @@ import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, take
 import { isId } from "@/lib/editor/validate";
 import { sourceLabel, uploadSizeProblem, type CreateUploadInput, type CreateUploadResult, type PreviewInput, type PreviewResult, type UploadPreview } from "@/lib/processes/upload";
 import { NOTICE_COOKIE, noticeValue } from "@/lib/processes/upload-notice";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Upload a process (issue #166, B13). The file is checked here, not trusted from the browser, and written by the same code
 // the MCP `import_process` tool uses (packages/mcp/src/import-file.ts), acting as the signed-in user through RLS: only
@@ -22,17 +23,16 @@ const GENERIC = "Couldn't read that. Try again.";
 async function editorContext(workspaceId: string): Promise<{ ctx: Awaited<ReturnType<typeof context>> & object } | { error: string }> {
   const ctx = await context(workspaceId);
   if (!ctx) return { error: "Your session has ended. Sign in again." };
-  const { data: canEdit } = await ctx.db.rpc("can_edit_workspace", { ws: workspaceId });
+  const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: workspaceId }).catch(() => null);
   if (canEdit !== true) return { error: "Only editors and owners can upload a process." };
   return { ctx };
 }
 
 async function context(workspaceId: string) {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return null;
-  return { db: supabase, tokenHash: "", userId, activeWorkspaceId: workspaceId, today: new Date().toISOString().slice(0, 10) };
+  const user = await getSessionUser();
+  if (!user) return null;
+  const userId = user.id;
+  return { db: await getDb(), tokenHash: "", userId, activeWorkspaceId: workspaceId, today: new Date().toISOString().slice(0, 10) };
 }
 
 const failure = (check: ProcessFileCheck, source: string): UploadPreview => ({

@@ -3,7 +3,8 @@
 import { ENGINE_VERSION } from "@transpera-flow/engine";
 import { headlineIsFresh, pickHeadline, sameHeadline, type HeadlineNumbers } from "@/lib/overview/headline";
 import { isId } from "@/lib/services";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // The agency list's headline numbers (issue #30, B1 part 3): the Overview, once its run at the workspace's own horizon is in,
 // records flow efficiency, processes needing attention and client groups at risk, so the agency's home page can list them
@@ -40,26 +41,38 @@ export async function recordHeadline(
   ) {
     return { status: "error", message: "That isn't valid." };
   }
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return { status: "error", message: "Your session has ended. Sign in again." };
+  if (!(await getSessionUser())) return { status: "error", message: "Your session has ended. Sign in again." };
+  const db = await getDb();
 
-  const stored = await supabase
-    .from("workspace_headlines")
-    .select("engine_version, revision_ids, computed_at, horizon_weeks, numbers")
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (stored.error) return { status: "error", message: "Couldn't read the stored numbers." };
-  const fresh = stored.data && stored.data.horizon_weeks === horizonWeeks && headlineIsFresh(stored.data, { engineVersion: ENGINE_VERSION, revisionIds, at: new Date() });
-  if (fresh && sameHeadline(stored.data?.numbers, numbers)) return { status: "fresh" };
+  let stored;
+  try {
+    stored = await db
+      .selectFrom("workspace_headlines")
+      .select(["engine_version", "revision_ids", "computed_at", "horizon_weeks", "numbers"])
+      .where("workspace_id", "=", workspaceId)
+      .executeTakeFirst();
+  } catch {
+    return { status: "error", message: "Couldn't read the stored numbers." };
+  }
+  const fresh = stored && stored.horizon_weeks === horizonWeeks && headlineIsFresh(stored, { engineVersion: ENGINE_VERSION, revisionIds, at: new Date() });
+  if (fresh && sameHeadline(stored?.numbers, numbers)) return { status: "fresh" };
   // `computed_by` and `computed_at` are set by the database.
-  const { error } = await supabase.from("workspace_headlines").upsert({
-    workspace_id: workspaceId,
-    engine_version: ENGINE_VERSION,
-    revision_ids: revisionIds,
-    horizon_weeks: horizonWeeks,
-    numbers: { ...pickHeadline(numbers) },
-  });
-  if (error) return { status: "error", message: "Couldn't save the headline numbers." };
+  try {
+    const row = { engine_version: ENGINE_VERSION, revision_ids: revisionIds, horizon_weeks: horizonWeeks, numbers: jsonb({ ...pickHeadline(numbers) }) };
+    await db
+      .insertInto("workspace_headlines")
+      .values({ workspace_id: workspaceId, ...row })
+      .onConflict((oc) =>
+        oc.column("workspace_id").doUpdateSet({
+          engine_version: (eb) => eb.ref("excluded.engine_version"),
+          revision_ids: (eb) => eb.ref("excluded.revision_ids"),
+          horizon_weeks: (eb) => eb.ref("excluded.horizon_weeks"),
+          numbers: (eb) => eb.ref("excluded.numbers"),
+        }),
+      )
+      .execute();
+  } catch {
+    return { status: "error", message: "Couldn't save the headline numbers." };
+  }
   return { status: "recorded" };
 }

@@ -1,10 +1,13 @@
 "use server";
 
-import { FORECAST_PLAN_COLUMNS, type ForecastPlanRow, type Json } from "@transpera-flow/db";
+import type { ForecastPlanRow } from "@transpera-flow/db";
 import { parsePlanInput } from "@/lib/forecast/plan";
 import { PLAN_CHANGED_ELSEWHERE, PLAN_SIGNED_OUT, planFailure } from "@/lib/forecast/plan-save";
 import { isId } from "@/lib/sources/validate";
-import { createClient } from "@/lib/supabase/server";
+import { jsonb, pgError } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
+
+const PLAN_COLUMNS = ["id", "workspace_id", "name", "markers", "created_at", "updated_at", "created_by"] as const;
 
 // Saving and deleting forecast plans (issue #36, B7). A plan is a named set of markers; it never touches the live model.
 // Everything runs as the signed-in user through row-level security: owners, editors and agency admins read and write
@@ -25,50 +28,60 @@ export async function savePlan(workspaceId: unknown, planId: unknown, input: unk
   if (!isId(workspaceId)) return invalid;
   if (planId !== null && !isId(planId)) return invalid;
   if (planId !== null && (typeof expectedUpdatedAt !== "string" || !expectedUpdatedAt)) return invalid;
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
 
   // Two solutions for one process can't go live in the same month: needs each solution's process (small columns only).
-  const [{ data: solutions }, { data: processes }] = await Promise.all([
-    supabase.from("solutions").select("id, process_id").eq("workspace_id", workspaceId),
-    supabase.from("processes").select("id, name").eq("workspace_id", workspaceId),
+  const [solutions, processes] = await Promise.all([
+    db.selectFrom("solutions").select(["id", "process_id"]).where("workspace_id", "=", workspaceId).execute().catch(() => []),
+    db.selectFrom("processes").select(["id", "name"]).where("workspace_id", "=", workspaceId).execute().catch(() => []),
   ]);
-  const names = new Map((processes ?? []).map((p) => [p.id, p.name]));
-  const parsed = parsePlanInput(input, { solutions: solutions ?? [], processName: (id) => names.get(id) ?? "that process" });
+  const names = new Map(processes.map((p) => [p.id, p.name]));
+  const parsed = parsePlanInput(input, { solutions, processName: (id) => names.get(id) ?? "that process" });
   if (!parsed.ok) return { status: "error", message: parsed.error };
   const { name, markers } = parsed.value;
 
   if (planId === null) {
-    const { data, error } = await supabase
-      .from("forecast_plans")
-      .insert({ workspace_id: workspaceId, name, markers: markers as unknown as Json })
-      .select(FORECAST_PLAN_COLUMNS)
-      .single();
-    if (error) return { status: "error", message: planFailure(error) };
-    return { status: "ok", plan: data as unknown as ForecastPlanRow };
+    try {
+      const data = await db
+        .insertInto("forecast_plans")
+        .values({ workspace_id: workspaceId, name, markers: jsonb(markers) })
+        .returning(PLAN_COLUMNS)
+        .executeTakeFirstOrThrow();
+      return { status: "ok", plan: data as unknown as ForecastPlanRow };
+    } catch (e) {
+      return { status: "error", message: planFailure(pgError(e)) };
+    }
   }
-  const { data, error } = await supabase
-    .from("forecast_plans")
-    .update({ name, markers: markers as unknown as Json })
-    .eq("id", planId)
-    .eq("workspace_id", workspaceId)
-    .eq("updated_at", expectedUpdatedAt as string)
-    .select(FORECAST_PLAN_COLUMNS);
-  if (error) return { status: "error", message: planFailure(error) };
+  let data;
+  try {
+    data = await db
+      .updateTable("forecast_plans")
+      .set({ name, markers: jsonb(markers) })
+      .where("id", "=", planId as string)
+      .where("workspace_id", "=", workspaceId)
+      .where("updated_at", "=", expectedUpdatedAt as string)
+      .returning(PLAN_COLUMNS)
+      .execute();
+  } catch (e) {
+    return { status: "error", message: planFailure(pgError(e)) };
+  }
   // No row back: someone else changed or deleted it since this page loaded it, so nothing was overwritten.
-  if (!data?.length) return { status: "error", message: PLAN_CHANGED_ELSEWHERE };
+  if (!data.length) return { status: "error", message: PLAN_CHANGED_ELSEWHERE };
   return { status: "ok", plan: data[0] as unknown as ForecastPlanRow };
 }
 
 /** Delete a plan. */
 export async function deletePlan(workspaceId: unknown, planId: unknown): Promise<DeletePlanResult> {
   if (!isId(workspaceId) || !isId(planId)) return invalid;
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
-  const { data, error } = await supabase.from("forecast_plans").delete().eq("id", planId).eq("workspace_id", workspaceId).select("id");
-  if (error) return { status: "error", message: planFailure(error) };
-  if (!data?.length) return { status: "error", message: PLAN_CHANGED_ELSEWHERE };
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("forecast_plans").where("id", "=", planId).where("workspace_id", "=", workspaceId).returning("id").execute();
+  } catch (e) {
+    return { status: "error", message: planFailure(pgError(e)) };
+  }
+  if (!data.length) return { status: "error", message: PLAN_CHANGED_ELSEWHERE };
   return { status: "ok" };
 }

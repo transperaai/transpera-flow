@@ -4,7 +4,8 @@ import { refresh } from "next/cache";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField, saveLinks } from "@/lib/fields/server";
 import { CLIENT_FIELDS, isBase, isClientField, isId, parseNewClient, type ClientField } from "@/lib/clients";
-import { createClient } from "@/lib/supabase/server";
+import { pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Clients by hand (issue #182, B19). Every write runs as the signed-in user through row-level security: owners and editors
 // change clients, viewers can't. A client is never deleted (the database refuses it): they are made inactive. These checks
@@ -16,9 +17,7 @@ const invalid = { status: "error", message: "That value isn't valid." } as const
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
 
 async function signedIn(): Promise<boolean> {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return Boolean(data?.claims?.sub);
+  return Boolean(await getSessionUser());
 }
 
 export interface AddClientResult {
@@ -31,9 +30,12 @@ export async function addClient(workspaceId: string, _prev: AddClientResult, for
   const parsed = parseNewClient({ name: form.get("name"), mrr: form.get("mrr"), start_date: form.get("start_date") });
   if (!parsed.ok) return { error: parsed.error };
   if (!(await signedIn())) return { error: signedOut.message };
-  const supabase = await createClient();
-  const { error } = await supabase.from("clients").insert({ workspace_id: workspaceId, ...parsed.value });
-  if (error) return { error: error.code === "42501" ? "You don't have permission to add clients." : "Couldn't save. Try again." };
+  const db = await getDb();
+  try {
+    await db.insertInto("clients").values({ workspace_id: workspaceId, ...parsed.value }).execute();
+  } catch (e) {
+    return { error: pgCode(e) === "42501" ? "You don't have permission to add clients." : "Couldn't save. Try again." };
+  }
   refresh();
   return {};
 }
@@ -70,26 +72,38 @@ export async function saveClientAssignment(
   if (!isId(clientId) || !isId(workspaceId) || !isId(roleId)) return invalid;
   if (!(base === null || isId(base)) || !(next === null || isId(next))) return invalid;
   if (!(await signedIn())) return signedOut;
-  const supabase = await createClient();
-  const { data: rows, error: readError } = await supabase
-    .from("client_assignments")
-    .select("person_id")
-    .eq("client_id", clientId)
-    .eq("role_id", roleId)
-    .eq("workspace_id", workspaceId);
-  if (readError) return { status: "error", message: "Couldn't save. Try again." };
+  const db = await getDb();
+  let rows;
+  try {
+    rows = await db
+      .selectFrom("client_assignments")
+      .select("person_id")
+      .where("client_id", "=", clientId)
+      .where("role_id", "=", roleId)
+      .where("workspace_id", "=", workspaceId)
+      .execute();
+  } catch {
+    return { status: "error", message: "Couldn't save. Try again." };
+  }
   const stored = rows[0]?.person_id ?? null;
   if (stored === next) return { status: "saved", value: next };
   if (stored !== base) return { status: "conflict", theirs: stored };
   const failed = (code?: string): SaveOutcome<string | null> =>
     code === "42501" ? { status: "error", message: "You don't have permission to change this." } : { status: "error", message: "Couldn't save. Try again." };
   if (next === null) {
-    const { data, error } = await supabase.from("client_assignments").delete().eq("client_id", clientId).eq("role_id", roleId).eq("person_id", base!).select("person_id");
-    if (error) return failed(error.code);
+    let data;
+    try {
+      data = await db.deleteFrom("client_assignments").where("client_id", "=", clientId).where("role_id", "=", roleId).where("person_id", "=", base!).returning("person_id").execute();
+    } catch (e) {
+      return failed(pgCode(e));
+    }
     if (!data.length) return { status: "not_found" };
   } else if (base === null) {
-    const { error } = await supabase.from("client_assignments").insert({ client_id: clientId, role_id: roleId, person_id: next, workspace_id: workspaceId });
-    if (error) return error.code === "23505" ? { status: "error", message: "Someone just changed this. Reload to see it." } : failed(error.code);
+    try {
+      await db.insertInto("client_assignments").values({ client_id: clientId, role_id: roleId, person_id: next, workspace_id: workspaceId }).execute();
+    } catch (e) {
+      return pgCode(e) === "23505" ? { status: "error", message: "Someone just changed this. Reload to see it." } : failed(pgCode(e));
+    }
   } else {
     const r = await saveField("client_assignments", { client_id: clientId, role_id: roleId }, "person_id", base, next);
     return r;

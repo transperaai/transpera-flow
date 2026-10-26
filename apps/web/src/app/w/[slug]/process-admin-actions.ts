@@ -2,7 +2,9 @@
 
 import { isId } from "@/lib/editor/validate";
 import { cleanProcessName, type ProcessAdminResult, type ProcessKind } from "@/lib/processes/admin";
-import { createClient } from "@/lib/supabase/server";
+import type { Db } from "@transpera-flow/db";
+import { pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Process admin from the Processes page (issue #182, B19 2/2; ADR 0014 "B19: archiving a process"): rename a process, change its
 // kind, archive it (soft delete) and restore it. Each is an ordinary update of `processes` as the signed-in user, so RLS decides
@@ -14,81 +16,99 @@ const signedOut = { status: "error", message: "Your session has ended. Sign in a
 const forbidden = { status: "error", message: "Only owners and editors can change processes here." } as const;
 const generic = { status: "error", message: "Couldn't save. Try again." } as const;
 
-async function signedInClient() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims?.sub ? supabase : null;
+async function signedInClient(): Promise<Db | null> {
+  return (await getSessionUser()) ? getDb() : null;
 }
 
-type Client = NonNullable<Awaited<ReturnType<typeof signedInClient>>>;
-
 /** The process (never the company map), as the caller may read it; null when it isn't there or isn't visible. */
-async function readProcess(supabase: Client, processId: string) {
-  const { data } = await supabase.from("processes").select("id, workspace_id, name, kind, entity_name, archived_at, is_company").eq("id", processId).maybeSingle();
+async function readProcess(db: Db, processId: string) {
+  const data = await db
+    .selectFrom("processes")
+    .select(["id", "workspace_id", "name", "kind", "entity_name", "archived_at", "is_company"])
+    .where("id", "=", processId)
+    .executeTakeFirst()
+    .catch(() => undefined);
   return data && !data.is_company ? data : null;
 }
 
 /** An update of one process; zero rows back means RLS stopped it (a viewer). The database's own refusals are passed on. */
 async function update(
-  supabase: Client,
+  db: Db,
   processId: string,
   changes: { name?: string; kind?: ProcessKind; entity_name?: string; archived_at?: string | null },
 ): Promise<ProcessAdminResult> {
-  const { data, error } = await supabase.from("processes").update(changes).eq("id", processId).eq("is_company", false).select("id");
-  if (error) {
-    if (error.code === "42501") return forbidden;
+  try {
+    const data = await db.updateTable("processes").set(changes).where("id", "=", processId).where("is_company", "=", false).returning("id").execute();
+    return data.length ? { status: "ok" } : forbidden;
+  } catch (e) {
+    const code = pgCode(e);
+    if (code === "42501") return forbidden;
     // 55000: archiving refused (inside another process, holding others); 23514: a kind change refused (linked to services).
-    if ((error.code === "55000" || error.code === "23514") && error.message) return { status: "error", message: error.message };
+    const message = (e as { message?: string }).message;
+    if ((code === "55000" || code === "23514") && message) return { status: "error", message };
     return generic;
   }
-  return data?.length ? { status: "ok" } : forbidden;
 }
 
 export async function renameProcess(processId: unknown, name: unknown): Promise<ProcessAdminResult> {
   const clean = cleanProcessName(name);
   if (!isId(processId)) return generic;
   if (!clean.ok) return { status: "error", message: clean.error };
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const proc = await readProcess(supabase, processId);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const proc = await readProcess(db, processId);
   if (!proc) return { status: "error", message: "That process isn't there any more. Reload the page." };
   if (proc.name === clean.name) return { status: "ok" };
   // Names are unique among the processes in use (an archived one gives its name up; restoring it checks again).
-  const { data: others } = await supabase.from("processes").select("id, name").eq("workspace_id", proc.workspace_id).eq("is_company", false).is("archived_at", null).neq("id", processId);
-  if ((others ?? []).some((p) => p.name.trim().toLowerCase() === clean.name.toLowerCase())) return { status: "error", message: `There is already a process called '${clean.name}'.` };
-  return update(supabase, processId, { name: clean.name });
+  const others = await db
+    .selectFrom("processes")
+    .select(["id", "name"])
+    .where("workspace_id", "=", proc.workspace_id)
+    .where("is_company", "=", false)
+    .where("archived_at", "is", null)
+    .where("id", "<>", processId)
+    .execute()
+    .catch(() => []);
+  if (others.some((p) => p.name.trim().toLowerCase() === clean.name.toLowerCase())) return { status: "error", message: `There is already a process called '${clean.name}'.` };
+  return update(db, processId, { name: clean.name });
 }
 
 export async function changeProcessKind(processId: unknown, kind: unknown): Promise<ProcessAdminResult> {
   if (!isId(processId) || (kind !== "pipeline" && kind !== "servicing")) return generic;
   const to = kind as ProcessKind;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  const proc = await readProcess(supabase, processId);
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const proc = await readProcess(db, processId);
   if (!proc) return { status: "error", message: "That process isn't there any more. Reload the page." };
   if (proc.kind === to) return { status: "ok" };
   if (to === "pipeline") {
     // The database refuses it too; say which services first.
-    const { data: links } = await supabase.from("service_servicing").select("services(name)").eq("process_id", processId);
-    const names = [...new Set((links ?? []).map((l) => (l.services as { name: string } | null)?.name).filter((n): n is string => !!n))].sort();
+    const links = await db
+      .selectFrom("service_servicing")
+      .leftJoin("services", "services.id", "service_servicing.service_id")
+      .select("services.name as name")
+      .where("service_servicing.process_id", "=", processId)
+      .execute()
+      .catch(() => []);
+    const names = [...new Set(links.map((l) => l.name).filter((n): n is string => !!n))].sort();
     if (names.length) return { status: "error", message: `${proc.name} is client work for ${names.join(", ")}. Unlink it from ${names.length === 1 ? "that service" : "those services"} in Settings, Services first.` };
   }
   // The word for what flows through it follows the kind, unless someone chose their own.
   const entity = proc.entity_name === "lead" || proc.entity_name === "task" || proc.entity_name === "item" ? (to === "pipeline" ? "lead" : "task") : proc.entity_name;
-  return update(supabase, processId, { kind: to, entity_name: entity });
+  return update(db, processId, { kind: to, entity_name: entity });
 }
 
 export async function archiveProcess(processId: unknown): Promise<ProcessAdminResult> {
   if (!isId(processId)) return generic;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
+  const db = await signedInClient();
+  if (!db) return signedOut;
   // The database stamps when and by whom.
-  return update(supabase, processId, { archived_at: new Date().toISOString() });
+  return update(db, processId, { archived_at: new Date().toISOString() });
 }
 
 export async function restoreProcess(processId: unknown): Promise<ProcessAdminResult> {
   if (!isId(processId)) return generic;
-  const supabase = await signedInClient();
-  if (!supabase) return signedOut;
-  return update(supabase, processId, { archived_at: null });
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  return update(db, processId, { archived_at: null });
 }
