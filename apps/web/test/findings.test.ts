@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { findingDraftProblem, findingIdOfKey, findingKey, northbeamIssues, partOf, readCitations, toEngineModel, type FindingRow, type IssueRow } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { FactsList } from "@/components/findings/facts-list";
@@ -12,6 +12,9 @@ import { registerEntries } from "@/lib/issues/register";
 import { COMPANY_GROUP, findingsByProcess, groupOfFinding, groupOfIssue } from "@/lib/overview/by-process";
 import { rerate } from "@/lib/rules/edit";
 import { demoBundle } from "@/lib/sources/demo";
+
+// use-findings imports its Server Actions, which are server-only; nothing here calls them.
+vi.mock("server-only", () => ({}));
 
 // Findings (issue #175, B17; decision D40): the engine's results are facts, shown as evidence and never as findings; a
 // finding is AI's (proposed until someone accepts it) or a person's (accepted as they add it); only accepted findings are

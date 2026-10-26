@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, simulate } from "@transpera-flow/engine";
 import { NORTHBEAM_WORKSPACE_ID, northbeamBundle, toEngineModel, type ChurnDriverRow } from "@transpera-flow/db";
 import { ChurnDriversSettings } from "@/app/w/[slug]/settings/churn-drivers-settings";
@@ -16,6 +16,9 @@ import {
   toEngineDrivers,
   valueNow,
 } from "@/lib/churn-drivers";
+
+// The screen imports its Server Actions, which are server-only; nothing here calls them.
+vi.mock("server-only", () => ({}));
 
 // Settings, Churn drivers (A56, issue #121): the screen's state, wording and input checks.
 
