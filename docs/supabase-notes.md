@@ -505,3 +505,9 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
 - JSON numbers pass through the JavaScript parser on import, so a `numeric` with more than about 15 significant digits, or an `int8`
   above 2^53, would lose precision. The export keeps the database's own text, and nothing in the schema is that wide (not proven
   against production's data).
+
+### Copy tooling on Neon (checked 26 Oct)
+
+- `neondb_owner` cannot `set session_replication_role = replica` (42501, "permission denied to set parameter"), so
+  `copy:import` will take its fallback path on Neon: `alter table … disable trigger user` (checked: allowed for the
+  owner, in a rolled-back transaction) and inserts in foreign-key order.
