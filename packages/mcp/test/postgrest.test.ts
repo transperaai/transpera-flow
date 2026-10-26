@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -24,90 +23,42 @@ import {
   shadowPrice,
   simulate,
 } from "@transpera-flow/engine";
-import { generateApiToken, TOOL_NAMES, type McpHandlerOptions } from "../src";
-import { call, connect, post, signJwt } from "./helpers";
+import { rpc } from "@transpera-flow/db/client";
+import { generateApiToken, hashApiToken, TOOL_NAMES, type McpHandlerOptions } from "../src";
+import { call, connect, createUser, issueToken as issue, post, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// End to end, as in production: MCP client → handleMcpRequest → supabase-js →
-// PostgREST (with the pre-request hook) → Postgres with every migration, RLS
-// and the seed. CI prepares the database with test/postgrest-db.ts, then
-// starts PostgREST against it (.github/workflows/ci.yml); locally this suite
-// is skipped unless POSTGREST_URL is set.
+// End to end, as in production: MCP client → handleMcpRequest → token lookup in app code → Kysely with the token owner's claims →
+// Postgres with every migration, RLS and the seed. Each run builds a throwaway database (test/helpers.ts); no PostgREST.
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
-
-if (process.env.CI && !POSTGREST_URL) throw new Error("CI must run the PostgREST end-to-end suite: set POSTGREST_URL");
-
+let env: McpTestDb;
 let admin: pg.Client;
 let options: McpHandlerOptions;
-const anonKey = () => signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
 
-/** Route supabase-js's `<url>/rest/v1/...` requests to PostgREST, which serves at its root. */
-const toPostgrest: typeof fetch = (input, init) => {
-  if (input instanceof Request) throw new Error("expected supabase-js to pass a URL string");
-  return fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
-};
-
-async function rest(path: string, headers: Record<string, string>) {
-  return fetch(`${POSTGREST_URL}${path}`, { headers: { authorization: `Bearer ${anonKey()}`, ...headers } });
-}
-
-async function createUser(email: string, appMetadata: Record<string, unknown> = {}) {
-  const id = randomUUID();
-  await admin.query("insert into auth.users (id, email, raw_app_meta_data) values ($1, $2, $3)", [id, email, appMetadata]);
-  return id;
-}
-
-async function issueToken(userId: string) {
-  const { token, hash } = generateApiToken();
-  await admin.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'e2e')", [userId, hash]);
-  return token;
-}
+const issueToken = (userId: string) => issue(admin, userId);
 
 let memberToken: string;
 let strangerToken: string;
 let memberId: string;
+let strangerId: string;
 let otherWorkspaceId: string;
 
-describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)", () => {
+describe("MCP over the database (acts as the user under RLS)", () => {
   beforeAll(async () => {
-    // postgrest-db.ts prepared this database before PostgREST started.
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
+    options = env.options;
 
-    memberId = await createUser("member@example.com");
-    const strangerId = await createUser("stranger@example.com");
+    memberId = await createUser(admin, "member@example.com");
+    strangerId = await createUser(admin, "stranger@example.com");
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [NORTHBEAM_WORKSPACE_ID, memberId]);
     otherWorkspaceId = (await admin.query("insert into workspaces (name, slug) values ('Other Co', 'other-co') returning id")).rows[0].id;
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [otherWorkspaceId, strangerId]);
     memberToken = await issueToken(memberId);
     strangerToken = await issueToken(strangerId);
-
-    options = { supabaseUrl: SUPABASE_URL, supabaseKey: anonKey(), fetch: toPostgrest };
-
-    // Wait for PostgREST to connect, load the schema and the hook.
-    const deadline = Date.now() + 60_000;
-    let last = "";
-    for (;;) {
-      try {
-        const res = await rest("/workspaces?select=id", { "x-api-token": memberToken });
-        last = `${res.status} ${await res.text()}`;
-        if (res.status === 200 && JSON.parse(last.slice(4)).length === 1) break;
-      } catch (err) {
-        last = String(err);
-      }
-      if (Date.now() > deadline) throw new Error(`PostgREST never became ready: ${last}`);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   it("lists every tool to an MCP client", async () => {
@@ -151,12 +102,11 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
     }
     await client.close();
 
-    // Straight at the Data API with the same token: RLS still hides every row.
-    for (const table of ["workspaces", "processes", "steps", "edges", "people"]) {
-      const column = table === "workspaces" ? "id" : "workspace_id";
-      const res = await rest(`/${table}?select=${column}&${column}=eq.${NORTHBEAM_WORKSPACE_ID}`, { "x-api-token": strangerToken });
-      expect(res.status, table).toBe(200);
-      expect(await res.json(), table).toEqual([]);
+    // Straight at the database as the same user: RLS still hides every row.
+    const asStranger = env.dbAs(userClaims(strangerId));
+    expect(await asStranger.selectFrom("workspaces").select("id").where("id", "=", NORTHBEAM_WORKSPACE_ID).execute()).toEqual([]);
+    for (const table of ["processes", "steps", "edges", "people"] as const) {
+      expect(await asStranger.selectFrom(table).select("workspace_id").where("workspace_id", "=", NORTHBEAM_WORKSPACE_ID).execute(), table).toEqual([]);
     }
   });
 
@@ -272,27 +222,21 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
   });
 
   it("serves the draft RPCs to a signed-in editor, as the web app calls them (issue #9)", async () => {
-    const editorId = await createUser("draft-editor@example.com");
+    const editorId = await createUser(admin, "draft-editor@example.com");
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editorId]);
-    const session = signJwt({ sub: editorId, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    const rpc = async (fn: string, body: object) => {
-      const res = await fetch(`${POSTGREST_URL}/rpc/${fn}`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${session}`, "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      expect(res.status, fn).toBe(200);
-      return res.json();
-    };
-    const opened = await rpc("open_draft", { target_process: NORTHBEAM_PROCESS_ID });
+    const editorDb = env.dbAs(userClaims(editorId));
+    // As the web app calls them: named arguments, the function's own JSON back.
+    const call_ = async (fn: "open_draft" | "publish_process" | "discard_draft", body: Record<string, unknown>) =>
+      (await rpc(editorDb, fn, body as never)) as Record<string, unknown>;
+    const opened = await call_("open_draft", { target_process: NORTHBEAM_PROCESS_ID });
     expect(opened).toMatchObject({ status: "ok", created: true });
-    expect(await rpc("publish_process", { target_process: NORTHBEAM_PROCESS_ID, accept_estimates: false })).toMatchObject({
+    expect(await call_("publish_process", { target_process: NORTHBEAM_PROCESS_ID, accept_estimates: false })).toMatchObject({
       status: "published",
       number: opened.number,
     });
     const audit = await admin.query("select actor_id, diff from audit_log where action = 'publish' and target_id = $1", [NORTHBEAM_PROCESS_ID]);
     expect(audit.rows).toEqual([expect.objectContaining({ actor_id: editorId })]);
-    expect(await rpc("discard_draft", { target_process: NORTHBEAM_PROCESS_ID })).toEqual({ status: "no_draft" });
+    expect(await call_("discard_draft", { target_process: NORTHBEAM_PROCESS_ID })).toEqual({ status: "no_draft" });
   });
 
   // --- Analysis tools (issue #26) ---
@@ -370,7 +314,7 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
   });
 
   it("save_scenario and log_issue write as the user: an editor can, a viewer can't", async () => {
-    const editorId = await createUser("analysis-editor@example.com");
+    const editorId = await createUser(admin, "analysis-editor@example.com");
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editorId]);
     const editor = await connect(await issueToken(editorId), options);
     const viewer = await connect(memberToken, options);
@@ -488,24 +432,25 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
 
   it("rejects revoked and unknown tokens with 401", async () => {
     const token = await issueToken(memberId);
-    await admin.query("update api_tokens set revoked_at = now() where token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')", [token]);
+    await admin.query("update api_tokens set revoked_at = now() where token_hash = $1", [hashApiToken(token)]);
     expect((await post(options, { authorization: `Bearer ${token}` })).status).toBe(401);
     expect((await post(options, { authorization: `Bearer ${generateApiToken().token}` })).status).toBe(401);
-    // use_api_token's own check, without the header (so without the hook).
-    const direct = await fetch(`${POSTGREST_URL}/rpc/use_api_token`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${anonKey()}`, "content-type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    expect(direct.status).toBe(401);
+    // The lookup itself, as `anon`: nothing for a revoked token.
+    await admin.query("begin");
+    try {
+      await admin.query("set local role anon");
+      expect((await admin.query("select * from public.mcp_token_lookup($1)", [hashApiToken(token)])).rows).toEqual([]);
+    } finally {
+      await admin.query("rollback");
+    }
   });
 
   it("rate-limits per token", async () => {
     const limited = await issueToken(memberId);
     const other = await issueToken(memberId);
     await admin.query(
-      "update api_tokens set rate_window_start = now(), rate_window_count = 120 where token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')",
-      [limited],
+      "update api_tokens set rate_window_start = now(), rate_window_count = 120 where token_hash = $1",
+      [hashApiToken(limited)],
     );
     const res = await post(options, { authorization: `Bearer ${limited}` });
     expect(res.status).toBe(429);
@@ -513,17 +458,14 @@ describe.skipIf(!POSTGREST_URL)("MCP over PostgREST (acts as the user under RLS)
     expect((await post(options, { authorization: `Bearer ${other}` })).status).toBe(200);
   });
 
-  it("leaves signed-in and anonymous Data API requests as they were", async () => {
-    const session = signJwt({ sub: memberId, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    const signedIn = await fetch(`${POSTGREST_URL}/workspaces?select=id`, { headers: { authorization: `Bearer ${session}` } });
-    expect(await signedIn.json()).toEqual([{ id: NORTHBEAM_WORKSPACE_ID }]);
+  it("leaves signed-in and anonymous callers as they were", async () => {
+    const signedIn = await env.dbAs(userClaims(memberId)).selectFrom("workspaces").select("id").execute();
+    expect(signedIn).toEqual([{ id: NORTHBEAM_WORKSPACE_ID }]);
 
-    const anon = await rest("/workspaces?select=id", {});
-    expect(anon.status).not.toBe(200);
-
-    const both = await fetch(`${POSTGREST_URL}/workspaces?select=id`, {
-      headers: { authorization: `Bearer ${session}`, "x-api-token": strangerToken },
-    });
-    expect(both.status).toBe(400);
+    // Signed out (role anon): no workspaces, whether the database refuses the table or RLS hides the rows.
+    const anon = await env.dbAs(null).selectFrom("workspaces").select("id").execute().catch(() => [] as unknown[]);
+    expect(anon).toEqual([]);
+    // There is no "session and token together" request any more (it was refused with 400 at the Data API): a token only
+    // ever reaches the database through the endpoint, which takes it from the Authorization header alone.
   });
 });
