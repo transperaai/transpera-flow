@@ -13,6 +13,47 @@ company-domain and named-email roles. Uploads are dropped for reference links, l
 on Vercel. The next session starts the move off Supabase (no feature cutting yet; Austin's manual QA and strip list come later). Supabase was restored on 26 Oct
 after a free-plan pause. PR #248 is open; issue #249 is parked.
 
+## The move off Supabase (26–27 Oct 2026; branch `claude/supabase-migration-plan-mzchlf`)
+
+The plan is `docs/plans/supabase-exit-brief.md`. Steps 1–6 and 8 are built, reviewed and merged on the integration branch,
+along with the step 7 copy tooling. `main` and production are untouched: still Supabase at row 72. Each step was built
+by Sonnet from an Opus brief and reviewed adversarially by Opus.
+
+- **Built:**
+  - **Step 1:** Neon compat layer, migration runner, and `createDb` (Kysely + ClaimsDriver: every query runs as
+    `authenticated`/`anon` with Supabase-shaped claims, so RLS and the SECURITY DEFINER functions are unchanged).
+  - **Step 2:** Better Auth (Google now, Microsoft wired), the deployment access list (Admin/Editor/Viewer by domain or
+    email), and share-link guests.
+  - **Step 3:** about 470 supabase-js calls ported, and MCP tokens checked in app code (ADR 0018).
+  - **Step 4:** References (`file_url`) replace uploads, and the logo lives in `workspace_logos`.
+  - **Step 5:** Realtime and presence removed.
+  - **Step 6:** `@supabase` removed, generated function types, statement time limits, the `authenticator` app login,
+    docs and the privacy page.
+  - **Step 7a:** `packages/db/scripts/copy-from-supabase/` (export, import, verify).
+  - **Step 8:** `docs/new-client.md` and `scripts/new-client.sh`.
+- **Checks:** lint and typecheck are clean. All test suites pass except `apps/web/test/format.test.ts` (an ICU difference
+  in this container; it fails on `main` too). A local end-to-end run of the production build, with a real Better Auth
+  session, passed for owner, viewer, guest, MCP, share links and export.
+- **Neon:** `transpera-flow-db` (`purple-wind-75278769`, Sydney, PG 18) holds all 76 migrations and no data. It has an
+  `authenticator` login. Vercel Preview has `DATABASE_URL`, `APP_DATABASE_URL`, `BETTER_AUTH_*`, `OAUTH_PROXY_SECRET`,
+  `PREVIEW_ALIAS_URL`, `GOOGLE_*` and `ACCESS_ADMIN_EMAILS`. The preview of the branch is at
+  `https://transpera-flow-next.vercel.app` (behind Vercel login). From the cloud container, Neon is reached over WebSockets
+  (`docs/supabase-notes.md`, "Checked on Neon"). Neon refuses `session_replication_role`, so the import takes its
+  fallback path.
+- **Next:**
+  - **7b, rehearsal:** export from Supabase into a Neon branch, import, verify. It needs Austin to allow production reads,
+    because auto mode blocks them.
+  - **Austin's QA** on the preview.
+  - **7c, cutover:** a freeze, the copy into Neon `main`, Austin adds Production to the Neon connection, then merge to
+    `main` by PR.
+  - **The strip list** comes after.
+- **Decisions Opus made, for Austin to confirm:**
+  - Admin = agency admin; Editor/Viewer are a floor on every workspace at sign-in.
+  - Restricted-link outsiders sign in as guests.
+  - The logo limit stays 512 KB; logo changes are audited.
+  - Copied users get access rules: agency admins become admin; owners and editors become editor; everyone else viewer.
+  - Logo URLs carrying the current hash are cached for good.
+
 ## Where things stand
 
 **Milestone A** (redesign A31–A58, #96–#123): merged as #125–#160; see git history and #1 for the per-ticket log.
