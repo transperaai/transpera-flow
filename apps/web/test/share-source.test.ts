@@ -18,11 +18,12 @@ describe("the visitor's page", () => {
   });
 
   it("calls one database function, open_share_link, and reads no table", () => {
-    expect([...page.matchAll(/\.rpc\(\s*"([a-z_]+)"/g)].map((m) => m[1])).toEqual(["open_share_link"]);
-    expect(page).not.toMatch(/\.from\(/);
+    expect([...page.matchAll(/\brpc(?:Rows)?\(\s*db,\s*"([a-z_]+)"/g)].map((m) => m[1])).toEqual(["open_share_link"]);
+    expect(page).not.toMatch(/\.(selectFrom|insertInto|updateTable|deleteFrom|with)\(/);
+    expect(page).not.toMatch(/\bsql`/);
     expect(page).not.toMatch(/service[_-]?role/i);
     // The visitor's own address comes from their session, never from the link.
-    expect(page).toContain("db.auth.getUser()");
+    expect(page).toContain("(await getSessionUser())?.email");
   });
 
   it("is not indexed, shows the same words for every dead link, and checks the token and the format", () => {

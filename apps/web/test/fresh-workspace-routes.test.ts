@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
+vi.mock("@/lib/auth/session", () => ({ getDb: async () => ({}), getSessionUser: async () => null }));
 vi.mock("next/navigation", () => ({
   notFound: () => {
     state.notFound++;

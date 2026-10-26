@@ -24,8 +24,8 @@ describe("play mode keeps nothing and writes nowhere but through the one functio
 
   it("the visitor's page still reads only through open_share_link", () => {
     const page = read("src/app/s/[token]/page.tsx");
-    expect(page.match(/\.rpc\("([a-z_]+)"/g)).toEqual(['.rpc("open_share_link"']);
-    expect(page).not.toMatch(/\.from\(/);
+    expect(page.match(/\brpc(?:Rows)?\(\s*db,\s*"([a-z_]+)"/g)).toEqual(['rpc(db, "open_share_link"']);
+    expect(page).not.toMatch(/\.(selectFrom|insertInto|updateTable|deleteFrom)\(/);
   });
 
   it("the Share dialog's play switch is for a process only, and it is off until chosen", () => {
