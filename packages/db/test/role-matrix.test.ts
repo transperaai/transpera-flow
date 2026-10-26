@@ -1101,12 +1101,12 @@ describe("play links (B4): submit_play_proposal and play_proposal_contacts", () 
         await db.client.query("select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'execute') order by 1")
       ).rows.map((r) => r.proname as string);
       // Before B4: every anon-executable function except submit_play_proposal (the stable helpers the policies use, the token
-      // functions, B3's open_share_link ...).
+      // functions, B3's open_share_link ...), and since then mcp_token_lookup, which /api/mcp calls as anon with a token's hash (ADR 0018).
       const before = fns.filter((f) => f !== "submit_play_proposal");
       expect(fns).toContain("submit_play_proposal");
       expect(before).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
-        "is_agency_admin", "is_free_mail_domain", "open_share_link", "reconcile_after_access_change", "report_download", "set_updated_at",
+        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "reconcile_after_access_change", "report_download", "set_updated_at",
         "stamp_provenance", "use_api_token", "workspace_role",
       ]);
       // And none of the functions that act on visitors' ideas or build solutions.
