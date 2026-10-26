@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { generateApiToken } from "@transpera-flow/mcp";
 import { pgError } from "@/app/action-db";
-import { getDb } from "@/lib/auth/session";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 export type CreateTokenState = { token: string; label: string } | { error: string } | null;
 
@@ -11,6 +11,7 @@ export type CreateTokenState = { token: string; label: string } | { error: strin
 export async function createToken(_prev: CreateTokenState, form: FormData): Promise<CreateTokenState> {
   const label = String(form.get("label") ?? "").trim();
   if (!label || label.length > 100) return { error: "Give the token a name of up to 100 characters." };
+  if (!(await getSessionUser())) return { error: "Your session has ended. Sign in again." };
   const db = await getDb();
   const { token, hash } = generateApiToken();
   // RLS: user_id defaults to the signed-in user and the policy only allows their own.

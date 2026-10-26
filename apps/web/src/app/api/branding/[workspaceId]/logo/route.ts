@@ -1,6 +1,6 @@
 import { loadWorkspaceLogo } from "@transpera-flow/db";
 import { authEnv } from "@/lib/auth/env";
-import { getDb } from "@/lib/auth/session";
+import { getVisitorDb } from "@/lib/auth/session";
 
 // GET /api/branding/<workspace id>/logo: a workspace's logo, stored as bytes in `workspace_logos`. Open to anyone, signed in or not: share-link visitors see the logo too, and the public `branding` bucket it
 // replaces was public. It reads through `public.workspace_logo(uuid)`, a SECURITY DEFINER function that anon may call; nothing
@@ -25,7 +25,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/branding/[wo
   const { workspaceId } = await ctx.params;
   // Demo mode has no database, so no logos.
   if (!authEnv() || !UUID.test(workspaceId)) return new Response(null, { status: 404 });
-  const logo = await loadWorkspaceLogo(await getDb(), workspaceId.toLowerCase());
+  const logo = await loadWorkspaceLogo(await getVisitorDb(), workspaceId.toLowerCase());
   if (!logo) return new Response(null, { status: 404, headers: { "Cache-Control": "public, max-age=60" } });
   const etag = `"${logo.sha256}"`;
   const headers = {
