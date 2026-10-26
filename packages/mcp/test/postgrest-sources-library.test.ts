@@ -1,39 +1,38 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Db } from "@transpera-flow/db";
+import { rpcRows } from "@transpera-flow/db/client";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { signJwt } from "./helpers";
+import { errorOf, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
-// The Sources library and the editor tour (issue #176, B18; migration 20261130500000), as the web app calls them: over PostgREST
-// with Supabase's default table privileges and RLS. `search_sources` matches every word as plain text over title, speakers and
+// The Sources library and the editor tour (issue #176, B18; migration 20261130500000), as the web app calls them: through Kysely
+// under RLS. `search_sources` matches every word as plain text over title, speakers and
 // text, filters, sorts and pages, and never returns a full text; another workspace's member sees nothing and anon is refused.
 // `user_tours` holds a person's dismissed tours: their own rows only. The widened `sources_kind` check allows the new kinds.
-// Skipped unless POSTGREST_URL is set (see postgrest-db.ts).
+// Runs on a throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
+
+// One throwaway database for the file's two suites.
+beforeAll(async () => {
+  env = await startTestDb();
+  admin = env.t.client;
+}, 120_000);
+
+afterAll(async () => {
+  await env?.close();
+});
+
 type Row = Record<string, unknown>;
 const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Row;
 
 const ids = { ws: "", other: "", sales: "", delivery: "", editor: "", outsider: "" };
 const src: Record<string, string> = {};
-let editor: SupabaseClient;
-let outsider: SupabaseClient;
-let anon: SupabaseClient;
-
-function client(token: string): SupabaseClient {
-  return createClient("http://postgrest.invalid", token, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { authorization: `Bearer ${token}` },
-      fetch: (input, init) => fetch(String(input instanceof Request ? input.url : input).replace("http://postgrest.invalid/rest/v1", POSTGREST_URL!), init),
-    },
-  });
-}
+let editor: Db;
+let outsider: Db;
+let anon: Db;
 
 interface Listed {
   id: string;
@@ -44,20 +43,22 @@ interface Listed {
   total: number;
   body?: unknown;
 }
-const search = async (c: SupabaseClient, args: Record<string, unknown> = {}, ws = ids.ws) => {
-  const r = await c.rpc("search_sources", { p_workspace: ws, ...args });
-  return { error: r.error, rows: (r.data ?? []) as Listed[] };
+const search = async (c: Db, args: Record<string, unknown> = {}, ws = ids.ws) => {
+  let error: Error | null = null;
+  let rows: Listed[] = [];
+  try {
+    rows = (await rpcRows(c, "search_sources", { p_workspace: ws, ...args } as never)) as unknown as Listed[];
+  } catch (e) {
+    error = e as Error;
+  }
+  return { error, rows };
 };
 const titles = (rows: Listed[]) => rows.map((r) => r.title);
 
 const LONG = `${"The intake form goes back and forth. ".repeat(100)}Then the refund policy is checked by Dana. ${"More words follow. ".repeat(100)}`;
 
-describe.skipIf(!POSTGREST_URL)("the sources library over PostgREST", () => {
+describe("the sources library", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
     const tag = randomUUID().slice(0, 8);
     ids.ws = (await one("insert into workspaces (name, slug) values ('Sources Lib Co', $1) returning id", [`srclib-${tag}`])).id as string;
     ids.other = (await one("insert into workspaces (name, slug) values ('Other Sources Co', $1) returning id", [`srclib-other-${tag}`])).id as string;
@@ -77,19 +78,9 @@ describe.skipIf(!POSTGREST_URL)("the sources library over PostgREST", () => {
     await add("other", "other", "Zebra whiteboard", [], "2026-08-01", "");
     await admin.query("insert into sources (workspace_id, kind, title, body) values ($1, 'transcript', 'Theirs only', 'refund policy') ", [ids.other]);
     await admin.query("insert into source_links (workspace_id, source_id, kind, process_id) values ($1, $2, 'process', $3), ($1, $4, 'process', $5)", [ids.ws, src.kickoff, ids.sales, src.sop, ids.delivery]);
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    editor = client(token(ids.editor));
-    outsider = client(token(ids.outsider));
-    anon = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await editor.from("sources").select("id").eq("id", src.kickoff)).data?.length !== 1) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  });
-
-  afterAll(async () => {
-    await admin?.end();
+    editor = env.dbAs(userClaims(ids.editor));
+    outsider = env.dbAs(userClaims(ids.outsider));
+    anon = env.dbAs(null);
   });
 
   it("lists every source with its total, newest first (a source with no date counts as the day it was added), without any full text", async () => {
@@ -182,85 +173,69 @@ describe.skipIf(!POSTGREST_URL)("the sources library over PostgREST", () => {
   });
 
   it("reads a full text on its own: a member can, another workspace's member and anon cannot", async () => {
-    const read = (c: SupabaseClient) => c.from("sources").select("body").eq("id", src.sop);
-    expect((await read(editor)).data).toEqual([{ body: LONG }]);
-    expect((await read(outsider)).data).toEqual([]);
-    expect((await read(anon)).data ?? []).toEqual([]);
+    const read = (c: Db) => c.selectFrom("sources").select("body").where("id", "=", src.sop).execute();
+    expect(await read(editor)).toEqual([{ body: LONG }]);
+    expect(await read(outsider)).toEqual([]);
+    expect(await read(anon).catch(() => [])).toEqual([]);
   });
 
   it("accepts the new kinds and still refuses an unknown one", async () => {
     for (const kind of ["transcript", "notes", "sop", "spreadsheet", "data", "screenshot", "other"]) {
-      const r = await editor.from("sources").insert({ workspace_id: ids.ws, kind, title: `Kind ${kind}` }).select("kind");
-      expect(r.error, kind).toBeNull();
-      expect(r.data).toEqual([{ kind }]);
+      const r = await editor.insertInto("sources").values({ workspace_id: ids.ws, kind, title: `Kind ${kind}` }).returning("kind").execute();
+      expect(r, kind).toEqual([{ kind }]);
     }
-    const bad = await editor.from("sources").insert({ workspace_id: ids.ws, kind: "video", title: "Kind video" });
-    expect(bad.error?.code).toBe("23514");
+    const bad = await errorOf(() => editor.insertInto("sources").values({ workspace_id: ids.ws, kind: "video", title: "Kind video" }).execute());
+    expect(bad?.code).toBe("23514");
   });
 });
 
-describe.skipIf(!POSTGREST_URL)("tour state over PostgREST", () => {
-  let a: SupabaseClient;
-  let b: SupabaseClient;
-  let anonymous: SupabaseClient;
+describe("tour state", () => {
+  let a: Db;
+  let b: Db;
+  let anonymous: Db;
   let aId = "";
   let bId = "";
 
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
     const tag = randomUUID().slice(0, 8);
     [aId, bId] = [randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [aId, `tour-a-${tag}@example.com`, bId, `tour-b-${tag}@example.com`]);
-    const token = (sub: string) => signJwt({ sub, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
-    a = client(token(aId));
-    b = client(token(bId));
-    anonymous = client(signJwt({ role: "anon" }, JWT_SECRET));
-    const deadline = Date.now() + 60_000;
-    while ((await a.from("user_tours").select("tour")).error) {
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  });
-
-  afterAll(async () => {
-    await admin?.end();
+    a = env.dbAs(userClaims(aId));
+    b = env.dbAs(userClaims(bId));
+    anonymous = env.dbAs(null);
   });
 
   it("remembers a dismissed tour for the person, once however often it is dismissed", async () => {
-    expect((await a.from("user_tours").select("tour")).data).toEqual([]);
+    expect(await a.selectFrom("user_tours").select("tour").execute()).toEqual([]);
     for (let i = 0; i < 2; i++) {
-      const r = await a.from("user_tours").upsert({ tour: "process" }, { onConflict: "user_id,tour", ignoreDuplicates: true });
-      expect(r.error).toBeNull();
+      await a.insertInto("user_tours").values({ tour: "process" }).onConflict((oc) => oc.columns(["user_id", "tour"]).doNothing()).execute();
     }
-    expect((await a.from("user_tours").select("tour")).data).toEqual([{ tour: "process" }]);
+    expect(await a.selectFrom("user_tours").select("tour").execute()).toEqual([{ tour: "process" }]);
     expect(Number((await one("select count(*)::int n from user_tours where user_id = $1", [aId])).n)).toBe(1);
   });
 
   it("shows another person none of it, and lets them dismiss on their own", async () => {
-    expect((await b.from("user_tours").select("tour")).data).toEqual([]);
-    expect((await b.from("user_tours").upsert({ tour: "company" }, { onConflict: "user_id,tour" })).error).toBeNull();
-    expect((await b.from("user_tours").select("tour")).data).toEqual([{ tour: "company" }]);
-    expect((await a.from("user_tours").select("tour")).data).toEqual([{ tour: "process" }]);
+    expect(await b.selectFrom("user_tours").select("tour").execute()).toEqual([]);
+    await b.insertInto("user_tours").values({ tour: "company" }).onConflict((oc) => oc.columns(["user_id", "tour"]).doUpdateSet({ tour: "company" })).execute();
+    expect(await b.selectFrom("user_tours").select("tour").execute()).toEqual([{ tour: "company" }]);
+    expect(await a.selectFrom("user_tours").select("tour").execute()).toEqual([{ tour: "process" }]);
   });
 
   it("refuses writing, changing or removing another person's row", async () => {
-    const forged = await b.from("user_tours").insert({ user_id: aId, tour: "company" });
-    expect(forged.error?.code).toBe("42501");
-    const changed = await b.from("user_tours").update({ dismissed_at: "2020-01-01T00:00:00Z" }).eq("user_id", aId).select();
-    expect(changed.data).toEqual([]);
-    const removed = await b.from("user_tours").delete().eq("user_id", aId).select();
-    expect(removed.data).toEqual([]);
+    const forged = await errorOf(() => b.insertInto("user_tours").values({ user_id: aId, tour: "company" }).execute());
+    expect(forged?.code).toBe("42501");
+    const changed = await b.updateTable("user_tours").set({ dismissed_at: "2020-01-01T00:00:00Z" }).where("user_id", "=", aId).returningAll().execute();
+    expect(changed).toEqual([]);
+    const removed = await b.deleteFrom("user_tours").where("user_id", "=", aId).returningAll().execute();
+    expect(removed).toEqual([]);
     expect(Number((await one("select count(*)::int n from user_tours where user_id = $1", [aId])).n)).toBe(1);
   });
 
   it("refuses an unknown tour and anon", async () => {
-    expect((await a.from("user_tours").insert({ tour: "everything" })).error?.code).toBe("23514");
-    expect((await anonymous.from("user_tours").select("tour")).error).not.toBeNull();
-    expect((await anonymous.from("user_tours").insert({ user_id: aId, tour: "company" })).error).not.toBeNull();
-    expect((await anonymous.from("user_tours").delete().eq("user_id", aId)).error).not.toBeNull();
+    expect((await errorOf(() => a.insertInto("user_tours").values({ tour: "everything" }).execute()))?.code).toBe("23514");
+    expect(await errorOf(() => anonymous.selectFrom("user_tours").select("tour").execute())).not.toBeNull();
+    expect(await errorOf(() => anonymous.insertInto("user_tours").values({ user_id: aId, tour: "company" }).execute())).not.toBeNull();
+    expect(await errorOf(() => anonymous.deleteFrom("user_tours").where("user_id", "=", aId).execute())).not.toBeNull();
     expect(Number((await one("select count(*)::int n from user_tours where user_id = $1", [aId])).n)).toBe(1);
   });
 });
