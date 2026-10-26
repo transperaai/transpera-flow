@@ -62,7 +62,7 @@ describe("adding things by hand", () => {
     const id = added.id as string;
     expect(await save(editor, "clients", { id }, { mrr: 3600 }, { mrr: 3800 })).toMatchObject({ status: "saved" });
     expect(
-      await rpc(editor, "save_links", { target: "client_services", owner: { client_id: id, workspace_id: ids.ws }, member: "service_id", base: JSON.stringify([]) as never, next: JSON.stringify([ids.service]) as never }),
+      await rpc(editor, "save_links", { target: "client_services", owner: { client_id: id, workspace_id: ids.ws }, member: "service_id", base: [], next: [ids.service] }),
     ).toMatchObject({ status: "saved" });
     await editor.insertInto("client_assignments").values({ client_id: id, role_id: ids.role, person_id: ids.person, workspace_id: ids.ws }).execute();
     expect(await save(editor, "clients", { id }, { active: true }, { active: false })).toMatchObject({ status: "saved" });
@@ -112,7 +112,7 @@ describe("adding things by hand", () => {
       p_base_revision: ids.revision,
       p_name: "Reply templates",
       p_steps: { steps: [], edges: [], entry_step_id: null },
-      p_links: JSON.stringify([{ issue_id: ids.issue, auto_verdict: "pass", holds_pct: 80, auto_note: "Wait 2 h against under 4 hours" }]) as never,
+      p_links: [{ issue_id: ids.issue, auto_verdict: "pass", holds_pct: 80, auto_note: "Wait 2 h against under 4 hours" }],
     });
     const sol = (saved as { id: string }).id;
     expect(await viewer.deleteFrom("solutions").where("id", "=", sol).returning("id").execute()).toEqual([]);

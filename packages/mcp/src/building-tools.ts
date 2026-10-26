@@ -262,9 +262,6 @@ async function writing<T>(what: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** A JSON array for a `jsonb` parameter: node-postgres would send a JS array as a Postgres array, so it goes as JSON text. */
-const jsonText = (value: unknown): Json => JSON.stringify(value) as unknown as Json;
-
 /** A write RLS, a trigger or a check refused, as a ToolError the caller can act on. */
 export function writeError(error: { code?: string; message?: string }, what: string): ToolError {
   if (error.code === "42501") return new ToolError("forbidden", `You don't have permission to ${what} in this workspace (editors and owners can).`);
@@ -926,11 +923,11 @@ async function prepareImport(
           data = bundle
             ? await rpc(ctx.db, "import_process_bundle", {
                 p_workspace: ws.id,
-                p_nodes: jsonText(nodes),
-                p_adopt: jsonText(adopts),
+                p_nodes: nodes as unknown as Json,
+                p_adopt: adopts as unknown as Json,
                 p_extras: { sources: bundle.sources.map(({ id, ...rest }) => ({ ref: id, ...rest })), import_source: bundle.importSource, ...bundle.extras } as unknown as Json,
               })
-            : await rpc(ctx.db, "import_new_process", { p_workspace: ws.id, p_nodes: jsonText(nodes), p_adopt: jsonText(adopts) });
+            : await rpc(ctx.db, "import_new_process", { p_workspace: ws.id, p_nodes: nodes as unknown as Json, p_adopt: adopts as unknown as Json });
         } catch (e) {
           const error = e as DbError & { hint?: string };
           if (error.code === "23505" && error.hint === "name_taken") throw new ToolError("name_taken", error.message ?? "");
@@ -1145,7 +1142,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         let sourceId: string;
         if (resolved) {
           const id = await writing("add sources", () =>
-            rpc(ctx.db, "add_source", { p_workspace: ws.id, p_source: fields, p_links: jsonText(resolved.targets.map(linkJson)) }),
+            rpc(ctx.db, "add_source", { p_workspace: ws.id, p_source: fields, p_links: resolved.targets.map(linkJson) as unknown as Json }),
           );
           if (!id) throw writeError({}, "add sources");
           sourceId = id;

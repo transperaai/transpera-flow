@@ -199,9 +199,8 @@ export async function saveLinks(
     target,
     owner,
     member: LINK_MEMBERS[target],
-    // jsonb parameters that are arrays go as JSON text (node-postgres would send them as a Postgres array).
-    base: JSON.stringify([...base]) as unknown as Json,
-    next: JSON.stringify([...next]) as unknown as Json,
+    base: [...base],
+    next: [...next],
   }));
   if ("error" in out) return errorOutcome(out.error);
   const data = out.data;

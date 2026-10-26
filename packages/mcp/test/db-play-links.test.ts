@@ -106,8 +106,7 @@ describe("play links", () => {
       levers: [{ path: "demand.leads_per_week", op: "set", value: 9 }],
       ...over,
     };
-    // `levers` is a JSON array: node-postgres would send a JS array as a Postgres array, so it goes as JSON text.
-    return rpc(client, "submit_play_proposal", { ...args, levers: JSON.stringify(args.levers) } as never) as Promise<Record<string, unknown>>;
+    return rpc(client, "submit_play_proposal", args as never) as Promise<Record<string, unknown>>;
   };
   const proposals = (client: Db) =>
     client.selectFrom("suggestion_proposals").select(["id", "title", "detail", "proposer_name", "created_via", "created_by", "status", "issue_id", "share_link_id", "payload"]).where("workspace_id", "=", ws).where("created_via", "=", "play_link").execute();
@@ -151,7 +150,7 @@ describe("play links", () => {
     await refused(() => anon.updateTable("suggestion_proposals").set({ status: "built" }).where("id", "=", one).execute(), "update proposal");
     await refused(() => rpc(anon, "review_proposals", { ids: [one], decision: "reject" }), "review_proposals");
     await refused(
-      () => rpc(anon, "build_proposal", { p_proposal: one, p_workspace: ws, p_process: LARKSPUR_PROCESS_ID, p_base_revision: randomUUID(), p_name: "x", p_steps: {}, p_changed: [], p_levers: JSON.stringify([]) as never, p_links: JSON.stringify([]) as never } as never),
+      () => rpc(anon, "build_proposal", { p_proposal: one, p_workspace: ws, p_process: LARKSPUR_PROCESS_ID, p_base_revision: randomUUID(), p_name: "x", p_steps: {}, p_changed: [], p_levers: [], p_links: [] } as never),
       "build_proposal",
     );
     await refused(() => rpc(anon, "save_solution", { p_workspace: ws, p_process: LARKSPUR_PROCESS_ID, p_base_revision: randomUUID(), p_name: "x", p_steps: {} }), "save_solution");
