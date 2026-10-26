@@ -348,14 +348,14 @@ async function call(db: Kysely<DB>, name: string, args: object | undefined) {
  * numbers, JSON and timestamps come back exactly as PostgREST rendered them.
  */
 export async function rpc<N extends FnName>(db: Kysely<DB>, name: N, args?: FnArgs<N>): Promise<FnReturns<N>> {
-  const fn = await call(db, name, args);
+  const fn = await call(db, name, args as object | undefined);
   const { rows } = await sql<{ r: unknown }>`select to_json(f) as r from ${fn} as f`.execute(db);
   return (rows[0]?.r ?? null) as FnReturns<N>;
 }
 
 /** A set-returning function (`returns setof …` / `returns table`): its rows, as `.rpc()` gave them. */
 export async function rpcRows<N extends FnName>(db: Kysely<DB>, name: N, args?: FnArgs<N>): Promise<FnReturns<N>> {
-  const fn = await call(db, name, args);
+  const fn = await call(db, name, args as object | undefined);
   const { rows } = await sql<{ r: unknown }>`select coalesce(json_agg(f), '[]'::json) as r from ${fn} as f`.execute(db);
   return rows[0]!.r as FnReturns<N>;
 }
