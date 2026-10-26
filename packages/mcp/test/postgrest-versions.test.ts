@@ -1,60 +1,53 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { signJwt } from "./helpers";
+import type { Db } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
+import { errorOf, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // Versions and provenance hardened for every process (issue #171, migration 20261128500000), as an editor writing the tables
-// directly over PostgREST: history, the version pointers and `created_by` / `created_at` / `source` are refused (SQLSTATE 55000);
-// the functions the app calls (open_draft, publish_process, discard_draft, restore_version, duplicate_version) still work. Runs in a
-// workspace of its own against the database postgrest-db.ts prepares. Skipped unless POSTGREST_URL is set.
+// directly through Kysely: history, the version pointers and `created_by` / `created_at` / `source` are refused (SQLSTATE 55000);
+// the functions the app calls (open_draft, publish_process, discard_draft, restore_version, duplicate_version) still work. Runs on a
+// throwaway database (test/helpers.ts), in a workspace of its own.
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
 
+let env: McpTestDb;
 let admin: pg.Client;
 let editorId: string;
-let session: string;
+let editor: Db;
 const ids = { ws: "", proc: "", other: "", v1: "", v2: "", v3: "", otherPublished: "" };
 
 type Row = Record<string, unknown>;
 
-async function rest(method: string, path: string, body?: unknown) {
-  const res = await fetch(`${POSTGREST_URL}/${path}`, {
-    method,
-    headers: { authorization: `Bearer ${session}`, apikey: session, "content-type": "application/json", prefer: "return=representation" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  return { status: res.status, json: (text ? JSON.parse(text) : null) as Row | Row[] | null };
+/** The write is refused by the database's rule (not by row-level security): SQLSTATE 55000 and our message. */
+async function expectRefused(run: () => Promise<unknown>, message: RegExp) {
+  const err = await errorOf(run);
+  expect(err, "the write should be refused").not.toBeNull();
+  expect(err!.code).toBe("55000");
+  expect(String(err!.message)).toMatch(message);
 }
 
-/** The write is refused by the database's rule (not by row-level security): 4xx with SQLSTATE 55000 and our message. */
-async function expectRefused(method: string, path: string, body: unknown, message: RegExp) {
-  const r = await rest(method, path, body);
-  expect(r.status, JSON.stringify(r.json)).toBeGreaterThanOrEqual(400);
-  expect((r.json as Row).code).toBe("55000");
-  expect(String((r.json as Row).message)).toMatch(message);
-}
+const del = (table: "process_revisions", id: string) => () => editor.deleteFrom(table).where("id", "=", id).execute();
+const patchRev = (id: string, change: Record<string, unknown>) => () => editor.updateTable("process_revisions").set(change as never).where("id", "=", id).execute();
+const patchProc = (change: Record<string, unknown>) => () => editor.updateTable("processes").set(change as never).where("id", "=", ids.proc).execute();
+const postRev = (row: Record<string, unknown>) => () => editor.insertInto("process_revisions").values(row as never).execute();
+const postProc = (row: Record<string, unknown>) => () => editor.insertInto("processes").values(row as never).execute();
 
 const one = async (sql: string, params: unknown[]) => (await admin.query(sql, params)).rows[0] as Row;
 const processRow = () => one("select live_revision_id, draft_revision_id, created_by, created_at, source, name from processes where id = $1", [ids.proc]);
 const statusOf = async (id: string) => (await one("select status from process_revisions where id = $1", [id])).status;
 
-describe.skipIf(!POSTGREST_URL)("process versions and provenance over PostgREST (editor, direct writes)", () => {
+describe("process versions and provenance (editor, direct writes)", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
 
     const slug = `harden-${randomUUID().slice(0, 8)}`;
     ids.ws = (await one("insert into workspaces (name, slug) values ('Harden Co', $1) returning id", [slug])).id as string;
     editorId = randomUUID();
     await admin.query("insert into auth.users (id, email) values ($1, $2)", [editorId, `harden-editor-${slug}@example.com`]);
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ids.ws, editorId]);
-    session = signJwt({ sub: editorId, role: "authenticated", aud: "authenticated", app_metadata: {} }, JWT_SECRET);
+    editor = env.dbAs(userClaims(editorId));
 
     const rev = async (proc: string, number: number, status: string) =>
       (await one("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, $3, $4) returning id", [ids.ws, proc, number, status])).id as string;
@@ -67,117 +60,104 @@ describe.skipIf(!POSTGREST_URL)("process versions and provenance over PostgREST 
     ids.otherPublished = await rev(ids.other, 1, "published");
     await admin.query("update processes set live_revision_id = $1 where id = $2", [ids.otherPublished, ids.other]);
 
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const res = await fetch(`${POSTGREST_URL}/processes?select=id&id=eq.${ids.proc}`, { headers: { authorization: `Bearer ${session}` } }).catch(() => null);
-      if (res?.status === 200 && (await res.json()).length === 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   it("refuses deleting a superseded or a published version", async () => {
-    await expectRefused("DELETE", `process_revisions?id=eq.${ids.v1}`, undefined, /Published versions are kept/);
-    await expectRefused("DELETE", `process_revisions?id=eq.${ids.v2}`, undefined, /Published versions are kept/);
+    await expectRefused(del("process_revisions", ids.v1), /Published versions are kept/);
+    await expectRefused(del("process_revisions", ids.v2), /Published versions are kept/);
     expect(await statusOf(ids.v1)).toBe("superseded");
     expect(await statusOf(ids.v2)).toBe("published");
   });
 
   it("refuses setting the live version back to a draft, or a superseded one to published", async () => {
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v2}`, { status: "draft" }, /can't change status/);
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v1}`, { status: "published" }, /can't change status/);
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v1}`, { status: "draft" }, /can't change status/);
+    await expectRefused(patchRev(ids.v2, { status: "draft" }), /can't change status/);
+    await expectRefused(patchRev(ids.v1, { status: "published" }), /can't change status/);
+    await expectRefused(patchRev(ids.v1, { status: "draft" }), /can't change status/);
     expect(await statusOf(ids.v2)).toBe("published");
   });
 
   it("refuses inserting a published or superseded version", async () => {
     for (const status of ["superseded", "published"]) {
-      await expectRefused("POST", "process_revisions", { workspace_id: ids.ws, process_id: ids.proc, number: 50, status }, /starts as a draft/);
+      await expectRefused(postRev({ workspace_id: ids.ws, process_id: ids.proc, number: 50, status }), /starts as a draft/);
     }
     expect((await one("select count(*)::int as n from process_revisions where process_id = $1", [ids.proc])).n).toBe(3);
   });
 
   it("refuses publishing a draft directly while another version is published", async () => {
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { status: "published" }, /published by publishing it/);
+    await expectRefused(patchRev(ids.v3, { status: "published" }), /published by publishing it/);
     expect(await statusOf(ids.v3)).toBe("draft");
   });
 
   it("refuses pointing live at an old or draft version, or at another process's version, and clearing it", async () => {
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { live_revision_id: ids.v1 }, /published version/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { live_revision_id: ids.v3 }, /published version/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { live_revision_id: ids.otherPublished }, /published version/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { live_revision_id: null }, /keeps its live version/);
+    await expectRefused(patchProc({ live_revision_id: ids.v1 }), /published version/);
+    await expectRefused(patchProc({ live_revision_id: ids.v3 }), /published version/);
+    await expectRefused(patchProc({ live_revision_id: ids.otherPublished }), /published version/);
+    await expectRefused(patchProc({ live_revision_id: null }), /keeps its live version/);
     expect((await processRow()).live_revision_id).toBe(ids.v2);
   });
 
   it("refuses pointing the draft at a published version or another process's version", async () => {
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { draft_revision_id: ids.v2 }, /own drafts/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { draft_revision_id: ids.otherPublished }, /own drafts/);
+    await expectRefused(patchProc({ draft_revision_id: ids.v2 }), /own drafts/);
+    await expectRefused(patchProc({ draft_revision_id: ids.otherPublished }), /own drafts/);
     expect((await processRow()).draft_revision_id).toBe(ids.v3);
   });
 
   it("refuses rewriting created_by, created_at and source", async () => {
     const before = await processRow();
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { created_by: editorId }, /Who made a process/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { created_at: "2020-01-01T00:00:00Z" }, /Who made a process/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { source: "import" }, /Who made a process/);
-    await expectRefused("PATCH", `processes?id=eq.${ids.proc}`, { name: "Renamed", source: "template" }, /Who made a process/);
+    await expectRefused(patchProc({ created_by: editorId }), /Who made a process/);
+    await expectRefused(patchProc({ created_at: "2020-01-01T00:00:00Z" }), /Who made a process/);
+    await expectRefused(patchProc({ source: "import" }), /Who made a process/);
+    await expectRefused(patchProc({ name: "Renamed", source: "template" }), /Who made a process/);
     expect(await processRow()).toEqual(before);
   });
 
   it("refuses superseding the live version with other columns changed, or by itself (the live pointer must follow)", async () => {
     const bits: Row[] = [{ layout: { x: 1 } }, { number: 999 }, { published_by: editorId }, { published_at: "2020-01-01T00:00:00Z" }, { created_by: editorId }, { created_at: "2020-01-01T00:00:00Z" }];
     for (const extra of bits) {
-      await expectRefused("PATCH", `process_revisions?id=eq.${ids.v2}`, { status: "superseded", ...extra }, /kept as it was/);
+      await expectRefused(patchRev(ids.v2, { status: "superseded", ...extra }), /kept as it was/);
     }
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v2}`, { status: "superseded" }, /live version of a process is its published version/);
+    await expectRefused(patchRev(ids.v2, { status: "superseded" }), /live version of a process is its published version/);
     expect(await statusOf(ids.v2)).toBe("published");
   });
 
   it("refuses publishing a draft by hand with a forged person, time or number", async () => {
     for (const forged of [{ published_by: editorId }, { published_at: "2020-01-01T00:00:00Z" }, { number: 99 }, {}]) {
-      // The unique index (or the rule) refuses; either way it is a 4xx and the draft stays a draft.
-      const r = await rest("PATCH", `process_revisions?id=eq.${ids.v3}`, { status: "published", ...forged });
-      expect(r.status).toBeGreaterThanOrEqual(400);
+      // The unique index (or the rule) refuses; either way it is refused and the draft stays a draft.
+      expect(await errorOf(patchRev(ids.v3, { status: "published", ...forged })), JSON.stringify(forged)).not.toBeNull();
     }
     expect(await statusOf(ids.v3)).toBe("draft");
   });
 
   it("refuses changing a draft's number, author or dates, and inserting a forged draft", async () => {
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { number: 77 }, /number, author and dates/);
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { created_by: editorId }, /number, author and dates/);
-    await expectRefused("PATCH", `process_revisions?id=eq.${ids.v3}`, { created_at: "2020-01-01T00:00:00Z" }, /number, author and dates/);
-    await expectRefused("POST", "process_revisions", { workspace_id: ids.ws, process_id: ids.other, number: 5, created_by: randomUUID() }, /made by the person saving it/);
-    await expectRefused("POST", "process_revisions", { workspace_id: ids.ws, process_id: ids.other, number: 5, published_by: editorId }, /made by the person saving it/);
+    await expectRefused(patchRev(ids.v3, { number: 77 }), /number, author and dates/);
+    await expectRefused(patchRev(ids.v3, { created_by: editorId }), /number, author and dates/);
+    await expectRefused(patchRev(ids.v3, { created_at: "2020-01-01T00:00:00Z" }), /number, author and dates/);
+    await expectRefused(postRev({ workspace_id: ids.ws, process_id: ids.other, number: 5, created_by: randomUUID() }), /made by the person saving it/);
+    await expectRefused(postRev({ workspace_id: ids.ws, process_id: ids.other, number: 5, published_by: editorId }), /made by the person saving it/);
   });
 
   it("refuses making a process with version pointers or a forged created_by or created_at", async () => {
-    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged A", live_revision_id: ids.v2 }, /no versions yet/);
-    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged B", draft_revision_id: ids.v3 }, /no versions yet/);
-    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged C", created_by: randomUUID() }, /no versions yet/);
-    await expectRefused("POST", "processes", { workspace_id: ids.ws, name: "Forged D", created_at: "2020-01-01T00:00:00Z" }, /no versions yet/);
-    const ok = await rest("POST", "processes", { workspace_id: ids.ws, name: "Made the usual way", source: "mcp" });
-    expect(ok.status).toBe(201);
-    expect(((ok.json as Row[])[0] as Row).created_by).toBe(editorId);
+    await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged A", live_revision_id: ids.v2 }), /no versions yet/);
+    await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged B", draft_revision_id: ids.v3 }), /no versions yet/);
+    await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged C", created_by: randomUUID() }), /no versions yet/);
+    await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged D", created_at: "2020-01-01T00:00:00Z" }), /no versions yet/);
+    const ok = await editor.insertInto("processes").values({ workspace_id: ids.ws, name: "Made the usual way", source: "mcp" }).returning("created_by").executeTakeFirstOrThrow();
+    expect(ok.created_by).toBe(editorId);
   });
 
   it("still lets the editor change an ordinary column and a draft", async () => {
-    const renamed = await rest("PATCH", `processes?id=eq.${ids.proc}`, { description: "Edited by an editor" });
-    expect(renamed.status).toBe(200);
-    const draft = await rest("PATCH", `process_revisions?id=eq.${ids.v3}`, { layout: { note: "ok" } });
-    expect(draft.status).toBe(200);
+    const renamed = await editor.updateTable("processes").set({ description: "Edited by an editor" }).where("id", "=", ids.proc).returning("id").execute();
+    expect(renamed).toHaveLength(1);
+    const draft = await editor.updateTable("process_revisions").set({ layout: { note: "ok" } }).where("id", "=", ids.v3).returning("id").execute();
+    expect(draft).toHaveLength(1);
   });
 
   it("keeps the app's flows working: open, discard, open, publish, restore, duplicate", async () => {
-    const call = async (fn: string, args: Row) => {
-      const r = await rest("POST", `rpc/${fn}`, args);
-      expect(r.status, JSON.stringify(r.json)).toBe(200);
-      return r.json as Row;
-    };
+    const call = async (fn: "discard_draft" | "open_draft" | "publish_process" | "restore_version" | "duplicate_version", args: Row) => (await rpc(editor, fn, args as never)) as Row;
     expect((await call("discard_draft", { target_process: ids.proc })).status).toBe("discarded");
     const opened = await call("open_draft", { target_process: ids.proc });
     expect(opened.status).toBe("ok");
