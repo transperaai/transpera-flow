@@ -8,7 +8,6 @@
 
 import type { EdgeRow, ProcessBundle, StepRow } from "@transpera-flow/db";
 import { sameScalar } from "./commands";
-import type { RemoteChange } from "@/lib/realtime/rows";
 import { readField, writeFields, type Patch, type Table } from "./ops";
 
 export type WriteResult = { status: "ok" } | { status: "error"; message: string };
@@ -30,23 +29,14 @@ export interface ProcessStore {
 
 /**
  * Rows in memory, with the same compare-and-set rules as the database.
- * `onChange` hears every stored change, as Realtime's Postgres Changes would
- * report it (the demo's live updates, and tests).
  */
 export class MemoryStore implements ProcessStore {
   private steps = new Map<string, StepRow>();
   private edges = new Map<string, EdgeRow>();
 
-  constructor(
-    bundle: Pick<ProcessBundle, "steps" | "edges">,
-    public onChange: ((change: RemoteChange) => void) | null = null,
-  ) {
+  constructor(bundle: Pick<ProcessBundle, "steps" | "edges">) {
     for (const s of bundle.steps) this.steps.set(s.id, structuredClone(s));
     for (const e of bundle.edges) this.edges.set(e.id, structuredClone(e));
-  }
-
-  private tell(change: RemoteChange): void {
-    this.onChange?.(structuredClone(change));
   }
 
   /** What is stored, as a reload would see it. */
@@ -64,8 +54,6 @@ export class MemoryStore implements ProcessStore {
       }
       this.edges.set(e.id, structuredClone(e));
     }
-    for (const row of steps) this.tell({ kind: "upsert", table: "steps", row });
-    for (const row of edges) this.tell({ kind: "upsert", table: "edges", row });
     return { status: "ok" };
   }
 
@@ -76,8 +64,6 @@ export class MemoryStore implements ProcessStore {
     const steps = stepIds.filter((id) => this.steps.has(id));
     for (const id of edges) this.edges.delete(id);
     for (const id of steps) this.steps.delete(id);
-    for (const id of edges) this.tell({ kind: "delete", table: "edges", id });
-    for (const id of steps) this.tell({ kind: "delete", table: "steps", id });
     return { status: "ok" };
   }
 
@@ -93,11 +79,7 @@ export class MemoryStore implements ProcessStore {
       if (!sameScalar(stored, seen) && !sameScalar(stored, value)) theirs[field] = stored;
       else write[field] = value;
     }
-    const updated = writeFields(row, write);
-    rows.set(id, updated);
-    if (Object.keys(write).some((f) => !sameScalar(readField(row, f), write[f]!))) {
-      this.tell(table === "steps" ? { kind: "upsert", table, row: updated as StepRow } : { kind: "upsert", table, row: updated as EdgeRow });
-    }
+    rows.set(id, writeFields(row, write));
     return Object.keys(theirs).length ? { status: "conflict", theirs } : { status: "saved" };
   }
 }

@@ -8,16 +8,12 @@
 // conflict keeps our value on screen and waits for "keep mine" / "keep
 // theirs"; a failed save rolls back what didn't save.
 //
-// Other people's saves arrive through `applyRemote` (issue #10) and are merged
-// by a RemoteChangeMerger (lib/realtime/merge.ts): they update the copy the
-// next compare-and-set is checked against, never the undo history, and never
-// a field we are still saving. Undo and redo are compare-and-set saves like
-// any edit, so undoing a field someone else has since changed is a conflict
-// (keep mine / keep theirs), not an overwrite.
+// The editor does not hear about other people's saves while it is open (docs/adr/0005,
+// superseded). Undo and redo are compare-and-set saves like any edit, so undoing
+// a field someone else has since changed is a conflict (keep mine / keep
+// theirs), not an overwrite.
 
-import { isRetiredStep, partitionSteps, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
-import { RemoteChangeMerger, type Applied, type UnitOutcome } from "@/lib/realtime/merge";
-import type { RemoteChange } from "@/lib/realtime/rows";
+import type { ProcessBundle } from "@transpera-flow/db";
 import {
   applyOp,
   invertEdit,
@@ -45,12 +41,6 @@ export interface Conflict {
   mine: Value;
   /** What is stored now. */
   theirs: Value;
-  /**
-   * Set when the clash was noticed before saving (someone else saved the
-   * field while it was being typed): "keep mine" re-runs the edit on top of
-   * theirs, so it is an ordinary undoable edit.
-   */
-  retry?: (bundle: ProcessBundle) => Edit | null;
 }
 
 export interface EditorState {
@@ -65,13 +55,8 @@ export interface EditorState {
   error: string | null;
 }
 
-/** A save of ours went through: which fields of which row now hold what, or which rows were added or removed. */
-export type Saved =
-  | { kind: "update"; table: Table; id: string; values: Patch }
-  | { kind: "insert" | "remove"; steps: string[]; edges: string[] };
-export type SavedListener = (saved: Saved) => void;
-/** Someone else's changes were merged in. */
-export type RemoteListener = (applied: Applied[]) => void;
+/** How a save ended. A conflict counts as saved, pending the user's choice. */
+type Outcome = { kind: "saved" } | { kind: "failed" };
 
 export const SAVE_FAILED = "Couldn't save that change, so it was rolled back. Check your connection and try again.";
 export const GONE = "That item was removed by someone else, or you don't have permission to edit it.";
@@ -86,19 +71,14 @@ export class ProcessEditor {
   private redoStack: Edit[] = [];
   private queue: Promise<void> = Promise.resolve();
   private inFlight = 0;
-  private readonly merger: RemoteChangeMerger;
-  private savedListeners = new Set<SavedListener>();
-  private remoteListeners = new Set<RemoteListener>();
 
   constructor(
     bundle: ProcessBundle,
     private readonly store: ProcessStore,
     /** Who is editing, and when: step parameters they change are recorded as entered (./provenance.ts). */
     private readonly stamp?: () => Stamp,
-    now: () => number = Date.now,
   ) {
     this.state = { bundle, undoLabel: null, redoLabel: null, saving: false, conflicts: [], error: null };
-    this.merger = new RemoteChangeMerger(now);
   }
 
   getState = (): EditorState => this.state;
@@ -139,12 +119,6 @@ export class ProcessEditor {
   keepMine(conflict: Conflict): Promise<void> {
     const all = this.withCompanion(conflict);
     all.forEach((c) => this.dropConflict(c));
-    if (conflict.retry) {
-      // Start from theirs, as the edit would have if we'd seen it in time (stamped as ours again).
-      for (const c of all) this.setField(c, c.theirs);
-      this.run(conflict.retry);
-      return this.queue;
-    }
     const change: RowChange = {
       table: conflict.table,
       id: conflict.id,
@@ -153,9 +127,8 @@ export class ProcessEditor {
     };
     for (const c of all) this.setField(c, c.mine);
     const unit: SaveUnit = { kind: "update", change };
-    this.merger.begin(unit);
     return this.enqueue(async () => {
-      this.finish(unit, await this.save(unit));
+      await this.save(unit);
     });
   }
 
@@ -173,82 +146,6 @@ export class ProcessEditor {
     return companion ? [conflict, companion] : [conflict];
   }
 
-  /**
-   * Someone else saved a field while the user was typing a new value for it
-   * (the input keeps the typing when a remote change arrives). Show the
-   * user's value and ask keep mine / keep theirs, instead of silently saving
-   * over theirs.
-   */
-  raiseConflict(conflict: Conflict): void {
-    const key = conflictKey(conflict);
-    this.setField(conflict, conflict.mine);
-    this.set({ conflicts: [...this.state.conflicts.filter((c) => conflictKey(c) !== key), conflict] });
-  }
-
-  /**
-   * Merge a change someone else saved (from Realtime, or the demo's simulated
-   * colleague). Not undoable, and never overwrites a field we are saving or
-   * one in conflict; see lib/realtime/merge.ts.
-   */
-  applyRemote(change: RemoteChange): void {
-    if (change.kind === "upsert" && change.table === "steps" && isRetiredStep(change.row)) {
-      // Only for echo bookkeeping (it may be our own split's echo); the row itself is never drawn.
-      this.merger.merge(this.state.bundle, this.state.conflicts, change);
-      return this.retire(change.row);
-    }
-    const r = this.merger.merge(this.state.bundle, this.state.conflicts, change);
-    if (r.bundle !== this.state.bundle || r.conflicts !== this.state.conflicts) this.set({ bundle: r.bundle, conflicts: r.conflicts });
-    if (r.applied) this.emitRemote([r.applied]);
-  }
-
-  /**
-   * Bring the copy in line with the revision's stored rows, as after a
-   * reconnect, when changes may have been missed. Our in-flight saves and
-   * conflicts are kept, as in `applyRemote`.
-   */
-  resync(saved: { steps: StepRow[]; edges: EdgeRow[] }): void {
-    // Split or replaced steps are filed apart (issue #16); the stored ones are the truth.
-    const { steps: inUse, retired } = partitionSteps(saved.steps);
-    const rows = { steps: inUse, edges: saved.edges };
-    if (retired.length || this.state.bundle.retired?.length) this.set({ bundle: { ...this.state.bundle, retired } });
-    let { bundle, conflicts } = this.state;
-    const applied: Applied[] = [];
-    const merge = (change: RemoteChange) => {
-      const r = this.merger.merge(bundle, conflicts, change, true);
-      ({ bundle, conflicts } = r);
-      if (r.applied) applied.push(r.applied);
-    };
-    for (const row of rows.steps) merge({ kind: "upsert", table: "steps", row });
-    for (const row of rows.edges) merge({ kind: "upsert", table: "edges", row });
-    const stored = { steps: new Set(rows.steps.map((s) => s.id)), edges: new Set(rows.edges.map((e) => e.id)) };
-    for (const e of bundle.edges) if (!stored.edges.has(e.id)) merge({ kind: "delete", table: "edges", id: e.id });
-    for (const s of bundle.steps) if (!stored.steps.has(s.id)) merge({ kind: "delete", table: "steps", id: s.id });
-    if (bundle !== this.state.bundle || conflicts !== this.state.conflicts) this.set({ bundle, conflicts });
-    if (applied.length) this.emitRemote(applied);
-  }
-
-  /**
-   * A step was split or replaced (issue #16): file its row with the retired
-   * ones, and take it off the map if it is still there (as its delete would).
-   */
-  private retire(row: StepRow): void {
-    if (this.state.bundle.steps.some((s) => s.id === row.id)) this.applyRemote({ kind: "delete", table: "steps", id: row.id });
-    const kept = (this.state.bundle.retired ?? []).filter((r) => r.id !== row.id);
-    this.set({ bundle: { ...this.state.bundle, retired: [...kept, row] } });
-  }
-
-  /** Listen for our saves going through (to tell others who made them). */
-  onSaved(listener: SavedListener): () => void {
-    this.savedListeners.add(listener);
-    return () => this.savedListeners.delete(listener);
-  }
-
-  /** Listen for other people's changes being merged in. */
-  onRemote(listener: RemoteListener): () => void {
-    this.remoteListeners.add(listener);
-    return () => this.remoteListeners.delete(listener);
-  }
-
   dismissError(): void {
     this.set({ error: null });
   }
@@ -261,7 +158,6 @@ export class ProcessEditor {
   reset(bundle: ProcessBundle): void {
     this.undoStack = [];
     this.redoStack = [];
-    this.merger.reset();
     this.set({ bundle, undoLabel: null, redoLabel: null, conflicts: [], error: null });
   }
   /** Resolves once every save queued so far has finished. */
@@ -277,18 +173,13 @@ export class ProcessEditor {
     for (const op of edit.ops) this.applyLocal(op);
     this.syncHistory();
     const list = saveUnits(edit);
-    for (const unit of list) this.merger.begin(unit);
     void this.enqueue(async () => {
       for (let i = 0; i < list.length; i++) {
         const outcome = await this.save(list[i]!);
-        if (outcome.kind === "saved") {
-          this.finish(list[i]!, outcome);
-          continue;
-        }
+        if (outcome.kind === "saved") continue;
         // Roll back what didn't save, newest first. A failed edit leaves
         // history; after a failed undo the edit stays where undo can retry it.
         for (let j = list.length - 1; j >= i; j--) this.applyLocal(invertOp(unitOp(list[j]!)));
-        for (let j = i; j < list.length; j++) this.finish(list[j]!, outcome);
         this.undoStack = this.undoStack.filter((e) => e !== origin);
         this.redoStack = this.redoStack.filter((e) => e !== origin);
         if (mode === "undo") this.undoStack.push(origin);
@@ -298,34 +189,10 @@ export class ProcessEditor {
     });
   }
 
-  /** A unit's save ended: show anything newer that arrived meanwhile, and tell listeners what saved. */
-  private finish(unit: SaveUnit, outcome: UnitOutcome): void {
-    const late = this.merger.end(unit, outcome);
-    if (late) {
-      this.applyLocal({ kind: "update", changes: [{ table: late.table, id: late.id, before: {}, after: late.values }] });
-      this.emitRemote([{ table: late.table, id: late.id, kind: "changed", values: late.values }]);
-    }
-    if (outcome.kind !== "saved") return;
-    let saved: Saved;
-    if (unit.kind === "update") {
-      const { table, id, after } = unit.change;
-      const values: Patch = {};
-      for (const [f, v] of Object.entries(after)) if (!outcome.conflicted.has(f)) values[f] = v;
-      if (!Object.keys(values).length) return;
-      saved = { kind: "update", table, id, values };
-    } else {
-      saved = { kind: unit.kind, steps: unit.steps.map((s) => s.id), edges: unit.edges.map((e) => e.id) };
-    }
-    for (const listener of this.savedListeners) listener(saved);
-  }
-
-  /**
-   * Save one unit. "failed" if it didn't save; a conflict counts as saved,
-   * pending the user's choice, and lists the fields in conflict.
-   */
-  private async save(unit: SaveUnit): Promise<UnitOutcome> {
+  /** Save one unit. "failed" if it didn't save; a conflict counts as saved, pending the user's choice. */
+  private async save(unit: SaveUnit): Promise<Outcome> {
     const failed = { kind: "failed" } as const;
-    const saved = (conflicted: ReadonlySet<string> = new Set()): UnitOutcome => ({ kind: "saved", conflicted });
+    const saved = { kind: "saved" } as const;
     try {
       if (unit.kind === "insert" || unit.kind === "remove") {
         const r =
@@ -335,7 +202,7 @@ export class ProcessEditor {
                 unit.steps.map((s) => s.id),
                 unit.edges.map((e) => e.id),
               );
-        if (r.status === "ok") return saved();
+        if (r.status === "ok") return saved;
         this.set({ error: `${r.message} ${ROLLED_BACK}` });
         return failed;
       }
@@ -357,8 +224,7 @@ export class ProcessEditor {
         }
         this.set({ conflicts });
         if (Object.keys(adopt).length) this.applyLocal({ kind: "update", changes: [{ table, id, before: {}, after: adopt }] });
-        // Fields not written (in conflict, or adopted) will have no echo.
-        return saved(new Set(Object.keys(theirs)));
+        return saved;
       }
       this.set({ error: `${r.status === "not_found" ? GONE : r.message} ${ROLLED_BACK}` });
       return failed;
@@ -378,10 +244,6 @@ export class ProcessEditor {
     const row = rows.find((r) => (r as { id: string }).id === c.id);
     if (!row || readField(row, c.field) === value) return;
     this.applyLocal({ kind: "update", changes: [{ table: c.table, id: c.id, before: {}, after: { [c.field]: value } }] });
-  }
-
-  private emitRemote(applied: Applied[]): void {
-    for (const listener of this.remoteListeners) listener(applied);
   }
 
   private dropConflict(conflict: Conflict): void {

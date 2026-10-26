@@ -19,10 +19,7 @@ import type { Table, Value } from "@/lib/editor/ops";
 import { isProvenanceField } from "@/lib/editor/provenance";
 import { splitStep } from "@/lib/editor/split";
 import { newlyBroken, retiredSteps } from "@/lib/scenarios/broken";
-import { connect } from "@/lib/realtime/connect";
-import type { RealtimeSync } from "@/lib/realtime/sync";
-import type { View, Viewer } from "@/lib/realtime/transport";
-import { useRealtime } from "@/lib/realtime/use-realtime";
+import { connect } from "@/lib/drafts/connect";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import { useHiddenLevers } from "@/lib/levers/use-hidden-levers";
@@ -40,7 +37,6 @@ import { withHorizon } from "@/lib/editor/modes";
 import { panelTabs } from "@/lib/map/panel-tabs";
 import { HorizonPicker } from "./horizon-picker";
 import { KpiStrip } from "./kpi-strip";
-import { PresenceBar } from "./presence-bar";
 import { SaveRunBar } from "./save-run";
 import { NO_SELECTION, ProcessCanvas, type CanvasCommands, type Selection } from "./process-canvas";
 import { useProcessIssues } from "./process-issues";
@@ -59,7 +55,6 @@ import { EDIT_ONLY } from "@/lib/phone";
 export type EditMode = ScreenMode;
 
 /** Who you are on the public demo, where nobody signs in. */
-const DEMO_VIEWER: Viewer = { userId: "demo-you", name: "You", email: null };
 
 /** A bundle's engine model, the same object while the model is unchanged (moving a step doesn't change it). */
 export function useEngineModel(bundle: ProcessBundle, weeks: number | null, levers?: readonly ScenarioPatch[]): { model: EngineModel | null; error: string | null } {
@@ -92,7 +87,6 @@ export function ProcessView({
   registerHref,
   settingsHref,
   userId = null,
-  viewer = null,
   sources = [],
   liveRevisions,
   firstPrinciples,
@@ -114,8 +108,6 @@ export function ProcessView({
   settingsHref?: string;
   /** The signed-in user, recorded as who entered the values they change. */
   userId?: string | null;
-  /** The signed-in user as others see them in presence (issue #10). */
-  viewer?: Viewer | null;
   /** The workspace's sources, which values cite as evidence (issue #21). */
   sources?: SourceRow[];
   /** Each process's live revision id, which a dismissed insight is measured against. Omitted: this bundle's own. */
@@ -133,12 +125,12 @@ export function ProcessView({
 }) {
   const stamp = () => ({ at: new Date().toISOString(), by: userId });
   const sourcesHref = registerHref ? registerHref.replace(/\/issues$/, "/sources") : mode === "demo" ? "/demo/sources" : undefined;
-  // Saves, catch-up reads and Realtime: the database and Supabase, or memory on the demo.
-  const [connection] = useState(() => connect(mode, initialLive));
+  // Saves go to the database, or to memory on the demo.
+  const [backend] = useState(() => connect(mode, initialLive));
   const [session, drafts, state] = useDraftSession(
     initialLive,
     initialDraft,
-    () => connection.backend,
+    () => backend,
     () => ({ at: new Date().toISOString(), by: userId }),
   );
   const editor = session.editor;
@@ -154,9 +146,6 @@ export function ProcessView({
   const editable = false;
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   const [compare, setCompare] = useState(false);
-  const me = viewer ?? (mode === "demo" ? DEMO_VIEWER : null);
-  const presenceView: View = hasDraft && !showingLive ? "draft" : "live";
-  const [sync, realtime] = useRealtime(session, connection.transport, me, presenceView);
 
   const diff = useMemo(() => (hasDraft ? diffBundles(live, working) : EMPTY_DIFF), [hasDraft, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
@@ -449,15 +438,6 @@ export function ProcessView({
               </Button>
             </>
           )}
-          <PresenceBar
-            variant="compact"
-            sync={sync}
-            state={realtime}
-            me={me}
-            processName={live.process.name}
-            colleague={connection.colleague}
-            selectedStep={selected.steps.length === 1 ? selected.steps[0]! : null}
-          />
           {shownModel && !isReadOnly(mode) && (!hasDraft || showingLive) && (
             // Saved runs are of the live model (issue #25).
             <SaveRunBar
@@ -500,7 +480,7 @@ export function ProcessView({
             </AlertDescription>
           </Alert>
         )}
-        {editable && <SaveProblems editor={editor} bundle={bundle} conflicts={state.conflicts} error={state.error} sync={sync} />}
+        {editable && <SaveProblems editor={editor} bundle={bundle} conflicts={state.conflicts} error={state.error} />}
       </div>
       {shownModel ? (
         <div className="flex flex-col gap-2 px-4 pt-3">
@@ -615,14 +595,11 @@ export function SaveProblems({
   bundle,
   conflicts,
   error,
-  sync,
 }: {
   editor: ProcessEditor;
   bundle: ProcessBundle;
   conflicts: Conflict[];
   error: string | null;
-  /** Names who made the other change, when their note has arrived. */
-  sync: RealtimeSync | null;
 }) {
   // A value's provenance is settled along with the value, so it gets no prompt of its own.
   conflicts = conflicts.filter((c) => !isProvenanceField(c.field));
@@ -641,7 +618,6 @@ export function SaveProblems({
         <ConflictPrompt
           key={`${c.table}:${c.id}:${c.field}`}
           subject={subject(c)}
-          by={sync?.who(c.table, c.id, c.field, c.theirs) ?? null}
           theirs={show(c.field, c.theirs)}
           mine={show(c.field, c.mine)}
           onKeepMine={() => void editor.keepMine(c)}

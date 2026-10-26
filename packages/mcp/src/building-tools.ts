@@ -10,7 +10,7 @@
 // and the database refuses it too (`edit_drafts_only`). Writes are ordinary
 // row inserts and deletes plus per-field compare-and-set saves
 // (`save_fields`, docs/adr/0001-per-field-saves.md), exactly what the canvas
-// sends, so open editors see them through Realtime and a field someone else
+// sends, so a field someone else
 // changed meanwhile is reported, not overwritten. The rules for values,
 // evidence and the graph live in building.ts; the text is templated, never
 // written by a language model. Every row write is audit-logged with
