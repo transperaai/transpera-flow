@@ -1,5 +1,5 @@
 import type { LinkTargets } from "./source-links";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type { DB } from "./db-types";
 import { rpc, rpcRows } from "./rpc";
 import { columns } from "./columns";
@@ -857,14 +857,14 @@ export async function countSources(db: Db, workspaceId: string): Promise<number>
   return Number(r.count);
 }
 
-/** Which of these sources still exist (RLS applies). In batches, so a long list stays a short statement. */
+/**
+ * Which of these sources still exist (RLS applies). One statement whatever the length: the list goes as one array parameter
+ * (PostgREST needed batches to keep its URL short; here each batch would cost a round trip).
+ */
 export async function existingSourceIds(db: Db, ids: readonly string[]): Promise<Set<string>> {
-  const found = new Set<string>();
-  for (let i = 0; i < ids.length; i += 100) {
-    const r = await db.selectFrom("sources").select("id").where("id", "in", ids.slice(i, i + 100)).execute();
-    for (const row of r) found.add(row.id);
-  }
-  return found;
+  if (!ids.length) return new Set();
+  const r = await db.selectFrom("sources").select("id").where(sql<boolean>`${sql.ref("id")} = any(${[...ids]}::uuid[])`).execute();
+  return new Set(r.map((row) => row.id));
 }
 
 /** One source's full text, read when it is opened. Null when it has none, or is not visible. */
@@ -923,13 +923,17 @@ export async function loadSourceLinks(db: Db, workspaceId: string): Promise<Sour
 
 /** The names of steps by their stable ids, from whichever version holds them (the latest written wins). For links to steps that are in no current version. */
 export async function loadStepNames(db: Db, ids: readonly string[]): Promise<{ id: string; name: string }[]> {
+  if (!ids.length) return [];
+  // One statement, the list as one array parameter (the batches were for PostgREST's URL length).
+  const r = await db
+    .selectFrom("steps")
+    .select(["id", "name", "updated_at"])
+    .where(sql<boolean>`${sql.ref("id")} = any(${[...ids]}::uuid[])`)
+    .orderBy("updated_at", "desc")
+    .execute();
   const seen = new Set<string>();
   const out: { id: string; name: string }[] = [];
-  // In batches, so a long list stays a short statement.
-  for (let i = 0; i < ids.length; i += 100) {
-    const r = await db.selectFrom("steps").select(["id", "name", "updated_at"]).where("id", "in", ids.slice(i, i + 100)).orderBy("updated_at", "desc").execute();
-    for (const s of r) if (!seen.has(s.id)) out.push({ id: s.id, name: (seen.add(s.id), s.name) });
-  }
+  for (const s of r) if (!seen.has(s.id)) out.push({ id: s.id, name: (seen.add(s.id), s.name) });
   return out;
 }
 
