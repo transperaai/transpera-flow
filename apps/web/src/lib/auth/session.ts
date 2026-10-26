@@ -24,16 +24,34 @@ export interface SessionUser extends ClaimsUser {
 export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const env = authEnv();
   if (!env) return null;
-  const session = await getAuth().api.getSession({ headers: await headers() });
-  if (!session) return null;
-  const access = await currentAccess(authPool(), session.user.id, env.adminEmails);
-  if (!access) return null;
-  return {
-    id: session.user.id,
-    ...access,
-    name: session.user.name?.trim() || null,
-  };
+  return onceForRequest(await headers(), async (h) => {
+    const session = await getAuth().api.getSession({ headers: h });
+    if (!session) return null;
+    const access = await currentAccess(authPool(), session.user.id, env.adminEmails);
+    if (!access) return null;
+    return {
+      id: session.user.id,
+      ...access,
+      name: session.user.name?.trim() || null,
+    };
+  });
 });
+
+// React's `cache` memoizes only inside a render: in a Server Action or a Route Handler it calls through every time, and nearly
+// every action asks `getSessionUser()` and then `getDb()`, which asks again (a Better Auth session read and the access check,
+// each a database round trip). Keyed on the request's own headers object, which `headers()` hands back for the whole request.
+const perRequest = new WeakMap<object, Promise<SessionUser | null>>();
+
+/** `load(h)` once per request headers object; a failed load isn't kept. Exported for tests. */
+export function onceForRequest(h: Headers, load: (h: Headers) => Promise<SessionUser | null>): Promise<SessionUser | null> {
+  let found = perRequest.get(h);
+  if (!found) {
+    found = load(h);
+    perRequest.set(h, found);
+    found.catch(() => perRequest.delete(h));
+  }
+  return found;
+}
 
 /**
  * A database handle that runs every query as the signed-in user (or `anon`), under the same RLS the Supabase client used. Call
