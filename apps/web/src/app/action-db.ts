@@ -18,8 +18,8 @@ export function pgError(e: unknown): { code?: string; message?: string; details?
 }
 
 /**
- * A value for a jsonb column or argument, as JSON text. `pg` turns a JS array into a Postgres array literal, which jsonb
- * rejects; text is cast to jsonb by the server, so arrays, objects and scalars all take one path.
+ * A value for a jsonb column, as JSON text. `pg` turns a JS array into a Postgres array literal, which jsonb rejects; text is
+ * cast to jsonb by the server, so arrays, objects and scalars all take one path. Not for `rpc()` arguments: it encodes those.
  */
 export function jsonb<T>(value: T): string {
   return JSON.stringify(value);

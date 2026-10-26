@@ -7,7 +7,7 @@ import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/sav
 import { serverVerdict, type CopyRun } from "@/lib/solutions/server-verdict";
 import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 import { isId } from "@/lib/sources/validate";
-import { jsonb, pgCode } from "@/app/action-db";
+import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
 const SOLUTION_ISSUE_COLS = ["solution_id", "issue_id", "workspace_id", "auto_verdict", "holds_pct", "auto_note", "user_verdict", "user_notes", "created_at", "updated_at", "created_by"] as const;
