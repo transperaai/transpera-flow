@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import pg from "pg";
 import { sql, type Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, createPool, type Claims } from "../src/client";
+import { createDb, createPool, toJsonTimestamp, type Claims } from "../src/client";
 import type { DB } from "../src/db-types";
 import { applyCompat, applyMigrations, migrationFiles } from "../src/migrations";
 import { NORTHBEAM_WORKSPACE_ID } from "../src";
@@ -138,6 +138,58 @@ describe("transactions", () => {
   });
 });
 
+describe("nothing runs as the owner role", () => {
+  const who = sql<{ who: string; uid: string | null }>`select current_user as who, auth.uid() as uid`;
+
+  it("re-applies the claims after a transaction rolls back inside db.connection()", async () => {
+    const after = await as(member)
+      .connection()
+      .execute(async (conn) => {
+        await expect(
+          conn.transaction().execute(async () => {
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        return (await who.execute(conn)).rows[0];
+      });
+    expect(after).toEqual({ who: "authenticated", uid: member.id });
+  });
+
+  it("re-applies the claims after a raw commit, rollback, reset role or set role", async () => {
+    const seen = await as(member)
+      .connection()
+      .execute(async (conn) => {
+        const out: unknown[] = [];
+        for (const stmt of ["commit", "rollback", "reset role", "set role postgres", "set session authorization postgres"]) {
+          await sql.raw(stmt).execute(conn);
+          out.push((await who.execute(conn)).rows[0]);
+        }
+        return out;
+      });
+    expect(seen).toEqual(Array(5).fill({ who: "authenticated", uid: member.id }));
+  });
+
+  it("refuses several statements in one query", async () => {
+    await expect(sql.raw("commit; select current_user").execute(as(member))).rejects.toMatchObject({ code: "42601" });
+  });
+
+  it("ignores legacy per-claim settings left on a pooled connection", async () => {
+    const c = await pool.connect();
+    await c.query("select set_config('request.jwt.claim.sub', $1, false), set_config('request.jwt.claim', '{}', false)", [stranger.id]);
+    c.release();
+    expect((await who.execute(as(member))).rows[0]).toEqual({ who: "authenticated", uid: member.id });
+    expect((await who.execute(as(null))).rows[0]).toEqual({ who: "anon", uid: null });
+  });
+
+  it("forces the claims' role to match the database role", async () => {
+    const forged = { ...member.claims, role: "service_role" } as unknown as Claims;
+    const { rows } = await sql<{ r: string }>`select auth.role() as r`.execute(createDb(pool, forged));
+    expect(rows[0]!.r).toBe("authenticated");
+    const { rows: anon } = await sql<{ r: string }>`select auth.role() as r`.execute(as(null));
+    expect(anon[0]!.r).toBe("anon");
+  });
+});
+
 describe("a failed query doesn't poison the pool", () => {
   it("serves the next query on the same connection after a statement error", async () => {
     const kdb = as(member);
@@ -184,15 +236,61 @@ describe("type parsing", () => {
     const r = rows[0]!;
     expect(r.n).toBe(12.5);
     expect(r.b).toBe(9007199254740);
-    expect(typeof r.tz).toBe("string");
-    expect(r.tz).toBe("2026-10-26 10:00:00+00");
-    expect(r.ts).toBe("2026-10-26 10:00:00");
+    expect(r.tz).toBe("2026-10-26T10:00:00+00:00");
+    expect(r.ts).toBe("2026-10-26T10:00:00");
     expect(r.d).toBe("2026-10-26");
     expect(r.j).toEqual({ a: [1, { b: null }] });
     expect(r.na).toEqual([1.5, 2]);
     expect(r.ba).toEqual([3, 4]);
     expect(r.da).toEqual(["2026-10-26", "2026-10-27"]);
-    expect(r.tza).toEqual(["2026-10-26 10:00:00+00"]);
+    expect(r.tza).toEqual(["2026-10-26T10:00:00+00:00"]);
+  });
+
+  // What PostgREST sent was to_json() of the value, in a UTC session.
+  const timestamps = [
+    "2026-10-26 10:00:00+00",
+    "2026-10-26 10:00:00.5+00",
+    "2026-10-26 10:00:00.123456+00",
+    "2026-10-26 23:59:59.999999+05:30",
+    "1850-06-01 12:00:00 Europe/Amsterdam",
+    "0044-03-15 10:00:00+00 BC",
+    "12026-01-01 00:00:00+00",
+    "infinity",
+    "-infinity",
+  ];
+  const probe = (cast: string) =>
+    sql<{ v: unknown; j: unknown; va: unknown; ja: unknown }>`
+      select x.v, to_json(x.v) as j, array[x.v, null] as va, to_json(array[x.v, null]) as ja
+      from (select unnest(${timestamps}::text[])::${sql.raw(cast)} as v) x`;
+
+  it.each(["timestamptz", "timestamp"])("returns %s exactly as to_json() does, arrays included", async (cast) => {
+    const { rows } = await probe(cast).execute(as(member));
+    expect(rows).toHaveLength(timestamps.length);
+    for (const r of rows) {
+      expect(r.v).toBe(r.j);
+      expect(r.va).toEqual(r.ja);
+    }
+    expect(rows[0]!.v).toBe(cast === "timestamptz" ? "2026-10-26T10:00:00+00:00" : "2026-10-26T10:00:00");
+  });
+
+  it("runs in UTC with ISO dates whatever the session defaults are, as PostgREST on Supabase did", async () => {
+    const other = createPool(db.url, { max: 1, options: "-c TimeZone=Asia/Kolkata -c DateStyle=SQL,DMY" });
+    try {
+      const { rows } = await probe("timestamptz").execute(createDb(other, member.claims));
+      for (const r of rows) expect(r.v).toBe(r.j);
+      expect(rows[0]!.v).toBe("2026-10-26T10:00:00+00:00");
+      const { rows: d } = await sql<{ d: string }>`select '2026-10-26'::date as d`.execute(createDb(other, null));
+      expect(d[0]!.d).toBe("2026-10-26");
+    } finally {
+      await other.end();
+    }
+  });
+
+  it("converts the text forms Postgres outputs for any offset", () => {
+    expect(toJsonTimestamp("2026-10-26 15:30:00.1234+05:30")).toBe("2026-10-26T15:30:00.1234+05:30");
+    expect(toJsonTimestamp("2026-10-26 07:30:00-02")).toBe("2026-10-26T07:30:00-02:00");
+    expect(toJsonTimestamp("1850-01-01 05:53:28+05:53:28")).toBe("1850-01-01T05:53:28+05:53:28");
+    expect(toJsonTimestamp("0044-03-15 10:00:00 BC")).toBe("0044-03-15T10:00:00 BC");
   });
 
   it("leaves other pg users on pg's defaults (parsers are per pool)", async () => {

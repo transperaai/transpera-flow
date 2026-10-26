@@ -33,11 +33,27 @@ export interface Claims {
 const OID = { int8: 20, numeric: 1700, date: 1082, timestamp: 1114, timestamptz: 1184 } as const;
 const ARRAY_OID = { int8: 1016, numeric: 1231, date: 1182, timestamp: 1115, timestamptz: 1185 } as const;
 
-const parseTextArray = pg.types.getTypeParser(1009 as never) as (v: string) => unknown[] | null;
+const parseTextArray = pg.types.getTypeParser(1009 as never) as (v: string) => (string | null)[] | null;
 const toNumbers = (v: unknown): unknown => (Array.isArray(v) ? v.map(toNumbers) : v === null ? null : Number(v));
 const asString = (v: string) => v;
 
-/** numeric and int8 arrive as numbers; timestamptz, timestamp and date stay strings; json/jsonb parse as usual. */
+// Postgres's text output (DateStyle ISO, which every ClaimsDriver transaction pins) next to what to_json() gives, which is
+// what PostgREST returned: "2026-10-26 10:00:00.5+00" → "2026-10-26T10:00:00.5+00:00". Only the separator and a whole-hour
+// offset differ; "+05:30", "+00:09:21", " BC" and fractional seconds already match, and infinity passes through.
+const TIMESTAMP = /^(\d{4,}-\d\d-\d\d) (\d\d:\d\d:\d\d(?:\.\d+)?)([+-]\d\d(?::\d\d){0,2})?( BC)?$/;
+/** A timestamp or timestamptz in its text output → exactly Postgres's to_json() string for the same value. */
+export function toJsonTimestamp(text: string): string {
+  const m = TIMESTAMP.exec(text);
+  if (!m) return text;
+  const [, date, time, offset = "", bc = ""] = m;
+  return `${date}T${time}${offset.length === 3 ? `${offset}:00` : offset}${bc}`;
+}
+const toJsonTimestamps = (v: string) => parseTextArray(v)?.map((t) => (t === null ? null : toJsonTimestamp(t))) ?? null;
+
+/**
+ * numeric and int8 arrive as numbers; timestamptz and timestamp as Postgres's to_json() strings (as PostgREST sent them);
+ * date stays YYYY-MM-DD; json/jsonb parse as usual.
+ */
 const types = {
   getTypeParser(oid: number, format?: "text" | "binary") {
     switch (oid) {
@@ -45,26 +61,33 @@ const types = {
       case OID.numeric:
         return Number;
       case OID.date:
+        return asString;
       case OID.timestamp:
       case OID.timestamptz:
-        return asString;
+        return toJsonTimestamp;
       case ARRAY_OID.int8:
       case ARRAY_OID.numeric:
         return (v: string) => toNumbers(parseTextArray(v));
       // pg's own array parsers for dates build Date objects; the text[] parser leaves the strings alone.
       case ARRAY_OID.date:
+        return parseTextArray;
       case ARRAY_OID.timestamp:
       case ARRAY_OID.timestamptz:
-        return parseTextArray;
+        return toJsonTimestamps;
       default:
         return pg.types.getTypeParser(oid, format as "text");
     }
   },
 } as pg.CustomTypesConfig;
 
-/** One per process. Parsers are set on the pool, so other pg users (Better Auth, scripts) keep pg's defaults. */
+/**
+ * One per process. Parsers are set on the pool, so other pg users (Better Auth, scripts) keep pg's defaults.
+ * Logs, rather than crashes on, an idle client's error (Neon closes idle connections when the compute suspends).
+ */
 export function createPool(url: string, options: Omit<pg.PoolConfig, "connectionString" | "types"> = {}): pg.Pool {
-  return new pg.Pool({ ...options, connectionString: url, types });
+  const pool = new pg.Pool({ ...options, connectionString: url, types });
+  pool.on("error", (err) => console.error("db pool: idle client error", err));
+  return pool;
 }
 
 // --- ClaimsDriver ---
@@ -76,29 +99,92 @@ const isBroken = (err: unknown) => {
 };
 const asError = (err: unknown) => (err instanceof Error ? err : new Error(String(err)));
 
+/** Statements that can change the role or a setting for the rest of the transaction (`set role`, `reset all`, ...). */
+const RESETS_STATE = new Set(["SET", "RESET", "DISCARD"]);
+
+/**
+ * The statement that puts a connection under the caller's claims, for the current transaction only (`set_config(..., true)`).
+ * It also clears the legacy per-claim settings auth.uid() / auth.jwt() / auth.role() read first, so a value someone left
+ * at session level on a pooled connection can't stand in for these claims, and pins TimeZone and DateStyle to what
+ * Supabase's PostgREST sessions ran with (UTC, ISO), which the timestamp parser above relies on.
+ */
+function claimsStatement(claims: Claims | null): string {
+  // The database role always follows whether there are claims, and the claims' role always says the same, so a caller
+  // can't pass role "service_role" in the claims and have SQL that checks auth.role() treat it as the service role.
+  // Signed out, PostgREST set {"role":"anon"} from the anon key; do the same so auth.role() reads 'anon'.
+  const role = claims ? "authenticated" : "anon";
+  const json = JSON.stringify(claims ? { ...claims, role } : { role });
+  const set = (name: string, value: string) => `set_config('${name}', ${pg.escapeLiteral(value)}, true)`;
+  return `select ${[
+    set("role", role),
+    set("request.jwt.claims", json),
+    set("request.jwt.claim", ""),
+    set("request.jwt.claim.sub", ""),
+    set("request.jwt.claim.role", ""),
+    set("TimeZone", "UTC"),
+    set("DateStyle", "ISO, MDY"),
+  ].join(", ")}`;
+}
+
 class ClaimsConnection implements DatabaseConnection {
-  /** The claims transaction is over (rolled back), so release has nothing to commit. */
-  ended = false;
   /** Set when the connection failed in a way that makes it unfit for reuse. */
   broken: Error | undefined;
+  /** A statement may have changed the role or claims (`set role ...`): put them back before the next one. */
+  #dirty = false;
 
   // The pool stops listening for errors on a checked-out client; without a listener a dropped connection would crash the process.
   readonly onError = (err: Error) => {
     this.broken = err;
   };
 
-  constructor(readonly client: pg.PoolClient) {
+  constructor(
+    readonly client: pg.PoolClient,
+    private readonly claimsSql: string,
+  ) {
     client.on("error", this.onError);
+  }
+
+  /** "I" outside a transaction, "T" inside one, "E" inside a failed one. */
+  get status() {
+    return this.client.getTransactionStatus();
+  }
+
+  /** Our own statements (claims, transaction control): simple protocol, no claims check first. */
+  async run(text: string) {
+    if (this.broken) throw this.broken;
+    try {
+      return await this.client.query(text);
+    } catch (err) {
+      if (isBroken(err)) this.broken = asError(err);
+      throw err;
+    }
+  }
+
+  /** Opens the claims transaction, or (inside one) applies the claims again. */
+  async applyClaims() {
+    const open = this.status === "I";
+    await this.run(open ? `begin; ${this.claimsSql}` : this.claimsSql);
+    if (this.status !== "T") throw new Error(`claims not applied: transaction status ${this.status}`);
+    this.#dirty = false;
   }
 
   release() {
     this.client.off("error", this.onError);
-    this.client.release(this.broken);
+    // A client still inside a transaction would hand that transaction (and its role and claims) to the next caller.
+    const leftover = this.status === "I" ? undefined : new Error(`released with transaction status ${this.status}`);
+    this.client.release(this.broken ?? leftover);
   }
 
   async executeQuery<R>(compiled: CompiledQuery): Promise<QueryResult<R>> {
+    if (this.broken) throw this.broken;
+    // No statement runs outside the claims: a raw `commit` / `rollback` (or the rollback of a db.transaction() inside
+    // db.connection()) ended the claims transaction, and the next statement would otherwise run as the owner role.
+    if (this.#dirty || this.status === "I") await this.applyClaims();
     try {
-      const { command, rowCount, rows } = await this.client.query(compiled.sql, compiled.parameters as unknown[]);
+      // The extended protocol takes exactly one statement, so `commit; select ...` can't slip past the check above.
+      const config = { text: compiled.sql, values: compiled.parameters as unknown[], queryMode: "extended" };
+      const { command, rowCount, rows } = await this.client.query(config as pg.QueryConfig);
+      if (RESETS_STATE.has(command)) this.#dirty = true;
       return {
         numAffectedRows: ["INSERT", "UPDATE", "DELETE", "MERGE"].includes(command) ? BigInt(rowCount ?? 0) : undefined,
         rows: rows as R[],
@@ -122,40 +208,48 @@ class ClaimsConnection implements DatabaseConnection {
  * Every connection it hands out is already inside a transaction that has the role and claims set (`set_config(..., true)`
  * lasts to the end of the transaction). A statement outside db.transaction() is therefore its own short transaction:
  * `begin; set_config` on acquire, `commit` on release. Inside db.transaction() Kysely's begin and commit are no-ops
- * (we are already in one), and its rollback really rolls back.
+ * (we are already in one), and its rollback really rolls back; a statement after that rollback on the same connection
+ * (db.connection()) opens a new claims transaction first.
+ *
+ * The app's login is the database owner, so the claims are the only thing between a statement and RLS-free access: the
+ * connection re-applies them whenever a statement ended the transaction or ran SET/RESET. It can't see a
+ * `select set_config('role', ...)` inside a statement; don't build SQL from user input.
  */
 class ClaimsDriver implements Driver {
-  readonly #setup: string;
+  readonly #claimsSql: string;
 
   constructor(
     private readonly pool: pg.Pool,
     claims: Claims | null,
   ) {
-    const role = claims ? "authenticated" : "anon";
-    const json = claims ? JSON.stringify(claims) : "";
-    // One simple-protocol round trip (no parameters), so the claims go in as an escaped literal.
-    this.#setup = `begin; select set_config('role', '${role}', true), set_config('request.jwt.claims', ${pg.escapeLiteral(json)}, true)`;
+    this.#claimsSql = claimsStatement(claims);
   }
 
   async init() {}
 
   async acquireConnection(): Promise<DatabaseConnection> {
     const client = await this.pool.connect();
+    const connection = new ClaimsConnection(client, this.#claimsSql);
     try {
-      await client.query(this.#setup);
+      if (connection.status !== "I") throw new Error(`pool handed out a client with transaction status ${connection.status}`);
+      await connection.applyClaims();
     } catch (err) {
       // Mid-transaction or unreachable: don't hand this client to anyone else.
-      client.release(asError(err));
+      connection.broken ??= asError(err);
+      connection.release();
       throw err;
     }
-    return new ClaimsConnection(client);
+    return connection;
   }
 
-  async beginTransaction(_: DatabaseConnection, settings: TransactionSettings) {
+  async beginTransaction(connection: DatabaseConnection, settings: TransactionSettings) {
     // The transaction began on acquire, after which an isolation level or access mode can no longer be set.
     if (settings.isolationLevel || settings.accessMode) {
       throw new Error("Transaction isolation level and access mode are not supported");
     }
+    // A second db.transaction() on one db.connection(), after the first rolled back.
+    const c = connection as ClaimsConnection;
+    if (c.status === "I") await c.applyClaims();
   }
 
   async commitTransaction() {
@@ -163,42 +257,29 @@ class ClaimsDriver implements Driver {
   }
 
   async rollbackTransaction(connection: DatabaseConnection) {
-    const c = connection as ClaimsConnection;
-    try {
-      await c.client.query("rollback");
-    } catch (err) {
-      if (isBroken(err)) c.broken = asError(err);
-      throw err;
-    } finally {
-      c.ended = true;
-    }
+    await (connection as ClaimsConnection).run("rollback");
   }
 
   async savepoint(connection: DatabaseConnection, name: string) {
-    await connection.executeQuery(CompiledQuery.raw(`savepoint ${pg.escapeIdentifier(name)}`));
+    await (connection as ClaimsConnection).run(`savepoint ${pg.escapeIdentifier(name)}`);
   }
 
   async rollbackToSavepoint(connection: DatabaseConnection, name: string) {
-    await connection.executeQuery(CompiledQuery.raw(`rollback to ${pg.escapeIdentifier(name)}`));
+    await (connection as ClaimsConnection).run(`rollback to ${pg.escapeIdentifier(name)}`);
   }
 
   async releaseSavepoint(connection: DatabaseConnection, name: string) {
-    await connection.executeQuery(CompiledQuery.raw(`release ${pg.escapeIdentifier(name)}`));
+    await (connection as ClaimsConnection).run(`release ${pg.escapeIdentifier(name)}`);
   }
 
   async releaseConnection(connection: DatabaseConnection) {
     const c = connection as ClaimsConnection;
-    if (!c.ended && !c.broken) {
-      try {
-        // Postgres turns a commit of an aborted transaction into a rollback, so a failed statement needs no special case.
-        await c.client.query("commit");
-      } catch (err) {
-        if (isBroken(err)) c.broken = asError(err);
-        c.release();
-        throw err;
-      }
+    try {
+      // Postgres turns a commit of an aborted transaction into a rollback, so a failed statement needs no special case.
+      if (!c.broken && c.status !== "I") await c.run("commit");
+    } finally {
+      c.release();
     }
-    c.release();
   }
 
   /** The pool is shared and outlives every Kysely instance; the owner ends it. */
