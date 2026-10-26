@@ -116,13 +116,20 @@ const isBroken = (err: unknown) => {
 };
 const asError = (err: unknown) => (err instanceof Error ? err : new Error(String(err)));
 
+/**
+ * How long a statement may run, by database role: what Supabase applied to each role (and PostgREST therefore to every
+ * request), so a query that was cancelled there still is. `set_config('role', ...)` applies no role setting, so the claims
+ * statement sets it. A function that needs longer carries its own `set statement_timeout`, which rpc() applies (see ./rpc).
+ */
+export const STATEMENT_TIMEOUT = { anon: "3s", authenticated: "8s" } as const;
+
 /** Statements that can change the role or a setting for the rest of the transaction (`set role`, `reset all`, ...). */
 const RESETS_STATE = new Set(["SET", "RESET", "DISCARD"]);
 
 /**
  * The statement that puts a connection under the caller's claims, for the current transaction only (`set_config(..., true)`).
  * It also clears the legacy per-claim settings auth.uid() / auth.jwt() / auth.role() read first, so a value someone left
- * at session level on a pooled connection can't stand in for these claims, and pins TimeZone and DateStyle to what
+ * at session level on a pooled connection can't stand in for these claims, and sets the role's statement_timeout (3 s for anon, 8 s for authenticated), and pins TimeZone and DateStyle to what
  * PostgREST's sessions ran with (UTC, ISO), which the timestamp parser above relies on.
  */
 function claimsStatement(claims: Claims | null): string {
@@ -134,6 +141,7 @@ function claimsStatement(claims: Claims | null): string {
   const set = (name: string, value: string) => `set_config('${name}', ${pg.escapeLiteral(value)}, true)`;
   return `select ${[
     set("role", role),
+    set("statement_timeout", STATEMENT_TIMEOUT[role]),
     set("request.jwt.claims", json),
     set("request.jwt.claim", ""),
     set("request.jwt.claim.sub", ""),

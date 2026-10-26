@@ -1,6 +1,6 @@
 # Transpera Flow (transpera-flow)
 
-Multi-tenant process-map simulator: discrete-event Monte Carlo engine, React Flow canvas, Supabase, MCP server. The product spec and decision log live in `docs/PRD.md`; read the relevant sections before working on a ticket.
+Multi-tenant process-map simulator: discrete-event Monte Carlo engine, React Flow canvas, Neon (Postgres), Better Auth, MCP server. The product spec and decision log live in `docs/PRD.md`; read the relevant sections before working on a ticket.
 
 ## Agent skills
 
@@ -19,6 +19,7 @@ Single-context: `CONTEXT.md` and `docs/adr/` at the repo root, created lazily. S
 ## Working in this repo
 
 - pnpm monorepo: `apps/web`, `packages/engine`, `packages/db`, `packages/mcp`. See `README.md`.
+- Database: Neon Postgres (Sydney) through Kysely and a `pg` pool; sign-in is Better Auth (Google). Apply migrations with `pnpm --filter @transpera-flow/db migrate` (needs `DATABASE_URL`, the owner). Ad hoc SQL: `bash packages/db/scripts/db-sql.sh -c "select 1"`. After changing a table or function run `pnpm --filter @transpera-flow/db gen:types` (writes `db-types.ts`, `json-columns.ts` and `function-types.ts`).
 - Run `pnpm lint && pnpm typecheck && pnpm test` before pushing; database tests need Postgres at `DATABASE_URL`.
 - `apps/web` uses Next.js 16: read `apps/web/AGENTS.md` and the bundled docs before writing Next code (e.g. `proxy.ts`, not middleware).
-- Anything verified only against plain Postgres rather than Supabase goes in `docs/supabase-notes.md`.
+- Anything verified only against plain Postgres rather than Neon goes in `docs/supabase-notes.md`.

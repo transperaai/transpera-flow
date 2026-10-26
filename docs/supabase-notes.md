@@ -1,33 +1,20 @@
-# Supabase: things to check when we connect a real project
+# Notes on what was verified only against plain Postgres
 
-Everything database-related has so far been verified only against **plain
-Postgres 16 with a small auth stand-in** (`packages/db/sql/compat.sql`),
-because Supabase's Docker images couldn't be pulled in the build environment.
-When we move to a real Supabase project, work through this list; some items
-may need code or migration changes.
+(The file keeps its name from the Supabase days.) Database behaviour is tested against **plain Postgres 16 with a small stand-in
+for the `auth` schema and the Supabase roles** (`packages/db/sql/compat.sql`), through the same runner that builds Neon. The
+database is now Neon, so this is the list of things to check there, and the record of what was found. Some items may need code or
+migration changes. Sections below that mention Supabase's own services (Auth, Storage, Realtime, PostgREST) are history.
 
-## Setup steps (once)
+## Setup steps (once, per deployment)
 
-1. Create a Supabase project (Pro plan per PRD D2) and a Vercel project for `apps/web`.
-2. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to Vercel
-   (and to `apps/web/.env.local` for local dev). See `apps/web/.env.example`.
-3. Apply migrations and seed. Either:
-   - **SQL editor (works from a phone):** paste `packages/db/bootstrap.sql`
-     into a new query and run it once. It contains every migration, the seed, and
-     the migration-history rows so the CLI stays in sync afterwards.
-   - **CLI:** `npx supabase link --workdir packages/db` then
-     `npx supabase db push --workdir packages/db`, then run `seed.sql` in the SQL editor.
-   Regenerate the bundle with `pnpm --filter @transpera-flow/db gen:bootstrap` after changing
-   migrations or fixtures (CI fails if it's stale).
-4. (Covered by the bootstrap bundle.)
-5. Auth → URL configuration: set the site URL and add
-   `https://<your-domain>/auth/callback` (and Vercel preview URLs) to the redirect allow-list.
-6. Sign in once with your email, then run `packages/db/scripts/make-agency-admin.sql`
-   (with your email) and sign out/in again.
-
-The Claude Code environment's network policy currently blocks `api.supabase.com`
-and `*.supabase.co`; allow them in the environment's Network access settings so an
-agent can run migrations and checks directly.
+1. Create the database in Neon (Sydney, aws-ap-southeast-2) and the Vercel project for `apps/web`; set `DATABASE_URL` (the owner)
+   and the Better Auth and Google variables in Vercel. See `apps/web/.env.example`.
+2. Apply the schema: `pnpm --filter @transpera-flow/db migrate` (add `--seed` only on a local database).
+3. Create the app's login: `bash packages/db/scripts/db-sql.sh -v app_password="$APP_PASSWORD" -f packages/db/scripts/create-app-login.sql`,
+   then set `APP_DATABASE_URL` to the connection string for `authenticator` with that password.
+4. Add the app's `/api/auth/callback/google` URL to the Google OAuth client's redirect URIs.
+5. Sign in once with your email (it must be in `ACCESS_ADMIN_EMAILS` or a deployment rule), then, if you need an agency admin,
+   run `packages/db/scripts/make-agency-admin.sql` (with your email) and sign out and in again.
 
 ## Verified on the live project (29 Sep 2026)
 

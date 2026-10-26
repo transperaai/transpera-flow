@@ -86,6 +86,15 @@ describe("sign-in settings", () => {
     });
   });
 
+  it("queries as APP_DATABASE_URL when it is set, and as DATABASE_URL (the owner) when it is not", () => {
+    expect(authEnv({ ...SETTINGS, DATABASE_URL: "postgres://owner@x/y" })).toMatchObject({ databaseUrl: "postgres://owner@x/y", appDatabaseUrl: "postgres://owner@x/y" });
+    expect(authEnv({ ...SETTINGS, DATABASE_URL: "postgres://owner@x/y", APP_DATABASE_URL: " postgres://authenticator@x/y " })).toMatchObject({
+      databaseUrl: "postgres://owner@x/y",
+      appDatabaseUrl: "postgres://authenticator@x/y",
+    });
+    expect(authEnv({ ...SETTINGS, APP_DATABASE_URL: "" })?.appDatabaseUrl).toBe(SETTINGS.DATABASE_URL);
+  });
+
   it("defaults to Google and reads AUTH_PROVIDERS", () => {
     expect(parseProviders(undefined)).toEqual(["google"]);
     expect(parseProviders("")).toEqual(["google"]);
