@@ -10,7 +10,7 @@ new session with:
 **26 Oct 2026: the direction changed. Read `docs/plans/rework-direction.md` first.** Each client gets its own
 deployment (not multi-tenant). The app moves off Supabase to Neon with Better Auth: Google now, Microsoft later, with
 company-domain and named-email roles. Uploads are dropped for reference links, live editing is dropped, and hosting stays
-on Vercel. The next session plans the strip list with Austin, then builds with agents. Supabase was restored on 26 Oct
+on Vercel. The next session starts with Austin's manual QA (log and fix findings; no cutting yet), then agrees the strip list and builds with agents. Supabase was restored on 26 Oct
 after a free-plan pause. PR #248 is open; issue #249 is parked.
 
 ## Where things stand

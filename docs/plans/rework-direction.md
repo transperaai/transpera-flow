@@ -68,7 +68,13 @@ There are no Edge Functions, webhooks, extensions or auth emails. The SQL alread
 ## Next session
 
 1. Read this file, `CLAUDE.md` and `docs/HANDOVER.md`.
-2. Walk Austin through the app section by section, keep or cut, and record the strip list here.
-3. Write briefs (Opus), build with agents (Sonnet), review (Opus), in this order: strip → schema port to Neon → Better
-   Auth with domain and email roles → server-side queries → References → drop Storage and Realtime → deployment
-   template per client.
+2. **Austin is doing a manual QA pass first.** Take his findings as he sends them: log each one (issue or list), fix what
+   is clearly broken, and tag each finding keep / cut / rework. **Don't start cutting features until he says the QA pass
+   is done.** His notes will drive the strip list.
+3. Production is still the Supabase project `vgsjkpwvxkpqvyazwcyq`. If it has paused (free plan, about 7 idle days),
+   restore it first: `curl -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
+   https://api.supabase.com/v1/projects/vgsjkpwvxkpqvyazwcyq/restore`, then poll `GET /v1/projects/<ref>` until
+   `ACTIVE_HEALTHY`.
+4. After QA: agree the strip list with Austin and record it here. Then write briefs (Opus), build with agents (Sonnet)
+   and review (Opus), in this order: strip → schema port to Neon → Better Auth with domain and email roles → server-side
+   queries → References → drop Storage and Realtime → deployment template per client.
