@@ -86,14 +86,14 @@ builds a preview of the branch on every push, and Austin points its Preview env 
 |---|---|---|
 | 1 | Neon schema: compat SQL, migration runner, `createDb` + ClaimsDriver, generated Kysely types | no |
 | 2 | Better Auth: Google now, Microsoft-ready, deployment access (domains/emails → Admin/Editor/Viewer) | live test only |
-| 3a–3d | Port supabase-js to Kysely: 3a `packages/db`, 3b `packages/mcp` (+ token auth in app code), 3c `apps/web/src/lib`, 3d `apps/web/src/app` + components | no |
+| 3 | Port supabase-js to Kysely in one parallel wave (3a–3e by package and folder; MCP token auth moves into app code) | no |
 | 4 | References replace uploads; logo in the database; drop Storage | no |
 | 5 | Drop Realtime and presence | no |
 | 6 | Ops: `psql "$DATABASE_URL"` scripts, migration log, remove `@supabase/*` | no |
 | 7 | Data copy from Supabase and cutover | yes, plus Austin's go-ahead |
 | 8 | Per-client deployment template | yes |
 
-Steps 3a–3d can run in parallel once step 1 is merged, because they touch separate packages. Steps 4 and 5 come
+Step 3 runs as one wave of parallel builders after step 2, because every call site needs `getDb()`. Steps 4 and 5 come
 after 3, since they edit files that 3 ports.
 
 ## Step 1: Neon schema, compat layer and `createDb`
@@ -207,24 +207,62 @@ null); the sync trigger writes `auth.users`; the editor/viewer membership sync n
 is refused; a proxy redirect when there's no session cookie. Better Auth's own OAuth flow isn't unit-tested. Austin
 checks it live.
 
-## Steps 3a–3d: port supabase-js to Kysely (outline; Opus details each before it starts)
+## Step 3: port supabase-js to Kysely (one parallel wave)
+
+**Contract first (Opus, one commit before the wave):** `export type Db = Kysely<DB>` in `packages/db/src/queries.ts`
+(type-only import, so the package root stays browser-safe). `rpc`/`rpcRows` helpers live in
+`@transpera-flow/db/client`. `getDb()` and `getSessionUser()` live in `apps/web/src/lib/auth/session.ts` (step 2), and a
+shared test helper builds a `Db` on a throwaway database for given claims (`packages/db/test/harness.ts`, exported for
+the other packages' tests). After this commit the tree doesn't typecheck until the wave lands; that's expected on the
+integration branch.
+
+**Wave: five Sonnet builders in parallel worktrees, each owning disjoint files.** Every function's signature stays the
+same apart from the `db` parameter's type, so their work meets cleanly:
+
+| Builder | Owns (source and its tests) |
+|---|---|
+| 3a | `packages/db/src/**`, `packages/db/test/**` |
+| 3b | `packages/mcp/src/**`, `packages/mcp/test/**`, `apps/web/src/app/api/mcp/**`, `.github/workflows/ci.yml` |
+| 3c | `apps/web/src/lib/**` (except `lib/auth`, `lib/realtime`), their tests in `apps/web/test` |
+| 3d | `apps/web/src/app/w/[slug]/**/*actions*.ts` and `apps/web/src/app/actions.ts`, their tests |
+| 3e | the rest of `apps/web/src/app/**` (pages, layouts, route handlers, `s/[token]`, `settings/tokens`), `apps/web/src/components/**`, `apps/web/stories/**`, their tests |
+
+A builder that needs a change in a file it doesn't own stops and reports it, rather than editing.
 
 Rules for every call site:
-- `check(await db.from(t).select(cols)…)` → `await db.selectFrom(t).select([...])…execute()` (or
-  `executeTakeFirst()` / `executeTakeFirstOrThrow()` for `.maybeSingle()` / `.single()`).
-- `.rpc(name, args)` → helper `rpc(db, name, args)` / `rpcRows(...)` in `packages/db/src/client.ts` that issues
-  `select * from public.<name>(k => $1, …)` with named arguments. Scalar functions return the value, and set-returning
-  functions return rows. That matches PostgREST.
-- Errors: thrown `pg` errors carry the same SQLSTATE `code` that PostgREST passed through, so `error.code === "23505"`
-  checks keep their meaning. `PGRST116` (no row for `.single()`) becomes Kysely's `NoResultError`. Port each of the 120
-  `error.code` sites deliberately.
-- `count: "exact", head: true` → `select(eb => eb.fn.countAll().as("count"))`, converted to a number.
-- Keep each function's signature and return shape. Only `db` changes type. The existing tests are the safety net, and
-  they run against the same RLS.
-- 3a switches `export type Db` to `Kysely<DB>` and ports `packages/db/src`. 3b ports `packages/mcp`, replacing the
-  PostgREST pre-request hook: `/api/mcp` hashes the bearer token, calls the existing token-lookup SQL as `anon` (read
-  ADR 0002 and `20260930040000_api_tokens.sql` first), then builds claims `{ sub: user_id, role: "authenticated",
-  api_token_id }`. 3c ports `apps/web/src/lib/*`, and 3d ports `apps/web/src/app/**` and components.
+- `const supabase = await createClient()` → `const db = await getDb()`. `supabase.auth.getClaims()`/`getUser()` used to
+  learn who is signed in → `getSessionUser()`.
+- `check(await db.from(t).select(cols)…)` → `await db.selectFrom(t).select([...])…execute()`. Use
+  `executeTakeFirst()` for `.maybeSingle()` and `executeTakeFirstOrThrow()` for `.single()`. For `.insert(...).select()`,
+  use `returning`. For upserts, use `onConflict(oc => oc.columns([...]).doUpdateSet(...))` with the same conflict columns.
+- `.rpc(name, args)` → `rpc(db, name, args)` for scalar functions and `rpcRows(...)` for set-returning ones. Named
+  arguments, the same names as today.
+- Errors: a thrown `pg` error carries the same SQLSTATE `code` that PostgREST passed through, so `error.code === "23505"`
+  checks keep their meaning, but they move from `{ error }` destructuring to try/catch. `PGRST116` → Kysely's
+  `NoResultError`. Port each `error.code` site deliberately, and keep the user-facing messages identical.
+- `count: "exact", head: true` → `select(eb => eb.fn.countAll<number>().as("count"))`, then `Number(...)`.
+- Embedded selects (two of them): an explicit join, or a second query, returning the same shape.
+- Values: numbers and JSON come back as they did, and timestamps come back in the same ISO text as PostgREST (step 1's
+  parsers). Don't add conversions at call sites.
+- Keep each function's return shape exactly. Its callers and tests depend on it.
+
+Tests:
+- Tests that fake the supabase-js builder (`vi.mock("@/lib/supabase/server", …)`, 16 web files, plus MCP fakes) are
+  rewritten to run against a throwaway Postgres through the shared harness, mocking only `@/lib/auth/session` to return
+  a real `Db` for chosen claims. Keep every assertion's intent. Where a fake checked which filters were applied,
+  assert the observable result instead.
+- The MCP `postgrest-*` end-to-end suites, which skip without PostgREST, run directly against the throwaway database
+  through the new handler. So 3b turns about 230 skipped tests into running ones, and CI drops its PostgREST container.
+
+3b also replaces the PostgREST pre-request hook (ADR 0002). `/api/mcp` hashes the bearer token and looks it up with
+the existing SQL from `20260930040000_api_tokens.sql` (read the hook function; reuse its checks: expiry, revocation and
+last-used stamping). The lookup runs as the owner inside a narrow SECURITY DEFINER function if one doesn't exist.
+Then `createDb` builds claims `{ sub: user_id, role: "authenticated", api_token_id }`. Write a short ADR (0018)
+superseding 0002.
+
+**After the wave:** Opus merges the five branches, fixes the seams until `pnpm lint && pnpm typecheck && pnpm test` pass,
+then reviews adversarially. The review looks hardest at error-code handling, `.single()` semantics, upsert conflict
+targets, and anything that ran as `service_role`.
 
 ## Step 4: References in place of uploads (outline)
 
