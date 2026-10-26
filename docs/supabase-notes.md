@@ -489,3 +489,19 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
 - A bare `pg` Pool given as `database` cannot take `schemaName` (the types only offer it with `{ dialect, type }` or `{ db, type }`), so
   the instance passes `new PostgresDialect({ pool })` with `type: "postgres"`, `schemaName: "better_auth"` and `transaction: true`.
 - The migration's Better Auth DDL is what `auth generate` 1.7.13 emitted for that configuration (already schema-qualified, uuid ids).
+
+## Neon move, step 7a: the copy scripts (verified only on plain Postgres 16, not Supabase or Neon)
+
+- `packages/db/scripts/copy-from-supabase/` (`export.ts`, `import.ts`, `verify.ts`) were run only against local Postgres 16, with a
+  "Supabase-like" source (the shims and migrations up to `20261227000000`) and a local http server standing in for the Management
+  API and the public Storage URL. Never run against Supabase or Neon.
+- Not checked: the real Management API's response size limit and rate limit (the adapter retries 429 and 5xx three times; `--page-size`
+  is the knob), that it answers a `select` with a JSON array of rows as documented, that `metadata ->> 'size'` and `'mimetype'` are
+  how `storage.objects` records an object, that `supabase_migrations.schema_migrations.version` reads `20261227000000` at row 72, and
+  that the public branding URL serves the bytes without a key.
+- Not checked on Neon (Postgres 18): whether `neondb_owner` may `set session_replication_role = replica`. The local test of the refusal
+  uses a non-superuser that owns the tables, which is what Neon's owner is for ownership, but not for `neon_superuser`'s extra rights.
+  Both import paths are tested; the report says which one ran.
+- JSON numbers pass through the JavaScript parser on import, so a `numeric` with more than about 15 significant digits, or an `int8`
+  above 2^53, would lose precision. The export keeps the database's own text, and nothing in the schema is that wide (not proven
+  against production's data).
