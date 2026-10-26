@@ -1,6 +1,8 @@
 import { normalizeFirstPrinciples, oversizedParts, type FirstPrinciples } from "@transpera-flow/engine";
 import type { Json } from "./database.types";
 import type { Db } from "./queries";
+import { columns } from "./columns";
+import { pgCode } from "./pg-error";
 import type { FirstPrinciplesRow } from "./types";
 
 // First principles per process revision (issue #119, A54). One row per revision; edits go into the draft (the
@@ -84,12 +86,10 @@ export function firstPrinciplesDiffer(a: ResolvedFirstPrinciples, b: ResolvedFir
 /** Load the first principles of several revisions of a process (each own or inherited), in one read. */
 export async function loadFirstPrinciplesFor(db: Db, processId: string, revisionIds: readonly string[]): Promise<Record<string, ResolvedFirstPrinciples>> {
   const [revisions, rows] = await Promise.all([
-    db.from("process_revisions").select("id, number").eq("process_id", processId),
-    db.from("first_principles").select(FIRST_PRINCIPLES_COLUMNS).eq("process_id", processId),
+    db.selectFrom("process_revisions").select(["id", "number"]).where("process_id", "=", processId).execute(),
+    db.selectFrom("first_principles").select(columns(FIRST_PRINCIPLES_COLUMNS)).where("process_id", "=", processId).execute(),
   ]);
-  if (revisions.error) throw revisions.error;
-  if (rows.error) throw rows.error;
-  return Object.fromEntries(revisionIds.map((id) => [id, resolveFirstPrinciples(revisions.data, rows.data as unknown as FirstPrinciplesRow[], id)]));
+  return Object.fromEntries(revisionIds.map((id) => [id, resolveFirstPrinciples(revisions, rows as unknown as FirstPrinciplesRow[], id)]));
 }
 
 /** Load the first principles of one revision of a process (own or inherited). */
@@ -123,33 +123,51 @@ export type SaveFirstPrinciplesOutcome =
 export async function saveFirstPrinciples(db: Db, owner: FirstPrinciplesOwner, doc: FirstPrinciples, version: string | null): Promise<SaveFirstPrinciplesOutcome> {
   const big = oversizedParts(normalizeFirstPrinciples(doc));
   if (big.length) return { status: "invalid", message: "That is too much text to save. Shorten the longer answers." };
-  const columns = firstPrinciplesToColumns(doc);
-  const fail = (error: { code?: string }): SaveFirstPrinciplesOutcome => {
-    if (error.code === "42501") return { status: "forbidden" };
-    if (error.code === "55000") return { status: "not_draft" };
+  const cols = firstPrinciplesToColumns(doc);
+  const fail = (error: unknown): SaveFirstPrinciplesOutcome => {
+    const code = pgCode(error);
+    if (code === "42501") return { status: "forbidden" };
+    if (code === "55000") return { status: "not_draft" };
     return { status: "error", message: "Couldn't save. Try again." };
   };
   const conflict = async (): Promise<SaveFirstPrinciplesOutcome> => {
-    const { data, error } = await db.from("first_principles").select(FIRST_PRINCIPLES_COLUMNS).eq("revision_id", owner.revisionId).maybeSingle();
-    if (error) return { status: "error", message: "Couldn't save. Try again." };
+    let data;
+    try {
+      data = await db.selectFrom("first_principles").select(columns(FIRST_PRINCIPLES_COLUMNS)).where("revision_id", "=", owner.revisionId).executeTakeFirst();
+    } catch {
+      return { status: "error", message: "Couldn't save. Try again." };
+    }
     // Nothing to compare against and the write didn't go through: the user can't write here.
     if (!data || data.updated_at === version) return { status: "forbidden" };
     return { status: "conflict", doc: firstPrinciplesFromRow(data as unknown as FirstPrinciplesRow), version: data.updated_at };
   };
 
   if (version === null) {
-    const { data, error } = await db
-      .from("first_principles")
-      .insert({ workspace_id: owner.workspaceId, process_id: owner.processId, revision_id: owner.revisionId, ...columns })
-      .select("updated_at")
-      .single();
-    if (!error) return { status: "saved", version: data.updated_at };
-    if (error.code === "23505") return conflict();
-    return fail(error);
+    try {
+      const data = await db
+        .insertInto("first_principles")
+        .values({ workspace_id: owner.workspaceId, process_id: owner.processId, revision_id: owner.revisionId, ...cols })
+        .returning("updated_at")
+        .executeTakeFirstOrThrow();
+      return { status: "saved", version: data.updated_at };
+    } catch (e) {
+      if (pgCode(e) === "23505") return conflict();
+      return fail(e);
+    }
   }
 
-  const { data, error } = await db.from("first_principles").update(columns).eq("revision_id", owner.revisionId).eq("updated_at", version).select("updated_at");
-  if (error) return fail(error);
+  let data;
+  try {
+    data = await db
+      .updateTable("first_principles")
+      .set(cols)
+      .where("revision_id", "=", owner.revisionId)
+      .where("updated_at", "=", version)
+      .returning("updated_at")
+      .execute();
+  } catch (e) {
+    return fail(e);
+  }
   const row = data[0];
   if (!row) return conflict();
   return { status: "saved", version: row.updated_at };

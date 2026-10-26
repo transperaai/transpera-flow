@@ -1,5 +1,7 @@
 import type { Json } from "./database.types";
 import type { Db } from "./queries";
+import { rpc } from "./client";
+import { pgCode } from "./pg-error";
 import type { AiAnalysisRow, AiAnalysisStatus, AiAnalysisTrigger } from "./types";
 
 // AI analysis storage (issue #111, A46): the five switches per workspace, and what AI wrote about each process
@@ -22,12 +24,11 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
 
 /** The workspace's switches: the defaults when there is no row. */
 export async function loadAiSettings(db: Db, workspaceId: string): Promise<AiSettings> {
-  const { data, error } = await db
-    .from("ai_settings")
-    .select("review_on_publish, review_on_market, suggest_issues, suggest_solutions, read_sources")
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (error) throw error;
+  const data = await db
+    .selectFrom("ai_settings")
+    .select(["review_on_publish", "review_on_market", "suggest_issues", "suggest_solutions", "read_sources"])
+    .where("workspace_id", "=", workspaceId)
+    .executeTakeFirst();
   return data ? { ...data } : { ...DEFAULT_AI_SETTINGS };
 }
 
@@ -40,12 +41,19 @@ export type SaveAiSettingOutcome = { status: "saved"; settings: AiSettings } | {
 export async function saveAiSetting(db: Db, workspaceId: string, key: string, value: boolean): Promise<SaveAiSettingOutcome> {
   if (!(AI_SETTING_KEYS as readonly string[]).includes(key) || typeof value !== "boolean") return { status: "invalid" };
   const row: Partial<AiSettings> & { workspace_id: string } = { workspace_id: workspaceId, [key as AiSettingKey]: value };
-  const { error } = await db.from("ai_settings").upsert(row, { onConflict: "workspace_id" });
-  if (error) return error.code === "42501" ? { status: "forbidden" } : { status: "error", message: "Couldn't save. Try again." };
+  try {
+    await db
+      .insertInto("ai_settings")
+      .values(row)
+      .onConflict((oc) => oc.column("workspace_id").doUpdateSet(row))
+      .execute();
+  } catch (e) {
+    return pgCode(e) === "42501" ? { status: "forbidden" } : { status: "error", message: "Couldn't save. Try again." };
+  }
   return { status: "saved", settings: await loadAiSettings(db, workspaceId) };
 }
 
-const ANALYSIS_COLUMNS = "id, workspace_id, process_id, revision_id, status, reason, trigger, summary, insights, review, checked, dropped, input_hash, model, model_hash, usage, run_id, person_labels, created_by, created_at, updated_at";
+const ANALYSIS_COLUMNS = ["id", "workspace_id", "process_id", "revision_id", "status", "reason", "trigger", "summary", "insights", "review", "checked", "dropped", "input_hash", "model", "model_hash", "usage", "run_id", "person_labels", "created_by", "created_at", "updated_at"] as const;
 
 export type AiAnalysisWithRun = AiAnalysisRow & {
   /** Who ran it (the name recorded when the run was reserved); null if unknown. */
@@ -56,9 +64,8 @@ export type AiAnalysisWithRun = AiAnalysisRow & {
 async function withRunBy(db: Db, rows: AiAnalysisRow[]): Promise<AiAnalysisWithRun[]> {
   const names = new Map<string, string | null>();
   if (rows.length) {
-    const runs = await db.from("ai_runs").select("id, user_name").in("id", rows.map((r) => r.run_id));
-    if (runs.error) throw runs.error;
-    for (const r of runs.data) names.set(r.id, r.user_name);
+    const runs = await db.selectFrom("ai_runs").select(["id", "user_name"]).where("id", "in", rows.map((r) => r.run_id)).execute();
+    for (const r of runs) names.set(r.id, r.user_name);
   }
   return rows.map((r) => ({ ...r, run_by: names.get(r.run_id) ?? null }));
 }
@@ -66,8 +73,7 @@ async function withRunBy(db: Db, rows: AiAnalysisRow[]): Promise<AiAnalysisWithR
 /** The stored analyses of these revisions (RLS: every member reads), by revision id, each with the name of whoever ran it. */
 export async function loadAiAnalyses(db: Db, revisionIds: readonly string[]): Promise<Record<string, AiAnalysisWithRun>> {
   if (!revisionIds.length) return {};
-  const { data, error } = await db.from("ai_analyses").select(ANALYSIS_COLUMNS).in("revision_id", [...revisionIds]);
-  if (error) throw error;
+  const data = await db.selectFrom("ai_analyses").select([...ANALYSIS_COLUMNS]).where("revision_id", "in", [...revisionIds]).execute();
   const rows = await withRunBy(db, data as unknown as AiAnalysisRow[]);
   return Object.fromEntries(rows.map((r) => [r.revision_id, r]));
 }
@@ -78,8 +84,7 @@ export async function loadAiAnalyses(db: Db, revisionIds: readonly string[]): Pr
  */
 export async function loadLatestAiAnalyses(db: Db, processIds: readonly string[]): Promise<Record<string, AiAnalysisWithRun>> {
   if (!processIds.length) return {};
-  const { data, error } = await db.from("ai_analyses").select(ANALYSIS_COLUMNS).in("process_id", [...processIds]).order("updated_at", { ascending: false });
-  if (error) throw error;
+  const data = await db.selectFrom("ai_analyses").select([...ANALYSIS_COLUMNS]).where("process_id", "in", [...processIds]).orderBy("updated_at", "desc").execute();
   const latest = new Map<string, AiAnalysisRow>();
   for (const r of data as unknown as AiAnalysisRow[]) if (!latest.has(r.process_id)) latest.set(r.process_id, r);
   const rows = await withRunBy(db, [...latest.values()]);
@@ -105,8 +110,12 @@ export const AI_RUN_COOLDOWN_SECONDS = 60;
  * called: every run, failed or not, reserves first.
  */
 export async function reserveAiRun(db: Db, workspaceId: string, processId: string, trigger: AiAnalysisTrigger): Promise<AiReservation> {
-  const { data, error } = await db.rpc("reserve_ai_run", { p_workspace: workspaceId, p_process: processId, p_trigger: trigger });
-  if (error) return { status: "error" };
+  let data: unknown;
+  try {
+    data = await rpc(db, "reserve_ai_run", { p_workspace: workspaceId, p_process: processId, p_trigger: trigger });
+  } catch {
+    return { status: "error" };
+  }
   const r = data as { status?: string; id?: string; retry_after_seconds?: number } | null;
   if (r?.status === "ok" && r.id) return { status: "ok", runId: r.id };
   if (r?.status === "limit") return { status: "limit" };
@@ -140,10 +149,16 @@ export interface SaveAiAnalysisInput {
 
 /** Store (or replace) the analysis of a revision. Owners and editors only; returns its id, or null when it couldn't be written. */
 export async function saveAiAnalysis(db: Db, input: SaveAiAnalysisInput): Promise<string | null> {
-  const { data, error } = await db.from("ai_analyses").upsert(input, { onConflict: "revision_id" }).select("id").single();
-  if (error) {
-    console.error("Couldn't store the AI analysis.", error.message);
+  try {
+    const data = await db
+      .insertInto("ai_analyses")
+      .values(input)
+      .onConflict((oc) => oc.column("revision_id").doUpdateSet(input))
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    return data.id;
+  } catch (e) {
+    console.error("Couldn't store the AI analysis.", e instanceof Error ? e.message : e);
     return null;
   }
-  return data.id;
 }

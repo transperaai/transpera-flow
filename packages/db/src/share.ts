@@ -10,6 +10,7 @@
 
 import { compareRatingsDesc, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
 import { loadFindings } from "./findings";
+import { shareToggles } from "./share-reader";
 import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
 import { loadLeverSettings } from "./lever-settings";
@@ -167,27 +168,16 @@ export class ShareBuildError extends Error {
 // ---------------------------------------------------------------------------
 
 /**
- * A `Db` that changes exactly two rpc calls and nothing else: `team_capacity` becomes `share_team_capacity` (labels or names
- * by the People toggle, and no pay for anyone), and `can_see_people` answers the People toggle. Every other call passes
- * through, so the loaders read as the editor who makes the link (RLS) and build exactly what the pages build.
+ * A `Db` that changes exactly two reads and nothing else: `team_capacity` becomes `share_team_capacity` (labels or names
+ * by the People toggle, and no pay for anyone), and `can_see_people` answers the People toggle (both in ./queries.ts, which
+ * looks the `Db` up in ./share-reader.ts). Every other query passes through, so the loaders read as the editor who makes
+ * the link (RLS) and build exactly what the pages build.
  */
 export function shareReaderDb(db: Db, toggles: ShareToggles): Db {
-  return new Proxy(db, {
-    get(target, prop) {
-      if (prop === "rpc") {
-        return (fn: string, args?: unknown, options?: unknown) => {
-          if (fn === "team_capacity") {
-            const ws = (args as { ws: string } | undefined)?.ws;
-            return (target.rpc as (...a: unknown[]) => unknown)("share_team_capacity", { ws, show_people: toggles.people }, options);
-          }
-          if (fn === "can_see_people") return Promise.resolve({ data: toggles.people, error: null });
-          return (target.rpc as (...a: unknown[]) => unknown)(fn, args, options);
-        };
-      }
-      const value = Reflect.get(target, prop, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
+  // A new Kysely over the same driver; `loadTeam` and `readerSeesPeople` see it in the registry and answer for a link.
+  const reader = db.withPlugin({ transformQuery: ({ node }) => node, transformResult: async ({ result }) => result });
+  shareToggles.set(reader, toggles);
+  return reader;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,24 +545,23 @@ type Workspace = Pick<WorkspaceRow, "id" | "name" | "slug"> & { settings: unknow
 /** The real names and ids of the workspace's people and clients, read as the editor. Used to redact and check; never saved. */
 export async function loadShareSecrets(db: Db, workspaceId: string): Promise<ShareSecrets> {
   const [people, clients] = await Promise.all([
-    db.from("people").select("id, name, created_at").eq("workspace_id", workspaceId),
-    db.from("clients").select("id, name, created_at").eq("workspace_id", workspaceId),
+    db.selectFrom("people").select(["id", "name", "created_at"]).where("workspace_id", "=", workspaceId).execute(),
+    db.selectFrom("clients").select(["id", "name", "created_at"]).where("workspace_id", "=", workspaceId).execute(),
   ]);
-  if (people.error) throw people.error;
-  if (clients.error) throw clients.error;
   // The numbering `share_team_capacity` and `team_capacity` use: (created_at, id) over every person, active or not.
   const rank = (rows: { id: string; name: string; created_at: string }[], prefix: string): SecretName[] =>
     [...rows]
       .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .map((r, i) => ({ id: r.id, name: r.name, label: `${prefix} ${i + 1}` }));
-  return { people: rank(people.data, "Team member"), clients: rank(clients.data, "Client") };
+  return { people: rank(people, "Team member"), clients: rank(clients, "Client") };
 }
 
 async function loadRevisionGraph(db: Db, revisionId: string): Promise<Graph> {
-  const [steps, edges] = await Promise.all([db.from("steps").select("*").eq("revision_id", revisionId), db.from("edges").select("*").eq("revision_id", revisionId)]);
-  if (steps.error) throw steps.error;
-  if (edges.error) throw edges.error;
-  return { steps: partitionSteps(steps.data as unknown as StepRow[]).steps, edges: edges.data as unknown as EdgeRow[] };
+  const [steps, edges] = await Promise.all([
+    db.selectFrom("steps").selectAll().where("revision_id", "=", revisionId).execute(),
+    db.selectFrom("edges").selectAll().where("revision_id", "=", revisionId).execute(),
+  ]);
+  return { steps: partitionSteps(steps as unknown as StepRow[]).steps, edges: edges as unknown as EdgeRow[] };
 }
 
 async function loadSolutionsData(db: Db, ws: string, processId?: string): Promise<SolutionsData> {
@@ -631,8 +620,13 @@ export async function loadShareData(
     const solutionBases: Record<string, Graph> = Object.fromEntries(older.flatMap((s, i) => (graphs[i] ? [[s.id, graphs[i]!]] : [])));
     raw = { ...base, kind: "overview", live, parts, company, issues, solutions, solutionBases, findings, firstPrinciples };
   } else if (target.kind === "process") {
-    const row = await db.from("processes").select("id, workspace_id, is_company, archived_at, live_revision_id").eq("id", target.id ?? "").eq("workspace_id", ws).maybeSingle();
-    if (row.error) throw row.error;
+    const found = await db
+      .selectFrom("processes")
+      .select(["id", "workspace_id", "is_company", "archived_at", "live_revision_id"])
+      .where("id", "=", target.id ?? "")
+      .where("workspace_id", "=", ws)
+      .executeTakeFirst();
+    const row = { data: found ?? null };
     if (!row.data) throw new ShareBuildError("That process isn't here any more.");
     if (row.data.is_company) throw new ShareBuildError("Share the Overview instead.");
     if (row.data.archived_at) throw new ShareBuildError("An archived process can't be shared. Restore it first.");
@@ -718,9 +712,8 @@ export async function loadShareData(
 async function refuseArchived(db: Db, workspaceId: string, processIds: readonly (string | null | undefined)[]): Promise<void> {
   const ids = [...new Set(processIds.filter((x): x is string => !!x))];
   if (!ids.length) return;
-  const { data, error } = await db.from("processes").select("id, archived_at").eq("workspace_id", workspaceId).in("id", ids);
-  if (error) throw error;
-  if ((data ?? []).some((p) => p.archived_at)) throw new ShareBuildError("An archived process can't be shared. Restore it first.");
+  const data = await db.selectFrom("processes").select(["id", "archived_at"]).where("workspace_id", "=", workspaceId).where("id", "in", ids).execute();
+  if (data.some((p) => p.archived_at)) throw new ShareBuildError("An archived process can't be shared. Restore it first.");
 }
 
 /**
