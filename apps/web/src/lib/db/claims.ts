@@ -10,8 +10,8 @@ export interface ClaimsUser {
 }
 
 /**
- * The only place JWT claims are built: what `auth.jwt()` and `auth.uid()` see inside a query. Supabase-shaped, so the
- * existing RLS policies and SECURITY DEFINER functions work unchanged. A guest is never an agency admin. Signed out is `null` (role `anon`). The MCP route adds
+ * The only place JWT claims are built: what `auth.jwt()` and `auth.uid()` see inside a query. the shape (`sub`, `role`, `email`, `app_metadata`) the
+ * RLS policies and SECURITY DEFINER functions work unchanged. A guest is never an agency admin. Signed out is `null` (role `anon`). The MCP route adds
  * `api_token_id` (step 3b).
  */
 export function claimsFor(user: ClaimsUser | null, extra: { apiTokenId?: string } = {}): Claims | null {

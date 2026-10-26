@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
-    "@supabase/supabase-js": "^2.117.2",
     "@transpera-flow/db": "workspace:*",
     "@transpera-flow/engine": "workspace:*",
     "zod": "^4.6.5"

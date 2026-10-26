@@ -1,4 +1,4 @@
-import { BundleTooLargeError, bundleJsonChunks, exportWorkspaceBundle, supabaseReader, supabaseWorkspaceReader } from "@transpera-flow/db";
+import { BundleTooLargeError, bundleJsonChunks, exportWorkspaceBundle, dbReader, dbWorkspaceReader } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { authEnv } from "@/lib/auth/env";
 import { getDb, getSessionUser } from "@/lib/auth/session";
@@ -35,7 +35,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/w/[slug]/export
 
   const now = new Date();
   try {
-    const bundle = await exportWorkspaceBundle(workspace.id, supabaseWorkspaceReader(db), supabaseReader(db), { canEdit: true, now });
+    const bundle = await exportWorkspaceBundle(workspace.id, dbWorkspaceReader(db), dbReader(db), { canEdit: true, now });
     if (!bundle) return Response.json({ message: "No such workspace." }, { status: 404 });
     const chunks = bundleJsonChunks(bundle);
     const encoder = new TextEncoder();

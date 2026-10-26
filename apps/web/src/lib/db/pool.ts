@@ -9,16 +9,20 @@ import { authEnv } from "@/lib/auth/env";
 
 const globalPools = globalThis as unknown as { __tfAppPool?: pg.Pool; __tfAuthPool?: pg.Pool };
 
-function databaseUrl(): string {
-  const env = authEnv();
-  if (!env) throw new Error("DATABASE_URL and BETTER_AUTH_SECRET are not set");
-  return env.databaseUrl;
+function env() {
+  const found = authEnv();
+  if (!found) throw new Error("DATABASE_URL and BETTER_AUTH_SECRET are not set");
+  return found;
 }
 
-/** The pool behind `getDb()`: numeric, int8 and date types parse as PostgREST returned them (see createPool). */
+/**
+ * The pool behind `getDb()`: numeric, int8 and date types parse as PostgREST returned them (see createPool). It connects with
+ * `APP_DATABASE_URL` (the `authenticator` login, which can only become `anon` or `authenticated`) and falls back to
+ * `DATABASE_URL` (the owner) where that is not set, such as local development.
+ */
 export function appPool(): pg.Pool {
   if (!globalPools.__tfAppPool) {
-    globalPools.__tfAppPool = createPool(databaseUrl());
+    globalPools.__tfAppPool = createPool(env().appDatabaseUrl);
     attachDatabasePool(globalPools.__tfAppPool);
   }
   return globalPools.__tfAppPool;
@@ -30,7 +34,7 @@ export function appPool(): pg.Pool {
  */
 export function authPool(): pg.Pool {
   if (!globalPools.__tfAuthPool) {
-    globalPools.__tfAuthPool = new pg.Pool({ connectionString: databaseUrl() });
+    globalPools.__tfAuthPool = new pg.Pool({ connectionString: env().databaseUrl });
     attachDatabasePool(globalPools.__tfAuthPool);
   }
   return globalPools.__tfAuthPool;

@@ -3,7 +3,10 @@
 export type ProviderId = "google" | "microsoft";
 
 export interface AuthEnv {
+  /** `DATABASE_URL`: the owner. Better Auth and the sign-in access functions use it; nothing else should. */
   databaseUrl: string;
+  /** `APP_DATABASE_URL`, the `authenticator` login (packages/db/scripts/create-app-login.sql), or `databaseUrl` when it is not set. The app's queries use it. */
+  appDatabaseUrl: string;
   secret: string;
   /** The deployment's own URL; a preview deployment sets the stable alias here and signs in through it (oAuthProxy). */
   baseUrl: string | undefined;
@@ -20,6 +23,7 @@ export function authEnv(env: Record<string, string | undefined> = process.env): 
   if (!databaseUrl || !secret) return null;
   return {
     databaseUrl,
+    appDatabaseUrl: env.APP_DATABASE_URL?.trim() || databaseUrl,
     secret,
     baseUrl: env.BETTER_AUTH_URL?.trim() || undefined,
     oauthProxySecret: env.OAUTH_PROXY_SECRET?.trim() || undefined,

@@ -10,7 +10,7 @@ Work is tracked as GitHub issues (milestone parents #1–#3). Picking this up? S
 |---|---|
 | `apps/web` | Next.js 16 app (App Router, Tailwind v4, React Flow) |
 | `packages/engine` | Simulation engine, shared by the browser (Web Worker) and Node |
-| `packages/db` | Supabase migrations, seed, row types, row → engine model mapping |
+| `packages/db` | Postgres migrations and runner, seed, generated types, the Kysely `createDb`, row → engine model mapping |
 | `packages/mcp` | MCP server: tools and the `/api/mcp` request handler (see below) |
 | `prototype/` | The original single-file prototype; the engine port is tested against it |
 
@@ -23,10 +23,38 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Without Supabase settings the app runs in **demo mode** (`/demo`), showing the
+Without `DATABASE_URL` and `BETTER_AUTH_SECRET` the app runs in **demo mode** (`/demo`), showing the
 Northbeam sample from the seed fixtures. To use a database, copy
-`apps/web/.env.example` to `apps/web/.env.local` and fill it in; see
-[`docs/supabase-notes.md`](docs/supabase-notes.md).
+`apps/web/.env.example` to `apps/web/.env.local` and fill it in.
+
+## Stack and database
+
+The database is [Neon](https://neon.tech) Postgres (Sydney, AWS ap-southeast-2); the app is hosted on Vercel. Sign-in is
+[Better Auth](https://www.better-auth.com) with Google (`/api/auth/*`), kept in the `better_auth` schema of the same
+database. Queries go through Kysely and a `pg` pool as the database role `authenticated` (or `anon` when signed out), with the
+user's claims set for each transaction, so the row-level security policies and SECURITY DEFINER functions decide what each
+request sees (`packages/db/src/client.ts`, ADR [0019](docs/adr/0019-neon-and-better-auth.md)). Statements are cut off after
+3 s for `anon` and 8 s for `authenticated`, and a function that sets its own `statement_timeout` gets it.
+
+| Variable | What |
+|---|---|
+| `DATABASE_URL` | The database owner's connection string. Migrations, Better Auth and the sign-in access functions use it. |
+| `APP_DATABASE_URL` | The `authenticator` login the app's queries use. Optional locally (falls back to `DATABASE_URL`). |
+| `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `OAUTH_PROXY_SECRET` | Better Auth's secret, the deployment's URL, and the preview-alias proxy secret. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in. `AUTH_PROVIDERS` also accepts `microsoft`. |
+| `ACCESS_ADMIN_EMAILS` | Addresses that sign in as Admin, so a new deployment's first admin can get in. |
+
+```sh
+pnpm --filter @transpera-flow/db migrate [--dry-run]   # apply new migrations to DATABASE_URL (--dry-run lists them)
+bash packages/db/scripts/db-sql.sh -c "select 1"    # psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"
+bash packages/db/scripts/db-sql.sh -v app_password="$APP_PASSWORD" -f packages/db/scripts/create-app-login.sql
+pnpm --filter @transpera-flow/db gen:types          # db-types.ts, json-columns.ts, function-types.ts (needs local Postgres)
+```
+
+`create-app-login.sql` creates the `authenticator` login (no privileges of its own; it can only become `anon` or
+`authenticated`) with the password you pass. Put it in `APP_DATABASE_URL`; the password never goes in git. The migration log
+and production steps are in [`docs/production-migrations.md`](docs/production-migrations.md); notes on what was checked only
+against plain Postgres are in [`docs/supabase-notes.md`](docs/supabase-notes.md).
 
 ## Checks
 
@@ -37,7 +65,7 @@ pnpm test           # database tests need Postgres, see below
 pnpm --filter @transpera-flow/web build && pnpm --filter @transpera-flow/web e2e
 ```
 
-`e2e` (needs a finished build, made without Supabase settings so the app is in demo mode) opens every demo page at
+`e2e` (needs a finished build, served without a database or auth secret, so the app is in demo mode) opens every demo page at
 400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read only, no light surface in
 dark mode. It runs in CI's `check` job after the build.
 
@@ -47,20 +75,13 @@ them out; run them there with `pnpm test:perf`.
 
 Database tests create a throwaway database on the Postgres at `DATABASE_URL`
 (default `postgres://postgres:postgres@localhost:5432/postgres`) and load a
-small stand-in for Supabase auth, the migrations and the seed.
+small stand-in for the `auth` schema and roles that policies read, the migrations and the seed.
 
 After changing the fixtures, regenerate the seed with `pnpm --filter @transpera-flow/db gen:seed`.
 
 The engine's golden models fail on any change that moves a snapshotted number. If the change is meant to,
 approve the new baselines, which bumps `ENGINE_VERSION`:
 `pnpm --filter @transpera-flow/engine golden:approve "why the numbers moved"` (see `docs/engine-versioning.md`).
-
-The MCP end-to-end suites (`packages/mcp/test/postgrest*.test.ts`) also need
-PostgREST; it is skipped locally unless `POSTGREST_URL` and
-`POSTGREST_JWT_SECRET` are set. CI prepares its database with
-`packages/mcp/test/postgrest-db.ts` and then starts PostgREST (see
-`.github/workflows/ci.yml`). To run it beside another checkout, set
-`POSTGREST_DATABASE` to a database name of your own for both steps.
 
 ## Storybook and visual tests
 
@@ -99,10 +120,9 @@ values someone entered are flagged as conflicts instead of overwritten
 page, and the database refuses company-model writes made with a token, roles
 included. A missing role is suggested with `upsert_role` and can be used in
 `import_process` once accepted. The endpoint acts as the token's user under
-RLS and uses only `NEXT_PUBLIC_SUPABASE_URL` and
-`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; no extra environment variables. How it
-does that without the service-role key:
-[`docs/adr/0002-mcp-acts-as-user-via-pre-request.md`](docs/adr/0002-mcp-acts-as-user-via-pre-request.md).
+RLS through the same database pool as the web app; no extra environment variables. How it
+checks the token and acts as its owner:
+[`docs/adr/0018-mcp-tokens-checked-in-app-code.md`](docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 
 To turn interview transcripts into a draft process, use the `/extract-process` skill: [`docs/extraction/README.md`](docs/extraction/README.md).
 

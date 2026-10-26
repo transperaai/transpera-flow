@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Privacy policy · Transpera Flow" };
 
-const UPDATED = "7 October 2026";
+const UPDATED = "26 October 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -65,14 +65,14 @@ export default function PrivacyPage() {
 
       <Section title="Service providers">
         <ul className="list-disc pl-5">
-          <li>Supabase: database, sign-in and file storage, hosted in Sydney, Australia.</li>
+          <li>Neon: database, hosted on AWS in Sydney, Australia (ap-southeast-2).</li>
           <li>Vercel: web hosting.</li>
           <li>
             Sentry: error reports when something in the app breaks: which page, what failed in our code, and the browser and
             device type. Names, email addresses, pay, the contents of your workspace and share links are removed before a report
             is sent, and IP addresses are not stored. Hosted in the European Union (Germany).
           </li>
-          <li>Google: sign-in.</li>
+          <li>Google: sign-in. You sign in with your Google account; the app handles the sign-in itself and Google sends it your name, email address and profile picture.</li>
           <li>
             Anthropic: explains a saved run, only when someone asks. It receives the
             figures being described and the names of the process, its steps, roles and scenarios; the names of your staff and

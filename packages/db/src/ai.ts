@@ -1,4 +1,4 @@
-import type { Json } from "./database.types";
+import type { Json } from "./db-types";
 import type { Db } from "./queries";
 import { rpc } from "./rpc";
 import { pgCode } from "./pg-error";

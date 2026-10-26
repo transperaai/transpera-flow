@@ -10,7 +10,7 @@ import { authEnv, type AuthEnv } from "./env";
 import { socialProviders, trustedOrigins } from "./providers";
 
 // The Better Auth instance (docs/plans/supabase-exit-brief.md, step 2). Users live in schema `better_auth` of the deployment's
-// own database; a trigger mirrors each into `auth.users`, so the foreign keys and RLS written against Supabase keep working.
+// own database; a trigger mirrors each into `auth.users`, so the foreign keys and RLS written against `auth.users` keep working.
 
 const denied = () => new APIError("FORBIDDEN", { code: ACCESS_DENIED_CODE, message: ACCESS_DENIED_MESSAGE });
 

@@ -2,7 +2,7 @@ export * from "./types";
 export * from "./issue-status";
 export * from "./source-links";
 export * from "./calibration";
-export type { Database, Json } from "./database.types";
+export type { Json } from "./db-types";
 export type { DB } from "./db-types";
 export type { Claims } from "./client";
 export { columns, type SplitColumns } from "./columns";

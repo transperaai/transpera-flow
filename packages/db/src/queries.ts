@@ -5,7 +5,7 @@ import { rpc, rpcRows } from "./rpc";
 import { columns } from "./columns";
 import { pgCode } from "./pg-error";
 import { shareToggles } from "./share-reader";
-import type { Json } from "./database.types";
+import type { Json } from "./db-types";
 import type { CompanyModel, SnapshotProcess } from "./company";
 import type { CitingRow } from "./evidence";
 import { uiStatus, type StoredIssueStatus } from "./issue-status";
@@ -714,7 +714,7 @@ export async function loadIssuesForReader(db: Db, workspaceId: string): Promise<
   return sees ? issues : issues.map((i) => hideAiIssueKey(i, false));
 }
 
-/** A thrown database error as the `{ code, message }` that supabase-js handed back as `error`. */
+/** A thrown database error as the `{ code, message }` that PostgREST's `error` had. */
 function errorOf(e: unknown): { code?: string; message?: string } {
   return { code: pgCode(e), message: e instanceof Error ? e.message : String(e) };
 }

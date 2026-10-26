@@ -26,7 +26,12 @@ export interface TestDb {
 export interface TestDbOptions {
   /** The Realtime stand-in (publication and realtime.messages) loads by default; `false` leaves it out. */
   realtime?: boolean;
-  /** Give anon, authenticated and service_role full privileges on every table made from now on, as a Supabase project does. */
+  /**
+   * Give anon, authenticated and service_role full privileges on every table made from now on, as a Supabase project did.
+   * Neon has no such default, but the migrations were written and applied on Supabase, where every table started with all
+   * privileges: the tests that check what the migrations revoke or grant (and the ones on the production data's history) still
+   * run with it, to show the migrations leave the right privileges whichever way a database starts.
+   */
   supabaseDefaultPrivileges?: boolean;
 }
 

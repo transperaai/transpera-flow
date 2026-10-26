@@ -46,21 +46,9 @@ function jsonRpcError(status: number, message: string, headers: Record<string, s
 const unauthorized = (message: string) =>
   jsonRpcError(401, message, { "www-authenticate": 'Bearer realm="transpera-flow", error="invalid_token"' });
 
-interface TokenUse {
-  user_id: string;
-  token_id: string;
-  email: string | null;
-  agency_admin: boolean;
-  active_workspace_id: string | null;
-  allowed: boolean;
-  retry_after_seconds: number;
-}
-
 /** One call: resolves the token, stamps its last use and counts the request. No rows: unknown, revoked or its owner is banned. */
-async function lookupToken(pool: Pool, hash: string): Promise<TokenUse | undefined> {
-  // Not in the generated function types until they are regenerated, so the call is typed here.
-  const call = rpcRows as unknown as (db: Db, name: string, args: { p_token_hash: string }) => Promise<TokenUse[]>;
-  const rows = await call(createDb(pool, null), "mcp_token_lookup", { p_token_hash: hash });
+async function lookupToken(pool: Pool, hash: string) {
+  const rows = await rpcRows(createDb(pool, null), "mcp_token_lookup", { p_token_hash: hash });
   return rows[0];
 }
 

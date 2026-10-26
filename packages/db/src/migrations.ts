@@ -26,7 +26,7 @@ export async function applyCompat(db: Queryable, options: CompatOptions = {}): P
   await db.query(options.realtimeShim === false ? shims.slice(0, shims.indexOf(REALTIME_MARKER)) : shims);
 }
 
-/** Migration file names, oldest first. seed.sql and bootstrap.sql live beside migrations/, not in it. */
+/** Migration file names, oldest first. seed.sql lives beside migrations/, not in it. */
 export function migrationFiles(): string[] {
   return readdirSync(new URL("migrations/", root)).filter((f) => f.endsWith(".sql")).sort();
 }

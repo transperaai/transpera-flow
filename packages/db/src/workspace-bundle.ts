@@ -154,7 +154,7 @@ export interface ReaderOptions {
  * A reader over a `Db` acting as the signed-in user, in a stable order. It asks for the next rows after what it
  * has, and stops only on an empty page, so an API that returns fewer rows than asked (a lower max-rows) can't truncate it.
  */
-export function supabaseReader(db: Db, options: ReaderOptions = {}): TableReader {
+export function dbReader(db: Db, options: ReaderOptions = {}): TableReader {
   const pageSize = options.pageSize ?? 1000;
   const maxRows = options.maxRows ?? MAX_TABLE_ROWS;
   return async (table, workspaceId) => {
@@ -345,7 +345,7 @@ export async function exportWorkspaceBundle(
 }
 
 /** The reader of the `workspaces` row, as the signed-in user. */
-export function supabaseWorkspaceReader(db: Db): (id: string) => Promise<Row | null> {
+export function dbWorkspaceReader(db: Db): (id: string) => Promise<Row | null> {
   return async (id) => {
     const data = await db.selectFrom("workspaces").select(["id", "name", "slug", "plan", "settings", "provenance"]).where("id", "=", id).executeTakeFirst();
     return (data as Row | undefined) ?? null;

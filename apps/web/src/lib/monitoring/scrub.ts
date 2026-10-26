@@ -14,8 +14,8 @@ const UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 const UUID_WHOLE = new RegExp(`^${UUID}$`);
 
 // The path segments an address may keep (deny by default): the app's own static route segments, Next's build files, and the
-// Supabase and Anthropic API words the app calls. Any other segment becomes "[part]": a file's name in a Storage path
-// (`/storage/v1/object/sources/<ids>/Maya Collins interview.pdf`), a workspace's slug, a share token, anything new.
+// Better Auth's and Anthropic's API words the app calls. Any other segment becomes "[part]": a source's file name, a
+// workspace's slug, a share token, anything new.
 // test/monitoring-scrub.test.ts checks every static route segment under src/app is here, and that no name is.
 export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app).
@@ -25,15 +25,12 @@ export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   "sources", "suggestions", "tokens", "w",
   // Next's build files.
   "_next", "chunks", "css", "media", "static",
-  // Supabase (REST, Auth, Storage, Realtime) and Anthropic.
-  "authenticated", "buckets", "functions", "info", "logout", "messages", "object", "otp", "public", "realtime", "recover", "rest",
-  "rpc", "sign", "storage", "token", "user", "v1", "verify", "websocket",
+  // Better Auth (/api/auth/sign-in/social, /api/auth/get-session) and Anthropic (/v1/messages).
+  "get-session", "google", "messages", "microsoft", "sign-in", "sign-out", "social", "v1",
 ]);
 
 // A route pattern's placeholders (Next's `[slug]`, and the ones this file writes).
 const ROUTE_PARAM = /^\[(?:\.\.\.)?(?:slug|token|processId|number|id|part)\]$/;
-// Postgres table and function names in a Supabase REST path (`/rest/v1/rpc/import_workspace_bundle`).
-const SNAKE_CASE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
 
 function keepSegment(segment: string, index: number, segments: readonly string[]): string {
   if (segment === "" || UUID_WHOLE.test(segment) || /^\d+$/.test(segment) || ROUTE_PARAM.test(segment)) return segment;
@@ -42,7 +39,6 @@ function keepSegment(segment: string, index: number, segments: readonly string[]
   if (index === 2 && segments[1] === "w") return "[slug]";
   const lower = segment.toLowerCase();
   if (segment === lower && (ROUTE_WORDS.has(segment) || ALLOWED_WORDS.has(segment))) return segment;
-  if (segments[1] === "rest" && SNAKE_CASE.test(segment)) return segment;
   // Next's build files are named by content hashes: nothing personal, and the stack trace needs them.
   if (segments[1] === "_next" && segments[2] === "static" && /^[\w.-]+$/.test(segment)) return segment;
   return "[part]";

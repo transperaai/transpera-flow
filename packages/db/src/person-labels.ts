@@ -8,7 +8,7 @@
 //   * a person since deleted, for anyone: "A team member".
 // The map holds ids, never names, so it tells a member nothing new. The letters are the AI's own and are never shown.
 
-import type { Json } from "./database.types";
+import type { Json } from "./db-types";
 import type { Viewer } from "./queries";
 import type { AiAnalysisRow, FindingRow } from "./types";
 

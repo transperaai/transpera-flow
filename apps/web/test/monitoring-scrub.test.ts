@@ -91,7 +91,7 @@ function browserEvent(): ErrorEvent {
       { category: "console", level: "log", message: `${people[0]} ${MONEY[0]}`, timestamp: 1 },
       { category: "ui.click", message: `button[aria-label="Delete ${people[1]}"]`, timestamp: 2 },
       { category: "navigation", data: { from: `/w/${encodeURIComponent(clients[0]!)}/people`, to: `/s/${TOKEN}?x=1` }, timestamp: 3 },
-      { type: "http", category: "fetch", data: { method: "GET", url: `https://abc.supabase.co/rest/v1/people?email=eq.${EMAILS[0]}`, status_code: 200, body: poison }, message: poison, timestamp: 4 },
+      { type: "http", category: "fetch", data: { method: "GET", url: `https://api.example.test/v1/people?email=eq.${EMAILS[0]}`, status_code: 200, body: poison }, message: poison, timestamp: 4 },
     ],
     modules: { "secret-lib": "1.0.0" },
     debug_meta: { images: [{ type: "sourcemap", code_file: `https://app.example.com/_next/static/chunks/0abc.js?dpl=${TOKEN}`, debug_id: "6f3a1e2b-1c2d-4e5f-8a9b-0c1d2e3f4a5b" }] },
@@ -135,7 +135,7 @@ function serverEvent(): ErrorEvent {
       nextjs: { request_path: `/w/northbeam/p/${UUID}?x=${EMAILS[0]}`, router_kind: "App Router", router_path: "/w/[slug]/p/[processId]", route_type: "render", extra: people[0] },
     },
     extra: { arguments: [people[0], MONEY[2]] },
-    breadcrumbs: [{ category: "http", data: { "http.method": "GET", url: `https://abc.supabase.co/rest/v1/people?name=eq.${people[0]}`, status_code: 200 }, timestamp: 5 }],
+    breadcrumbs: [{ category: "http", data: { "http.method": "GET", url: `https://api.example.test/v1/people?name=eq.${people[0]}`, status_code: 200 }, timestamp: 5 }],
   } as unknown as ErrorEvent;
 }
 
@@ -263,8 +263,8 @@ describe("shapeMessage", () => {
 
 describe("scrubText", () => {
   it("replaces emails, money, quoted text, long tokens and URLs", () => {
-    const out = scrubText(`${EMAILS[0]} ${MONEY.join(" ")} "quoted" ${TOKEN} https://abc.supabase.co/rest/v1/p?email=eq.x and /s/${TOKEN}?a=1.`);
-    expect(out).toBe("[email] [amount] [amount]/h [amount] [amount] [text] [token] https://abc.supabase.co/rest/v1/p and /s/[token].");
+    const out = scrubText(`${EMAILS[0]} ${MONEY.join(" ")} "quoted" ${TOKEN} https://api.example.test/v1/p?email=eq.x and /s/${TOKEN}?a=1.`);
+    expect(out).toBe("[email] [amount] [amount]/h [amount] [amount] [text] [token] https://api.example.test/v1/p and /s/[token].");
   });
 
   it("leaves an apostrophe inside a word alone", () => {
@@ -281,14 +281,14 @@ describe("scrubUrl", () => {
     [`/s/${TOKEN}?x=1#y`, "/s/[token]"],
     [`/w/northbeam/p/${UUID}`, `/w/[slug]/p/${UUID}`],
     ["/auth/callback?code=abc", "/auth/callback"],
-    ["https://abc.supabase.co/rest/v1/people?email=eq.maya@northbeam.example&select=*", "https://abc.supabase.co/rest/v1/people"],
+    ["https://api.example.test/v1/people?email=eq.maya@northbeam.example&select=*", "https://api.example.test/v1/people"],
     ["https://user:pass@app.example.com/w/acme/people#top", "https://app.example.com/w/[slug]/people"],
     ["app:///_next/static/chunks/a.js?v=1", "app:///_next/static/chunks/a.js"],
     ["/w/[slug]/issues/12", "/w/[slug]/issues/12"],
-    // A Storage path ends in the file's own name, which can name a person: every segment that isn't a known word or an id goes.
-    [`https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/Maya%20Collins%20interview.pdf`, `https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/[part]`],
-    [`https://abc.supabase.co/storage/v1/object/sign/sources/${UUID}/maya-collins.pdf?token=abc`, `https://abc.supabase.co/storage/v1/object/sign/sources/${UUID}/[part]`],
-    ["https://abc.supabase.co/rest/v1/rpc/import_workspace_bundle", "https://abc.supabase.co/rest/v1/rpc/import_workspace_bundle"],
+    // A file path ends in the file's own name, which can name a person: every segment that isn't a known word or an id goes.
+    [`https://api.example.test/v1/sources/${UUID}/${UUID}/${UUID}/Maya%20Collins%20interview.pdf`, `https://api.example.test/v1/sources/${UUID}/${UUID}/${UUID}/[part]`],
+    [`https://api.example.test/v1/sources/${UUID}/maya-collins.pdf?token=abc`, `https://api.example.test/v1/sources/${UUID}/[part]`],
+    ["https://api.example.test/v1/rpc/import_workspace_bundle", "https://api.example.test/v1/[part]/[part]"],
     [`/w/acme/p/${UUID}/first-principles`, `/w/[slug]/p/${UUID}/first-principles`],
     ["/w/acme/people/maya", "/w/[slug]/people/[part]"],
     ["/something/new/Maya", "/[part]/new/[part]"],
@@ -342,9 +342,9 @@ describe("scrubEvent: smaller fields", () => {
     expect(withType("Maya Collins")).toBe("[type]");
   });
 
-  it("cuts a fetch breadcrumb to Storage down to the bucket and ids", () => {
-    const out = scrubBreadcrumb({ category: "fetch", data: { method: "POST", url: `https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/${encodeURIComponent(people[0]!)}.pdf` } });
-    expect(out!.data!.url).toBe(`https://abc.supabase.co/storage/v1/object/sources/${UUID}/${UUID}/${UUID}/[part]`);
+  it("cuts a fetch breadcrumb for a file down to its ids", () => {
+    const out = scrubBreadcrumb({ category: "fetch", data: { method: "POST", url: `https://api.example.test/v1/sources/${UUID}/${UUID}/${UUID}/${encodeURIComponent(people[0]!)}.pdf` } });
+    expect(out!.data!.url).toBe(`https://api.example.test/v1/sources/${UUID}/${UUID}/${UUID}/[part]`);
   });
 });
 
@@ -363,8 +363,8 @@ describe("scrubBreadcrumb", () => {
   });
 
   it.each(["fetch", "xhr", "http"])("keeps a %s breadcrumb's method, scrubbed url and status", (category) => {
-    const input: Breadcrumb = { type: "http", category, level: "info", timestamp: 4, message: poison, data: { method: "POST", url: `https://abc.supabase.co/rest/v1/people?name=eq.${people[0]}`, status_code: 400, body: poison, request_body_size: 10 } };
-    expect(scrubBreadcrumb(input)).toEqual({ type: "http", category, level: "info", timestamp: 4, data: { method: "POST", url: "https://abc.supabase.co/rest/v1/people", status_code: 400 } });
+    const input: Breadcrumb = { type: "http", category, level: "info", timestamp: 4, message: poison, data: { method: "POST", url: `https://api.example.test/v1/people?name=eq.${people[0]}`, status_code: 400, body: poison, request_body_size: 10 } };
+    expect(scrubBreadcrumb(input)).toEqual({ type: "http", category, level: "info", timestamp: 4, data: { method: "POST", url: "https://api.example.test/v1/people", status_code: 400 } });
   });
 });
 
