@@ -56,8 +56,8 @@ describe("per-person screens use the viewer helpers", () => {
 
   it("Settings counts a role's people from team_capacity, not from the member's own reads", () => {
     const data = read("lib/data.ts");
-    expect(data).toContain("loadTeam(supabase, ws)");
-    expect(data).toContain("roleUsage(roleSteps.data ?? [], team.personRoles, team.clientAssignments,");
+    expect(data).toContain("loadTeam(db, ws)");
+    expect(data).toContain("roleUsage(roleSteps, team.personRoles, team.clientAssignments,");
     expect(read("app/w/[slug]/settings/people-settings.tsx")).toContain("Your record. Owners and editors see the whole team.");
     expect(read("app/w/[slug]/settings/clients-settings.tsx")).toContain("A_TEAM_MEMBER");
   });
@@ -103,7 +103,7 @@ describe("saved AI text is named per reader (B1 2b part 3)", () => {
 
 describe("issues.detected_key is opaque for AI-text keys when the reader can't see everyone (B1 2b)", () => {
   it("every page loader of issues reads them through loadIssuesForReader", () => {
-    expect(read("lib/data.ts")).toContain("loadIssuesForReader(await createClient(), workspaceId)");
+    expect(read("lib/data.ts")).toContain("loadIssuesForReader(await getDb(), workspaceId)");
     const processes = read("lib/processes/data.ts");
     expect(processes).not.toMatch(/\bloadIssues\(/);
     expect(processes.match(/loadIssuesForReader\(/g)).toHaveLength(2);

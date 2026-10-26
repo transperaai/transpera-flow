@@ -63,21 +63,20 @@ type Row = {
   created_at: string;
 };
 
-const COLUMNS = "id, text, validated, fallback, fallback_kind, fallback_reason, model, rejected, usage, edited_by_name, edited_at, updated_at, created_at";
+const COLUMNS = ["id", "text", "validated", "fallback", "fallback_kind", "fallback_reason", "model", "rejected", "usage", "edited_by_name", "edited_at", "updated_at", "created_at"] as const;
 
 /** The cached row for this input, if any. */
 export async function findNarration(db: Db, workspaceId: string, targetId: string, input: NarrationInput): Promise<Row | null> {
-  const { data, error } = await db
-    .from("narrations")
+  const data = await db
+    .selectFrom("narrations")
     .select(COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .eq("target", "run")
-    .eq("target_id", targetId)
-    .eq("purpose", input.purpose)
-    .eq("input_hash", input.hash)
-    .maybeSingle();
-  if (error) throw error;
-  return data as Row | null;
+    .where("workspace_id", "=", workspaceId)
+    .where("target", "=", "run")
+    .where("target_id", "=", targetId)
+    .where("purpose", "=", input.purpose)
+    .where("input_hash", "=", input.hash)
+    .executeTakeFirst();
+  return (data as Row | undefined) ?? null;
 }
 
 /** A cached row as an outcome, if it can be used as it is. */
@@ -106,9 +105,17 @@ export function fromCache(row: Row, input: NarrationInput): StoredNarration | nu
 
 async function draftsToday(db: Db, workspaceId: string, now: Date): Promise<number> {
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const { count, error } = await db.from("narrations").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).gte("updated_at", since);
-  if (error) return 0;
-  return count ?? 0;
+  try {
+    const r = await db
+      .selectFrom("narrations")
+      .select((eb) => eb.fn.countAll<number>().as("count"))
+      .where("workspace_id", "=", workspaceId)
+      .where("updated_at", ">=", since)
+      .executeTakeFirstOrThrow();
+    return Number(r.count);
+  } catch {
+    return 0;
+  }
 }
 
 /** Narration for `input`: from the cache, or drafted, checked and recorded. Never throws for model problems. */
@@ -137,32 +144,38 @@ export async function cachedNarration(db: Db, req: NarrationRequest): Promise<St
     outcome = await narrate(req.input, req.model, req.budgetMs ? { budgetMs: req.budgetMs } : {});
   }
   const at = now().toISOString();
-  const { data, error } = await db
-    .from("narrations")
-    .upsert(
-      {
-        workspace_id: req.workspaceId,
-        target: "run",
-        target_id: req.targetId,
-        purpose: req.input.purpose,
-        input_hash: req.input.hash,
-        model: outcome.model,
-        text: outcome.paragraphs.join("\n\n"),
-        validated: outcome.validated,
-        fallback: outcome.fallback,
-        fallback_kind: outcome.fallbackKind,
-        fallback_reason: outcome.reason?.slice(0, 2000) ?? null,
-        checked: outcome.checked,
-        rejected: outcome.rejected as unknown as Json,
-        usage: outcome.usage as unknown as Json,
-        edited_by: null,
-        edited_by_name: null,
-        edited_at: null,
-        created_at: at,
-      },
-      { onConflict: "workspace_id,target,target_id,purpose,input_hash" },
-    )
-    .select("id")
-    .maybeSingle();
-  return { ...outcome, id: error ? null : (data?.id ?? null), cached: false, at, editedBy: null, editedAt: null };
+  const values = {
+    workspace_id: req.workspaceId,
+    target: "run",
+    target_id: req.targetId,
+    purpose: req.input.purpose,
+    input_hash: req.input.hash,
+    model: outcome.model,
+    text: outcome.paragraphs.join("\n\n"),
+    validated: outcome.validated,
+    fallback: outcome.fallback,
+    fallback_kind: outcome.fallbackKind,
+    fallback_reason: outcome.reason?.slice(0, 2000) ?? null,
+    checked: outcome.checked,
+    // jsonb parameters go as JSON text.
+    rejected: JSON.stringify(outcome.rejected) as unknown as Json,
+    usage: JSON.stringify(outcome.usage) as unknown as Json,
+    edited_by: null,
+    edited_by_name: null,
+    edited_at: null,
+    created_at: at,
+  };
+  let id: string | null = null;
+  try {
+    const row = await db
+      .insertInto("narrations")
+      .values(values)
+      .onConflict((oc) => oc.columns(["workspace_id", "target", "target_id", "purpose", "input_hash"]).doUpdateSet(values))
+      .returning("id")
+      .executeTakeFirst();
+    id = row?.id ?? null;
+  } catch {
+    // The text is still shown; it just isn't cached.
+  }
+  return { ...outcome, id, cached: false, at, editedBy: null, editedAt: null };
 }

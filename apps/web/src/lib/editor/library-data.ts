@@ -1,7 +1,7 @@
 import "server-only";
 import { listPlacements, listProcesses } from "@transpera-flow/db";
 import { PROCESS_TEMPLATES } from "@transpera-flow/mcp";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 import type { LibraryProcess, LibraryTemplate } from "./library";
 
 /**
@@ -10,7 +10,7 @@ import type { LibraryProcess, LibraryTemplate } from "./library";
  * signed-in user (RLS decides what is visible).
  */
 export async function loadLibrary(workspaceId: string): Promise<{ processes: LibraryProcess[]; templates: LibraryTemplate[] }> {
-  const db = await createClient();
+  const db = await getDb();
   const [processes, placements] = await Promise.all([listProcesses(db, workspaceId), listPlacements(db, workspaceId)]);
   const holderOf = new Map(placements.map((p) => [p.processId, { id: p.holderId, name: p.holderName, company: p.holderIsCompany }]));
   return {

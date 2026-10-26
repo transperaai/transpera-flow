@@ -5,6 +5,7 @@
 // The checks here only refuse a wrong file early, with the same words.
 
 import { attachSourceFile } from "@/app/w/[slug]/source-actions";
+// step 4: Supabase Storage goes (no database calls in this file).
 import { createClient } from "@/lib/supabase/browser";
 import { SOURCE_FILE_MIME, checkSourceFile, safeFileName, storagePath } from "./file-check";
 import type { AttachFileResult } from "./store";

@@ -6,6 +6,7 @@
 import { attachWorkspaceLogo } from "@/app/w/[slug]/settings/branding/actions";
 import { LOGO_ERRORS, LOGO_MIME, checkLogo } from "@/lib/branding/logo-check";
 import type { LogoResult } from "@/lib/branding/branding";
+// step 4: Supabase Storage goes (no database calls in this file).
 import { createClient } from "@/lib/supabase/browser";
 
 export async function uploadWorkspaceLogo(workspaceId: string, base: string | null, file: File): Promise<LogoResult> {

@@ -12,7 +12,7 @@ import {
   type NameSource,
 } from "@transpera-flow/db";
 import { narrationConfigured } from "@/lib/narration/anthropic";
-import { createClient } from "../supabase/server";
+import { getDb } from "@/lib/auth/session";
 import { aiViewFromRow, type AiAnalysisView } from "./types";
 
 /** Whether this server has an Anthropic API key (the one narration uses): without it AI analysis says it isn't set up. */
@@ -21,7 +21,7 @@ export const aiConfigured = (): boolean => narrationConfigured();
 /** The workspace's AI switches (RLS: every member reads); the defaults if they can't be read (say the table isn't there yet). */
 export async function loadWorkspaceAiSettings(workspaceId: string): Promise<AiSettings> {
   try {
-    return await loadAiSettings(await createClient(), workspaceId);
+    return await loadAiSettings(await getDb(), workspaceId);
   } catch (err) {
     console.error("Couldn't load the AI settings; using the defaults.", err instanceof Error ? err.message : err);
     return { ...DEFAULT_AI_SETTINGS };
@@ -34,7 +34,7 @@ export async function loadWorkspaceAiSettings(workspaceId: string): Promise<AiSe
  */
 export async function loadAiViews(revisionIds: readonly string[], who: NameSource): Promise<Record<string, AiAnalysisView>> {
   try {
-    const rows = await loadAiAnalyses(await createClient(), revisionIds);
+    const rows = await loadAiAnalyses(await getDb(), revisionIds);
     return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, aiViewFromRow(nameAnalysisRow(row, who))]));
   } catch (err) {
     console.error("Couldn't load the AI analysis; showing none.", err instanceof Error ? err.message : err);
@@ -45,7 +45,7 @@ export async function loadAiViews(revisionIds: readonly string[], who: NameSourc
 /** The latest stored analysis of each of these processes, whichever version it read (B17), by process id; none if they can't be read. */
 export async function loadLatestAiViews(processIds: readonly string[], who: NameSource): Promise<Record<string, AiAnalysisView>> {
   try {
-    const rows = await loadLatestAiAnalyses(await createClient(), processIds);
+    const rows = await loadLatestAiAnalyses(await getDb(), processIds);
     return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, aiViewFromRow(nameAnalysisRow(row, who))]));
   } catch (err) {
     console.error("Couldn't load the AI analysis; showing none.", err instanceof Error ? err.message : err);
@@ -59,7 +59,7 @@ export async function loadLatestAiViews(processIds: readonly string[], who: Name
  */
 export async function loadWorkspaceFindings(workspaceId: string, who: NameSource): Promise<FindingRow[]> {
   try {
-    return (await loadFindings(await createClient(), workspaceId)).map((r) => nameFinding(r, who));
+    return (await loadFindings(await getDb(), workspaceId)).map((r) => nameFinding(r, who));
   } catch (err) {
     console.error("Couldn't load the findings; showing none.", err instanceof Error ? err.message : err);
     return [];

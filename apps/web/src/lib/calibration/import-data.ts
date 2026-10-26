@@ -1,6 +1,6 @@
 import "server-only";
 import type { ImportDetails, ImportKind } from "@transpera-flow/db/csv-import";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 import { isImportKind, storedImportDetails } from "./import-request";
 
 // What the Historical data page (issue #40) needs about earlier imports: the last 50 records of the workspace for the Imports
@@ -31,17 +31,18 @@ const stringMap = (v: unknown): Record<string, string> =>
   isObject(v) ? Object.fromEntries(Object.entries(v).filter((e): e is [string, string] => typeof e[1] === "string")) : {};
 
 export async function loadImports(workspaceId: string): Promise<ImportsData> {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("datasets")
-    .select("id, kind, file_name, row_count, imported_at, column_map, details")
-    .eq("workspace_id", workspaceId)
-    .order("imported_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(50);
+  const db = await getDb();
+  const data = await db
+    .selectFrom("datasets")
+    .select(["id", "kind", "file_name", "row_count", "imported_at", "column_map", "details"])
+    .where("workspace_id", "=", workspaceId)
+    .orderBy("imported_at", "desc")
+    .orderBy("id", "desc")
+    .limit(50)
+    .execute();
   const imports: ImportRecord[] = [];
   const previous: ImportsData["previous"] = {};
-  for (const d of data ?? []) {
+  for (const d of data) {
     if (!isImportKind(d.kind)) continue;
     const columnMap = stringMap(d.column_map);
     imports.push({
@@ -61,8 +62,7 @@ export async function loadImports(workspaceId: string): Promise<ImportsData> {
 
 /** The workspace's lead sources, oldest first, for the lead checks (RLS: everyone in the workspace reads them). */
 export async function loadLeadSourceOptions(workspaceId: string): Promise<{ id: string; name: string; volumeWeek: number }[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("lead_sources").select("id, name, volume_week").eq("workspace_id", workspaceId).order("created_at").order("id");
-  if (error) throw error;
-  return (data ?? []).map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }));
+  const db = await getDb();
+  const data = await db.selectFrom("lead_sources").select(["id", "name", "volume_week"]).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute();
+  return data.map((s) => ({ id: s.id, name: s.name, volumeWeek: Number(s.volume_week) }));
 }

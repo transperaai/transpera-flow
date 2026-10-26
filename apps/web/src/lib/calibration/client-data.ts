@@ -1,6 +1,7 @@
 import "server-only";
+import { sql } from "kysely";
 import { loadProcessBySlug, type ClientCalibrationRows, type ProcessBundle } from "@transpera-flow/db";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 import { clientCalibrationRows, simulationPlan } from "./client-rows";
 import { pickLatestChecks, type StoredCheck } from "./client-request";
 
@@ -35,8 +36,8 @@ export interface ClientCalibrationPageData {
 }
 
 export async function loadClientCalibration(slug: string): Promise<ClientCalibrationPageData | null> {
-  const supabase = await createClient();
-  const loaded = await loadProcessBySlug(supabase, slug, { draft: false });
+  const db = await getDb();
+  const loaded = await loadProcessBySlug(db, slug, { draft: false });
   if (!loaded) return null;
   const { live, processes } = loaded;
   const workspaceId = live.workspace.id;
@@ -47,7 +48,7 @@ export async function loadClientCalibration(slug: string): Promise<ClientCalibra
   const runs: ChurnRun[] = [];
   for (const item of simulationPlan(rows, live.process.id)) {
     const bundle =
-      item.processId === live.process.id ? live : ((await loadProcessBySlug(supabase, slug, { draft: false, processId: item.processId }))?.live ?? null);
+      item.processId === live.process.id ? live : ((await loadProcessBySlug(db, slug, { draft: false, processId: item.processId }))?.live ?? null);
     runs.push({ processId: item.processId, processName: named.get(item.processId) ?? bundle?.process.name ?? "", serviceIds: item.serviceIds, bundle });
   }
   // The default process is always simulated, even when it runs no client group: the checks compare with its numbers.
@@ -55,23 +56,22 @@ export async function loadClientCalibration(slug: string): Promise<ClientCalibra
   // The default process first: its run's simulated checks are the ones shown.
   runs.sort((a, b) => Number(b.processId === live.process.id) - Number(a.processId === live.process.id));
 
-  const { data: past } = await supabase
-    .from("calibrations")
-    .select("id, created_at, applied_keys, results")
-    .eq("workspace_id", workspaceId)
-    .eq("results->>kind", "clients")
-    .order("created_at", { ascending: false })
-    .limit(5);
-  const datasetIds = [...new Set((past ?? []).flatMap((c) => datasetsOf(c.results)))];
-  const { data: datasets } = datasetIds.length
-    ? await supabase.from("datasets").select("id, file_name").in("id", datasetIds)
-    : { data: [] as { id: string; file_name: string }[] };
-  const names = new Map((datasets ?? []).map((d) => [d.id, d.file_name]));
+  const past = await db
+    .selectFrom("calibrations")
+    .select(["id", "created_at", "applied_keys", "results"])
+    .where("workspace_id", "=", workspaceId)
+    .where(sql<string>`results->>'kind'`, "=", "clients")
+    .orderBy("created_at", "desc")
+    .limit(5)
+    .execute();
+  const datasetIds = [...new Set(past.flatMap((c) => datasetsOf(c.results)))];
+  const datasets = datasetIds.length ? await db.selectFrom("datasets").select(["id", "file_name"]).where("id", "in", datasetIds).execute() : [];
+  const names = new Map(datasets.map((d) => [d.id, d.file_name]));
   return {
     workspaceId,
     rows,
     runs,
-    history: (past ?? []).map((c) => {
+    history: past.map((c) => {
       const [clients, log] = [datasetOf(c.results, "clients"), datasetOf(c.results, "servicing_log")];
       const proposals = isObject(c.results) && Array.isArray(c.results.proposals) ? c.results.proposals : [];
       return {
@@ -97,14 +97,15 @@ const datasetsOf = (results: unknown): string[] => [datasetOf(results, "clients"
 
 /** The latest client calibration's checks, for the Churn drivers section to show beside the simulated values. */
 export async function loadLatestChecks(workspaceId: string): Promise<{ asOf: number; checks: StoredCheck[] } | null> {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("calibrations")
-    .select("checks:results->checks, asOf:results->asOf")
-    .eq("workspace_id", workspaceId)
-    .eq("results->>kind", "clients")
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const db = await getDb();
+  const data = await db
+    .selectFrom("calibrations")
+    .select([sql<unknown>`results->'checks'`.as("checks"), sql<unknown>`results->'asOf'`.as("asOf")])
+    .where("workspace_id", "=", workspaceId)
+    .where(sql<string>`results->>'kind'`, "=", "clients")
+    .orderBy("created_at", "desc")
+    .limit(20)
+    .execute();
   // The newest with checks: a clients-only calibration saves none, and must not hide an earlier one's.
-  return pickLatestChecks(data ?? []);
+  return pickLatestChecks(data);
 }

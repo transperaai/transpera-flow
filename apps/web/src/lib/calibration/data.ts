@@ -1,6 +1,7 @@
 import "server-only";
+import { sql } from "kysely";
 import { loadProcessBySlug, type CalibrationRows } from "@transpera-flow/db";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 import { calibrationRows } from "./rows";
 import { personTimesSetup, type PersonTimesSetup } from "./person-times";
 
@@ -39,22 +40,21 @@ export interface CalibrationPageData {
 }
 
 export async function loadCalibrationPage(slug: string, processId: string | undefined): Promise<CalibrationPageData | null> {
-  const supabase = await createClient();
-  const loaded = await loadProcessBySlug(supabase, slug, processId ? { processId } : {});
+  const db = await getDb();
+  const loaded = await loadProcessBySlug(db, slug, processId ? { processId } : {});
   if (!loaded) return null;
   const { live, draft, processes } = loaded;
   const workspaceId = live.workspace.id;
-  const { data: past } = await supabase
-    .from("calibrations")
-    .select("id, created_at, applied_keys, dataset_id, proposals:results->proposals")
-    .eq("process_id", live.process.id)
-    .order("created_at", { ascending: false })
-    .limit(5);
-  const datasetIds = [...new Set((past ?? []).map((c) => c.dataset_id))];
-  const { data: datasets } = datasetIds.length
-    ? await supabase.from("datasets").select("id, file_name, row_count").in("id", datasetIds)
-    : { data: [] as { id: string; file_name: string; row_count: number }[] };
-  const byId = new Map((datasets ?? []).map((d) => [d.id, d]));
+  const past = await db
+    .selectFrom("calibrations")
+    .select(["id", "created_at", "applied_keys", "dataset_id", sql<unknown>`results->'proposals'`.as("proposals")])
+    .where("process_id", "=", live.process.id)
+    .orderBy("created_at", "desc")
+    .limit(5)
+    .execute();
+  const datasetIds = [...new Set(past.map((c) => c.dataset_id))];
+  const datasets = datasetIds.length ? await db.selectFrom("datasets").select(["id", "file_name", "row_count"]).where("id", "in", datasetIds).execute() : [];
+  const byId = new Map(datasets.map((d) => [d.id, d]));
   const personTimes = personTimesSetup(live, (draft ?? live).steps);
   const factorKey = (k: string) => k.startsWith("factor:");
   return {
@@ -63,7 +63,7 @@ export async function loadCalibrationPage(slug: string, processId: string | unde
     process: { id: live.process.id, name: live.process.name, kind: live.process.kind },
     hasDraft: Boolean(draft),
     stored: calibrationRows(live, draft),
-    history: (past ?? []).map((c) => ({
+    history: past.map((c) => ({
       id: c.id,
       createdAt: c.created_at,
       fileName: byId.get(c.dataset_id)?.file_name ?? "",
