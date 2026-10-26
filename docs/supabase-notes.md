@@ -351,7 +351,7 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 
 ## Client branding (#34, migration 20261214000000)
 
-> **Superseded for the logo (26 Oct 2026, migration 20261230000000, step 4):** the logo is a row of `workspace_logos` (256 KB at most), served by `app/api/branding/[workspaceId]/logo` through `public.workspace_logo(uuid)`. The `branding` bucket's policies, the logo guard and the `logo_path` key are gone; the bucket row and its objects were left for step 7. Verified only against plain Postgres (`packages/db/test/workspace-logos.test.ts`, `apps/web/test/branding-logo-route.test.ts`): nothing in it depends on Supabase.
+> **Superseded for the logo (26 Oct 2026, migration 20261230000000, step 4):** the logo is a row of `workspace_logos` (512 KB at most, as the bucket was), served by `app/api/branding/[workspaceId]/logo` through `public.workspace_logo(uuid)`. The `branding` bucket's policies, the logo guard and the `logo_path` key are gone; the bucket row and its objects were left for step 7. Verified only against plain Postgres (`packages/db/test/workspace-logos.test.ts`, `apps/web/test/branding-logo-route.test.ts`): nothing in it depends on Supabase.
 
 A public `branding` bucket (512 KB; PNG, JPEG, WebP), three policies on `storage.objects` for owners and agency admins (read, upload, delete; no update), `workspaces.branding` and a logo guard. Verified only against plain Postgres and the storage shim (`sql/storage-shim.sql`). The guard does not rely on `storage.objects.owner_id` (B19's live check of it is still open); it reads `storage.objects.metadata` (`mimetype`, `size`), which the shim fills in by hand and Supabase Storage sets on upload. To verify on Supabase:
 

@@ -97,7 +97,14 @@ const FIELD_TABLES = new Set<string>(["services", "people", "clients", "lead_sou
 
 const SKIP = new Set(["updated_at", "created_at", "created_by", "provenance", "id", "workspace_id"]);
 
-/** What changed in a workspace's branding (issue #34): colours by value, the logo never by its storage path. */
+/**
+ * The logo a branding diff names: `logo_path` in entries from when it was a Storage object, `logo_sha256` in those
+ * `private.audit_workspace_logo_write` writes now (step 4 of the move off Supabase). Either is only compared, never shown.
+ */
+const logoKey = (o: Record<string, unknown>): string | null =>
+  typeof o.logo_sha256 === "string" ? o.logo_sha256 : typeof o.logo_path === "string" ? o.logo_path : null;
+
+/** What changed in a workspace's branding (issue #34): colours by value, the logo never by its storage path or hash. */
 function describeBrandingChange(before: unknown, after: unknown): string[] {
   if (JSON.stringify(before ?? {}) === JSON.stringify(after ?? {})) return [];
   const read = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
@@ -106,9 +113,9 @@ function describeBrandingChange(before: unknown, after: unknown): string[] {
   const colour = (v: unknown) => (typeof v === "string" ? v : null);
   if (colour(a.accent) !== colour(b.accent)) out.push(`accent colour ${colour(a.accent) ?? "default"} → ${colour(b.accent) ?? "default"}`);
   if (colour(a.accent_dark) !== colour(b.accent_dark)) out.push(`dark-mode accent → ${colour(b.accent_dark) ?? "automatic"}`);
-  const [logoBefore, logoAfter] = [typeof a.logo_path === "string", typeof b.logo_path === "string"];
-  if (logoBefore !== logoAfter) out.push(logoAfter ? "logo added" : "logo removed");
-  else if (logoAfter && a.logo_path !== b.logo_path) out.push("logo changed");
+  const [logoBefore, logoAfter] = [logoKey(a), logoKey(b)];
+  if ((logoBefore === null) !== (logoAfter === null)) out.push(logoAfter !== null ? "logo added" : "logo removed");
+  else if (logoAfter !== null && logoBefore !== logoAfter) out.push("logo changed");
   return out;
 }
 

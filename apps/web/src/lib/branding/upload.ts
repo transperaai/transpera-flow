@@ -1,4 +1,4 @@
-// Uploading a workspace's logo from the browser (issue #34, B5). The file goes to the server action as form data (256 KB at most,
+// Uploading a workspace's logo from the browser (issue #34, B5). The file goes to the server action as form data (512 KB at most,
 // well inside a server action's body limit), which checks its content and stores the bytes in the database. The check here only
 // refuses a wrong file early, with the same words.
 

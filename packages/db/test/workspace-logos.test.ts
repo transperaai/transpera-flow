@@ -86,17 +86,17 @@ describe("the table", () => {
     expect(await q("select relrowsecurity from pg_class where oid = 'public.workspace_logos'::regclass")).toEqual([{ relrowsecurity: true }]);
   });
 
-  it("takes PNG, JPEG and WebP of 1 byte to 256 KB whose hash is the bytes' hash, and one per workspace", async () => {
+  it("takes PNG, JPEG and WebP of 1 byte to 512 KB (the old bucket's limit) whose hash is the bytes' hash, and one per workspace", async () => {
     for (const mime of ["image/png", "image/jpeg", "image/webp"]) {
       await clear();
       await insert(db.client, ws, PNG, mime);
     }
     await clear();
-    const edge = Buffer.alloc(262_144, 1);
+    const edge = Buffer.alloc(524_288, 1);
     await insert(db.client, ws, edge);
     await refused(insert(db.client, ws, PNG), "23505", /duplicate key|workspace_logos_pkey/);
     await clear();
-    await refused(insert(db.client, ws, Buffer.alloc(262_145, 1)), "23514", /workspace_logos_size/);
+    await refused(insert(db.client, ws, Buffer.alloc(524_289, 1)), "23514", /workspace_logos_size/);
     await refused(insert(db.client, ws, Buffer.alloc(0)), "23514", /workspace_logos_size/);
     for (const mime of ["image/svg+xml", "image/gif", "text/html", "IMAGE/PNG"]) await refused(insert(db.client, ws, PNG, mime), "23514", /workspace_logos_mime/);
     await refused(insert(db.client, ws, PNG, "image/png", "0".repeat(64)), "23514", /workspace_logos_sha256/);
@@ -158,6 +158,58 @@ describe("who reads it", () => {
     await refused(as(null, (c) => c.query("select 1 from workspace_logos")), "42501", /permission denied/);
     expect(await q("select has_table_privilege('anon', 'public.workspace_logos', 'select, insert, update, delete') as any_priv")).toEqual([{ any_priv: false }]);
     await clear();
+  });
+});
+
+describe("the audit entry (as save_fields wrote one when the logo was branding.logo_path)", () => {
+  const entries = () =>
+    q("select actor_id, actor_kind, action, target_table, target_id, diff from audit_log where workspace_id = $1 and diff::text like '%logo_sha256%' order by created_at, id", [ws]);
+  const clearLog = () => q("delete from audit_log where workspace_id = $1 and diff::text like '%logo_sha256%'", [ws]);
+
+  it("logs adding, replacing and removing a logo on the workspace, by its hash and never its bytes, naming who did it", async () => {
+    await clear();
+    await clearLog();
+    const owner = users.owner!;
+    const next = Buffer.concat([PNG, Buffer.from([2])]);
+    await as(owner.claims, (c) => insert(c, ws));
+    await as(owner.claims, (c) => c.query("update workspace_logos set bytes = $2, sha256 = $3 where workspace_id = $1", [ws, next, sha(next)]));
+    // A write that keeps the same logo (only updated_at moves) is not a change.
+    await as(owner.claims, (c) => c.query("update workspace_logos set updated_at = now() where workspace_id = $1", [ws]));
+    await as(owner.claims, (c) => c.query("delete from workspace_logos where workspace_id = $1", [ws]));
+    const base = { actor_id: owner.id, actor_kind: "user", action: "update", target_table: "workspaces", target_id: ws };
+    expect(await entries()).toEqual([
+      { ...base, diff: { old: { branding: {} }, new: { branding: { logo_sha256: sha(PNG) } } } },
+      { ...base, diff: { old: { branding: { logo_sha256: sha(PNG) } }, new: { branding: { logo_sha256: sha(next) } } } },
+      { ...base, diff: { old: { branding: { logo_sha256: sha(next) } }, new: { branding: {} } } },
+    ]);
+    expect(JSON.stringify(await entries())).not.toContain(PNG.toString("hex"));
+  });
+
+  it("names an agency admin too, and logs nothing for a refused write or one made without a signed-in person", async () => {
+    await clear();
+    await clearLog();
+    await as(users.flag!.claims, (c) => insert(c, ws));
+    expect((await entries()).map((e) => e.actor_id)).toEqual([users.flag!.id]);
+    await clearLog();
+    await refused(as(users.editor!.claims, (c) => c.query("insert into workspace_logos (workspace_id, mime, bytes, sha256) values ($1, 'image/png', $2, $3) on conflict (workspace_id) do update set bytes = excluded.bytes, sha256 = excluded.sha256", [ws, Buffer.from("y"), sha(Buffer.from("y"))])), "42501", /row-level security/);
+    // The superuser (a restore, a script): no person to name, as with audit_company_write.
+    await q("delete from workspace_logos where workspace_id = $1", [ws]);
+    await insert(db.client, ws);
+    expect(await entries()).toEqual([]);
+    await clear();
+  });
+
+  it("logs nothing when the logo goes with its workspace", async () => {
+    const [{ id }] = await q("insert into workspaces (name, slug) values ('Gone Logo Co', 'gone-logo-co') returning id");
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [id, users.owner!.id]);
+    await as(users.owner!.claims, (c) => insert(c, id));
+    await as(users.owner!.claims, (c) => c.query("delete from workspaces where id = $1", [id]));
+    expect(await q("select action from audit_log where workspace_id = $1 and diff::text like '%logo_sha256%'", [id])).toEqual([{ action: "update" }]);
+  });
+
+  it("is security definer with an empty search_path, and nobody may call it", async () => {
+    expect(await q("select prosecdef, proconfig from pg_proc where oid = 'private.audit_workspace_logo_write()'::regprocedure")).toEqual([{ prosecdef: true, proconfig: ["search_path=\"\""] }]);
+    expect(await q("select tgname from pg_trigger where tgrelid = 'public.workspace_logos'::regclass and not tgisinternal")).toEqual([{ tgname: "audit_logo" }]);
   });
 });
 

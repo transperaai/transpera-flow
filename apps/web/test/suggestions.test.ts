@@ -227,6 +227,12 @@ describe("the change log", () => {
     expect(say({ logo_path: logo(1) }, {})).toBe("Branding: logo removed");
     expect(say({ logo_path: logo(1) }, { logo_path: null })).toBe("Branding: logo removed");
     for (const s of [say({}, { logo_path: logo(1) }), say({ logo_path: logo(1) }, { logo_path: logo(2) })]) expect(s).not.toContain(WS);
+    // Since step 4 the logo is a row of workspace_logos, and the database logs its hash (never shown) in the same place.
+    const sha = (n: number) => String(n).repeat(64);
+    expect(say({}, { logo_sha256: sha(1) })).toBe("Branding: logo added");
+    expect(say({ logo_sha256: sha(1) }, { logo_sha256: sha(2) })).toBe("Branding: logo changed");
+    expect(say({ logo_sha256: sha(1) }, {})).toBe("Branding: logo removed");
+    for (const s of [say({}, { logo_sha256: sha(1) }), say({ logo_sha256: sha(1) }, { logo_sha256: sha(2) })]) expect(s).not.toContain(sha(1).slice(0, 12));
     // Beside another setting, it joins the company settings line.
     expect(say({}, { accent: "#0b6e8a" }, { old: { settings: { overtime_cap: 0.1 } }, new: { settings: { overtime_cap: 0.2 } } })).toBe(
       "Company settings: Overtime cap 10% → 20%, accent colour default → #0b6e8a",

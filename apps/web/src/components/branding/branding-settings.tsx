@@ -276,7 +276,7 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, l
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          {disabled ? READ_ONLY : "PNG, JPG or WebP, up to 256 KB and 2048 × 2048 pixels. A square logo with a transparent background works best."}
+          {disabled ? READ_ONLY : "PNG, JPG or WebP, up to 512 KB and 2048 × 2048 pixels. A square logo with a transparent background works best."}
         </p>
         <p aria-live="polite" role="status" className={notice?.tone === "error" ? "text-xs text-crit" : "text-xs text-muted-foreground"} data-logo-status>
           {notice?.text ?? ""}

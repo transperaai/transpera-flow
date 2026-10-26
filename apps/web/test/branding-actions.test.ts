@@ -176,10 +176,10 @@ describe("attachWorkspaceLogo", () => {
     expect(await logoRow()).toBeUndefined();
   });
 
-  it("refuses a file over 256 KB, and takes one of exactly 256 KB", async () => {
-    expect(await attachWorkspaceLogo(form(WS, null, new Uint8Array(262_145)))).toEqual({ status: "error", message: "That image is over 256 KB." });
+  it("refuses a file over 512 KB, and takes one of exactly 512 KB", async () => {
+    expect(await attachWorkspaceLogo(form(WS, null, new Uint8Array(524_289)))).toEqual({ status: "error", message: "That image is over 512 KB." });
     expect(await logoRow()).toBeUndefined();
-    const edge = new Uint8Array(262_144);
+    const edge = new Uint8Array(524_288);
     edge.set(pngBytes());
     expect((await attachWorkspaceLogo(form(WS, null, edge))).status).toBe("ok");
   });
@@ -219,6 +219,23 @@ describe("removeWorkspaceLogo", () => {
     signInAs(world, "editor");
     expect(await removeWorkspaceLogo(WS, old)).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
     expect((await logoRow())?.sha256).toBe(old);
+  });
+
+  it("is in the change log: adding, replacing and removing a logo each write an audit entry on the workspace, as the person", async () => {
+    await world.tdb.client.query("delete from audit_log where workspace_id = $1", [WS]);
+    const first = await attachWorkspaceLogo(form(WS, null, pngBytes()));
+    const second = await attachWorkspaceLogo(form(WS, first.status === "ok" ? first.sha : null, pngBytes(32, 32)));
+    expect(second.status).toBe("ok");
+    expect((await removeWorkspaceLogo(WS, second.status === "ok" ? second.sha : null)).status).toBe("ok");
+    const { rows } = await world.tdb.client.query("select actor_id, action, target_table, diff from audit_log where workspace_id = $1 order by created_at, id", [WS]);
+    const [a, b] = [sha(pngBytes()), sha(pngBytes(32, 32))];
+    const entry = (before: string | null, after: string | null) => ({
+      actor_id: world.users.owner.id,
+      action: "update",
+      target_table: "workspaces",
+      diff: { old: { branding: before ? { logo_sha256: before } : {} }, new: { branding: after ? { logo_sha256: after } : {} } },
+    });
+    expect(rows).toEqual([entry(null, a), entry(a, b), entry(b, null)]);
   });
 
   it("refuses what isn't a hash", async () => {

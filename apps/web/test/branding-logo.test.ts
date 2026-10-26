@@ -97,6 +97,8 @@ describe("everything else", () => {
   });
   it("the words are the brief's", () => {
     expect(LOGO_ERRORS.type).toBe("Use a PNG, JPG or WebP image. SVG isn't accepted because it can carry scripts.");
-    expect(LOGO_ERRORS.big).toBe("That image is over 256 KB.");
+    expect(LOGO_ERRORS.big).toBe("That image is over 512 KB.");
+    // The limit the `branding` bucket had, and workspace_logos' check: an existing logo is never refused on the move.
+    expect(MAX_LOGO_BYTES).toBe(524_288);
   });
 });

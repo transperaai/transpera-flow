@@ -54,7 +54,7 @@ window.mountBranding = ({ mode, branding = {}, logoUrl = null, upload = "ok" }) 
       }}
       uploadLogo={async (_ws, base, file) => {
         log("upload", file.name, file.type, file.size, base);
-        return upload === "ok" ? { status: "ok", sha: NEW_SHA, url: PIXEL } : { status: "error", message: "That image is over 256 KB." };
+        return upload === "ok" ? { status: "ok", sha: NEW_SHA, url: PIXEL } : { status: "error", message: "That image is over 512 KB." };
       }}
     />,
   );

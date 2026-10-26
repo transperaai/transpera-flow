@@ -280,7 +280,7 @@ is in `workspaces.branding` (`20261214000000`). Storage is called from `app/w/[s
   the file UI, the PDF text reading (`unpdf`) and its `outputFileTracingIncludes` entry, and their tests. Removing a test
   is right only where the feature it covers is removed. List each one in the report.
 - **Logo in the database:** a new table `public.workspace_logos (workspace_id pk → workspaces on delete cascade, mime text,
-  bytes bytea ≤ 256 KB, sha256 text, updated_at)`. RLS: editors of the workspace write (the same rule the branding
+  bytes bytea ≤ 512 KB (Opus for Austin, 26 Oct: the bucket's 512 KB, not 256, so no existing logo is refused), sha256 text, updated_at)`. RLS: owners and agency admins write, `can_manage_workspace` (corrected 26 Oct: "editors" was wrong; the same rule the branding
   action enforces today; read it). A SECURITY DEFINER `public.workspace_logo(p_workspace uuid)` returns `mime, bytes,
   sha256` and is executable by `anon` and `authenticated`, which matches the public bucket. A route
   `app/api/branding/[workspaceId]/logo/route.ts` serves it with `ETag` = sha256, `Cache-Control: public, max-age=300`, and 304

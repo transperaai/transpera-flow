@@ -147,7 +147,7 @@ describe("the logo", () => {
   it("says why a logo was refused, and keeps what it had", async () => {
     const { page } = await mount({ mode: "live", upload: "error" });
     await page.locator('input[type="file"]').setInputFiles({ name: "big.png", mimeType: "image/png", buffer: Buffer.from("x") });
-    await expect.poll(() => page.locator("[data-logo-status]").innerText()).toBe("That image is over 256 KB.");
+    await expect.poll(() => page.locator("[data-logo-status]").innerText()).toBe("That image is over 512 KB.");
     expect(await page.locator("[data-logo-preview] img").count()).toBe(0);
     await page.close();
   }, 60_000);
