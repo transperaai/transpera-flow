@@ -5,21 +5,16 @@ import { accentTokens, checkAccent, deriveDarkAccent, type AccentTokens, type Ac
 export interface Branding {
   accent: Hex | null;
   accentDark: Hex | null;
-  logoPath: string | null;
 }
-
-export const LOGO_PATH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp)$/;
 
 const STORED_HEX = /^#[0-9a-f]{6}$/;
 
 const hexOrNull = (v: unknown): Hex | null => (typeof v === "string" && STORED_HEX.test(v) ? (v as Hex) : null);
 
-/** The stored jsonb -> Branding. Anything malformed (wrong type, bad hex, a path outside `<workspaceId>/`) reads as null. */
-export function readBranding(raw: unknown, workspaceId: string): Branding {
+/** The stored jsonb -> Branding. Anything malformed (wrong type, bad hex) reads as null. The logo is not in it: see `logoUrl`. */
+export function readBranding(raw: unknown): Branding {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const path = o.logo_path;
-  const logoPath = typeof path === "string" && LOGO_PATH.test(path) && path.startsWith(`${workspaceId.toLowerCase()}/`) ? path : null;
-  return { accent: hexOrNull(o.accent), accentDark: hexOrNull(o.accent_dark), logoPath };
+  return { accent: hexOrNull(o.accent), accentDark: hexOrNull(o.accent_dark) };
 }
 
 /**
@@ -51,14 +46,23 @@ export function brandingCss(b: Branding): string | null {
   return blocks.length ? blocks.join("\n") : null;
 }
 
-/** The logo's public URL from NEXT_PUBLIC_SUPABASE_URL, or null. */
-export function logoUrl(path: string | null, supabaseUrl: string | undefined): string | null {
-  if (!path || !supabaseUrl || !LOGO_PATH.test(path)) return null;
-  return `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/public/branding/${path}`;
+const SHA256 = /^[0-9a-f]{64}$/;
+const WORKSPACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Whether `v` is a logo's SHA-256 as the database stores it: 64 lower-case hex digits. */
+export const isLogoSha = (v: unknown): v is string => typeof v === "string" && SHA256.test(v);
+
+/**
+ * The logo's address: the app's own route, with the first 12 characters of its hash so a new logo is a new address (the route
+ * itself is cached for five minutes). Null when the workspace has no logo.
+ */
+export function logoUrl(workspaceId: string, sha256: string | null): string | null {
+  if (!sha256 || !SHA256.test(sha256) || !WORKSPACE_ID.test(workspaceId.toLowerCase())) return null;
+  return `/api/branding/${workspaceId.toLowerCase()}/logo?v=${sha256.slice(0, 12)}`;
 }
 
-/** What the logo actions answer: the kept path and its public URL (both null once removed), or a plain message. */
-export type LogoResult = { status: "ok"; path: string | null; url: string | null } | { status: "error"; message: string };
+/** What the logo actions answer: the kept logo's hash and URL (both null once removed), or a plain message. */
+export type LogoResult = { status: "ok"; sha: string | null; url: string | null } | { status: "error"; message: string };
 
 /** A ratio as a person reads it. A failing one is rounded down, so "4.5:1" never sits beside a refusal. */
 export function formatRatio(ratio: number, passing: boolean): string {

@@ -1102,7 +1102,8 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
     {
       title: "Add source",
       description:
-        "Store a transcript, notes, an SOP, a spreadsheet, a data export, a screenshot link or other material from the audit as a source of the workspace, with its speakers and date, and " +
+        "Store a transcript, notes, an SOP, a spreadsheet, a data export, a screenshot link or other material from the audit as a source of the workspace, with its speakers and date, " +
+        "the text itself in `body` and, if the original lives somewhere else, a link to it in `file_url`, and " +
         "link it to what it is evidence for: `links` is required (a process, step, insight, issue or solution; each by id or name). A source linked to " +
         "nothing doesn't count as evidence. Returns the source id that step tools cite in `evidence` (with speaker, verbatim quote, timestamp and the value stated). " +
         "Only when you are adding a source to cite in import_process, add_step or update_step evidence, and the process it describes does not exist yet, pass `link_later: true` instead of `links`: " +
@@ -1113,7 +1114,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         speakers: z.union([z.array(z.string().trim().min(1).max(200)).max(50), z.string().max(10_000)]).optional().describe("Names, as a list or 'a, b'."),
         recorded_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("ISO date the conversation or notes are from."),
         body: z.string().max(500_000).optional().describe("The transcript or notes text."),
-        file_url: z.string().regex(/^https?:\/\/\S+$/).max(2000).optional().describe("Link to the recording or screenshot."),
+        file_url: z.string().regex(/^https?:\/\/\S+$/).max(2000).optional().describe("Link to the original (a Google Drive, Notion or SharePoint link, a recording, a screenshot or any web address). The app shows it as \"Open the original\". Files are not uploaded: keep the original where it is and pass its link."),
         links: linksArg.optional().describe("What the source is evidence for: at least one of { process }, { step } (with `process` if the name is not unique), { insight } (a detection key), { issue } (number, id or title), { solution }."),
         link_later: z.boolean().optional().describe("import_process / add_step / update_step only, when `links` is left out: citing the source in their evidence links it to those steps, and you then call link_source for the process. Until then it shows as 'Not linked to anything yet'."),
         workspace: workspaceArg,

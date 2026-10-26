@@ -14,7 +14,7 @@ import {
   type SourceLinkRow,
   type SourceLinkTarget,
 } from "@transpera-flow/db";
-import { MAX_TITLE, SOURCE_KINDS, isId, parseSourceInput, type Parsed, type SourceInput } from "./validate";
+import { MAX_TITLE, SOURCE_KINDS, cleanSourceField, isId, parseSourceInput, type Parsed, type SourceInput } from "./validate";
 
 export { SOURCE_LINK_KINDS };
 
@@ -147,6 +147,8 @@ export const sourcesRemovedBySave = (listedBefore: readonly string[], saved: rea
 /** The plain message under the "Link it to (required)" picker when nothing is chosen (the prototype's words). */
 export const NEEDS_A_LINK = "Pick what this source is evidence for.";
 export const NEEDS_A_TITLE = "Give the source a title.";
+/** What the link to the original must be. */
+export const BAD_LINK = "The link must start with http:// or https://.";
 export const NEEDS_A_SOURCE = "Pick a source.";
 
 /** What the dialog holds while it is open. */
@@ -156,6 +158,8 @@ export interface SourceDraft {
   /** YYYY-MM-DD, or blank. */
   date: string;
   quote: string;
+  /** The link to the original (a Google Drive, Notion or any other http(s) link), or blank. */
+  fileUrl: string;
   linkKind: SourceLinkKind;
   /** The picker's choice (a target's id or key), or blank. */
   linkValue: string;
@@ -165,12 +169,14 @@ export interface SourceDraftErrors {
   title?: string;
   date?: string;
   quote?: string;
+  /** The link to the original is not an http(s) link. */
+  fileUrl?: string;
   link?: string;
 }
 
 /** A blank draft for the Add source dialog, with a target filled in when the dialog was opened from a screen's "+ Link". */
 export function emptyDraft(preset?: SourceLinkTarget | null, today = ""): SourceDraft {
-  return { title: "", kind: "transcript", date: today, quote: "", linkKind: preset?.kind ?? "step", linkValue: preset ? targetValue(preset) : "" };
+  return { title: "", kind: "transcript", date: today, quote: "", fileUrl: "", linkKind: preset?.kind ?? "step", linkValue: preset ? targetValue(preset) : "" };
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -186,6 +192,7 @@ export function validateDraft(draft: SourceDraft, targets: LinkTargets, existing
     if (!draft.title.trim()) errors.title = NEEDS_A_TITLE;
     else if (draft.title.trim().length > MAX_TITLE) errors.title = `Keep the title to ${MAX_TITLE} characters.`;
     if (draft.date && (!DATE.test(draft.date) || Number.isNaN(Date.parse(draft.date)))) errors.date = "Enter the date as day, month and year.";
+    if (draft.fileUrl.trim() && !cleanSourceField("file_url", draft.fileUrl)) errors.fileUrl = BAD_LINK;
     if (draft.quote.length > MAX_QUOTE) errors.quote = `Keep the quote to ${MAX_QUOTE.toLocaleString("en-GB")} characters. The full text can be added on the source afterwards.`;
   }
   if (!toTarget(draft.linkKind, draft.linkValue, targets)) errors.link = NEEDS_A_LINK;
@@ -208,7 +215,7 @@ export function draftToSubmission(draft: SourceDraft, targets: LinkTargets): { o
       speakers: [],
       recorded_at: draft.date || null,
       body: draft.quote.trim() || null,
-      file_url: null,
+      file_url: draft.fileUrl.trim() || null,
     },
   };
 }

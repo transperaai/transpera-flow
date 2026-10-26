@@ -138,7 +138,7 @@ describe("the logo", () => {
     await page.getByRole("button", { name: "Upload logo" }).click({ trial: true });
     await page.getByRole("button", { name: "Remove" }).click();
     await expect.poll(() => page.locator("[data-logo-status]").innerText()).toBe("Logo removed.");
-    expect((await calls(page)).at(-1)).toEqual(["remove", expect.stringMatching(/\.png$/)]);
+    expect((await calls(page)).at(-1)).toEqual(["remove", "0123456789abcdef".repeat(4)]);
     expect(await page.locator("[data-logo-preview] img").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
@@ -147,7 +147,7 @@ describe("the logo", () => {
   it("says why a logo was refused, and keeps what it had", async () => {
     const { page } = await mount({ mode: "live", upload: "error" });
     await page.locator('input[type="file"]').setInputFiles({ name: "big.png", mimeType: "image/png", buffer: Buffer.from("x") });
-    await expect.poll(() => page.locator("[data-logo-status]").innerText()).toBe("That image is over 512 KB.");
+    await expect.poll(() => page.locator("[data-logo-status]").innerText()).toBe("That image is over 256 KB.");
     expect(await page.locator("[data-logo-preview] img").count()).toBe(0);
     await page.close();
   }, 60_000);

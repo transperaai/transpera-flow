@@ -97,6 +97,6 @@ describe("everything else", () => {
   });
   it("the words are the brief's", () => {
     expect(LOGO_ERRORS.type).toBe("Use a PNG, JPG or WebP image. SVG isn't accepted because it can carry scripts.");
-    expect(LOGO_ERRORS.big).toBe("That image is over 512 KB.");
+    expect(LOGO_ERRORS.big).toBe("That image is over 256 KB.");
   });
 });

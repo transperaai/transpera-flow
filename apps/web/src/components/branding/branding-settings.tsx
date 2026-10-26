@@ -32,11 +32,13 @@ export interface BrandingSettingsProps {
   workspaceId: string;
   name: string;
   branding: Branding;
-  /** The logo's public URL, or null. */
+  /** The logo's address (the app's route, with its hash), or null. */
   logoUrl: string | null;
+  /** The stored logo's SHA-256: the base for the next change, so someone else's change is noticed. Null when there is none. */
+  logoSha: string | null;
   saveAccent: typeof saveBrandAccent;
   removeLogo: typeof removeWorkspaceLogo;
-  /** Uploads a file and keeps it; the browser's Storage upload and then the server action by default. */
+  /** Checks a file and keeps it: the server action by default. `base` is the hash of the logo it replaces. */
   uploadLogo?: (workspaceId: string, base: string | null, file: File) => Promise<LogoResult>;
 }
 
@@ -168,7 +170,7 @@ function AccentControl({
 
 function Panel({ theme, accent, accentDark, children, label }: { theme: Theme; accent: Hex | null; accentDark: Hex | null; children: ReactNode; label: string }) {
   // The preview sets the tokens on its own wrapper: it is the only place that does.
-  const resolved = resolveBranding({ accent, accentDark, logoPath: null });
+  const resolved = resolveBranding({ accent, accentDark });
   const vars = previewVars(theme, theme === "light" ? resolved.light : resolved.dark);
   return (
     <div role="group" aria-label={label} style={vars as CSSProperties} className="flex min-w-0 flex-1 flex-col gap-3 rounded-lg border border-line bg-bg p-4 text-fg">
@@ -177,13 +179,13 @@ function Panel({ theme, accent, accentDark, children, label }: { theme: Theme; a
   );
 }
 
-export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, saveAccent, removeLogo, uploadLogo = uploadWorkspaceLogo }: BrandingSettingsProps) {
+export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, logoSha, saveAccent, removeLogo, uploadLogo = uploadWorkspaceLogo }: BrandingSettingsProps) {
   const disabled = mode === "readonly";
   const light = useField<string | null>(branding.accent, (base, next) => saveAccent(workspaceId, "light", base, next));
   const dark = useField<string | null>(branding.accentDark, (base, next) => saveAccent(workspaceId, "dark", base, next));
 
-  // The logo: the path it is stored under (the base for the next change), and the URL it shows from.
-  const [logo, setLogo] = useState<{ path: string | null; url: string | null }>({ path: branding.logoPath, url: logoUrl });
+  // The logo: its hash (the base for the next change), and the URL it shows from.
+  const [logo, setLogo] = useState<{ sha: string | null; url: string | null }>({ sha: logoSha, url: logoUrl });
   const [broken, setBroken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -192,7 +194,7 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
 
   const apply = (result: LogoResult, done: string) => {
     if (result.status === "ok") {
-      setLogo({ path: result.path, url: result.url });
+      setLogo({ sha: result.sha, url: result.url });
       setNotice({ tone: "ok", text: done });
     } else setNotice({ tone: "error", text: result.message });
   };
@@ -201,7 +203,7 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
     setBusy(true);
     setNotice({ tone: "ok", text: "Uploading…" });
     try {
-      apply(await uploadLogo(workspaceId, logo.path, file), "Logo saved.");
+      apply(await uploadLogo(workspaceId, logo.sha, file), "Logo saved.");
     } catch {
       setNotice({ tone: "error", text: "Couldn't upload the logo. Try again." });
     } finally {
@@ -210,11 +212,11 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
     }
   };
   const remove = async () => {
-    if (!logo.path) return;
+    if (!logo.sha) return;
     setBusy(true);
     setNotice(null);
     try {
-      apply(await removeLogo(workspaceId, logo.path), "Logo removed.");
+      apply(await removeLogo(workspaceId, logo.sha), "Logo removed.");
     } catch {
       setNotice({ tone: "error", text: "Couldn't remove the logo. Try again." });
     } finally {
@@ -234,7 +236,7 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
   const tile = (size: "sm" | "lg") =>
     shownLogo ? (
       <span aria-hidden data-allow-light className={`grid shrink-0 place-items-center overflow-hidden rounded-md bg-logo-tile ring-1 ring-line ${size === "sm" ? "size-8" : "size-24"}`}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- a small public logo; no optimiser, no remotePatterns */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- a small logo from our own route; no optimiser */}
         <img src={shownLogo} alt="" decoding="async" className="size-full object-contain p-0.5" onError={() => setBroken(shownLogo)} />
       </span>
     ) : (
@@ -269,12 +271,12 @@ export function BrandingSettings({ mode, workspaceId, name, branding, logoUrl, s
           <Button type="button" variant="outline" disabled={disabled || busy} onClick={() => fileInput.current?.click()}>
             Upload logo
           </Button>
-          <Button type="button" variant="ghost" disabled={disabled || busy || !logo.path} onClick={() => void remove()}>
+          <Button type="button" variant="ghost" disabled={disabled || busy || !logo.sha} onClick={() => void remove()}>
             Remove
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          {disabled ? READ_ONLY : "PNG, JPG or WebP, up to 512 KB and 2048 × 2048 pixels. A square logo with a transparent background works best."}
+          {disabled ? READ_ONLY : "PNG, JPG or WebP, up to 256 KB and 2048 × 2048 pixels. A square logo with a transparent background works best."}
         </p>
         <p aria-live="polite" role="status" className={notice?.tone === "error" ? "text-xs text-crit" : "text-xs text-muted-foreground"} data-logo-status>
           {notice?.text ?? ""}

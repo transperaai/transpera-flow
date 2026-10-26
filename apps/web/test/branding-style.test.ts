@@ -6,18 +6,17 @@ import { checkAccent, deriveDarkAccent, oklchToHex, type Hex, type Theme } from 
 // colour maths, and a stored accent that fails contrast is ignored at render time.
 
 const WS = "0d5f6f0e-0000-4000-8000-000000000001";
-const OTHER = "0d5f6f0e-0000-4000-8000-000000000002";
 const UUID = "11111111-2222-4333-8444-555555555555";
-const none: Branding = { accent: null, accentDark: null, logoPath: null };
+const none: Branding = { accent: null, accentDark: null, };
 const SAFE = /^[:a-z0-9#\-;{}()[\]="\s@,]*$/i;
 
 describe("brandingCss", () => {
   it("is null when nothing is branded", () => {
     expect(brandingCss(none)).toBeNull();
-    expect(brandingCss(readBranding({}, WS))).toBeNull();
-    expect(brandingCss(readBranding(null, WS))).toBeNull();
-    // A logo alone sets no colours.
-    expect(brandingCss({ ...none, logoPath: `${WS}/${UUID}.png` })).toBeNull();
+    expect(brandingCss(readBranding({}))).toBeNull();
+    expect(brandingCss(readBranding(null))).toBeNull();
+    // A stray logo_path (an old backup) sets no colours and is not read.
+    expect(brandingCss(readBranding({ logo_path: `${WS}/${UUID}.png` }))).toBeNull();
   });
 
   it("an accent gives the light block and, derived, the two dark ones, with tokens.css's selectors", () => {
@@ -66,38 +65,37 @@ describe("brandingCss", () => {
 
 describe("readBranding", () => {
   it("reads a good value", () => {
-    expect(readBranding({ accent: "#0b6e8a", accent_dark: "#4cc3e0", logo_path: `${WS}/${UUID}.webp` }, WS)).toEqual({ accent: "#0b6e8a", accentDark: "#4cc3e0", logoPath: `${WS}/${UUID}.webp` });
+    expect(readBranding({ accent: "#0b6e8a", accent_dark: "#4cc3e0" })).toEqual({ accent: "#0b6e8a", accentDark: "#4cc3e0" });
   });
 
   it("turns anything malformed into null", () => {
-    const injected = readBranding({ accent: "#fff;}body{display:none", accent_dark: "red" }, WS);
+    const injected = readBranding({ accent: "#fff;}body{display:none", accent_dark: "red" });
     expect(injected).toEqual(none);
     expect(brandingCss(injected)).toBeNull();
-    expect(readBranding({ logo_path: `${OTHER}/${UUID}.png` }, WS).logoPath).toBeNull(); // another workspace's folder
-    expect(readBranding({ logo_path: `${WS}/${UUID}.svg` }, WS).logoPath).toBeNull();
-    expect(readBranding({ logo_path: `${WS}/x/${UUID}.png` }, WS).logoPath).toBeNull();
-    expect(readBranding({ accent: 5, accent_dark: ["#aabbcc"], logo_path: 7 }, WS)).toEqual(none);
-    expect(readBranding({ accent: "#FFF" }, WS).accent).toBeNull();
-    for (const raw of [null, undefined, "x", 5, [], true]) expect(readBranding(raw, WS)).toEqual(none);
+    expect(readBranding({ accent: 5, accent_dark: ["#aabbcc"] })).toEqual(none);
+    expect(readBranding({ accent: "#FFF" }).accent).toBeNull();
+    for (const raw of [null, undefined, "x", 5, [], true]) expect(readBranding(raw)).toEqual(none);
   });
 
   it("whatever is stored, the output is safe CSS", () => {
-    const css = brandingCss(readBranding({ accent: "#0b6e8a", accent_dark: "#4cc3e0;}body{x:y" }, WS))!;
+    const css = brandingCss(readBranding({ accent: "#0b6e8a", accent_dark: "#4cc3e0;}body{x:y" }))!;
     expect(css).toMatch(SAFE);
   });
 });
 
 describe("logoUrl", () => {
-  const path = `${WS}/${UUID}.png`;
-  it("builds the public URL", () => {
-    expect(logoUrl(path, "https://abc.supabase.co")).toBe(`https://abc.supabase.co/storage/v1/object/public/branding/${path}`);
-    expect(logoUrl(path, "https://abc.supabase.co/")).toBe(`https://abc.supabase.co/storage/v1/object/public/branding/${path}`);
+  const sha = "0123456789abcdef".repeat(4);
+  it("builds the route's address with the first 12 characters of the hash", () => {
+    expect(logoUrl(WS, sha)).toBe(`/api/branding/${WS}/logo?v=0123456789ab`);
+    expect(logoUrl(WS.toUpperCase(), sha)).toBe(`/api/branding/${WS}/logo?v=0123456789ab`);
   });
-  it("is null without a path or a URL, or for a path off the layout", () => {
-    expect(logoUrl(null, "https://abc.supabase.co")).toBeNull();
-    expect(logoUrl(path, undefined)).toBeNull();
-    expect(logoUrl(path, "")).toBeNull();
-    expect(logoUrl("../x.png", "https://abc.supabase.co")).toBeNull();
+  it("is null without a logo, or for what isn't a workspace id or a hash", () => {
+    expect(logoUrl(WS, null)).toBeNull();
+    expect(logoUrl(WS, "")).toBeNull();
+    expect(logoUrl(WS, "0123456789ab")).toBeNull();
+    expect(logoUrl(WS, sha.toUpperCase())).toBeNull();
+    expect(logoUrl("../x", sha)).toBeNull();
+    expect(logoUrl(WS + "/x", sha)).toBeNull();
   });
 });
 

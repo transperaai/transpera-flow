@@ -2,13 +2,11 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { headerRollback } from "./header-rollback";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
-// Client branding (issue #34, B5, migration 20261214000000): `workspaces.branding` with its shape check and logo guard, the
-// public `branding` bucket and its three policies on `storage.objects` (owners and agency admins), saving through
-// `save_fields`, and the audit entry. Storage is the stand-in in sql/storage-shim.sql (verified only against plain Postgres:
-// docs/supabase-notes.md). Nothing here relies on `storage.objects.owner_id`.
+// Client branding (issue #34, B5, migration 20261214000000): `workspaces.branding` with its shape check, saving through
+// `save_fields`, and the audit entry. The logo guard, the `branding` bucket's policies and the `logo_path` key went with
+// migration 20261230000000 (step 4): the logo is a row of `workspace_logos`, tested in workspace-logos.test.ts.
 
 type Claims = Record<string, unknown>;
 interface User {
@@ -46,16 +44,7 @@ async function refused(run: Promise<unknown>, code: string, why: RegExp) {
   expect({ code: err!.code, message: err!.message }).toEqual({ code, message: expect.stringMatching(why) });
 }
 
-const upload = (c: pg.Client, name: string, owner: string, bucket = "branding") =>
-  c.query("insert into storage.objects (bucket_id, name, owner, owner_id, metadata) values ($1, $2, $3::uuid, $3, $4::jsonb) returning name", [bucket, name, owner, JSON.stringify({ size: 12, mimetype: MIME[name.split(".").pop()!] })]);
-const names = (c: pg.Client) => c.query("select name from storage.objects where bucket_id = 'branding' order by name").then((r) => r.rows.map((x) => x.name as string));
 const logo = (workspace: string, ext = "png") => `${workspace}/${randomUUID()}.${ext}`;
-/** An object in the bucket, made as the superuser. */
-const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
-const object = async (name: string, metadata: Record<string, unknown> = { mimetype: MIME[name.split(".").pop()!], size: 1234 }) => {
-  await q("insert into storage.objects (bucket_id, name, metadata) values ('branding', $1, $2::jsonb)", [name, JSON.stringify(metadata)]);
-  return name;
-};
 /** Set `branding` as the superuser (no JWT: the guard passes). */
 const set = (workspace: string, branding: unknown) => q("update workspaces set branding = $2::jsonb where id = $1", [workspace, JSON.stringify(branding)]);
 
@@ -102,17 +91,15 @@ describe("the column", () => {
 });
 
 describe("the shape check", () => {
-  it("accepts {}, an accent, a dark accent with a null accent, and a logo in the workspace's own folder", async () => {
+  it("accepts {}, an accent, and a dark accent with a null accent", async () => {
     await set(ws, {});
     await set(ws, { accent: "#0b6e8a" });
     await set(ws, { accent: null, accent_dark: "#aabbcc" });
-    await set(ws, { accent: "#0b6e8a", accent_dark: null, logo_path: await object(logo(ws, "png")) });
-    await set(ws, { logo_path: await object(logo(ws, "jpg")) });
-    await set(ws, { logo_path: await object(logo(ws, "webp")) });
+    await set(ws, { accent: "#0b6e8a", accent_dark: null });
     await set(ws, {});
   });
 
-  it("refuses bad hex, a wrong type, an unknown key, a non-object and a logo that isn't in the workspace's own folder", async () => {
+  it("refuses bad hex, a wrong type, an unknown key, a non-object, and a logo_path (the logo is in workspace_logos now)", async () => {
     const bad: unknown[] = [
       { accent: "#FFF" },
       { accent: "#abc" },
@@ -128,6 +115,7 @@ describe("the shape check", () => {
       5,
       null,
       { logo_path: 5 },
+      { logo_path: logo(ws) },
       { logo_path: logo(other) },
       { logo_path: logo(ws, "svg") },
       { logo_path: `${ws}/x/${randomUUID()}.png` },
@@ -139,65 +127,6 @@ describe("the shape check", () => {
       await refused(q("update workspaces set branding = $2::jsonb where id = $1", [ws, JSON.stringify(value)]), "23514", /workspaces_branding_shape|violates check/);
     }
     expect(await q("select branding from workspaces where id = $1", [ws])).toEqual([{ branding: {} }]);
-  });
-});
-
-describe("the logo guard", () => {
-  it("refuses a logo path with nothing behind it, for anyone signed in", async () => {
-    const path = logo(ws);
-    await refused(as(users.owner!.claims, (c) => c.query("update workspaces set branding = jsonb_build_object('logo_path', $2::text) where id = $1", [ws, path])), "42501", /^Upload the logo first: the workspace keeps only a logo uploaded for it$/);
-    expect(await q("select branding from workspaces where id = $1", [ws])).toEqual([{ branding: {} }]);
-  });
-
-  it("keeps a logo whose object is in the bucket (whoever uploaded it); the operator passes; an unchanged path is not checked again", async () => {
-    const path = await object(logo(ws));
-    await as(users.owner!.claims, (c) => c.query("update workspaces set branding = jsonb_build_object('logo_path', $2::text) where id = $1", [ws, path]));
-    expect(await q("select branding ->> 'logo_path' p from workspaces where id = $1", [ws])).toEqual([{ p: path }]);
-    // The operator (no JWT) passes with nothing behind the name.
-    const ghost = logo(ws);
-    await set(ws, { logo_path: ghost });
-    // An unchanged path on another update is not checked (the object may be gone).
-    await as(users.owner!.claims, (c) => c.query("update workspaces set branding = branding || '{\"accent\": \"#0b6e8a\"}' where id = $1", [ws]));
-    expect(await q("select branding from workspaces where id = $1", [ws])).toEqual([{ branding: { logo_path: ghost, accent: "#0b6e8a" } }]);
-    // An object in another bucket doesn't count.
-    await q("insert into storage.buckets (id, name) values ('elsewhere', 'elsewhere') on conflict do nothing");
-    const wrong = logo(ws);
-    await q("insert into storage.objects (bucket_id, name) values ('elsewhere', $1)", [wrong]);
-    await refused(as(users.owner!.claims, (c) => c.query("update workspaces set branding = jsonb_build_object('logo_path', $2::text) where id = $1", [ws, wrong])), "42501", /Upload the logo first/);
-    await set(ws, {});
-  });
-
-  it("keeps only an object whose stored metadata says a PNG, JPEG or WebP of up to 512 KB that matches the name", async () => {
-    const keep = (path: string) => as(users.owner!.claims, (c) => c.query("update workspaces set branding = jsonb_build_object('logo_path', $2::text) where id = $1", [ws, path]));
-    const why = /^The logo must be a PNG, JPEG or WebP image of up to 512 KB$/;
-    await refused(keep(await object(logo(ws, "png"), { mimetype: "image/svg+xml", size: 100 })), "42501", why);
-    await refused(keep(await object(logo(ws, "png"), { mimetype: "image/jpeg", size: 100 })), "42501", why); // not the name's type
-    await refused(keep(await object(logo(ws, "jpg"), { mimetype: "image/png", size: 100 })), "42501", why);
-    await refused(keep(await object(logo(ws, "png"), { size: 100 })), "42501", why); // no mimetype
-    await refused(keep(await object(logo(ws, "png"), { mimetype: "image/png", size: 524289 })), "42501", why);
-    await refused(keep(await object(logo(ws, "png"), { mimetype: "image/png", size: 0 })), "42501", why);
-    await refused(keep(await object(logo(ws, "png"), { mimetype: "image/png", size: "big" })), "42501", why);
-    await refused(keep(await object(logo(ws, "png"), { mimetype: "image/png" })), "42501", why); // no size
-    await refused(keep(await object(logo(ws, "webp"), {})), "42501", why);
-    await keep(await object(logo(ws, "png"), { mimetype: "image/png", size: 524288 }));
-    await keep(await object(logo(ws, "jpg"), { mimetype: "image/jpeg", size: 1 }));
-    await keep(await object(logo(ws, "webp"), { mimetype: "image/webp", size: "4096" })); // Storage may report size as text
-    await set(ws, {});
-  });
-
-  it("ACCEPTED LIMIT: the bytes and pixel size are the app's check; an object of the right declared type and size is kept whatever it holds", async () => {
-    // Postgres can't see inside the file. A manager who skips the app can keep junk bytes declared as a small PNG (header and
-    // docs/supabase-notes.md list this). If this test starts failing, the limit has changed: update both.
-    const path = await object(logo(ws, "png"), { mimetype: "image/png", size: 100, note: "junk bytes, declared 11000 x 11000 px in a real IHDR" });
-    await as(users.owner!.claims, (c) => saveFields(c, { id: ws }, { "branding.logo_path": null }, { "branding.logo_path": path }));
-    expect(await q("select branding ->> 'logo_path' p from workspaces where id = $1", [ws])).toEqual([{ p: path }]);
-    await set(ws, {});
-  });
-
-  it("is not executable by anyone signed in, and has an empty search_path", async () => {
-    expect(await q("select proconfig from pg_proc where pronamespace = 'private'::regnamespace and proname = 'branding_logo_guard'")).toEqual([{ proconfig: ['search_path=""'] }]);
-    expect(await q("select grantee from information_schema.routine_privileges where routine_schema = 'private' and routine_name = 'branding_logo_guard' and grantee in ('anon', 'authenticated', 'PUBLIC')")).toEqual([]);
-    expect(await q("select tgname, tgenabled::text e from pg_trigger where tgname = 'branding_logo_guard'")).toEqual([{ tgname: "branding_logo_guard", e: "O" }]);
   });
 });
 
@@ -252,111 +181,9 @@ describe("saving through save_fields", () => {
   });
 });
 
-describe("the branding bucket", () => {
-  it("is public, 512 KB a file, and takes only PNG, JPEG and WebP", async () => {
-    expect(await q("select id, public, file_size_limit::int, allowed_mime_types from storage.buckets where id = 'branding'")).toEqual([
-      { id: "branding", public: true, file_size_limit: 524288, allowed_mime_types: ["image/png", "image/jpeg", "image/webp"] },
-    ]);
-    expect(await q("select cmd, roles::text[] roles from pg_policies where schemaname = 'storage' and policyname like 'branding:%' order by cmd")).toEqual([
-      { cmd: "DELETE", roles: ["authenticated"] },
-      { cmd: "INSERT", roles: ["authenticated"] },
-      { cmd: "SELECT", roles: ["authenticated"] },
-    ]);
-  });
-
-  it("owners and agency admins upload into their workspace's folder", async () => {
-    for (const who of ["owner", "agency_member", "flag"]) {
-      const name = logo(ws);
-      expect((await as(users[who]!.claims, (c) => upload(c, name, users[who]!.id))).rows, who).toEqual([{ name }]);
-    }
-  });
-
-  it("refuses an editor, member, viewer, another workspace's owner and anon", async () => {
-    for (const who of ["editor", "member", "viewer", "stranger", "otherOwner"]) {
-      await refused(as(users[who]!.claims, (c) => upload(c, logo(ws), users[who]!.id)), "42501", /row-level security/);
-    }
-    await refused(as(null, (c) => upload(c, logo(ws), users.owner!.id), "anon"), "42501", /row-level security/);
-    // The owner of another workspace may not write into this one's folder, nor this owner into the other's.
-    await refused(as(users.owner!.claims, (c) => upload(c, logo(other), users.owner!.id)), "42501", /row-level security/);
-  });
-
-  it("refuses a name off the layout: another kind of file, a nested folder, a name that isn't a uuid", async () => {
-    const bad = [
-      logo(ws, "svg"),
-      logo(ws, "gif"),
-      logo(ws, "html"),
-      `${ws}/x/${randomUUID()}.png`,
-      `${ws}/${randomUUID()}/${randomUUID()}.png`,
-      `${ws}/logo.png`,
-      `${ws}/${randomUUID()}.PNG`,
-      `${ws}/${randomUUID()}.png.html`,
-      `../${ws}/${randomUUID()}.png`,
-      `${ws.toUpperCase()}/${randomUUID()}.png`,
-    ];
-    for (const name of bad) await refused(as(users.owner!.claims, (c) => upload(c, name, users.owner!.id)), "42501", /row-level security/);
-    // Other buckets are untouched by these policies.
-    await q("insert into storage.buckets (id, name) values ('elsewhere', 'elsewhere') on conflict do nothing");
-    await refused(as(users.owner!.claims, (c) => upload(c, logo(ws), users.owner!.id, "elsewhere")), "42501", /row-level security/);
-  });
-
-  it("owners read and delete; editors can't read or delete; anon can't read; there is no update", async () => {
-    const name = logo(ws);
-    await as(users.owner!.claims, (c) => upload(c, name, users.owner!.id));
-    expect(await as(users.owner!.claims, (c) => names(c))).toContain(name);
-    expect(await as(users.agency_member!.claims, (c) => names(c))).toContain(name);
-    for (const who of ["editor", "member", "viewer", "stranger", "otherOwner"]) expect(await as(users[who]!.claims, (c) => names(c)), who).not.toContain(name);
-    expect(await as(null, (c) => names(c), "anon")).toEqual([]);
-    for (const who of ["editor", "viewer", "stranger", "otherOwner"]) {
-      expect((await as(users[who]!.claims, (c) => c.query("delete from storage.objects where name = $1", [name]))).rowCount, who).toBe(0);
-    }
-    expect((await as(null, (c) => c.query("delete from storage.objects where name = $1", [name]), "anon")).rowCount).toBe(0);
-    // No update policy: even the owner changes nothing in place.
-    expect((await as(users.owner!.claims, (c) => c.query("update storage.objects set metadata = '{}' where name = $1", [name]))).rowCount).toBe(0);
-    expect((await as(users.owner!.claims, (c) => c.query("delete from storage.objects where name = $1", [name]))).rowCount).toBe(1);
-    expect(await q("select count(*)::int n from storage.objects where name = $1", [name])).toEqual([{ n: 0 }]);
-  });
-
-  it("an owner keeps a logo they uploaded, end to end, and an editor then sees the path but can't touch the object", async () => {
-    const name = logo(ws);
-    await as(users.owner!.claims, (c) => upload(c, name, users.owner!.id));
-    await as(users.owner!.claims, (c) => saveFields(c, { id: ws }, { "branding.logo_path": null }, { "branding.logo_path": name }));
-    expect(await as(users.viewer!.claims, async (c) => (await c.query("select branding ->> 'logo_path' p from workspaces where id = $1", [ws])).rows)).toEqual([{ p: name }]);
-    expect((await as(users.editor!.claims, (c) => c.query("delete from storage.objects where name = $1", [name]))).rowCount).toBe(0);
-    await set(ws, {});
-  });
-});
-
-describe("the rollback in the header", () => {
-  const FILE = "20261214000000_client_branding.sql";
-  // Last in the file: it removes the column the other tests use, then puts everything back.
-  it("undoes the migration, deletes the version row, and the migration applies again", async () => {
-    const migration = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
-    // The harness doesn't record versions (production does): make the table and the row the rollback must remove.
-    await q("create schema if not exists supabase_migrations");
-    await q("create table if not exists supabase_migrations.schema_migrations (version text primary key, name text, statements text[])");
-    await q("insert into supabase_migrations.schema_migrations (version, name) values ('20261214000000', 'client_branding') on conflict do nothing");
-    const rollback = headerRollback(FILE);
-    expect(rollback).toMatch(/^begin;/);
-    expect(rollback).toMatch(/commit;$/);
-    expect(rollback).toContain("delete from supabase_migrations.schema_migrations where version = '20261214000000';");
-    await db.client.query(rollback);
-    expect(await q("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'workspaces' and column_name = 'branding'")).toEqual([]);
-    expect(await q("select conname from pg_constraint where conname = 'workspaces_branding_shape'")).toEqual([]);
-    expect(await q("select proname from pg_proc where pronamespace = 'private'::regnamespace and proname = 'branding_logo_guard'")).toEqual([]);
-    expect(await q("select tgname from pg_trigger where tgname = 'branding_logo_guard'")).toEqual([]);
-    expect(await q("select policyname from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'branding:%'")).toEqual([]);
-    expect(await q("select version from supabase_migrations.schema_migrations where version = '20261214000000'")).toEqual([]);
-    // B19's pieces are untouched, and the bucket row stays (it may hold files).
-    expect(await q("select policyname from pg_policies where schemaname = 'storage' and policyname like 'sources:%' order by 1")).toHaveLength(3);
-    expect(await q("select id from storage.buckets where id = 'branding'")).toEqual([{ id: "branding" }]);
-    // Applying again puts everything back (the preflight 0 count is zero again, so nothing blocks it).
-    expect(await q("select count(*)::int n from supabase_migrations.schema_migrations where version >= '20261214000000'")).toEqual([{ n: 0 }]);
-    await db.client.query(migration);
-    expect(await q("select count(*)::int n from pg_policies where schemaname = 'storage' and policyname like 'branding:%'")).toEqual([{ n: 3 }]);
-    expect(await q("select count(*)::int n from workspaces where branding = '{}'::jsonb")).not.toEqual([{ n: 0 }]);
-  });
-
-  it("the apply file carries the rollback twice (header and statement) and the same migration", () => {
+describe("the apply file of the migration", () => {
+  it("carries the rollback twice (header and statement) and the same migration", () => {
+    const FILE = "20261214000000_client_branding.sql";
     const apply = readFileSync(new URL("../scripts/apply/20261214000000_client_branding.sql", import.meta.url), "utf8");
     const migration = readFileSync(new URL(`../migrations/${FILE}`, import.meta.url), "utf8");
     const del = "--   delete from supabase_migrations.schema_migrations where version = '20261214000000';";

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { listProcesses, loadSourceFile } from "@transpera-flow/db";
+import { listProcesses } from "@transpera-flow/db";
 import type { Db } from "@transpera-flow/db";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -150,31 +150,5 @@ describe("process admin and source files", () => {
     // The viewer still sees it (its history is kept), and it is off their lists.
     expect((await listProcesses(viewer, ids.ws)).map((p) => p.name)).not.toContain("Audit");
     expect((await listProcesses(viewer, ids.ws, { includeArchived: true })).map((p) => p.name)).toContain("Audit");
-  });
-
-  it("an editor keeps a file's details on a source; a viewer and anon can't", async () => {
-    const source = (await one("insert into sources (workspace_id, kind, title) values ($1, 'sop', 'Onboarding SOP') returning id", [ids.ws])).id as string;
-    // Uploaded by the editor (as Storage records it: the object's owner).
-    const uploaded = async (name: string, owner = ids.editor) => {
-      await admin.query("insert into storage.objects (bucket_id, name, owner, owner_id) values ('sources', $1, $2::uuid, $2)", [name, owner]);
-      return name;
-    };
-    const path = `${ids.ws}/${source}/${randomUUID()}/Onboarding SOP.pdf`;
-    const set = (db: Db, change: Record<string, unknown>) => db.updateTable("sources").set(change as never).where("id", "=", source).returning("id").execute();
-    // Nothing uploaded there yet: refused.
-    const early = await errorOf(() => set(editor, { file_path: path, file_name: "Onboarding SOP.pdf", file_type: "pdf", file_size: 2048 }));
-    expect({ code: early?.code, message: early?.message }).toEqual({ code: "42501", message: "Upload the file first: a source keeps only a file you have just uploaded for it" });
-    await uploaded(path);
-    const file = { file_path: path, file_name: "Onboarding SOP.pdf", file_type: "pdf", file_size: 2048, body: "1. Send the welcome pack." };
-    expect(await set(viewer, file)).toEqual([]);
-    expect((await errorOf(() => set(anon, file)))?.code).toBe("42501");
-    expect(await loadSourceFile(viewer, source)).toBeNull();
-    expect(await set(editor, file)).toHaveLength(1);
-    expect(await loadSourceFile(viewer, source)).toEqual({ path, name: "Onboarding SOP.pdf", type: "pdf", size: 2048 });
-    // The database's checks hold over the API too: another workspace's folder, another kind, over 10 MB.
-    const other = await errorOf(async () => set(editor, { ...file, file_path: await uploaded(`${randomUUID()}/${source}/${randomUUID()}/x.pdf`) }));
-    expect(other?.code).toBe("23514");
-    expect((await errorOf(() => set(editor, { ...file, file_type: "html" })))?.code).toBe("23514");
-    expect((await errorOf(() => set(editor, { ...file, file_size: 10 * 1024 * 1024 + 1 })))?.code).toBe("23514");
   });
 });

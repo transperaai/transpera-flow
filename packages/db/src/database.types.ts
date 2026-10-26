@@ -2890,10 +2890,6 @@ export type Database = {
           body: string | null
           created_at: string
           created_by: string | null
-          file_name: string | null
-          file_path: string | null
-          file_size: number | null
-          file_type: string | null
           file_url: string | null
           id: string
           kind: string
@@ -2907,10 +2903,6 @@ export type Database = {
           body?: string | null
           created_at?: string
           created_by?: string | null
-          file_name?: string | null
-          file_path?: string | null
-          file_size?: number | null
-          file_type?: string | null
           file_url?: string | null
           id?: string
           kind?: string
@@ -2924,10 +2916,6 @@ export type Database = {
           body?: string | null
           created_at?: string
           created_by?: string | null
-          file_name?: string | null
-          file_path?: string | null
-          file_size?: number | null
-          file_type?: string | null
           file_url?: string | null
           id?: string
           kind?: string
@@ -3772,6 +3760,14 @@ export type Database = {
           role: Database["public"]["Enums"]["membership_role"]
           source: string
           user_id: string
+        }[]
+      }
+      workspace_logo: {
+        Args: { p_workspace: string }
+        Returns: {
+          bytes: string
+          mime: string
+          sha256: string
         }[]
       }
       workspace_role: {

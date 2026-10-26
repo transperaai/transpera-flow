@@ -6,6 +6,7 @@ import {
   NEEDS_A_LINK,
   NEEDS_A_TITLE,
   draftToSubmission,
+  BAD_LINK,
   emptyDraft,
   hasErrors,
   linkJson,
@@ -52,7 +53,7 @@ const targets: LinkTargets = {
   solutions: [{ id: SOL, name: "Second strategist" }],
 };
 
-const draft = (over: Partial<SourceDraft> = {}): SourceDraft => ({ title: "Interview: Leah Brooks", kind: "transcript", date: "2026-09-18", quote: "Access requests go back and forth.", linkKind: "step", linkValue: S1, ...over });
+const draft = (over: Partial<SourceDraft> = {}): SourceDraft => ({ title: "Interview: Leah Brooks", kind: "transcript", date: "2026-09-18", quote: "Access requests go back and forth.", fileUrl: "", linkKind: "step", linkValue: S1, ...over });
 
 describe("the Add / Link source dialog's rules", () => {
   it("is valid with a title and a link", () => {
@@ -96,9 +97,23 @@ describe("the Add / Link source dialog's rules", () => {
     });
   });
 
+  it("takes a link to the original: optional, trimmed, and only an http(s) address", () => {
+    const link = "https://drive.google.com/file/d/abc/view";
+    expect(validateDraft(draft({ fileUrl: link }), targets)).toEqual({});
+    expect(validateDraft(draft({ fileUrl: "   " }), targets)).toEqual({});
+    expect(draftToSubmission(draft({ fileUrl: `  ${link} ` }), targets)).toMatchObject({ ok: true, input: { file_url: link } });
+    expect(draftToSubmission(draft({ fileUrl: "" }), targets)).toMatchObject({ ok: true, input: { file_url: null } });
+    for (const bad of ["drive.google.com/x", "ftp://example.com/x", "javascript:alert(1)", `https://example.com/${"a".repeat(2000)}`]) {
+      expect(validateDraft(draft({ fileUrl: bad }), targets).fileUrl, bad).toBe(BAD_LINK);
+      expect(draftToSubmission(draft({ fileUrl: bad }), targets).ok).toBe(false);
+    }
+    // Linking an existing source asks only for the link to something: that source keeps its own original.
+    expect(validateDraft(draft({ fileUrl: "nope" }), targets, true)).toEqual({});
+  });
+
   it("opens with the target a screen's + Link gave it", () => {
     const preset: SourceLinkTarget = { kind: "issue", issueId: I1 };
-    expect(emptyDraft(preset, "2026-10-02")).toEqual({ title: "", kind: "transcript", date: "2026-10-02", quote: "", linkKind: "issue", linkValue: I1 });
+    expect(emptyDraft(preset, "2026-10-02")).toEqual({ title: "", kind: "transcript", date: "2026-10-02", quote: "", fileUrl: "", linkKind: "issue", linkValue: I1 });
     expect(validateDraft({ ...emptyDraft(preset), title: "Notes" }, targets)).toEqual({});
     expect(emptyDraft(null).linkValue).toBe("");
     expect(hasErrors(validateDraft(emptyDraft(null), targets))).toBe(true);
