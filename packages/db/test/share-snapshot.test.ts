@@ -2,9 +2,11 @@ import { detectIssues, parsePatchPath, simulate, type DetectedIssue, type FirstP
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { JOIN_PLACE_WORDS, JOIN_STANDARD_WORDS, JOIN_VERSION_WORDS } from "../src/money";
 import { normaliseView } from "../src/share-text";
+import { rpc } from "../src/client";
+import { createTestDb, createUser, type TestDb } from "./harness";
 import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES, OLD_SHARE_MONEY_SOURCE } from "./money-cases";
 import {
   SHARE_SNAPSHOT_VERSION,
@@ -13,6 +15,9 @@ import {
   northbeamIssues,
   redactShareSnapshot,
   shareReaderDb,
+  loadTeam,
+  readerSeesPeople,
+  NORTHBEAM_WORKSPACE_ID,
   shareSnapshotLeaks,
   sortWithoutMoney,
   toEngineModel,
@@ -35,44 +40,54 @@ import { LEVER_KIND_IDS, SHARE_FREE_TEXT_KEYS, SHARE_HEX_COLOR, SHARE_NON_TEXT_K
 // ---------------------------------------------------------------------------
 
 describe("shareReaderDb", () => {
-  const fake = () => {
-    const rpc = vi.fn(async (fn: string, args: unknown) => ({ data: { fn, args }, error: null }));
-    const from = vi.fn(function (this: unknown, table: string) {
-      return { table, self: this };
-    });
-    return { rpc, from, auth: { x: 1 } } as unknown as Db & { rpc: typeof rpc; from: typeof from };
-  };
+  // Against Postgres as a real editor and a real member: the two reads it changes, and everything else it leaves alone.
+  let tdb: TestDb;
+  let editor: Db;
+  let member: Db;
+  const ws = NORTHBEAM_WORKSPACE_ID;
+  beforeAll(async () => {
+    tdb = await createTestDb();
+    const e = await createUser(tdb, "editor@share-reader.example.com");
+    const m = await createUser(tdb, "member@share-reader.example.com");
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [ws, e.id, m.id]);
+    await tdb.client.query("update people set cost_rate = 55 where workspace_id = $1", [ws]);
+    editor = tdb.dbAs(e.claims as never);
+    member = tdb.dbAs(m.claims as never);
+  });
+  afterAll(async () => {
+    await tdb?.close();
+  });
 
   it("sends team_capacity to share_team_capacity with the People toggle", async () => {
+    const own = await loadTeam(editor, ws);
+    expect(own.people.some((p) => p.cost_rate !== null)).toBe(true);
     for (const people of [false, true]) {
-      const db = fake();
-      const wrapped = shareReaderDb(db, { people, financials: false });
-      const r = await wrapped.rpc("team_capacity", { ws: "w1" });
-      expect(db.rpc).toHaveBeenCalledTimes(1);
-      expect(db.rpc).toHaveBeenCalledWith("share_team_capacity", { ws: "w1", show_people: people }, undefined);
-      expect(r.data).toEqual({ fn: "share_team_capacity", args: { ws: "w1", show_people: people } });
+      const wrapped = shareReaderDb(editor, { people, financials: false });
+      const team = await loadTeam(wrapped, ws);
+      const direct = (await rpc(editor, "share_team_capacity", { ws, show_people: people })) as unknown as { people: unknown[] };
+      expect(team.people).toEqual(direct.people);
+      expect(team.viewer).toEqual({ seesEveryone: people, ownPersonId: null });
+      expect(team.people.every((p) => p.cost_rate === null)).toBe(true);
+      expect(team.people.map((p) => p.name)).toEqual(people ? own.people.map((p) => p.name).sort() : own.people.map((_, i) => `Team member ${i + 1}`));
     }
   });
 
-  it("answers can_see_people with the People toggle, without calling the database", async () => {
+  it("answers can_see_people with the People toggle, whoever is reading", async () => {
+    expect(await readerSeesPeople(editor, ws)).toBe(true);
+    expect(await readerSeesPeople(member, ws)).toBe(false);
     for (const people of [false, true]) {
-      const db = fake();
-      const r = await shareReaderDb(db, { people, financials: true }).rpc("can_see_people", { ws: "w1" });
-      expect(r).toEqual({ data: people, error: null });
-      expect(db.rpc).not.toHaveBeenCalled();
+      expect(await readerSeesPeople(shareReaderDb(editor, { people, financials: true }), ws)).toBe(people);
+      expect(await readerSeesPeople(shareReaderDb(member, { people, financials: true }), ws)).toBe(people);
     }
   });
 
-  it("passes every other rpc and every other member through unchanged", async () => {
-    const db = fake();
-    const wrapped = shareReaderDb(db, { people: true, financials: true });
-    await wrapped.rpc("can_edit_workspace", { ws: "w1" });
-    expect(db.rpc).toHaveBeenCalledWith("can_edit_workspace", { ws: "w1" }, undefined);
-    // `from` keeps working with the original client as `this`.
-    const q = wrapped.from("people") as unknown as { table: string; self: unknown };
-    expect(q.table).toBe("people");
-    expect(q.self).toBe(db);
-    expect((wrapped as unknown as { auth: unknown }).auth).toBe(db.auth);
+  it("passes every other query through unchanged, and leaves the original Db alone", async () => {
+    const wrapped = shareReaderDb(editor, { people: false, financials: false });
+    const ids = async (db: Db) => (await db.selectFrom("people").select("id").where("workspace_id", "=", ws).orderBy("id").execute()).map((r) => r.id);
+    expect(await ids(wrapped)).toEqual(await ids(editor));
+    expect(await rpc(wrapped, "can_edit_workspace", { ws })).toBe(true);
+    // The editor's own Db still reads the stored values.
+    expect((await loadTeam(editor, ws)).viewer.seesEveryone).toBe(true);
   });
 });
 

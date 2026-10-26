@@ -42,6 +42,8 @@ export function readCitations(json: Json | unknown): FindingCitation[] {
 
 /** Every finding of a workspace that a page may show or review (dismissed and superseded ones stay in the table, unread). */
 export async function loadFindings(db: Db, workspaceId: string, statuses: readonly FindingStatus[] = ["proposed", "accepted"]): Promise<FindingRow[]> {
+  // `in ()` is not SQL (PostgREST read an empty list as matching nothing).
+  if (!statuses.length) return [];
   const data = await db
     .selectFrom("findings")
     .select(columns(FINDING_COLUMNS))
@@ -177,58 +179,58 @@ export async function storeProposedFindings(
   // supabase-js returned `{ error }`; this function reports a failed statement as `{ error: message }` too.
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   try {
-  if (keys.length) {
-    const same = await db
+    if (keys.length) {
+      const same = await db
+        .selectFrom("findings")
+        .select(["id", "ai_key", "process_id", "status"])
+        .where("workspace_id", "=", input.workspaceId)
+        .where("origin", "=", "ai")
+        .where("ai_key", "in", keys)
+        .execute();
+      for (const r of same) known.set(where(r.process_id, r.ai_key ?? ""), { id: r.id, status: r.status as FindingStatus });
+    }
+    const content = (f: ProposedFinding) => ({
+      step_id: f.stepId,
+      rating: f.rating,
+      type: f.type,
+      title: f.title.slice(0, FINDING_LIMITS.title),
+      evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
+      why: f.why.slice(0, FINDING_LIMITS.why),
+      facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
+      person_labels: f.personLabels as unknown as Json,
+      analysis_id: input.analysisId,
+      run_id: input.runId,
+      status: "proposed",
+    });
+    const fresh = wanted.filter((f) => !known.has(where(f.processId, f.aiKey)));
+    const again = wanted.flatMap((f) => {
+      const r = known.get(where(f.processId, f.aiKey));
+      return r && (r.status === "proposed" || r.status === "superseded") ? [{ id: r.id, f }] : [];
+    });
+    if (fresh.length) {
+      await db
+        .insertInto("findings")
+        .values(fresh.map((f) => ({ workspace_id: input.workspaceId, process_id: f.processId, origin: "ai", ai_key: f.aiKey, ...content(f) })))
+        .execute();
+    }
+    for (const { id, f } of again) {
+      await db.updateTable("findings").set(content(f)).where("id", "=", id).execute();
+    }
+    // The proposals still open in this scope (made by an analysis stored against it) that an earlier run made.
+    const open = await db
       .selectFrom("findings")
-      .select(["id", "ai_key", "process_id", "status"])
-      .where("workspace_id", "=", input.workspaceId)
-      .where("origin", "=", "ai")
-      .where("ai_key", "in", keys)
+      .innerJoin("ai_analyses", "ai_analyses.id", "findings.analysis_id")
+      .select(["findings.id", "findings.run_id"])
+      .where("findings.workspace_id", "=", input.workspaceId)
+      .where("findings.origin", "=", "ai")
+      .where("findings.status", "=", "proposed")
+      .where("ai_analyses.process_id", "=", input.scope)
       .execute();
-    for (const r of same) known.set(where(r.process_id, r.ai_key ?? ""), { id: r.id, status: r.status as FindingStatus });
-  }
-  const content = (f: ProposedFinding) => ({
-    step_id: f.stepId,
-    rating: f.rating,
-    type: f.type,
-    title: f.title.slice(0, FINDING_LIMITS.title),
-    evidence: f.evidence.slice(0, FINDING_LIMITS.evidence),
-    why: f.why.slice(0, FINDING_LIMITS.why),
-    facts: f.facts.slice(0, FINDING_LIMITS.facts) as unknown as Json,
-    person_labels: f.personLabels as unknown as Json,
-    analysis_id: input.analysisId,
-    run_id: input.runId,
-    status: "proposed",
-  });
-  const fresh = wanted.filter((f) => !known.has(where(f.processId, f.aiKey)));
-  const again = wanted.flatMap((f) => {
-    const r = known.get(where(f.processId, f.aiKey));
-    return r && (r.status === "proposed" || r.status === "superseded") ? [{ id: r.id, f }] : [];
-  });
-  if (fresh.length) {
-    await db
-      .insertInto("findings")
-      .values(fresh.map((f) => ({ workspace_id: input.workspaceId, process_id: f.processId, origin: "ai", ai_key: f.aiKey, ...content(f) })))
-      .execute();
-  }
-  for (const { id, f } of again) {
-    await db.updateTable("findings").set(content(f)).where("id", "=", id).execute();
-  }
-  // The proposals still open in this scope (made by an analysis stored against it) that an earlier run made.
-  const open = await db
-    .selectFrom("findings")
-    .innerJoin("ai_analyses", "ai_analyses.id", "findings.analysis_id")
-    .select(["findings.id", "findings.run_id"])
-    .where("findings.workspace_id", "=", input.workspaceId)
-    .where("findings.origin", "=", "ai")
-    .where("findings.status", "=", "proposed")
-    .where("ai_analyses.process_id", "=", input.scope)
-    .execute();
-  const stale = open.filter((r) => r.run_id !== input.runId).map((r) => r.id);
-  if (stale.length) {
-    await db.updateTable("findings").set({ status: "superseded" }).where("id", "in", stale).execute();
-  }
-  return { added: fresh.length, renewed: again.length, superseded: stale.length };
+    const stale = open.filter((r) => r.run_id !== input.runId).map((r) => r.id);
+    if (stale.length) {
+      await db.updateTable("findings").set({ status: "superseded" }).where("id", "in", stale).execute();
+    }
+    return { added: fresh.length, renewed: again.length, superseded: stale.length };
   } catch (e) {
     return { error: message(e) };
   }
@@ -267,20 +269,20 @@ export async function proposeConnectorFinding(db: Db, input: ConnectorFindingInp
     const data = await db
       .insertInto("findings")
       .values({
-      workspace_id: input.workspaceId,
-      process_id: input.processId,
-      step_id: input.stepId,
-      origin: "ai",
-      status: "proposed",
-      rating: input.rating,
-      type: input.type,
-      title: input.title.trim(),
-      evidence: input.evidence.trim(),
-      why: input.why.trim(),
-      facts: input.facts as unknown as Json,
-      source_ids: input.sourceIds,
-      person_labels: input.personLabels as unknown as Json,
-    })
+        workspace_id: input.workspaceId,
+        process_id: input.processId,
+        step_id: input.stepId,
+        origin: "ai",
+        status: "proposed",
+        rating: input.rating,
+        type: input.type,
+        title: input.title.trim(),
+        evidence: input.evidence.trim(),
+        why: input.why.trim(),
+        facts: input.facts as unknown as Json,
+        source_ids: input.sourceIds,
+        person_labels: input.personLabels as unknown as Json,
+      })
       .returning(columns(FINDING_COLUMNS))
       .executeTakeFirstOrThrow();
     return { status: "saved", finding: data as unknown as FindingRow };
