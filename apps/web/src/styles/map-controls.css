@@ -1,0 +1,52 @@
+/* The buttons on the process map (React Flow's Controls panel, see components/map/map-controls.tsx), from the tokens so they
+   follow light and dark. Scoped under [data-process-map] so they win over @xyflow/react's base.css whatever the order. */
+[data-process-map] .react-flow__controls {
+  z-index: 10;
+  margin: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+[data-process-map] .react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--fg);
+  cursor: pointer;
+}
+[data-process-map] .react-flow__controls-button:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+[data-process-map] .react-flow__controls-button:disabled {
+  color: var(--fg-3);
+  cursor: not-allowed;
+}
+/* Inside the panel, which clips: the ring sits within the button. */
+[data-process-map] .react-flow__controls-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+[data-process-map] .react-flow__controls-button svg {
+  width: 16px;
+  height: 16px;
+  max-width: none;
+  max-height: none;
+  fill: none;
+  stroke: currentColor;
+}
+[data-process-map] .map-controls-zoom {
+  display: block;
+  padding: 3px 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}

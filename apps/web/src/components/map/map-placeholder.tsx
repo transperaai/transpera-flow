@@ -1,12 +1,15 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { TALL_PANEL_CLASS } from "@/lib/map/zoom";
 
 /**
  * What stands in for a process map while its code or data loads: the canvas frame (as `ProcessCanvas` draws it), a toolbar
- * strip and four step-card shapes in a row, joined by lines. `height` is the map area in px, or `"fill"` for as tall as
- * the space given (the Editor). `nested` leaves out the status wrapper, for a skeleton that is already one.
+ * strip and four step-card shapes in a row, joined by lines. `height` is the map area in px, `"fill"` for as tall as
+ * the space given (the Editor), or `"tall"` for the Overview's company map (`TALL_PANEL_CLASS`, the same height the map
+ * takes, so nothing moves when it arrives). `nested` leaves out the status wrapper, for a skeleton that is already one.
  */
-export function MapSkeleton({ height = 360, nested = false }: { height?: number | "fill"; nested?: boolean }) {
+export function MapSkeleton({ height = 360, nested = false }: { height?: number | "fill" | "tall"; nested?: boolean }) {
   const fill = height === "fill";
+  const tall = height === "tall";
   return (
     <div
       {...(nested ? {} : { role: "status", "aria-label": "Loading the map", "data-loading": "map" })}
@@ -17,7 +20,12 @@ export function MapSkeleton({ height = 360, nested = false }: { height?: number 
         <Skeleton className="h-7 w-20" />
         <Skeleton className="h-7 w-20" />
       </div>
-      <div className={`relative flex min-h-0 items-center justify-center overflow-hidden px-3 ${fill ? "flex-1" : ""}`} style={fill ? undefined : { height }} aria-hidden>
+      <div
+        className={`relative flex min-h-0 items-center justify-center overflow-hidden px-3 ${fill ? "flex-1" : tall ? TALL_PANEL_CLASS : ""}`}
+        style={fill || tall ? undefined : { height }}
+        aria-hidden
+        data-map-area
+      >
         <div className="flex flex-wrap items-center justify-center gap-y-4">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="flex items-center">

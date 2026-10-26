@@ -181,7 +181,7 @@ export function OverviewSkeleton() {
           <Skeleton className="h-4 w-72 max-w-full" />
         </header>
         <SectionShape>
-          <MapSkeleton nested height={360} />
+          <MapSkeleton nested height="tall" />
         </SectionShape>
         <CardGridCells cards={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" />
         <SectionShape>
