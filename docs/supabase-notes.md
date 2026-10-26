@@ -468,3 +468,21 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
   (compat.sql skips it with a notice if not), `create publication` and `grant anon, authenticated, service_role to current_user`;
   that `set_config('role', ...)` works through its pooled (PgBouncer) endpoint in a transaction; and the round-trip cost
   (measured locally: 0.6 ms per `createDb` query against 0.2 ms for a bare query).
+
+### Checked on Neon (26 Oct, project `transpera-flow-db`, `purple-wind-75278769`)
+
+- Postgres 18.6. The login `neondb_owner` is a member of `neon_superuser`, with `rolbypassrls` and `rolcreaterole`.
+  The session `TimeZone` is `GMT`. There is no `postgres` role, so row 72 (`20261224000000`) now skips its
+  `for role postgres` step when that role is missing.
+- `compat.sql` and all 72 migrations apply cleanly, and a second run applies nothing. Roles created by `neondb_owner`
+  come back with admin option only (PG16+). `compat.sql` now grants them `with set true, inherit false`, and after that
+  `begin; set_config('role','authenticated',true), set_config('request.jwt.claims',…,true)` works through the pooled
+  endpoint: `auth.uid()` returns the sub, and `current_user` is back to `neondb_owner` after commit.
+- The owner login has BYPASSRLS, so claims are the only barrier when the app connects as it. Before cutover, give the
+  app its own login (`authenticator`: noinherit, member of `anon` and `authenticated` only, created by SQL so it isn't in
+  `neon_superuser`). Set its URL as a separate Vercel variable through the API, and keep the owner for migrations.
+- The cloud container can't reach Neon on port 5432, but it can over HTTPS. To apply migrations from it, use
+  `@neondatabase/serverless`'s Pool over WebSockets through the agent proxy (`ws` with an `HttpsProxyAgent`), with the
+  connection string fetched from the Neon API (`/projects/{id}/connection_uri`) into a private scratch file, never
+  printed. The repo's `applyCompat`/`applyMigrations` accept that client unchanged. Vercel functions connect over TCP
+  as normal.
