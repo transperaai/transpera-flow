@@ -81,7 +81,7 @@ export async function currentUserId(): Promise<string | null> {
   return (await getSessionUser())?.id ?? null;
 }
 
-/** The signed-in user as others see them in presence (issue #10): id, a display name and email. */
+/** The signed-in user: id, a display name and email. */
 export const currentViewer = cache(async (): Promise<{ userId: string; name: string; email: string | null } | null> => {
   const user = await getSessionUser();
   if (!user) return null;

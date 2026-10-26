@@ -1,7 +1,7 @@
 "use client";
 
 // A visitor's page behind a share link (issue #32, B3): the same screens as the workspace's own, with `mode="share"`: read only,
-// no server or Realtime call, no sidebar, links to other pages as plain text. The snapshot is the only data it has; what a toggle
+// no server call, no sidebar, links to other pages as plain text. The snapshot is the only data it has; what a toggle
 // hides was never sent (the server built it redacted and Postgres checked it). Wording: docs/plans/b3-brief.md.
 
 import { useMemo, useRef, type ReactNode } from "react";

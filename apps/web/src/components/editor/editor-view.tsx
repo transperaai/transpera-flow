@@ -30,9 +30,7 @@ import { useDraftSession } from "@/lib/drafts/use-draft-session";
 import { namesOf } from "@/lib/editor/describe";
 import type { Table } from "@/lib/editor/ops";
 import { MODE_INFO, editorHorizonWeeks, type EditorMode } from "@/lib/editor/modes";
-import { connect, connectScratch } from "@/lib/realtime/connect";
-import type { Viewer } from "@/lib/realtime/transport";
-import { useRealtime } from "@/lib/realtime/use-realtime";
+import { connect, connectScratch } from "@/lib/drafts/connect";
 import { newlyBroken, retiredSteps } from "@/lib/scenarios/broken";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import type { EngineModel } from "@transpera-flow/engine";
@@ -44,7 +42,6 @@ import type { TargetVerdict } from "@/lib/solutions/verdict";
 import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
-import { PresenceBar } from "@/components/presence-bar";
 import { SaveProblems, useEngineModel, type EditMode } from "@/components/process-view";
 import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
 import { IssueArea } from "./issue-area";
@@ -57,7 +54,6 @@ import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
 
-const DEMO_VIEWER: Viewer = { userId: "demo-you", name: "You", email: null };
 
 /** What block mode edits: the workspace's roles and people (so steps can be given to them), and one new step on an empty map. */
 function blockScratch(base: ProcessBundle): ProcessBundle {
@@ -74,7 +70,6 @@ export function EditorView({
   blocks = [],
   sources = [],
   userId = null,
-  viewer = null,
   sourcesHref,
   settingsHref,
   exitHref,
@@ -103,7 +98,6 @@ export function EditorView({
   tourDismissed?: boolean;
   /** The History page of what is being edited, for the bar's History button. */
   historyHref?: string;
-  viewer?: Viewer | null;
   sourcesHref?: string;
   /** The workspace's Settings page, which "Missing for simulation" links to for incoming volume. */
   settingsHref?: string;
@@ -134,8 +128,8 @@ export function EditorView({
   // starts empty; a solution starts as a copy of live.
   const scratch = blockMode || solutionMode;
   const [seed] = useState(() => (blockMode ? blockScratch(initialLive) : initialLive));
-  const [connection] = useState(() => (scratch ? connectScratch(seed) : connect(mode, seed)));
-  const [session, drafts, state] = useDraftSession(seed, scratch ? null : initialDraft, () => connection.backend, () => ({ at: new Date().toISOString(), by: userId }));
+  const [backend] = useState(() => (scratch ? connectScratch(seed) : connect(mode, seed)));
+  const [session, drafts, state] = useDraftSession(seed, scratch ? null : initialDraft, () => backend, () => ({ at: new Date().toISOString(), by: userId }));
   const editor = session.editor;
   const info = MODE_INFO[editorMode];
   const hasDraft = !scratch && (drafts.draft !== null || drafts.opening);
@@ -146,10 +140,8 @@ export function EditorView({
   // Worked out up front, on the live map the copy starts as, so the steps are selected as soon as they arrive.
   const [placement] = useState(() => (solutionMode && idea ? placeIdea(initialLive, idea) : null));
   const [selection, setSelection] = useState<Selection>(placement?.id ? { steps: [placement.id], edges: [] } : NO_SELECTION);
-  const me = viewer ?? (mode === "demo" ? DEMO_VIEWER : null);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
   const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
-  const [sync, realtime] = useRealtime(session, connection.transport, me, "draft");
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
@@ -405,22 +397,9 @@ export function EditorView({
                   : "Demo: your edits live in this tab only. Leaving the Editor or reloading starts the sample again."}
             </p>
           )}
-          <div className="mt-auto flex flex-col gap-2 empty:hidden">
-            {!scratch && (
-            <PresenceBar
-              variant="compact"
-              sync={sync}
-              state={realtime}
-              me={me}
-              processName={live.process.name}
-              colleague={connection.colleague}
-              selectedStep={selected.steps.length === 1 ? selected.steps[0]! : null}
-            />
-            )}
-          </div>
         </aside>
         <main className="flex min-h-[28rem] min-w-0 flex-col gap-2 bg-bg p-3 lg:min-h-0">
-          {(state.conflicts.length > 0 || state.error) && <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} sync={sync} />}
+          {(state.conflicts.length > 0 || state.error) && <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} />}
           <MissingForSimulation gaps={gaps} onSelectStep={select} settingsHref={settingsHref} />
           {workingModel.error && !blockMode && !company && (
             <p role="status" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">

@@ -9,7 +9,6 @@ import { createContext, useContext, useEffect, useRef, useState, type KeyboardEv
 import type { ProcessBundle, StepRow } from "@transpera-flow/db";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { commitInline, inlineDraft, type InlineField } from "@/lib/editor/inline-edit";
-import { applyEdit, readField } from "@/lib/editor/ops";
 import { selectableRoles } from "@/lib/roles";
 
 export interface InlineEditing {
@@ -77,12 +76,10 @@ export function NodeInlineEditor({ step, focus }: { step: StepRow; focus: Inline
 
 /**
  * Commit `text` to `field`; returns false (and says why) if it can't be saved.
- * `base` is the stored value editing started from: if someone else has saved
- * the field since, it becomes a keep mine / keep theirs conflict (issue #10).
  */
 function useCommit(ctx: InlineEditing, step: StepRow, field: InlineField) {
   const [error, setError] = useState<string | null>(null);
-  const commit = (text: string, base?: string): boolean => {
+  const commit = (text: string): boolean => {
     const bundle = ctx.editor.getState().bundle;
     const r = commitInline(bundle, step.id, field, text);
     if ("error" in r) {
@@ -91,22 +88,6 @@ function useCommit(ctx: InlineEditing, step: StepRow, field: InlineField) {
     }
     setError(null);
     if (!r.edit) return true;
-    const current = bundle.steps.find((s) => s.id === step.id);
-    if (base !== undefined && current && inlineDraft(bundle, step.id, field) !== base) {
-      const mine = applyEdit(bundle, r.edit).steps.find((s) => s.id === step.id);
-      ctx.editor.raiseConflict({
-        table: "steps",
-        id: step.id,
-        field,
-        mine: mine ? readField(mine, field) : null,
-        theirs: readField(current, field),
-        retry: (b) => {
-          const again = commitInline(b, step.id, field, text);
-          return "edit" in again ? again.edit : null;
-        },
-      });
-      return true;
-    }
     ctx.editor.run(() => r.edit);
     return true;
   };
@@ -116,16 +97,14 @@ function useCommit(ctx: InlineEditing, step: StepRow, field: InlineField) {
 function TextInput({ ctx, step, field, label, short }: { ctx: InlineEditing; step: StepRow; field: InlineField; label: string; short?: string }) {
   const stored = inlineDraft(ctx.bundle, step.id, field);
   const [draft, setDraft] = useState(stored);
-  // The stored value editing started from. When it changes (a save, an undo,
-  // someone else's edit) the input takes it, unless the user is typing: then
-  // the typing stays, and committing it asks keep mine / keep theirs.
+  // The stored value editing started from. When it changes (a save or an undo)
+  // the input takes it, unless the user is typing: then the typing stays.
   const [base, setBase] = useState(stored);
   if (base !== stored && (draft === base || draft === stored)) {
     setBase(stored);
     setDraft(stored);
   }
-  const { error, setError, commit: commitText } = useCommit(ctx, step, field);
-  const commit = (text: string) => commitText(text, base);
+  const { error, setError, commit } = useCommit(ctx, step, field);
   // Set once Enter or Escape has dealt with the draft, so the blur that follows doesn't commit again.
   const done = useRef(false);
   const errorId = `${step.id}-${field}-error`;

@@ -24,15 +24,12 @@ export interface FieldHelp {
 /** The "keep mine / keep theirs" prompt for a same-field conflict. `subject` names the field when it isn't next to it. */
 export function ConflictPrompt({
   subject,
-  by = null,
   theirs,
   mine,
   onKeepMine,
   onKeepTheirs,
 }: {
   subject?: ReactNode;
-  /** Who made the other change, when known ("Tom"). */
-  by?: string | null;
   theirs: string;
   mine: string;
   onKeepMine: () => void;
@@ -41,7 +38,7 @@ export function ConflictPrompt({
   return (
     <div role="alert" className="mt-1 rounded-lg border border-warn bg-warn-soft p-2 text-xs text-foreground">
       <p>
-        {by ?? "Someone else"} changed {subject ?? "this"} to <strong>{theirs}</strong> while you were editing. Keep yours or
+        Someone else changed {subject ?? "this"} to <strong>{theirs}</strong> while you were editing. Keep yours or
         theirs?
       </p>
       <div className="mt-1.5 flex gap-2">
