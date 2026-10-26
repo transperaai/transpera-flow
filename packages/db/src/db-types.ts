@@ -767,10 +767,6 @@ export interface Sources {
   body: string | null;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
-  file_name: string | null;
-  file_path: string | null;
-  file_size: number | null;
-  file_type: string | null;
   file_url: string | null;
   id: Generated<string>;
   kind: Generated<string>;
@@ -903,6 +899,14 @@ export interface WorkspaceHeadlines {
   workspace_id: string;
 }
 
+export interface WorkspaceLogos {
+  bytes: Buffer;
+  mime: string;
+  sha256: string;
+  updated_at: Generated<string>;
+  workspace_id: string;
+}
+
 export interface Workspaces {
   branding: Generated<Json>;
   created_at: Generated<string>;
@@ -978,5 +982,6 @@ export interface DB {
   workspace_access_emails: WorkspaceAccessEmails;
   workspace_domains: WorkspaceDomains;
   workspace_headlines: WorkspaceHeadlines;
+  workspace_logos: WorkspaceLogos;
   workspaces: Workspaces;
 }
