@@ -234,7 +234,7 @@ describe("restore route", () => {
   });
 
   it("refuses a second restore into a workspace that now has processes (409), whole and as it was", async () => {
-    const { id, slug, base } = await newWorkspace();
+    const { id, slug } = await newWorkspace();
     expect((await call(slug, backup())).status).toBe(200);
     const before = await processCount(id);
     const r = await call(slug, backup());
