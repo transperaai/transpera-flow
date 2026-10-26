@@ -68,13 +68,23 @@ There are no Edge Functions, webhooks, extensions or auth emails. The SQL alread
 ## Next session
 
 1. Read this file, `CLAUDE.md` and `docs/HANDOVER.md`.
-2. **Austin is doing a manual QA pass first.** Take his findings as he sends them: log each one (issue or list), fix what
-   is clearly broken, and tag each finding keep / cut / rework. **Don't start cutting features until he says the QA pass
-   is done.** His notes will drive the strip list.
-3. Production is still the Supabase project `vgsjkpwvxkpqvyazwcyq`. If it has paused (free plan, about 7 idle days),
-   restore it first: `curl -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
+2. **Start the move off Supabase now (Austin, 26 Oct).** Austin's manual QA and the strip list come **later**, so don't cut
+   features yet. Port everything that exists. The only removals now are those already decided above: uploads become
+   References, and live editing (Realtime) goes.
+3. Production is still the Supabase project `vgsjkpwvxkpqvyazwcyq` until cutover. If it has paused (free plan, about 7
+   idle days), restore it first: `curl -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
    https://api.supabase.com/v1/projects/vgsjkpwvxkpqvyazwcyq/restore`, then poll `GET /v1/projects/<ref>` until
-   `ACTIVE_HEALTHY`.
-4. After QA: agree the strip list with Austin and record it here. Then write briefs (Opus), build with agents (Sonnet)
-   and review (Opus), in this order: strip → schema port to Neon → Better Auth with domain and email roles → server-side
-   queries → References → drop Storage and Realtime → deployment template per client.
+   `ACTIVE_HEALTHY`. Keep it running until the Neon deployment is verified.
+4. Plan first (Opus): one migration brief covering the target architecture, the order of PRs, data migration from the
+   Supabase project, cutover and rollback. Austin must create the Neon project and the Google OAuth credentials himself;
+   give him exact steps and never ask for keys in chat. Then build with agents (Sonnet) and review (Opus). Suggested
+   order:
+   1. Neon schema and roles, with the `auth` compatibility layer.
+   2. Better Auth (Google now, Microsoft-ready), with company-domain and named-email roles (Admin, Editor, Viewer).
+   3. Server-side queries in place of supabase-js.
+   4. References in place of uploads; drop Storage.
+   5. Drop Realtime.
+   6. Ops scripts (`psql` instead of the Management API).
+   7. Data copy and cutover.
+   8. A per-client deployment template.
+5. The multi-tenant machinery (workspaces as tenants, agency admin) stays until Austin's strip list says otherwise.
