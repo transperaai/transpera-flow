@@ -54,7 +54,7 @@ export function onceForRequest(h: Headers, load: (h: Headers) => Promise<Session
 }
 
 /**
- * A database handle that runs every query as the signed-in user (or `anon`),, under RLS.
+ * A database handle that runs every query as the signed-in user (or `anon`), under RLS.
  */
 export async function getDb(): Promise<ReturnType<typeof createDb>> {
   return createDb(appPool(), claimsFor(await getSessionUser()));

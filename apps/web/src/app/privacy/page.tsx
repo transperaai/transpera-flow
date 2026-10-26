@@ -42,8 +42,9 @@ export default function PrivacyPage() {
             enter while modelling your business. This can include staff names, working hours and cost rates.
           </li>
           <li>
-            <strong>Technical data:</strong> sign-in sessions and standard server logs (such as IP address and request
-            times) kept by our hosting providers for security and troubleshooting, and error reports when something breaks (see Service providers).
+            <strong>Technical data:</strong> your sign-in sessions, each recorded in our database with the IP address and browser
+            it was started from; standard server logs (such as IP address and request times) kept by our hosting providers for
+            security and troubleshooting; and error reports when something breaks (see Service providers).
           </li>
         </ul>
       </Section>
