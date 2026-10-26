@@ -11,7 +11,24 @@ import {
   type QueryResult,
   type TransactionSettings,
   sql,
+  AliasNode,
+  ColumnNode,
+  ColumnUpdateNode,
+  InsertQueryNode,
+  PrimitiveValueListNode,
+  TableNode,
+  UpdateQueryNode,
+  ValueListNode,
+  ValueNode,
+  ValuesNode,
+  type KyselyPlugin,
+  type OperationNode,
+  type PluginTransformQueryArgs,
+  type PluginTransformResultArgs,
+  type RootOperationNode,
+  type UnknownRow,
 } from "kysely";
+import { JSON_COLUMNS } from "./json-columns";
 import type { Database } from "./database.types";
 import type { DB } from "./db-types";
 
@@ -297,9 +314,66 @@ function dialect(pool: pg.Pool, claims: Claims | null): Dialect {
   };
 }
 
+
+// --- JSON columns: PostgREST sent rows as JSON, so a JS array written to a json/jsonb column arrived as JSON. ---
+// node-postgres sends a JS array as a Postgres array literal instead, which jsonb rejects, so values written to those
+// columns are JSON-encoded here. Strings pass through as already-encoded JSON text.
+
+const encode = (v: unknown) => (v === null || v === undefined || typeof v === "string" ? v : JSON.stringify(v));
+
+function tableName(node: OperationNode | undefined): string | undefined {
+  if (!node) return undefined;
+  if (TableNode.is(node)) return node.table.identifier.name;
+  if (AliasNode.is(node)) return tableName(node.node);
+  return undefined;
+}
+
+function encodeValue(node: OperationNode): OperationNode {
+  return ValueNode.is(node) ? ValueNode.create(encode(node.value)) : node;
+}
+
+function encodeUpdates(updates: readonly ColumnUpdateNode[] | undefined, json: readonly string[]) {
+  return updates?.map((u) =>
+    ColumnNode.is(u.column) && json.includes(u.column.column.name) ? ColumnUpdateNode.create(u.column, encodeValue(u.value)) : u,
+  );
+}
+
+class JsonColumnsPlugin implements KyselyPlugin {
+  transformQuery({ node }: PluginTransformQueryArgs): RootOperationNode {
+    if (InsertQueryNode.is(node)) {
+      const json = JSON_COLUMNS[tableName(node.into) ?? ""];
+      if (!json) return node;
+      const at = (node.columns ?? []).flatMap((c, i) => (json.includes(c.column.name) ? [i] : []));
+      const values =
+        node.values && ValuesNode.is(node.values) && at.length
+          ? ValuesNode.create(
+              node.values.values.map((row) =>
+                PrimitiveValueListNode.is(row)
+                  ? PrimitiveValueListNode.create(row.values.map((v, i) => (at.includes(i) ? encode(v) : v)))
+                  : ValueListNode.create(row.values.map((v, i) => (at.includes(i) ? encodeValue(v) : v))),
+              ),
+            )
+          : node.values;
+      const onConflict = node.onConflict && { ...node.onConflict, updates: encodeUpdates(node.onConflict.updates, json) };
+      return { ...node, values, onConflict };
+    }
+    if (UpdateQueryNode.is(node)) {
+      const json = JSON_COLUMNS[tableName(node.table) ?? ""];
+      return json ? { ...node, updates: encodeUpdates(node.updates, json) } : node;
+    }
+    return node;
+  }
+
+  async transformResult({ result }: PluginTransformResultArgs): Promise<QueryResult<UnknownRow>> {
+    return result;
+  }
+}
+
+const jsonColumns = new JsonColumnsPlugin();
+
 /** A query builder that runs every statement as `claims`' user (null: signed out, role `anon`), with RLS applying. */
 export function createDb(pool: pg.Pool, claims: Claims | null): Kysely<DB> {
-  return new Kysely<DB>({ dialect: dialect(pool, claims) });
+  return new Kysely<DB>({ dialect: dialect(pool, claims), plugins: [jsonColumns] });
 }
 
 // --- Calling SQL functions the way supabase-js `.rpc()` did. ---
