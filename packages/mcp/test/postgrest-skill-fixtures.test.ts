@@ -1,42 +1,29 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { checkProcessFile, type Database } from "@transpera-flow/db";
+import { checkProcessFile } from "@transpera-flow/db";
 import { importProcessFile, previewProcessFile } from "../src";
 import type { ToolContext } from "../src/context";
-import { signJwt } from "./helpers";
+import { startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // The process-file skill's fixtures (issue #167, B14 part 2): the Tidewater and Copperleaf files in docs/import/examples/, as the
-// skill would write them, uploaded the way the web app does (checked file, shared import code, PostgREST with RLS as the signed-in
+// skill would write them, uploaded the way the web app does (checked file, shared import code, Kysely under RLS as the signed-in
 // user). Each lands as a draft with step evidence, sources and their links, pending suggestions and pending proposals; nothing
-// company-level is applied. The files themselves are checked in packages/db/test/process-file-skill-fixtures.test.ts. Skipped
-// unless POSTGREST_URL is set (see postgrest-import-file.test.ts).
+// company-level is applied. The files themselves are checked in packages/db/test/process-file-skill-fixtures.test.ts. Runs on
+// a throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
-
+let env: McpTestDb;
 let admin: pg.Client;
-/** The workspaces and users these tests make, removed afterwards: the shared database is read by other suites (the QA workspace test looks for Grace Adeyemi). */
+/** The workspaces and users these tests make. */
 const madeWorkspaces: string[] = [];
 const madeUsers: string[] = [];
 
-const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 const q = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows;
 const count = async (sql: string, params: unknown[] = []) => Number((await q(sql, params))[0].n);
 
 function contextFor(userId: string): ToolContext {
-  const anon = signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
-  const user = signJwt({ sub: userId, role: "authenticated", iss: "test", aud: "authenticated" }, JWT_SECRET);
-  const db = createClient<Database>(SUPABASE_URL, anon, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { headers: { Authorization: `Bearer ${user}` }, fetch: toPostgrest },
-  });
-  return { db, tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-05" };
+  return { db: env.dbAs(userClaims(userId)), tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-05" };
 }
 
 const fixture = (name: string) => {
@@ -66,13 +53,6 @@ async function company(slug: string, roles: string[], people: [string, number][]
   await q("insert into auth.users (id, email) values ($1, $2)", [editorId, `skill-${randomUUID()}@example.com`]);
   await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [workspaceId, editorId]);
   const ctx = contextFor(editorId);
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    const r = await ctx.db.from("workspaces").select("id");
-    if (!r.error && (r.data ?? []).length >= 1) break;
-    if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
   return { workspaceId, ctx, roles: roleIds };
 }
 
@@ -103,19 +83,14 @@ async function written(w: World, processName: string, revisionId: string) {
 type Cite = { source_id: string; speaker: string; value: number };
 const cites = (list: Cite[]) => list.map((c) => [c.source_id, c.speaker, c.value]);
 
-describe.skipIf(!POSTGREST_URL)("uploading the process-file skill's fixtures over PostgREST", () => {
+describe("uploading the process-file skill's fixtures", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
   });
 
   afterAll(async () => {
-    if (madeWorkspaces.length) await admin?.query("delete from steps where workspace_id = any($1)", [madeWorkspaces]);
-    if (madeWorkspaces.length) await admin?.query("delete from workspaces where id = any($1)", [madeWorkspaces]);
-    if (madeUsers.length) await admin?.query("delete from auth.users where id = any($1)", [madeUsers]);
-    await admin?.end();
+    await env?.close();
   });
 
   it("Tidewater: Monthly client report lands as a draft with pending suggestions and proposals", async () => {

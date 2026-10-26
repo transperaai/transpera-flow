@@ -1,23 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { checkProcessFile, findGaps, gapInputFromBundle, PROCESS_FILE_EXAMPLE_2, type Database } from "@transpera-flow/db";
+import { checkProcessFile, findGaps, gapInputFromBundle, PROCESS_FILE_EXAMPLE_2 } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { importProcessFile, previewProcessFile, ToolError } from "../src";
 import type { ToolContext } from "../src/context";
-import { signJwt } from "./helpers";
+import { startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // Upload a transpera-process/2 file (issue #167, B14), end to end as the web app does it: checked file → shared import code →
-// PostgREST with RLS as the signed-in user → `import_process_bundle`. Every section lands (draft with step evidence, sources and
-// their links, first principles, pending suggestions, pending proposals) and nothing company-level is applied. Skipped unless
-// POSTGREST_URL is set (see postgrest-import-file.test.ts).
+// Kysely under RLS as the signed-in user → `import_process_bundle`. Every section lands (draft with step evidence, sources and
+// their links, first principles, pending suggestions, pending proposals) and nothing company-level is applied. Runs on a
+// throwaway database (test/helpers.ts).
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
 
+let env: McpTestDb;
 let admin: pg.Client;
 let workspaceId: string;
 let editorCtx: ToolContext;
@@ -25,7 +21,6 @@ let viewerCtx: ToolContext;
 let editorId: string;
 let mdRoleId: string;
 
-const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 
 async function createUser(email: string) {
   const id = randomUUID();
@@ -34,13 +29,7 @@ async function createUser(email: string) {
 }
 
 function contextFor(userId: string): ToolContext {
-  const anon = signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
-  const user = signJwt({ sub: userId, role: "authenticated", iss: "test", aud: "authenticated" }, JWT_SECRET);
-  const db = createClient<Database>(SUPABASE_URL, anon, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { headers: { Authorization: `Bearer ${user}` }, fetch: toPostgrest },
-  });
-  return { db, tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-05" };
+  return { db: env.dbAs(userClaims(userId)), tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-05" };
 }
 
 // Loosely typed on purpose: the tests change a file one way at a time, by reaching into it.
@@ -63,12 +52,10 @@ const counts = async () => ({
   fp: await count("select count(*) n from first_principles where workspace_id = $1", [workspaceId]),
 });
 
-describe.skipIf(!POSTGREST_URL)("uploading a transpera-process/2 file over PostgREST", () => {
+describe("uploading a transpera-process/2 file ", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
     workspaceId = (await q("insert into workspaces (name, slug) values ('V2 Co', 'v2-co-' || substr(gen_random_uuid()::text, 1, 8)) returning id"))[0].id;
     mdRoleId = (await q("insert into roles (workspace_id, name) values ($1, 'Managing director') returning id", [workspaceId]))[0].id;
     await q("insert into people (workspace_id, name, fte) values ($1, 'Maya Chen', 0.5)", [workspaceId]);
@@ -77,17 +64,10 @@ describe.skipIf(!POSTGREST_URL)("uploading a transpera-process/2 file over Postg
     await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
     editorCtx = contextFor(editorId);
     viewerCtx = contextFor(viewerId);
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const r = await editorCtx.db.from("workspaces").select("id");
-      if (!r.error && (r.data ?? []).length >= 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   it("every section lands: draft with step evidence, sources and links, first principles, pending suggestions and proposals", async () => {
@@ -162,9 +142,8 @@ describe.skipIf(!POSTGREST_URL)("uploading a transpera-process/2 file over Postg
     expect(prop.evidence[0]).toMatchObject({ source_id: sources.transcript.id, speaker: "Maya Chen" });
 
     // A person accepting the proposal makes a real issue linked to the new process's step (the draft's), as for any proposal.
-    const review = await editorCtx.db.rpc("review_proposals", { ids: [prop.id], decision: "accept" });
-    expect(review.error).toBeNull();
-    expect(JSON.stringify(review.data)).toContain("accepted");
+    const review = await rpc(editorCtx.db, "review_proposals", { ids: [prop.id], decision: "accept" });
+    expect(JSON.stringify(review)).toContain("accepted");
     expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues + 1);
   });
 
@@ -304,9 +283,8 @@ describe.skipIf(!POSTGREST_URL)("uploading a transpera-process/2 file over Postg
     const prop = await q("select created_via, import_source from suggestion_proposals where workspace_id = $1 and import_source = 'from-claude.json'", [workspaceId]);
     expect(prop).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
     // The app reads the proposal's source column as the signed-in user.
-    const read = await editorCtx.db.from("suggestion_proposals").select("created_via, import_source").eq("import_source", "from-claude.json");
-    expect(read.error).toBeNull();
-    expect(read.data).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
+    const read = await editorCtx.db.selectFrom("suggestion_proposals").select(["created_via", "import_source"]).where("import_source", "=", "from-claude.json").execute();
+    expect(read).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
   });
 
   describe("Missing for simulation", () => {

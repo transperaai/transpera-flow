@@ -1,24 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE, processTextFrom, type Database, type ProcessFile } from "@transpera-flow/db";
+import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE, processTextFrom, type ProcessFile } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { fetchPublicPage, importProcessFile, previewProcessFile, PUBLIC_POLICY, takeLinkFetch, ToolError } from "../src";
 import type { ToolContext } from "../src/context";
-import { signJwt } from "./helpers";
+import { startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // Upload a process (issue #166, B13), end to end as the web app does it: a checked transpera-process/1 file → the shared
-// import code → PostgREST with RLS as the signed-in user → Postgres with every migration. Runs against the database
-// postgrest-db.ts prepares (see postgrest.test.ts), in a workspace of its own. Skipped unless POSTGREST_URL is set.
+// import code → Kysely under RLS as the signed-in user → Postgres with every migration. Runs on a throwaway database
+// (test/helpers.ts), in a workspace of its own.
 
-const POSTGREST_URL = process.env.POSTGREST_URL;
-const JWT_SECRET = process.env.POSTGREST_JWT_SECRET ?? "";
-const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
-const DATABASE_NAME = process.env.POSTGREST_DATABASE ?? "transpera_flow_postgrest";
-const SUPABASE_URL = "https://project.supabase.test";
 
+let env: McpTestDb;
 let admin: pg.Client;
 let workspaceId: string;
 let consultantId: string;
@@ -29,7 +25,6 @@ let strangerCtx: ToolContext;
 let editorId: string;
 let otherWorkspaceRoleId: string;
 
-const toPostgrest: typeof fetch = (input, init) => fetch(String(input).replace(`${SUPABASE_URL}/rest/v1`, POSTGREST_URL!), init);
 
 async function createUser(email: string) {
   const id = randomUUID();
@@ -37,15 +32,9 @@ async function createUser(email: string) {
   return id;
 }
 
-/** What the web app builds for a signed-in user: a client carrying their JWT, no API token. */
+/** What the web app builds for a signed-in user: a database handle carrying their claims, no API token. */
 function contextFor(userId: string): ToolContext {
-  const anon = signJwt({ role: "anon", iss: "test" }, JWT_SECRET);
-  const user = signJwt({ sub: userId, role: "authenticated", iss: "test", aud: "authenticated" }, JWT_SECRET);
-  const db = createClient<Database>(SUPABASE_URL, anon, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { headers: { Authorization: `Bearer ${user}` }, fetch: toPostgrest },
-  });
-  return { db, tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-02" };
+  return { db: env.dbAs(userClaims(userId)), tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-02" };
 }
 
 /** The example, with its roles renamed to roles the workspace has, as a checked file. */
@@ -67,12 +56,10 @@ const stepsOf = async (revisionId: string) => (await admin.query("select * from 
 const edgesOf = async (revisionId: string) => (await admin.query("select * from edges where revision_id = $1", [revisionId])).rows;
 const processCount = async () => (await admin.query("select count(*)::int as n from processes where workspace_id = $1", [workspaceId])).rows[0].n as number;
 
-describe.skipIf(!POSTGREST_URL)("uploading a process file over PostgREST (a draft, as the user)", () => {
+describe("uploading a process file (a draft, as the user)", () => {
   beforeAll(async () => {
-    const url = new URL(ADMIN_URL);
-    url.pathname = `/${DATABASE_NAME}`;
-    admin = new pg.Client({ connectionString: url.toString() });
-    await admin.connect();
+    env = await startTestDb();
+    admin = env.t.client;
 
     workspaceId = (await admin.query("insert into workspaces (name, slug) values ('Upload Co', 'upload-co') returning id")).rows[0].id;
     consultantId = (await admin.query("insert into roles (workspace_id, name) values ($1, 'Consultant') returning id", [workspaceId])).rows[0].id;
@@ -90,17 +77,10 @@ describe.skipIf(!POSTGREST_URL)("uploading a process file over PostgREST (a draf
     viewerCtx = contextFor(viewerId);
     strangerCtx = contextFor(strangerId);
 
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      const r = await editorCtx.db.from("workspaces").select("id");
-      if (!r.error && (r.data ?? []).length >= 1) break;
-      if (Date.now() > deadline) throw new Error("PostgREST never became ready");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await env?.close();
   });
 
   it("creates a new process with a draft only, laid out left to right, roles matched, numbers marked to confirm, and logs the import", async () => {
@@ -145,8 +125,7 @@ describe.skipIf(!POSTGREST_URL)("uploading a process file over PostgREST (a draf
   it("publishing the draft puts the process in the library like any other", async () => {
     const proc = (await processRow("Enquiry to signed client"))!;
     expect(proc.live_revision_id).toBeNull();
-    const { data, error } = await editorCtx.db.rpc("publish_process", { target_process: proc.id, accept_estimates: true });
-    expect(error).toBeNull();
+    const data = await rpc(editorCtx.db, "publish_process", { target_process: proc.id, accept_estimates: true });
     expect((data as { status: string }).status).toBe("published");
     const after = (await processRow("Enquiry to signed client"))!;
     expect(after.live_revision_id).not.toBeNull();
@@ -377,15 +356,22 @@ describe.skipIf(!POSTGREST_URL)("uploading a process file over PostgREST (a draf
 
   it("still makes the process when the change log can't be written, and says so", async () => {
     const ctx = contextFor(editorId);
-    const rpc = ctx.db.rpc.bind(ctx.db);
-    (ctx.db as unknown as { rpc: unknown }).rpc = (fn: string, args: never) =>
-      fn === "log_process_import" ? Promise.resolve({ data: null, error: { message: "function does not exist" } }) : rpc(fn as never, args);
-    const file = example((f) => {
-      f.name = "No log";
-    });
-    const r = await importProcessFile(ctx, file, { workspaceId, source: "nolog.json" });
-    expect(r.warnings).toContain("The process was made, but the activity log entry for the import couldn't be written.");
-    expect(await processRow("No log")).toBeDefined();
+    // The log call fails in the database (a trigger on the audit log, for this one source), as a missing function would.
+    await admin.query(`create function public.b13_fail_log() returns trigger language plpgsql as $$ begin
+      if new.diff ->> 'source' = 'nolog.json' then raise exception 'injected log failure'; end if;
+      return new; end $$`);
+    await admin.query("create trigger b13_fail_log before insert on public.audit_log for each row execute function public.b13_fail_log()");
+    try {
+      const file = example((f) => {
+        f.name = "No log";
+      });
+      const r = await importProcessFile(ctx, file, { workspaceId, source: "nolog.json" });
+      expect(r.warnings).toContain("The process was made, but the activity log entry for the import couldn't be written.");
+      expect(await processRow("No log")).toBeDefined();
+    } finally {
+      await admin.query("drop trigger b13_fail_log on public.audit_log");
+      await admin.query("drop function public.b13_fail_log()");
+    }
   });
 
   it("is all or nothing: a failure while the edges are written leaves nothing behind, and the same name can be uploaded again", async () => {
