@@ -17,7 +17,7 @@ import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { ShareButton } from "@/components/share/share-dialog";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 
 /** The Overview of a workspace (issue #100): the landing page, at `/w/[slug]` and `/w/[slug]/overview`. */
 export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
@@ -28,7 +28,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     if (!head) notFound();
     const [overview, canEdit] = await Promise.all([loadWorkspaceOverview(slug), canEditWorkspace(head.id)]);
     // The card to restore a backup: only for someone who can, and only while the workspace is empty (drafts count as not empty).
-    const canRestore = canEdit && (await workspaceIsEmpty(await createClient(), head.id));
+    const canRestore = canEdit && (await workspaceIsEmpty(await getDb(), head.id));
     const setup = canEdit ? await loadWorkspaceSetup(head.id) : null;
     const base = `/w/${slug}`;
     const unpublished = (overview?.processes ?? []).filter((p) => !p.live);

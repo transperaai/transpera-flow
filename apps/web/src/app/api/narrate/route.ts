@@ -1,8 +1,8 @@
 import { anthropicNarrator } from "@/lib/narration/anthropic";
 import { explainRun } from "@/lib/narration/explain";
 import type { StoredNarration } from "@/lib/narration/service";
-import { supabaseEnv } from "@/lib/supabase/env";
-import { createClient } from "@/lib/supabase/server";
+import { authEnv } from "@/lib/auth/env";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // POST /api/narrate (issue #29; docs/PRD.md §7.3): narration on demand, as
 // the signed-in user under RLS, server-side only (the Anthropic key never
@@ -33,15 +33,13 @@ const view = (n: StoredNarration) => ({
 });
 
 export async function POST(request: Request): Promise<Response> {
-  if (!supabaseEnv()) return Response.json({ status: "error", message: "Supabase is not configured; the demo uses a stand-in writer." }, { status: 503 });
+  if (!authEnv()) return Response.json({ status: "error", message: "The database is not configured; the demo uses a stand-in writer." }, { status: 503 });
   const body = (await request.json().catch(() => null)) as { target?: unknown; runId?: unknown; regenerate?: unknown } | null;
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return Response.json({ status: "error", message: "Your session has ended. Sign in again." }, { status: 401 });
+  if (!(await getSessionUser())) return Response.json({ status: "error", message: "Your session has ended. Sign in again." }, { status: 401 });
   const regenerate = body?.regenerate === true;
 
   if (body?.target === "run" && isUuid(body.runId)) {
-    const result = await explainRun(supabase, body.runId, { model: anthropicNarrator(), regenerate });
+    const result = await explainRun(await getDb(), body.runId, { model: anthropicNarrator(), regenerate });
     if (result.status === "error") return Response.json({ status: "error", message: result.message }, { status: result.code === "not_found" ? 404 : 403 });
     return Response.json({ status: "ok", narration: view(result.narration) });
   }

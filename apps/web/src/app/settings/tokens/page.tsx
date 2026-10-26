@@ -6,8 +6,8 @@ import { PageHeader } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { createClient } from "@/lib/supabase/server";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { authEnv } from "@/lib/auth/env";
+import { getDb } from "@/lib/auth/session";
 import { revokeToken } from "./actions";
 import { CreateTokenForm } from "./create-token-form";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
@@ -16,13 +16,13 @@ const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en
 
 export default async function ApiTokensPage() {
   await connection();
-  if (!supabaseEnv()) redirect("/demo");
-  const supabase = await createClient();
-  const { data: tokens, error } = await supabase
-    .from("api_tokens")
-    .select("id, label, created_at, last_used_at, revoked_at")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (!authEnv()) redirect("/demo");
+  const db = await getDb();
+  const tokens = await db
+    .selectFrom("api_tokens")
+    .select(["id", "label", "created_at", "last_used_at", "revoked_at"])
+    .orderBy("created_at", "desc")
+    .execute();
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");

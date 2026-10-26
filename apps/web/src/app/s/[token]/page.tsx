@@ -5,8 +5,9 @@ import { SHARE_KINDS, SHARE_SNAPSHOT_VERSION, type ShareSnapshot } from "@transp
 import { SharedView } from "@/components/share/shared-view";
 import { Button } from "@/components/ui/button";
 import { SHARE_TOKEN } from "@/lib/share/after-sign-in";
-import { supabaseEnv } from "@/lib/supabase/env";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { authEnv } from "@/lib/auth/env";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 import { signInToOpen } from "./actions";
 
 // A share link's page (issue #32, B3): a visitor, signed in or not, opens a frozen, redacted copy of a page. The ONLY data this page
@@ -31,11 +32,15 @@ interface Opened {
 export default async function SharedPage(props: PageProps<"/s/[token]">) {
   await connection();
   const { token } = await props.params;
-  if (!supabaseEnv() || !SHARE_TOKEN.test(token)) notFound();
-  const db = await createClient();
-  const { data, error } = await db.rpc("open_share_link", { token });
-  const opened = data as Opened | null;
-  if (error || !opened || typeof opened !== "object") notFound();
+  if (!authEnv() || !SHARE_TOKEN.test(token)) notFound();
+  const db = await getDb();
+  let opened: Opened | null;
+  try {
+    opened = (await rpc(db, "open_share_link", { token })) as Opened | null;
+  } catch {
+    notFound();
+  }
+  if (!opened || typeof opened !== "object") notFound();
 
   if (opened.status === "sign_in") {
     return (
@@ -51,8 +56,7 @@ export default async function SharedPage(props: PageProps<"/s/[token]">) {
   }
   if (opened.status === "not_allowed") {
     // The address comes from the visitor's own session, never from the link.
-    const { data: user } = await db.auth.getUser();
-    const email = user.user?.email ?? "this account";
+    const email = (await getSessionUser())?.email ?? "this account";
     return (
       <Gate title="This link wasn't shared with you">
         <p className="text-fg-2">
@@ -82,8 +86,7 @@ export default async function SharedPage(props: PageProps<"/s/[token]">) {
   const play = opened.mode === "play";
   let visitorEmail: string | null = null;
   if (play && (opened.show_people || opened.show_financials)) {
-    const { data: user } = await db.auth.getUser();
-    visitorEmail = user.user?.email ?? null;
+    visitorEmail = (await getSessionUser())?.email ?? null;
   }
   return (
     <SharedView
