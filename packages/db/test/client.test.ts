@@ -6,7 +6,7 @@ import { sql, type Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, createPool, toJsonTimestamp, type Claims } from "../src/client";
 import type { DB } from "../src/db-types";
-import { applyCompat, applyMigrations, migrationFiles } from "../src/migrations";
+import { LOCK_TIMEOUT, applyCompat, applyMigrations, migrationFiles } from "../src/migrations";
 import { NORTHBEAM_WORKSPACE_ID } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -415,6 +415,24 @@ describe("migration runner", () => {
       );
       await c.query("set role authenticated");
       expect((await c.query("select current_user as who")).rows[0].who).toBe("authenticated");
+    } finally {
+      await c.end();
+    }
+  });
+
+  it("gives each migration a lock timeout inside its own transaction, so it fails rather than queueing behind traffic", async () => {
+    const name = await emptyDatabase();
+    const c = new pg.Client({ connectionString: urlOf(name) });
+    await c.connect();
+    try {
+      await applyCompat(c);
+      const sent: string[] = [];
+      const spy = { query: (text: string, values?: unknown[]) => (sent.push(text), c.query(text, values)) };
+      const { files } = await applyMigrations(spy);
+      const begins = sent.flatMap((q, i) => (q === "begin" ? [i] : []));
+      expect(begins).toHaveLength(files.length);
+      for (const i of begins) expect(sent.slice(i, i + 3)).toContain(`set local lock_timeout = '${LOCK_TIMEOUT}'`);
+      expect(LOCK_TIMEOUT).toBe("5s");
     } finally {
       await c.end();
     }

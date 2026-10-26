@@ -31,6 +31,9 @@ export function migrationFiles(): string[] {
   return readdirSync(new URL("migrations/", root)).filter((f) => f.endsWith(".sql")).sort();
 }
 
+/** How long a migration waits for a lock before it fails (the old production apply files used 5 s). */
+export const LOCK_TIMEOUT = "5s";
+
 const versionOf = (file: string) => file.split("_")[0]!;
 
 export interface MigrateOptions {
@@ -74,6 +77,8 @@ export async function applyMigrations(db: Queryable, options: MigrateOptions = {
       try {
         const xid = async () => (await db.query("select txid_current()::text as x")).rows[0]!.x;
         const before = await xid();
+        // Don't queue behind live traffic for long: a migration that can't get its locks fails and can be re-run.
+        await db.query(`set local lock_timeout = '${LOCK_TIMEOUT}'`);
         await db.query(read(`migrations/${file}`));
         // A file with its own commit would leave the rest of it, and the version row, outside the transaction.
         if ((await xid()) !== before) throw new Error("it ended the transaction (commit or rollback in the file)");
