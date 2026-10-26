@@ -264,25 +264,62 @@ superseding 0002.
 then reviews adversarially. The review looks hardest at error-code handling, `.single()` semantics, upsert conflict
 targets, and anything that ran as `service_role`.
 
-## Step 4: References in place of uploads (outline)
+## Step 4: References in place of uploads; logo in the database; no Storage
 
-A reference is a title plus a URL, attached wherever a source or evidence is cited today (`lib/sources/upload.ts`, the
-sources components, the MCP `add_source`). Text already extracted from uploads stays in the database. The migration adds
-`url` to sources and makes the storage path nullable, then drops the storage policies and the shim tables' use. The client
-logo moves to a `bytea` column (≤ 256 KB, PNG/JPEG/SVG sanitised as today) served from `/api/branding/[workspaceId]/logo` with
-an ETag. Before production cutover, list the existing storage objects so Austin can decide what to re-host.
+Facts: `public.sources` already has `file_url` (an http(s) link, 2000 characters at most) next to `title`, `kind`,
+`speakers`, `recorded_at` and `body`. Migration `20261204000000` added the uploaded original (`file_path`, `file_name`,
+`file_type`, `file_size`) in the private `sources` bucket. The logo lives in the public `branding` bucket, and its path
+is in `workspaces.branding` (`20261214000000`). Storage is called from `app/w/[slug]/source-actions.ts`
+(`deleteSource`, `attachSourceFile`, `sourceFileLink`), `settings/branding/actions.ts`, `lib/sources/upload.ts` and
+`lib/branding/upload.ts`, all marked `// step 4`.
 
-## Step 5: drop Realtime (outline)
+- **A reference is a source's title plus `file_url`.** The UI calls it a link ("Link to the original", opening in a new
+  tab), and it is offered wherever the upload was: the sources library, the source form, the evidence pickers and
+  MCP `add_source`/`update_source`. Pasted text (`body`) stays exactly as it is, and so does AI analysis over it.
+- **Remove the upload path:** `attachSourceFile`, `sourceFileLink`, file removal in `deleteSource`, `lib/sources/upload.ts`,
+  the file UI, the PDF text reading (`unpdf`) and its `outputFileTracingIncludes` entry, and their tests. Removing a test
+  is right only where the feature it covers is removed. List each one in the report.
+- **Logo in the database:** a new table `public.workspace_logos (workspace_id pk → workspaces on delete cascade, mime text,
+  bytes bytea ≤ 256 KB, sha256 text, updated_at)`. RLS: editors of the workspace write (the same rule the branding
+  action enforces today; read it). A SECURITY DEFINER `public.workspace_logo(p_workspace uuid)` returns `mime, bytes,
+  sha256` and is executable by `anon` and `authenticated`, which matches the public bucket. A route
+  `app/api/branding/[workspaceId]/logo/route.ts` serves it with `ETag` = sha256, `Cache-Control: public, max-age=300`, and 304
+  on a match. `workspaces.branding` keeps its other keys, and the logo URL the UI uses becomes that route plus `?v=<sha
+  prefix>`. Keep the existing type and size checks and the SVG sanitising in `lib/branding/upload.ts`. Only the
+  destination changes.
+- **Migration** `20261230000000_references_and_logos.sql`: create `workspace_logos` and its function; drop the
+  `sources` file constraints and columns and every policy or trigger that reads `storage.objects` (find them in
+  `20261204000000` and `20261214000000`), and remove the logo path key from `workspaces.branding`. The legacy shims stay,
+  because older migrations still need them to apply.
+- **Data:** none of this touches Supabase. Step 7 lists every Storage object so Austin can re-host what they want
+  as links, and copies the current logo into `workspace_logos`.
 
-Delete `lib/realtime/*`, the browser client and presence UI. A migration drops the realtime triggers, functions and the
-`realtime.messages` policies added in `20261007000000_realtime.sql`. Pages that refreshed on live changes keep their normal
-revalidation after their own writes.
+## Step 5: drop Realtime and presence
 
-## Step 6: ops (outline)
+- Delete `apps/web/src/lib/realtime/*`, `lib/supabase/browser.ts`, the presence UI (avatars of who else is here) and
+  the live-change listeners. Pages keep their normal refresh after their own writes (`revalidatePath`/`router.refresh`).
+  The "someone else changed this" conflict handling that comes from per-field saves (ADR 0001) stays, because it's
+  database-side.
+- **Migration** `20261231000000_drop_realtime.sql`: drop the triggers, functions and `realtime.messages` policies from
+  `20261007000000_realtime.sql`, and take the tables out of the publication if they were added. Leave the shim.
+- Mark ADR 0005 "Superseded: live editing removed (26 Oct 2026)". Remove the tests for the removed code and list them.
 
-`prod-sql.sh` → `db-sql.sh` running `psql "$DATABASE_URL"`. The migration log in `docs/production-migrations.md` starts a
-Neon section. Remove `@supabase/*` packages, `lib/supabase/*`, `database.types.ts` and the Supabase env vars. README and
-CLAUDE.md drop Supabase.
+## Step 6: ops and the last of Supabase
+
+- **Function types:** `gen:types` also writes `src/function-types.ts` (each public function's argument names and types, and
+  its return type, from `pg_proc`). It replaces `database.types.ts`, which `rpc`/`rpcRows` and a few row types still use.
+  Delete `database.types.ts` and the Supabase generator script.
+- Remove `@supabase/*` from every package, along with `lib/supabase/*`, `supabaseEnv()`, `NEXT_PUBLIC_SUPABASE_*` reads
+  and `packages/db/scripts/prod-sql.sh`. Add `packages/db/scripts/db-sql.sh` (`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"`).
+  Remove the `supabaseDefaultPrivileges` test option once nothing needs it.
+- **App login:** a migration creates no role, because passwords don't belong in migrations. `scripts/create-app-login.sql`
+  creates `authenticator` (login, noinherit, member of `anon` and `authenticated` with SET), with its password passed as
+  a psql variable. `lib/db/pool.ts` uses `APP_DATABASE_URL` when it is set and falls back to `DATABASE_URL`. Opus
+  creates the role on Neon and sets `APP_DATABASE_URL` in Vercel through the API, never printing the password.
+- **Docs:** README, CLAUDE.md and `apps/web` docs describe Neon, Better Auth and `pnpm --filter @transpera-flow/db
+  migrate`. `docs/production-migrations.md` starts a Neon section. The privacy page names Neon (database, Sydney) and
+  Vercel (hosting) instead of Supabase, and says sign-in is Google, handled by the app.
+- The Supabase environment variables in Vercel are removed after cutover, not in this step.
 
 ## Step 7: data copy and cutover
 
