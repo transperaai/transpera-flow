@@ -1,12 +1,33 @@
 import type { ProviderId } from "./env";
 
-// Preview deployments sign in through the stable alias (oAuthProxy), so both it and per-commit preview URLs are trusted origins.
+// Preview deployments sign in through the stable alias (oAuthProxy).
 export const PREVIEW_ALIAS = "https://transpera-flow-next.vercel.app";
-export const PREVIEW_ORIGINS = [PREVIEW_ALIAS, "https://transpera-flow-*.vercel.app"];
 
-/** Origins Better Auth accepts for callback URLs and requests, besides its own base URL. */
-export function trustedOrigins(baseUrl: string | undefined): string[] {
-  return [...(baseUrl ? [baseUrl] : []), ...PREVIEW_ORIGINS];
+/**
+ * Origins Better Auth accepts for callback URLs, Origin headers and the oAuthProxy's return leg: its own base URL, the preview
+ * alias, and this deployment's own Vercel URLs (per-commit and branch). Not a `transpera-flow-*.vercel.app` wildcard: anyone
+ * can name a Vercel project `transpera-flow-<anything>`, which would make every such site a trusted redirect target.
+ */
+export function trustedOrigins(baseUrl: string | undefined, env: Record<string, string | undefined> = process.env): string[] {
+  const own = [env.VERCEL_URL, env.VERCEL_BRANCH_URL]
+    .map((host) => host?.trim())
+    .filter((host): host is string => !!host && /^[a-z0-9.-]+$/i.test(host))
+    .map((host) => `https://${host}`);
+  return [...new Set([...(baseUrl ? [baseUrl] : []), PREVIEW_ALIAS, ...own])];
+}
+
+/**
+ * The incoming request, rebuilt for a direct `auth.api` call. The oAuthProxy decides from the request's URL whether this
+ * deployment is the one Google knows (then no proxy) and where to come back to (a trusted origin only). Without a request it
+ * falls back to VERCEL_URL, the per-commit URL, so someone who started on the alias or the production domain would end up
+ * signed in on the per-commit URL instead.
+ */
+export function incomingRequest(headers: Headers, path: string): Request {
+  const host = headers.get("x-forwarded-host") ?? headers.get("host") ?? "localhost";
+  const proto = headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || "https";
+  const forwarded = new Headers(headers);
+  for (const name of ["content-length", "content-type", "transfer-encoding"]) forwarded.delete(name);
+  return new Request(new URL(path, `${proto}://${host}`), { method: "POST", headers: forwarded });
 }
 
 /**

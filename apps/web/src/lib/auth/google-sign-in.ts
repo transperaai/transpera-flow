@@ -2,6 +2,7 @@ import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { authEnv, type ProviderId } from "./env";
+import { incomingRequest } from "./providers";
 import { getAuth } from "./server";
 
 /**
@@ -15,9 +16,12 @@ export async function redirectToProvider(provider: ProviderId, callbackURL = "/"
   let url: string | undefined;
   let message = "Sign-in is unavailable.";
   try {
+    const h = new Headers(await headers());
     const result = await getAuth().api.signInSocial({
       body: { provider, callbackURL, errorCallbackURL: "/login" },
-      headers: await headers(),
+      headers: h,
+      // Only matters to the oAuthProxy (a deployment with BETTER_AUTH_URL): see incomingRequest.
+      ...(env.baseUrl ? { request: incomingRequest(h, "/api/auth/sign-in/social"), asResponse: false } : {}),
     });
     url = result.url;
   } catch (error) {

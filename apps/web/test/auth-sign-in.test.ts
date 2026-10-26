@@ -11,7 +11,7 @@ import {
   type Queryable,
 } from "@/lib/auth/access";
 import { authEnv, parseEmails, parseProviders } from "@/lib/auth/env";
-import { PREVIEW_ALIAS, socialProviders, trustedOrigins } from "@/lib/auth/providers";
+import { incomingRequest, PREVIEW_ALIAS, socialProviders, trustedOrigins } from "@/lib/auth/providers";
 import { claimsFor } from "@/lib/db/claims";
 import { deploymentErrorMessage, normalizeRuleValue } from "@/lib/deployment-rules";
 import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
@@ -112,15 +112,26 @@ describe("sign-in settings", () => {
     expect(() => socialProviders({ MICROSOFT_CLIENT_ID: "mid" }, ["microsoft"])).toThrow(/MICROSOFT_TENANT_ID/);
   });
 
-  it("trusts the preview alias and per-commit preview URLs, besides its own URL", () => {
-    expect(trustedOrigins("https://transpera-flow.vercel.app")).toEqual([
-      "https://transpera-flow.vercel.app",
-      PREVIEW_ALIAS,
-      "https://transpera-flow-*.vercel.app",
-    ]);
+  it("trusts its own URL, the preview alias and this deployment's Vercel URLs, and no wildcard", () => {
+    expect(trustedOrigins("https://transpera-flow.vercel.app", {})).toEqual(["https://transpera-flow.vercel.app", PREVIEW_ALIAS]);
     expect(PREVIEW_ALIAS).toBe("https://transpera-flow-next.vercel.app");
-    expect(trustedOrigins(undefined)).toHaveLength(2);
+    expect(trustedOrigins(undefined, {})).toEqual([PREVIEW_ALIAS]);
+    expect(
+      trustedOrigins(PREVIEW_ALIAS, { VERCEL_URL: "transpera-flow-abc-team.vercel.app", VERCEL_BRANCH_URL: "transpera-flow-git-x-team.vercel.app" }),
+    ).toEqual([PREVIEW_ALIAS, "https://transpera-flow-abc-team.vercel.app", "https://transpera-flow-git-x-team.vercel.app"]);
+    expect(trustedOrigins(undefined, { VERCEL_URL: "evil.io/x" })).toEqual([PREVIEW_ALIAS]);
   });
+
+  it("rebuilds the incoming request for a direct auth.api call", () => {
+    const req = incomingRequest(
+      new Headers({ host: "internal", "x-forwarded-host": "a.example", "x-forwarded-proto": "https", cookie: "c=1", "content-length": "9" }),
+      "/api/auth/sign-in/social",
+    );
+    expect(req.url).toBe("https://a.example/api/auth/sign-in/social");
+    expect(req.headers.get("cookie")).toBe("c=1");
+    expect(req.headers.get("content-length")).toBeNull();
+  });
+
 });
 
 describe("claims", () => {

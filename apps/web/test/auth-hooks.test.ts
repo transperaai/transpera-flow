@@ -20,6 +20,8 @@ beforeAll(async () => {
   vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
   vi.stubEnv("GOOGLE_CLIENT_SECRET", "client-secret");
   vi.stubEnv("ACCESS_ADMIN_EMAILS", "first@brand-new.io");
+  vi.stubEnv("VERCEL_URL", "transpera-flow-abc123-team.vercel.app");
+  vi.stubEnv("VERCEL_BRANCH_URL", "");
   await db.client.query(`insert into deployment_access (kind, value, role) values ('domain', 'client.com', 'viewer'), ('email', 'lead@client.com', 'editor')`);
   const { getAuth } = await import("@/lib/auth/server");
   ctx = await getAuth().$context;
@@ -95,8 +97,45 @@ describe("Better Auth hooks", () => {
     expect((await db.client.query("select 1 from memberships where user_id = $1", [user.id])).rowCount).toBe(0);
   });
 
-  it("trusts the preview alias and per-commit preview URLs", () => {
+  it("trusts the preview alias and this deployment's own URL, and no look-alike Vercel project", () => {
     const origins = (ctx as unknown as { trustedOrigins: string[] }).trustedOrigins;
-    expect(origins).toEqual(expect.arrayContaining(["https://transpera-flow-next.vercel.app", "https://transpera-flow-*.vercel.app"]));
+    expect(origins).toEqual(expect.arrayContaining(["https://transpera-flow-next.vercel.app", "https://transpera-flow-abc123-team.vercel.app"]));
+    expect(origins.some((o) => o.includes("*"))).toBe(false);
+  });
+
+  it("refuses to send anyone on to another Vercel project after sign-in", () => {
+    // What the origin check asks of a callbackURL (Better Auth skips the check itself under NODE_ENV=test).
+    const c = ctx as { isTrustedOrigin(url: string, o?: { allowRelativePaths?: boolean }): boolean };
+    const trusted = (url: string, o?: { allowRelativePaths?: boolean }) => c.isTrustedOrigin(url, o);
+    expect(trusted("https://transpera-flow-evil.vercel.app/steal", { allowRelativePaths: true })).toBe(false);
+    expect(trusted("https://transpera-flow-next.vercel.app/s/abc", { allowRelativePaths: true })).toBe(true);
+    expect(trusted("/s/abc", { allowRelativePaths: true })).toBe(true);
+  });
+
+  describe("the oAuthProxy, from a direct auth.api call", () => {
+    const start = async (host: string) => {
+      const { getAuth } = await import("@/lib/auth/server");
+      const { incomingRequest } = await import("@/lib/auth/providers");
+      const headers = new Headers({ host, "x-forwarded-proto": "https", origin: `https://${host}`, "content-type": "multipart/form-data" });
+      const result = await getAuth().api.signInSocial({
+        body: { provider: "google", callbackURL: "/s/abc" },
+        headers,
+        request: incomingRequest(headers, "/api/auth/sign-in/social"),
+        asResponse: false,
+      });
+      return new URL(result.url!);
+    };
+
+    it("goes straight to Google from the alias Google knows", async () => {
+      const url = await start("transpera-flow-next.vercel.app");
+      expect(url.searchParams.get("redirect_uri")).toBe("https://transpera-flow-next.vercel.app/api/auth/callback/google");
+      expect(url.searchParams.get("state")!.length).toBeLessThan(100);
+    });
+
+    it("goes through the alias from a per-commit preview URL", async () => {
+      const url = await start("transpera-flow-abc123-team.vercel.app");
+      expect(url.searchParams.get("redirect_uri")).toBe("https://transpera-flow-next.vercel.app/api/auth/callback/google");
+      expect(url.searchParams.get("state")!.length).toBeGreaterThan(100); // the proxy's encrypted package
+    });
   });
 });
