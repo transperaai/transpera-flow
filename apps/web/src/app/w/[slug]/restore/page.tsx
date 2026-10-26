@@ -5,8 +5,8 @@ import { canEditWorkspace, canManageWorkspace } from "@/lib/access-data";
 import { loadWorkspaceHead } from "@/lib/data";
 import { NOT_EMPTY_MESSAGE, ROLE_MESSAGE } from "@/lib/restore/errors";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
-import { supabaseEnv } from "@/lib/supabase/env";
-import { createClient } from "@/lib/supabase/server";
+import { authEnv } from "@/lib/auth/env";
+import { getDb } from "@/lib/auth/session";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
@@ -24,11 +24,11 @@ export default async function RestorePage(props: PageProps<"/w/[slug]/restore">)
       </p>
     </Page>
   );
-  if (!supabaseEnv()) return refused("Restoring needs a connected workspace; the demo has none.");
+  if (!authEnv()) return refused("Restoring needs a connected workspace; the demo has none.");
   const head = await loadWorkspaceHead(slug);
   if (!head) notFound();
   if (!(await canEditWorkspace(head.id))) return refused(ROLE_MESSAGE);
-  if (!(await workspaceIsEmpty(await createClient(), head.id))) return refused(NOT_EMPTY_MESSAGE);
+  if (!(await workspaceIsEmpty(await getDb(), head.id))) return refused(NOT_EMPTY_MESSAGE);
   return (
     <Page title="Restore a backup" eyebrow="Workspace" description={description} width="max-w-3xl">
       <PhoneReadOnly>

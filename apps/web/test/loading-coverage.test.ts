@@ -69,7 +69,8 @@ describe("a loading state loads nothing", () => {
     });
     it(`${name} imports no data and no server actions`, () => {
       expect(src).not.toMatch(/from "@\/lib\/data"/);
-      expect(src).not.toMatch(/from "@\/lib\/supabase/);
+      expect(src).not.toMatch(/from "@\/lib\/(supabase|auth\/session|db\/)/);
+      expect(src).not.toMatch(/from "@transpera-flow\/db\/client"/);
       expect(src).not.toContain('"use server"');
       expect(src).not.toMatch(/\bawait\b|\basync\b/);
     });
@@ -83,7 +84,8 @@ describe("the skeletons load nothing either", () => {
     it(`${file} is a server module that imports no data`, () => {
       expect(src).not.toMatch(/^["']use client["']/m);
       expect(src).not.toContain('"use server"');
-      expect(src).not.toMatch(/from "@\/lib\/(data|supabase)/);
+      expect(src).not.toMatch(/from "@\/lib\/(data|supabase|auth\/session|db\/)/);
+      expect(src).not.toMatch(/from "@transpera-flow\/db\/client"/);
       expect(src).not.toMatch(/\bawait\b|\basync\b/);
     });
   }

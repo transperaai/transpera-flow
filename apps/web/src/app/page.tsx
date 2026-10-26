@@ -8,15 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { isAgencyAdmin, resolveMyAccess } from "@/lib/access-data";
 import { listAgencyWorkspaces, listWorkspaces } from "@/lib/data";
-import { createClient } from "@/lib/supabase/server";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { authEnv } from "@/lib/auth/env";
+import { getSessionUser } from "@/lib/auth/session";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { NewWorkspaceForm } from "./new-workspace-form";
 
 export default async function HomePage() {
-  // Render per request: Supabase settings are read at runtime, not build time.
+  // Render per request: Auth and database settings are read at runtime, not build time.
   await connection();
-  if (!supabaseEnv()) redirect("/demo");
+  if (!authEnv()) redirect("/demo");
   const [firstLook, admin] = await Promise.all([listWorkspaces(), isAgencyAdmin()]);
   let workspaces = firstLook;
   if (workspaces.length === 0) {
@@ -25,9 +25,7 @@ export default async function HomePage() {
   }
   // An agency admin with no workspaces creates the first one here.
   if (workspaces.length === 0 && !admin) {
-    const {
-      data: { user },
-    } = await (await createClient()).auth.getUser();
+    const user = await getSessionUser();
     return <HoldingPage email={user?.email ?? "an unknown account"} />;
   }
   // Agency admins see each company's headline numbers; everyone else keeps the cards.
