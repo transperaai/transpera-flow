@@ -76,9 +76,29 @@ describe("create-app-login.sql", () => {
     run(password);
   });
 
-  it("refuses to run without a password", () => {
-    const out = execFileSync("psql", [db.url, "-v", "ON_ERROR_STOP=1", "-f", script], { stdio: "pipe" }).toString();
-    expect(out).toContain("app_password is not set");
+  it("refuses to run without a password, and fails", () => {
+    let failed: { status?: number; stdout?: Buffer } | undefined;
+    try {
+      execFileSync("psql", [db.url, "-v", "ON_ERROR_STOP=1", "-f", script], { stdio: "pipe" });
+    } catch (e) {
+      failed = e as typeof failed;
+    }
+    expect(failed).toBeDefined();
+    expect(failed?.status).not.toBe(0);
+    expect(failed?.stdout?.toString()).toContain("app_password is not set");
+  });
+
+  it("run again, takes away any other membership and any inherited or admin grant", async () => {
+    await db.client.query("grant service_role to authenticator; grant anon to authenticator with inherit true, admin true");
+    run(password);
+    const { rows } = await db.client.query(`
+      select g.rolname::text as role, m.inherit_option, m.admin_option, m.set_option
+      from pg_auth_members m join pg_roles g on g.oid = m.roleid
+      where m.member = 'authenticator'::regrole order by 1`);
+    expect(rows).toEqual([
+      { role: "anon", inherit_option: false, admin_option: false, set_option: true },
+      { role: "authenticated", inherit_option: false, admin_option: false, set_option: true },
+    ]);
   });
 });
 
