@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { NORTHBEAM_WORKSPACE_ID, exportWorkspaceBundle, supabaseReader, supabaseWorkspaceReader, type Db } from "@transpera-flow/db";
+import { NORTHBEAM_WORKSPACE_ID, exportWorkspaceBundle, dbReader, dbWorkspaceReader, type Db } from "@transpera-flow/db";
 import { rpc, type Claims } from "@transpera-flow/db/client";
 import { GATEWAY_TOO_BIG_MESSAGE, LOST_CONNECTION_MESSAGE, SLOW_START_MESSAGE, restoreFailure } from "@/lib/restore/errors";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
@@ -93,7 +93,7 @@ beforeAll(async () => {
   // A real backup: Northbeam as an editor exports it.
   as(editor);
   const db = tdb.dbAs(state.claims);
-  source = { workspaceBundle: await exportWorkspaceBundle(NORTHBEAM_WORKSPACE_ID, supabaseWorkspaceReader(db), supabaseReader(db), { canEdit: true, now: new Date() }) };
+  source = { workspaceBundle: await exportWorkspaceBundle(NORTHBEAM_WORKSPACE_ID, dbWorkspaceReader(db), dbReader(db), { canEdit: true, now: new Date() }) };
 }, 120_000);
 afterAll(async () => {
   vi.unstubAllEnvs();

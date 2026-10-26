@@ -31,7 +31,7 @@ interface DbError {
   message?: string;
 }
 
-/** A sentence for an error returned by Supabase when changing access settings. */
+/** A sentence for an error returned by the database when changing access settings. */
 export function accessErrorMessage(error: DbError): string {
   const m = error.message ?? "";
   if (m.includes("workspace_keeps_an_owner")) {

@@ -1,4 +1,4 @@
-import type { Json } from "./database.types";
+import type { Json } from "./db-types";
 import type { PersonLabels } from "./person-labels";
 import type { Db } from "./queries";
 import { columns } from "./columns";
@@ -176,7 +176,7 @@ export async function storeProposedFindings(
   const keys = [...new Set(wanted.map((f) => f.aiKey))];
   const where = (processId: string | null, key: string) => `${processId ?? ""}|${key}`;
   const known = new Map<string, { id: string; status: FindingStatus }>();
-  // supabase-js returned `{ error }`; this function reports a failed statement as `{ error: message }` too.
+  // The earlier PostgREST client returned `{ error }`; this function reports a failed statement as `{ error: message }` too.
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   try {
     if (keys.length) {

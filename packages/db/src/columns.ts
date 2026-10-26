@@ -1,4 +1,4 @@
-// The `*_COLUMNS` constants are comma-separated strings (what supabase-js `.select()` took). Kysely takes a list, and
+// The `*_COLUMNS` constants are comma-separated strings (the form PostgREST's `select=` took). Kysely takes a list, and
 // types the rows from it, so `columns()` splits one at the type level too: `db.selectFrom("t").select(columns(T_COLUMNS))`.
 
 export type SplitColumns<S extends string> = S extends `${infer A}, ${infer B}` ? [A, ...SplitColumns<B>] : [S];

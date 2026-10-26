@@ -1,10 +1,11 @@
 // Row shapes the app and engine work with. The database shape itself lives in
-// `database.types.ts` (generated: `pnpm --filter @transpera-flow/db gen:types`); these
+// `db-types.ts` (generated: `pnpm --filter @transpera-flow/db gen:types`); these
 // narrow its check-constrained text and jsonb columns, and the checks at the
 // bottom fail the typecheck if they drift from it.
 
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
-import type { Database, Json } from "./database.types";
+import type { Selectable } from "kysely";
+import type { DB, Json } from "./db-types";
 import type { Viewer } from "./queries";
 
 export type MembershipRole = "agency_admin" | "owner" | "editor" | "member" | "viewer";
@@ -1174,10 +1175,10 @@ export interface WorkspaceAccess {
   emails: AccessEmailRow[];
 }
 
-type TableRow<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
+type TableRow<T extends keyof DB> = Selectable<DB[T]>;
 
 /** `true` when every field of `Row` is a column of table `T` with a compatible type. */
-type Matches<Row, T extends keyof Database["public"]["Tables"]> = [Exclude<keyof Row, keyof TableRow<T>>] extends [never]
+type Matches<Row, T extends keyof DB> = [Exclude<keyof Row, keyof TableRow<T>>] extends [never]
   ? Row extends Pick<TableRow<T>, keyof Row & keyof TableRow<T>>
     ? true
     : { mismatch: T }

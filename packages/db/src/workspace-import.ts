@@ -13,7 +13,8 @@
 // is restored like any setting.
 
 import { ENGINE_VERSION } from "@transpera-flow/engine";
-import type { Database } from "./database.types";
+import type { Selectable } from "kysely";
+import type { DB } from "./db-types";
 import { payFreeIssueFields } from "./issue-pay";
 import type { WorkspaceSettings } from "./types";
 import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./workspace-bundle";
@@ -22,7 +23,7 @@ export const PLAN_FORMAT = "transpera-workspace-import/1";
 
 /**
  * What a restore will take. B10 2b started at 50 processes, 500 steps and so on (they restored in about 2 s, inside a 3 s budget
- * because Supabase stops a statement by `authenticated` at 8 s). B21 (#203) raised them to three times that. The brief sized them at
+ * because a statement by `authenticated` is stopped at 8 s). B21 (#203) raised them to three times that. The brief sized them at
  * four times from a plan without leave, client services and the small company tables (6.6 to 7.3 s with the faster id remap and the
  * `audit_log (target_id)` index); the performance test fills every table (packages/db/test/workspace-import-large.test.ts) and took
  * 14.9 to 17.7 s at four times on the shared test Postgres, over its 15 s local budget, so every limit was lowered by a quarter
@@ -65,8 +66,7 @@ export const WORKSPACE_IMPORT_LIMITS = {
 export const MAX_BACKUP_BYTES = WORKSPACE_IMPORT_LIMITS.backupBytes;
 export const MAX_COMPRESSED_BYTES = WORKSPACE_IMPORT_LIMITS.compressedBytes;
 
-type Tables = Database["public"]["Tables"];
-const cols = <T extends keyof Tables>(_table: T, ...c: (keyof Tables[T]["Row"] & string)[]): readonly string[] => c;
+const cols = <T extends keyof DB>(_table: T, ...c: (keyof Selectable<DB[T]> & string)[]): readonly string[] => c;
 
 /**
  * The columns the restore accepts for each plan section (everything else is dropped). `workspace_id`, `created_by`,

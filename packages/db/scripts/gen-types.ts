@@ -1,10 +1,11 @@
-// Regenerates src/db-types.ts and src/json-columns.ts: builds a throwaway database from the migrations, then runs kysely-codegen on it.
+// Regenerates src/db-types.ts, src/json-columns.ts and src/function-types.ts: builds a throwaway database from the migrations, then runs kysely-codegen on it.
 // The numeric and date options match the parsers in src/client.ts (numeric and int8 are numbers; dates are strings).
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { applyCompat, applyMigrations } from "../src/migrations.ts";
+import { generateFunctionTypes } from "./function-types.ts";
 
 const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
 const name = `transpera_flow_types_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -25,6 +26,7 @@ try {
      where table_schema = 'public' and data_type in ('json', 'jsonb')
      group by table_name order by table_name`,
   );
+  writeFileSync(new URL("../src/function-types.ts", import.meta.url), await generateFunctionTypes(client));
   await client.end();
   writeFileSync(
     new URL("../src/json-columns.ts", import.meta.url),
@@ -45,4 +47,4 @@ try {
   await admin.query(`drop database if exists ${name} with (force)`);
   await admin.end();
 }
-console.log("Wrote src/db-types.ts and src/json-columns.ts");
+console.log("Wrote src/db-types.ts, src/json-columns.ts and src/function-types.ts");

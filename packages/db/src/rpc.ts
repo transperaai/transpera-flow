@@ -1,10 +1,9 @@
 import { sql, type Kysely } from "kysely";
-import type { Database } from "./database.types";
 import type { DB } from "./db-types";
+import type { Functions } from "./function-types";
 
-// --- Calling SQL functions the way supabase-js `.rpc()` did. ---
+// --- Calling SQL functions the way PostgREST's `/rpc` did. ---
 
-type Functions = Database["public"]["Functions"];
 type FnName = keyof Functions & string;
 // Distributes over an overloaded function's signatures, so any one of their argument lists is accepted.
 type FnArgs<N extends FnName> = Functions[N] extends infer F ? (F extends { Args: infer A } ? A : never) : never;

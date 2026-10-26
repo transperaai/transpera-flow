@@ -16,7 +16,7 @@ beforeAll(async () => {
 });
 afterAll(() => db.close());
 
-// The helpers are typed from database.types.ts; these test-only functions aren't in it.
+// The helpers are typed from function-types.ts; these test-only functions are not in it.
 const anyRpc = rpc as unknown as (...a: unknown[]) => Promise<unknown>;
 const anyRows = rpcRows as unknown as (...a: unknown[]) => Promise<unknown>;
 

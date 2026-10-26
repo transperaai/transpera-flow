@@ -54,8 +54,7 @@ export function onceForRequest(h: Headers, load: (h: Headers) => Promise<Session
 }
 
 /**
- * A database handle that runs every query as the signed-in user (or `anon`), under the same RLS the Supabase client used. Call
- * sites switch to it in steps 3c and 3d; until then they use `lib/supabase/server.ts`.
+ * A database handle that runs every query as the signed-in user (or `anon`),, under RLS.
  */
 export async function getDb(): Promise<ReturnType<typeof createDb>> {
   return createDb(appPool(), claimsFor(await getSessionUser()));

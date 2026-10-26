@@ -1,4 +1,4 @@
-// Small helpers the server actions share after the move from supabase-js to Kysely (docs/plans/supabase-exit-brief.md, step 3).
+// Small helpers the server actions share after the move to Kysely.
 
 /** The SQLSTATE of a thrown `pg` error, as PostgREST's `error.code` carried it; undefined for anything else. */
 export function pgCode(e: unknown): string | undefined {

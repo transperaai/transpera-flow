@@ -30,8 +30,8 @@ import {
 import { JSON_COLUMNS } from "./json-columns";
 import type { DB } from "./db-types";
 
-// Query layer for the move off Supabase (docs/plans/supabase-exit-brief.md, step 1). Authorization stays in Postgres: every
-// query runs as `authenticated` (or `anon` when signed out) with Supabase-shaped JWT claims set for its transaction, so
+// Query layer (docs/plans/supabase-exit-brief.md, step 1). Authorization stays in Postgres: every
+// query runs as `authenticated` (or `anon` when signed out) with JWT-shaped claims set for its transaction, so
 // the RLS policies and SECURITY DEFINER functions that call auth.uid() / auth.jwt() work unchanged.
 
 /** What auth.jwt() returns inside a query. Built in one place in the app (apps/web/src/lib/db/claims.ts). */
@@ -123,7 +123,7 @@ const RESETS_STATE = new Set(["SET", "RESET", "DISCARD"]);
  * The statement that puts a connection under the caller's claims, for the current transaction only (`set_config(..., true)`).
  * It also clears the legacy per-claim settings auth.uid() / auth.jwt() / auth.role() read first, so a value someone left
  * at session level on a pooled connection can't stand in for these claims, and pins TimeZone and DateStyle to what
- * Supabase's PostgREST sessions ran with (UTC, ISO), which the timestamp parser above relies on.
+ * PostgREST's sessions ran with (UTC, ISO), which the timestamp parser above relies on.
  */
 function claimsStatement(claims: Claims | null): string {
   // The database role always follows whether there are claims, and the claims' role always says the same, so a caller

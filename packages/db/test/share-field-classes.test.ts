@@ -1,21 +1,22 @@
 import type { FpDeleteCandidate, FpImprovement, FpMeasure, FpRequirement, FpStatement, ScenarioPatch } from "@transpera-flow/engine";
 import { describe, expect, it } from "vitest";
-import type { Database } from "../src";
+import type { Selectable } from "kysely";
+import type { DB } from "../src";
 import type { Viewer } from "../src/queries";
 import { SHARE_NON_TEXT_KEYS, SHARE_NON_TEXT_REASONS, type IssueShare, type OverviewShare, type ProcessShare, type SolutionShare } from "../src/share";
 import type { BlockBundle, FindingCitation, FindingRow, IssueLinkRef, IssueRow, RecurrenceJson, SolutionsData, WorkspaceSettings } from "../src/types";
 
-// Every string column of every table, from the generated database types, is classified here: free text, or not text (an id, a date,
+// Every string column of every table, from the generated database types (db-types.ts), is classified here: free text, or not text (an id, a date,
 // an enum the engine reads), or the whole table is "unused" (its rows never reach a share link). The maps are exhaustive at the type
-// level: add a column or a table (regenerate database.types.ts) and this file stops compiling until the new one is classified, so a
+// level: add a column or a table (regenerate db-types.ts) and this file stops compiling until the new one is classified, so a
 // new field can't ship unclassified; the share link scrubs any string under a key not on SHARE_NON_TEXT_KEYS (default deny) either
 // way. The nested shapes the snapshot carries (the first-principles document) are classified the same way below.
 
-type Tables = Database["public"]["Tables"];
+type Tables = { [K in keyof DB]: Selectable<DB[K]> };
 /** Free text; not text (its key is on SHARE_NON_TEXT_KEYS); or always a uuid or null, which both checks skip whatever its key. */
 type Class = "text" | "not" | "uuid";
 type StrKeys<T> = { [K in keyof T]-?: NonNullable<T[K]> extends string | string[] ? K : never }[keyof T];
-type Cols<K extends keyof Tables> = StrKeys<Tables[K]["Row"]>;
+type Cols<K extends keyof Tables> = StrKeys<Tables[K]>;
 type TableClasses = { [K in keyof Tables]: "unused" | { [C in Cols<K>]: Class } };
 
 const TABLES: TableClasses = {
@@ -51,7 +52,11 @@ const TABLES: TableClasses = {
   memberships: "unused",
   narrations: "unused",
   people: { created_at: "not", created_by: "not", email: "text", end_date: "not", id: "not", name: "text", notes: "text", start_date: "not", updated_at: "not", workspace_id: "not" },
+  deployment_access: "unused",
   person_capacity_factors: "unused",
+  process_placements: "unused",
+  schema_migrations: "unused",
+  workspace_logos: "unused",
   person_leave: { created_at: "not", created_by: "not", end_date: "not", id: "not", note: "text", person_id: "not", start_date: "not", updated_at: "not", workspace_id: "not" },
   person_roles: { created_at: "not", person_id: "not", role_id: "not", workspace_id: "not" },
   person_skills: { created_at: "not", person_id: "not", step_id: "not", workspace_id: "not" },
