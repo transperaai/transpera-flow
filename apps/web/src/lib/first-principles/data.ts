@@ -1,7 +1,7 @@
 import "server-only";
 import { firstPrinciplesDiffer, loadFirstPrinciplesFor, type ResolvedFirstPrinciples } from "@transpera-flow/db";
 import type { FirstPrinciples } from "@transpera-flow/engine";
-import { createClient } from "../supabase/server";
+import { getDb } from "@/lib/auth/session";
 
 /**
  * The first principles of some revisions of a process (RLS: every member reads), each its own row or the nearest
@@ -10,7 +10,7 @@ import { createClient } from "../supabase/server";
  */
 export async function loadProcessFirstPrinciples(processId: string, revisionIds: readonly string[]): Promise<Record<string, ResolvedFirstPrinciples>> {
   try {
-    return await loadFirstPrinciplesFor(await createClient(), processId, revisionIds);
+    return await loadFirstPrinciplesFor(await getDb(), processId, revisionIds);
   } catch (err) {
     console.error("Couldn't load the first principles; showing none.", err instanceof Error ? err.message : err);
     return Object.fromEntries(revisionIds.map((id) => [id, { doc: null, version: null, inheritedFrom: null }]));

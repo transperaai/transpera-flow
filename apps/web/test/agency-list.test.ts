@@ -159,7 +159,7 @@ describe("Client health rules for editors", () => {
     const fn = actions.slice(actions.indexOf("export async function saveHealthSetting"));
     expect(fn).toContain("saveHealthRule(workspaceId, key, base, value)");
     expect(fn).not.toContain("saveField(");
-    expect(read("lib/fields/server.ts")).toContain('supabase.rpc("save_health_rules"');
+    expect(read("lib/fields/server.ts")).toContain('rpc(db, "save_health_rules"');
   });
 
   it("the Overview records the headline numbers only for editors, at the workspace's own horizon", () => {

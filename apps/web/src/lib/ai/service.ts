@@ -32,6 +32,7 @@ import {
   type ProposedFinding,
   type SaveAiAnalysisInput,
 } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { absenceTest, resolveMoney, shadowPricesFor, simulate, type AbsenceTest, type DetectedIssue } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { anthropicAnalyst, NARRATION_MODEL } from "@/lib/narration/anthropic";
@@ -222,14 +223,14 @@ async function acknowledgedAiKeys(db: Db, workspaceId: string): Promise<Set<stri
 async function common(db: Db, workspaceId: string, storedOn: string) {
   const [settings, canWrite, latest, skip] = await Promise.all([
     loadAiSettings(db, workspaceId),
-    db.rpc("can_edit_workspace", { ws: workspaceId }),
+    rpc(db, "can_edit_workspace", { ws: workspaceId }),
     loadLatestAiAnalyses(db, [storedOn]),
     acknowledgedAiKeys(db, workspaceId),
   ]);
   const row = latest[storedOn];
   return {
     settings,
-    canWrite: canWrite.data === true,
+    canWrite: canWrite === true,
     existing: row ? { input_hash: row.input_hash, status: row.status, model_hash: row.model_hash } : null,
     reserve: () => reserveAiRun(db, workspaceId, storedOn, "manual"),
     save: (r: SaveAiAnalysisInput) => saveAiAnalysis(db, r),
@@ -243,13 +244,14 @@ async function common(db: Db, workspaceId: string, storedOn: string) {
 /** "Analyse" on a process page: the signed-in user's client analyses the process's live version. */
 export async function runAiAnalysis(db: Db, processId: string, { force = false, model = anthropicAnalyst() }: { force?: boolean; model?: AiModel | null } = {}): Promise<AiRunResult> {
   try {
-    const { data: process, error } = await db.from("processes").select("id, workspace_id, live_revision_id, is_company").eq("id", processId).maybeSingle();
-    if (error || !process) return { status: "error", message: "That process isn't available." };
+    // A failed read (say a malformed id) counts as "not available", as it did when the error came back with no row.
+    const process = await db.selectFrom("processes").select(["id", "workspace_id", "live_revision_id", "is_company"]).where("id", "=", processId).executeTakeFirst().catch(() => undefined);
+    if (!process) return { status: "error", message: "That process isn't available." };
     if (process.is_company) return { status: "error", message: "Analyse the whole company from the Overview." };
     const workspaceId = process.workspace_id;
     const revisionId = process.live_revision_id;
     if (!revisionId) return { status: "skipped", why: "no_live" };
-    const { data: workspace } = await db.from("workspaces").select("id, name, slug, settings").eq("id", workspaceId).maybeSingle();
+    const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", workspaceId).executeTakeFirst();
     const listed = (await listProcesses(db, workspaceId)).find((p) => p.id === processId);
     if (!workspace || !listed) return { status: "error", message: "The process couldn't be found." };
     const bundle = await loadProcessBundle(db, workspace, listed, revisionId);
@@ -278,7 +280,7 @@ export async function runAiAnalysis(db: Db, processId: string, { force = false, 
  */
 export async function runCompanyAiAnalysis(db: Db, workspaceId: string, { force = false, model = anthropicAnalyst() }: { force?: boolean; model?: AiModel | null } = {}): Promise<AiRunResult> {
   try {
-    const { data: workspace } = await db.from("workspaces").select("id, name, slug, settings").eq("id", workspaceId).maybeSingle();
+    const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", workspaceId).executeTakeFirst();
     if (!workspace) return { status: "error", message: "That workspace isn't available." };
     const everything = await listProcesses(db, workspaceId, { includeCompany: true });
     const company = everything.find((p) => p.is_company);

@@ -4,6 +4,7 @@
 // explanation; editors draft one (it costs an API call).
 
 import type { Db, RunRow } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { runNarrationInput } from "./facts";
 import type { NarrationModel } from "./narrate";
 import { cachedNarration, findNarration, fromCache, type StoredNarration } from "./service";
@@ -13,18 +14,17 @@ export type ExplainResult =
   | { status: "error"; code: "not_found" | "forbidden"; message: string };
 
 async function runAndProcess(db: Db, runId: string): Promise<{ run: RunRow; processName: string } | null> {
-  const { data, error } = await db
-    .from("runs")
-    .select("id, workspace_id, process_id, name, scenario_id, revision_ids, engine_version, reps, seed, params_snapshot, results, duration_ms, created_at, created_by")
-    .eq("id", runId)
-    .maybeSingle();
-  if (error) throw error;
+  const data = await db
+    .selectFrom("runs")
+    .select(["id", "workspace_id", "process_id", "name", "scenario_id", "revision_ids", "engine_version", "reps", "seed", "params_snapshot", "results", "duration_ms", "created_at", "created_by"])
+    .where("id", "=", runId)
+    .executeTakeFirst();
   if (!data) return null;
   const run = data as unknown as RunRow;
   let processName = "the process";
   if (run.process_id) {
-    const p = await db.from("processes").select("name").eq("id", run.process_id).maybeSingle();
-    if (p.data?.name) processName = p.data.name;
+    const p = await db.selectFrom("processes").select("name").where("id", "=", run.process_id).executeTakeFirst();
+    if (p?.name) processName = p.name;
   }
   return { run, processName };
 }
@@ -45,9 +45,8 @@ export async function explainRun(db: Db, runId: string, { model, regenerate = fa
     const hit = await cachedExplanation(db, run, processName);
     if (hit) return { status: "ok", narration: hit };
   }
-  const edit = await db.rpc("can_edit_workspace", { ws: run.workspace_id });
-  if (edit.error) throw edit.error;
-  if (!edit.data) return { status: "error", code: "forbidden", message: "Only editors can ask for a new explanation: it calls the Anthropic API." };
+  const edit = await rpc(db, "can_edit_workspace", { ws: run.workspace_id });
+  if (!edit) return { status: "error", code: "forbidden", message: "Only editors can ask for a new explanation: it calls the Anthropic API." };
   const narration = await cachedNarration(db, { workspaceId: run.workspace_id, targetId: run.id, input: runNarrationInput(run, processName), model, regenerate });
   return { status: "ok", narration };
 }

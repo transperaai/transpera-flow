@@ -1,7 +1,7 @@
 import "server-only";
 import { loadMemberNames } from "@/lib/data";
 import { shareStatus, type ShareStatus } from "@/lib/share/format";
-import { createClient } from "@/lib/supabase/server";
+import { getDb } from "@/lib/auth/session";
 
 /** One row of the Share links page. Never the link itself or its copy: those aren't readable through the API. */
 export interface ShareLinkRow {
@@ -26,28 +26,29 @@ export interface ShareLinkRow {
   status: ShareStatus;
 }
 
-const COLUMNS = "id, kind, mode, target_id, show_people, show_financials, allowed_emails, expires_at, label, snapshot_at, created_by, created_at, revoked_at, opens, last_opened_at" as const;
+const COLUMNS = ["id", "kind", "mode", "target_id", "show_people", "show_financials", "allowed_emails", "expires_at", "label", "snapshot_at", "created_by", "created_at", "revoked_at", "opens", "last_opened_at"] as const;
 
 /** The workspace's share links, newest first, as an owner or editor sees them (RLS decides: nobody else reads any). */
 export async function loadShareLinks(workspaceId: string): Promise<ShareLinkRow[]> {
-  const db = await createClient();
-  const { data, error } = await db.from("share_links").select(COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).order("id");
-  if (error) throw error;
+  const db = await getDb();
+  const data = await db.selectFrom("share_links").select(COLUMNS).where("workspace_id", "=", workspaceId).orderBy("created_at", "desc").orderBy("id").execute();
   const ids = (kind: string) => [...new Set(data.filter((l) => l.kind === kind && l.target_id).map((l) => l.target_id!))];
   const playIds = data.filter((l) => l.mode === "play").map((l) => l.id);
   const [processes, issues, solutions, members, sent] = await Promise.all([
-    ids("process").length ? db.from("processes").select("id, name").in("id", ids("process")) : { data: [] as { id: string; name: string }[] },
-    ids("issue").length ? db.from("issues").select("id, number").in("id", ids("issue")) : { data: [] as { id: string; number: number | null }[] },
-    ids("solution").length ? db.from("solutions").select("id, name").in("id", ids("solution")) : { data: [] as { id: string; name: string }[] },
+    ids("process").length ? db.selectFrom("processes").select(["id", "name"]).where("id", "in", ids("process")).execute() : ([] as { id: string; name: string }[]),
+    ids("issue").length ? db.selectFrom("issues").select(["id", "number"]).where("id", "in", ids("issue")).execute() : ([] as { id: string; number: number | null }[]),
+    ids("solution").length ? db.selectFrom("solutions").select(["id", "name"]).where("id", "in", ids("solution")).execute() : ([] as { id: string; name: string }[]),
     loadMemberNames(workspaceId),
     // Ideas sent from each play link: one query for the page.
-    playIds.length ? db.from("suggestion_proposals").select("share_link_id").eq("workspace_id", workspaceId).in("share_link_id", playIds).limit(5000) : { data: [] as { share_link_id: string | null }[] },
+    playIds.length
+      ? db.selectFrom("suggestion_proposals").select("share_link_id").where("workspace_id", "=", workspaceId).where("share_link_id", "in", playIds).limit(5000).execute()
+      : ([] as { share_link_id: string | null }[]),
   ]);
   const ideasOf = new Map<string, number>();
-  for (const r of sent.data ?? []) if (r.share_link_id) ideasOf.set(r.share_link_id, (ideasOf.get(r.share_link_id) ?? 0) + 1);
-  const processName = new Map((processes.data ?? []).map((p) => [p.id, p.name]));
-  const issueNumber = new Map((issues.data ?? []).map((i) => [i.id, i.number]));
-  const solutionName = new Map((solutions.data ?? []).map((s) => [s.id, s.name]));
+  for (const r of sent) if (r.share_link_id) ideasOf.set(r.share_link_id, (ideasOf.get(r.share_link_id) ?? 0) + 1);
+  const processName = new Map(processes.map((p) => [p.id, p.name]));
+  const issueNumber = new Map(issues.map((i) => [i.id, i.number]));
+  const solutionName = new Map(solutions.map((s) => [s.id, s.name]));
   const now = new Date();
   return data.map((l) => {
     const kind = l.kind as ShareLinkRow["kind"];
