@@ -5,7 +5,7 @@ import type pg from "pg";
 import { createPool, type Claims } from "@transpera-flow/db/client";
 import { claimsFor } from "../../../apps/web/src/lib/db/claims";
 import { createTestDb, type TestDb, type TestDbOptions } from "../../db/test/harness";
-import { generateApiToken, handleMcpRequest, type McpHandlerOptions } from "../src";
+import { generateApiToken, handleMcpRequest, hashApiToken, type McpHandlerOptions } from "../src";
 
 export const ENDPOINT = "https://flow.test/api/mcp";
 
@@ -97,4 +97,15 @@ export async function errorOf(run: () => Promise<unknown>): Promise<(Error & { c
   } catch (e) {
     return e as Error & { code?: string };
   }
+}
+
+/**
+ * A database handle for a user as an API token reaches it through the endpoint: their identity, as the app's `claimsFor` builds
+ * it, with the token's id in the claims. (This is what the pre-request hook gave a token's request over PostgREST.)
+ */
+export async function tokenDbFor(env: McpTestDb, userId: string, { agencyAdmin = false, email = "" } = {}) {
+  const token = await issueToken(env.t.client, userId, "e2e");
+  const tokenId = (await env.t.client.query("select id from api_tokens where token_hash = $1", [hashApiToken(token)])).rows[0].id as string;
+  const claims = env.options.claimsFor({ id: userId, email, agencyAdmin }, { apiTokenId: tokenId });
+  return { db: env.dbAs(claims), token, tokenId };
 }
