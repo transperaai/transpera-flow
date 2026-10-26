@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { redirect } from "next/navigation";
 import { claimsFor } from "@/lib/db/claims";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
 
@@ -20,7 +21,14 @@ const session: { db: ReturnType<TestDb["dbAs"]> | null; user: (TestUser & { name
 
 /** What the mocked `@/lib/auth/session` module exports. */
 export const sessionMock = {
+  // As the real getDb(): signed out, it redirects to /login rather than querying as anon.
   getDb: async () => {
+    if (!session.db) throw new Error("action-harness: call signInAs() or signOut() first");
+    if (!session.user) redirect("/login");
+    return session.db;
+  },
+  // The share link's page and its Send action, and the logo route: as the signed-in user, or anon.
+  getVisitorDb: async () => {
     if (!session.db) throw new Error("action-harness: call signInAs() or signOut() first");
     return session.db;
   },

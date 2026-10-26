@@ -7,7 +7,7 @@ import { SHARE_TOKEN } from "@/lib/share/after-sign-in";
 import { parsePlayIdea, type PlayResult } from "@/lib/share/play-input";
 import { rpc } from "@transpera-flow/db/client";
 import { pgError } from "@/app/action-db";
-import { getDb } from "@/lib/auth/session";
+import { getVisitorDb } from "@/lib/auth/session";
 
 /**
  * "Continue with Google" on a restricted link: the same Google hand-off as the login page, returning to the link afterwards
@@ -36,7 +36,7 @@ export async function submitPlayIdea(token: unknown, input: unknown): Promise<Pl
   const parsed = parsePlayIdea(input, { needEmail: false });
   if (!parsed.ok) return { status: "error", message: parsed.message };
   const v = parsed.value;
-  const db = await getDb();
+  const db = await getVisitorDb();
   let data;
   try {
     data = await rpc(db, "submit_play_proposal", {

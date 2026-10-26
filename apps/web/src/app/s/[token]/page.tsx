@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SHARE_TOKEN } from "@/lib/share/after-sign-in";
 import { rpc } from "@transpera-flow/db/client";
 import { authEnv } from "@/lib/auth/env";
-import { getDb, getSessionUser } from "@/lib/auth/session";
+import { getSessionUser, getVisitorDb } from "@/lib/auth/session";
 import { signInToOpen } from "./actions";
 
 // A share link's page (issue #32, B3): a visitor, signed in or not, opens a frozen, redacted copy of a page. The ONLY data this page
@@ -33,7 +33,7 @@ export default async function SharedPage(props: PageProps<"/s/[token]">) {
   await connection();
   const { token } = await props.params;
   if (!authEnv() || !SHARE_TOKEN.test(token)) notFound();
-  const db = await getDb();
+  const db = await getVisitorDb();
   let opened: Opened | null;
   try {
     opened = (await rpc(db, "open_share_link", { token })) as Opened | null;
