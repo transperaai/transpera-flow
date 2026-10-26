@@ -46,37 +46,55 @@ export interface MigrateResult {
   seeded: boolean;
 }
 
+/** Two runners at once (a deploy and someone's terminal) would race on the same files; the second waits instead. */
+const LOCK_KEY = 7_204_190_826; // arbitrary, fixed
+
 export async function applyMigrations(db: Queryable, options: MigrateOptions = {}): Promise<MigrateResult> {
+  const all = migrationFiles();
+  const dup = all.map(versionOf).find((v, i, vs) => vs.indexOf(v) !== i);
+  if (dup) throw new Error(`two migration files share version ${dup}`);
   if (options.dryRun) {
     // A dry run changes nothing, not even the log table: no table means everything is pending.
     const exists = (await db.query("select to_regclass('public.schema_migrations') as t")).rows[0]!.t !== null;
     const done = exists ? await appliedVersions(db) : new Set<string>();
-    return { files: migrationFiles().filter((f) => !done.has(versionOf(f))), seeded: false };
+    return { files: all.filter((f) => !done.has(versionOf(f))), seeded: false };
   }
-  await db.query(
-    "create table if not exists public.schema_migrations (version text primary key, applied_at timestamptz default now())",
-  );
-  const done = await appliedVersions(db);
-  const files: string[] = [];
-  for (const file of migrationFiles()) {
-    if (done.has(versionOf(file))) continue;
-    await db.query("begin");
-    try {
-      await db.query(read(`migrations/${file}`));
-      await db.query("insert into public.schema_migrations (version) values ($1)", [versionOf(file)]);
-      await db.query("commit");
-    } catch (err) {
-      await db.query("rollback");
-      throw new Error(`migration ${file} failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  await db.query("select pg_advisory_lock($1)", [LOCK_KEY]);
+  try {
+    await db.query(
+      "create table if not exists public.schema_migrations (version text primary key, applied_at timestamptz default now())",
+    );
+    // Only the owner reads or writes the log, whatever default privileges the database has.
+    await db.query("revoke all on public.schema_migrations from public, anon, authenticated, service_role");
+    const done = await appliedVersions(db);
+    const files: string[] = [];
+    for (const file of all) {
+      if (done.has(versionOf(file))) continue;
+      await db.query("begin");
+      try {
+        const xid = async () => (await db.query("select txid_current()::text as x")).rows[0]!.x;
+        const before = await xid();
+        await db.query(read(`migrations/${file}`));
+        // A file with its own commit would leave the rest of it, and the version row, outside the transaction.
+        if ((await xid()) !== before) throw new Error("it ended the transaction (commit or rollback in the file)");
+        await db.query("insert into public.schema_migrations (version) values ($1)", [versionOf(file)]);
+        await db.query("commit");
+      } catch (err) {
+        // A broken connection fails the rollback too; report the migration's error, not that one.
+        await db.query("rollback").catch(() => {});
+        throw new Error(`migration ${file} failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      }
+      files.push(file);
     }
-    files.push(file);
+    let seeded = false;
+    if (options.seed && files.length > 0) {
+      await db.query(read("seed.sql"));
+      seeded = true;
+    }
+    return { files, seeded };
+  } finally {
+    await db.query("select pg_advisory_unlock($1)", [LOCK_KEY]).catch(() => {});
   }
-  let seeded = false;
-  if (options.seed && files.length > 0) {
-    await db.query(read("seed.sql"));
-    seeded = true;
-  }
-  return { files, seeded };
 }
 
 async function appliedVersions(db: Queryable): Promise<Set<string>> {

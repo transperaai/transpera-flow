@@ -362,6 +362,23 @@ describe("migration runner", () => {
     }
   });
 
+  it("runs one runner at a time: a concurrent second run waits, then finds nothing to apply", { timeout: 60_000 }, async () => {
+    const name = await emptyDatabase();
+    const clients = [new pg.Client({ connectionString: urlOf(name) }), new pg.Client({ connectionString: urlOf(name) })];
+    await Promise.all(clients.map((c) => c.connect()));
+    try {
+      await applyCompat(clients[0]!);
+      const results = await Promise.all(clients.map((c) => applyMigrations(c)));
+      expect(results.map((r) => r.files.length).sort((a, b) => a - b)).toEqual([0, migrationFiles().length]);
+      const grants = await clients[0]!.query(
+        "select grantee from information_schema.role_table_grants where table_name = 'schema_migrations' and grantee <> current_user",
+      );
+      expect(grants.rows).toEqual([]);
+    } finally {
+      await Promise.all(clients.map((c) => c.end()));
+    }
+  });
+
   it("lets a non-superuser owner (Neon's neondb_owner) set role after compat.sql", async () => {
     // From Postgres 16 a role that creates anon/authenticated holds them with admin option only (no SET, no INHERIT),
     // which is what Neon's neondb_owner ends up with. Reproduce that grant, then let compat.sql run as the owner.
