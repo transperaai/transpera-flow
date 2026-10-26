@@ -26,6 +26,7 @@ import {
   type FindingCitation,
   type FindingRow,
 } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig, type DetectedIssue } from "@transpera-flow/engine";
 import { loadLiveModel, processSteps } from "./analysis-tools";
 import { matchNamed } from "./analysis";
@@ -57,7 +58,7 @@ const pageArgs = {
 function pageOf(args: { limit?: number; offset?: number }) {
   const limit = args.limit ?? DEFAULT_PAGE;
   const offset = args.offset ?? 0;
-  return { limit, offset, range: [offset, offset + limit - 1] as const };
+  return { limit, offset };
 }
 const paged = (total: number, page: { limit: number; offset: number }, shown: number) => ({
   total,
@@ -68,11 +69,6 @@ const paged = (total: number, page: { limit: number; offset: number }, shown: nu
 
 const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
-
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
 
 /**
  * The live run's facts for a process, worst first, with the names of the steps they point at. What `get_facts` returns and what
@@ -175,16 +171,21 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const statuses = args.status?.length ? args.status : ["proposed", "accepted"];
         if (!args.status) assumptions.push("status defaulted to proposed and accepted.");
         const page = pageOf(args);
-        let q = ctx.db
-          .from("findings")
-          .select("id, process_id, step_id, origin, status, rating, type, title, evidence, why, facts, person_labels, source_ids, edited, proposed_via, created_at, decided_at", { count: "exact" })
-          .eq("workspace_id", ws.id)
-          .in("status", statuses);
-        if (proc) q = q.eq("process_id", proc.id);
-        const res = await q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(...page.range);
+        const matching = ctx.db
+          .selectFrom("findings")
+          .where("workspace_id", "=", ws.id)
+          .where("status", "in", statuses)
+          .$if(!!proc, (qb) => qb.where("process_id", "=", proc!.id));
+        const res = await matching
+          .select(["id", "process_id", "step_id", "origin", "status", "rating", "type", "title", "evidence", "why", "facts", "person_labels", "source_ids", "edited", "proposed_via", "created_at", "decided_at"])
+          .orderBy("created_at")
+          .orderBy("id")
+          .limit(page.limit)
+          .offset(page.offset)
+          .execute();
         // AI text is stored with labels ("Team member A"); the token's owner gets names where they may see them (B1 2b).
         const team = await loadTeam(ctx.db, ws.id);
-        const rows = (check(res) as unknown as Pick<FindingRow, "id" | "process_id" | "step_id" | "origin" | "status" | "rating" | "type" | "title" | "evidence" | "why" | "facts" | "person_labels" | "source_ids" | "edited" | "proposed_via" | "created_at" | "decided_at">[]).map((r) => nameFinding(r, team));
+        const rows = (res as unknown as Pick<FindingRow, "id" | "process_id" | "step_id" | "origin" | "status" | "rating" | "type" | "title" | "evidence" | "why" | "facts" | "person_labels" | "source_ids" | "edited" | "proposed_via" | "created_at" | "decided_at">[]).map((r) => nameFinding(r, team));
         const [processes, issues] = await Promise.all([listProcesses(ctx.db, ws.id), loadIssues(ctx.db, ws.id)]);
         const stepNames = new Map<string, string>();
         for (const p of processes.filter((p) => rows.some((r) => r.process_id === p.id))) for (const s of await processSteps(ctx, p)) stepNames.set(s.id, s.name);
@@ -250,8 +251,8 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         // Refuse before any lookup: a caller who can't edit may not read other people, so a lookup would answer not_found (as log_issue does).
         const forbidden = new ToolError("forbidden", "You don't have permission to propose findings in this workspace (owners, editors and agency admins can).");
-        const { data: canEdit, error: accessError } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
-        if (accessError || canEdit !== true) throw forbidden;
+        const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: ws.id }).catch(() => null);
+        if (canEdit !== true) throw forbidden;
 
         const factKeys = [...new Set(args.facts ?? [])];
         const quotes = args.quotes ?? [];
@@ -281,7 +282,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         let step: { id: string; name: string } | null = null;
         if (args.step && proc) {
           if (!proc.live_revision_id) throw new ToolError("not_found", `'${proc.name}' has no live version yet; publish it first`);
-          const rows = check(await ctx.db.from("steps").select("id, name").eq("revision_id", proc.live_revision_id));
+          const rows = await ctx.db.selectFrom("steps").select(["id", "name"]).where("revision_id", "=", proc.live_revision_id).execute();
           step = matchNamed(rows, args.step, "step", ` in '${proc.name}'`);
         }
 
@@ -289,7 +290,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const sourceIds = new Set<string>();
         const quoted: { source: { id: string; name: string }; text: string }[] = [];
         if ((args.sources?.length ?? 0) + quotes.length > 0) {
-          const all = check(await ctx.db.from("sources").select("id, title").eq("workspace_id", ws.id).order("created_at", { ascending: true })).map((s) => ({ id: s.id, name: s.title }));
+          const all = (await ctx.db.selectFrom("sources").select(["id", "title"]).where("workspace_id", "=", ws.id).orderBy("created_at").execute()).map((s) => ({ id: s.id, name: s.title }));
           for (const ref of args.sources ?? []) sourceIds.add(matchNamed(all, ref, "source", ` in '${ws.name}'`).id);
           for (const q of quotes) {
             const source = matchNamed(all, q.source, "source", ` in '${ws.name}'`);
@@ -299,7 +300,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
           if (sourceIds.size > FINDING_LIMITS.sources) throw new ToolError("invalid_input", `Cite at most ${FINDING_LIMITS.sources} sources.`);
           const needBodies = [...new Set(quoted.map((q) => q.source.id))];
           if (needBodies.length) {
-            const bodies = new Map(check(await ctx.db.from("sources").select("id, body").in("id", needBodies)).map((b) => [b.id, b.body ?? ""]));
+            const bodies = new Map((await ctx.db.selectFrom("sources").select(["id", "body"]).where("id", "in", needBodies).execute()).map((b) => [b.id, b.body ?? ""]));
             for (const q of quoted) {
               if (!quoteIn(bodies.get(q.source.id) ?? "", q.text)) {
                 throw new ToolError("quote_not_found", `That passage isn't in '${q.source.name}' word for word: ${q.text.slice(0, 80)}…`);
@@ -353,8 +354,14 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         // A finding with these words already waits or was accepted here, whoever wrote it (the database's key refuses a connector one for good).
         const processId = proc?.id ?? null;
         // Any proposed or accepted finding, and any connector proposal whatever its status: a person's dismissal stands (D38).
-        const base = ctx.db.from("findings").select("id, title, status, origin, proposed_via").eq("workspace_id", ws.id).or("status.in.(proposed,accepted),proposed_via.eq.connector");
-        const twin = check(await (processId ? base.eq("process_id", processId) : base.is("process_id", null))).find((f) => titleKey(lab(f.title)) === titleKey(title));
+        const twins = await ctx.db
+          .selectFrom("findings")
+          .select(["id", "title", "status", "origin", "proposed_via"])
+          .where("workspace_id", "=", ws.id)
+          .where((eb) => eb.or([eb("status", "in", ["proposed", "accepted"]), eb("proposed_via", "=", "connector")]))
+          .where("process_id", processId ? "=" : "is", processId)
+          .execute();
+        const twin = twins.find((f) => titleKey(lab(f.title)) === titleKey(title));
         if (twin) throw new ToolError("duplicate", `There's already a finding with that title here (${twin.status}${twin.status === "dismissed" ? "; a person dismissed it, and that stands" : ""}).`, [{ id: twin.id, status: twin.status }]);
 
         const written = await proposeConnectorFinding(ctx.db, {
@@ -425,18 +432,17 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
           const proc = await resolveProcess(ctx, ws, args.process, assumptions);
           target = { id: proc.id, name: proc.name };
         }
-        const rows = check(
-          await ctx.db
-            .from("ai_analyses")
-            .select("id, revision_id, status, reason, summary, review, person_labels, checked, dropped, model, model_hash, updated_at")
-            .eq("process_id", target.id)
-            .order("updated_at", { ascending: false })
-            .limit(1),
-        );
+        const rows = await ctx.db
+          .selectFrom("ai_analyses")
+          .select(["id", "revision_id", "status", "reason", "summary", "review", "person_labels", "checked", "dropped", "model", "model_hash", "updated_at"])
+          .where("process_id", "=", target.id)
+          .orderBy("updated_at", "desc")
+          .limit(1)
+          .execute();
         // Stored with labels; named for the token's owner (B1 2b). The insights aren't returned here (they're findings).
         const row = rows[0] ? nameAnalysisRow({ ...rows[0], insights: [] }, await loadTeam(ctx.db, ws.id)) : undefined;
         if (!row) return { workspace: { id: ws.id, name: ws.name }, scope: target, analysis: null, note: "Nobody has analysed this yet: someone presses Analyse in the app." };
-        const revision = check(await ctx.db.from("process_revisions").select("number").eq("id", row.revision_id).maybeSingle()) as { number: number } | null;
+        const revision = (await ctx.db.selectFrom("process_revisions").select("number").where("id", "=", row.revision_id).executeTakeFirst()) ?? null;
         return {
           workspace: { id: ws.id, name: ws.name },
           scope: target,
@@ -476,16 +482,24 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         let wanted: string[] | null = null;
         if (proc) {
           const stepIds = (await processSteps(ctx, proc)).map((s) => s.id);
-          const onProcess = check(await ctx.db.from("source_links").select("source_id").eq("workspace_id", ws.id).eq("process_id", proc.id));
-          const onSteps = stepIds.length ? check(await ctx.db.from("source_links").select("source_id").eq("workspace_id", ws.id).in("step_id", stepIds)) : [];
+          const onProcess = await ctx.db.selectFrom("source_links").select("source_id").where("workspace_id", "=", ws.id).where("process_id", "=", proc.id).execute();
+          const onSteps = stepIds.length ? await ctx.db.selectFrom("source_links").select("source_id").where("workspace_id", "=", ws.id).where("step_id", "in", stepIds).execute() : [];
           wanted = [...new Set([...onProcess, ...onSteps].map((l) => l.source_id))];
         }
         if (wanted && !wanted.length) return { workspace: { id: ws.id, name: ws.name }, count: 0, ...paged(0, page, 0), sources: [] };
-        let q = ctx.db.from("sources").select("id, kind, title, speakers, recorded_at, body, created_at", { count: "exact" }).eq("workspace_id", ws.id);
-        if (wanted) q = q.in("id", wanted);
-        const res = await q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(...page.range);
-        const rows = check(res);
-        const linkRows = rows.length ? check(await ctx.db.from("source_links").select("source_id, kind, process_id, step_id, issue_id, solution_id, insight_key").in("source_id", rows.map((s) => s.id))) : [];
+        const matching = ctx.db.selectFrom("sources").where("workspace_id", "=", ws.id).$if(!!wanted, (qb) => qb.where("id", "in", wanted!));
+        const [rows, counted] = await Promise.all([
+          matching
+            .select(["id", "kind", "title", "speakers", "recorded_at", "body", "created_at"])
+            .orderBy("created_at")
+            .orderBy("id")
+            .limit(page.limit)
+            .offset(page.offset)
+            .execute(),
+          matching.select((eb) => eb.fn.countAll<number>().as("count")).executeTakeFirstOrThrow(),
+        ]);
+        const total = Number(counted.count);
+        const linkRows = rows.length ? await ctx.db.selectFrom("source_links").select(["source_id", "kind", "process_id", "step_id", "issue_id", "solution_id", "insight_key"]).where("source_id", "in", rows.map((s) => s.id)).execute() : [];
         const out = rows
           .map((s) => ({
             id: s.id,
@@ -497,7 +511,7 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
             text_truncated: (s.body ?? "").length > MAX_SOURCE_TEXT,
             links: linkRows.filter((l) => l.source_id === s.id).map(({ source_id, ...l }) => (void source_id, l)),
           }));
-        return { workspace: { id: ws.id, name: ws.name }, count: out.length, ...paged(res.count ?? out.length, page, out.length), sources: out };
+        return { workspace: { id: ws.id, name: ws.name }, count: out.length, ...paged(total, page, out.length), sources: out };
       }),
   );
 
@@ -516,11 +530,15 @@ export function registerFindingsTools(server: McpServer, ctx: ToolContext): void
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = args.process ? await resolveProcess(ctx, ws, args.process, assumptions) : null;
         // Not the copied map (`steps`): it can be large, and the changed step ids say what the solution changed.
-        let q = ctx.db.from("solutions").select("id, process_id, base_revision_id, name, notes, changed_step_ids, lever_changes, created_at, updated_at").eq("workspace_id", ws.id).order("created_at", { ascending: true });
-        if (proc) q = q.eq("process_id", proc.id);
-        const solutions = check(await q);
+        const solutions = await ctx.db
+          .selectFrom("solutions")
+          .select(["id", "process_id", "base_revision_id", "name", "notes", "changed_step_ids", "lever_changes", "created_at", "updated_at"])
+          .where("workspace_id", "=", ws.id)
+          .$if(!!proc, (qb) => qb.where("process_id", "=", proc!.id))
+          .orderBy("created_at")
+          .execute();
         const ids = solutions.map((s) => s.id);
-        const links = ids.length ? check(await ctx.db.from("solution_issues").select("solution_id, issue_id, auto_verdict, holds_pct, auto_note, user_verdict, user_notes").in("solution_id", ids)) : [];
+        const links = ids.length ? await ctx.db.selectFrom("solution_issues").select(["solution_id", "issue_id", "auto_verdict", "holds_pct", "auto_note", "user_verdict", "user_notes"]).where("solution_id", "in", ids).execute() : [];
         return {
           workspace: { id: ws.id, name: ws.name },
           count: solutions.length,

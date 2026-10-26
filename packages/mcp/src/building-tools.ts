@@ -24,13 +24,13 @@ import {
   linkColumns,
   listProcesses,
   loadProcessBundle,
-  SOURCE_COLUMNS,
   type EdgeRow,
   type Json,
   type ProcessBundle,
   type SourceRow,
   type StepRow,
 } from "@transpera-flow/db";
+import { rpc } from "@transpera-flow/db/client";
 import {
   BUILD_STEP_KINDS,
   IMPORT_STEP_KINDS,
@@ -247,10 +247,23 @@ const routeArg = z
 // Helpers
 // ---------------------------------------------------------------------------
 
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
+type DbError = { code?: string; message?: string };
+
+/** The columns of a source the tools read (the row's text and dates included). */
+const SOURCE_FIELDS = ["id", "workspace_id", "kind", "title", "speakers", "recorded_at", "body", "file_url", "created_at", "updated_at"] as const;
+
+/** Run a database call and turn a thrown pg error into the ToolError `writeError` makes for it. */
+async function writing<T>(what: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof ToolError) throw error;
+    throw writeError(error as DbError, what);
+  }
 }
+
+/** A JSON array for a `jsonb` parameter: node-postgres would send a JS array as a Postgres array, so it goes as JSON text. */
+const jsonText = (value: unknown): Json => JSON.stringify(value) as unknown as Json;
 
 /** A write RLS, a trigger or a check refused, as a ToolError the caller can act on. */
 export function writeError(error: { code?: string; message?: string }, what: string): ToolError {
@@ -269,10 +282,15 @@ function userIdOf(ctx: ToolContext): Promise<string | null> {
   if (ctx.userId !== undefined) return Promise.resolve(ctx.userId);
   let p = userIds.get(ctx);
   if (!p) {
-    p = Promise.resolve(ctx.db.from("api_tokens").select("user_id").eq("token_hash", ctx.tokenHash).maybeSingle()).then(
-      (r) => (r.data as { user_id: string } | null)?.user_id ?? null,
-      () => null,
-    );
+    p = ctx.db
+      .selectFrom("api_tokens")
+      .select("user_id")
+      .where("token_hash", "=", ctx.tokenHash)
+      .executeTakeFirst()
+      .then(
+        (r) => r?.user_id ?? null,
+        () => null,
+      );
     userIds.set(ctx, p);
   }
   return p;
@@ -295,8 +313,7 @@ interface Draft {
 
 /** Open the process's draft (a copy of live with the same ids), or continue the open one. */
 async function openDraft(ctx: ToolContext, proc: { id: string; name: string }): Promise<Draft> {
-  const { data, error } = await ctx.db.rpc("open_draft", { target_process: proc.id });
-  if (error) throw writeError(error, "edit processes");
+  const data = await writing("edit processes", () => rpc(ctx.db, "open_draft", { target_process: proc.id }));
   const r = data as { status: string; revision_id?: string; number?: number; created?: boolean };
   // open_draft locks the process for update, so a process the user may read but not edit is not found.
   if (r.status !== "ok") throw new ToolError("forbidden", `You don't have permission to edit '${proc.name}' (editors and owners can).`);
@@ -338,7 +355,7 @@ async function processForStep(ctx: ToolContext, ws: WorkspaceRef, args: { proces
   const processes = await listProcesses(ctx.db, ws.id);
   if (processes.length <= 1) return undefined;
   const revisions = processes.flatMap((p) => [p.live_revision_id, p.draft_revision_id]).filter((id): id is string => !!id);
-  const rows = check(await ctx.db.from("steps").select("process_id").eq("id", args.step.trim()).in("revision_id", revisions));
+  const rows = await ctx.db.selectFrom("steps").select("process_id").where("id", "=", args.step.trim()).where("revision_id", "in", revisions).execute();
   const ids = [...new Set(rows.map((r) => r.process_id))];
   if (ids.length === 1) {
     assumptions.push(`No process given; using '${processes.find((p) => p.id === ids[0])?.name}', which has that step.`);
@@ -384,7 +401,7 @@ interface Lookups {
 }
 
 async function loadSources(ctx: ToolContext, ws: WorkspaceRef): Promise<Lookups["sources"]> {
-  const rows = check(await ctx.db.from("sources").select(SOURCE_COLUMNS).eq("workspace_id", ws.id)) as unknown as SourceRow[];
+  const rows = (await ctx.db.selectFrom("sources").select([...SOURCE_FIELDS]).where("workspace_id", "=", ws.id).execute()) as unknown as SourceRow[];
   return rows.map((s) => ({ ...s, name: s.title }));
 }
 
@@ -446,13 +463,14 @@ async function saveFields(
   changes: Record<string, unknown>,
 ): Promise<{ field: string; theirs: unknown }[]> {
   if (!Object.keys(changes).length) return [];
-  const { data, error } = await ctx.db.rpc("save_fields", {
-    target: table,
-    key: { revision_id: revisionId, id } as Json,
-    base: base as Json,
-    changes: changes as Json,
-  });
-  if (error) throw writeError(error, "edit processes");
+  const data = await writing("edit processes", () =>
+    rpc(ctx.db, "save_fields", {
+      target: table,
+      key: { revision_id: revisionId, id } as Json,
+      base: base as Json,
+      changes: changes as Json,
+    }),
+  );
   const r = data as { status: string; conflicts?: Record<string, unknown> };
   if (r.status === "not_found") throw new ToolError("not_found", `The ${table === "steps" ? "step" : "connection"} ${id} is no longer in the draft.`);
   return Object.entries(r.conflicts ?? {}).map(([field, theirs]) => ({ field, theirs }));
@@ -474,8 +492,9 @@ async function applyPlan(
   const conflicts: EditConflict[] = [];
   if (plan.insertSteps.length) {
     // A group's first step is set once its steps are all in place (the database checks it when each request commits).
-    const { error } = await ctx.db.from("steps").insert(plan.insertSteps.map((s) => ({ ...s, entry_step_id: null, provenance: s.provenance as Json })));
-    if (error) throw writeError(error, "add steps");
+    await writing("add steps", () =>
+      ctx.db.insertInto("steps").values(plan.insertSteps.map((s) => ({ ...s, entry_step_id: null, provenance: s.provenance as Json }))).execute(),
+    );
   }
   // Moves into and out of groups first, then first steps, which need their group's steps to be in place.
   const entries = [
@@ -508,19 +527,20 @@ async function applyPlan(
     for (const c of await saveFields(ctx, "steps", revisionId, e.id, e.base, e.changes)) conflicts.push({ table: "steps", id: e.id, ...c });
   }
   if (plan.removeEdges.length) {
-    const { error } = await ctx.db.from("edges").delete().eq("revision_id", revisionId).in("id", plan.removeEdges.map((e) => e.id));
-    if (error) throw writeError(error, "remove connections");
+    await writing("remove connections", () =>
+      ctx.db.deleteFrom("edges").where("revision_id", "=", revisionId).where("id", "in", plan.removeEdges.map((e) => e.id)).execute(),
+    );
   }
   for (const u of plan.updateEdges) {
     for (const c of await saveFields(ctx, "edges", revisionId, u.id, u.base, u.changes)) conflicts.push({ table: "edges", id: u.id, ...c });
   }
   if (plan.insertEdges.length) {
-    const { error } = await ctx.db.from("edges").insert(plan.insertEdges);
-    if (error) throw writeError(error, "connect steps");
+    await writing("connect steps", () => ctx.db.insertInto("edges").values(plan.insertEdges).execute());
   }
   if (plan.removeSteps.length) {
-    const { error } = await ctx.db.from("steps").delete().eq("revision_id", revisionId).in("id", plan.removeSteps.map((s) => s.id));
-    if (error) throw writeError(error, "remove steps");
+    await writing("remove steps", () =>
+      ctx.db.deleteFrom("steps").where("revision_id", "=", revisionId).where("id", "in", plan.removeSteps.map((s) => s.id)).execute(),
+    );
   }
   return conflicts;
 }
@@ -569,40 +589,43 @@ async function createProcessWithDraft(
       { id: clash.id, name: clash.name },
     ]);
   }
-  const columns = "id, workspace_id, name, kind, entity_name, description, live_revision_id, draft_revision_id, parent_process_id";
-  let made: { data: unknown; error: { code?: string; message: string } | null };
+  const columns = ["id", "workspace_id", "name", "kind", "entity_name", "description", "live_revision_id", "draft_revision_id", "parent_process_id"] as const;
+  let proc: ProcessWithDraft;
   if (offMap && !input.parent_process_id) {
-    const { data: reply, error: rpcError } = await ctx.db.rpc("create_library_process", {
-      p_workspace: ws.id,
-      p_name: input.name,
-      p_kind: input.kind,
-      p_entity_name: input.entity_name,
-      p_description: input.description ?? undefined,
-      p_source: input.source,
-    });
-    if (rpcError) throw writeError(rpcError, "create processes");
+    const reply = await writing("create processes", () =>
+      rpc(ctx.db, "create_library_process", {
+        p_workspace: ws.id,
+        p_name: input.name,
+        p_kind: input.kind,
+        p_entity_name: input.entity_name,
+        p_description: input.description ?? undefined,
+        p_source: input.source,
+      }),
+    );
     const r = reply as { status: string; process_id?: string };
     if (r.status === "name_taken") throw new ToolError("name_taken", `'${ws.name}' already has a process called '${input.name}'`);
     if (r.status !== "created" || !r.process_id) throw new ToolError("forbidden", `Couldn't create '${input.name}' in '${ws.name}' (${r.status}).`);
-    made = await ctx.db.from("processes").select(columns).eq("id", r.process_id).single();
+    const processId = r.process_id;
+    proc = (await writing("create processes", () =>
+      ctx.db.selectFrom("processes").select([...columns]).where("id", "=", processId).executeTakeFirstOrThrow(),
+    )) as unknown as ProcessWithDraft;
   } else {
-    made = await ctx.db
-      .from("processes")
-      .insert({
-        workspace_id: ws.id,
-        name: input.name,
-        kind: input.kind,
-        entity_name: input.entity_name,
-        description: input.description,
-        source: input.source,
-        ...(input.parent_process_id ? { parent_process_id: input.parent_process_id } : {}),
-      })
-      .select(columns)
-      .single();
+    proc = (await writing("create processes", () =>
+      ctx.db
+        .insertInto("processes")
+        .values({
+          workspace_id: ws.id,
+          name: input.name,
+          kind: input.kind,
+          entity_name: input.entity_name,
+          description: input.description,
+          source: input.source,
+          ...(input.parent_process_id ? { parent_process_id: input.parent_process_id } : {}),
+        })
+        .returning([...columns])
+        .executeTakeFirstOrThrow(),
+    )) as unknown as ProcessWithDraft;
   }
-  const { data, error } = made;
-  if (error) throw writeError(error, "create processes");
-  const proc = data as unknown as ProcessWithDraft;
   const draft = await openDraft(ctx, proc);
   return { proc: { ...proc, draft_revision_id: draft.revision_id }, draft };
 }
@@ -843,8 +866,8 @@ async function prepareImport(
       ({
         steps: [],
         edges: [],
-        roles: check(await ctx.db.from("roles").select("id, name").eq("workspace_id", ws.id)),
-        people: check(await ctx.db.from("people").select("id, name").eq("workspace_id", ws.id)),
+        roles: await ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", ws.id).execute(),
+        people: await ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", ws.id).execute(),
       } as DraftBundle),
     { revision_id: current ?? newId(), workspace_id: ws.id, process_id: target?.id ?? (createId || newId()) },
     childIds,
@@ -898,16 +921,19 @@ async function prepareImport(
         if (nodes.length > MAX_IMPORT_PROCESSES) throw new ToolError("invalid_input", `An import can create at most ${MAX_IMPORT_PROCESSES} processes (this one has ${nodes.length}). Split it into smaller imports.`);
         if (stepCount > MAX_IMPORT_TOTAL_STEPS) throw new ToolError("invalid_input", `An import can have at most ${MAX_IMPORT_TOTAL_STEPS} steps in all, child processes included (this one has ${stepCount}). Split it into smaller imports.`);
         const bundle = scope.bundle;
-        const { data, error } = bundle
-          ? await ctx.db.rpc("import_process_bundle", {
-              p_workspace: ws.id,
-              p_nodes: nodes as unknown as Json,
-              p_adopt: adopts as unknown as Json,
-              p_extras: { sources: bundle.sources.map(({ id, ...rest }) => ({ ref: id, ...rest })), import_source: bundle.importSource, ...bundle.extras } as unknown as Json,
-            })
-          : await ctx.db.rpc("import_new_process", { p_workspace: ws.id, p_nodes: nodes as unknown as Json, p_adopt: adopts as unknown as Json });
-        if (error) {
-          if (error.code === "23505" && error.hint === "name_taken") throw new ToolError("name_taken", error.message);
+        let data: unknown;
+        try {
+          data = bundle
+            ? await rpc(ctx.db, "import_process_bundle", {
+                p_workspace: ws.id,
+                p_nodes: jsonText(nodes),
+                p_adopt: jsonText(adopts),
+                p_extras: { sources: bundle.sources.map(({ id, ...rest }) => ({ ref: id, ...rest })), import_source: bundle.importSource, ...bundle.extras } as unknown as Json,
+              })
+            : await rpc(ctx.db, "import_new_process", { p_workspace: ws.id, p_nodes: jsonText(nodes), p_adopt: jsonText(adopts) });
+        } catch (e) {
+          const error = e as DbError & { hint?: string };
+          if (error.code === "23505" && error.hint === "name_taken") throw new ToolError("name_taken", error.message ?? "");
           throw writeError(error, "create processes");
         }
         let made = data as unknown as { process_id: string; revision_id: string; number: number }[];
@@ -977,8 +1003,7 @@ async function prepareImport(
 
 /** Refuse unless the caller can edit the workspace's processes (editors and owners). */
 async function requireCanEdit(ctx: ToolContext, ws: WorkspaceRef): Promise<void> {
-  const { data: canEdit, error: accessError } = await ctx.db.rpc("can_edit_workspace", { ws: ws.id });
-  if (accessError) throw writeError(accessError, "edit processes");
+  const canEdit = await writing("edit processes", () => rpc(ctx.db, "can_edit_workspace", { ws: ws.id }));
   if (canEdit !== true) throw new ToolError("forbidden", `You don't have permission to edit processes in '${ws.name}' (editors and owners can).`);
 }
 
@@ -1048,10 +1073,11 @@ export async function createProcessFromTemplate(
 async function importProcesses(ctx: ToolContext, workspaceId: string): Promise<ProcessWithDraft[]> {
   const [processes, stored] = await Promise.all([
     listProcesses(ctx.db, workspaceId),
-    ctx.db.from("processes").select("id, parent_process_id").eq("workspace_id", workspaceId).not("parent_process_id", "is", null),
+    writing("read processes", () =>
+      ctx.db.selectFrom("processes").select(["id", "parent_process_id"]).where("workspace_id", "=", workspaceId).where("parent_process_id", "is not", null).execute(),
+    ),
   ]);
-  if (stored.error) throw writeError(stored.error, "read processes");
-  const column = new Map((stored.data ?? []).map((r) => [r.id, r.parent_process_id as string]));
+  const column = new Map(stored.map((r) => [r.id, r.parent_process_id as string]));
   return processes.map((p) => ({ ...p, parent_process_id: p.parent_process_id ?? column.get(p.id) ?? null }));
 }
 
@@ -1118,19 +1144,22 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         // With links, the source and its links are saved together by the database function, so there is never a half-added source.
         let sourceId: string;
         if (resolved) {
-          const { data: id, error } = await ctx.db.rpc("add_source", { p_workspace: ws.id, p_source: fields, p_links: resolved.targets.map(linkJson) });
-          if (error || !id) throw writeError(error ?? {}, "add sources");
+          const id = await writing("add sources", () =>
+            rpc(ctx.db, "add_source", { p_workspace: ws.id, p_source: fields, p_links: jsonText(resolved.targets.map(linkJson)) }),
+          );
+          if (!id) throw writeError({}, "add sources");
           sourceId = id;
           await recordIssueSources(ctx, ws.id, id, resolved.targets);
         } else {
-          const { data, error } = await ctx.db.from("sources").insert({ workspace_id: ws.id, ...fields }).select("id").single();
-          if (error) throw writeError(error, "add sources");
+          const data = await writing("add sources", () =>
+            ctx.db.insertInto("sources").values({ workspace_id: ws.id, ...fields }).returning("id").executeTakeFirstOrThrow(),
+          );
           sourceId = data.id;
           assumptions.push("link_later: the source is not linked to anything yet; citing it in a step's evidence links it to that step.");
         }
-        const { data, error } = await ctx.db.from("sources").select(SOURCE_COLUMNS).eq("id", sourceId).single();
-        if (error) throw writeError(error, "add sources");
-        const source = data as unknown as SourceRow;
+        const source = (await writing("add sources", () =>
+          ctx.db.selectFrom("sources").select([...SOURCE_FIELDS]).where("id", "=", sourceId).executeTakeFirstOrThrow(),
+        )) as unknown as SourceRow;
         return {
           workspace: { id: ws.id, name: ws.name },
           source: { id: source.id, kind: source.kind, title: source.title, speakers: source.speakers, recorded_at: source.recorded_at, file_url: source.file_url, body_length: source.body?.length ?? 0 },
@@ -1163,13 +1192,15 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         const added: string[] = [];
         const already: string[] = [];
         for (const [i, t] of resolved.targets.entries()) {
-          const { error } = await ctx.db.from("source_links").insert({ workspace_id: ws.id, source_id: source.id, ...linkColumns(t) });
-          if (!error) {
-            added.push(resolved.text[i]!);
-            await recordIssueSources(ctx, ws.id, source.id, [t]);
+          try {
+            await ctx.db.insertInto("source_links").values({ workspace_id: ws.id, source_id: source.id, ...linkColumns(t) }).execute();
+          } catch (error) {
+            if ((error as DbError).code === "23505") already.push(resolved.text[i]!);
+            else throw writeError(error as DbError, "link sources");
+            continue;
           }
-          else if (error.code === "23505") already.push(resolved.text[i]!);
-          else throw writeError(error, "link sources");
+          added.push(resolved.text[i]!);
+          await recordIssueSources(ctx, ws.id, source.id, [t]);
         }
         return {
           workspace: { id: ws.id, name: ws.name },
@@ -1458,8 +1489,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         if (replacements.length) {
           // As the editor's split (docs/adr/0006-retired-steps-and-broken-scenarios.md): the row stays, retired, under the same id.
           const retired: StepRow = { ...row, replaced_by: replacements.map((r) => r.id), assumption: false, conflict: false };
-          const { error } = await ctx.db.from("steps").insert({ ...retired, provenance: retired.provenance as Json });
-          if (error) throw writeError(error, "record replacements");
+          await writing("record replacements", () => ctx.db.insertInto("steps").values({ ...retired, provenance: retired.provenance as Json }).execute());
         }
         const steps = bundle.steps.filter((s) => s.id !== row.id);
         const graph = { steps, edges };
@@ -1674,8 +1704,9 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
         const proc = await resolveProcess(ctx, ws, args.process, assumptions);
         if (args.accept_estimates === undefined) assumptions.push("accept_estimates defaulted to false.");
         const draftSteps = proc.draft_revision_id ? (await loadProcessBundle(ctx.db, ws, proc, proc.draft_revision_id)).steps : [];
-        const { data, error } = await ctx.db.rpc("publish_process", { target_process: proc.id, accept_estimates: args.accept_estimates ?? false });
-        if (error) throw writeError(error, "publish processes");
+        const data = await writing("publish processes", () =>
+          rpc(ctx.db, "publish_process", { target_process: proc.id, accept_estimates: args.accept_estimates ?? false }),
+        );
         const r = data as {
           status: string;
           revision_id?: string;
@@ -1734,8 +1765,7 @@ export function registerBuildingTools(server: McpServer, ctx: ToolContext): void
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = await resolveProcess(ctx, ws, args.process, assumptions);
-        const { data, error } = await ctx.db.rpc("discard_draft", { target_process: proc.id });
-        if (error) throw writeError(error, "discard drafts");
+        const data = await writing("discard drafts", () => rpc(ctx.db, "discard_draft", { target_process: proc.id }));
         const r = data as { status: string; revision_id?: string };
         if (r.status === "not_found") throw new ToolError("forbidden", `You don't have permission to discard the draft of '${proc.name}' (editors and owners can).`);
         if (r.status === "no_draft") throw new ToolError("no_draft", `'${proc.name}' has no draft.`);

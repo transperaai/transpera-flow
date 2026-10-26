@@ -1,7 +1,7 @@
 import { listProcesses, type Db, type ProcessRow } from "@transpera-flow/db";
 import { ToolError } from "./result";
 
-/** Per-request state: a Supabase client acting as the token's user, and which token it is. */
+/** Per-request state: a database handle acting as the token's user (claims set per query), and which token it is. */
 export interface ToolContext {
   db: Db;
   tokenHash: string;
@@ -27,14 +27,9 @@ export interface WorkspaceRef {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
-
 /** Workspaces the user can see; RLS decides. */
 export async function visibleWorkspaces(db: Db): Promise<WorkspaceRef[]> {
-  return check(await db.from("workspaces").select("id, name, slug, settings").order("name"));
+  return await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).orderBy("name").execute();
 }
 
 const summary = (w: WorkspaceRef) => ({ id: w.id, name: w.name, slug: w.slug });
