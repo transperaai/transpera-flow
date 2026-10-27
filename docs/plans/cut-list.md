@@ -21,7 +21,8 @@ Started 27 Oct 2026 during QA of the Neon preview. These changes are built **aft
    - Remove findings (`public.findings`), "findings by hand" and the accept/dismiss step.
    - Keep the engine's **facts** as read-only evidence on pages.
 4. **The forecast becomes a full sandbox.** It keeps working as a simulator and gets every kind of lever: market,
-   personnel, lead volume and others. This is a redesign, to be brainstormed with Austin before a brief is written.
+   personnel, lead volume and others: scenarios with whole-run and timed changes, saved, run and compared. Design draft:
+   `docs/plans/sandbox-design.md`.
 
 ## Open questions
 
