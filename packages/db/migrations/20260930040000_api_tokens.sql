@@ -150,7 +150,8 @@ revoke all on function private.api_token_pre_request() from public;
 grant execute on function private.api_token_pre_request() to anon, authenticated, service_role;
 
 -- Register the hook. `authenticator` exists on Supabase (and in the CI
--- PostgREST test), not in the plain-Postgres test databases.
+-- PostgREST test), not in the plain-Postgres test databases. On Neon an `authenticator` is the app's own login (no
+-- PostgREST, ADR 0018), and only a superuser may set a placeholder parameter on a role, so it is skipped there.
 do $$
 begin
   if exists (select from pg_roles where rolname = 'authenticator')
@@ -159,7 +160,11 @@ begin
        where r.rolname = 'authenticator' and s.setdatabase = 0
          and 'pgrst.db_pre_request=private.api_token_pre_request' = any (s.setconfig)
      ) then
-    alter role authenticator set pgrst.db_pre_request = 'private.api_token_pre_request';
+    begin
+      alter role authenticator set pgrst.db_pre_request = 'private.api_token_pre_request';
+    exception when insufficient_privilege then
+      raise notice 'api_tokens: % may not set pgrst.db_pre_request on authenticator; skipped (no PostgREST)', current_user;
+    end;
   end if;
 end;
 $$;

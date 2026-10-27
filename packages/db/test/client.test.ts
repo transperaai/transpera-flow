@@ -420,6 +420,38 @@ describe("migration runner", () => {
     }
   });
 
+  it("applies every migration as a non-superuser owner when an `authenticator` login already exists (Neon after create-app-login)", { timeout: 60_000 }, async () => {
+    // 20260930040000 registered PostgREST's pre-request hook on `authenticator`; only a superuser may set that parameter,
+    // so on Neon, where `authenticator` is the app's own login, the step is skipped instead of failing the run.
+    const owner = "transpera_flow_test_owner";
+    const admin = new pg.Client({ connectionString: ADMIN_URL });
+    await admin.connect();
+    const name = `transpera_flow_test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    try {
+      // Roles are cluster-wide and other files use both, so tolerate them existing; neither is dropped here.
+      for (const ddl of [`create role ${owner} login password 'owner' createrole createdb`, "create role authenticator login noinherit"]) {
+        await admin.query(`do $$ begin ${ddl}; exception when duplicate_object or unique_violation then null; end $$`);
+      }
+      // A cluster that once ran PostgREST may still carry the hook; without this the migration would skip the step anyway.
+      await admin.query("alter role authenticator reset pgrst.db_pre_request");
+      await admin.query(`create database ${name} owner ${owner}`);
+      databases.push(name);
+    } finally {
+      await admin.end();
+    }
+    const u = new URL(urlOf(name));
+    u.username = owner;
+    u.password = "owner";
+    const c = new pg.Client({ connectionString: u.toString() });
+    await c.connect();
+    try {
+      await applyCompat(c);
+      expect((await applyMigrations(c)).files).toEqual(migrationFiles());
+    } finally {
+      await c.end();
+    }
+  });
+
   it("gives each migration a lock timeout inside its own transaction, so it fails rather than queueing behind traffic", async () => {
     const name = await emptyDatabase();
     const c = new pg.Client({ connectionString: urlOf(name) });
