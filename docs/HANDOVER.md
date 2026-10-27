@@ -40,11 +40,14 @@ by Sonnet from an Opus brief and reviewed adversarially by Opus.
   `https://transpera-flow-next.vercel.app` (behind Vercel login). From the cloud container, Neon is reached over WebSockets
   (`docs/supabase-notes.md`, "Checked on Neon"). Neon refuses `session_replication_role`, so the import takes its
   fallback path.
+- **7b, rehearsal: done 27 Oct.** It ran on a throwaway Neon branch through the WebSocket route and printed VERIFIED:
+  406 rows in 61 tables, 179 foreign keys and 1 user. That user signs in with Google, has an Admin rule, and reads the
+  3 workspaces under RLS. The branch was deleted afterwards. The same export was then loaded into Neon `main` (the
+  Preview database) and verified, so QA runs on real data. Austin allowed `copy:export` with a project-local permission
+  rule. The rehearsal found that migrations failed when `authenticator` already exists; that is fixed in 171bba53.
 - **Next:**
-  - **7b, rehearsal:** export from Supabase into a Neon branch, import, verify. It needs Austin to allow production reads,
-    because auto mode blocks them.
   - **Austin's QA** on the preview.
-  - **7c, cutover:** a freeze, the copy into Neon `main`, Austin adds Production to the Neon connection, then merge to
+  - **7c, cutover:** a freeze, emptying Neon `main` (it now holds the QA copy), a fresh copy into it, Austin adds Production to the Neon connection, then merge to
     `main` by PR.
   - **The strip list** comes after.
 - **Decisions Opus made, for Austin to confirm:**

@@ -521,3 +521,12 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
 - `neondb_owner` cannot `set session_replication_role = replica` (42501, "permission denied to set parameter"), so
   `copy:import` will take its fallback path on Neon: `alter table … disable trigger user` (checked: allowed for the
   owner, in a rolled-back transaction) and inserts in foreign-key order.
+
+### Rehearsal (27 Oct)
+
+- The Management API export (`--supabase`) read every table as `postgres`. It passed the RLS check, and
+  `pg_stat_all_tables` was readable. The whole export took about 10 minutes, mostly API round trips; the data is small.
+- `--driver neon-ws` worked through the agent proxy for `migrate`, `copy:import` and `copy:verify`. The import took the
+  fallback path.
+- Production had 1 user with 2 identities (Google and email). Only the Google one became a Better Auth account; email
+  sign-in doesn't exist on the new stack.
