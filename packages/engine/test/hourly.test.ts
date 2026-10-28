@@ -134,6 +134,22 @@ describe("hourly billing for clients won in the run", () => {
     expect(r.revenue.recurring).toBeCloseTo(fee, 6);
   });
 
+  it("clients already there as a counted group bill their fee and no hours either, while the clients won in the run bill hours", () => {
+    const m: EngineModel = { ...model({ weeks: 10 }), clients: undefined, clientGroups: { svc: { count: 4, fee: 4330, churnMonthly: 0, stayMonths: 12, health: 80 } } };
+    const r = runOnce(m, 1, true);
+    // 4 clients × 4330 a month for 10 weeks, billed as the fee entered (no churn).
+    expect(r.revenue.recurring).toBeCloseTo(4 * (4330 / 4.33) * 10, 6);
+    expect(r.revenue.recurring).toBeCloseTo(r.billed, 6);
+    // Their weekly tasks are worked but not billed: the hours are the won clients' alone (onboarding and their own tasks).
+    const H = m.horizonWeeks * HPW;
+    const groupTasks = r.entities!.filter((e) => e.servicing && !e.servicing.client.startsWith("won:"));
+    const wonOnly = r.entities!.filter((e) => !e.servicing || e.servicing.client.startsWith("won:"));
+    expect(groupTasks.length).toBeGreaterThan(0);
+    const { onboard, tasks } = billable(wonOnly, H);
+    expect(r.hourly.svc!.hours).toBeCloseTo(onboard + tasks, 9);
+    expect(billable(groupTasks, H).tasks).toBeGreaterThan(0);
+  });
+
   it("hours nobody of the role was there to work are not billed (a role with nobody has no one to do them)", () => {
     // Ongoing client hours for a won client sit in its shape's `uncovered` when nobody of the role is on the team.
     const m: EngineModel = { ...model({ svc: { servicing: [], fallbackOngoing: { r: 8.66 } } }), roles: { r: { name: "R", count: 2, cost: 50, ongoing: 0 }, q: { name: "Q", count: 1, cost: 50, ongoing: 0 } } };
