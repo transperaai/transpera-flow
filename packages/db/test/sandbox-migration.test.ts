@@ -40,6 +40,23 @@ const ID = {
   issue: randomUUID(),
   run: randomUUID(),
 };
+// Real-shaped awkward rows (what the app could have saved): float noise, the value bounds, a hire whose name is only spaces or 120
+// characters with spaces round it, the FTE and week limits, the first and last years the old check took, a solution deleted after the
+// plan named it, 40 markers with four solutions, a name whose " (2)" is taken, the same name in another workspace, and a workspace
+// made before the migration whose old library rows must still count as "only the library" for a restore.
+const AWK = {
+  floats: randomUUID(),
+  planB: randomUUID(),
+  planB2: randomUUID(),
+  planBPlan: randomUUID(),
+  edgePlan: randomUUID(),
+  fullPlan: randomUUID(),
+  otherWs: randomUUID(),
+  goneSolution: randomUUID(),
+  liveSolutions: [randomUUID(), randomUUID(), randomUUID()],
+};
+// 116 characters, saved with two spaces each side: 120, the most the old check took.
+const name120 = `${"N".repeat(114)}xy`;
 const longA = "A".repeat(120);
 const longB = "a".repeat(120);
 const PATHS = [
@@ -66,6 +83,10 @@ const PATHS = [
 const LEVERS = ["A1", "B1", "B3", "B2", "C2", "X1", "X1", "X1", "X1", "B2", "A6", "X3", "D5", "C1", "X2", "D4", "E1", "E2", "E3"];
 const TARGETS = [null, null, null, null, null, "initial", "recover", "late_penalty", "missed_penalty", "s1", "s1", "s1", "r1", "r1", "r1", "p1", "st1", "st1", "st1"];
 let before: { scenarios: number; plans: number };
+let edgeMarkersSaved: Record<string, unknown>[] = [];
+let fullMarkersSaved: Record<string, unknown>[] = [];
+let oldLibraryWs = "";
+let oldLibraryRows = 0;
 
 beforeAll(async () => {
   db = await createTestDb({ upTo: BASE });
@@ -101,6 +122,45 @@ beforeAll(async () => {
   await plan(ID.planLeave, "Leave only", [{ id: randomUUID(), kind: "leave", date: "2027-05-10", person_id: person, weeks: 1 }], "2030-02-04T00:00:00Z");
   await q("insert into issues (id, workspace_id, type, title, scenario_id) values ($1, $2, 'idea', 'Try every path', $3)", [ID.issue, ws, ID.everyPath]);
   await q("insert into runs (id, workspace_id, name, reps, seed, params_snapshot, scenario_id) values ($1, $2, 'Run', 30, 1, '{}', $3)", [ID.run, ws, ID.everyPath]);
+  // The awkward rows.
+  await scenario(AWK.floats, "Floats", [
+    { path: "demand.leads_per_week", op: "multiply", value: 0.30000000000000004 },
+    { path: "demand.active_clients", op: "set", value: 1000000000 },
+    { path: "finances.retainer", op: "add", value: -1000000000 },
+    { path: "steps.@heaviest.rework_rate", op: "set", value: 1e-7 },
+    { path: "roles.@busiest.ongoing_hours", op: "multiply", value: 0 },
+    { path: "roles.@busiest.cost_rate", op: "add", value: 12.5 },
+    { path: "steps.@heaviest.wait_hours", op: "set", value: 0 },
+  ], "2030-01-01T00:00:09Z");
+  await scenario(AWK.planB, "Plan B", [], "2030-01-01T00:00:10Z");
+  await scenario(AWK.planB2, "Plan B (2)", [], "2030-01-01T00:00:11Z");
+  for (const [i, sid] of [AWK.goneSolution, ...AWK.liveSolutions].entries()) {
+    await q("insert into solutions (id, workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, $4, $5, $6::jsonb)", [sid, ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, `Sol ${i}`, JSON.stringify({ steps: [], edges: [], entry_step_id: null })]);
+  }
+  const m = (kind: string, extra: Record<string, unknown>) => ({ id: randomUUID(), kind, ...extra });
+  const edgeMarkers = [
+    m("hire", { date: "2000-01-01", role_id: role, fte: 0.1, name: "   " }),
+    m("hire", { date: "2100-12-01", role_id: role, fte: 2, name: `  ${name120}  ` }),
+    m("leave", { date: "2000-01-03", person_id: person, weeks: 52 }),
+    m("leave", { date: "2100-12-27", person_id: person, weeks: 1 }),
+    m("solution", { date: "2027-06-01", solution_id: AWK.goneSolution }),
+  ];
+  await plan(AWK.edgePlan, "Edges", edgeMarkers, "2030-02-05T00:00:00Z");
+  // The solution is deleted after the plan named it (markers are not foreign keys).
+  await q("delete from solutions where id = $1", [AWK.goneSolution]);
+  const fullMarkers = [
+    ...AWK.liveSolutions.map((sid, i) => m("solution", { date: `2027-0${i + 1}-01`, solution_id: sid })),
+    m("solution", { date: "2027-09-01", solution_id: AWK.liveSolutions[0] }),
+    ...Array.from({ length: 36 }, (_, i) => (i % 2 ? m("hire", { date: `2027-${String((i % 12) + 1).padStart(2, "0")}-01`, role_id: role, fte: 0.5 }) : m("leave", { date: "2027-03-01", person_id: person, weeks: 1 + (i % 52) }))),
+  ];
+  await plan(AWK.fullPlan, "Forty markers", fullMarkers, "2030-02-06T00:00:00Z");
+  await plan(AWK.planBPlan, "plan b", [], "2030-02-07T00:00:00Z");
+  edgeMarkersSaved = edgeMarkers;
+  fullMarkersSaved = fullMarkers;
+  const oldWs = (await q("insert into workspaces (name, slug) values ('Made before', 'made-before') returning id"))[0]!.id as string;
+  oldLibraryWs = oldWs;
+  await q("insert into forecast_plans (id, workspace_id, name, markers) values ($1, $2, 'Plan B', '[]')", [AWK.otherWs, oldWs]);
+  oldLibraryRows = Number((await q("select count(*) from scenarios where workspace_id = $1", [oldWs]))[0]!.count);
   before = {
     scenarios: Number((await q("select count(*) from scenarios"))[0]!.count),
     plans: Number((await q("select count(*) from forecast_plans"))[0]!.count),
@@ -118,7 +178,7 @@ const noIds = (changes: { id: string }[]) => changes.map(({ id: _id, ...c }) => 
 describe("the data mapping", () => {
   it("starts with scenarios and plans, including every awkward case", () => {
     expect(before.scenarios).toBeGreaterThan(8);
-    expect(before.plans).toBe(4);
+    expect(before.plans).toBe(8);
   });
 
   it("keeps every row: scenarios plus plans, with their ids", async () => {
@@ -197,6 +257,58 @@ describe("the data mapping", () => {
   });
 });
 
+describe("real-shaped awkward rows", () => {
+  it("keeps float noise, the value bounds and every selector exactly", async () => {
+    expect(noIds((await row(AWK.floats)).changes)).toEqual([
+      { lever: "A1", target: null, op: "multiply", value: 0.30000000000000004 },
+      { lever: "B1", target: null, op: "set", value: 1000000000 },
+      { lever: "B2", target: null, op: "add", value: -1000000000 },
+      { lever: "E3", target: "@heaviest", op: "set", value: 1e-7 },
+      { lever: "X2", target: "@busiest", op: "multiply", value: 0 },
+      { lever: "C1", target: "@busiest", op: "add", value: 12.5 },
+      { lever: "E2", target: "@heaviest", op: "set", value: 0 },
+    ]);
+    expect(parseChanges((await row(AWK.floats)).changes).ok).toBe(true);
+  });
+
+  it("keeps the edge markers: a name of spaces dropped, a padded 120-character name trimmed, 2000 and 2100, 52 weeks, a deleted solution", async () => {
+    const [blank, long, leave52, leave2100, gone] = edgeMarkersSaved as { id: string }[];
+    const r = await row(AWK.edgePlan);
+    expect(r.changes).toEqual([
+      { id: blank!.id, lever: "D1", target: role, op: "set", value: 0.1, from: "2000-01" },
+      { id: long!.id, lever: "D1", target: role, op: "set", value: 2, from: "2100-12", params: { name: name120 } },
+      { id: leave52!.id, lever: "D3", target: person, op: "set", value: 52, from: "2000-01-03" },
+      { id: leave2100!.id, lever: "D3", target: person, op: "set", value: 1, from: "2100-12-27" },
+      { id: gone!.id, lever: "E6", target: AWK.goneSolution, op: "set", value: 1, from: "2027-06" },
+    ]);
+    expect(parseChanges(r.changes).ok).toBe(true);
+  });
+
+  it("converts a plan of 40 markers with four solutions, each marker one change in order", async () => {
+    const r = await row(AWK.fullPlan);
+    expect(r.changes.map((c: { id: string }) => c.id)).toEqual(fullMarkersSaved.map((x) => x.id));
+    expect(r.changes.filter((c: { lever: string }) => c.lever === "E6")).toHaveLength(4);
+    expect(parseChanges(r.changes).ok).toBe(true);
+  });
+
+  it("skips a suffix that is taken, and leaves the same name in another workspace alone", async () => {
+    expect((await row(AWK.planB)).name).toBe("Plan B");
+    expect((await row(AWK.planB2)).name).toBe("Plan B (2)");
+    expect((await row(AWK.planBPlan)).name).toBe("plan b (3)");
+    expect((await row(AWK.otherWs)).name).toBe("Plan B");
+  });
+
+  it("a workspace made before the migration, with only its old library, still takes a restore (its library rows have random change ids)", async () => {
+    expect(oldLibraryRows).toBe(4);
+    await q("delete from sandbox_scenarios where id = $1", [AWK.otherWs]);
+    const lib = await q("select name, changes from sandbox_scenarios where workspace_id = $1 order by name", [oldLibraryWs]);
+    expect(lib.map((l) => l.name)).toEqual([...SANDBOX_LIBRARY].map((l) => l.name).sort());
+    expect(lib.map((l) => noIds(l.changes))).toEqual([...SANDBOX_LIBRARY].sort((a, b) => (a.name < b.name ? -1 : 1)).map((l) => noIds(l.changes as never)));
+    const result = await restoreInto(oldLibraryWs, []);
+    expect(result.counts.sandbox_scenarios).toBe(0);
+  });
+});
+
 describe("what is left", () => {
   it("drops the old tables and the functions only they used, and keeps the solution patch check", async () => {
     const r = (await q("select to_regclass('public.scenarios') as s, to_regclass('public.forecast_plans') as f, to_regprocedure('private.scenario_library()') as l, to_regprocedure('private.seed_scenario_library()') as sl, to_regprocedure('private.forecast_plans_before_write()') as fp, to_regprocedure('private.is_scenario_patch(jsonb)') as isp"))[0]!;
@@ -220,23 +332,25 @@ describe("what is left", () => {
   });
 });
 
+const LISTS = ["roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "churn_drivers", "market_conditions", "market_schedule", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services", "client_assignments", "person_skills", "person_capacity_factors", "source_links"];
+async function restoreInto(w: string, scenarios: unknown[]) {
+  const plan = { format: "transpera-workspace-import/1", settings: null, demand_settings: null, lever_settings: null, analysis_rules: null, ...Object.fromEntries(LISTS.map((k) => [k, []])), sandbox_scenarios: scenarios };
+  await db.client.query("begin");
+  try {
+    await db.client.query("set local role authenticated");
+    await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(admin.claims)]);
+    const r = (await db.client.query("select public.import_workspace_bundle($1, $2::jsonb) as r", [w, JSON.stringify(plan)])).rows[0].r;
+    await db.client.query("commit");
+    return r;
+  } catch (e) {
+    await db.client.query("rollback");
+    throw e;
+  }
+}
+
 describe("the rewritten restore", () => {
-  const LISTS = ["roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "churn_drivers", "market_conditions", "market_schedule", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services", "client_assignments", "person_skills", "person_capacity_factors", "source_links"];
   const P = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
-  const restore = async (w: string, scenarios: unknown[]) => {
-    const plan = { format: "transpera-workspace-import/1", settings: null, demand_settings: null, lever_settings: null, analysis_rules: null, ...Object.fromEntries(LISTS.map((k) => [k, []])), sandbox_scenarios: scenarios };
-    await db.client.query("begin");
-    try {
-      await db.client.query("set local role authenticated");
-      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(admin.claims)]);
-      const r = (await db.client.query("select public.import_workspace_bundle($1, $2::jsonb) as r", [w, JSON.stringify(plan)])).rows[0].r;
-      await db.client.query("commit");
-      return r;
-    } catch (e) {
-      await db.client.query("rollback");
-      throw e;
-    }
-  };
+  const restore = restoreInto;
 
   it("restores scenarios with their parents and skips the library, whatever ids its changes have", async () => {
     const w = (await q("insert into workspaces (name, slug) values ('Restored', 'restored') returning id"))[0]!.id;
