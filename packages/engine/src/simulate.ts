@@ -1496,14 +1496,18 @@ export function runOnce(
   const evSlots: number[] = [];
   for (let s = 1; s < nSlots; s++) if (don[s] && (staticEv[s] || chanceCh[s])) evSlots.push(s);
   const chanceCapable = roster && evSlots.length > 0;
-  const eventsAt = (s: number, t: number): DriverEvents | null => {
+  /** The events driver slot `s` runs with in channel month `m` (the channel's, else the model's); null in weight mode. */
+  const eventsInMonth = (s: number, m: number): DriverEvents | null => {
     const c = chanceCh[s];
     if (c) {
-      const v = c[chM(t)];
+      const v = c[m];
       if (v) return v;
     }
     return staticEv[s]!;
   };
+  const eventsAt = (s: number, t: number): DriverEvents | null => eventsInMonth(s, chanceCh[s] ? chM(t) : 0);
+  /** The channel month the weekly tick in hand closes: a tick on a month's first hour belongs to the month before, so the new month's churn and chances start with the next one. */
+  let chTick = 0;
   /** Per slot: events counted (measured at the event, or drawn), client-weeks under an effect, client-weeks in chance mode, the effect last used. */
   const hitCount = new Float64Array(nSlots);
   const expSum = new Float64Array(nSlots);
@@ -1598,7 +1602,8 @@ export function runOnce(
     const list = plan?.rises.get(rc.svcKey) ?? plan?.rises.get("");
     if (!list) return 0;
     let press = 0;
-    for (const r of list) if (t >= r.t && t < r.t + PRICE_WEIGHT_WEEKS * hpw && r.t >= rc.since) press += PRICE_PRESSURE_PER_UNIT * r.r;
+    // (From the first tick after the rise: a tick on the month's first hour closes the month before.)
+    for (const r of list) if (t > r.t && t <= r.t + PRICE_WEIGHT_WEEKS * hpw && r.t >= rc.since) press += PRICE_PRESSURE_PER_UNIT * r.r;
     return press;
   };
   const riseOn = Boolean(plan && plan.rises.size > 0 && [...plan.rises.values()].some((l) => l.length > 0));
@@ -2008,7 +2013,7 @@ export function runOnce(
       if (s === SPRICE) {
         // A fee rise hits each client of the service with the driver's chance, once, at the rise.
         const rises = priceRises(rc.svcKey);
-        while (rc.riseIdx < rises.length && rises[rc.riseIdx]!.t <= t) {
+        while (rc.riseIdx < rises.length && rises[rc.riseIdx]!.t < t) {
           const rise = rises[rc.riseIdx++]!;
           if (rise.t < rc.since) continue;
           let hit = true;
@@ -2088,7 +2093,7 @@ export function runOnce(
       if (s !== SLATE || chanceLate) extra += term;
     }
     const cfArr = plan && plan.churn.any ? keyFactors(plan.churn, rc.svcKey) : null;
-    const cf = cfArr ? cfArr[chM(t)]! : 1;
+    const cf = cfArr ? cfArr[chTick]! : 1;
     const mult = cf === 1 ? multiplier : multiplier * cf;
     // Not clamped: a monthly rate above 1 means certain churn at the first tick.
     const weekly = (rc.churnBase * a * mult) / WEEKS_PER_MONTH;
@@ -2124,7 +2129,7 @@ export function runOnce(
     if (!roster) {
       accruePooled(t);
       const before = active;
-      const cfPooled = plan && plan.churn.any ? factorNow(keyFactors(plan.churn, ""), t) : 1;
+      const cfPooled = plan && plan.churn.any ? factorNow(keyFactors(plan.churn, ""), Math.max(0, t - 1e-6)) : 1;
       active = Math.max(0, active - active * ((model.churnMonthly * cfPooled * churnMarket(t)) / WEEKS_PER_MONTH));
       if (before > 0) {
         const keep = active / before;
@@ -2176,12 +2181,13 @@ export function runOnce(
     pricePlanned = t >= priceFrom && t < priceFrom + PRICE_WEIGHT_WEEKS * hpw ? pricePressure(drivers[SPRICE - 1]!.value ?? 0) : 0;
     ev[SPRICE] = pricePlanned;
     // Which drivers are in chance mode this week (a channel can switch a driver over from a month), and their weekly chance of a hit.
+    chTick = plan ? chM(Math.max(0, t - 1e-6)) : 0;
     chanceTick = false;
     chanceLate = false;
     chanceNow.length = 0;
     for (let i = 0; i < evSlots.length; i++) {
       const s = evSlots[i]!;
-      const e = eventsAt(s, t);
+      const e = eventsInMonth(s, chTick);
       curEv[s] = e;
       if (!e) {
         dw[s] = dwBase[s]!;

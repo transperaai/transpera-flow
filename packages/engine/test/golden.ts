@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, northbeamModel, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat } from "../src";
+import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, northbeamModel, northbeamWithChances, northbeamWithChannels, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat } from "../src";
 
 export const GOLDEN_DIR = new URL("../golden/", import.meta.url);
 export const VERSION_FILE = new URL("../src/version.ts", import.meta.url);
@@ -66,6 +66,22 @@ export const GOLDEN_MODELS: GoldenModel[] = [
     name: "northbeam-money",
     description: "Northbeam with its clients counted per service, 18,000 a month of overheads and PPC priced hourly at 95 (clients won in the run bill the hours worked for them): billed revenue by kind, paid labour, overheads, profit, and the monthly sales, revenue and money series.",
     model: northbeamWithMoney,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
+    name: "northbeam-chances",
+    description: "northbeam-drivers run for six months with churn drivers as chances (late work measured, account manager changes and a competitor at a monthly chance), PPC clients won paying 3,000 to 6,000 around their price, and a +8% rise in PPC fees from the fourth month with the price driver on (engine 1.12.0): the chance, exposure and effect of each driver, the rise in revenue, and the months.",
+    model: northbeamWithChances,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
+    name: "northbeam-channels",
+    description: "northbeam-money run for six months with a change in every monthly channel from the third month: enquiries, enquiries that sign, a step's time, a wait, rework, a role's cost, overheads, a person's hours and base churn (engine 1.12.0).",
+    model: northbeamWithChannels,
     seed: 1,
     reps: 30,
     options: { monthly: true },
@@ -143,7 +159,7 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
       ? {
           clients: r.churnCauses.clients,
           normalShare: r.churnCauses.normal.share,
-          causes: Object.fromEntries(r.churnCauses.causes.map((c) => [c.id, { share: c.share, mrr: c.mrr, pressure: c.pressure, value: c.value }])),
+          causes: Object.fromEntries(r.churnCauses.causes.map((c) => [c.id, { share: c.share, mrr: c.mrr, pressure: c.pressure, value: c.value, mode: c.mode, chance: c.chance, exposure: c.exposure }])),
           byService: r.churnCauses.byService,
         }
       : null,
@@ -165,6 +181,7 @@ function monthlyMeans(m: NonNullable<SimulationResult["monthly"]>) {
     recurring: means(m.revenue.recurring),
     hourly: means(m.revenue.hourly),
     lostToChurn: means(m.revenue.lostToChurn),
+    rise: means(m.revenue.rise),
     overtimeHours: means(m.overtimeHours),
     labour: m.money?.labour ?? null,
     overtimeCost: m.money ? means(m.money.overtimeCost) : null,

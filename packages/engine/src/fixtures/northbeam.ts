@@ -221,3 +221,70 @@ export function northbeamWithMoney(): EngineModel {
     services: { ...base.services, ppc: { ...base.services!.ppc!, pricingModel: "hourly", price: 95 } },
   };
 }
+
+/** Hours inside a run where months 1, 2, … start when the run is asked for 52/12-week months (the golden models': no calendar). */
+const goldenMonthStarts = (horizonWeeks: number, hoursPerWeek: number): number[] => {
+  const monthHours = (52 / 12) * hoursPerWeek;
+  const H = horizonWeeks * hoursPerWeek;
+  const n = Math.max(1, Math.ceil(H / monthHours - 1e-9));
+  return Array.from({ length: n - 1 }, (_, i) => (i + 1) * monthHours);
+};
+
+/**
+ * `northbeamWithChurnDrivers()` run for six months with the chance mode of churn drivers, a fee range and a rise in fees (sandbox phase 3,
+ * engine 1.12.0): late work measured as hits (+60% churn for 3 months), account manager changes at a 5% monthly chance (+100% for 2 months),
+ * the competitor driver at a 10% chance (+50%), PPC clients won paying 3,000 to 6,000 around their price, and a +8% rise in PPC fees from
+ * the fourth month with the price changes driver on (its weight mode, at the prototype's weight).
+ */
+export function northbeamWithChances(): EngineModel {
+  const base = northbeamWithChurnDrivers();
+  const horizonWeeks = 26;
+  const months = Math.ceil(horizonWeeks / (52 / 12) - 1e-9);
+  return {
+    ...base,
+    horizonWeeks,
+    services: { ...base.services, ppc: { ...base.services!.ppc!, priceRange: { low: 3000, high: 6000 } } },
+    churnDrivers: base.churnDrivers!.map((d) =>
+      d.id === "late"
+        ? { ...d, effect: 0.6, effectMonths: 3 }
+        : d.id === "handoff"
+          ? { ...d, chance: 0.05, effect: 1, effectMonths: 2 }
+          : d.id === "custom:competitor"
+            ? { ...d, chance: 0.1, effect: 0.5, effectMonths: 3 }
+            : d,
+    ),
+    channels: {
+      starts: goldenMonthStarts(horizonWeeks, base.hoursPerWeek),
+      fee: { ppc: Array.from({ length: months }, (_, m) => (m < 3 ? 1 : 1.08)) },
+    },
+  };
+}
+
+/**
+ * `northbeamWithMoney()` run for six months with a change in every monthly channel from the third month (sandbox phase 3, engine 1.12.0):
+ * enquiries ×1.2, enquiries that sign ×0.9, the heaviest step (the PPC report) ×0.7 hands-on time, the `live` step with an 8-hour wait
+ * it didn't have, the kick-off with 10% rework it didn't have, the strategist's cost ×1.1, overheads ×1.25, Priya's hours ×0.9 and base
+ * churn ×1.3.
+ */
+export function northbeamWithChannels(): EngineModel {
+  const base = northbeamWithMoney();
+  const horizonWeeks = 26;
+  const months = Math.ceil(horizonWeeks / (52 / 12) - 1e-9);
+  const from = (value: number, was = 1) => Array.from({ length: months }, (_, m) => (m < 2 ? was : value));
+  return {
+    ...base,
+    horizonWeeks,
+    channels: {
+      starts: goldenMonthStarts(horizonWeeks, base.hoursPerWeek),
+      leads: from(1.2),
+      conv: from(0.9),
+      work: { report_ppc: from(0.7) },
+      wait: { live: from(8, 0) },
+      rework: { kickoff: from(0.1, 0) },
+      roleCost: { strat: from(1.1) },
+      overheads: from(1.25),
+      capacity: { priya: from(0.9) },
+      churn: { "*": from(1.3) },
+    },
+  };
+}

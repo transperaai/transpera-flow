@@ -70,5 +70,11 @@
     "date": "2026-10-28",
     "note": "Profit first (sandbox phase 2): billed revenue incl. hourly work for clients won in the run, paid labour, overheads and profit, and monthly sales, revenue and money series; northbeam-money golden model. No existing simulated number moved.",
     "digest": "sha256:0512d37e26f1340f3e7bacce67b57e53dacea3476f10e753ae342bfb93fbe7f5"
+  },
+  {
+    "version": "1.12.0",
+    "date": "2026-10-28",
+    "note": "Sandbox phase 3: monthly channels, churn drivers as chances, fee ranges, price rises for existing clients with their churn, pinned warm-up option; northbeam-chances and northbeam-channels golden models. No existing simulated number moved.",
+    "digest": "sha256:ea5be26a8f147e41bafb9965f2d26e2edc52f261c7930267a933ff74987c6a44"
   }
 ]

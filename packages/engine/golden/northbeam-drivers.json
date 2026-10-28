@@ -1,7 +1,7 @@
 {
   "model": "northbeam-drivers",
   "description": "Northbeam as seeded with all ten churn drivers on at the prototype's weights, and one of its own (churn-drivers.ts): who the churn is blamed on, and what each cause measured.",
-  "engineVersion": "1.11.0",
+  "engineVersion": "1.12.0",
   "seed": 1,
   "reps": 30,
   "outputs": {
@@ -160,17 +160,17 @@
       "clients": 9.795791063760424,
       "normalShare": 0.3205961280963139,
       "causes": {
-        "late": { "share": 0.3419573235507967, "mrr": 13507.577445727475, "pressure": 0.6528595390610656, "value": 0.11886593412179132 },
-        "resp": { "share": 0, "mrr": 0, "pressure": 0, "value": null },
-        "onb": { "share": 0.000013368292408046527, "mrr": 0.5249150757177252, "pressure": 0.00004882934766817954, "value": 5.295047561848057 },
-        "rework": { "share": 0, "mrr": 0, "pressure": 0, "value": 0 },
-        "load": { "share": 0.10840062641197518, "mrr": 4067.8857317789275, "pressure": 0.26870563854898805, "value": 0.811263052160927 },
-        "handoff": { "share": 0.057707303057336796, "mrr": 2159.715990762118, "pressure": 0.29999999999999827, "value": 0.3 },
-        "results": { "share": 0.08014903202407847, "mrr": 2999.605542725163, "pressure": 0.25, "value": 7 },
-        "tenure": { "share": 0.030558441774235896, "mrr": 1167.619399538105, "pressure": 0.11351909528062384, "value": 1.6000000000000008 },
-        "price": { "share": 0.012528357578407744, "mrr": 468.61000769822846, "pressure": 0.0780367908347767, "value": 10 },
-        "market": { "share": 0, "mrr": 0, "pressure": 0, "value": 1 },
-        "custom:competitor": { "share": 0.04808941921444717, "mrr": 1799.7633256350975, "pressure": 0.14999999999999913, "value": 15 }
+        "late": { "share": 0.3419573235507967, "mrr": 13507.577445727475, "pressure": 0.6528595390610656, "value": 0.11886593412179132, "mode": "weight", "chance": 0.3043400828423816, "exposure": 0 },
+        "resp": { "share": 0, "mrr": 0, "pressure": 0, "value": null, "mode": "weight", "chance": 0, "exposure": 0 },
+        "onb": { "share": 0.000013368292408046527, "mrr": 0.5249150757177252, "pressure": 0.00004882934766817954, "value": 5.295047561848057, "mode": "weight", "chance": 0.003545799504639365, "exposure": 0 },
+        "rework": { "share": 0, "mrr": 0, "pressure": 0, "value": 0, "mode": "weight", "chance": 0, "exposure": 0 },
+        "load": { "share": 0.10840062641197518, "mrr": 4067.8857317789275, "pressure": 0.26870563854898805, "value": 0.811263052160927, "mode": "weight", "chance": 0.671837325285846, "exposure": 0 },
+        "handoff": { "share": 0.057707303057336796, "mrr": 2159.715990762118, "pressure": 0.29999999999999827, "value": 0.3, "mode": "weight", "chance": null, "exposure": 0 },
+        "results": { "share": 0.08014903202407847, "mrr": 2999.605542725163, "pressure": 0.25, "value": 7, "mode": "weight", "chance": null, "exposure": 0 },
+        "tenure": { "share": 0.030558441774235896, "mrr": 1167.619399538105, "pressure": 0.11351909528062384, "value": 1.6000000000000008, "mode": "weight", "chance": null, "exposure": 0 },
+        "price": { "share": 0.012528357578407744, "mrr": 468.61000769822846, "pressure": 0.0780367908347767, "value": 10, "mode": "weight", "chance": null, "exposure": 0 },
+        "market": { "share": 0, "mrr": 0, "pressure": 0, "value": 1, "mode": "weight", "chance": null, "exposure": 0 },
+        "custom:competitor": { "share": 0.04808941921444717, "mrr": 1799.7633256350975, "pressure": 0.14999999999999913, "value": 15, "mode": "weight", "chance": null, "exposure": 0 }
       },
       "byService": {
         "ppc": {

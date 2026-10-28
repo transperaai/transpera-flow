@@ -1,7 +1,7 @@
 {
   "model": "northbeam-downturn",
   "description": "Northbeam as seeded under the Downturn market for the whole run: fewer enquiries that sign less, slower decisions, lower prices, more churn (market.ts).",
-  "engineVersion": "1.11.0",
+  "engineVersion": "1.12.0",
   "seed": 1,
   "reps": 30,
   "outputs": {
@@ -155,16 +155,16 @@
       "clients": 5.401891974595843,
       "normalShare": 0.49885581138536117,
       "causes": {
-        "late": { "share": 0.2418849293553796, "mrr": 5944.856919168591, "pressure": 0.4549078326047304, "value": 0.10928857956123525 },
-        "resp": { "share": 0, "mrr": 0, "pressure": 0, "value": null },
-        "onb": { "share": 0, "mrr": 0, "pressure": 0.00005547267587689654, "value": 5.047148513325428 },
-        "rework": { "share": 0, "mrr": 0, "pressure": 0, "value": 0 },
-        "load": { "share": 0, "mrr": 0, "pressure": 0.35690035975899076, "value": 0.8496026310966599 },
-        "handoff": { "share": 0, "mrr": 0, "pressure": 0.29999999999999816, "value": 0.3 },
-        "results": { "share": 0, "mrr": 0, "pressure": 0.25, "value": 7 },
-        "tenure": { "share": 0, "mrr": 0, "pressure": 0.0684378096736387, "value": 1.6000000000000008 },
-        "price": { "share": 0, "mrr": 0, "pressure": 0, "value": 0 },
-        "market": { "share": 0.25925925925925913, "mrr": 5999.106572979213, "pressure": 0.34999999999999787, "value": 1.3499999999999979 }
+        "late": { "share": 0.2418849293553796, "mrr": 5944.856919168591, "pressure": 0.4549078326047304, "value": 0.10928857956123525, "mode": "weight", "chance": 0.3212126213578674, "exposure": 0 },
+        "resp": { "share": 0, "mrr": 0, "pressure": 0, "value": null, "mode": "weight", "chance": 0, "exposure": 0 },
+        "onb": { "share": 0, "mrr": 0, "pressure": 0.00005547267587689654, "value": 5.047148513325428, "mode": "weight", "chance": 0.0008575946514152425, "exposure": 0 },
+        "rework": { "share": 0, "mrr": 0, "pressure": 0, "value": 0, "mode": "weight", "chance": 0, "exposure": 0 },
+        "load": { "share": 0, "mrr": 0, "pressure": 0.35690035975899076, "value": 0.8496026310966599, "mode": "weight", "chance": 0.842193942524036, "exposure": 0 },
+        "handoff": { "share": 0, "mrr": 0, "pressure": 0.29999999999999816, "value": 0.3, "mode": "weight", "chance": null, "exposure": 0 },
+        "results": { "share": 0, "mrr": 0, "pressure": 0.25, "value": 7, "mode": "weight", "chance": null, "exposure": 0 },
+        "tenure": { "share": 0, "mrr": 0, "pressure": 0.0684378096736387, "value": 1.6000000000000008, "mode": "weight", "chance": null, "exposure": 0 },
+        "price": { "share": 0, "mrr": 0, "pressure": 0, "value": 0, "mode": "weight", "chance": null, "exposure": 0 },
+        "market": { "share": 0.25925925925925913, "mrr": 5999.106572979213, "pressure": 0.34999999999999787, "value": 1.3499999999999979, "mode": "weight", "chance": null, "exposure": 0 }
       },
       "byService": {
         "ppc": {

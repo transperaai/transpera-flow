@@ -7,6 +7,7 @@ export { FORECAST_KEY_PREFIX, UNCOVERED_KEY, firstCrossing, forecastAlerts, isTo
 export { checkDemand, demandFactor, isFlatDemand, WEEKS_PER_CALENDAR_MONTH } from "./demand";
 export * from "./market";
 export * from "./churn-drivers";
+export { activeChannels, capacityFactors, channelMonth, checkChannels, planChannels, withMaxRework, type ChannelPlan, type FeeRise } from "./channels";
 export { mulberry32 } from "./random";
 export {
   NORTHBEAM_CLIENT_GROUPS,
@@ -16,6 +17,8 @@ export {
   NORTHBEAM_TEAM,
   northbeamClientKey,
   northbeamModel,
+  northbeamWithChances,
+  northbeamWithChannels,
   northbeamWithChurnDrivers,
   northbeamWithMoney,
   northbeamWithClientGroups,
