@@ -411,6 +411,7 @@ export function ForecastTimeline({
               <line x1={x(i)} x2={x(i)} y1={TOP - 4} y2={height - AXIS} stroke="var(--line)" strokeWidth={1} />
               <text x={x(i)} y={height - 7} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
                 {mo.short}
+                {mo.partial ? "*" : ""}
               </text>
             </g>
           ) : null,
@@ -495,21 +496,28 @@ export function ForecastTimeline({
               const hitW = wide ? Math.max(28, x1 - x0 + 8) : 28;
               const active = drag?.id === mk.id && drag.moved;
               const name = mk.label.replace(LABEL_TAIL, "");
+              // Only a marker that can be moved is a slider with a grab cursor. A Viewer's, a phone's and a parent's change are just drawn.
+              const movable = plan.editable && !mk.inherited;
+              const said = `${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`;
               return (
                 <g
                   key={mk.id}
-                  role="slider"
-                  tabIndex={0}
-                  className="group cursor-grab outline-none"
+                  {...(movable
+                    ? {
+                        role: "slider",
+                        tabIndex: 0,
+                        "aria-label": `${KIND_WORD[mk.kind]}: ${name}`,
+                        "aria-valuemin": 0,
+                        "aria-valuemax": n - 1,
+                        "aria-valuenow": monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek),
+                        "aria-valuetext": said,
+                      }
+                    : { role: "img", "aria-label": `${KIND_WORD[mk.kind]}: ${said}` })}
+                  className={movable ? "group cursor-grab outline-none" : "group outline-none"}
                   data-plan-marker={mk.id}
                   data-kind={mk.kind}
-                  aria-label={`${KIND_WORD[mk.kind]}: ${name}`}
-                  aria-valuemin={0}
-                  aria-valuemax={n - 1}
-                  aria-valuenow={monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek)}
-                  aria-valuetext={`${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`}
                   opacity={active ? 0.4 : 1}
-                  style={{ touchAction: "none", cursor: plan.editable && !mk.inherited ? (active ? "grabbing" : "grab") : "default" }}
+                  style={{ touchAction: "none", cursor: movable ? (active ? "grabbing" : "grab") : "default" }}
                   onPointerDown={(e) => markerDown(e, mk)}
                   onPointerMove={(e) => markerMove(e, mk)}
                   onPointerUp={(e) => markerUp(e, mk)}
@@ -552,7 +560,8 @@ export function ForecastTimeline({
           className="pointer-events-none absolute top-0 z-10 w-max max-w-64 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
           style={{ left: x(hover) + 12 + 240 > width ? Math.max(0, x(hover) - 252) : x(hover) + 12 }}
         >
-          <p className="font-medium">{shown.long}</p>
+          <p className="font-medium">{shown.label}</p>
+          {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
           {data.market.filter((b) => hover >= b.from && hover <= b.to).map((b) => (
             <p key={b.name} className="text-muted-foreground">
               Market: {b.name}
@@ -640,7 +649,7 @@ function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy
       <tbody>
         {data.months.map((mo, i) => (
           <tr key={mo.index}>
-            <th scope="row">{mo.long}</th>
+            <th scope="row">{mo.label}</th>
             {busy.map((r) => (
               <td key={r.id}>{cell(r.series[i] ?? null, r.uncovered?.[i] ?? null)}</td>
             ))}

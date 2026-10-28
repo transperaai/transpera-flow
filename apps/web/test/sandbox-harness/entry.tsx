@@ -19,7 +19,7 @@ declare global {
     __simRuns?: number;
     /** The address changing from outside the page, as a link or the sidebar would change it. */
     __setHarnessUrl: (url: string) => void;
-    mountSandbox: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean; dan?: boolean }) => void;
+    mountSandbox: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean; dan?: boolean; nobody?: boolean; leah?: boolean }) => void;
   }
 }
 
@@ -68,7 +68,7 @@ const scenario = (name: string, changes: ReturnType<typeof change>[]) => saveDem
 
 window.__setHarnessUrl = setHarnessUrl;
 
-window.mountSandbox = ({ mode, url, broken, many, dan }) => {
+window.mountSandbox = ({ mode, url, broken, many, dan, nobody, leah }) => {
   if (many) {
     // Four go-live months, each for a different version of the solution (and so a different model): five runs.
     scenario("Many runs", ["2026-12", "2027-02", "2027-04", "2027-06"].map((month, i) => change(`00000000-0000-4000-8000-0000000f04${String(i).padStart(2, "0")}`, MANY_SOLUTIONS[i]!.id, month)));
@@ -76,8 +76,20 @@ window.mountSandbox = ({ mode, url, broken, many, dan }) => {
   if (broken) scenario("Broken scenario", [change("00000000-0000-4000-8000-0000000f0296", BROKEN_SOLUTION.id, "2027-01")]);
   setHarnessUrl(url ?? "/demo/sandbox");
   const base = demoForecastBundle();
-  // A Viewer who sees only their own row (B1): the same bundle with a viewer who isn't everyone.
-  const live = mode === "readonly" && dan ? { ...base, viewer: { seesEveryone: false, ownPersonId: northbeamPersonIds["Dan Okafor"]! } } : base;
+  // A Viewer who sees only their own row (B1): the same bundle with a viewer who isn't everyone, and the names the database gives
+  // such a reader (`team_capacity`): their own, "Team member N" for everyone else. `nobody`: a Viewer who isn't linked to a person.
+  const ownPersonId = nobody ? null : dan ? northbeamPersonIds["Dan Okafor"]! : undefined;
+  const live =
+    mode === "readonly" && ownPersonId !== undefined
+      ? { ...base, viewer: { seesEveryone: false, ownPersonId }, people: base.people.map((p, i) => (p.id === ownPersonId ? p : { ...p, name: `Team member ${i + 1}`, cost_rate: null })) }
+      : base;
+  // A saved scenario that names a person (Leah Brooks, away for two weeks), for what a Viewer reads of her.
+  const leaveScenario = {
+    ...DEMO_SCENARIOS[0]!,
+    id: "50000000-0000-4000-8000-0000000000a1",
+    name: "Leah away",
+    changes: [{ id: "5b0000f4-0000-4000-8000-000000000001", lever: "D3" as const, target: northbeamPersonIds["Leah Brooks"]!, op: "set" as const, value: 2, from: "2027-02-08" }],
+  };
   const solutions = mode === "demo" ? (broken ? [DEMO_FORECAST_SOLUTION, BROKEN_SOLUTION] : many ? [DEMO_FORECAST_SOLUTION, ...MANY_SOLUTIONS] : [DEMO_FORECAST_SOLUTION]) : [DEMO_FORECAST_SOLUTION];
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
@@ -89,7 +101,7 @@ window.mountSandbox = ({ mode, url, broken, many, dan }) => {
         issuesHref="/demo/issues"
         leversHref="/demo/settings/levers"
         startDate={DEMO_FORECAST_START}
-        scenarios={mode === "readonly" ? DEMO_SCENARIOS : undefined}
+        scenarios={mode === "readonly" ? (leah ? [...DEMO_SCENARIOS, leaveScenario] : DEMO_SCENARIOS) : undefined}
         solutions={solutions}
       />
     </div>,

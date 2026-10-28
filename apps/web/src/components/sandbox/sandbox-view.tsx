@@ -27,7 +27,7 @@ import { DEFAULT_FORECAST_MONTHS, forecastInsights, forecastModel, today } from 
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { dateAtPosition, hoursToDate, mondayOnOrBefore, monthBounds, addDays } from "@/lib/forecast/positions";
 import { runKey, sharedSimPool } from "@/lib/forecast/sim-pool";
-import { timelineData, timelineMonths } from "@/lib/forecast/timeline";
+import { partMonthNote, timelineData, timelineMonths } from "@/lib/forecast/timeline";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { horizonLabel, horizonWeeks } from "@/lib/horizon";
 import { issueFormOptions } from "@/lib/issues/draft";
@@ -40,10 +40,13 @@ import { deleteDemoScenario, saveDemoScenario, useDemoScenarios } from "@/lib/sa
 import type { DescribeContext } from "@/lib/sandbox/describe";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { solutionReason } from "@/lib/sandbox/greyed";
+import { todayValue } from "@/lib/sandbox/today";
+import { explainFull } from "@/lib/sandbox/explain";
+import { EDIT_ONLY } from "@/lib/phone";
 import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
-import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { canSeePerson, namedForViewer, viewerOf } from "@/lib/viewer";
 import { forecastMoney } from "@/lib/forecast/money";
 import { ForecastMoney } from "@/components/forecast/forecast-money";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/forecast/forecast-timeline";
@@ -51,7 +54,7 @@ import { ChangeDialog, type ChangeTarget } from "./change-dialog";
 import { ChangeList } from "./change-list";
 import { PriceRise } from "./price-rise";
 import { SandboxCompare, MAX_COMPARE } from "./sandbox-compare";
-import { ConfirmDialog, NameDialog, NO_CHANGES, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
+import { ConfirmDialog, NameDialog, NO_CHANGES, ParentDialog, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
 
 export interface SandboxViewProps {
   /** The company model's process (the first sales pipeline), with the servicing processes it runs beside. */
@@ -96,7 +99,7 @@ interface Draft {
 }
 
 type Confirm = { title: string; description?: string; confirm: string; cancel: string; destructive?: boolean; onConfirm: () => void } | null;
-type NameAsk = { title: string; initial: string; confirm: string; taken: string[]; onConfirm: (name: string) => void } | null;
+type NameAsk = { title: string; initial: string; confirm: string; taken: string[]; onConfirm: (name: string) => void | string | null | Promise<void | string | null> } | null;
 
 export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHref, peopleHref = null, leversHref = null, startDate, note, scenarios = NO_SCENARIOS, solutions = NO_SOLUTIONS, hiddenLevers = NO_HIDDEN }: SandboxViewProps) {
   const router = useRouter();
@@ -141,6 +144,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const [changeTarget, setChangeTarget] = useState<ChangeTarget | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [nameAsk, setNameAsk] = useState<NameAsk>(null);
+  const [parentAsk, setParentAsk] = useState(false);
   const [saveNote, setSaveNote] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
 
   const savedScenario = saved.find((p) => p.id === selected) ?? null;
@@ -164,6 +168,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     setChangeTarget(null);
     setConfirm(null);
     setNameAsk(null);
+    setParentAsk(false);
     setSaveNote(null);
     // Only an address change from outside resets the page; `saved` is read as it is then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,7 +257,9 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     [shownRun, start, serviceNames],
   );
 
-  const ctx: DescribeContext = useMemo(() => ({ bundle: live, solutions: planSolutions, changes: effectiveList?.map((e) => e.change) ?? [] }), [live, planSolutions, effectiveList]);
+  // The weight of each service type in the live model: what "Traffic by type" percentages are shares of.
+  const mix = useMemo(() => Object.fromEntries(Object.entries(built.model?.services ?? {}).map(([id, sv]) => [id, sv.mixShare])), [built.model]);
+  const ctx: DescribeContext = useMemo(() => ({ bundle: live, solutions: planSolutions, changes: effectiveList?.map((e) => e.change) ?? [], mix }), [live, planSolutions, effectiveList, mix]);
   const lane = useMemo(() => (effectiveList ? laneMarkers(ctx, effectiveList, plan.problems, start, hpw) : []), [ctx, effectiveList, plan.problems, start, hpw]);
   const inSpan = useMemo(() => lane.filter((mk) => bounds !== null && hoursToDate(start, mk.date, hpw) < horizonHours), [lane, bounds, start, hpw, horizonHours]);
   const model = built.model;
@@ -279,6 +286,26 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     }
     return lines;
   }, [working, compare, plan.run, plan.status, result, built.model, cutoffs, start, months]);
+
+  /** Why a scenario that fills a role or person can look worse: it says so, with a hire to try. Worked out from the two runs already on screen. */
+  const fullNotes = useMemo(() => {
+    if (working === null || compare || !plan.run || !result?.monthly || !built.model || plan.status === "error") return [];
+    const monthly = plan.run.result.monthly;
+    if (!monthly) return [];
+    const viewer = viewerOf(live);
+    const people = Object.fromEntries(
+      Object.entries(plan.run.model.people ?? {})
+        .filter(([id]) => canSeePerson(viewer, id))
+        .map(([id, p]) => [id, { name: p.name, roles: p.roles }]),
+    );
+    return explainFull({
+      live: result.monthly,
+      scenario: monthly,
+      monthNames: timelineMonths(start, monthly.months, built.model.hoursPerWeek).map((mo) => mo.long),
+      roles: plan.run.model.roles,
+      people,
+    });
+  }, [working, compare, plan.run, plan.status, result, built.model, start, live]);
 
   const changeChanges = (fn: (changes: SandboxChange[]) => SandboxChange[]) => {
     setSaveNote(null);
@@ -380,18 +407,65 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   };
   const onSaveAsNew = () =>
     setNameAsk({ title: "Save as a new scenario", initial: `${workingName} (copy)`, confirm: "Save", taken: namesTaken(null), onConfirm: (name) => (setNameAsk(null), startSave(name, true)) });
+  /**
+   * Change one field of the saved scenario on screen and save it at once (a rename, a new parent), as the saved scenario stands: any
+   * other edits not yet saved stay on screen, unsaved. Saved with the usual check that nobody else changed it since the page loaded it.
+   * Returns why it was refused, or null.
+   */
+  const saveField = async (fields: { name: string } | { parent_id: string | null }): Promise<string | null> => {
+    const base = savedScenario;
+    if (!base) return "Save the scenario first.";
+    const parsed = parseSandboxInput({ name: base.name, description: base.description, parent_id: base.parent_id, changes: base.changes, horizon_months: base.horizon_months, ...fields }, { ...parseContext, selfId: base.id });
+    if (!parsed.ok) return parsed.error;
+    let row: SandboxScenarioRow;
+    if (demo) row = saveDemoScenario({ id: base.id, ...parsed.value });
+    else {
+      try {
+        const r = await saveSandboxScenario(live.workspace.id, base.id, parsed.value, base.updated_at);
+        if (r.status === "error") return r.message;
+        row = r.scenario;
+      } catch {
+        return "Couldn't save the scenario. Try again.";
+      }
+      setLiveScenarios((prev) => [...prev.filter((p) => p.id !== row.id), row].sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    // What was being edited stays, with this change in it.
+    setEdit((prev) => (prev ? { ...prev, ...fields } : prev));
+    setSaveNote({ text: "Saved", tone: "ok" });
+    return null;
+  };
   const onRename = () =>
     setNameAsk({
       title: "Rename the scenario",
       initial: workingName,
       confirm: "Rename",
       taken: namesTaken(savedScenario?.id ?? null),
-      onConfirm: (name) => {
-        setNameAsk(null);
-        setSaveNote(null);
-        setEdit((prev) => ({ ...(prev ?? { description: savedScenario?.description ?? null, parent_id: savedScenario?.parent_id ?? null, changes: savedScenario?.changes ?? [] }), name }));
+      onConfirm: async (name) => {
+        // A scenario that isn't saved yet has no row to rename: the name is kept for when it is saved.
+        if (!savedScenario) {
+          setNameAsk(null);
+          setSaveNote(null);
+          setEdit((prev) => ({ ...(prev ?? { description: null, parent_id: null, changes: [] }), name }));
+          return null;
+        }
+        const refused = await saveField({ name });
+        if (refused === null) setNameAsk(null);
+        return refused;
       },
     });
+  /** Change or clear what the scenario on screen builds on. A saved one is saved at once; a new one keeps it for when it is saved. */
+  const applyParent = async (parentId: string | null): Promise<string | null> => {
+    if (!savedScenario) {
+      const parsed = parseSandboxInput({ name: workingName, description: null, parent_id: parentId, changes: working?.changes ?? [], horizon_months: months }, { ...parseContext, selfId: null });
+      if (!parsed.ok) return parsed.error;
+      setEdit((prev) => ({ ...(prev ?? { name: workingName, description: null, parent_id: null, changes: [] }), parent_id: parentId }));
+      setParentAsk(false);
+      return null;
+    }
+    const refused = await saveField({ parent_id: parentId });
+    if (refused === null) setParentAsk(false);
+    return refused;
+  };
   /** Duplicate: a new scenario with the same changes and the same parent. */
   const onDuplicate = () => {
     if (!savedScenario) return;
@@ -496,6 +570,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onRemove: removeChange,
         }
       : undefined;
+  // A hire can be offered when its lever is on in Settings, Levers and does something in this model.
+  const hireOffered = offeredLevers(hiddenLevers).some((l) => l.id === "D1") && !appliesReason("D1");
   const solutionOptions = planSolutions.map((s) => ({
     id: s.id,
     name: s.name,
@@ -602,6 +678,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onRename={onRename}
           onDuplicate={onDuplicate}
           onBuildOn={onBuildOn}
+          onChangeParent={() => setParentAsk(true)}
           onDelete={onDelete}
           onCompare={openCompare}
         />
@@ -645,10 +722,29 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
                   </p>
                 ) : withThisScenario === null ? (
                   <p className="text-sm text-muted-foreground">Working out what this scenario does…</p>
-                ) : withThisScenario.length ? (
+                ) : withThisScenario.length || fullNotes.length ? (
                   <ul className="list-disc pl-5 text-sm">
                     {withThisScenario.map((line) => (
                       <li key={line}>{line}</li>
+                    ))}
+                    {fullNotes.map((note) => (
+                      <li key={note.text} data-full-note>
+                        {note.text}
+                        {canEdit && note.hireRoleId && hireOffered ? (
+                          <>
+                            {" "}
+                            <button
+                              type="button"
+                              className={cn("underline", EDIT_ONLY)}
+                              data-edit-entry
+                              data-full-note-hire={note.hireRoleId}
+                              onClick={() => setChangeTarget({ mode: "add", preset: { lever: "D1", target: note.hireRoleId!, month: monthOptions[note.month]?.value } })}
+                            >
+                              Try a hire for this role
+                            </button>
+                          </>
+                        ) : null}
+                      </li>
                     ))}
                   </ul>
                 ) : (
@@ -701,6 +797,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
                 example="At 85%, someone with 40 hours spends more than 34 of them on work."
               />
             </div>
+            {rows === "people" && shownData && shownData.people.length === 0 && !viewerOf(live).seesEveryone ? (
+              <p className="text-sm text-muted-foreground" data-people-empty>
+                By person shows only your own row, and there is none to show: you aren&apos;t linked to a person on the team, or they have no work in this span. Agency admins and the Owner see everyone.
+              </p>
+            ) : null}
             {shownData ? (
               <ForecastTimeline
                 data={shownData}
@@ -714,6 +815,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
             ) : (
               <Skeleton className="h-[320px] w-full" aria-busy="true" />
             )}
+            {shownData && partMonthNote(shownData.months) ? (
+              <p className="text-xs text-muted-foreground" data-part-month-note>
+                * {partMonthNote(shownData.months)}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               {planned ? `${planned} planned change${planned === 1 ? "" : "s"} from Settings: ` : "No planned hires, end dates or leave from Settings in this span. "}
               {shownData?.markers.map((mk) => `${mk.label} ${mk.kind === "leave" ? `from ${mk.when}` : `on ${mk.when}`}`).join("; ")}
@@ -754,6 +860,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           defaultMonth={monthOptions[1]?.value ?? monthOptions[0]?.value ?? start.slice(0, 7)}
           defaultMonday={mondayOnOrBefore(addDays(start, 7))}
           currency={live.workspace.settings.currency}
+          today={(leverId, targetId) => {
+            const lever = sandboxLever(leverId);
+            return lever && model ? todayValue(lever, targetId, model, live.workspace.settings.currency) : null;
+          }}
+          mix={mix}
           validate={(change) => {
             const others = (working?.changes ?? []).filter((c) => c.id !== change.id);
             const parsed = parseSandboxInput({ name: "x", parent_id: working?.parent_id ?? null, changes: [...others, change], horizon_months: months }, { ...parseContext, selfId: selected });
@@ -773,6 +884,15 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       ) : null}
       {confirm ? <ConfirmDialog {...confirm} onCancel={() => setConfirm(null)} /> : null}
       {nameAsk ? <NameDialog {...nameAsk} onCancel={() => setNameAsk(null)} /> : null}
+      {parentAsk && working ? (
+        <ParentDialog
+          title={`What “${workingName}” builds on`}
+          current={working.parent_id}
+          options={saved.filter((s) => s.id !== savedScenario?.id).map((s) => ({ id: s.id, name: s.name }))}
+          onConfirm={applyParent}
+          onCancel={() => setParentAsk(false)}
+        />
+      ) : null}
     </div>
   );
 }

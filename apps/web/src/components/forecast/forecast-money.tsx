@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { SANDBOX_HELP as PLAN_HELP } from "@/lib/forecast/help";
 import type { ForecastMoneyView, MoneyRow, MoneyTile, MoneyUnit } from "@/lib/forecast/money";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import { partMonthNote } from "@/lib/forecast/timeline";
 import { CompareChart } from "@/components/sandbox/compare-chart";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -131,8 +132,9 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
               <tr className="text-right text-muted-foreground">
                 <th scope="col" className="sticky left-0 bg-card py-1 pr-3 text-left font-medium"></th>
                 {view.months.map((mo) => (
-                  <th key={mo.index} scope="col" className="px-2 py-1 font-medium">
+                  <th key={mo.index} scope="col" className="px-2 py-1 font-medium" title={mo.partial ? `Part month: covers ${mo.span}` : undefined}>
                     {mo.short}
+                    {mo.partial ? "*" : ""}
                   </th>
                 ))}
                 <th scope="col" className="py-1 pl-3 font-medium">
@@ -147,6 +149,11 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
             </tbody>
           </table>
         </div>
+        {partMonthNote(view.months) ? (
+          <p className="text-xs text-muted-foreground" data-part-month-note>
+            * {partMonthNote(view.months)} Totals in a part month reflect the days it covers, so a dip or rise there is not a change.
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           Hover a figure for its 10–90% range. Months add to the run&apos;s totals, except overtime cost and profit: overtime is worked out month by month, so those months can add to a little more or less than the Labour and Profit tiles above.
         </p>

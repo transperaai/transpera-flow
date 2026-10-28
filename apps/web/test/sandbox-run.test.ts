@@ -834,7 +834,7 @@ describe("the demo's scenarios", () => {
     expect(demoScenariosNow()[0]!.name).toBe("Aardvark");
     expect(deleteDemoScenario(row.id)).toEqual({ ok: true });
     const refused = deleteDemoScenario(DEMO_SCENARIOS[1]!.id);
-    expect(refused).toEqual({ ok: false, message: "Other scenarios build on this one: “Hire in March, then more leads”. Delete them or change what they build on first." });
+    expect(refused).toEqual({ ok: false, message: "Other scenarios build on this one: “Hire in March, then more leads”. In the Sandbox, open it and choose “Change what it builds on” (or delete it), then try again." });
     expect(demoScenariosNow()).toHaveLength(3);
     resetDemoScenarios();
   });
@@ -845,7 +845,7 @@ describe("sandboxFailure", () => {
     expect(sandboxFailure({ code: "23505", message: "duplicate key value violates unique constraint" })).toBe("A scenario with that name already exists.");
     expect(sandboxFailure({ code: "23514", message: "sandbox_scenarios: a workspace keeps at most 1000 scenarios" })).toBe("This workspace already has 1,000 scenarios. Delete one first.");
     expect(sandboxFailure({ code: "23514", message: "sandbox_scenarios: scenarios build on each other at most 5 deep" })).toBe("Scenarios can build on each other up to 5 deep.");
-    expect(sandboxFailure({ code: "23514", message: "sandbox_scenarios: a scenario cannot build on itself" })).toBe("A scenario can't build on itself.");
+    expect(sandboxFailure({ code: "23514", message: "sandbox_scenarios: a scenario cannot build on itself" })).toBe("A scenario can't build on itself or on one that builds on it.");
     expect(sandboxFailure({ code: "23514", message: 'new row violates check constraint "sandbox_scenarios_changes"' })).toMatch(/up to 200 changes, from up to 6 different months, with up to 4 solutions/);
     expect(sandboxFailure({ code: "42501", message: "denied" })).toBe("You don't have permission to change scenarios here.");
     expect(sandboxFailure({ code: "XX000", message: "boom" })).toBe("Couldn't save the scenario. Try again.");

@@ -20,6 +20,7 @@ import { compareSandbox, type CompareRow, type CompareTile } from "@/lib/sandbox
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { COSTS_HIDDEN_NOTE } from "@/components/forecast/forecast-money";
+import { partMonthNote, type TimelineMonth } from "@/lib/forecast/timeline";
 import { CompareChart, SERIES_STYLES } from "./compare-chart";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -139,6 +140,11 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             <Help {...SANDBOX_HELP.compare} />
           </h2>
           <p className="text-sm text-muted-foreground">Profit, revenue, clients, clients at risk and how busy each role gets, with the 10–90% range from 30 runs. Differences are against “No changes”.</p>
+          {comparison && partMonthNote(comparison.months) ? (
+            <p className="text-sm text-muted-foreground" data-part-month-note>
+              {partMonthNote(comparison.months)} Totals in a part month reflect the days it covers, so a dip or rise there is not a change.
+            </p>
+          ) : null}
         </div>
         <Button variant="outline" onClick={onBack}>
           Back to the scenario
@@ -212,7 +218,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             <ChartAndNumbers row={comparison.revenue} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} />
           </Section>
 
-          <Section title="Wins and costs" help={SANDBOX_HELP.winsPerMonth}>
+          <Section title={comparison.labour ? "Wins and costs" : "Wins"} help={SANDBOX_HELP.winsPerMonth}>
             <ChartAndNumbers row={comparison.won} months={comparison.months} names={names} format={(v) => formatNumber(v, 1)} formatDiff={(v) => signed(v, (x) => formatNumber(x, 1))} />
             <ChartAndNumbers row={comparison.conversion} months={comparison.months} names={names} format={formatPercent} formatDiff={(v) => signed(v, (x) => `${Math.round(x * 100)} points`)} />
             {comparison.labour ? <ChartAndNumbers row={comparison.labour} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} /> : null}
@@ -299,7 +305,7 @@ function ChartAndNumbers({
   minTop,
 }: {
   row: CompareRow;
-  months: { index: number; long: string; short: string; name: string }[];
+  months: TimelineMonth[];
   names: string[];
   format: (v: number) => string;
   formatDiff: (v: number) => string;
@@ -346,7 +352,7 @@ function ChartAndNumbers({
               {months.map((mo, i) => (
                 <tr key={mo.index} className="border-t border-line">
                   <th scope="row" className="py-1 pr-3 text-left font-normal">
-                    {mo.long}
+                    {mo.label}
                   </th>
                   {names.map((name, c) => (
                     <td key={name + c} className="py-1 pr-3">

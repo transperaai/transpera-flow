@@ -19,8 +19,10 @@ import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { mondayOnOrBefore } from "@/lib/forecast/positions";
 import { greyedLevers, listWords } from "@/lib/sandbox/greyed";
 import { longDate, weekdayDate } from "@/lib/sandbox/lane";
+import { MAX_TRAFFIC_PERCENT, othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 
-export type ChangeTarget = { mode: "add" } | { mode: "edit"; change: SandboxChange };
+/** `preset`: an add that starts on a lever, target and month (the "Try a hire" link under "With this scenario"). */
+export type ChangeTarget = { mode: "add"; preset?: { lever: string; target: string; month?: string } } | { mode: "edit"; change: SandboxChange };
 
 export interface NamedOption {
   id: string;
@@ -57,6 +59,10 @@ export interface ChangeDialogProps {
   defaultMonth: string;
   defaultMonday: string;
   currency: string;
+  /** What a lever stands at today for the target picked ("about 30 opportunities a month"), from the live model the runs use; null: nothing to say. */
+  today: (leverId: string, targetId: string | null) => string | null;
+  /** The live model's traffic weight per service type: what the "Traffic by type" percentages are shares of. */
+  mix: Readonly<Record<string, number>>;
   /** A message when the change (as it would be saved) can't be part of the scenario, else null. */
   validate: (change: SandboxChange) => string | null;
   onSubmit: (change: SandboxChange) => void;
@@ -67,12 +73,13 @@ export interface ChangeDialogProps {
 const OP_WORD: Record<PatchOp, string> = { set: "Set to", multiply: "Multiply by", add: "Add" };
 
 export function ChangeDialog(props: ChangeDialogProps) {
-  const { target, appliesReason, roles, people, steps, services, leadSources = [], drivers = [], solutions, months, defaultMonth, defaultMonday, validate, onSubmit, onRemove, onClose } = props;
+  const { target, appliesReason, roles, people, steps, services, leadSources = [], drivers = [], solutions, months, defaultMonth, defaultMonday, today, mix, validate, onSubmit, onRemove, onClose } = props;
   const editing = target.mode === "edit" ? target.change : null;
   const editedLever = editing ? sandboxLever(editing.lever) : undefined;
   const levers = editedLever && !props.levers.some((l) => l.id === editedLever.id) ? [editedLever, ...props.levers] : props.levers;
+  const preset = target.mode === "add" && target.preset && levers.some((l) => l.id === target.preset!.lever) ? target.preset : null;
   const firstUsable = levers.find((l) => !appliesReason(l.id))?.id ?? levers[0]?.id ?? "A1";
-  const [leverId, setLeverId] = useState<string>(editing?.lever ?? firstUsable);
+  const [leverId, setLeverId] = useState<string>(editing?.lever ?? preset?.lever ?? firstUsable);
   const lever = sandboxLever(leverId) ?? levers[0]!;
   const offeredOps = (l: SandboxLever): PatchOp[] => {
     const ops = (Object.keys(l.range) as PatchOp[]).filter((o) => l.ops.includes(o));
@@ -82,9 +89,11 @@ export function ChangeDialog(props: ChangeDialogProps) {
   // A multiplier is a plain number; only a set or an add is shown in the lever's display unit (a month, not a week).
   const scaleOf = (o: PatchOp) => (o === "multiply" ? 1 : (lever.displayScale ?? 1));
   const scale = scaleOf(op);
-  const initialValue = editing && editing.lever === lever.id ? String(Math.round(editing.value * scaleOf(editing.op) * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
+  // Traffic by type is typed as a percentage of all traffic; the stored weight is worked out against the other types (./traffic.ts).
+  const trafficEdit = editing && editing.lever === "A6" && editing.op === "set" && editing.target ? Math.round(weightToShare(editing.value, othersTotal(mix, editing.target)) * 1000) / 10 : null;
+  const initialValue = editing && editing.lever === lever.id ? String(trafficEdit ?? Math.round(editing.value * scaleOf(editing.op) * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
   const [valueText, setValueText] = useState(initialValue);
-  const [targetId, setTargetId] = useState<string>(editing?.target ?? "");
+  const [targetId, setTargetId] = useState<string>(editing?.target ?? preset?.target ?? "");
   const [hireName, setHireName] = useState(editing?.params?.name ?? "");
   // Phase 3 extras: a fee range's ends (A5), when a fee applies (B2), and a driver's chance and months (B4).
   const [lowText, setLowText] = useState(editing?.params?.low !== undefined ? String(editing.params.low) : "");
@@ -92,8 +101,8 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const [who, setWho] = useState<"new" | "all">(editing?.params?.who ?? "new");
   const [chanceText, setChanceText] = useState(editing?.params?.chance !== undefined ? String(Math.round(editing.params.chance * 1e4) / 100) : "");
   const [monthsText, setMonthsText] = useState(editing?.params?.months !== undefined ? String(editing.params.months) : "");
-  const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : false);
-  const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : defaultMonth.slice(0, 7));
+  const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : preset?.month !== undefined);
+  const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : (preset?.month ?? defaultMonth).slice(0, 7));
   const [monday, setMonday] = useState(editing?.from && editing.from.length === 10 ? editing.from : defaultMonday);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,11 +135,13 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const snapped = /^\d{4}-\d{2}-\d{2}$/.test(monday) && !Number.isNaN(Date.parse(`${monday}T00:00:00Z`)) ? mondayOnOrBefore(monday) : null;
   const solution = lever.id === "E6" ? solutions.find((s) => s.id === effectiveTarget) : undefined;
 
+  const traffic = lever.id === "A6" && op === "set";
   const range = lever.range[op];
-  const shownMin = range ? range.min * scale : undefined;
-  const shownMax = range ? range.max * scale : undefined;
+  const shownMin = traffic ? 0 : range ? range.min * scale : undefined;
+  const shownMax = traffic ? MAX_TRAFFIC_PERCENT : range ? range.max * scale : undefined;
+  const todayText = today(lever.id, needsTarget ? effectiveTarget || null : null);
   const fixedValue = lever.id === "D2" || lever.id === "E6";
-  const kindWord = lever.id === "D1" ? "FTE" : lever.id === "D3" ? "weeks" : lever.unit === "per_week" ? "a month" : lever.unit === "share" && lever.id !== "A6" && op !== "multiply" ? "as a fraction, 0.1 is 10%" : "";
+  const kindWord = lever.id === "D1" ? "FTE" : lever.id === "D3" ? "weeks" : traffic ? "% of all opportunities" : lever.unit === "per_week" ? "a month" : lever.unit === "share" && lever.id !== "A6" && op !== "multiply" ? "as a fraction, 0.1 is 10%" : "";
 
   const pickLever = (id: string) => {
     const next = sandboxLever(id)!;
@@ -148,8 +159,14 @@ export function ChangeDialog(props: ChangeDialogProps) {
     if (needsTarget && !effectiveTarget && !allowAll) return { error: `Pick what to change.` };
     const n = fixedValue ? (lever.id === "E6" ? 1 : 0) : Number(valueText);
     if (!fixedValue && (!valueText.trim() || !Number.isFinite(n))) return { error: "Enter a value." };
-    const stored = Math.round((n / scale) * 1e6) / 1e6;
-    if (!fixedValue) {
+    let stored = Math.round((n / scale) * 1e6) / 1e6;
+    if (traffic && !fixedValue) {
+      if (n < 0 || n > MAX_TRAFFIC_PERCENT) return { error: `Use a share from 0% to ${MAX_TRAFFIC_PERCENT}%.` };
+      const weight = shareToWeight(n / 100, othersTotal(mix, effectiveTarget));
+      if (weight === null) return { error: "The other types have no traffic to share, so this type would stay at 100%." };
+      if (range && weight > range.max) return { error: "That share is too high next to the other types' traffic. Try a lower one." };
+      stored = weight;
+    } else if (!fixedValue) {
       if (lever.id === "D1") {
         if (stored < HIRE_FTE.accepted.min || stored > HIRE_FTE.accepted.max) return { error: "FTE must be between 0.1 and 2." };
       } else if (lever.id === "D3") {
@@ -296,6 +313,12 @@ export function ChangeDialog(props: ChangeDialogProps) {
               </label>
             ) : null}
 
+            {todayText ? (
+              <p className="text-xs text-muted-foreground" data-today>
+                Today: {todayText}
+              </p>
+            ) : null}
+
             {!fixedValue ? (
               <div className="flex flex-wrap items-end gap-3">
                 {lever.id !== "D1" && lever.id !== "D3" && offeredOps(lever).length + (editing && !offeredOps(lever).includes(editing.op) ? 1 : 0) > 1 ? (
@@ -311,12 +334,12 @@ export function ChangeDialog(props: ChangeDialogProps) {
                   </label>
                 ) : null}
                 <label className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
-                  <HelpLabel {...(lever.id === "D1" ? SANDBOX_HELP.hireFte : lever.id === "D3" ? SANDBOX_HELP.leaveFor : { label: "Value", description: `The value, ${kindWord || "in the units shown"}. ${shownMin !== undefined ? `From ${formatNumber(shownMin, 3)} to ${formatNumber(shownMax!, 3)}.` : ""}`, example: "Multiply by 0.6 for 40% less." })} />
+                  <HelpLabel {...(lever.id === "D1" ? SANDBOX_HELP.hireFte : lever.id === "D3" ? SANDBOX_HELP.leaveFor : { label: traffic ? "Share (%)" : "Value", description: `The value, ${kindWord || "in the units shown"}. ${shownMin !== undefined ? `From ${formatNumber(shownMin, 3)} to ${formatNumber(shownMax!, 3)}.` : ""}`, example: "Multiply by 0.6 for 40% less." })} />
                   <Input
-                    aria-label={lever.id === "D1" ? "FTE" : lever.id === "D3" ? "For (weeks)" : "Value"}
+                    aria-label={lever.id === "D1" ? "FTE" : lever.id === "D3" ? "For (weeks)" : traffic ? "Share (%)" : "Value"}
                     type="number"
                     inputMode="decimal"
-                    step={range?.step ?? "any"}
+                    step={traffic ? 0.1 : (range?.step ?? "any")}
                     min={lever.id === "D1" ? HIRE_FTE.offered.min : shownMin}
                     max={lever.id === "D1" ? HIRE_FTE.offered.max : shownMax}
                     value={valueText}

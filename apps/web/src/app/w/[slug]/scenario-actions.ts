@@ -4,6 +4,7 @@ import { changesFromPatch, wholeRunPatches, type SandboxChange, type ScenarioRow
 import { parsePatches } from "@transpera-flow/engine";
 import { sql } from "kysely";
 import { isId, parseScenarioInput } from "@/lib/scenarios/validate";
+import { buildOnRefusal } from "@/lib/sandbox/save-errors";
 import type { RemoveScenarioResult, SaveScenarioResult } from "@/lib/scenarios/store";
 import { jsonb, pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
@@ -77,7 +78,7 @@ export async function deleteScenario(id: unknown): Promise<RemoveScenarioResult>
   } catch (e) {
     if (pgCode(e) === "23503") {
       const children = await db.selectFrom("sandbox_scenarios").select("name").where("parent_id", "=", id).orderBy("name").execute().catch(() => []);
-      return { status: "error", message: `Other scenarios build on this one${children.length ? `: ${children.map((c) => `“${c.name}”`).join(", ")}` : ""}. Delete them or change what they build on first.` };
+      return { status: "error", message: buildOnRefusal(children.map((c) => c.name)) };
     }
     return failure(e);
   }

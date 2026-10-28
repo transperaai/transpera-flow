@@ -193,10 +193,12 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     id: "A6",
     group: "A",
     label: "Traffic by type",
-    description: "How opportunities split across service types: a type's weight against the others'.",
+    description: "How opportunities split across service types, as percentages that add up to 100%. Set one type's share; the others keep their proportions to one another and share the rest.",
     target: "service",
     ops: ["set", "multiply", "add"],
-    range: { set: { min: 0, max: 1000, step: 1 }, multiply: { min: 0, max: 5, step: 0.05 } },
+    // Stored as the type's weight (a set patch on mix_share); the dialog shows and takes a percentage of all traffic and converts
+    // (apps/web/src/lib/sandbox/traffic.ts). Only "set" is offered: a saved multiply or add still runs, as a weight.
+    range: { set: { min: 0, max: 1000, step: 1 } },
     unit: "share",
     wholeRun: true,
     ...CHANNEL,
