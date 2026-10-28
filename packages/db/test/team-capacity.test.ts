@@ -35,7 +35,7 @@ beforeAll(async () => {
   db = await createTestDb();
   const link = async (email: string, role: string, person: string | null) => {
     const u = await createUser(db, email);
-    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, $3, $4)", [ws, u.id, role, person]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::public.membership_role, $4)", [ws, u.id, role, person]);
     return u;
   };
   member = await link("jess@tc.example", "member", P.jess!);
@@ -137,7 +137,7 @@ describe("team_capacity per-person times (C6)", () => {
 
   it("a member linked to nobody and a viewer linked to someone else get only their own or an empty list; no one else's number appears anywhere in the text", async () => {
     const unlinked = await createUser(db, "cf-unlinked@tc.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ws, unlinked.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [ws, unlinked.id]);
     expect(await factorsAs(unlinked)).toEqual([]);
     const viewer = await createUser(db, "cf-viewer@tc.example");
     await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'viewer', $3)", [ws, viewer.id, P.callum!]);
@@ -280,9 +280,9 @@ describe("a member's simulation equals an editor's", () => {
   it("Northbeam (no person rates): deep-equal with only the names removed, and the overtime cost still unavailable", async () => {
     const opts = { startDate: "2026-10-05" };
     const nbMember = await createUser(db, "nb-member@tc.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [NORTHBEAM_WORKSPACE_ID, nbMember.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [NORTHBEAM_WORKSPACE_ID, nbMember.id]);
     const nbEditor = await createUser(db, "nb-editor@tc.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, nbEditor.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, nbEditor.id]);
     const viaTables = simulate(toEngineModel(await bundleFor(nbEditor, NORTHBEAM_WORKSPACE_ID, false), opts), 30, 1);
     const viaTeam = simulate(toEngineModel(await bundleFor(nbMember, NORTHBEAM_WORKSPACE_ID, true), opts), 30, 1);
     expect(viaTeam.kpi.overtimeCost).toBeNull();

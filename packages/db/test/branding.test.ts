@@ -69,10 +69,10 @@ beforeAll(async () => {
     [ws, users.editor!.id, "editor"],
     [ws, users.member!.id, "member"],
     [ws, users.viewer!.id, "viewer"],
-    [ws, users.agency_member!.id, "agency_admin"],
+    [ws, users.agency_member!.id, "owner"],
     [other, users.otherOwner!.id, "owner"],
   ];
-  for (const m of memberships) await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", m);
+  for (const m of memberships) await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", m);
 });
 
 afterAll(async () => {
@@ -134,7 +134,7 @@ describe("saving through save_fields", () => {
   const save = (claims: Claims, accent = "#0b6e8a") => as(claims, (c) => saveFields(c, { id: ws }, { "branding.accent": null }, { "branding.accent": accent }));
 
   it("owners and agency admins save it (JWT flag and membership)", async () => {
-    for (const who of ["owner", "agency_member", "flag"]) {
+    for (const who of ["owner", "editor", "agency_member", "flag"]) {
       await set(ws, {});
       const r = await save(users[who]!.claims);
       expect(r.status, who).toBe("saved");
@@ -143,8 +143,8 @@ describe("saving through save_fields", () => {
     await set(ws, {});
   });
 
-  it("an editor, member, viewer and stranger find nothing", async () => {
-    for (const who of ["editor", "member", "viewer", "stranger", "otherOwner"]) {
+  it("a viewer and a stranger find nothing", async () => {
+    for (const who of ["member", "viewer", "stranger", "otherOwner"]) {
       expect((await save(users[who]!.claims)).status, who).toBe("not_found");
     }
     expect(await q("select branding from workspaces where id = $1", [ws])).toEqual([{ branding: {} }]);

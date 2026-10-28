@@ -30,7 +30,7 @@ export default async function WorkspaceForecastPage(props: PageProps<"/w/[slug]/
   }
   const ws = live.workspace.id;
   const [issues, sources, canEdit] = await Promise.all([loadWorkspaceIssues(ws), loadWorkspaceSources(ws), canEditWorkspace(ws)]);
-  // Plans are for owners, editors and agency admins (B7): everyone else gets the forecast as it was, with no plan UI.
+  // Plans are for Agency admins and the Owner (B7): everyone else gets the forecast as it was, with no plan UI.
   const [plans, solutions] = canEdit ? await Promise.all([loadWorkspaceForecastPlans(ws), loadWorkspaceSolutions(ws).then((d) => d.solutions)]) : [[], []];
   const base = `/w/${slug}`;
   return (

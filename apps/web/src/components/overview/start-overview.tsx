@@ -47,7 +47,7 @@ export function StartOverview({
         <ShellHeader title="Overview" />
         <div className="mx-auto mt-6 w-full max-w-3xl">
           <EmptyState data-start-overview title={`${name} has nothing published yet`}>
-            The Overview shows the company map, headline numbers and trends once an owner or editor publishes a process.
+            The Overview shows the company map, headline numbers and trends once an Agency admin publishes a process.
           </EmptyState>
         </div>
       </div>

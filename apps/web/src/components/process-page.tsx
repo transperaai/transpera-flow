@@ -86,7 +86,7 @@ export function ProcessPage({
   aboutInfo,
   share,
 }: {
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
   share?: ReactNode;
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
   aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };

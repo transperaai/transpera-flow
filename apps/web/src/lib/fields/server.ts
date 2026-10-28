@@ -100,7 +100,7 @@ export async function saveField<T extends string | number | boolean | null | str
 }
 
 /**
- * Save one Client health rule (a `settings.<key>` of the workspace) if its stored value is still `base`. Owners and editors may
+ * Save one Client health rule (a `settings.<key>` of the workspace) if its stored value is still `base`. Agency admins may
  * (`save_health_rules`, a SECURITY DEFINER function that writes nothing but those four keys; `save_fields('workspaces')` is
  * owner-only). `value` is a number from 0 to 100, or null to restore the estimated default.
  */
@@ -119,7 +119,7 @@ export async function saveHealthRule(workspaceId: string, key: HealthSetting, ba
 }
 
 /**
- * Switch Per-person times (`settings.capacity_factor_enabled`, C6) if its stored value is still `base`. Owners and editors may
+ * Switch Per-person times (`settings.capacity_factor_enabled`, C6) if its stored value is still `base`. Agency admins may
  * (`save_capacity_factor_switch`, a SECURITY DEFINER function that writes nothing but this key; `save_fields('workspaces')` is
  * owner-only). Absent, null and false all mean off, so the outcome is a plain boolean.
  */
@@ -139,7 +139,7 @@ export async function saveCapacityFactorSwitch(workspaceId: string, base: boolea
 
 /**
  * Save one person's time on one step (`stepId` null: on every step they do) if the stored factor is still `base` (null: none).
- * `value` null removes it. Owners and editors only (`save_capacity_factor` is SECURITY INVOKER, so RLS decides).
+ * `value` null removes it. Agency admins only (`save_capacity_factor` is SECURITY INVOKER, so RLS decides).
  */
 export async function saveCapacityFactor(personId: string, stepId: string | null, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
   const db = await getDb();

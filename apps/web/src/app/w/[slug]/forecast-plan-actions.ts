@@ -10,7 +10,7 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 const PLAN_COLUMNS = ["id", "workspace_id", "name", "markers", "created_at", "updated_at", "created_by"] as const;
 
 // Saving and deleting forecast plans (issue #36, B7). A plan is a named set of markers; it never touches the live model.
-// Everything runs as the signed-in user through row-level security: owners, editors and agency admins read and write
+// Everything runs as the signed-in user through row-level security: Agency admins and the Owner read and write
 // plans, nobody else reads any. The database checks every marker again (roles, people and solutions of this workspace,
 // dates, FTE, weeks, limits); `planFailure` puts its errors in plain words.
 

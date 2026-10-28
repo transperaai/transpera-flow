@@ -69,7 +69,7 @@ describe("uploading a process file (a draft, as the user)", () => {
     editorId = await createUser("upload-editor@example.com");
     const viewerId = await createUser("upload-viewer@example.com");
     const strangerId = await createUser("upload-stranger@example.com");
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
     const otherId = (await admin.query("insert into workspaces (name, slug) values ('Upload Elsewhere', 'upload-elsewhere') returning id")).rows[0].id;
     otherWorkspaceRoleId = (await admin.query("insert into roles (workspace_id, name) values ($1, 'Their role') returning id", [otherId])).rows[0].id;
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [otherId, strangerId]);

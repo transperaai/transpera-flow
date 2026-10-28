@@ -14,7 +14,7 @@ afterAll(async () => {
 
 async function exportOf(workspaceId: string, email: string): Promise<WorkspaceBundle> {
   const user = await createUser(db, email);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [workspaceId, user.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [workspaceId, user.id]);
   const bundle = await db.as(user.claims, async (c) => {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;

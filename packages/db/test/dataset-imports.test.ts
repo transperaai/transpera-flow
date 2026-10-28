@@ -129,7 +129,7 @@ beforeAll(async () => {
   member = await createUser(db, "di-member@example.com");
   viewer = await createUser(db, "di-viewer@example.com");
   stranger = await createUser(db, "di-stranger@example.com");
-  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member'), ($1, $4, 'viewer')", [ws, editor.id, member.id, viewer.id]);
+  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer'), ($1, $4, 'viewer')", [ws, editor.id, member.id, viewer.id]);
 });
 
 afterAll(async () => {

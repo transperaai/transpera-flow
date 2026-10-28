@@ -8,7 +8,7 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // The agency list's headline numbers (issue #30, B1 part 3): the Overview, once its run at the workspace's own horizon is in,
 // records flow efficiency, processes needing attention and client groups at risk, so the agency's home page can list them
-// without simulating every workspace. Runs as the signed-in user: RLS lets owners and editors write `workspace_headlines`, the
+// without simulating every workspace. Runs as the signed-in user: RLS lets Agency admins write `workspace_headlines`, the
 // table's check pins the numbers' shape, and a trigger stamps who and when. A failure is quiet: the Overview doesn't depend on it.
 
 export type RecordHeadlineResult = { status: "recorded" | "fresh" } | { status: "error"; message: string };

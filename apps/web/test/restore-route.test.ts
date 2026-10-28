@@ -66,7 +66,7 @@ async function newWorkspace() {
   as(agency, true);
   const id = await rpc(tdb.dbAs(state.claims), "create_workspace", { ws_name: "Restored Co", ws_slug: slug });
   for (const [u, role] of [[editor, "editor"], [owner, "owner"], [member, "member"], [viewer, "viewer"]] as const) {
-    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [id, u.id, role]);
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [id, u.id, role]);
   }
   return { id, slug, base: await processCount(id) };
 }
@@ -89,7 +89,7 @@ beforeAll(async () => {
   viewer = await mk("viewer");
   stranger = await mk("stranger");
   agency = await mk("agency", { agency_admin: true });
-  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
+  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
   // A real backup: Northbeam as an editor exports it.
   as(editor);
   const db = tdb.dbAs(state.claims);
@@ -163,7 +163,7 @@ describe("restore route", () => {
     state.hooks.push({ match: RESTORE, fn: () => undefined }, { match: "can_manage_workspace", fn: () => undefined });
     const r = await call(slug, backup());
     expect(r.status).toBe(403);
-    expect((await r.json()).message).toBe("Only owners, editors and agency admins can restore a backup.");
+    expect((await r.json()).message).toBe("Only Agency admins and the Owner can restore a backup.");
     expect(restoreCalls()).toBe(0);
     expect(state.seen).not.toContain("can_manage_workspace");
     expect(await processCount(id)).toBe(base);
@@ -212,9 +212,10 @@ describe("restore route", () => {
     expect(restoreCalls()).toBe(0);
   });
 
+  // Every Agency admin manages (there is no editor who only suggests any more: migration 20270103000000), so the settings are applied.
   it.each([
-    ["an editor (can't manage)", () => editor, "skipped"],
-    ["an owner (can manage)", () => owner, "applied"],
+    ["an Agency admin", () => editor, "applied"],
+    ["another Agency admin", () => owner, "applied"],
   ])("restores a real backup for %s, passing canManage on as the database says", async (_who, who, settings) => {
     const { id, slug, base } = await newWorkspace();
     as(who());
@@ -246,7 +247,7 @@ describe("restore route", () => {
   it("maps each database refusal to its message, and no SQL text reaches any body", async () => {
     const { slug } = await newWorkspace();
     const cases: [ReturnType<typeof dbError>, number, RegExp][] = [
-      [dbError("42501", "Only owners, editors and agency admins can restore a backup."), 403, /Only owners, editors and agency admins/],
+      [dbError("42501", "Only Agency admins and the Owner can restore a backup."), 403, /Only Agency admins and the Owner/],
       [dbError("23514", "This workspace isn't empty: it already has roles. Backups restore only into a new, empty workspace.", "not_empty"), 409, /Backups restore only into an empty workspace/],
       [dbError("23514", 'import_workspace_bundle: issues could not be restored: new row for relation "issues" violates check constraint "issues_status_check"', "section:issues"), 422, /Couldn't restore the issues: a row didn't fit this workspace's rules/],
       [dbError("55000", "import_workspace_bundle: archive could not be restored: A new process can't start archived", "section:archive"), 422, /Couldn't restore the archived processes: A new process can't start archived\./],

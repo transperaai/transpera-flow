@@ -92,7 +92,7 @@ export function ProcessesPage({
               Start one with New process, or bring one in from a file.
             </EmptyState>
           ) : (
-            <EmptyState data-processes-empty>No processes yet. An owner or editor adds them.</EmptyState>
+            <EmptyState data-processes-empty>No processes yet. An Agency admin adds them.</EmptyState>
           )
         }
       />

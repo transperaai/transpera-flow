@@ -93,7 +93,7 @@ beforeAll(async () => {
   editor = await createUser(db, "cc-editor@example.com");
   viewer = await createUser(db, "cc-viewer@example.com");
   stranger = await createUser(db, "cc-stranger@example.com");
-  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
+  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
 });
 
 afterAll(async () => {

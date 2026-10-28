@@ -37,7 +37,7 @@ export interface CalibrationPanelProps {
   history: { id: string; createdAt: string; fileName: string; rowCount: number; proposals: number; applied: number; perPersonApplied?: number }[];
   /**
    * Per-person times (#227): `hidden` for members and viewers (nothing per-person is shown or computed), `off` with the switch off,
-   * `on` for owners, editors and agency admins with it on. The demo passes `hidden`.
+   * `on` for Agency admins and the Owner with it on. The demo passes `hidden`.
    */
   personTimes: PersonTimesSetup;
   /** The latest column map of each kind, offered to the wizard first. */
@@ -96,7 +96,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
     // Let the page say so before a big file is measured.
     setTimeout(() => {
       const result = ready.rows.length ? measure(ready) : null;
-      // Per-person times: only for owners, editors and agency admins with the switch on, from the visits whose people were matched.
+      // Per-person times: only for Agency admins and the Owner with the switch on, from the visits whose people were matched.
       const factors =
         result && personTimes.state === "on" && ready.personRows
           ? proposePersonTimes({ steps: calibrationInput(stored, []).steps, rows: ready.personRows, people: personTimes.persons }).proposals
@@ -144,7 +144,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
         // The names the person left out are recorded as a count with the ones that matched no step, never by name.
         results: { ...measured, unmatchedSteps: measured.unmatchedSteps.length + read.ready.leftOut.names },
         // Every per-person time with a value, ticked or not, so the record holds what was proposed; the database keeps them where only
-        // owners and editors read them (#227).
+        // Agency admins read them (#227).
         capacityFactors: read.factors.filter((f) => f.set),
         keys,
       });
@@ -300,7 +300,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
                 </Button>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">You can see what the log measures here; owners and editors can apply it.</p>
+              <p className="text-sm text-muted-foreground">You can see what the log measures here; Agency admins can apply it.</p>
             )}
             {done && (
               <div
@@ -445,7 +445,7 @@ function ProposalGroup({
 }
 
 /**
- * Per-person times from a log that names people (#227), only for owners, editors and agency admins with the switch on. One closed
+ * Per-person times from a log that names people (#227), only for Agency admins and the Owner with the switch on. One closed
  * <details> per person, in the roster's order, with their steps in the process's order. Never sorted by value, no table with people as rows
  * or columns, no totals or averages across people.
  */
@@ -473,7 +473,7 @@ function PersonTimesSection({
         Per-person times
         <Help
           label="Per-person times"
-          description="How long each person takes on a step compared with the step's normal time, from the log's hands-on hours. Only owners and editors see this. Times are never ranked or compared across people. 1 is the normal time, 0.8 is 20% faster, 1.25 is 25% slower."
+          description="How long each person takes on a step compared with the step's normal time, from the log's hands-on hours. Only Agency admins see this. Times are never ranked or compared across people. 1 is the normal time, 0.8 is 20% faster, 1.25 is 25% slower."
           example="Sam's 14 Kickoff visits took 0.8 of the step's normal time: tick it to set his Kickoff time to 0.8."
         />
       </h3>

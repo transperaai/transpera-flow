@@ -1,8 +1,8 @@
 -- Copperleaf Marketing (QA): the fictional agency for the timed extraction run
 -- (issue #27; docs/extraction/qa/README.md). It adds one workspace and touches
 -- nothing else. It stops with an error, changing nothing, if the slug
--- `copperleaf-qa` already exists. Every agency admin gets an agency_admin
--- membership so the workspace shows in their list.
+-- `copperleaf-qa` already exists. Every Owner gets an owner
+-- (Agency admin) membership so the workspace shows in their list.
 --
 -- Run it once in the Supabase SQL editor. To remove the workspace again, or to
 -- start over, run reset-workspace.sql first.
@@ -58,7 +58,7 @@ begin
   on conflict (workspace_id) do update set growth_monthly = 0;
 
   insert into public.memberships (workspace_id, user_id, role)
-  select ws, id, 'agency_admin' from auth.users where (raw_app_meta_data ->> 'agency_admin')::boolean is true
+  select ws, id, 'owner' from auth.users where (raw_app_meta_data ->> 'agency_admin')::boolean is true
   on conflict (workspace_id, user_id) do nothing;
 end $$;
 

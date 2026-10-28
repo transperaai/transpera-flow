@@ -5,7 +5,7 @@ import type { Claims } from "@transpera-flow/db/client";
 import type { Db } from "@transpera-flow/db";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
 
-// GET /w/<slug>/export/bundle (issue #39, B10): only agency admins, owners and editors (403 for anyone else, nothing read), as a download, nothing cached, and no detail in errors.
+// GET /w/<slug>/export/bundle (issue #39, B10): only agency admins, Agency admins (403 for anyone else, nothing read), as a download, nothing cached, and no detail in errors.
 // Runs against a throwaway Postgres as the signed-in user (row-level security decides what can be read); only the session module is replaced.
 
 let tdb: TestDb;
@@ -63,7 +63,7 @@ beforeAll(async () => {
   tdb = await createTestDb();
   const mk = async (name: string, role?: string, meta: Record<string, unknown> = {}) => {
     const u = await createUser(tdb, `${name}-${randomUUID().slice(0, 6)}@export-route.example.com`, meta);
-    if (role) await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [NORTHBEAM_WORKSPACE_ID, u.id, role]);
+    if (role) await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [NORTHBEAM_WORKSPACE_ID, u.id, role]);
     return u;
   };
   owner = await mk("owner", "owner");
@@ -142,7 +142,7 @@ describe("bundle route", () => {
     state.wrap = onTable("processes", () => (++reads, null));
     const r = await call();
     expect(r.status).toBe(403);
-    expect((await r.json()).message).toBe("Only owners, editors and agency admins can export the workspace.");
+    expect((await r.json()).message).toBe("Only Agency admins and the Owner can export the workspace.");
     expect(reads).toBe(0);
   });
 

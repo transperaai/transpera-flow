@@ -1,6 +1,6 @@
 // What the import wizard shows of a file (issue #40), as pure functions so the privacy rules are testable: client, person and id
 // values are never shown (the mapper counts them, the preview labels them "Client 1", "Person 1", "Deal 1"; a deal's name is often
-// the client's), and amounts are shown only to owners and editors. Nothing here is stored.
+// the client's), and amounts are shown only to Agency admins. Nothing here is stored.
 
 import type { ImportColumn, ImportKindSpec } from "@transpera-flow/db/csv-import";
 
@@ -15,7 +15,7 @@ export function sampleLine(column: ImportColumn, samples: readonly string[][], i
     const n = new Set(values).size;
     return `${n} different value${n === 1 ? "" : "s"} in the first ${samples.length} row${samples.length === 1 ? "" : "s"}`;
   }
-  if (column.type === "amount" && !canSeeAmounts) return "Amounts are shown to owners and editors only.";
+  if (column.type === "amount" && !canSeeAmounts) return "Amounts are shown to Agency admins only.";
   return values.slice(0, 3).map((v) => cut(v)).join(", ");
 }
 
@@ -27,7 +27,7 @@ export interface PreviewTable {
 /**
  * The first parsed rows as a table, one column for each matched column of the kind. A `client` column shows "Client 1",
  * "Client 2"… and a `person` column "Person 1"…, and an id column "Deal 1", "Job 1"… (its own label), numbered in order of first
- * appearance, never the file's values. An amount shows only to owners and editors (otherwise "—").
+ * appearance, never the file's values. An amount shows only to Agency admins (otherwise "—").
  */
 export function previewTable(spec: ImportKindSpec, matched: ReadonlySet<string>, preview: readonly Record<string, string>[], canSeeAmounts: boolean): PreviewTable {
   const columns = spec.columns.filter((c) => matched.has(c.id));

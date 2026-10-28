@@ -93,7 +93,6 @@ export {
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_REVISION_ID,
   NORTHBEAM_WORKSPACE_ID,
-  northbeamAccess,
   northbeamBundle,
   northbeamClientIds,
   northbeamLeadSourceIds,

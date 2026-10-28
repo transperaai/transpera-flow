@@ -150,8 +150,8 @@ describe("Client health rules for editors", () => {
   it("HealthSettings gates on canEdit, not canManage, and says who can change them", () => {
     expect(health).toContain("canEdit");
     expect(health).not.toContain("canManage");
-    expect(health).toContain("You can view these; owners and editors can change them.");
-    expect(health).not.toContain("Only workspace owners can change this.");
+    expect(health).toContain("You can view these; Agency admins can change them.");
+    expect(health).not.toContain("Only Agency admins can change this.");
   });
 
   it("saveHealthSetting saves through saveHealthRule (save_health_rules), not the owner-only saveField", () => {

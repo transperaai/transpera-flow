@@ -33,7 +33,7 @@ describe("adding things by hand", () => {
     ids.ws = (await one("insert into workspaces (name, slug, settings) values ('Manual Co', $1, '{\"currency\": \"AUD\"}') returning id", [`manual-${tag}`])).id as string;
     const [ow, ed, vw] = [randomUUID(), randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6)", [ow, `man-owner-${tag}@example.com`, ed, `man-editor-${tag}@example.com`, vw, `man-viewer-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'editor'), ($1, $4, 'viewer')", [ids.ws, ow, ed, vw]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'owner'), ($1, $4, 'viewer')", [ids.ws, ow, ed, vw]);
     ids.service = (await one("insert into services (workspace_id, name) values ($1, 'SEO') returning id", [ids.ws])).id as string;
     ids.role = (await one("insert into roles (workspace_id, name) values ($1, 'Account director') returning id", [ids.ws])).id as string;
     ids.person = (await one("insert into people (workspace_id, name) values ($1, 'Maya Collins') returning id", [ids.ws])).id as string;
@@ -86,11 +86,11 @@ describe("adding things by hand", () => {
     expect(await one("select active from clients where id = $1", [id])).toEqual({ active: true });
   });
 
-  it("an owner changes the workspace's name and currency; an editor and a viewer can't; a bad code is refused", async () => {
+  it("an owner changes the workspace's name and currency; a viewer can't; a bad code is refused", async () => {
     expect(await save(owner, "workspaces", { id: ids.ws }, { name: "Manual Co" }, { name: "Manual Company" })).toMatchObject({ status: "saved" });
     expect(await save(owner, "workspaces", { id: ids.ws }, { "settings.currency": "AUD" }, { "settings.currency": "GBP" })).toMatchObject({ status: "saved" });
     expect((await errorOf(() => save(owner, "workspaces", { id: ids.ws }, { "settings.currency": "GBP" }, { "settings.currency": "pounds" })))?.message).toMatch(/workspaces_currency_code/);
-    for (const who of [editor, viewer]) {
+    for (const who of [viewer]) {
       expect(await save(who, "workspaces", { id: ids.ws }, { name: "Manual Company" }, { name: "Theirs" })).toMatchObject({ status: "not_found" });
     }
     expect(await one("select name, settings ->> 'currency' as currency from workspaces where id = $1", [ids.ws])).toEqual({ name: "Manual Company", currency: "GBP" });
@@ -128,8 +128,8 @@ describe("adding things by hand", () => {
     // It was the issue's only solution, so the issue is back to Open: one entry says both.
     expect(last).toEqual({ kind: "edited", detail: { from: "testing", to: "open", solution_deleted: { solution_id: sol, solution: "Reply templates" } } });
     expect((await one("select status from issues where id = $1", [ids.issue])).status).toBe("open");
-    // The editor can't read the audit log (owners can) and can't write it.
-    expect(await editor.selectFrom("audit_log").select("id").where("target_id", "=", sol).execute()).toEqual([]);
+    // The viewer can't read the audit log (Agency admins can).
+    expect(await viewer.selectFrom("audit_log").select("id").where("target_id", "=", sol).execute()).toEqual([]);
     expect(await owner.selectFrom("audit_log").select("action").where("target_id", "=", sol).execute()).toEqual([{ action: "delete" }]);
   });
 });

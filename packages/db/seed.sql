@@ -582,16 +582,6 @@ update public.processes set live_revision_id = 'd0000000-0000-4000-8001-00000000
 
 select private.relayout_company_map('a0000000-0000-4000-8001-000000000001');
 
--- Access: allowed domains and pre-assigned emails
-
-insert into public.workspace_domains (id, workspace_id, domain) values
-  ('70000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'northbeam.example');
-
-insert into public.workspace_access_emails (id, workspace_id, email, role, person_id) values
-  ('70000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001', 'rosa.diaz@northbeam.example', 'owner', '90000000-0000-4000-8000-00000000000b'),
-  ('70000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'leah.brooks@northbeam.example', 'editor', '90000000-0000-4000-8000-000000000004'),
-  ('70000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000001', 'sam.patel.seo@example.com', 'member', '90000000-0000-4000-8000-000000000006');
-
 -- Scenario library: replaces the generic one the workspace trigger created
 
 delete from public.scenarios where workspace_id in ('a0000000-0000-4000-8000-000000000001');

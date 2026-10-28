@@ -128,7 +128,7 @@ export function OtherImportsPanel(props: OtherImportsPanelProps) {
             {mode === "demo" && <span className="text-sm text-muted-foreground">Demo: nothing is saved.</span>}
           </div>
         )}
-        {ready && mode === "readonly" && <p className="text-sm text-muted-foreground">You can see what the file says here; owners and editors can save an import.</p>}
+        {ready && mode === "readonly" && <p className="text-sm text-muted-foreground">You can see what the file says here; Agency admins can save an import.</p>}
         {done && (
           <div role="status" className={cn("rounded-lg border p-3 text-sm", done.tone === "ok" ? "border-good bg-good-soft" : "border-crit bg-crit-soft")}>
             {done.message}

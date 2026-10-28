@@ -48,7 +48,7 @@ export function SolutionCards({
   /** `/w/<slug>` or `/demo`. */
   base: string;
   demo: boolean;
-  /** Who can open the Editor: owners and editors. */
+  /** Who can open the Editor: Agency admins. */
   canEdit: boolean;
   viewerId?: string | null;
   memberNames?: Readonly<Record<string, string>>;

@@ -49,7 +49,7 @@ describe("shareReaderDb", () => {
     tdb = await createTestDb();
     const e = await createUser(tdb, "editor@share-reader.example.com");
     const m = await createUser(tdb, "member@share-reader.example.com");
-    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [ws, e.id, m.id]);
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, e.id, m.id]);
     await tdb.client.query("update people set cost_rate = 55 where workspace_id = $1", [ws]);
     editor = tdb.dbAs(e.claims as never);
     member = tdb.dbAs(m.claims as never);

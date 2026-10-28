@@ -143,7 +143,7 @@ describe("the workspace's name and currency", () => {
       const region = page.getByRole("region", { name: "Workspace" });
       expect(await region.getByLabel("Name", { exact: true }).isDisabled()).toBe(true);
       expect(await region.getByLabel("Currency", { exact: true }).isDisabled()).toBe(true);
-      expect(await region.getByText("Only workspace owners can change this.").count()).toBe(2);
+      expect(await region.getByText("Only Agency admins can change this.").count()).toBe(2);
       await page.close();
     }
   }, 60_000);
@@ -185,7 +185,7 @@ describe("a viewer", () => {
     const { page, errors } = await mount({ canEdit: false, canManage: false });
     const region = clientsRegion(page);
     expect(await region.getByRole("button", { name: "Add client" }).count()).toBe(0);
-    expect(await region.getByText("You can view clients here; owners and editors can change them.").isVisible()).toBe(true);
+    expect(await region.getByText("You can view clients here; Agency admins can change them.").isVisible()).toBe(true);
     const row = page.locator('[data-client="Harbour Lane Dental"]');
     await row.locator("summary").click();
     for (const label of ["Name", "Status", "MRR", "Start date", "Account director"]) {

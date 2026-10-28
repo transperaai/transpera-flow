@@ -46,7 +46,7 @@ describe("process versions and provenance (editor, direct writes)", () => {
     ids.ws = (await one("insert into workspaces (name, slug) values ('Harden Co', $1) returning id", [slug])).id as string;
     editorId = randomUUID();
     await admin.query("insert into auth.users (id, email) values ($1, $2)", [editorId, `harden-editor-${slug}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ids.ws, editorId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ids.ws, editorId]);
     editor = env.dbAs(userClaims(editorId));
 
     const rev = async (proc: string, number: number, status: string) =>

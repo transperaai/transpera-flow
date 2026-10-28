@@ -15,7 +15,7 @@ vi.mock("@/lib/auth/session", () => ({
   getSessionUser: async () => session.user,
 }));
 
-const { canEditWorkspace, canManageWorkspace, currentUserId, isAgencyAdmin, loadAccessSettings, resolveMyAccess } = await import("@/lib/access-data");
+const { canEditWorkspace, canManageWorkspace, currentUserId, isAgencyAdmin, loadAccessSettings } = await import("@/lib/access-data");
 const { listAgencyWorkspaces, listWorkspaces, loadMemberNames, loadWorkspaceHead } = await import("@/lib/data");
 const { shellCounts } = await import("@/lib/company-data");
 const { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveHealthRule, saveLinks } = await import("@/lib/fields/server");
@@ -49,7 +49,9 @@ beforeAll(async () => {
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     const email = `${role}@lib.example.com`;
     const u = await createUser(tdb, email);
-    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, u.id, role]);
+    // The sign-in list names them too (the members list only shows people it still lets in).
+    await tdb.client.query("insert into deployment_access (kind, value, role) values ('email', $1, $2)", [email, role === "editor" || role === "owner" ? "agency_admin" : "viewer"]);
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
     users[role] = { id: u.id, email, claims: { sub: u.id, role: "authenticated", email } };
   }
   const agency = await createUser(tdb, "agency@lib.example.com", { agency_admin: true });
@@ -82,27 +84,19 @@ describe("access-data", () => {
     expect(await isAgencyAdmin()).toBe(true);
   });
 
-  it("counts the workspaces resolve_my_access leaves a member with", async () => {
-    actAs("editor");
-    expect(await resolveMyAccess()).toBe(1);
-    actAs("stranger");
-    expect(await resolveMyAccess()).toBe(0);
-  });
-
-  it("gives an owner the Access page and nobody else but an agency admin", async () => {
+  it("gives every Agency admin the Access page, and the Owner, and no Viewer or stranger", async () => {
     actAs("owner");
     const page = await loadAccessSettings("northbeam");
     expect(page?.workspace.slug).toBe("northbeam");
-    expect(page?.isAgencyAdmin).toBe(false);
     expect(page?.members.map((m) => m.email)).toContain("owner@lib.example.com");
     expect(page?.members.find((m) => m.email === "viewer@lib.example.com")).toMatchObject({ role: "viewer", active: true });
     expect(page?.people.length).toBeGreaterThan(0);
-    expect(page?.domains.map((d) => d.domain)).toEqual(["northbeam.example"]);
-    expect(page?.emails.length).toBeGreaterThan(0);
-    expect(page?.emails[0]).toHaveProperty("email");
+    expect(page?.members.every((m) => m.role === "owner" || m.role === "viewer")).toBe(true);
     actAs("agency");
-    expect((await loadAccessSettings("northbeam"))?.isAgencyAdmin).toBe(true);
-    for (const role of ["editor", "member", "viewer", "stranger"]) {
+    expect((await loadAccessSettings("northbeam"))?.workspace.slug).toBe("northbeam");
+    actAs("editor");
+    expect((await loadAccessSettings("northbeam"))?.workspace.slug).toBe("northbeam");
+    for (const role of ["member", "viewer", "stranger"]) {
       actAs(role);
       expect(await loadAccessSettings("northbeam")).toBeNull();
     }

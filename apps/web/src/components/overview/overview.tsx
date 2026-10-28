@@ -110,7 +110,7 @@ export interface OverviewProps {
   issuesHref: string;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
   share?: ReactNode;
 }
 

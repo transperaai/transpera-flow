@@ -381,7 +381,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
               </Button>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">You can see what the files measure here; owners and editors can apply them.</p>
+            <p className="text-sm text-muted-foreground">You can see what the files measure here; Agency admins can apply them.</p>
           ))}
         {done && (
           <div role="status" className={cn("rounded-lg border p-3 text-sm", done.tone === "ok" ? "border-good bg-good-soft" : "border-crit bg-crit-soft")}>

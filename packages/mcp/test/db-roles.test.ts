@@ -13,11 +13,6 @@ import { rpc } from "@transpera-flow/db/client";
 import { generateApiToken, type McpHandlerOptions } from "../src";
 import { call, connect, errorOf, startTestDb, tokenDbFor, userClaims, type McpTestDb } from "./helpers";
 
-// Keeping an owner (issue #30, B1 part 1; migration 20261206000000), as an API token reaches it: the endpoint runs the query as `authenticated`
-// with the token owner's claims (and the token's id), and the guard (which reads `current_user`) must fire there and not for the
-// SECURITY DEFINER reconciliation behind it. Runs on a throwaway database (test/helpers.ts).
-
-
 let env: McpTestDb;
 let admin: pg.Client;
 
@@ -29,71 +24,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await env?.close();
-});
-
-const one = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows[0] as Record<string, unknown>;
-
-let ws = "";
-const users = { owner: "", second: "", editor: "", agency: "" };
-let second: Db;
-let owner: Db;
-let editor: Db;
-let agency: Db;
-
-describe("keeping an owner", () => {
-  beforeAll(async () => {
-    const tag = randomUUID().slice(0, 8);
-    ws = (await one("insert into workspaces (name, slug) values ('Roles Co', $1) returning id", [`roles-${tag}`])).id as string;
-    for (const k of Object.keys(users) as (keyof typeof users)[]) {
-      users[k] = randomUUID();
-      await admin.query("insert into auth.users (id, email, raw_app_meta_data) values ($1, $2, $3)", [
-        users[k],
-        `roles-${k}-${tag}@example.com`,
-        k === "agency" ? { agency_admin: true } : {},
-      ]);
-    }
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'editor')", [ws, users.owner, users.editor]);
-    // Each as its API token reaches the database: the owner's claims, with the token's id.
-    owner = (await tokenDbFor(env, users.owner)).db;
-    editor = (await tokenDbFor(env, users.editor)).db;
-    agency = (await tokenDbFor(env, users.agency, { agencyAdmin: true })).db;
-    second = (await tokenDbFor(env, users.second)).db;
-  });
-
-  const role = async (userId: string) => (await one("select role, active from memberships where workspace_id = $1 and user_id = $2", [ws, userId])) as { role: string; active: boolean } | undefined;
-
-  it("refuses an owner's token demoting, deactivating or removing the last owner, with the guard's message", async () => {
-    const demote = await errorOf(() => owner.updateTable("memberships").set({ role: "editor" }).where("workspace_id", "=", ws).where("user_id", "=", users.owner).returning("id").execute());
-    expect(demote?.message).toMatch(/workspace_keeps_an_owner/);
-    expect(demote?.code).toBe("23514");
-    const off = await errorOf(() => owner.updateTable("memberships").set({ active: false }).where("workspace_id", "=", ws).where("user_id", "=", users.owner).returning("id").execute());
-    expect(off?.message).toMatch(/workspace_keeps_an_owner/);
-    const gone = await errorOf(() => owner.deleteFrom("memberships").where("workspace_id", "=", ws).where("user_id", "=", users.owner).returning("id").execute());
-    expect(gone?.message).toMatch(/workspace_keeps_an_owner/);
-    expect(await role(users.owner)).toEqual({ role: "owner", active: true });
-  });
-
-  it("lets an editor's token change no membership at all", async () => {
-    const res = await editor.updateTable("memberships").set({ role: "owner" }).where("workspace_id", "=", ws).where("user_id", "=", users.editor).returning("id").execute();
-    expect(res).toEqual([]);
-    expect(await role(users.editor)).toEqual({ role: "editor", active: true });
-  });
-
-  it("allows the demotion once there is a second owner, and the new owner is then the last", async () => {
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, users.second]);
-    const demote = await owner.updateTable("memberships").set({ role: "editor" }).where("workspace_id", "=", ws).where("user_id", "=", users.owner).returning("id").execute();
-    expect(demote).toHaveLength(1);
-    expect(await role(users.owner)).toEqual({ role: "editor", active: true });
-    // The demoted owner can no longer manage anything, and the second is now the last owner.
-    const again = await errorOf(() => second.updateTable("memberships").set({ role: "viewer" }).where("workspace_id", "=", ws).where("user_id", "=", users.second).returning("id").execute());
-    expect(again?.message).toMatch(/workspace_keeps_an_owner/);
-  });
-
-  it("lets an agency admin's token remove the last owner", async () => {
-    const gone = await agency.deleteFrom("memberships").where("workspace_id", "=", ws).where("user_id", "=", users.second).returning("id").execute();
-    expect(gone).toHaveLength(1);
-    expect(await role(users.second)).toBeUndefined();
-  });
 });
 
 // Per-person privacy (issue #30, B1 part 2a; migration 20261207500000) as the web app and the connector reach it: a linked
@@ -116,7 +46,7 @@ describe("per-person privacy", () => {
       await db.query("insert into auth.users (id, email) values ($1, $2)", [pid[k], `priv-${k}-${tag}@example.com`]);
     }
     pid.memberPerson = NORTHBEAM_PERSON;
-    await db.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'member', $3), ($1, $4, 'editor', null)", [
+    await db.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'viewer', $3), ($1, $4, 'owner', null)", [
       NORTHBEAM_WORKSPACE_ID,
       pid.member,
       pid.memberPerson,
@@ -231,7 +161,7 @@ describe("client health rules", () => {
       hu[k] = randomUUID();
       await db.query("insert into auth.users (id, email) values ($1, $2)", [hu[k], `health-${k}-${tag}@example.com`]);
     }
-    await db.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [hws, hu.editor, hu.member]);
+    await db.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [hws, hu.editor, hu.member]);
     editorSession = env.dbAs(userClaims(hu.editor));
     memberSession = env.dbAs(userClaims(hu.member));
     editorToken = (await tokenDbFor(env, hu.editor)).db;

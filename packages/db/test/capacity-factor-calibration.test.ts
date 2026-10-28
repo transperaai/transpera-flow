@@ -102,7 +102,7 @@ beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   const link = async (email: string, role: string, person: string | null) => {
     const u = await createUser(db, email);
-    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, $3, $4)", [ws, u.id, role, person]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::public.membership_role, $4)", [ws, u.id, role, person]);
     return u;
   };
   editor = await link("cfc-editor@example.com", "editor", P.editor);
@@ -474,6 +474,8 @@ describe("the migration file", () => {
   });
 
   /** The smoke block exactly as the header prints it (post-apply 6), and the message it must end with. */
+  /** The block was written before migration 20270103000000, which made a 'member' a 'viewer': run it with the role that exists. */
+  const oldRoles = (sql: string) => sql.replaceAll("'member'", "'viewer'");
   const smoke = () => {
     const head = sql.slice(0, sql.indexOf("-- ROLLBACK ("));
     const lines = head.split("\n");
@@ -498,7 +500,7 @@ describe("the migration file", () => {
     try {
       const before = await counts();
       // Run as the operator would: outside any transaction, the block as printed with the user id put in.
-      const e = await db.client.query(block.replace("<agency admin user id>", admin.id)).then(
+      const e = await db.client.query(oldRoles(block).replace("<agency admin user id>", admin.id)).then(
         () => null,
         (x: { code?: string; message?: string }) => x,
       );
@@ -510,7 +512,7 @@ describe("the migration file", () => {
       await db.client.query("begin");
       try {
         await db.client.query("delete from memberships where workspace_id = $1 and role in ('member', 'viewer')", [ws]);
-        const e2 = await db.client.query(block.replace("<agency admin user id>", admin.id)).then(
+        const e2 = await db.client.query(oldRoles(block).replace("<agency admin user id>", admin.id)).then(
           () => null,
           (x: { code?: string; message?: string }) => x,
         );

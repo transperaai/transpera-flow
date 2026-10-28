@@ -88,7 +88,7 @@ describe("calibration", () => {
 
     const [ed, vw] = [randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `cal-editor-${tag}@example.com`, vw, `cal-viewer-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
     editor = env.dbAs(userClaims(ed));
     viewer = env.dbAs(userClaims(vw));
     anon = env.dbAs(null);

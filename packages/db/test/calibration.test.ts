@@ -122,7 +122,7 @@ beforeAll(async () => {
   editor = await createUser(db, "cal-editor@example.com");
   viewer = await createUser(db, "cal-viewer@example.com");
   stranger = await createUser(db, "cal-stranger@example.com");
-  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
+  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
 });
 
 afterAll(async () => {
@@ -299,7 +299,7 @@ describe("apply_calibration", () => {
 
   it("forgets who applied and created a calibration when their user is deleted", async () => {
     const leaver = await createUser(db, "cal-leaver@example.com");
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, leaver.id]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, leaver.id]);
     // Referrals' leads a week were applied above: propose against what they are now.
     const res = structuredClone(await computeCalibration());
     const key = `arrivals:${northbeamLeadSourceIds.referrals}`;

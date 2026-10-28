@@ -9,7 +9,7 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 const SOLUTION_ISSUE_COLS = ["solution_id", "issue_id", "workspace_id", "auto_verdict", "holds_pct", "auto_note", "user_verdict", "user_notes", "created_at", "updated_at", "created_by"] as const;
 
 // What the Solution page writes (issue #115, A50): your verdict and note on each issue a solution solves, and the notes on
-// the solution. As the signed-in user through row-level security: owners and editors write, everyone in the workspace reads.
+// the solution. As the signed-in user through row-level security: Agency admins write, everyone in the workspace reads.
 // The database logs a changed verdict or note on the issue's history (`solution_verdict_logged`), so nothing is logged here.
 
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;

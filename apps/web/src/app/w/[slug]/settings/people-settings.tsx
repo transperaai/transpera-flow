@@ -39,7 +39,7 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   const { workspace, canManage } = data;
   const floor = workspace.settings.availability_floor ?? null;
   const overtime = workspace.settings.overtime_cap ?? null;
-  const ownersOnly = canManage ? undefined : "Only workspace owners can change this.";
+  const ownersOnly = canManage ? undefined : "Only Agency admins can change this.";
   return (
     <SettingsSection id="simulation" title="Simulation" description="Limits on how the simulation treats people's time.">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -50,10 +50,10 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
           onLabel="On: people can have their own times"
           offLabel="Off: everyone works at their role's normal time"
           disabled={!data.canEdit}
-          hint={data.canEdit ? undefined : "Only owners and editors can change this."}
+          hint={data.canEdit ? undefined : "Only Agency admins can change this."}
           help={{
             description:
-              "Let owners and editors say that one person takes more or less time than their role's normal time on some steps. Off: everyone in a role works at the role's normal time. Each person sees only their own times; they are never ranked or compared across people. Members' and viewers' simulations always use the role's normal time.",
+              "Let Agency admins say that one person takes more or less time than their role's normal time on some steps. Off: everyone in a role works at the role's normal time. Each person sees only their own times; they are never ranked or compared across people. Members' and viewers' simulations always use the role's normal time.",
             example: "Maya has run kickoffs for years and takes about 0.8 of the normal time on Kickoff, 20% faster. Switch this on and set 0.8 on Kickoff in her detail under People.",
           }}
         />
@@ -108,13 +108,13 @@ export function PeopleSettings({ data, saveFactor }: { data: WorkspaceSettingsDa
           {active.length} active{inactive.length ? `, ${inactive.length} inactive` : ""}. Modelled for capacity, not performance.
         </>
       ) : (
-        <>Your record. Owners and editors see the whole team. Modelled for capacity, not performance.</>
+        <>Your record. Agency admins see the whole team. Modelled for capacity, not performance.</>
       )
     }>
       {data.canEdit ? (
         <AddPerson data={data} />
       ) : (
-        <p className="mb-3 text-fg-2">You can view people here; owners and editors can change them.</p>
+        <p className="mb-3 text-fg-2">You can view people here; Agency admins can change them.</p>
       )}
       {data.people.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">

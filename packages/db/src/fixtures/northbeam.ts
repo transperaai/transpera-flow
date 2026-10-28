@@ -21,7 +21,6 @@ import type {
   ServiceServicingRow,
   SourceRow,
   StepRow,
-  WorkspaceAccess,
 } from "../types";
 
 // Northbeam Digital, the prototype's sample agency, as database rows. Ids are
@@ -617,20 +616,6 @@ function pipelineEdgeRows(): EdgeRow[] {
 }
 
 export const NORTHBEAM_DOMAIN = "northbeam.example";
-
-/** Example access settings (fictional; `.example` and example.com never receive mail). */
-export function northbeamAccess(): WorkspaceAccess {
-  const person = (name: string) => northbeamPersonIds[name]!;
-  return {
-    domains: [{ id: id("7", 1), workspace_id: ws, domain: NORTHBEAM_DOMAIN }],
-    emails: [
-      { id: id("7", 2), workspace_id: ws, email: "rosa.diaz@northbeam.example", role: "owner", person_id: person("Rosa Diaz") },
-      { id: id("7", 3), workspace_id: ws, email: "leah.brooks@northbeam.example", role: "editor", person_id: person("Leah Brooks") },
-      // A contractor on a personal address: only the pre-assigned list can let them in.
-      { id: id("7", 4), workspace_id: ws, email: "sam.patel.seo@example.com", role: "member", person_id: person("Sam Patel") },
-    ],
-  };
-}
 
 /**
  * Northbeam's scenario library: the four every workspace starts with (hire,

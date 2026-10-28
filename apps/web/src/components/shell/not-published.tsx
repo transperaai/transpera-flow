@@ -52,7 +52,7 @@ export function NotPublished({
         ) : undefined
       }
     >
-      {what} {canEdit ? "Publish a process and this page fills in." : "An owner or editor publishes a process first, then this page fills in."}
+      {what} {canEdit ? "Publish a process and this page fills in." : "An Agency admin publishes a process first, then this page fills in."}
     </EmptyState>
   );
 }

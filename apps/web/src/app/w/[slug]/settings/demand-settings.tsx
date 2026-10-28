@@ -82,7 +82,7 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
         . Seasonality and growth then raise or lower it month by month.
       </p>
 
-      {!canEdit && <p className="mb-3 text-fg-2">You can view demand here; owners and editors can change it.</p>}
+      {!canEdit && <p className="mb-3 text-fg-2">You can view demand here; Agency admins can change it.</p>}
 
       <h3 className="mb-2 font-semibold">Lead sources</h3>
       {canEdit && <AddLeadSource workspaceId={data.workspace.id} />}

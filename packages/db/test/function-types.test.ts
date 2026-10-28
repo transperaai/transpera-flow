@@ -37,15 +37,18 @@ describe("function-types.ts", () => {
     const src = readFileSync(new URL("../src/function-types.ts", import.meta.url), "utf8");
     const admin = await createUser(db, "nullable-columns@transpera.example", { agency_admin: true });
     const d = db.dbAs(admin.claims as Claims);
+    // A person the sign-in list names as an Agency admin, who has never signed in: the new workspace gets their membership.
+    const listed = await createUser(db, "nullable-listed@transpera.example");
+    await db.client.query("insert into deployment_access (kind, value, role) values ('email', 'nullable-listed@transpera.example', 'agency_admin')");
     const ws = await rpc(d, "create_workspace", { ws_name: "Nullable columns", ws_slug: "nullable-columns" });
 
     // A new workspace has no headline numbers yet (left join).
-    const listed = (await rpcRows(d, "agency_workspace_list")).find((r) => r.id === ws)!;
-    expect(listed).toMatchObject({ numbers: null, computed_at: null });
+    const listedWs = (await rpcRows(d, "agency_workspace_list")).find((r) => r.id === ws)!;
+    expect(listedWs).toMatchObject({ numbers: null, computed_at: null });
     expect(src).toMatch(/agency_workspace_list: .*last_activity: string \| null; numbers: Json \| null; computed_at: string \| null/);
 
     // A member who has never signed in, with no person linked.
-    const member = (await rpcRows(d, "workspace_members", { ws })).find((r) => r.user_id === admin.id);
+    const member = (await rpcRows(d, "workspace_members", { ws })).find((r) => r.user_id === listed.id);
     expect(member).toMatchObject({ person_id: null, last_sign_in_at: null });
     expect(src).toMatch(/workspace_members: .*email: string \| null;.*person_id: string \| null; last_sign_in_at: string \| null/);
 

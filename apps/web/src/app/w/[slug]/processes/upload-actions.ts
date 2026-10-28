@@ -24,7 +24,7 @@ async function editorContext(workspaceId: string): Promise<{ ctx: Awaited<Return
   const ctx = await context();
   if (!ctx) return { error: "Your session has ended. Sign in again." };
   const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: workspaceId }).catch(() => null);
-  if (canEdit !== true) return { error: "Only editors and owners can upload a process." };
+  if (canEdit !== true) return { error: "Only Agency admins can upload a process." };
   return { ctx };
 }
 

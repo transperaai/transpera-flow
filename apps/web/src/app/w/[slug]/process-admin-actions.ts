@@ -8,12 +8,12 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Process admin from the Processes page (issue #182, B19 2/2; ADR 0014 "B19: archiving a process"): rename a process, change its
 // kind, archive it (soft delete) and restore it. Each is an ordinary update of `processes` as the signed-in user, so RLS decides
-// (owners, editors and agency admins write; viewers read), and the database does the rest: the company map follows a rename, a
+// (Agency admins and the Owner write; viewers read), and the database does the rest: the company map follows a rename, a
 // kind change, an archive and a restore as a system version, and archiving is refused, with a plain message naming the processes
 // involved, for a process inside another ordinary process or one that holds others. Nothing here deletes a process.
 
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
-const forbidden = { status: "error", message: "Only owners and editors can change processes here." } as const;
+const forbidden = { status: "error", message: "Only Agency admins can change processes here." } as const;
 const generic = { status: "error", message: "Couldn't save. Try again." } as const;
 
 async function signedInClient(): Promise<Db | null> {

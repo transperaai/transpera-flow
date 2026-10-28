@@ -46,12 +46,12 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const r of ["owner", "editor", "member", "viewer"] as const) {
     users[r] = await createUser(db, `${r}@plans.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[r]!.id, r]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[r]!.id, r]);
   }
   users.stranger = await createUser(db, "stranger@plans.example.com");
   users.agencyFlag = await createUser(db, "agency-flag@plans.example.com", { agency_admin: true });
   users.agencyMember = await createUser(db, "agency-member@plans.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'agency_admin')", [ws, users.agencyMember!.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, users.agencyMember!.id]);
   otherWs = (await db.client.query("insert into workspaces (name, slug) values ('Other', 'other-plans') returning id")).rows[0].id;
   otherRole = (await db.client.query("insert into roles (workspace_id, name) values ($1, 'Theirs') returning id", [otherWs])).rows[0].id;
   otherPerson = (await db.client.query("insert into people (workspace_id, name) values ($1, 'Them') returning id", [otherWs])).rows[0].id;

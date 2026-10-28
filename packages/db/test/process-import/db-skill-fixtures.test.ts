@@ -51,7 +51,7 @@ async function company(slug: string, roles: string[], people: [string, number][]
   const editorId = randomUUID();
   madeUsers.push(editorId);
   await q("insert into auth.users (id, email) values ($1, $2)", [editorId, `skill-${randomUUID()}@example.com`]);
-  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [workspaceId, editorId]);
+  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [workspaceId, editorId]);
   const ctx = contextFor(editorId);
   return { workspaceId, ctx, roles: roleIds };
 }

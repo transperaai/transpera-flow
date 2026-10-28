@@ -48,7 +48,7 @@ describe("id columns are never shown", () => {
     }
   });
 
-  it("shows an amount only to owners and editors", () => {
+  it("shows an amount only to Agency admins", () => {
     const rows = [{ deal: "d", stage: "s", entered: "1 Mar 2026", amount: "9000" }];
     const spec = IMPORT_KINDS.deals;
     const m = new Set(["deal", "stage", "entered", "amount"]);

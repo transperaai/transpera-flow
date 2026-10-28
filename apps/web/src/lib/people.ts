@@ -176,14 +176,14 @@ export function capacityFactorsShown<F extends { measuredItems: number; entered:
 /** The (i) text for "Time on each step", the same in Settings and on the People page. */
 export const FACTOR_HELP = {
   description:
-    "How long this person takes compared with their role's normal time. 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower; from 0.5 to 2. Blank uses their time for every step, or the normal time. The simulation multiplies the hands-on time they spend on the step by this. Only owners and editors set it; the person sees their own.",
+    "How long this person takes compared with their role's normal time. 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower; from 0.5 to 2. Blank uses their time for every step, or the normal time. The simulation multiplies the hands-on time they spend on the step by this. Only Agency admins set it; the person sees their own.",
   example: "Every step 1, Kickoff 0.8: Maya's kickoffs take 20% less time than the role's normal; everything else takes the normal time.",
 } as const;
 
 /** The note a member or viewer sees when the switch is on: their numbers use everyone's normal time. */
 export const SPEEDS_NORMALISED_NOTE = {
-  text: "Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what owners and editors see.",
-  description: "Each person's times are visible only to them and to owners and editors.",
+  text: "Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what Agency admins see.",
+  description: "Each person's times are visible only to them and to Agency admins.",
   example: "Maya sees her own times and an editor sees everyone's, so a member's run uses each role's normal time instead.",
 } as const;
 

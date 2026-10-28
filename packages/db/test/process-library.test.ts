@@ -47,7 +47,7 @@ async function world(): Promise<World> {
   const n = ++counter;
   const [{ id: ws }] = await q("insert into workspaces (name, slug) values ($1, $2) returning id", [`Library ${n}`, `process-library-${n}`]);
   for (const [user, role] of [[editor, "editor"], [viewer, "viewer"]] as const) {
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   }
   const [sales, delivery, support] = [randomUUID(), randomUUID(), randomUUID()];
   await q("insert into processes (id, workspace_id, name, kind) values ($1, $2, 'Sales', 'pipeline')", [sales, ws]);

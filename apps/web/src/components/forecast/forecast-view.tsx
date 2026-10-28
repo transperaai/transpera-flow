@@ -8,7 +8,7 @@
 //
 // B7 (#36) makes it a planning tool: a "Your plan" lane on the timeline holds hire, leave and solution markers that can be
 // added, dragged along the months (or moved by keyboard) and removed, and the forecast re-runs with them. A set of
-// markers is a plan, saved with a name (owners, editors and agency admins only; the demo keeps plans in the tab), and
+// markers is a plan, saved with a name (Agency admins and the Owner only; the demo keeps plans in the tab), and
 // two plans can be compared side by side. The live forecast, and its insights, are never changed by a plan.
 
 import { useIsPhone } from "@/hooks/use-mobile";
@@ -61,7 +61,7 @@ export interface ForecastViewProps {
   startDate?: string;
   /** A line under the title, e.g. the demo's note about its sample plan. */
   note?: ReactNode;
-  /** Saved forecast plans (owners, editors and agency admins; none otherwise). */
+  /** Saved forecast plans (Agency admins and the Owner; none otherwise). */
   plans?: ForecastPlanRow[];
   /** Saved solutions a plan can put live. On the demo the tab's own are added to these. */
   solutions?: SolutionRow[];
@@ -141,7 +141,7 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
     [parts, live, sources],
   );
 
-  // ---- Plans (B7): owners, editors and agency admins only; a member or viewer sees the forecast as it was. ----
+  // ---- Plans (B7): Agency admins and the Owner only; a member or viewer sees the forecast as it was. ----
   const planUi = mode !== "readonly";
   const isPhone = useIsPhone();
   const demoStore = useDemoPlans();

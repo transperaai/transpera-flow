@@ -49,7 +49,7 @@ async function world<N extends string>(names: [N, "pipeline" | "servicing"][]) {
   const n = ++counter;
   const [{ id: ws }] = await q("insert into workspaces (name, slug) values ($1, $2) returning id", [`Archive ${n}`, `archive-${n}`]);
   for (const [user, role] of [[editor, "editor"], [viewer, "viewer"]] as const) {
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   }
   const [{ id: cid }] = await q("select id from processes where workspace_id = $1 and is_company", [ws]);
   const p = {} as Record<N, string>;
@@ -340,7 +340,7 @@ describe("deletes elsewhere still reach an archived process", () => {
   it("lets a deleted person's steps, edges, versions and archive stamp go to nobody", async () => {
     const maker = await createUser(db, `maker-${randomUUID()}@process-archive.example.com`);
     const w = await world([["Sales", "pipeline"]]);
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [w.ws, maker.id]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [w.ws, maker.id]);
     const draft = (await commitAs(maker.claims, (c) => rpc(c, "open_draft", w.p.Sales))).revision_id as string;
     const [a, b] = [randomUUID(), randomUUID()];
     await commitAs(maker.claims, async (c) => {

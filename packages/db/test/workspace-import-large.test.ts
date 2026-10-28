@@ -65,7 +65,7 @@ async function newWorkspace(name = "Restored Co"): Promise<string> {
 
 async function member(ws: string, role: string): Promise<User> {
   const user = await createUser(db, `u${++seq}.${role}@import-workspace.example.com`);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   return user;
 }
 

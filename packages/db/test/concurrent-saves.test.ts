@@ -45,7 +45,7 @@ beforeAll(async () => {
     ["ana", "editor"],
   ] as const) {
     users[name] = await createUser(db, `${name}@concurrent.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[name]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[name]!.id, role]);
   }
 });
 

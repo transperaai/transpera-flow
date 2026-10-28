@@ -177,7 +177,7 @@ describe("deployment list helpers", () => {
       "That is already on the list.",
     );
     expect(deploymentErrorMessage({ code: "23514", message: 'violates check constraint "deployment_access_value_format"' })).toMatch(/free email providers/);
-    expect(deploymentErrorMessage({ code: "42501", message: "permission denied for table deployment_access" })).toMatch(/agency admins/);
+    expect(deploymentErrorMessage({ code: "42501", message: "permission denied for table deployment_access" })).toMatch(/Only an Owner/);
   });
 });
 
@@ -197,7 +197,7 @@ describe("the access functions the Better Auth hooks call", () => {
   let db: TestDb;
   beforeAll(async () => {
     db = await createTestDb();
-    await db.client.query(`insert into deployment_access (kind, value, role) values ('domain', 'client.com', 'viewer'), ('email', 'lead@client.com', 'editor')`);
+    await db.client.query(`insert into deployment_access (kind, value, role) values ('domain', 'client.com', 'viewer'), ('email', 'lead@client.com', 'agency_admin')`);
   });
   afterAll(async () => {
     await db?.close();
@@ -219,12 +219,12 @@ describe("the access functions the Better Auth hooks call", () => {
 
   it("decides a role before the user exists (the user-create hook)", async () => {
     expect(await signInRole(q(), "someone@client.com", true, [])).toBe("viewer");
-    expect(await signInRole(q(), "lead@client.com", true, [])).toBe("editor");
+    expect(await signInRole(q(), "lead@client.com", true, [])).toBe("agency_admin");
     expect(await signInRole(q(), "stranger@else.org", true, [])).toBeNull();
     expect(await signInRole(q(), "someone@client.com", false, [])).toBeNull();
     expect(await signInRole(q(), "", true, [])).toBeNull();
     expect(await signInRole(q(), undefined, true, [])).toBeNull();
-    expect(await signInRole(q(), "boot@else.org", true, ["boot@else.org"])).toBe("admin");
+    expect(await signInRole(q(), "boot@else.org", true, ["boot@else.org"])).toBe("owner");
   });
 
   it("refuses an unknown email at sign-in and changes nothing (the session-create hook)", async () => {
@@ -249,11 +249,11 @@ describe("the access functions the Better Auth hooks call", () => {
 
   it("re-checks a signed-in user's access on each request: removed, demoted and guest (web sessions and MCP tokens)", async () => {
     const id = await signUp("ops@client.com");
-    await db.client.query(`insert into deployment_access (kind, value, role) values ('email', 'ops@client.com', 'admin')`);
-    expect(await syncSignIn(q(), id, [], [])).toBe("admin");
+    await db.client.query(`insert into deployment_access (kind, value, role) values ('email', 'ops@client.com', 'owner')`);
+    expect(await syncSignIn(q(), id, [], [])).toBe("owner");
     expect(await currentAccess(q(), id, [])).toEqual({ email: "ops@client.com", agencyAdmin: true, guest: false });
     // Demoted: auth.users still says agency_admin until the next sign-in, and that no longer counts.
-    await db.client.query(`update deployment_access set role = 'editor' where value = 'ops@client.com'`);
+    await db.client.query(`update deployment_access set role = 'agency_admin' where value = 'ops@client.com'`);
     expect(await currentAccess(q(), id, [])).toEqual({ email: "ops@client.com", agencyAdmin: false, guest: false });
     // Taken off the list (the domain rule is removed too): refused, though their memberships remain.
     await db.client.query(`delete from deployment_access where value in ('ops@client.com', 'client.com')`);
@@ -267,7 +267,7 @@ describe("the access functions the Better Auth hooks call", () => {
       { providerId: "microsoft", accountId: "m-1", idToken: jwt({ tid: "tenant-1" }) },
       { providerId: "google", accountId: "g-2", idToken: jwt({ email: "lead@client.com" }) },
     ]);
-    expect(await syncSignIn(q(), id, [], await loadIdentities(q(), id))).toBe("editor");
+    expect(await syncSignIn(q(), id, [], await loadIdentities(q(), id))).toBe("agency_admin");
     const { rows } = await db.client.query("select provider, identity_data from auth.identities where user_id = $1 order by provider", [id]);
     expect(rows.map((r) => [r.provider, r.identity_data.custom_claims])).toEqual([
       ["google", undefined],

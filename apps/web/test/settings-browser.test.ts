@@ -77,7 +77,7 @@ describe("Settings: Per-person times switch", { timeout: 120_000 }, () => {
   it("a member can't change it, and is told who can; the (i) is there", async () => {
     const { page, errors } = await mount({ who: "member" });
     expect(await field(page, "Per-person times").isDisabled()).toBe(true);
-    expect(await page.locator("#simulation-heading").locator("xpath=ancestor::*[@role='region']").innerText()).toContain("Only owners and editors can change this.");
+    expect(await page.locator("#simulation-heading").locator("xpath=ancestor::*[@role='region']").innerText()).toContain("Only Agency admins can change this.");
     expect(await page.getByRole("button", { name: "About Per-person times" }).count()).toBe(1);
     expect(errors).toEqual([]);
     await page.close();

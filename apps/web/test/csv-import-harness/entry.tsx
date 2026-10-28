@@ -23,7 +23,7 @@ declare global {
     importWorkerScripts: Record<string, string>;
     /** Each message posted to a worker, in order: its file, and the `op` of the message. */
     importWorkerPosts: { file: string; op: string | null }[];
-    /** `personTimes` (#227): hidden (a member), off (an owner or editor with the switch off) or on; Northbeam's people. Default hidden. */
+    /** `personTimes` (#227): hidden (a member), off (an Agency admin with the switch off) or on; Northbeam's people. Default hidden. */
     mountImport: (options?: {
       mode?: "live" | "readonly" | "demo";
       previous?: Partial<Record<ImportKind, Record<string, string>>>;

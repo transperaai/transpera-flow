@@ -1,6 +1,6 @@
 import { storedStatus } from "@transpera-flow/db/issue-status";
 import type { NewSourceLink } from "./source-links";
-import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow, WorkspaceAccess } from "./types";
+import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "./types";
 
 type Value = string | number | boolean | null | object;
 
@@ -22,14 +22,13 @@ function insert(table: string, rows: Record<string, Value>[]): string {
 }
 
 /**
- * SQL that inserts process bundles, access settings, scenarios, issues and sources. The
+ * SQL that inserts process bundles, scenarios, issues and sources. The
  * process is linked to its revision last. Inserting a workspace gives it the
  * generic scenario library (a trigger); scenarios given for a workspace
  * replace it. Issues come last, as they can link a scenario.
  */
 export function seedSql(
   bundles: ProcessBundle[],
-  access: WorkspaceAccess[] = [],
   scenarios: ScenarioRow[] = [],
   issues: IssueRow[] = [],
   sources: SourceRow[] = [],
@@ -72,11 +71,6 @@ export function seedSql(
     // The workspace's company map (made by a trigger when the workspace went in, with a holder for each process as it
     // went in) is laid out afresh now every process is published, as the Overview used to compute it.
     out.push(`select private.relayout_company_map(${literal(b.workspace.id)});\n`);
-  }
-  for (const a of access) {
-    out.push("-- Access: allowed domains and pre-assigned emails\n");
-    out.push(insert("workspace_domains", a.domains.map((r) => ({ ...r }))));
-    out.push(insert("workspace_access_emails", a.emails.map((r) => ({ ...r }))));
   }
   const libraries = [...new Set(scenarios.map((s) => s.workspace_id))];
   if (libraries.length) {

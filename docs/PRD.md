@@ -39,6 +39,8 @@ Transpera Flow is **not sold separately**. It is included in Austin's service re
 
 ## 2. Users and roles
 
+> **Amended 28 Oct 2026 (docs/plans/cut-list.md item 9; migration 20270103000000). Three roles replace the table below.** **Owner** (Austin; everything, in every workspace; the agency-admin flag, `app_metadata.agency_admin`). **Agency admin** (the client's founder and head of CS; an `owner` membership in every workspace): edits everything, uses the sandbox, creates share links, **sees individual pay**, manages who can sign in (but cannot add, change or remove an Owner). **Viewer** (a `viewer` membership): reads everything except individual pay (B1 privacy stays for viewers: they see only the person their sign-in is linked to), runs saved scenarios but cannot save, edits nothing. "Who can sign in" (Settings > Access) is the only access list: per-workspace pre-assigned emails and allowed domains are gone. Existing rows moved: agency-admin flag to Owner; owner or editor to Agency admin; member or viewer to Viewer. Wherever the text below says owner, editor, member or viewer as a workspace role, read Agency admin (owners and editors) or Viewer (members and viewers). The history below is kept as written.
+
 | Persona | Who | What they need | Role in app |
 |---|---|---|---|
 | Consultant | Austin and future agency staff | Build maps fast, attach findings, run scenarios, produce proposals, manage many client workspaces | `agency_admin` (all workspaces) |

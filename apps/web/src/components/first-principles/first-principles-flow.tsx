@@ -310,7 +310,7 @@ function EditingNote({ editing, status, message }: { editing: FlowEditing; statu
       case "opens-draft":
         return `Answers are saved in the draft, not the live version ${editing.liveNumber}. Your first change opens a draft from live; nothing goes live until it is published.`;
       case "readonly":
-        return "You can read these answers but not change them. Editors and owners can.";
+        return "You can read these answers but not change them. Agency admins can.";
       case "demo":
         return "Demo mode: your answers stay in this tab and are gone when you reload.";
     }

@@ -125,7 +125,7 @@ export function LeversSettings({
       <PhoneReadOnly>
       {mode === "readonly" && (
         <p role="note" className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-          Only owners and editors can change which levers show. You can see them here.
+          Only Agency admins can change which levers show. You can see them here.
         </p>
       )}
       {mode === "demo" && (

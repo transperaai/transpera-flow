@@ -3,7 +3,7 @@
 
 import { normalizeDomain, normalizeEmail } from "./access";
 
-export const DEPLOYMENT_ROLES = ["admin", "editor", "viewer"] as const;
+export const DEPLOYMENT_ROLES = ["owner", "agency_admin", "viewer"] as const;
 export type DeploymentRuleRole = (typeof DEPLOYMENT_ROLES)[number];
 export type DeploymentRuleKind = "domain" | "email";
 
@@ -14,11 +14,26 @@ export interface DeploymentRule {
   role: DeploymentRuleRole;
 }
 
-export const DEPLOYMENT_ROLE_HELP: Record<DeploymentRuleRole, string> = {
-  admin: "Sees and manages every workspace, and this list.",
-  editor: "Added to every workspace as an editor.",
-  viewer: "Added to every workspace as a viewer.",
+/** What each role is called on screen. The stored word `owner` is the Owner here and `owner` on a membership is an Agency admin. */
+export const DEPLOYMENT_ROLE_LABEL: Record<DeploymentRuleRole, string> = {
+  owner: "Owner",
+  agency_admin: "Agency admin",
+  viewer: "Viewer",
 };
+
+/** A membership's role as shown: `owner` there is an Agency admin (the Owner needs no membership). */
+export const MEMBERSHIP_ROLE_LABEL: Record<"owner" | "viewer", string> = { owner: "Agency admin", viewer: "Viewer" };
+
+export const DEPLOYMENT_ROLE_HELP: Record<DeploymentRuleRole, string> = {
+  owner: "Everything, in every workspace, including who can sign in as an Owner.",
+  agency_admin: "Edits everything, sees individual pay, and manages who can sign in (not Owners).",
+  viewer: "Reads everything except individual pay, and can't edit.",
+};
+
+/** The roles a person may give: an Agency admin can't make an Owner (the database refuses too). */
+export function assignableRoles(isOwner: boolean): readonly DeploymentRuleRole[] {
+  return isOwner ? DEPLOYMENT_ROLES : DEPLOYMENT_ROLES.filter((r) => r !== "owner");
+}
 
 export function isDeploymentRole(value: unknown): value is DeploymentRuleRole {
   return typeof value === "string" && (DEPLOYMENT_ROLES as readonly string[]).includes(value);
@@ -35,6 +50,8 @@ export function deploymentErrorMessage(error: { code?: string; message?: string 
   if (m.includes("deployment_access_value_format")) {
     return "Enter a company domain like acme.com (free email providers like gmail.com can't be allowed) or a full email address.";
   }
-  if (error.code === "42501" || m.includes("row-level security")) return "Only agency admins can change who can sign in.";
+  if (error.code === "42501" || m.includes("row-level security")) {
+    return "You can add and change Agency admins and Viewers. Only an Owner can add, change or remove an Owner.";
+  }
   return "Something went wrong saving that change. Please try again.";
 }

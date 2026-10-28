@@ -7,7 +7,7 @@ import { loadShareLinks } from "@/lib/share/list";
 
 /**
  * Share links (issue #32, B3): the read-only copies of pages this workspace has shared, listed, updated and turned off in one
- * place. Owners and editors only; everyone else gets a not-found page, as if it weren't there.
+ * place. Agency admins only; everyone else gets a not-found page, as if it weren't there.
  */
 export default async function ShareLinksPage(props: PageProps<"/w/[slug]/share">) {
   const { slug } = await props.params;

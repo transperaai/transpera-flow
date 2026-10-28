@@ -47,7 +47,7 @@ describe("get_first_principles (read-only, as the user)", () => {
     editorId = await createUser("fp-editor@example.com");
     const viewerId = await createUser("fp-viewer@example.com");
     const strangerId = await createUser("fp-stranger@example.com");
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
     const otherId = (await admin.query("insert into workspaces (name, slug) values ('Elsewhere FP', 'elsewhere-fp') returning id")).rows[0].id;
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [otherId, strangerId]);
     viewerToken = await issueToken(viewerId);

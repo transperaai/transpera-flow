@@ -222,7 +222,7 @@ export async function loadWorkspaceSolutions(workspaceId: string, processId?: st
 }
 
 /**
- * The workspace's forecast plans by name (B7). RLS: only owners, editors and agency admins read them, so anyone else gets
+ * The workspace's forecast plans by name (B7). RLS: only Agency admins and the Owner read them, so anyone else gets
  * none. If they can't be read (say the table isn't there yet), the page shows none rather than break.
  */
 export async function loadWorkspaceForecastPlans(workspaceId: string): Promise<ForecastPlanRow[]> {
@@ -237,7 +237,7 @@ export async function loadWorkspaceForecastPlans(workspaceId: string): Promise<F
 /**
  * Who the workspace's members are, by user id: the name of the person linked to each membership (Settings > Access). A member with
  * no person linked is left out, so pages say "A team member" for them. (RLS, B1 2/3a: `memberships` and `people` are both read in
- * full only by owners, editors and agency admins (`can_see_people`); anyone else reads only their own membership row, and
+ * full only by Agency admins and the Owner (`can_see_people`); anyone else reads only their own membership row, and
  * their own person (`can_see_person`). So a member or viewer gets only their own name, and every other author falls back to
  * "A team member": that is the rule, not a gap.)
  */
@@ -379,7 +379,7 @@ export interface LeaveDetail extends PersonLeaveRow {
 /** Everything the workspace settings page edits, and what the user may change. */
 export interface WorkspaceSettingsData {
   workspace: WorkspaceRow;
-  /** agency_admin, owner or editor: may manage people. */
+  /** agency_admin, Agency admin: may manage people. */
   canEdit: boolean;
   /** agency_admin or owner: may change workspace settings. */
   canManage: boolean;
@@ -392,7 +392,7 @@ export interface WorkspaceSettingsData {
   personRoles: PersonRoleRow[];
   personSkills: PersonSkillRow[];
   personLeave: LeaveDetail[];
-  /** Per-person times (C6): everyone's for owners and editors, only the viewer's own person's otherwise (RLS, `can_see_person`). */
+  /** Per-person times (C6): everyone's for Agency admins, only the viewer's own person's otherwise (RLS, `can_see_person`). */
   personCapacityFactors: PersonCapacityFactorRow[];
   services: ServiceRow[];
   /** The workspace's processes, for a service's entry process. */

@@ -11,8 +11,8 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Client servicing settings (issue #19): which servicing processes each
 // service's clients run, how often and within what SLA, and the workspace's
-// health rules. Owners and editors change links (RLS); health rules are
-// workspace settings, which owners and editors change (`save_health_rules`). Every write runs as the signed-in
+// health rules. Agency admins change links (RLS); health rules are
+// workspace settings, which Agency admins change (`save_health_rules`). Every write runs as the signed-in
 // user; these checks only reject malformed input early.
 
 const invalid = { status: "error", message: "That value isn't valid." } as const;

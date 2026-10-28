@@ -40,7 +40,7 @@ function Lines({ lines }: { lines: SummaryLine[] }) {
   );
 }
 
-export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** An owner or agency admin applies the backup's workspace settings; an editor leaves them out. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
+export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** Whether the restore applies the backup's workspace settings: true for the Owner and every Agency admin, the only people who can restore. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
   const router = useRouter();
   const inputId = useId();
   const [step, setStep] = useState<Step>({ kind: "choose" });

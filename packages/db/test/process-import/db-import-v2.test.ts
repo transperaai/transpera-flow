@@ -58,7 +58,7 @@ describe("uploading a transpera-process/2 file ", () => {
     await q("insert into people (workspace_id, name, fte) values ($1, 'Maya Chen', 0.5)", [workspaceId]);
     editorId = await createUser(`v2-editor-${randomUUID()}@example.com`);
     const viewerId = await createUser(`v2-viewer-${randomUUID()}@example.com`);
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
     editorCtx = contextFor(editorId);
     viewerCtx = contextFor(viewerId);
   });

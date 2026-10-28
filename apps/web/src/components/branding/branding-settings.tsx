@@ -17,7 +17,7 @@ import { useField, type Field } from "@/lib/fields/use-field";
 // else sees them. The writes come in as props (the server actions, or stand-ins in the browser tests). The readouts and the
 // preview use the same contrast maths as the server, which checks again before saving.
 
-const READ_ONLY = "Only workspace owners can change this.";
+const READ_ONLY = "Only Agency admins can change this.";
 const NOT_A_COLOUR = "Enter a colour as six hex digits, like #0b6e8a.";
 
 const CLASH_NOTE = {

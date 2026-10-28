@@ -46,7 +46,7 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
         ) : undefined
       }
     >
-      {mode === "readonly" && <p className="text-xs text-muted-foreground">You can look at the library but not change it. Ask an owner or editor to add blocks.</p>}
+      {mode === "readonly" && <p className="text-xs text-muted-foreground">You can look at the library but not change it. Ask an Agency admin to add blocks.</p>}
       {list.length === 0 ? (
         <Card className="items-center gap-2 p-8 text-center">
           <Layers aria-hidden className="size-6 text-muted-foreground" />

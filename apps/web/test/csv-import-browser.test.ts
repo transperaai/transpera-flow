@@ -379,7 +379,7 @@ describe("the import wizard", () => {
     const { page, errors } = await mount({ mode: "readonly" });
     // A deals file: the mapper doesn't show amounts, and the preview shows a dash.
     await choose(page, "cal-log", "Deals from your CRM", csv(hubspotDeals(4)));
-    expect(await column(page, "cal-log", "amount").innerText()).toContain("Amounts are shown to owners and editors only.");
+    expect(await column(page, "cal-log", "amount").innerText()).toContain("Amounts are shown to Agency admins only.");
     expect(await column(page, "cal-log", "amount").innerText()).not.toContain("9000");
     await readIt(page, "cal-log");
     const preview = step(page, "cal-log", "rows").locator("[data-import-preview]");
@@ -422,7 +422,7 @@ describe("the import wizard", () => {
   }, 120_000);
 });
 
-// Per-person times (issue #227): a time log that names people, matched to Northbeam's people by an owner or editor with Per-person
+// Per-person times (issue #227): a time log that names people, matched to Northbeam's people by an Agency admin with Per-person
 // times on. Sales' Qualify lead is done by Priya Shah and Tom Reed; in the file Priya is "PRIYA SHAH" (matched for you) and Tom is
 // "T. Reed" (matched by hand).
 const peopleLog = () =>

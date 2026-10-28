@@ -2,9 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
-// Better Auth and deployment access (migration 20261228000000, docs/plans/supabase-exit-brief.md step 2): the role an address
-// gets, the mirror into auth.users, the per-sign-in sync of memberships, the agency-admin flag and identities, and who may edit
-// the list.
+// Better Auth and deployment access (migration 20261228000000, docs/plans/supabase-exit-brief.md step 2; three roles since
+// 20270103000000): the role an address gets, the mirror into auth.users, the per-sign-in sync of memberships, the Owner flag and
+// identities, and who may edit the list ("Who can sign in").
+//
+// The list's roles are `owner` (Austin: the agency-admin JWT flag), `agency_admin` (an `owner` membership in every workspace) and
+// `viewer` (a `viewer` membership in every workspace). The list is the single source of truth: the sync lowers as well as raises.
 
 let db: TestDb;
 
@@ -13,10 +16,10 @@ beforeAll(async () => {
   await db.client.query(`
     insert into deployment_access (kind, value, role) values
       ('domain', 'client.com', 'viewer'),
-      ('email', 'lead@client.com', 'editor'),
-      ('email', 'boss@client.com', 'admin'),
+      ('email', 'lead@client.com', 'agency_admin'),
+      ('email', 'boss@client.com', 'owner'),
       ('email', 'someone@gmail.com', 'viewer'),
-      ('domain', 'agency.io', 'editor')`);
+      ('domain', 'agency.io', 'agency_admin')`);
   // Enough workspaces to give one membership of each kind.
   await db.client.query("insert into workspaces (name, slug) values ('Extra A', 'extra-a'), ('Extra B', 'extra-b'), ('Extra C', 'extra-c')");
 });
@@ -58,16 +61,16 @@ const agencyFlag = async (id: string) =>
 describe("private.deployment_role", () => {
   it("gives a domain's default role", async () => {
     expect(await role("anyone@client.com")).toBe("viewer");
-    expect(await role("anyone@agency.io")).toBe("editor");
+    expect(await role("anyone@agency.io")).toBe("agency_admin");
   });
 
   it("lets a named email beat its domain, up or down", async () => {
-    expect(await role("lead@client.com")).toBe("editor");
-    expect(await role("boss@client.com")).toBe("admin");
+    expect(await role("lead@client.com")).toBe("agency_admin");
+    expect(await role("boss@client.com")).toBe("owner");
   });
 
   it("ignores case and surrounding spaces", async () => {
-    expect(await role("  LEAD@Client.COM ")).toBe("editor");
+    expect(await role("  LEAD@Client.COM ")).toBe("agency_admin");
     expect(await role("Anyone@CLIENT.com")).toBe("viewer");
   });
 
@@ -98,11 +101,11 @@ describe("private.deployment_role", () => {
     expect(await role("other@gmail.com")).toBeNull();
   });
 
-  it("counts ACCESS_ADMIN_EMAILS as admin rules that need no table row", async () => {
-    expect(await role("first@x.io", true, ["First@X.io"])).toBe("admin");
+  it("counts ACCESS_ADMIN_EMAILS as Owner rules that need no table row", async () => {
+    expect(await role("first@x.io", true, ["First@X.io"])).toBe("owner");
     expect(await role("first@x.io")).toBeNull();
-    // And they win over a lower row, so an admin can't lock themselves out.
-    expect(await role("lead@client.com", true, ["lead@client.com"])).toBe("admin");
+    // And they win over a lower row, so the Owner can't lock themselves out.
+    expect(await role("lead@client.com", true, ["lead@client.com"])).toBe("owner");
   });
 });
 
@@ -115,26 +118,100 @@ describe("deployment_access table", () => {
     await expect(insert("domain", "@client.com")).rejects.toThrow(/value_format/);
     await expect(insert("email", "not-an-email")).rejects.toThrow(/value_format/);
     await expect(insert("email", "lead@client.com")).rejects.toThrow(/duplicate key/);
-    await expect(db.client.query("insert into deployment_access (kind, value, role) values ('email', 'x@y.io', 'owner')")).rejects.toThrow();
+    // Only the three roles: the old words (admin, editor) and a made-up one are refused.
+    for (const old of ["admin", "editor", "member", "root"]) {
+      await expect(db.client.query("insert into deployment_access (kind, value, role) values ('email', 'x@y.io', $1)", [old]), old).rejects.toMatchObject({
+        code: "23514",
+        constraint: "deployment_access_role_check",
+      });
+    }
+    for (const ok of ["owner", "agency_admin", "viewer"]) {
+      await db.client.query("insert into deployment_access (kind, value, role) values ('email', $1, $2)", [`probe-${ok}@y.io`, ok]);
+      await db.client.query("delete from deployment_access where value = $1", [`probe-${ok}@y.io`]);
+    }
   });
 
-  it("is readable and writable by agency admins only", async () => {
-    const admin = { ...(await createUser(db, "listadmin@agency.test", { agency_admin: true })).claims };
-    const member = { sub: randomUUID(), role: "authenticated", app_metadata: {} };
-    expect(await db.as(admin, async (c) => (await c.query("select * from deployment_access")).rowCount)).toBe(5);
-    expect(await db.as(member, async (c) => (await c.query("select * from deployment_access")).rowCount)).toBe(0);
-    expect(await db.as(null, async (c) => (await c.query("select * from deployment_access")).rowCount)).toBe(0);
-    await db.as(admin, async (c) => {
-      await c.query("insert into deployment_access (kind, value, role) values ('domain', 'new.io', 'viewer')");
-      expect((await c.query("update deployment_access set role = 'editor' where value = 'new.io'")).rowCount).toBe(1);
+  /** Who can sign in, as each caller: the Owner (flag), an Agency admin (an `owner` membership), a Viewer, someone with no membership. */
+  let made: ReturnType<typeof makeCallers> | undefined;
+  const callers = () => (made ??= makeCallers());
+  async function makeCallers() {
+    const [ws] = await workspaceIds();
+    const owner = (await createUser(db, "list-owner@agency.test", { agency_admin: true })).claims;
+    const admin = await createUser(db, "list-admin@agency.test");
+    const viewer = await createUser(db, "list-viewer@agency.test");
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, admin.id, viewer.id]);
+    return { owner, admin: admin.claims, viewer: viewer.claims, stranger: { sub: randomUUID(), role: "authenticated", app_metadata: {} } };
+  }
+  const rows = (claims: Record<string, unknown> | null) => db.as(claims, async (c) => (await c.query("select * from deployment_access")).rowCount);
+
+  it("is readable by the Owner and Agency admins only, not by a Viewer, a stranger or anon", async () => {
+    const who = await callers();
+    const total = Number((await db.client.query("select count(*) from deployment_access")).rows[0].count);
+    expect(await rows(who.owner)).toBe(total);
+    expect(await rows(who.admin)).toBe(total);
+    expect(await rows(who.viewer)).toBe(0);
+    expect(await rows(who.stranger)).toBe(0);
+    expect(await rows(null)).toBe(0);
+  });
+
+  it("lets the Owner add, change and remove a rule of any role, owner rules included", async () => {
+    const who = await callers();
+    await db.as(who.owner, async (c) => {
+      await c.query("insert into deployment_access (kind, value, role) values ('domain', 'new.io', 'viewer'), ('email', 'second-owner@new.io', 'owner')");
+      expect((await c.query("update deployment_access set role = 'agency_admin' where value = 'new.io'")).rowCount).toBe(1);
+      expect((await c.query("update deployment_access set role = 'viewer' where value = 'second-owner@new.io'")).rowCount).toBe(1);
+      expect((await c.query("update deployment_access set role = 'owner' where value = 'second-owner@new.io'")).rowCount).toBe(1);
+      expect((await c.query("delete from deployment_access where value in ('new.io', 'second-owner@new.io')")).rowCount).toBe(2);
     });
+  });
+
+  it("lets an Agency admin manage agency_admin and viewer rules", async () => {
+    const who = await callers();
+    await db.as(who.admin, async (c) => {
+      await c.query("insert into deployment_access (kind, value, role) values ('domain', 'mine.io', 'viewer'), ('email', 'deputy@mine.io', 'agency_admin')");
+      expect((await c.query("update deployment_access set role = 'agency_admin' where value = 'mine.io'")).rowCount).toBe(1);
+      expect((await c.query("update deployment_access set role = 'viewer' where value = 'deputy@mine.io'")).rowCount).toBe(1);
+      expect((await c.query("delete from deployment_access where value in ('mine.io', 'deputy@mine.io')")).rowCount).toBe(2);
+    });
+  });
+
+  it("stops an Agency admin adding an owner rule, making a rule an owner rule, changing one, or removing one", async () => {
+    const who = await callers();
+    // An owner rule that exists (the Owner made it), and an ordinary one to try to promote.
+    await db.client.query("insert into deployment_access (kind, value, role) values ('email', 'real-owner@mine.io', 'owner'), ('email', 'staff@mine.io', 'viewer')");
     await expect(
-      db.as(member, (c) => c.query("insert into deployment_access (kind, value, role) values ('domain', 'mine.io', 'admin')")),
-    ).rejects.toThrow(/row-level security/);
-    await db.as(member, async (c) => {
-      expect((await c.query("update deployment_access set role = 'admin'")).rowCount).toBe(0);
-      expect((await c.query("delete from deployment_access")).rowCount).toBe(0);
+      db.as(who.admin, (c) => c.query("insert into deployment_access (kind, value, role) values ('email', 'sneaky@mine.io', 'owner')")),
+    ).rejects.toMatchObject({ code: "42501" });
+    await expect(
+      db.as(who.admin, (c) => c.query("insert into deployment_access (kind, value, role) values ('domain', 'sneaky.io', 'owner')")),
+    ).rejects.toMatchObject({ code: "42501" });
+    // Making a rule an owner rule (the new row would be an owner rule), a rule they can't see through to the end.
+    await expect(db.as(who.admin, (c) => c.query("update deployment_access set role = 'owner' where value = 'staff@mine.io'"))).rejects.toMatchObject({ code: "42501" });
+    await db.as(who.admin, async (c) => {
+      // An owner rule is invisible to the update and delete: nothing matches, nothing changes.
+      expect((await c.query("update deployment_access set role = 'viewer' where value = 'real-owner@mine.io'")).rowCount).toBe(0);
+      expect((await c.query("delete from deployment_access where value = 'real-owner@mine.io'")).rowCount).toBe(0);
     });
+    expect((await db.client.query("select role from deployment_access where value in ('real-owner@mine.io', 'staff@mine.io') order by value")).rows).toEqual([
+      { role: "owner" },
+      { role: "viewer" },
+    ]);
+    await db.client.query("delete from deployment_access where value in ('real-owner@mine.io', 'staff@mine.io')");
+  });
+
+  it("stops a Viewer, a stranger and anon writing the list at all", async () => {
+    const who = await callers();
+    for (const [name, claims] of [["viewer", who.viewer], ["stranger", who.stranger]] as const) {
+      await expect(
+        db.as(claims, (c) => c.query("insert into deployment_access (kind, value, role) values ('domain', 'mine.io', 'viewer')")),
+        name,
+      ).rejects.toThrow(/row-level security/);
+      await db.as(claims, async (c) => {
+        expect((await c.query("update deployment_access set role = 'viewer'")).rowCount, name).toBe(0);
+        expect((await c.query("delete from deployment_access")).rowCount, name).toBe(0);
+      });
+    }
+    await db.as(null, async (c) => expect((await c.query("delete from deployment_access")).rowCount).toBe(0));
   });
 
   it("writes an audit entry for a change", async () => {
@@ -185,7 +262,7 @@ describe("the mirror into auth.users", () => {
   it("lets foreign keys to auth.users point at a Better Auth user", async () => {
     const id = await signUp("fk@client.com");
     const [ws] = await workspaceIds();
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ws, id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [ws, id]);
   });
 });
 
@@ -207,79 +284,77 @@ describe("private.sync_deployment_access", () => {
     expect(await memberships(id)).toEqual(before);
   });
 
-  it("adds an editor to every workspace", async () => {
+  it("adds an Agency admin to every workspace, as an owner membership", async () => {
     const id = await signUp("lead@client.com");
-    expect(await sync(id)).toBe("editor");
-    expect(new Set((await memberships(id)).map((r) => r.role))).toEqual(new Set(["editor"]));
+    expect(await sync(id)).toBe("agency_admin");
+    const rows = await memberships(id);
+    expect(rows.map((r) => r.workspace_id).sort()).toEqual(await workspaceIds());
+    expect(new Set(rows.map((r) => r.role))).toEqual(new Set(["owner"]));
+    expect(await agencyFlag(id)).toBe(false);
   });
 
-  it("raises a lower membership to the deployment role and never lowers a higher one", async () => {
-    const [ws1, ws2, ws3, ws4] = await workspaceIds();
-    expect(ws4).toBeDefined();
-    const id = await signUp("mixed@agency.io");
-    await db.client.query(
-      `insert into memberships (workspace_id, user_id, role, source) values
-         ($1, $5, 'owner', 'manual'), ($2, $5, 'member', 'domain'), ($3, $5, 'viewer', 'access_list'), ($4, $5, 'agency_admin', 'manual')`,
-      [ws1, ws2, ws3, ws4, id],
-    );
-    // The lists still back the domain and access_list rows, so reconcile_access keeps them.
-    await db.client.query("insert into workspace_domains (workspace_id, domain) values ($1, 'agency.io')", [ws2]);
-    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'mixed@agency.io', 'viewer')", [ws3]);
-    expect(await sync(id, [], [{ provider: "google", provider_id: "g-mixed", hd: "agency.io" }])).toBe("editor"); // agency.io
-    const byWs = Object.fromEntries((await memberships(id)).map((r) => [r.workspace_id, r]));
-    expect(byWs[ws1]).toMatchObject({ role: "owner", source: "manual" });
-    // Raised, but still attached to the lists: the source is kept.
-    expect(byWs[ws2]).toMatchObject({ role: "editor", source: "domain" });
-    expect(byWs[ws3]).toMatchObject({ role: "editor", source: "access_list" });
-    expect(byWs[ws4]).toMatchObject({ role: "agency_admin" });
+  it("raises a Viewer made an Agency admin, in every workspace", async () => {
+    const id = await signUp("raised@agency.io");
+    await db.client.query("insert into deployment_access (kind, value, role) values ('email', 'raised@agency.io', 'viewer')");
+    expect(await sync(id)).toBe("viewer");
+    expect(new Set((await memberships(id)).map((r) => r.role))).toEqual(new Set(["viewer"]));
+    await db.client.query("update deployment_access set role = 'agency_admin' where value = 'raised@agency.io'");
+    expect(await sync(id)).toBe("agency_admin");
+    expect(new Set((await memberships(id)).map((r) => r.role))).toEqual(new Set(["owner"]));
+    await db.client.query("delete from deployment_access where value = 'raised@agency.io'");
   });
 
-  it("re-applies the floor at every sign-in, after the lists have had their say", async () => {
+  it("LOWERS a membership to match the list: an Agency admin made a Viewer is a viewer everywhere at the next sign-in", async () => {
+    const id = await signUp("lowered@agency.io");
+    await db.client.query("insert into deployment_access (kind, value, role) values ('email', 'lowered@agency.io', 'agency_admin')");
+    expect(await sync(id)).toBe("agency_admin");
+    expect(new Set((await memberships(id)).map((r) => r.role))).toEqual(new Set(["owner"]));
+    await db.client.query("update deployment_access set role = 'viewer' where value = 'lowered@agency.io'");
+    expect(await sync(id)).toBe("viewer");
+    const rows = await memberships(id);
+    expect(rows.map((r) => r.workspace_id).sort()).toEqual(await workspaceIds());
+    expect(new Set(rows.map((r) => r.role))).toEqual(new Set(["viewer"]));
+    // And the database agrees from that moment: they no longer edit.
+    const claims = { sub: id, role: "authenticated", app_metadata: {} };
     const [ws] = await workspaceIds();
-    const id = await signUp("floor@agency.io");
-    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'floor@agency.io', 'viewer')", [ws]);
-    expect(await sync(id)).toBe("editor");
-    const listed = async () => (await memberships(id)).find((r) => r.workspace_id === ws);
-    expect(await listed()).toMatchObject({ role: "editor", source: "access_list" });
-    // The list changes (its trigger reconciles): the row follows the list again until the next sign-in.
-    await db.client.query("update workspace_access_emails set role = 'viewer', person_id = null where email = 'floor@agency.io'");
-    await db.client.query("select public.reconcile_access($1)", [id]);
-    expect(await listed()).toMatchObject({ role: "viewer", source: "access_list" });
-    await sync(id);
-    expect(await listed()).toMatchObject({ role: "editor", source: "access_list" });
-    // Taken off the list: reconcile removes the list row, and the floor puts a manual one back.
-    await db.client.query("delete from workspace_access_emails where email = 'floor@agency.io'");
-    await sync(id);
-    expect(await listed()).toMatchObject({ role: "editor", source: "manual" });
+    expect(await db.as(claims, async (c) => (await c.query("select public.can_edit_workspace($1) as ok", [ws])).rows[0].ok)).toBe(false);
+    await db.client.query("delete from deployment_access where value = 'lowered@agency.io'");
   });
 
-  it("never lowers an owner or an editor to viewer, and keeps a member above viewer", async () => {
-    const [ws1, ws2, ws3] = await workspaceIds();
-    const id = await signUp("keeps@client.com");
-    await db.client.query(
-      `insert into memberships (workspace_id, user_id, role) values ($1, $4, 'owner'), ($2, $4, 'editor'), ($3, $4, 'member')`,
-      [ws1, ws2, ws3, id],
-    );
+  it("makes every existing membership match, whatever it was", async () => {
+    const [ws1, ws2] = await workspaceIds();
+    const id = await signUp("matches@client.com");
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $3, 'owner'), ($2, $3, 'viewer')", [ws1, ws2, id]);
     expect(await sync(id)).toBe("viewer");
     const byWs = Object.fromEntries((await memberships(id)).map((r) => [r.workspace_id, r.role]));
-    expect(byWs[ws1]).toBe("owner");
-    expect(byWs[ws2]).toBe("editor");
-    expect(byWs[ws3]).toBe("member");
+    expect(byWs[ws1]).toBe("viewer");
+    expect(byWs[ws2]).toBe("viewer");
   });
 
-  it("does not reactivate a deactivated membership or remove anything", async () => {
+  it("keeps the link to a person record when it changes a role", async () => {
+    const [ws1] = await workspaceIds();
+    const id = await signUp("linked@client.com");
+    const person = (await db.client.query("insert into people (workspace_id, name) values ($1, 'Linked Person') returning id", [ws1])).rows[0].id as string;
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'owner', $3)", [ws1, id, person]);
+    expect(await sync(id)).toBe("viewer");
+    expect((await db.client.query("select role, person_id from memberships where user_id = $1 and workspace_id = $2", [id, ws1])).rows).toEqual([
+      { role: "viewer", person_id: person },
+    ]);
+  });
+
+  it("reactivates a deactivated membership: the list is the only access list", async () => {
     const [ws1, ws2] = await workspaceIds();
     const id = await signUp("blocked@client.com");
-    await db.client.query(`insert into memberships (workspace_id, user_id, role, active) values ($1, $2, 'member', false)`, [ws1, id]);
+    await db.client.query(`insert into memberships (workspace_id, user_id, role, active) values ($1, $2, 'viewer', false)`, [ws1, id]);
     await sync(id);
     const byWs = Object.fromEntries((await memberships(id)).map((r) => [r.workspace_id, r]));
-    expect(byWs[ws1]).toMatchObject({ role: "member", active: false });
+    expect(byWs[ws1]).toMatchObject({ role: "viewer", active: true });
     expect(byWs[ws2]).toMatchObject({ role: "viewer", active: true });
   });
 
-  it("makes an admin an agency admin and adds no memberships", async () => {
+  it("makes the Owner a flag and adds no memberships, leaving any it already has alone", async () => {
     const id = await signUp("boss@client.com");
-    expect(await sync(id)).toBe("admin");
+    expect(await sync(id)).toBe("owner");
     expect(await agencyFlag(id)).toBe(true);
     expect(await memberships(id)).toEqual([]);
     // The flag reaches the claims the app builds, so RLS then shows every workspace.
@@ -287,9 +362,13 @@ describe("private.sync_deployment_access", () => {
     expect(await db.as(claims, async (c) => Number((await c.query("select count(*) from workspaces")).rows[0].count))).toBe(
       (await workspaceIds()).length,
     );
+    const [ws1] = await workspaceIds();
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [ws1, id]);
+    await sync(id);
+    expect(await memberships(id)).toMatchObject([{ role: "viewer" }]);
   });
 
-  it("takes the flag away when the list no longer names the user an admin, and keeps unrelated app metadata", async () => {
+  it("takes the flag away when the list no longer names the user an Owner, and keeps unrelated app metadata", async () => {
     const id = await signUp("demoted@client.com");
     await db.client.query(`update auth.users set raw_app_meta_data = '{"agency_admin": true, "note": "kept"}' where id = $1`, [id]);
     await sync(id);
@@ -299,10 +378,10 @@ describe("private.sync_deployment_access", () => {
     });
   });
 
-  it("lets a bootstrap admin in with no table row", async () => {
+  it("lets a bootstrap Owner in with no table row", async () => {
     const id = await signUp("founder@brand-new.io");
     expect(await sync(id)).toBeNull();
-    expect(await sync(id, ["founder@brand-new.io"])).toBe("admin");
+    expect(await sync(id, ["founder@brand-new.io"])).toBe("owner");
     expect(await agencyFlag(id)).toBe(true);
   });
 
@@ -348,7 +427,7 @@ describe("private.sync_deployment_access", () => {
       (await db.client.query("select provider, provider_id, identity_data from auth.identities where user_id = $1 order by provider", [id]))
         .rows;
 
-    it("records Google's hosted domain where the domain joins read it", async () => {
+    it("records Google's hosted domain in the identity", async () => {
       const id = await signUp("hd@client.com");
       await sync(id, [], [{ provider: "google", provider_id: "g-123", hd: "client.com" }]);
       expect(await identityData(id)).toEqual([
@@ -358,33 +437,12 @@ describe("private.sync_deployment_access", () => {
           identity_data: { sub: "g-123", email: "hd@client.com", custom_claims: { hd: "client.com" } },
         },
       ]);
-      const ok = await db.client.query("select private_qualifies as q from (select public.qualifies_for_domain($1, 'client.com') as private_qualifies) s", [id]);
-      expect(ok.rows[0].q).toBe(true);
-    });
-
-    it("joins a workspace by domain on the very first sign-in (identities are recorded before the lists run)", async () => {
-      const [ws] = await workspaceIds();
-      await db.client.query("insert into deployment_access (kind, value, role) values ('domain', 'joiners.io', 'viewer')");
-      await db.client.query("insert into workspace_domains (workspace_id, domain) values ($1, 'joiners.io')", [ws]);
-      const id = await signUp("first@joiners.io");
-      expect(await sync(id, [], [{ provider: "google", provider_id: "g-join", hd: "joiners.io" }])).toBe("viewer");
-      expect((await memberships(id)).find((r) => r.workspace_id === ws)).toMatchObject({ role: "member", source: "domain" });
     });
 
     it("stores the address the provider's token names, falling back to the user's", async () => {
       const id = await signUp("named@client.com");
       await sync(id, [], [{ provider: "google", provider_id: "g-named", email: "Other@Client.com" }]);
       expect((await identityData(id))[0].identity_data.email).toBe("other@client.com");
-    });
-
-    it("applies a workspace's own pre-assigned role first, so the deployment role never lowers it", async () => {
-      const [ws, other] = await workspaceIds();
-      const id = await signUp("pre@client.com");
-      await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'pre@client.com', 'owner')", [ws]);
-      expect(await sync(id)).toBe("viewer");
-      const byWs = Object.fromEntries((await memberships(id)).map((r) => [r.workspace_id, r]));
-      expect(byWs[ws]).toMatchObject({ role: "owner", source: "access_list" });
-      expect(byWs[other]).toMatchObject({ role: "viewer", source: "manual" });
     });
 
     it("drops the hosted domain when a later sign-in has none, and records a Microsoft tenant", async () => {
@@ -445,8 +503,8 @@ describe("guests: outsiders listed on a live restricted share link (B3)", () => 
     expect(await maySignIn("open@outside.org")).toBeNull();
     expect(await maySignIn("revoked@outside.org")).toBeNull();
     // A deployment role wins over guest.
-    expect(await maySignIn("lead@client.com")).toBe("editor");
-    expect(await maySignIn("guest@outside.org", true, ["guest@outside.org"])).toBe("admin");
+    expect(await maySignIn("lead@client.com")).toBe("agency_admin");
+    expect(await maySignIn("guest@outside.org", true, ["guest@outside.org"])).toBe("owner");
   });
 
   it("stops letting them in when the link expires", async () => {
@@ -465,18 +523,12 @@ describe("guests: outsiders listed on a live restricted share link (B3)", () => 
   it("gives a guest no memberships and no agency admin, but records the identity the share link checks", async () => {
     const id = await signUp("guest@outside.org");
     await db.client.query(`update auth.users set raw_app_meta_data = '{"agency_admin": true}' where id = $1`, [id]);
-    // Even a pre-assigned list entry isn't applied: the membership sync doesn't run for a guest.
-    await db.client.query("insert into workspace_access_emails (workspace_id, email, role) values ($1, 'guest@outside.org', 'viewer')", [ws]);
+    // Nothing is applied: the membership sync doesn't run for a guest.
     await db.client.query("delete from memberships where user_id = $1", [id]);
     expect(await sync(id, [], [{ provider: "google", provider_id: "g-guest", email: "guest@outside.org" }])).toBe("guest");
     expect(await memberships(id)).toEqual([]);
     expect(await agencyFlag(id)).toBe(false);
     const ident = (await db.client.query("select provider, identity_data ->> 'email' as e from auth.identities where user_id = $1", [id])).rows;
     expect(ident).toEqual([{ provider: "google", e: "guest@outside.org" }]);
-    // The home page's resolve_my_access doesn't reconcile for a guest's claims, and does for everyone else's.
-    const claims = (guest: boolean) => ({ sub: id, role: "authenticated", email: "guest@outside.org", app_metadata: { agency_admin: false, ...(guest ? { guest: true } : {}) } });
-    expect(await db.as(claims(true), async (c) => (await c.query("select * from resolve_my_access()")).rows)).toEqual([]);
-    expect(await db.as(claims(false), async (c) => (await c.query("select * from resolve_my_access()")).rows)).toHaveLength(1);
-    await db.client.query("delete from workspace_access_emails where email = 'guest@outside.org'");
   });
 });

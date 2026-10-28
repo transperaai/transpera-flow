@@ -111,7 +111,7 @@ export async function saveOvertimeCap(workspaceId: string, base: number | null, 
 }
 
 /**
- * Switch Per-person times (C6). Owners and editors (a dedicated function writes only this key). Refreshes on a save, because the
+ * Switch Per-person times (C6). Agency admins (a dedicated function writes only this key). Refreshes on a save, because the
  * page shows or hides the per-person fields.
  */
 export async function saveCapacityFactorsEnabled(workspaceId: string, base: boolean | null, value: boolean): Promise<SaveOutcome<boolean>> {
@@ -281,7 +281,7 @@ export async function removeLeave(leaveId: string): Promise<ActionResult> {
   return {};
 }
 
-// Services (issue #12). Owners and editors manage them; RLS enforces that.
+// Services (issue #12). Agency admins manage them; RLS enforces that.
 
 export async function saveServiceField(
   serviceId: string,
@@ -342,7 +342,7 @@ export async function removeService(serviceId: string): Promise<ActionResult> {
   return {};
 }
 
-// Roles (issue #88). Owners and editors manage them; RLS enforces that.
+// Roles (issue #88). Agency admins manage them; RLS enforces that.
 
 export async function saveRoleField(roleId: string, field: RoleField, base: Scalar, value: Scalar): Promise<SaveOutcome<Scalar>> {
   const parsed = parseRoleField(roleId, field, base, value);
@@ -382,7 +382,7 @@ export async function removeRole(roleId: string): Promise<ActionResult> {
   return {};
 }
 
-// Demand (issue #13): lead sources, seasonality and growth. Owners and editors
+// Demand (issue #13): lead sources, seasonality and growth. Agency admins
 // manage them; RLS enforces that. Changing a value makes its provenance
 // `entered` (a database trigger), and each save refreshes the page so the
 // totals and provenance shown catch up.
@@ -511,7 +511,7 @@ export async function saveGrowth(workspaceId: string, base: number | null, value
   return outcome;
 }
 
-// Market conditions (A57). Owners and editors manage them; RLS enforces that, and the four presets are read-only.
+// Market conditions (A57). Agency admins manage them; RLS enforces that, and the four presets are read-only.
 
 export interface MarketActionResult extends ActionResult {
   /** The condition just created, so the screen can select it. */

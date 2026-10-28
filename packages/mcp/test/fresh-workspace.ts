@@ -47,7 +47,7 @@ export async function createFreshWorkspace(admin: pg.Client): Promise<FreshWorks
     throw e;
   }
   for (const [k, role] of Object.entries(MEMBERSHIPS)) {
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [wsId, ids[k as keyof typeof MEMBERSHIPS], role]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [wsId, ids[k as keyof typeof MEMBERSHIPS], role]);
   }
   const companyId = (await admin.query("select id from processes where workspace_id = $1 and is_company", [wsId])).rows[0].id as string;
   const users = Object.fromEntries(

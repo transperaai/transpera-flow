@@ -14,7 +14,7 @@ const issue = northbeamIssues()[1]!.id;
 beforeAll(async () => {
   db = await createTestDb();
   editor = await createUser(db, "editor@sources-web.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
 });
 
 afterAll(async () => {

@@ -76,7 +76,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
       aboutInfo={{ trail: trailOf({ id: live.process.id, parentId: live.process.parent_process_id }, byId).map((t) => t.name), hasDraft: draft !== null && !isUnpublished(live), lastChange }}
-      // Owners and editors share the published version of an ordinary process (not an earlier version, an archived one or the company map).
+      // Agency admins share the published version of an ordinary process (not an earlier version, an archived one or the company map).
       share={canEdit && !earlier && !archivedAt && !isUnpublished(live) && !live.process.is_company ? <ShareButton slug={slug} kind="process" targetId={live.process.id} what={live.process.name} /> : undefined}
       firstPrinciples={{ doc: fpShown.doc, href: `${base}/p/${live.process.id}/first-principles`, draftChanged, inheritedFrom: fpShown.inheritedFrom }}
       inside={processes.filter((p) => p.parentId === live.process.id).map((p) => ({ id: p.id, name: p.name, href: hrefs[p.id]! }))}

@@ -54,7 +54,7 @@ export interface SolutionPageProps {
   compareBase?: ProcessBundle | null;
   /** A sentence when the process has been published since the solution was copied from it. */
   movedOn?: string | null;
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
   share?: ReactNode;
 }
 

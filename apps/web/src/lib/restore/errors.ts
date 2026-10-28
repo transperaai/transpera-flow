@@ -2,8 +2,8 @@
 // tests agree. Never echoes SQL: the database's own words are shown only for a failure inside a section, and only when they
 // read as a sentence about the data (the rules the triggers state in plain words), never as a statement, a relation or a column.
 
-export const ROLE_MESSAGE = "Only owners, editors and agency admins can restore a backup.";
-export const NOT_EMPTY_MESSAGE = "Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there.";
+export const ROLE_MESSAGE = "Only Agency admins and the Owner can restore a backup.";
+export const NOT_EMPTY_MESSAGE = "Backups restore only into an empty workspace. Ask an Owner to create a new workspace, then restore it there.";
 export const TOO_BIG_MESSAGE = "This backup is too big to restore in one go (the database ran out of time). Nothing was restored.";
 export const REFUSED_PLAN_MESSAGE = "This backup can't be restored as it is.";
 export const FAILED_MESSAGE = "The restore failed. Nothing was restored. Try again.";
