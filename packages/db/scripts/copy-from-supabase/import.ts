@@ -1,4 +1,4 @@
-// Loads an export (export.ts) into a database already migrated to the current head, in one transaction
+// Loads an export (export.ts) into a database migrated up to COPY_BASE_VERSION (then `migrate` takes it to head), in one transaction
 // (docs/plans/supabase-exit-brief.md, step 7a).
 //   node --experimental-strip-types scripts/copy-from-supabase/import.ts --in <dir> [--url <target postgres url>] [--driver pg|neon-ws]
 //       [--dry-run] [--no-replica]
@@ -14,6 +14,7 @@ import { migrationFiles } from "../../src/migrations.ts";
 import { DRIVERS, connectTarget, type Driver } from "./connect.ts";
 import { listForeignKeys, planLoad, type ForeignKey } from "./foreign-keys.ts";
 import {
+  COPY_BASE_VERSION,
   EXPECTED_SOURCE_VERSION,
   LOGO_MAX_BYTES,
   LOGO_MIMES,
@@ -104,11 +105,13 @@ export async function runImport(client: Queryable, options: ImportOptions): Prom
 
   // --- Before anything is written -----------------------------------------------------------------------------------------
   const applied = new Set((await client.query("select version from public.schema_migrations")).rows.map((r) => r.version as string));
-  const pending = migrationFiles().filter((f) => !applied.has(f.split("_")[0]!));
-  if (pending.length > 0) throw new Error(`the target is not at the current head (${pending.length} migration(s) pending, first ${pending[0]}); run pnpm migrate first`);
-  const head = migrationFiles().at(-1)!.split("_")[0]!;
+  const versions = migrationFiles().map((f) => f.split("_")[0]!);
+  const missing = versions.filter((v) => v <= COPY_BASE_VERSION && !applied.has(v));
+  if (missing.length > 0) throw new Error(`the target is not at the copy base ${COPY_BASE_VERSION} (${missing.length} migration(s) missing, first ${missing[0]}); run pnpm migrate --up-to ${COPY_BASE_VERSION} first`);
+  const beyond = [...applied].filter((v) => v > COPY_BASE_VERSION).sort();
+  if (beyond.length > 0) throw new Error(`the target is past the copy base ${COPY_BASE_VERSION} (first ${beyond[0]}); import into a database migrated with --up-to ${COPY_BASE_VERSION}, then run pnpm migrate`);
   if (manifest.maxMigration === null) warnings.push("the export does not say which migration the source was at");
-  else if (manifest.maxMigration > head) throw new Error(`the export is from migration ${manifest.maxMigration}, newer than the target's head ${head}`);
+  else if (manifest.maxMigration > COPY_BASE_VERSION) throw new Error(`the export is from migration ${manifest.maxMigration}, newer than the copy base ${COPY_BASE_VERSION}`);
   else if (manifest.maxMigration !== EXPECTED_SOURCE_VERSION) warnings.push(`the source was at migration ${manifest.maxMigration}, not ${EXPECTED_SOURCE_VERSION}`);
 
   const targetColumns = await loadColumns(client);

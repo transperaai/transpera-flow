@@ -16,6 +16,11 @@ export interface Queryable {
 
 /** The migration the Supabase production database was at when the export was designed (brief: "row 72"). */
 export const EXPECTED_SOURCE_VERSION = "20261227000000";
+/**
+ * The schema the copy loads into: the last migration of the move off Supabase. Import into a database migrated with
+ * `migrate --up-to` this version, verify, then `migrate` to head, so later migrations (the strip) run on the real data.
+ */
+export const COPY_BASE_VERSION = "20261231000000";
 /** `workspace_logos_size`: 512 KB. */
 export const LOGO_MAX_BYTES = 524_288;
 export const LOGO_MIMES = ["image/png", "image/jpeg", "image/webp"];

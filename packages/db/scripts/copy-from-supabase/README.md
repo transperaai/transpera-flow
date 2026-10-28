@@ -5,7 +5,7 @@ Three scripts, run from the repo root with `pnpm --filter @transpera-flow/db <sc
 | Script | What it does |
 |---|---|
 | `copy:export` | Reads the Supabase database (migration row 72) into a directory of JSON files, and downloads the public `branding` logos. Read-only. |
-| `copy:import` | Loads an export into a database already at the current head, in **one transaction**. Nothing is written if anything fails. |
+| `copy:import` | Loads an export into a database migrated `--up-to` the copy base (`20261231000000`, `COPY_BASE_VERSION`), in **one transaction**. Nothing is written if anything fails. Then `migrate` takes it to head, so later migrations transform the real data. |
 | `copy:verify` | Compares the target with the export: row counts, every exported row's values (compared in SQL from the file's own text), the Better Auth copies, access rules, logos, sequences, triggers, and a full check of every foreign key. Exits 1 on any problem. |
 
 The export directory holds real people's data. It must be **outside the repo** (`export.ts` refuses a path inside it), is created `0700`
@@ -19,7 +19,7 @@ with `0600` files, and is deleted when the cutover is done (`rm -rf <dir>`).
 - From the cloud container, where Neon's port 5432 is closed, add `--driver neon-ws` to `copy:import` and `copy:verify`: they then
   connect through `@neondatabase/serverless` over a WebSocket (through `HTTPS_PROXY` when it is set), on one connection, so the
   single transaction is the same. The migrations need the same route (docs/supabase-notes.md, "Checked on Neon").
-- The target is at the current head and holds **no data**: `pnpm --filter @transpera-flow/db migrate` first. The import refuses a target
+- The target is at the copy base and holds **no data**: `pnpm --filter @transpera-flow/db migrate --up-to 20261231000000` first. The import refuses a target
   that has rows in any table it copies. `deployment_access` may hold rules (a rule for an email the users have keeps its role), and
   their audit rows are allowed. A target someone has already signed in to has `auth.users` rows: use a fresh branch, not that one.
   **Neon `main` is the Preview database**, so by cutover it holds whatever QA wrote (Austin's own sign-in at least), and the import
@@ -43,7 +43,7 @@ D=--driver=neon-ws                                  # drop it on a machine that 
 #    neondb_owner; then its owner connection URI (`/projects/{id}/connection_uri?branch_id=…&database_name=copy_rehearsal&role_name=neondb_owner`)
 #    written straight to "$SCRATCH/rehearsal-url" (0600), never printed.
 export DATABASE_URL="$(cat "$SCRATCH/rehearsal-url")"
-pnpm --filter @transpera-flow/db migrate $D         # compat + every migration into the empty database
+pnpm --filter @transpera-flow/db migrate --up-to 20261231000000 $D   # compat + migrations up to the copy base
 
 # 2. Export from Supabase (needs Austin to allow the production reads).
 SUPABASE_ACCESS_TOKEN="$(cat "$SCRATCH/supabase-token")" \
@@ -54,7 +54,8 @@ pnpm --filter @transpera-flow/db copy:import --in "$OUT" $D --dry-run
 
 # 4. Import for real, then verify (VERIFIED, exit 0).
 pnpm --filter @transpera-flow/db copy:import --in "$OUT" $D
-pnpm --filter @transpera-flow/db copy:verify --in "$OUT" $D
+pnpm --filter @transpera-flow/db copy:verify --in "$OUT" $D             # at the copy base, before migrate
+pnpm --filter @transpera-flow/db migrate $D                             # the later migrations (the strip) run on the real data
 
 # 5. Point a local or preview check at the branch's database (sign in, open Northbeam and a client workspace), then delete the
 #    branch through the Neon API, `rm -rf "$OUT"` and remove the scratch URL file.
@@ -74,15 +75,16 @@ D=--driver=neon-ws
 # Start the export a minute after the freeze begins (see copy:export below on writes it reports).
 SUPABASE_ACCESS_TOKEN="$(cat "$SCRATCH/supabase-token")" \
   pnpm --filter @transpera-flow/db copy:export --out "$OUT" --supabase vgsjkpwvxkpqvyazwcyq
-pnpm --filter @transpera-flow/db migrate $D
+pnpm --filter @transpera-flow/db migrate --up-to 20261231000000 $D
 pnpm --filter @transpera-flow/db copy:import --in "$OUT" $D --dry-run
 pnpm --filter @transpera-flow/db copy:import --in "$OUT" $D
 pnpm --filter @transpera-flow/db copy:verify --in "$OUT" $D
+pnpm --filter @transpera-flow/db migrate $D
 
 # 3 to 6 (Vercel Production env, merge, smoke test, rollback) are in docs/plans/supabase-exit-brief.md, 7c.
 ```
 
-Do not go on to step 3 unless `copy:verify` printed `VERIFIED`. A failed or interrupted `copy:import` wrote nothing: fix the cause and run it again.
+Do not run the final `migrate` or go on to step 3 unless `copy:verify` printed `VERIFIED`. A failed or interrupted `copy:import` wrote nothing: fix the cause and run it again.
 
 ## Options
 

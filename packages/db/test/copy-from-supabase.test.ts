@@ -16,7 +16,7 @@ import { planLoad, type ForeignKey } from "../scripts/copy-from-supabase/foreign
 import { postgresSource, runExport } from "../scripts/copy-from-supabase/export.ts";
 import { formatReport, runImport, type ImportReport } from "../scripts/copy-from-supabase/import.ts";
 import { runVerify } from "../scripts/copy-from-supabase/verify.ts";
-import { assertReadOnlySelect, brandingFile, managementApiSource, parseRowsExactly, type Manifest } from "../scripts/copy-from-supabase/shared.ts";
+import { COPY_BASE_VERSION, assertReadOnlySelect, brandingFile, managementApiSource, parseRowsExactly, type Manifest } from "../scripts/copy-from-supabase/shared.ts";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // Step 7a of the move off Supabase: scripts/copy-from-supabase/. The source is "Supabase-like": the shims and the migrations up to
@@ -55,7 +55,7 @@ const EXACT = [
 const q = (db: TestDb) => async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows;
 
 async function emptyTarget(): Promise<TestDb> {
-  const t = await createTestDb({ seed: false });
+  const t = await createTestDb({ seed: false, upTo: COPY_BASE_VERSION });
   targets.push(t);
   return t;
 }
@@ -638,14 +638,30 @@ describe("import, the rest", () => {
     expect((await target.client.query("select current_setting('session_replication_role') as r")).rows[0].r).toBe("origin");
   });
 
-  it("refuses a target that has data, or isn't at head, and changes nothing", async () => {
+  it("refuses a target that has data, or isn't at the copy base, and changes nothing", async () => {
     const target = await emptyTarget();
     await runImport(target.client, { dir: exportDir });
     await expect(runImport(target.client, { dir: exportDir })).rejects.toThrow(/already has rows in .*public\.workspaces/);
     expect(await count(target, "workspaces")).toBe(await count(source, "workspaces"));
 
     // A database that is behind (the source itself, at 20261227000000) is not a target.
-    await expect(runImport(source.client, { dir: exportDir })).rejects.toThrow(/not at the current head/);
+    await expect(runImport(source.client, { dir: exportDir })).rejects.toThrow(/not at the copy base/);
+    // Nor is one past it: the later migrations must run on the copied data, after the import.
+    const past = await emptyTarget();
+    await past.client.query("insert into public.schema_migrations (version) values ('29991231000000')");
+    await expect(runImport(past.client, { dir: exportDir })).rejects.toThrow(/past the copy base/);
+    expect(await count(past, "workspaces")).toBe(0);
+  });
+
+  it("then migrates the copied data to head, and a copied user still reads their workspace", { timeout: 120_000 }, async () => {
+    const target = await emptyTarget();
+    await runImport(target.client, { dir: exportDir });
+    expect((await runVerify(target.client, exportDir)).ok).toBe(true);
+    const later = migrationFiles().filter((f) => f.split("_")[0]! > COPY_BASE_VERSION);
+    expect((await applyMigrations(target.client)).files).toEqual(later);
+    await signInAndRead(target);
+    // Verify belongs between the import and migrate; past the base it says so rather than passing.
+    if (later.length > 0) expect((await runVerify(target.client, exportDir)).ok).toBe(false);
   });
 
   it("fails, writing nothing, when another session holds a lock on a table it writes", async () => {

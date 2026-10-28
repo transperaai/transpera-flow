@@ -11,7 +11,7 @@ import { migrationFiles } from "../../src/migrations.ts";
 import { DRIVERS, connectTarget, type Driver } from "./connect.ts";
 import type { ImportReport } from "./import.ts";
 import { danglingSql, listForeignKeys } from "./foreign-keys.ts";
-import { REPORT_FILE, isMain, qualified, quoteIdent, readJson, readManifest, runMain, tableFile, usageError, type Queryable } from "./shared.ts";
+import { COPY_BASE_VERSION, REPORT_FILE, isMain, qualified, quoteIdent, readJson, readManifest, runMain, tableFile, usageError, type Queryable } from "./shared.ts";
 
 export interface VerifyLine {
   status: "ok" | "FAIL" | "info";
@@ -37,10 +37,18 @@ export async function runVerify(client: Queryable, dir: string): Promise<VerifyR
   const one = async (sql: string, params: unknown[] = []) => Number((await client.query(sql, params)).rows[0]!.n);
   info(report ? `using ${REPORT_FILE} from the import (${report.path} path) to allow for what it skipped` : `no ${REPORT_FILE}: nothing is allowed for skipped items`);
 
-  // Head
+  // Verify runs between the import and `migrate`: the target must still be exactly at the copy base, where the export's
+  // tables and columns are the target's.
   const applied = new Set((await client.query("select version from public.schema_migrations")).rows.map((r) => r.version as string));
-  const pending = migrationFiles().filter((f) => !applied.has(f.split("_")[0]!));
-  check(pending.length === 0, pending.length === 0 ? "target is at the current head" : `target has ${pending.length} migration(s) pending`);
+  const versions = migrationFiles().map((f) => f.split("_")[0]!);
+  const missing = versions.filter((v) => v <= COPY_BASE_VERSION && !applied.has(v));
+  const beyond = [...applied].filter((v) => v > COPY_BASE_VERSION);
+  check(
+    missing.length === 0 && beyond.length === 0,
+    missing.length === 0 && beyond.length === 0
+      ? `target is at the copy base ${COPY_BASE_VERSION}`
+      : `target is not at the copy base ${COPY_BASE_VERSION} (${missing.length} missing, ${beyond.length} past it): verify before running migrate`,
+  );
 
   // Row counts
   for (const [name, { rows }] of Object.entries(manifest.tables)) {
