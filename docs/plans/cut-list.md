@@ -39,10 +39,23 @@ Started 27 Oct 2026 during QA of the Neon preview. These changes are built **aft
 8. **Sandbox:** profit comes early (phase 2), and the default purpose categories are fine for now. See
    `docs/plans/sandbox-design.md`.
 
-## Open questions
+9. **Three roles replace all of today's roles (Austin, 28 Oct).** They replace both the sign-in roles (Admin, Editor,
+   Viewer) and the per-workspace roles (owner, editor, member, viewer).
+   - **Owner:** Austin, in every client's deployment. Everything, including deployment settings and anything technical.
+   - **Agency admin:** the client's founder and head of CS.
+     - Edits processes, people, clients and issues.
+     - Uses the sandbox and saves scenarios, and creates share links.
+     - **Manages who can sign in**: adds and removes viewers and agency admins.
+     - **Sees individual pay rates.**
+   - **Viewer:** everyone else at the client.
+     - Reads everything except individual pay (B1 privacy stays for viewers).
+     - Runs saved scenarios but can't save them.
 
-- **Roles.** Austin wants three roles: himself, agency admin and viewer. The exact mapping is to be confirmed (see the
-  design's "Who uses it").
+   This goes with the strip of the multi-tenant machinery (rework-direction decision 1). Existing memberships map like
+   this:
+   - agency admin flag → Owner;
+   - owner or editor → Agency admin;
+   - member or viewer → Viewer.
 
 ## Forecast sandbox: brainstorm notes
 

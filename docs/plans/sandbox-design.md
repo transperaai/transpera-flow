@@ -181,10 +181,10 @@ each scenario's band.
 - Results are never stored. They are re-run from today's live model, as forecast plans are today, so a scenario can't
   go stale. A scenario that refers to something that no longer exists (a person who left, a deleted step) shows that
   change as broken and skips it, with a note (as `resolveScenario` does today).
-- **Who uses it (Austin, 28 Oct):** Austin and the client's founder and head of CS. In each deployment, the sandbox is
-  open to **Admins and Editors** of "Who can sign in", so the founder and the head of CS need the Editor role at least.
-  Viewers can open and run saved scenarios but can't save. Levers and figures that show one person's pay follow the
-  existing pay privacy (B1).
+- **Who uses it (Austin, 28 Oct):** the three roles (cut list item 9).
+  - **Owner** (Austin) and **agency admins** (the client's founder and head of CS) use the sandbox, save scenarios and
+    see pay.
+  - **Viewers** open and run saved scenarios, can't save, and see no individual pay.
 - **MCP (read-only, decision 1b):** `list_scenarios` and `run_scenario` let Claude or ChatGPT run a saved scenario and
   report on it. Running is a read; nothing is saved.
 
@@ -231,7 +231,8 @@ each scenario's band.
 - Changes can be whole-run or timed; scenarios are saved, run and compared.
 
 - Profit early (phase 2). The default purpose categories are fine for now.
+- Roles: Owner, Agency admin, Viewer (cut list item 9).
 
 ## Questions for Austin
 
-1. **Roles.** Austin wants three: himself, agency admin and viewer. The proposed mapping is still to be confirmed.
+None open.
