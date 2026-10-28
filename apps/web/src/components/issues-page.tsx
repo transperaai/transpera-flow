@@ -228,9 +228,8 @@ export function IssuesPage({
                           {sol.tested} tested{sol.passed ? <span className="ml-1 text-good">✓ passed</span> : null}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">{sol.ideas ? "" : "—"}</span>
+                        <span className="text-muted-foreground">—</span>
                       )}
-                      {sol.ideas ? <div className="text-muted-foreground">{sol.ideas} AI idea{sol.ideas === 1 ? "" : "s"}</div> : null}
                     </td>
                   </tr>
                 );

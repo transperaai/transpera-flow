@@ -34,17 +34,14 @@ export interface UploadPreview {
   gap?: { input: GapInput; roleOf: Record<string, string>; gaps: SimulationGap[] };
 }
 
-/** What a /2 file carries beyond its steps, counted per section for the preview. Nothing here is applied: it all waits for a person. */
+/** What a /2 file carries beyond its steps, counted per section for the preview.  */
 export interface UploadExtras {
   sources: { title: string; kind: string; date: string | null }[];
-  /** Company facts that will wait in Suggestions, as the reviewer will read them. */
-  suggestions: { subject: string; headline: string; isNew: boolean }[];
-  proposals: { kind: "issue" | "solution_idea"; title: string; forIssue: string | null }[];
   /** How many parts of the first principles the file fills (job, truths, requirements, ...). */
   firstPrinciplesParts: number;
   /** Things the upload will leave out or change, in plain words. */
   notes: string[];
-  /** Where the file's sources disagree with each other, or the file disagrees with what the company has. */
+  /** Where the file's sources disagree with each other. */
   conflicts: string[];
 }
 

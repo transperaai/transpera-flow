@@ -25,7 +25,7 @@ const SECTION_WORDS: Record<string, string> = {
   clients: "the clients", sources: "the sources", processes: "the processes", scenarios: "the scenarios", blocks: "the blocks", issues: "the issues",
   steps: "the steps and edges", services: "the services", service_servicing: "the servicing rules", client_groups: "the client groups",
   client_services: "the client services", client_assignments: "the client assignments", person_skills: "the skills", person_capacity_factors: "the per-person times", source_links: "the source links",
-  suggestions: "the pending suggestions", proposals: "the pending proposals", archive: "the archived processes", log: "the import log",
+  archive: "the archived processes", log: "the import log",
 };
 
 export function sectionInWords(section: string): string {

@@ -5,20 +5,18 @@ import { describe, expect, it } from "vitest";
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 
-describe("play mode keeps nothing and writes nowhere but through the one function", () => {
-  it("the play section and the Send dialog use no browser storage, cookie or address state", () => {
-    for (const f of ["src/components/share/play-section.tsx", "src/components/share/send-idea.tsx"]) {
+describe("play mode keeps nothing and writes nothing", () => {
+  it("the play section uses no browser storage, cookie or address state", () => {
+    for (const f of ["src/components/share/play-section.tsx"]) {
       // Without comments (the file says in words what it keeps nowhere).
       const text = read(f).split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
       expect(text, f).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|history\.(push|replace)State|router\.(push|replace)|searchParams/);
     }
   });
 
-  it("the Server Action calls only submit_play_proposal, revalidates nothing, and never logs the token", () => {
+  it("the visitor's actions file makes no database call and the send action is gone", () => {
     const actions = read("src/app/s/[token]/actions.ts");
-    const send = actions.slice(actions.indexOf("export async function submitPlayIdea"));
-    expect(send.match(/\brpc(?:Rows)?\(\s*\w+,\s*"([a-z_]+)"/g)).toEqual(['rpc(db, "submit_play_proposal"']);
-    expect(send).not.toMatch(/\.(selectFrom|insertInto|updateTable|deleteFrom)\(|\.from\(|revalidate|refresh\(|console\./);
+    expect(actions).not.toMatch(/\brpc(?:Rows)?\(|submitPlayIdea|submit_play_proposal|\.(selectFrom|insertInto|updateTable|deleteFrom)\(/);
     expect(actions).toMatch(/^"use server";/);
   });
 
@@ -32,10 +30,5 @@ describe("play mode keeps nothing and writes nowhere but through the one functio
     const dialog = read("src/components/share/share-dialog.tsx");
     expect(dialog).toContain('useState(false);\n  const [label');
     expect(dialog).toContain('play: kind === "process" && play');
-  });
-
-  it("a visitor's typed text is never name-checked in the app (the database holds it for members)", () => {
-    const input = read("src/lib/share/play-input.ts");
-    expect(input).not.toMatch(/loadShareSecrets|nameTokenIndex|shareSnapshotLeaks|redactShareSnapshot/);
   });
 });

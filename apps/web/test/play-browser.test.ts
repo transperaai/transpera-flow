@@ -5,8 +5,8 @@ import { LEVER_KIND_IDS } from "@transpera-flow/db";
 import { bundleHarness } from "./build-harness";
 
 // A play link's page (issue #33, B4) in a real browser: the real SharedView for a Northbeam process in `play` mode, People off and
-// Financials off, with the workspace hiding "Work done twice". The visitor moves levers in their browser; nothing is stored; the Send
-// dialog calls the harness's stub (the Server Action's stand-in) once with the moved patch. A view link of the same snapshot offers none of it.
+// Financials off, with the workspace hiding "Work done twice". The visitor moves levers in their browser; nothing is stored (there is no way to send
+// an idea back). A view link of the same snapshot offers none of it.
 
 let browser: Browser;
 let script: string;
@@ -36,7 +36,6 @@ afterAll(async () => {
 interface Options {
   mode?: "view" | "play";
   hidden?: string[];
-  visitorEmail?: string | null;
   people?: boolean;
   financials?: boolean;
 }
@@ -85,7 +84,7 @@ describe("a play link's page, People off and Financials off", () => {
     const text = await page.locator("body").innerText();
     expect(text).toContain("Try your own changes");
     expect(text).toContain("Shared view · try changes");
-    expect(text).toContain("You can try changes here. Nothing is saved unless you send it to the team.");
+    expect(text).toContain("You can try changes here. Nothing is saved.");
     expect(text).not.toContain("Shared view · read only");
     // The workspace hides "Work done twice": no rework slider. Hands-on time is offered. No per-person slider (People off).
     expect(await page.locator('[data-lever$=".rework_rate"]').count()).toBe(0);
@@ -101,73 +100,14 @@ describe("a play link's page, People off and Financials off", () => {
     await page.close();
   }, 240_000);
 
-  it("moving a lever updates the comparison headline; Send is disabled before and enabled after", async () => {
+  it("moving a lever updates the comparison headline, and there is no way to send an idea", async () => {
     const { page } = await mount();
     await ready(page);
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(true);
-    expect(await page.locator("[data-play-send]").getAttribute("title")).toBe("Move at least one lever first.");
     expect(await page.locator('[data-testid="compare-headline"]').count()).toBe(0);
     await move(page, "demand.leads_per_week", 20);
     await page.waitForSelector('[data-testid="compare-headline"]', { timeout: 60_000 });
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(false);
-    await page.close();
-  }, 240_000);
-
-  it("Send: the dialog lists the change in words, checks the name, and calls the stubbed action once with the moved patch; the levers stay", async () => {
-    const { page, errors } = await mount();
-    await ready(page);
-    await move(page, "demand.leads_per_week", 12);
-    await page.click("[data-play-send]");
-    await page.waitForSelector("[data-send-idea]");
-    expect(await page.locator("[data-send-idea] h2").innerText()).toBe("Send your idea to Northbeam Digital");
-    expect(await page.locator("[data-send-changes]").innerText()).toContain("Leads per week: 12");
-    // The honeypot is off-screen and out of the tab order.
-    const box = await page.locator("[data-send-honeypot]").boundingBox();
-    expect(box === null || box.x + box.width <= 0).toBe(true);
-    expect(await page.locator("[data-send-honeypot] input").getAttribute("tabindex")).toBe("-1");
-    // Empty name first.
-    await page.click("[data-send-submit]");
-    expect(await page.locator("[data-send-error]").innerText()).toBe("Give your idea a name.");
-    expect(await page.evaluate(() => window.playSubmits.length)).toBe(0);
-    await page.fill("[data-send-title]", "More leads");
-    await page.fill("[data-send-note]", "Try it for a quarter.");
-    await page.fill("[data-send-name]", "Marta Okoye");
-    await page.click("[data-send-submit]");
-    expect(await page.locator("[data-send-error]").innerText()).toBe("Add your email address so the team can reply.");
-    await page.fill("[data-send-email]", "marta@example.com");
-    await page.click("[data-send-submit]");
-    await page.waitForSelector("[data-send-done]");
-    expect(await page.locator("[data-send-done]").innerText()).toContain("Sent. The team will find your idea in their Suggestions. Nothing changes unless they build it.");
-    const sent = await page.evaluate(() => window.playSubmits);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ title: "More leads", note: "Try it for a quarter.", name: "Marta Okoye", email: "marta@example.com", issue: null, levers: [{ path: "demand.leads_per_week", op: "set", value: 12 }] });
-    await page.click("[data-send-done] button");
-    // The levers stay where they were.
-    expect(await value(page, "demand.leads_per_week")).toBe("12");
-    expect(errors).toEqual([]);
-    await page.close();
-  }, 240_000);
-
-  it("shows each refusal in plain words, and keeps the dialog open", async () => {
-    const answers: [Parameters<typeof JSON.stringify>[0], string][] = [
-      [{ status: "rate_limited" }, "A lot of ideas have been sent from this link recently. Try again in an hour."],
-      [{ status: "busy" }, "The team has a lot of ideas waiting. Try again later."],
-      [{ status: "gone" }, "This link has expired or been turned off."],
-      [{ status: "sign_in" }, "Sign in again with the address this link was sent to."],
-      [{ status: "error", message: "One of the values is out of range." }, "One of the values is out of range."],
-    ];
-    const { page } = await mount();
-    await ready(page);
-    await move(page, "demand.leads_per_week", 12);
-    await page.click("[data-play-send]");
-    await page.fill("[data-send-title]", "More leads");
-    await page.fill("[data-send-name]", "Marta");
-    await page.fill("[data-send-email]", "marta@example.com");
-    for (const [answer, message] of answers) {
-      await page.evaluate((a) => (window.playAnswer = a as never), answer);
-      await page.click("[data-send-submit]");
-      await page.waitForFunction((m) => document.querySelector("[data-send-error]")?.textContent === m, message);
-    }
+    expect(await page.locator("[data-play-send]").count()).toBe(0);
+    expect(await page.locator("body").innerText()).not.toMatch(/Send this idea|Suggestions/);
     await page.close();
   }, 240_000);
 
@@ -185,11 +125,10 @@ describe("a play link's page, People off and Financials off", () => {
     await page.evaluate(() => window.mountShare("process", { people: false, financials: false }, { mode: "play" }));
     await ready(page);
     expect(await value(page, "demand.leads_per_week")).toBe(before);
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(true);
     await page.close();
   }, 240_000);
 
-  it("a view link of the same snapshot shows no levers and no Send", async () => {
+  it("a view link of the same snapshot shows no levers", async () => {
     const { page, errors } = await mount({ mode: "view" });
     await page.waitForSelector("[data-cost]", { timeout: 90_000, state: "attached" });
     await page.waitForTimeout(1500);
@@ -197,37 +136,23 @@ describe("a play link's page, People off and Financials off", () => {
     expect(text).toContain("Shared view · read only");
     expect(text).not.toContain("Try your own changes");
     expect(await page.locator("[data-lever]").count()).toBe(0);
-    expect(await page.locator("[data-play-send]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
   }, 240_000);
 
-  it("when the workspace hides every lever kind the section says so and Send stays disabled", async () => {
+  it("when the workspace hides every lever kind the section says so", async () => {
     const { page } = await mount({ hidden: [...LEVER_KIND_IDS] });
     await page.waitForSelector("[data-play-section]", { timeout: 90_000 });
     expect(await page.locator("[data-play-note]").innerText()).toBe("The team hasn't shown any levers on this page.");
     expect(await page.locator("[data-lever]").count()).toBe(0);
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(true);
     await page.close();
   }, 240_000);
 });
 
 describe("a restricted play link", () => {
-  it("shows the verified address, read only, instead of an email field, and sends no typed email", async () => {
-    const { page } = await mount({ people: true, financials: true, visitorEmail: "marta@example.com" });
+  it("with People on, a person's hours are offered", async () => {
+    const { page } = await mount({ people: true, financials: true });
     await ready(page);
-    await move(page, "demand.leads_per_week", 12);
-    await page.click("[data-play-send]");
-    await page.waitForSelector("[data-send-idea]");
-    expect(await page.locator("[data-send-verified]").innerText()).toBe("Sent as marta@example.com");
-    expect(await page.locator("[data-send-email]").count()).toBe(0);
-    await page.fill("[data-send-title]", "More leads");
-    await page.fill("[data-send-name]", "Marta");
-    await page.click("[data-send-submit]");
-    await page.waitForSelector("[data-send-done]");
-    expect((await page.evaluate(() => window.playSubmits))[0]).toMatchObject({ email: "" });
-    // With People on a person's hours are offered.
-    await page.click("[data-send-done] button");
     expect(await page.locator('[data-lever^="people."]').count()).toBeGreaterThan(0);
     await page.close();
   }, 240_000);
@@ -235,7 +160,7 @@ describe("a restricted play link", () => {
 
 describe("screenshots", () => {
   for (const [scheme, width] of [["light", 1440], ["dark", 1440], ["light", 400], ["dark", 400]] as const) {
-    it(`${scheme} at ${width} px: the section and the dialog render without console errors`, async () => {
+    it(`${scheme} at ${width} px: the section renders without console errors`, async () => {
       const { page, errors } = await mount({}, { width, height: width === 400 ? 900 : 1800 }, scheme);
       await ready(page);
       await move(page, "demand.leads_per_week", 12);
@@ -244,9 +169,6 @@ describe("screenshots", () => {
       // No horizontal page scroll at phone width.
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       if (SHOTS) await page.screenshot({ path: `${SHOTS}/play-${scheme}-${width}.png` });
-      await page.click("[data-play-send]");
-      await page.waitForSelector("[data-send-idea]");
-      if (SHOTS) await page.screenshot({ path: `${SHOTS}/play-send-${scheme}-${width}.png` });
       expect(errors).toEqual([]);
       await page.close();
     }, 240_000);

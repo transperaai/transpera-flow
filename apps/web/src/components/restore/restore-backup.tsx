@@ -40,7 +40,7 @@ function Lines({ lines }: { lines: SummaryLine[] }) {
   );
 }
 
-export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** An owner or agency admin applies the backup's workspace settings; an editor leaves them as a suggestion. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
+export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** An owner or agency admin applies the backup's workspace settings; an editor leaves them out. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
   const router = useRouter();
   const inputId = useId();
   const [step, setStep] = useState<Step>({ kind: "choose" });
@@ -154,7 +154,7 @@ export function RestoreBackup({ slug, canManage = true, post }: { slug: string; 
                   <p className="mt-1 text-fg-2">
                     {check.summary.settings === "applied"
                       ? "The workspace settings (hours a week, horizon, currency) are applied."
-                      : "The workspace settings wait as a suggestion for an owner to accept; until then this workspace uses its own defaults."}
+                      : "The workspace settings are not applied, because only an owner or agency admin can apply them. This workspace keeps its own."}
                   </p>
                 )}
               </div>

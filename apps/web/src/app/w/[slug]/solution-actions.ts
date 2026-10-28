@@ -1,6 +1,5 @@
 "use server";
 
-import { refresh } from "next/cache";
 import type { BlockBundle, Json, ProcessBundle, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
@@ -36,10 +35,6 @@ function failure(e: unknown) {
   if (/issue is closed/.test(m)) return { status: "error", message: "That issue is already resolved, marked won't fix or dismissed, so a solution can't be linked to it." } as const;
   if (/only a detection/.test(m)) return { status: "error", message: "That issue is only a detection. Acknowledge it as an issue first." } as const;
   if (/another process/.test(m)) return { status: "error", message: "That issue is about another process, so this solution can't be linked to it." } as const;
-  if (/already been dealt with/.test(m)) return { status: "error", message: "That idea has already been built or dismissed." } as const;
-  if (/linked to the idea's issue/.test(m)) return { status: "error", message: "A solution built from an idea has to be linked to the idea's issue." } as const;
-  if (/idea is for another process/.test(m)) return { status: "error", message: "That idea is for another process." } as const;
-  if (/no such idea/.test(m)) return { status: "error", message: "That idea isn't there any more, or isn't yours to build." } as const;
   if (/published version/.test(m)) return { status: "error", message: "A solution has to start from a published version of the process." } as const;
   if (error.code === "42501") return forbidden;
   if (error.code === "23503") return { status: "error", message: "The process, its live version or an issue is no longer there. Reload and try again." } as const;
@@ -47,13 +42,9 @@ function failure(e: unknown) {
   return { status: "error", message: "Couldn't save the solution. Try again." } as const;
 }
 
-/**
- * Save a solution, with the issues it solves and the automatic verdict against each (worked out here). With `ideaId` (A52: "Build it" on
- * a solution idea) the solution is saved through `build_proposal`, which also marks the idea built, in the same transaction.
- */
-export async function createSolution(workspaceId: unknown, input: unknown, ideaId?: unknown): Promise<SaveSolutionResult> {
+/** Save a solution, with the issues it solves and the automatic verdict against each (worked out here). */
+export async function createSolution(workspaceId: unknown, input: unknown): Promise<SaveSolutionResult> {
   if (!isId(workspaceId)) return invalid;
-  if (ideaId !== undefined && ideaId !== null && !isId(ideaId)) return invalid;
   const parsed = parseSolutionInput(input);
   if (!parsed.ok) return { status: "error", message: parsed.error };
   if (!(await getSessionUser())) return signedOut;
@@ -83,12 +74,10 @@ export async function createSolution(workspaceId: unknown, input: unknown, ideaI
   };
   let data;
   try {
-    data = typeof ideaId === "string" ? await rpc(db, "build_proposal", { ...args, p_proposal: ideaId }) : await rpc(db, "save_solution", args);
+    data = await rpc(db, "save_solution", args);
   } catch (e) {
     return failure(e);
   }
-  // The sidebar's pending count lives in the shared layout, which navigation doesn't re-render.
-  if (typeof ideaId === "string") refresh();
   const solution = data as unknown as SolutionRow;
   const saved = await db.selectFrom("solution_issues").select(SOLUTION_ISSUE_COLS).where("solution_id", "=", solution.id).execute().catch(() => []);
   return { status: "ok", solution, links: saved as unknown as SolutionIssueRow[] };

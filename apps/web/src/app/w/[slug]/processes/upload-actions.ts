@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { checkProcessFileText, processTextFrom, type ProcessFileCheck } from "@transpera-flow/db/process-file";
-import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, takeLinkFetch, ToolError } from "@transpera-flow/mcp";
+import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, takeLinkFetch, ImportError } from "@transpera-flow/db/process-import";
 import { isId } from "@/lib/editor/validate";
 import { sourceLabel, uploadSizeProblem, type CreateUploadInput, type CreateUploadResult, type PreviewInput, type PreviewResult, type UploadPreview } from "@/lib/processes/upload";
 import { NOTICE_COOKIE, noticeValue } from "@/lib/processes/upload-notice";
@@ -32,7 +32,7 @@ async function context(workspaceId: string) {
   const user = await getSessionUser();
   if (!user) return null;
   const userId = user.id;
-  return { db: await getDb(), tokenHash: "", userId, activeWorkspaceId: workspaceId, today: new Date().toISOString().slice(0, 10) };
+  return { db: await getDb(), userId };
 }
 
 const failure = (check: ProcessFileCheck, source: string): UploadPreview => ({
@@ -112,18 +112,16 @@ export async function previewUpload(workspaceId: string, _slug: string, input: P
           ? {
               extras: {
                 sources: p.extras.sources,
-                suggestions: p.extras.suggestions.map((s) => ({ subject: s.subject, headline: s.headline, isNew: s.isNew })),
-                proposals: p.extras.proposals,
                 firstPrinciplesParts: p.extras.firstPrinciplesParts,
                 notes: p.extras.notes,
-                conflicts: [...(check.conflicts ?? []), ...p.extras.conflicts],
+                conflicts: check.conflicts ?? [],
               },
             }
           : {}),
       },
     };
   } catch (e) {
-    return { error: e instanceof ToolError ? e.message : GENERIC };
+    return { error: e instanceof ImportError ? e.message : GENERIC };
   }
 }
 
@@ -151,7 +149,7 @@ export async function createUpload(workspaceId: string, slug: string, input: Cre
     processId = made.process.id;
     warnings = [...check.warnings, ...made.warnings];
   } catch (e) {
-    if (e instanceof ToolError) return { error: e.message };
+    if (e instanceof ImportError) return { error: e.message };
     return { error: "Couldn't create it. Try again." };
   }
   // The redirect below ends the request, so what the upload noticed rides along in a short-lived cookie for the editor to show once.

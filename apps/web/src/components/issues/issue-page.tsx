@@ -1,7 +1,7 @@
 "use client";
 
 // The Issue page (issue #113, A48; prototype: "Issue"): where the issue sits on the map, what is wrong, the solutions
-// tested, AI ideas and the history on the left; its target, owners, links and sources on the right. Edit reuses the
+// tested and the history on the left; its target, owners, links and sources on the right. Edit reuses the
 // Acknowledge dialog, Mark resolved opens the Resolve dialog, and a resolved issue offers Reopen and shows a
 // "Resolved <date> · by …" bar. The history is kept after resolving.
 
@@ -64,8 +64,6 @@ export interface IssuePageProps {
   /** The signed-in person's id, so their entries in the history say "You". */
   viewerId?: string | null;
   liveRevisions?: Record<string, string>;
-  /** The "AI ideas" section's content (A52): the ideas waiting for this issue, each with Build it and Dismiss. Without it the section says there are none. */
-  ideas?: ReactNode;
   /** The workspace's solutions and which issues they solve (the demo keeps its own in this tab). */
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
@@ -261,21 +259,6 @@ export function IssuePage(props: IssuePageProps) {
             {solutions.length ? <SolutionsTable solutions={solutions} /> : (
               <Card className="px-4 py-6 text-sm text-muted-foreground" data-empty="solutions">
                 Nothing tested yet. Build solution opens the Editor with this issue&apos;s steps outlined.
-              </Card>
-            )}
-          </section>
-
-          <section className="flex flex-col gap-2" data-section="ideas">
-            <div>
-              <h2 className={`${CARD_TITLE} flex items-center`}>
-                AI ideas
-                <Help {...ISSUE_PAGE_HELP.ideas} />
-              </h2>
-              <p className="text-sm text-muted-foreground">Proposed by AI, not built or simulated yet.</p>
-            </div>
-            {props.ideas ?? (
-              <Card className="px-4 py-6 text-sm text-muted-foreground" data-empty="ideas">
-                No AI ideas for this issue yet.
               </Card>
             )}
           </section>

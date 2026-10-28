@@ -43,7 +43,6 @@ export function ScenarioPanel({
   leversHref,
   viewer,
   library = true,
-  onLeversChange,
 }: {
   /** The baseline model (the process as it is now). */
   model: EngineModel;
@@ -68,8 +67,6 @@ export function ScenarioPanel({
   viewer?: Viewer;
   /** Show the saved scenarios (the library). A play link's visitor sees only the levers (B4). Default: shown. */
   library?: boolean;
-  /** Told the levers that are moved (as patches) whenever they change; none when everything is at neutral. */
-  onLeversChange?: (patches: ScenarioPatch[]) => void;
 }) {
   const canEdit = !isReadOnly(mode);
   const [store] = useState<ScenarioStore>(() => (mode === "live" ? liveScenarioStore(workspaceId) : new MemoryScenarioStore(workspaceId)));
@@ -94,7 +91,6 @@ export function ScenarioPanel({
   const levers = useMemo(() => visibleLevers(allLevers, hiddenLevers), [allLevers, hiddenLevers]);
   const hiddenCount = hiddenLevers.filter((id) => leverKind(id)?.control === "slider").length;
   const moved = useMemo(() => leverPatches(levers, values), [levers, values]);
-  useEffect(() => onLeversChange?.(moved), [moved, onLeversChange]);
   const patches = useMemo(() => [...usable.flatMap((s) => s.patch), ...moved], [usable, moved]);
   // Model resolution refuses a broken scenario rather than skipping its patch (issue #16).
   const resolved = useMemo(() => (patches.length ? resolveRun(model, patches, retired) : null), [model, patches, retired]);

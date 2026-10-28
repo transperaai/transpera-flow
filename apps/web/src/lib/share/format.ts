@@ -34,7 +34,5 @@ export const showsPeople = (on: boolean) => (on ? "Names" : "Team member labels"
 export const showsFinancials = (on: boolean) => (on ? "Costs and margins" : "Revenue only");
 /** What a play link lets a visitor do, in the table's words. */
 export const showsTryChanges = "Try changes";
-/** Ideas sent from a play link: "3 sent", "None sent". */
-export const ideasText = (n: number) => (n <= 0 ? "None sent" : `${n} sent`);
 /** Who may open it. */
 export const whoText = (emails: readonly string[]) => (emails.length === 0 ? "Anyone with the link" : emails.length === 1 ? "1 person" : `${emails.length} people`);

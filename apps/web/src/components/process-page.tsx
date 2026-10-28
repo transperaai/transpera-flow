@@ -96,7 +96,6 @@ export function ProcessPage({
   ai,
   findings: initialFindings = NO_FINDINGS,
   aboutInfo,
-  ideaIssueIds = [],
   share,
 }: {
   /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
@@ -105,8 +104,6 @@ export function ProcessPage({
   findings?: FindingRow[];
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
   aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
-  /** Issues with an AI solution idea waiting, for the status track's "Solution idea". */
-  ideaIssueIds?: readonly string[];
   /** The latest AI analysis of this process (B17): its read, when and by what it was written, and whether it is out of date. */
   ai?: AiPanelData;
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
@@ -173,10 +170,9 @@ export function ProcessPage({
   const solData = mode === "demo" ? inTab : (solutions?.data ?? NO_SOLUTIONS_DATA);
   const solBase = solutions?.base ?? (mode === "demo" ? "/demo" : "");
   const canBuild = !isReadOnly(mode) && viewingVersion === null && !!solutions?.base;
-  const ideaSet = useMemo(() => new Set(ideaIssueIds), [ideaIssueIds]);
   const issueExtra = (issue: IssueRow) => (
     <IssueTrackView
-      track={trackOf(issue, linkedSolutions(solData, issue.id), ideaSet.has(issue.id))}
+      track={trackOf(issue, linkedSolutions(solData, issue.id))}
       base={solBase}
       buildHref={canBuild && (issue.status === "open" || issue.status === "testing") ? buildSolutionHref(solBase, issue, `${solBase}/p/${bundle.process.id}#issues`) : null}
     />

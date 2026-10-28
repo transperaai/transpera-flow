@@ -4,10 +4,10 @@
 
 import type { Db } from "@transpera-flow/db";
 
-const TABLES = ["roles", "people", "services", "client_groups", "clients", "lead_sources", "churn_drivers", "market_schedule", "issues", "sources", "blocks", "solutions", "suggestions", "suggestion_proposals"] as const;
+const TABLES = ["roles", "people", "services", "client_groups", "clients", "lead_sources", "churn_drivers", "market_schedule", "issues", "sources", "blocks", "solutions"] as const;
 
 /**
- * One statement for all sixteen questions: the Overview asks this on every load for editors, and each statement outside a
+ * One statement for all the questions: the Overview asks this on every load for editors, and each statement outside a
  * transaction costs three round trips (ClaimsDriver), so asking table by table was dozens of round trips to Neon.
  */
 export async function workspaceIsEmpty(db: Db, workspaceId: string): Promise<boolean> {

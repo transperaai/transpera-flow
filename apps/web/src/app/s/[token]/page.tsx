@@ -81,13 +81,7 @@ export default async function SharedPage(props: PageProps<"/s/[token]">) {
       </Gate>
     );
   }
-  // A play link (B4): the page also needs the token (the Send action takes it) and, for a restricted link, the address the visitor
-  // signed in with, from their own session (as the not-allowed gate above). It still calls only `open_share_link`.
   const play = opened.mode === "play";
-  let visitorEmail: string | null = null;
-  if (play && (opened.show_people || opened.show_financials)) {
-    visitorEmail = (await getSessionUser())?.email ?? null;
-  }
   return (
     <SharedView
       data={{
@@ -95,8 +89,6 @@ export default async function SharedPage(props: PageProps<"/s/[token]">) {
         snapshotAt: opened.snapshot_at ?? "",
         expiresAt: opened.expires_at ?? null,
         mode: play ? "play" : "view",
-        token: play ? token : undefined,
-        visitorEmail,
       }}
     />
   );

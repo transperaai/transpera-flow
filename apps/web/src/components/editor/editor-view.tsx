@@ -17,10 +17,6 @@ import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { blockFromSteps } from "@/lib/blocks/blocks";
-import { markDemoIdeaBuilt } from "@/lib/demo/company-store";
-import type { ScenarioPatch } from "@transpera-flow/engine";
-import { LeverChangesBox } from "@/components/editor/lever-changes-box";
-import { placeIdea, type IdeaSeed } from "@/lib/suggestions/idea";
 import { parseBlockInput } from "@/lib/blocks/save";
 import { newStepRow } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
@@ -75,7 +71,6 @@ export function EditorView({
   horizonMonths = null,
   extraChanges = 0,
   issue = null,
-  idea = null,
   tourDismissed = false,
   historyHref,
   library,
@@ -108,8 +103,6 @@ export function EditorView({
   extraChanges?: number;
   /** Solution mode: the issue the solution is built for, whose steps are outlined and whose target the verdict is checked against. */
   issue?: SolutionIssue | null;
-  /** Solution mode opened from a solution idea (A52, "Build it"): its steps are placed on first load, and saving marks it built. */
-  idea?: IdeaSeed | null;
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
   library?: { processes: LibraryProcess[]; templates: LibraryTemplate[] };
 }) {
@@ -136,18 +129,14 @@ export function EditorView({
   const marksChanges = hasDraft || solutionMode;
   const live = drafts.live;
   const working = state.bundle;
-  // Worked out up front, on the live map the copy starts as, so the steps are selected as soon as they arrive.
-  const [placement] = useState(() => (solutionMode && idea ? placeIdea(initialLive, idea) : null));
-  const [selection, setSelection] = useState<Selection>(placement?.id ? { steps: [placement.id], edges: [] } : NO_SELECTION);
+  const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
   const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
   const weeks = editorHorizonWeeks(editorMode, horizonMonths);
-  // Solution mode (B4): the lever changes an idea brought (a visitor's moves), kept with the solution and applied when it is simulated.
-  const [levers, setLevers] = useState<ScenarioPatch[]>(() => (solutionMode ? (idea?.levers ?? []) : []));
-  const workingModel = useEngineModel(working, weeks, solutionMode ? levers : undefined);
+  const workingModel = useEngineModel(working, weeks);
   const liveModel = useEngineModel(live, weeks);
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
   // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
@@ -195,17 +184,9 @@ export function EditorView({
 
   // Solution mode: what the solution is called, the automatic verdict against the issue's target, and saving. Nothing is
   // written until then, and then only the solution's own rows: not live, not the draft.
-  const [solutionName, setSolutionName] = useState(solutionMode && idea ? idea.title : "");
-  // Build it: the AI's steps go into the copy once, in place of the step the idea would replace (or, with none, at the end of the map).
-  const seeded = useRef(false);
+  const [solutionName, setSolutionName] = useState("");
   // Where the map is looking, for the palette (new steps appear there).
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
-  useEffect(() => {
-    if (!placement?.edit || seeded.current) return;
-    seeded.current = true;
-    const edit = placement.edit;
-    editor.run(() => edit);
-  }, [placement, editor]);
   const [solutionSaving, setSolutionSaving] = useState(false);
   const [solutionError, setSolutionError] = useState<string | null>(null);
   const added = useMemo(() => [...diff.steps.values()].filter((c) => c.kind === "added").map((c) => c.id), [diff]);
@@ -218,7 +199,7 @@ export function EditorView({
     await editor.settled();
     const now = session.editor.getState().bundle;
     const changes = diffBundles(live, now);
-    if (!changes.list.length && !levers.length) return setSolutionError("Change at least one step or lever first. A solution with no changes has nothing to test.");
+    if (!changes.list.length) return setSolutionError("Change at least one step first. A solution with no changes has nothing to test.");
     setSolutionSaving(true);
     // The automatic verdict. In a workspace the server works it out again from the stored copy and ignores what is sent; the demo has no
     // server, so it keeps the one worked out here, in a worker.
@@ -237,7 +218,7 @@ export function EditorView({
       baseRevisionId: live.revision.id,
       copy: solutionCopy(now),
       changedStepIds: changedStepIds(changes),
-      levers,
+      levers: [],
       links: issue ? [{ issueId: issue.id, autoVerdict: auto && auto.status !== "unchecked" ? auto.status : null, holdsPct: auto?.holdsPct ?? null, autoNote: auto?.note ?? "" }] : [],
     };
     const checked = parseSolutionInput(input);
@@ -246,8 +227,7 @@ export function EditorView({
     else if (mode === "demo") {
       const made = addDemoSolution(checked.value);
       result = { status: "ok", ...made };
-      if (idea) markDemoIdeaBuilt(idea.id, made.solution.id);
-    } else result = await createSolution(live.workspace.id, input, idea?.id);
+    } else result = await createSolution(live.workspace.id, input);
     setSolutionSaving(false);
     if (result.status === "error") return setSolutionError(result.message);
     router.push(exitHref);
@@ -378,14 +358,6 @@ export function EditorView({
       <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[264px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)]">
         <aside aria-label="Palette" className="flex flex-col gap-4 border-b border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-r lg:border-b-0">
           <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
-          {solutionMode && placement && (
-            <p role="note" data-idea-note className="rounded-token border border-edit/50 bg-edit-soft p-2 text-xs">
-              {placement.note}
-            </p>
-          )}
-          {solutionMode && (levers.length > 0 || (idea?.leverNotes.length ?? 0) > 0) && (
-            <LeverChangesBox levers={levers} notes={idea?.leverNotes ?? []} bundle={working} onRemove={(i) => setLevers((l) => l.filter((_, n) => n !== i))} />
-          )}
           {solutionMode && <IssueArea issue={issue} steps={[...live.steps, ...working.steps]} present={new Set(working.steps.map((s) => s.id))} onSelect={select} />}
           {mode === "demo" && (
             <p role="note" className="text-xs text-muted-foreground">

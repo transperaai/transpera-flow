@@ -67,11 +67,6 @@ export const ISSUE_PAGE_HELP = {
     description: "Every solution built for this issue, with an automatic pass or fail against its target, how often that holds across the simulated runs, and your own verdict. You make the final call.",
     example: "“Lead scoring”: automatic pass, holds in 92% of runs, your verdict pass.",
   },
-  ideas: {
-    label: "AI ideas",
-    description: "Fixes the AI suggests for this issue, as the steps it would place. They are not built or simulated until you press Build it, which opens the Editor with the steps placed. Dismiss throws one away.",
-    example: "“Score leads before the discovery call”: a map of three new steps, ready to build.",
-  },
   history: {
     label: "History",
     description: "Everything that happened to this issue, oldest first: when it was logged, each edit, each solution tested, and when it was resolved or reopened. It stays after the issue is resolved.",

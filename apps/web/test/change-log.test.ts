@@ -1,104 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-  describeSuggestion,
-  northbeamServiceIds,
-  northbeamLeadSourceIds,
-  northbeamPersonIds,
-  northbeamRoleIds,
-  northbeamStepIds,
-  snapshotModel,
-  diffSnapshots,
-} from "@transpera-flow/db";
-import { auditStepId, auditStepIds, describeAuditEntry, newestStepNames, type AuditEntry } from "@/lib/suggestions/audit";
-import { demoBaselineSnapshot, demoCompany, demoProcesses, demoSuggestions } from "@/lib/suggestions/demo";
-import { parseReview, reviewInMemory, reviewSummary } from "@/lib/suggestions/review";
+import { companyOf, northbeamBundle, northbeamPersonIds, northbeamRoleIds, northbeamServiceIds, northbeamStepIds } from "@transpera-flow/db";
+import { auditStepId, auditStepIds, describeAuditEntry, newestStepNames, type AuditEntry } from "@/lib/change-log/audit";
 import { defaultRunName, parseSaveRun } from "@/lib/runs/runs";
 
-// The Suggestions page's review logic, the change log's wording, the demo's
-// sample data and saving runs (issue #25).
-
-const opts = { at: "2026-10-01T09:00:00.000Z", by: "you", newId: () => crypto.randomUUID() };
-const state = () => ({ model: demoCompany(), suggestions: demoSuggestions() });
-const ids = demoSuggestions().map((s) => s.id);
-const pending = demoSuggestions().filter((s) => s.status === "pending");
-
-describe("reviewing in memory", () => {
-  it("accepts one: the value changes with its evidence as provenance, and the suggestion records it", () => {
-    const [ads] = pending;
-    const r = reviewInMemory(state(), [ads!.id], "accept", null, opts);
-    expect(r.results).toEqual([{ id: ads!.id, status: "accepted", applied: { target_id: northbeamLeadSourceIds.ads, before: { volume_week: 4 }, after: { volume_week: 6 } } }]);
-    const row = r.model.leadSources.find((l) => l.id === northbeamLeadSourceIds.ads)!;
-    expect(row.volume_week).toBe(6);
-    expect(row.provenance.volume_week).toMatchObject({ source: "estimated", evidence: ads!.evidence, suggestion_id: ads!.id });
-    expect(r.suggestions.find((s) => s.id === ads!.id)).toMatchObject({ status: "accepted", reviewed_by: "you", reviewed_at: opts.at });
-    // Accepted, it reads with what was there before.
-    expect(describeSuggestion(r.suggestions.find((s) => s.id === ads!.id)!, r.model).changes[0]).toMatchObject({ before: "4/wk", after: "6/wk" });
-  });
-
-  it("accepts every pending suggestion in bulk; the already-rejected one is reported, not changed", () => {
-    const r = reviewInMemory(state(), ids, "accept", null, opts);
-    expect(r.results.filter((x) => x.status === "accepted")).toHaveLength(pending.length);
-    expect(r.results.filter((x) => x.status === "already_reviewed")).toHaveLength(1);
-    expect(r.model.people.find((p) => p.id === northbeamPersonIds["Leah Brooks"])!.fte).toBe(0.9);
-    expect(r.model.people.find((p) => p.id === northbeamPersonIds["Arjun Mehta"])!.fte).toBe(0.8);
-    expect(r.model.workspace.settings.overtime_cap).toBe(0.15);
-    expect(r.model.demand!.growth_monthly).toBe(0.02);
-    expect(r.model.seasonality).toEqual([expect.objectContaining({ month: 12, multiplier: 0.6 })]);
-    expect(reviewSummary(r.results, "accept")).toBe(`Accepted ${pending.length}. 1 had already been reviewed.`);
-  });
-
-  it("rejects with a reason and changes nothing; a suggestion whose row has gone fails and stays pending", () => {
-    const s = state();
-    const rejected = reviewInMemory(s, [pending[0]!.id], "reject", "Not this week", opts);
-    expect(rejected.model).toBe(s.model);
-    expect(rejected.suggestions[0]).toMatchObject({ status: "rejected", review_note: "Not this week" });
-
-    const gone = { ...s, model: { ...s.model, services: s.model.services.filter((sv) => sv.id !== northbeamServiceIds.seo) } };
-    const harbour = pending.find((p) => p.target_id === northbeamServiceIds.seo)!;
-    const r = reviewInMemory(gone, [harbour.id, pending[0]!.id], "accept", null, opts);
-    expect(r.results.map((x) => x.status)).toEqual(["failed", "accepted"]);
-    expect(r.suggestions.find((x) => x.id === harbour.id)!.status).toBe("pending");
-    expect(reviewSummary(r.results, "accept")).toBe("Accepted 1. 1 couldn't be applied and is still pending: What this suggestion changes no longer exists.");
-  });
-
-  it("checks review input", () => {
-    expect(parseReview([ids[0]], "accept", "  ")).toEqual({ ok: true, ids: [ids[0]], decision: "accept", note: null });
-    expect(parseReview([], "accept", null)).toMatchObject({ ok: false });
-    expect(parseReview(["x"], "accept", null)).toMatchObject({ ok: false });
-    expect(parseReview([ids[0]], "maybe", null)).toMatchObject({ ok: false });
-  });
-});
-
-describe("the demo's sample data", () => {
-  it("reads like the PRD", () => {
-    const m = demoCompany();
-    const [ads] = pending;
-    expect(describeSuggestion(ads!, m).headline).toBe(
-      "Claude suggests lead volume 6/wk for Google Ads, was 4/wk, citing “Ads are nearer six a week since we raised the budget.” (Priya Shah)",
-    );
-    const harbour = pending.find((p) => p.target_id === northbeamServiceIds.seo)!;
-    expect(describeSuggestion(harbour, m).changes[0]).toMatchObject({ before: "£3,500", after: "£3,700" });
-  });
-
-  it("has a baseline run whose model has changed since, and more once suggestions are accepted", () => {
-    const now = snapshotModel(demoCompany(), demoProcesses());
-    const before = diffSnapshots(demoBaselineSnapshot(), now).map((c) => c.text);
-    expect(before).toEqual([
-      "Overtime cap: 0% → 10%",
-      "Service SEO retainer: price £3,300 → £3,500",
-      "Person added: Chloe Evans",
-      "Lead source Google Ads: lead volume 3/wk → 4/wk",
-    ]);
-    const accepted = reviewInMemory(state(), ids, "accept", null, opts).model;
-    const after = diffSnapshots(demoBaselineSnapshot(), snapshotModel(accepted, demoProcesses())).map((c) => c.text);
-    expect(after).toContain("Person Leah Brooks: FTE 1 → 0.9");
-    expect(after).toContain("Person Arjun Mehta: FTE 1 → 0.8");
-    expect(after).toContain("Demand growth: 0% a month → 2% a month");
-  });
-});
+// The change log's wording (Settings → Change log) and saving runs. Ported from the Suggestions page's test (removed 28 Oct 2026,
+// docs/plans/cut-list.md): the review logic and the demo's sample suggestions went with the page; the log's wording stayed.
 
 describe("the change log", () => {
-  const m = demoCompany();
+  const m = companyOf(northbeamBundle());
   const entry = (e: Partial<AuditEntry>): AuditEntry => ({
     id: "a",
     created_at: "2026-10-01T09:00:00Z",
@@ -119,9 +28,6 @@ describe("the change log", () => {
     expect(
       describeAuditEntry(entry({ target_table: "person_roles", action: "delete", diff: { old: { person_id: northbeamPersonIds["Sam Patel"] }, role_id: northbeamRoleIds.seo } }), m),
     ).toBe("Sam Patel: role SEO specialist removed");
-    expect(
-      describeAuditEntry(entry({ target_table: "suggestions", action: "rejected", diff: { old: { status: "pending" }, new: { status: "rejected", review_note: "No" } } }), m),
-    ).toBe("Rejected a suggested change to the company model: “No”");
   });
 
   it("tells a per-person time (C6, #230) in words, names its step, and never states the number", () => {

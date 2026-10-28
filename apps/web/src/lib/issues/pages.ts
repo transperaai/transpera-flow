@@ -88,7 +88,7 @@ export { RATINGS_WORST_FIRST };
 
 /**
  * What the list says about the solutions tested for each issue, and the page lists. The rows come from
- * `solutionTests` and `solutionSummaries` in lib/solutions/cards.ts (A50); AI ideas are A52's.
+ * `solutionTests` and `solutionSummaries` in lib/solutions/cards.ts (A50).
  */
 export interface SolutionTest {
   id: string;
@@ -109,11 +109,9 @@ export interface SolutionSummary {
   tested: number;
   /** A solution passed (the person's verdict, else the automatic one). */
   passed: boolean;
-  /** AI ideas waiting for this issue (A52). */
-  ideas: number;
 }
 
-export const NO_SOLUTIONS: SolutionSummary = { tested: 0, passed: false, ideas: 0 };
+export const NO_SOLUTIONS: SolutionSummary = { tested: 0, passed: false };
 
 // ---------------------------------------------------------------------------
 // The issue page

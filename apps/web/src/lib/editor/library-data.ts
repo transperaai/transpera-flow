@@ -1,6 +1,6 @@
 import "server-only";
 import { listPlacements, listProcesses } from "@transpera-flow/db";
-import { PROCESS_TEMPLATES } from "@transpera-flow/mcp";
+import { PROCESS_TEMPLATES } from "@transpera-flow/db/process-import";
 import { getDb } from "@/lib/auth/session";
 import type { LibraryProcess, LibraryTemplate } from "./library";
 

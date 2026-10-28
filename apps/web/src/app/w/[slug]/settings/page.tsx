@@ -45,6 +45,11 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
           <Link href={`/w/${slug}/settings/calibration`} className={buttonVariants({ variant: "outline", size: "sm" })}>
             Historical data
           </Link>
+          {data.canManage && (
+            <Link href={`/w/${slug}/settings/changes`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              Change log
+            </Link>
+          )}
         </>
       }
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."

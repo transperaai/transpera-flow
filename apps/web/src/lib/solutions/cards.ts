@@ -21,8 +21,8 @@ export const solutionsListHref = (base: string): string => `${base}/solutions`;
 export type SolutionType = "By hand" | "AI block";
 
 /**
- * How a solution was made: "AI block" when it was built from an AI idea (a built `suggestion_proposals` row records the solution's id in
- * `applied.solution_id`, passed here as `aiIds`), else "By hand". With no data it reads "By hand".
+ * How a solution was made: "AI block" when its id is in `aiIds`, else "By hand". Nothing supplies `aiIds` any more (the Suggestions
+ * table that recorded built ideas was dropped 28 Oct 2026), so every solution reads "By hand"; the AI marks are S1's to remove.
  */
 export function solutionType(solution: Pick<SolutionRow, "id">, aiIds?: readonly string[]): SolutionType {
   return aiIds?.includes(solution.id) ? "AI block" : "By hand";
@@ -114,8 +114,8 @@ export function solutionSummaries(data: SolutionsData): Record<string, SolutionS
   const out: Record<string, SolutionSummary> = {};
   for (const l of data.links) {
     if (!data.solutions.some((s) => s.id === l.solution_id)) continue;
-    const was = out[l.issue_id] ?? { tested: 0, passed: false, ideas: 0 };
-    out[l.issue_id] = { tested: was.tested + 1, passed: was.passed || effectiveVerdict(l) === "pass", ideas: 0 };
+    const was = out[l.issue_id] ?? { tested: 0, passed: false };
+    out[l.issue_id] = { tested: was.tested + 1, passed: was.passed || effectiveVerdict(l) === "pass" };
   }
   return out;
 }
