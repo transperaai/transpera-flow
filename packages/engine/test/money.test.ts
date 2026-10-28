@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SEED_STRIDE, northbeamModel, northbeamWithClientGroups, runOnce, simulate, type EngineModel, type EnginePerson, type EngineService } from "../src";
+import { SEED_STRIDE, northbeamModel, northbeamWithChances, northbeamWithClientGroups, runOnce, simulate, type EngineModel, type EnginePerson, type EngineService } from "../src";
 
 // Profit first (engine 1.11.0, sandbox phase 2): paid labour, overheads, profit and the monthly money series.
 
@@ -200,5 +200,41 @@ describe("sales and revenue series", () => {
     expect(r.kpi.hourly.h!.hours.mean).toBe(0);
     expect(r.kpi.hourly.h!.revenue.mean).toBe(0);
     expect(r.kpi.revenueHourly.mean).toBe(0);
+  });
+});
+
+describe("revenue from a rise in fees (sandbox phase 3)", () => {
+  const model = northbeamWithChances();
+
+  it("revenue is still recurring + one-off + hourly in every replication, and the rise is part of it", () => {
+    for (let i = 0; i < 4; i++) {
+      const r = runOnce(model, 1 + i * SEED_STRIDE, false);
+      const total = r.revenue.recurring + r.revenue.oneOff + r.revenue.hourly;
+      expect(r.revenue.rise).toBeGreaterThan(0);
+      expect(r.revenue.rise).toBeLessThan(total);
+      // A rise of 8% on PPC alone is under 8% of what PPC pays, so well under 8% of the whole.
+      expect(r.revenue.rise).toBeLessThan(0.08 * total);
+    }
+  });
+
+  it("the monthly series add up to the run: no rise before the fourth month, and the months' rise adds up to the run's", () => {
+    const res = simulate(model, 8, 1, { monthly: true });
+    const mo = res.monthly!;
+    expect(mo.revenue.rise.slice(0, 3).map((s) => s.mean)).toEqual([0, 0, 0]);
+    expect(mo.revenue.rise.slice(3).every((s) => s.mean > 0)).toBe(true);
+    expect(mo.revenue.rise.reduce((a, s) => a + s.mean, 0)).toBeCloseTo(res.samples.revenueRise.reduce((a, b) => a + b, 0) / res.samples.revenueRise.length, 6);
+    mo.revenue.total.forEach((t, m) => expect(t.mean).toBeCloseTo(mo.revenue.recurring[m]!.mean + mo.revenue.oneOff[m]!.mean + mo.revenue.hourly[m]!.mean, 6));
+    // The paired samples (replication × month) behind it.
+    const s = res.monthlySamples!;
+    expect(s.revenue).toHaveLength(8);
+    expect(s.revenue[0]).toHaveLength(mo.months.length);
+    expect(s.rise[0]!.slice(0, 3)).toEqual([0, 0, 0]);
+    expect(s.revenue.reduce((a, row) => a + row[4]!, 0) / 8).toBeCloseTo(mo.revenue.total[4]!.mean, 6);
+  });
+
+  it("without a fee channel the rise is exactly 0", () => {
+    const { channels: _channels, ...plain } = model;
+    expect(simulate(plain, 3, 1, { monthly: true }).monthly!.revenue.rise.every((s) => s.mean === 0 && s.p10 === 0 && s.p90 === 0)).toBe(true);
+    expect(runOnce(plain, 1, false).revenue.rise).toBe(0);
   });
 });

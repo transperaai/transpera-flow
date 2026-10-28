@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_CHURN_DRIVER_IDS,
+  CHURN_EFFECT_MAX,
+  EFFECT_MONTHS,
   MARKET_PRESETS,
   churnCauseIssues,
   detectIssues,
+  equivalentEvents,
+  eventExposure,
   larkspurModel,
   northbeamWithChurnDrivers,
   northbeamWithClientGroups,
@@ -276,5 +280,80 @@ describe("rule 10: cause of clients leaving", () => {
     expect(ruleOfFinding({ key: "churn_risk:driver:ppc:late", type: "churn_risk" })).toBe("driver");
     expect(ruleOfFinding({ key: "churn_risk:group:ppc", type: "churn_risk" })).toBe("health");
     expect(ruleOfFinding({ key: "churn_risk:client:c1", type: "churn_risk" })).toBe("health");
+  });
+});
+
+describe("drivers as chances (sandbox phase 3)", () => {
+  const events = (churnDrivers: EngineChurnDriver[], id: string) => resolveChurnDrivers({ churnDrivers }).find((d) => d.id === id)!.events;
+
+  it("a stored driver with no effect stays in weight mode", () => {
+    expect(resolveChurnDrivers({}).every((d) => d.events === null)).toBe(true);
+    expect(events([{ id: "late", weight: 1, enabled: true, chance: 0.2 }], "late")).toBeNull();
+  });
+
+  it("an effect switches a driver to events: the chance is measured for measured drivers and defaulted for entered ones", () => {
+    expect(events([{ id: "late", weight: 1, enabled: true, effect: 0.6 }], "late")).toEqual({ chance: null, effect: 0.6, months: EFFECT_MONTHS.default });
+    expect(events([{ id: "load", weight: 1, enabled: true, effect: 0.5, effectMonths: 6, chance: 0.1 }], "load")).toEqual({ chance: 0.1, effect: 0.5, months: 6 });
+    // Entered: handoff a twelfth of the yearly share, results, price and your own 1.
+    expect(events([{ id: "handoff", weight: 1, enabled: true, value: 0.24, effect: 1 }], "handoff")!.chance).toBeCloseTo(0.02, 12);
+    expect(events([{ id: "results", weight: 1, enabled: true, effect: 1 }], "results")!.chance).toBe(1);
+    expect(events([{ id: "price", weight: 1, enabled: true, effect: 1 }], "price")!.chance).toBe(1);
+    expect(events([{ id: "custom:x", weight: 1, enabled: true, effect: 1 }], "custom:x")!.chance).toBe(1);
+  });
+
+  it("brings the effect, months and chance into range, and tenure and market ignore an effect altogether", () => {
+    expect(events([{ id: "results", weight: 1, enabled: true, effect: 99, effectMonths: 99, chance: 7 }], "results")).toEqual({ chance: 1, effect: CHURN_EFFECT_MAX, months: EFFECT_MONTHS.max });
+    expect(events([{ id: "results", weight: 1, enabled: true, effect: -1, effectMonths: 0, chance: -1 }], "results")).toEqual({ chance: 0, effect: 0, months: EFFECT_MONTHS.min });
+    expect(events([{ id: "tenure", weight: 1, enabled: true, effect: 1, chance: 0.5 }], "tenure")).toBeNull();
+    expect(events([{ id: "market", weight: 1, enabled: true, effect: 1 }], "market")).toBeNull();
+  });
+
+  it("the share of time under a hit is 1 - (1 - chance)^months", () => {
+    expect(eventExposure(0, 3)).toBe(0);
+    expect(eventExposure(1, 3)).toBe(1);
+    expect(eventExposure(0.1, 3)).toBeCloseTo(1 - 0.9 ** 3, 12);
+  });
+
+  it("switching a driver over with the equivalent chance and effect gives about the churn its weight gave", () => {
+    const base = withDrivers(groups(), [
+      { id: "late", weight: 1, enabled: true },
+      { id: "load", weight: 1.2, enabled: true },
+      { id: "results", weight: 1, enabled: true, value: 6 },
+    ]);
+    const run = simulate(base, 30, 1);
+    const causes = run.churnCauses!.causes;
+    const switched = base.churnDrivers!.map((d) => {
+      const cause = causes.find((c) => c.id === d.id)!;
+      const eq = equivalentEvents(cause, d.weight);
+      return { ...d, chance: eq.chance, effect: eq.effect, effectMonths: eq.months };
+    });
+    // Results: exact (a hit every week with effect weight × pressure is the weight mode's term).
+    const results = equivalentEvents(causes.find((c) => c.id === "results")!, 1);
+    expect(results).toEqual({ chance: 1, effect: causes.find((c) => c.id === "results")!.pressure, months: 3 });
+    const after = simulate({ ...base, churnDrivers: switched }, 30, 1);
+    // Expected churn matches in expectation, not draw for draw: within 15% on 30 replications.
+    expect(after.churnCauses!.clients).toBeGreaterThan(run.churnCauses!.clients * 0.85);
+    expect(after.churnCauses!.clients).toBeLessThan(run.churnCauses!.clients * 1.15);
+    expect(after.churnCauses!.causes.find((c) => c.id === "load")!.mode).toBe("chance");
+  });
+
+  it("the screen's projection counts a chance-mode choice as effect × exposure instead of weight × pressure", () => {
+    const run = simulate(northbeamWithChurnDrivers(), 30, 1).churnCauses!;
+    const asRun = run.causes.map((c) => ({ id: c.id, weight: c.weight, enabled: c.enabled }));
+    const plain = projectChurn(run, asRun);
+    const load = run.causes.find((c) => c.id === "load")!;
+    // An effect of 0 adds nothing: the driver's share falls to 0 and the projected churn falls with it.
+    const zero = projectChurn(run, asRun.map((c) => (c.id === "load" ? { ...c, effect: 0 } : c)));
+    expect(zero.shares.load).toBe(0);
+    expect(zero.clientsPerMonth).toBeLessThan(plain.clientsPerMonth);
+    // An effect of 1 hit with a chance of 1 for one month adds exactly 1 to the sum (a full exposure of an effect of 1): one more base × market of churn.
+    const full = projectChurn(run, asRun.map((c) => (c.id === "load" ? { ...c, effect: 1, chance: 1, months: 1 } : c)));
+    const without = projectChurn(run, asRun.map((c) => (c.id === "load" ? { ...c, enabled: false } : c)));
+    const nothing = projectChurn(run, asRun.map((c) => (c.id === "market" ? c : { ...c, enabled: false })));
+    expect((full.clientsPerMonth - without.clientsPerMonth) / nothing.clientsPerMonth).toBeCloseTo(1, 9);
+    // A choice that leaves the chance blank uses the chance the run measured.
+    expect(load.chance).not.toBeNull();
+    const measured = projectChurn(run, asRun.map((c) => (c.id === "load" ? { ...c, effect: 1, months: 1 } : c)));
+    expect((measured.clientsPerMonth - without.clientsPerMonth) / nothing.clientsPerMonth).toBeCloseTo(load.chance!, 9);
   });
 });

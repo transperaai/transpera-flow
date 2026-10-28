@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { northbeamModel, simulate } from "../src";
+import { initialState, northbeamModel, simulate } from "../src";
+import { GOLDEN_MODELS } from "./golden";
 
 describe("simulate (Northbeam)", () => {
   it("is deterministic for a given seed", () => {
@@ -56,5 +57,24 @@ describe("simulate (Northbeam)", () => {
     const base = simulate(northbeamModel(), 30, 1);
     const doubled = simulate({ ...northbeamModel(), leadsPerWeek: 2 * northbeamModel().leadsPerWeek }, 30, 1);
     expect(doubled.roles.strat!.util).toBeGreaterThan(base.roles.strat!.util);
+  });
+});
+
+describe("the initialState option (sandbox phase 3: the Sandbox pins a scenario's warm-up)", () => {
+  for (const g of GOLDEN_MODELS) {
+    it(`${g.name}: handing a run its own initial state gives exactly the run that works it out`, () => {
+      const m = g.model();
+      const own = initialState(m);
+      expect(simulate(m, 3, 1, { ...g.options, initialState: own })).toEqual(simulate(m, 3, 1, g.options));
+    });
+  }
+
+  it("echoes the state it was given, and another model's warm-up gives another run", () => {
+    const m = northbeamModel();
+    const pinned = { kind: "warmup" as const, hours: 8 * m.hoursPerWeek };
+    const a = simulate(m, 3, 1, { initialState: pinned });
+    expect(a.initialState).toEqual(pinned);
+    expect(a.initialState).not.toEqual(initialState(m));
+    expect(a.kpi).not.toEqual(simulate(m, 3, 1).kpi);
   });
 });

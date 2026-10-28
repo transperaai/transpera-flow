@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeChannels,
   initialState,
   northbeamWithMoney,
   northbeamWithServicing,
@@ -118,4 +119,58 @@ describe.each([
       expect(JSON.stringify(scenario)).not.toEqual(JSON.stringify(live));
     });
   }
+});
+
+describe("channels: what the engine refuses and how it reads them", () => {
+  const model = base();
+  const at = (c: EngineChannels, extra: Partial<EngineModel> = {}) => ({ ...model, ...extra, channels: c });
+
+  it("refuses numbers it can't run: negatives, rework above the maximum, month starts out of order or outside the run, unknown ids", () => {
+    expect(() => simulate(at({ starts: STARTS, leads: from(3, -1) }), 1, 1)).toThrow(/numbers from 0/);
+    expect(() => simulate(at({ starts: STARTS, rework: { audit: from(3, 0.99) } }), 1, 1)).toThrow(/0.95/);
+    expect(() => simulate(at({ starts: [100, 50] }), 1, 1)).toThrow(/start/);
+    expect(() => simulate(at({ starts: [0, 100] }), 1, 1)).toThrow(/start/);
+    expect(() => simulate(at({ starts: [model.horizonWeeks * model.hoursPerWeek] }), 1, 1)).toThrow(/start/);
+    expect(() => simulate(at({ starts: STARTS, work: { nope: from(3, 2) } }), 1, 1)).toThrow(/step 'nope'/);
+    expect(() => simulate(at({ starts: STARTS, fee: { nope: from(3, 2) } }), 1, 1)).toThrow(/service 'nope'/);
+    expect(() => simulate(at({ starts: STARTS, roleCost: { nope: from(3, 2) } }), 1, 1)).toThrow(/role 'nope'/);
+    expect(() => simulate(at({ starts: STARTS, capacity: { nope: from(3, 2) } }), 1, 1)).toThrow(/person 'nope'/);
+    expect(() => simulate(at({ starts: STARTS, leads: new Array<number>(MONTHS + 1).fill(1) }), 1, 1)).toThrow(/more months/);
+  });
+
+  it("when a run is asked month by month, the channels' months must be the run's", () => {
+    expect(() => simulate(at({ starts: STARTS, leads: from(3, 2) }), 1, 1, { monthly: true, monthStarts: STARTS.map((h) => h + 1) })).toThrow(/month starts/);
+    expect(() => simulate(at({ starts: STARTS, leads: from(3, 2) }), 1, 1, { monthly: true, monthStarts: STARTS })).not.toThrow();
+  });
+
+  it("an array shorter than the months holds its last value", () => {
+    const short = simulate(at({ starts: STARTS, fee: { "*": [1, 1, 1.1] } }), 3, 1, { monthly: true, monthStarts: STARTS, initialState: initialState(model) }).monthly!;
+    const full = simulate(at({ starts: STARTS, fee: { "*": from(2, 1.1) } }), 3, 1, { monthly: true, monthStarts: STARTS, initialState: initialState(model) }).monthly!;
+    expect(short).toEqual(full);
+  });
+
+  it("a step that only gains rework from a month has its redo loop, with nothing in the months before", () => {
+    const m = pooled();
+    const step = m.steps.find((s) => s.rework === 0 && s.role)!;
+    const res = simulate({ ...m, channels: { starts: STARTS, rework: { [step.id]: from(3, 0.3, 0) } } }, 3, 1, { initialState: initialState(m) });
+    expect(res.loops!.some((l) => l.id === `redo:${step.id}`)).toBe(true);
+  });
+
+  it("people without names (head-counts) take capacity by the '*' key, and the capacity event reshares the pooled load", () => {
+    const m = pooled();
+    const slower = simulate({ ...m, channels: { starts: STARTS, capacity: { "*": from(3, 0.5) } } }, 3, 1, { monthly: true, monthStarts: STARTS, initialState: initialState(m) }).monthly!;
+    const plain = simulate(m, 3, 1, { monthly: true, monthStarts: STARTS, initialState: initialState(m) }).monthly!;
+    const someone = Object.keys(plain.people)[0]!;
+    expect(slower.people[someone]![0]!.capacity).toBe(plain.people[someone]![0]!.capacity);
+    expect(slower.people[someone]![5]!.capacity).toBeCloseTo(plain.people[someone]![5]!.capacity / 2, 9);
+  });
+
+  it("the replications of a model share its channels without changing them", () => {
+    const channels: EngineChannels = { starts: STARTS, capacity: { "*": from(3, 0.5) } };
+    const m = { ...pooled(), channels };
+    const copy = structuredClone(channels);
+    simulate(m, 2, 1);
+    expect(m.channels).toEqual(copy);
+    expect(activeChannels(m)).not.toBeNull();
+  });
 });
