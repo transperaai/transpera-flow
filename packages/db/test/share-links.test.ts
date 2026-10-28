@@ -715,7 +715,11 @@ describe("the leak check", () => {
     await accepted({ ...clean(), findings: [{ facts: [{ kind: "fact", key: "k", text: "a figure" }] }], a: { provenance: null } });
   });
 
-  it("a snapshot over 5 MB is refused", async () => {
+  // The leak check (private.share_snapshot_problem) reads every string of the snapshot before the size check refuses it: 4.3 s of its
+  // own time for this 5.3 MB one. The test took 4.85 to 5.31 s at 2a595236 (before the strip), 8699a9c9, 0330ac4d and the Sandbox
+  // alike (local Postgres 16, three runs each), so vitest's default 5 s timeout failed it about half the time with no change to the
+  // database. 15 s leaves room for a busy machine; the refusal itself is what is tested.
+  it("a snapshot over 5 MB is refused", { timeout: 15_000 }, async () => {
     await asEditor(async (c) => {
       const big = { ...clean(), pad: "y".repeat(5_300_000) };
       expect(await make(c, { snapshot: big })).toMatchObject({ ok: false, code: "23514" });
