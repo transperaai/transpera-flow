@@ -530,6 +530,7 @@ function fake(n: number, level: number, c: number, m: number, extra: Partial<Mon
       hourly: Array.from({ length: n }, () => stat(m)),
       fromNew: Array.from({ length: n }, () => stat(m / 2)),
       lostToChurn: Array.from({ length: n }, () => stat(level * 7)),
+      rise: Array.from({ length: n }, () => stat(0)),
     },
     overtimeHours: Array.from({ length: n }, () => stat(level * 2)),
     money: {
@@ -571,7 +572,7 @@ describe("spliceMonthly", () => {
     for (const key of ["opportunities", "lost", "conversion"] as const) expect(s.sales[key]).toEqual(pick(a.sales[key], b.sales[key]));
     expect(s.clientsWon).toEqual(pick(a.clientsWon, b.clientsWon));
     expect(s.clientsLost).toEqual(pick(a.clientsLost, b.clientsLost));
-    for (const key of ["total", "recurring", "oneOff", "hourly", "fromNew", "lostToChurn"] as const) expect(s.revenue[key], key).toEqual(pick(a.revenue[key], b.revenue[key]));
+    for (const key of ["total", "recurring", "oneOff", "hourly", "fromNew", "lostToChurn", "rise"] as const) expect(s.revenue[key], key).toEqual(pick(a.revenue[key], b.revenue[key]));
     expect(s.overtimeHours).toEqual(pick(a.overtimeHours, b.overtimeHours));
     expect(s.money!.labour).toEqual(pick(a.money!.labour, b.money!.labour));
     expect(s.money!.labourByRole.r).toEqual(pick(a.money!.labourByRole.r!, b.money!.labourByRole.r!));

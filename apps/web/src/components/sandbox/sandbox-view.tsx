@@ -15,7 +15,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { partOf, speedsNormalisedFor, type IssueRow, type ProcessBundle, type SandboxChange, type SandboxScenarioRow, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { offeredLevers, sandboxLever } from "@transpera-flow/db";
-import { firstCrossing, toRatingConfig } from "@transpera-flow/engine";
+import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, CUSTOM_DRIVER_PREFIX, firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { InsightsSection } from "@/components/insights";
@@ -49,6 +49,7 @@ import { ForecastMoney } from "@/components/forecast/forecast-money";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/forecast/forecast-timeline";
 import { ChangeDialog, type ChangeTarget } from "./change-dialog";
 import { ChangeList } from "./change-list";
+import { PriceRise } from "./price-rise";
 import { SandboxCompare, MAX_COMPARE } from "./sandbox-compare";
 import { ConfirmDialog, NameDialog, NO_CHANGES, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
 
@@ -179,7 +180,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   // The live run is also what a scenario with no changes would run (and segment 0 of any scenario with no change at month 0): hand it
   // to the scenarios' pool, so nobody runs it twice.
   useEffect(() => {
-    if (built.model && built.monthStarts && result) sharedSimPool().seed(runKey(built.model, built.monthStarts), result);
+    if (built.model && built.monthStarts && result) sharedSimPool().seed(runKey(built.model, built.monthStarts, result.initialState), result);
   }, [built.model, built.monthStarts, result]);
   // The alerts use the documented defaults (D40): the rules editor is gone, so a stored setting nobody can reach doesn't move results.
   const rules = ANALYSIS_DEFAULTS;
@@ -506,6 +507,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const people = namedForViewer(viewerOf(live), live.people.filter((p) => p.active))
     .map((p) => ({ id: p.id, name: p.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Built-in drivers by key (tenure and market have no chances), then your own as custom:<id>.
+  const driverOptions = [
+    ...BUILTIN_CHURN_DRIVER_IDS.filter((id) => id !== "tenure" && id !== "market").map((id) => ({ id: id as string, name: CHURN_DRIVER_SPECS[id].name })),
+    ...(live.churnDrivers ?? []).filter((d) => d.driver === null).map((d) => ({ id: `${CUSTOM_DRIVER_PREFIX}${d.id}`, name: d.name ?? "Your own driver" })),
+  ];
   const parentName = working?.parent_id ? (saved.find((s) => s.id === working.parent_id)?.name ?? null) : null;
 
   return (
@@ -613,6 +619,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
               later={plan.later}
               hiddenKinds={hiddenLevers}
               appliesReason={appliesReason}
+              changeReason={(c) => (model ? (sandboxLever(c.lever)?.changeApplies?.(model, c) ?? null) : null)}
               leversHref={leversHref}
               canEdit={canEdit}
               hasScenario={working !== null}
@@ -728,6 +735,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       {!compare && moneyView ? (
         <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
+      {!compare && working !== null && plan.priceRise && !scenarioError ? <PriceRise tradeoff={plan.priceRise} months={timelineMonths(start, plan.run!.result.monthly!.months, plan.run!.model.hoursPerWeek)} currency={live.workspace.settings.currency} /> : null}
 
       {changeTarget && canEdit ? (
         <ChangeDialog
@@ -739,6 +747,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           people={people}
           steps={parts.flatMap((p) => p.steps).filter((s) => s.role_id || s.person_id).map((s) => ({ id: s.id, name: s.name }))}
           services={live.services.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name }))}
+          leadSources={(live.leadSources ?? []).map((s) => ({ id: s.id, name: s.name }))}
+          drivers={driverOptions}
           solutions={solutionOptions}
           months={monthOptions}
           defaultMonth={monthOptions[1]?.value ?? monthOptions[0]?.value ?? start.slice(0, 7)}

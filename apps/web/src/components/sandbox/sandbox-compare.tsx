@@ -84,7 +84,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
   const run2 = useScenarioRun({ bundle: live, changes: resolved[1]?.changes ?? null, solutions, months, startDate });
   const run3 = useScenarioRun({ bundle: live, changes: resolved[2]?.changes ?? null, solutions, months, startDate });
   const runs = [run0, run1, run2, run3];
-  const columns = [{ name: "No changes", run: run0, error: run0.error }, ...resolved.map((r, i) => ({ name: r.scenario?.name ?? "A scenario", run: runs[i + 1]!, error: r.error ?? runs[i + 1]!.error }))];
+  const columns = [{ name: "No changes", run: run0, error: run0.error }, ...resolved.map((r, i) => ({ name: r.scenario?.name ?? "A scenario", run: runs[i + 1]!, error: r.error ?? runs[i + 1]!.error }))].map((c) => ({ ...c, priceNet: c.run.priceRise?.total.net.mean ?? null }));
 
   const ready = columns.map((c) => (c.run.run && c.run.status === "done" && !c.error ? c.run.run : null));
   const currency = live.workspace.settings.currency;
@@ -92,7 +92,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
   // Failed columns are left out of the charts; the others still show.
   const shown = columns.map((c, i) => ({ ...c, index: i, run: ready[i] })).filter((c) => c.run !== null);
   const comparison = useMemo(
-    () => (ready[0] ? compareSandbox(ready[0].model, shown.map((c) => c.run!.result.monthly!), live, startDate, cutoffs) : null),
+    () => (ready[0] ? compareSandbox(ready[0].model, shown.map((c) => c.run!.result.monthly!), live, startDate, cutoffs, shown.map((c) => c.priceNet)) : null),
     // The columns are recomputed when a run (or its status or the ids and scenarios behind its error) changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [run0.run, run0.status, run1.run, run1.status, run2.run, run2.status, run3.run, run3.status, ids, scenarios, live, startDate, cutoffs],
@@ -181,6 +181,19 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
                 <p className="text-xs text-muted-foreground">Needs clients counted per service</p>
               </Card>
             )}
+            {comparison.totals.priceNet ? (
+              <Card className="gap-1 px-4 py-3" data-compare-tile="Net from price rises">
+                <h3 className="text-xs font-medium text-fg-2">Net from price rises</h3>
+                <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-sm tabular-nums">
+                  {names.map((name, c) => (
+                    <div key={name + c} className="contents">
+                      <dt className="truncate text-muted-foreground">{name}</dt>
+                      <dd className="text-right font-semibold">{comparison.totals.priceNet![c] === null ? "—" : signed(comparison.totals.priceNet![c]!, money)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </Card>
+            ) : null}
             <Tile title="Months a role is too busy" names={names} tile={comparison.totals.tooBusyMonths} format={(v) => String(v)} diff={(v) => signed(v, (x) => String(x))} />
             <Tile title={`Late tasks in ${last}`} names={names} tile={comparison.totals.lateTasks} format={(v) => formatNumber(v, 1)} diff={(v) => signed(v, (x) => formatNumber(x, 1))} />
           </div>

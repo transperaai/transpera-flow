@@ -39,6 +39,7 @@ function fake(n: number, level: number, c: number, m: number, extra: Partial<Mon
       hourly: Array.from({ length: n }, () => stat(m)),
       fromNew: Array.from({ length: n }, () => stat(m / 2)),
       lostToChurn: Array.from({ length: n }, () => stat(level * 7)),
+      rise: Array.from({ length: n }, () => stat(0)),
     },
     overtimeHours: Array.from({ length: n }, () => stat(level * 2)),
     money: {

@@ -34,6 +34,9 @@ const row = (over: Partial<ChurnDriverRow>): ChurnDriverRow => ({
   enabled: true,
   value: null,
   month: null,
+  chance: null,
+  effect: null,
+  effect_months: null,
   provenance: {},
   ...over,
 });

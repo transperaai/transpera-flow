@@ -4,7 +4,7 @@
 // month on from the run with it. Busy shares, waits and late tasks (flows) switch at once; clients, revenue and clients at
 // risk (stocks) carry on from where they were and change only as the later run changes. Pure.
 
-import type { MonthBusy, MonthlyResult, Stat } from "@transpera-flow/engine";
+import type { MonthBusy, MonthlyResult, SimulationResult, Stat } from "@transpera-flow/engine";
 
 const ZERO: Stat = { mean: 0, p10: 0, p90: 0 };
 
@@ -96,6 +96,7 @@ export function spliceMonthly(segments: readonly { from: number; monthly: Monthl
       hourly: series((r, m) => r.revenue.hourly[m]),
       fromNew: series((r, m) => r.revenue.fromNew[m]),
       lostToChurn: series((r, m) => r.revenue.lostToChurn[m]),
+      rise: series((r, m) => r.revenue.rise[m]),
     },
     overtimeHours: series((r, m) => r.overtimeHours[m]),
     money,
@@ -108,4 +109,18 @@ export function spliceMonthly(segments: readonly { from: number; monthly: Monthl
     mrr: stock((r, m) => r.mrr[m]),
     atRisk,
   };
+}
+
+/** The runs' per-replication months (`monthlySamples`) spliced the same way as the flows above: month m from the segment holding it. */
+export function spliceSamples(segments: readonly { from: number; samples: NonNullable<SimulationResult["monthlySamples"]> }[]): NonNullable<SimulationResult["monthlySamples"]> {
+  const first = segments[0]!.samples;
+  if (segments.length === 1) return first;
+  const segmentOf = (m: number) => {
+    let s = 0;
+    for (let i = 0; i < segments.length; i++) if (segments[i]!.from <= m) s = i;
+    return s;
+  };
+  const join = (pick: (x: NonNullable<SimulationResult["monthlySamples"]>) => number[][]) =>
+    pick(first).map((row, i) => row.map((_, m) => pick(segments[segmentOf(m)]!.samples)[i]![m]!));
+  return { revenue: join((x) => x.revenue), rise: join((x) => x.rise), clientsLost: join((x) => x.clientsLost) };
 }

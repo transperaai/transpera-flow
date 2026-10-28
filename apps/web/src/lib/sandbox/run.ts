@@ -11,12 +11,15 @@
 //   * a change whose target is gone is skipped and listed (`ChangeProblem`), never silent.
 // A scenario's effective changes are its parents' first, then its own (./effective.ts).
 
-import { workingDaysBetween, ModelError, toEngineModel, sandboxLever, patchOf, type PersonLeaveRow, type PersonRoleRow, type PersonRow, type PersonSkillRow, type PersonCapacityFactorRow, type ProcessBundle, type ProcessPart, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
-import { applyPatches, checkScenario, type EngineModel, type RetiredSteps, type ScenarioPatch } from "@transpera-flow/engine";
+import { workingDaysBetween, ModelError, engineMarket, toEngineModel, sandboxLever, patchOf, type PersonLeaveRow, type PersonRoleRow, type PersonRow, type PersonSkillRow, type PersonCapacityFactorRow, type ProcessBundle, type ProcessPart, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
+import { applyPatches, checkScenario, initialState, type EngineModel, type InitialState, type RetiredSteps, type ScenarioPatch } from "@transpera-flow/engine";
 import { calendarMonthStarts } from "@/lib/forecast/timeline";
+import { retiredSteps } from "@/lib/scenarios/broken";
 import { horizonWeeks } from "@/lib/horizon";
 import { bundleFromSolution } from "@/lib/solutions/bundle";
-import { addDays, hoursToDate } from "@/lib/forecast/positions";
+import { addDays, addMonths, hoursToDate, monthBounds } from "@/lib/forecast/positions";
+import { channelsOf, isChannelChange, overheadsCarried } from "./channels";
+import { applyBundleChanges, applyModelChanges } from "./edits";
 import type { EffectiveChange } from "./effective";
 
 /** What can be wrong with a change today, in words, for the "needs attention" list. `note` marks something applied but worth knowing (a value brought into range). */
@@ -66,6 +69,7 @@ export const monthWord = (from: string): string => `${MONTHS_SHORT[Number(from.s
 const derivedId = (changeId: string, n: number): string => `${changeId.slice(0, 24)}${n.toString(16).padStart(12, "0")}`;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const month0 = (from: string) => `${from}-01`;
 const combine = (current: number, op: SandboxChange["op"], value: number) => (op === "set" ? value : op === "multiply" ? current * value : current + value);
 
 export interface PeopleApplied {
@@ -131,6 +135,19 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
     return person;
   };
 
+  // The hiring delay (D9): every hire of the scenario from a month starts that many months later, stretched by the market's "time to hire" in
+  // the month the hire was planned for. Whole run hires are people who were always there: no delay. Settings' own planned hires are dated already.
+  const delayChange = [...changes].reverse().find((c) => c.lever === "D9");
+  const hireFactor = (() => {
+    const market = engineMarket(bundle);
+    return (from: string) => {
+      if (!market) return 1;
+      const idx = Math.floor(hoursToDate(startDate, `${from}-01`, hpw) / ((52 / 12) * hpw));
+      return market.months[Math.min(Math.max(0, idx), market.months.length - 1)]?.hire ?? 1;
+    };
+  })();
+  const startOf = (from: string): string => (delayChange && delayChange.value > 0 ? addMonths(`${from}-01`, Math.round(delayChange.value * hireFactor(from))) : `${from}-01`);
+
   // 1. Hires.
   const hires: PersonRow[] = [];
   for (const c of changes) {
@@ -139,7 +156,7 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
       problems.push({ changeId: c.id, message: `The role of “${c.params?.name?.trim() || "a new hire"}” isn't there any more` });
       continue;
     }
-    hires.push({ id: c.id, workspace_id, name: names.get(c.id)!, fte: c.value, capacity_hours_week: null, cost_rate: null, active: true, start_date: c.from ? `${c.from}-01` : null, end_date: null });
+    hires.push({ id: c.id, workspace_id, name: names.get(c.id)!, fte: c.value, capacity_hours_week: null, cost_rate: null, active: true, start_date: c.from ? startOf(c.from) : null, end_date: null });
     personRoles.push({ person_id: c.id, role_id: c.target!, workspace_id });
     planPeople.add(c.id);
   }
@@ -149,8 +166,21 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
   for (const c of fteChanges) {
     const person = problemOfPerson(c);
     if (!person) continue;
-    // Pinned or assigned: splitting would lose the pin, so it stays a (spliced) patch.
-    if (pinned.has(person.id) || assigned.has(person.id)) continue;
+    // Pinned or assigned: splitting would lose the pin, so the capacity channel does it, unless it takes them to nothing: then they leave.
+    if (pinned.has(person.id) || assigned.has(person.id)) {
+      const hours = person.capacity_hours_week != null ? person.capacity_hours_week / hpw : person.fte;
+      if (clamp(combine(hours, c.op, c.value), 0, 2) <= 0) {
+        const last = addDays(month0(c.from!), -1);
+        for (const st of chain(person.id)) {
+          if (st.to === null || st.to > last) {
+            st.to = last;
+            st.row.end_date = last;
+          }
+        }
+        handled.add(c.id);
+      }
+      continue;
+    }
     const month = `${c.from}-01`;
     const tail = chain(person.id).at(-1)!;
     const base = tail.row.capacity_hours_week != null ? tail.row.capacity_hours_week / hpw : tail.row.fte;
@@ -290,6 +320,8 @@ export interface SegmentsResult {
   planPeople: Set<string>;
   /** Set when the scenario cannot run at all (more change months than a run takes). Nothing runs. */
   error: string | null;
+  /** Timed FTE changes that were not done as person rows (someone pinned to a step or assigned clients): the capacity channel does them. */
+  d4Unhandled: Set<string>;
 }
 
 interface Item {
@@ -319,7 +351,10 @@ export function scenarioSegments(
 ): SegmentsResult {
   const list = changes.map((c) => c.change);
   const people = applyPeopleChanges(bundle, list, startDate);
-  const problems = [...people.problems];
+  // A lead source's volume is a row of the bundle (A1 for one source, whole run).
+  const edited = applyBundleChanges(people.bundle, list);
+  people.bundle = edited.bundle;
+  const problems = [...people.problems, ...edited.problems];
   const n = bounds.length - 1;
   const horizon = bounds[n]!;
   const byId = new Map(solutions.map((s) => [s.id, s]));
@@ -348,7 +383,9 @@ export function scenarioSegments(
       }
       month = m;
     }
-    if (lever.people && !(lever.id === "D4" && !people.handled.has(c.id))) continue;
+    // People are rows; every other timed lever but a headcount cut and a solution is a channel (./channels.ts), not a segment.
+    if (lever.people && !(lever.id === "D4" && c.from === undefined)) continue;
+    if (c.from !== undefined && lever.timed === "channel") continue;
     if (lever.solution) {
       const solution = byId.get(c.target ?? "");
       if (!solution) {
@@ -367,9 +404,10 @@ export function scenarioSegments(
     items.push({ change: c, month, kind: "patch", patch });
   }
 
+  const d4Unhandled = new Set(list.filter((c) => c.lever === "D4" && c.from !== undefined && !people.handled.has(c.id)).map((c) => c.id));
   const starts = [...new Set([0, ...items.map((i) => i.month)])].sort((a, b) => a - b);
   if (starts.length > MAX_SEGMENTS) {
-    return { segments: [], problems, later, planPeople: people.planPeople, error: `This scenario has changes from more than ${MAX_SEGMENTS - 1} different months, which is more than a run can take. Remove or move some.` };
+    return { segments: [], problems, later, d4Unhandled, planPeople: people.planPeople, error: `This scenario has changes from more than ${MAX_SEGMENTS - 1} different months, which is more than a run can take. Remove or move some.` };
   }
   // The latest by date wins for one process: apply in date order, then change order.
   const solutionItems = items.filter((i) => i.kind === "solution").sort((a, b) => ((a.change.from ?? "") < (b.change.from ?? "") ? -1 : (a.change.from ?? "") > (b.change.from ?? "") ? 1 : 0));
@@ -403,7 +441,7 @@ export function scenarioSegments(
     }
     return { from, bundle: b, solutionIds, patches, patchChangeIds };
   });
-  return { segments, problems, later, planPeople: people.planPeople, error: null };
+  return { segments, problems, later, d4Unhandled, planPeople: people.planPeople, error: null };
 }
 
 export interface ScenarioModelResult {
@@ -427,6 +465,8 @@ export function scenarioModel(
   patches: readonly ScenarioPatch[] = [],
   patchChangeIds: readonly string[] = [],
   retired: RetiredSteps = {},
+  /** The scenario's effective changes, for the edits and channels that are not patches (sandbox phase 3). */
+  edits?: { changes: readonly SandboxChange[]; d4Unhandled: ReadonlySet<string> },
 ): ScenarioModelResult | { model: null; monthStarts: null; problems: ChangeProblem[]; error: string } {
   try {
     const base = toEngineModel(bundle, { startDate, planned: true });
@@ -440,11 +480,136 @@ export function scenarioModel(
       model = patched.model;
       for (const issue of patched.issues) if (issue.problem === "clamped" && !brokenAt.has(issue.index)) problems.push({ changeId: patchChangeIds[issue.index]!, message: issue.message, note: true });
     }
+    if (edits) {
+      const edited = applyModelChanges(model, edits.changes, bundle);
+      model = edited.model;
+      problems.push(...edited.problems);
+    }
     model = { ...model, horizonWeeks: horizonWeeks(months) };
     // The run's months are the calendar's, so "February" in an alert is February.
-    return { model, monthStarts: calendarMonthStarts(startDate, model.horizonWeeks, model.hoursPerWeek), problems, error: null };
+    const monthStarts = calendarMonthStarts(startDate, model.horizonWeeks, model.hoursPerWeek);
+    if (edits) {
+      const made = channelsOf(model, edits.changes, { bundle, bounds: [0, ...monthStarts, model.horizonWeeks * model.hoursPerWeek], startDate, hoursPerWeek: model.hoursPerWeek, d4Unhandled: edits.d4Unhandled });
+      problems.push(...made.problems);
+      if (made.channels) {
+        const carried = overheadsCarried(model, made.channels, edits.changes);
+        model = { ...model, channels: made.channels, ...(carried !== null ? { overheadMonthly: carried } : {}) };
+      }
+    }
+    return { model, monthStarts, problems, error: null };
   } catch (err) {
     if (err instanceof ModelError) return { model: null, monthStarts: null, problems: [], error: err.message };
     throw err;
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// A scenario as the hook runs it
+// ---------------------------------------------------------------------------
+
+/** One run of a prepared scenario: its model from month `from` on. */
+export interface PreparedSegment {
+  from: number;
+  model: EngineModel;
+}
+
+export interface PreparedScenario {
+  segments: PreparedSegment[];
+  /** With a price rise (B5): the same scenario without it, run the same way, to pair against. Null otherwise. */
+  pair: PreparedSegment[] | null;
+  /** Month indexes where a price rise starts (for the trade-off). */
+  riseMonths: number[];
+  /** The scenario's pinned warm-up: the live model with only its whole-run changes (§1 of the brief), so months before a timed change don't move. */
+  start: InitialState | null;
+  monthStarts: number[];
+  markersModel: EngineModel;
+  planPeople: Set<string>;
+  problems: ChangeProblem[];
+  later: string[];
+  error: string | null;
+}
+
+const startCache = new Map<string, InitialState>();
+/** The warm-up a model sizes for itself, kept by the model (a pilot run costs a few milliseconds). */
+export function warmupOf(model: EngineModel): InitialState {
+  const key = JSON.stringify(model);
+  let hit = startCache.get(key);
+  if (!hit) {
+    hit = initialState(model);
+    startCache.set(key, hit);
+    if (startCache.size > 24) startCache.delete(startCache.keys().next().value!);
+  }
+  return hit;
+}
+
+/**
+ * Everything a run of the scenario needs: its segments' models (channels in them), the pinned warm-up, and for a price rise the
+ * paired run without it. Pure; the hook calls it in a memo.
+ */
+export function prepareScenario(bundle: ProcessBundle, changes: readonly EffectiveChange[], solutions: readonly SolutionRow[], months: number, startDate: string): PreparedScenario {
+  const retired = retiredSteps(bundle);
+  const live = scenarioModel(bundle, months, startDate);
+  const fail = (error: string, extra: Partial<PreparedScenario> = {}): PreparedScenario => ({ segments: [], pair: null, riseMonths: [], start: null, monthStarts: [], markersModel: null as unknown as EngineModel, planPeople: new Set(), problems: [], later: [], error, ...extra });
+  if (live.error !== null) return fail(live.error);
+  const hpw = live.model.hoursPerWeek;
+  const bounds = monthBounds(live.monthStarts, live.model.horizonWeeks * hpw);
+  const names = new Map(solutions.map((x) => [x.id, x.name]));
+
+  const build = (list: readonly EffectiveChange[]) => {
+    const plan = scenarioSegments(bundle, list, solutions, startDate, bounds, hpw);
+    if (plan.error !== null) return { error: plan.error, plan, segments: [] as PreparedSegment[], problems: plan.problems };
+    const all = list.map((c) => c.change);
+    const segments: PreparedSegment[] = [];
+    const problems: ChangeProblem[] = [...plan.problems];
+    const seen = new Set(problems.map((p) => p.changeId + p.message));
+    let error: string | null = null;
+    for (const seg of plan.segments) {
+      const built = scenarioModel(seg.bundle, months, startDate, seg.patches, seg.patchChangeIds, retired, { changes: all, d4Unhandled: plan.d4Unhandled });
+      if (built.error !== null) {
+        const solutionNames = seg.solutionIds.map((id) => names.get(id) ?? "A solution");
+        error = seg.from === 0 && !solutionNames.length ? built.error : `“${solutionNames[solutionNames.length - 1] ?? "A solution"}” can't be simulated: ${built.error}`;
+        break;
+      }
+      for (const p of built.problems) {
+        if (seen.has(p.changeId + p.message)) continue;
+        seen.add(p.changeId + p.message);
+        problems.push(p);
+      }
+      segments.push({ from: seg.from, model: built.model });
+    }
+    return { error, plan, segments, problems };
+  };
+
+  const main = build(changes);
+  if (main.error !== null) return fail(main.error, { problems: main.problems, later: main.plan.later });
+
+  // The pinned warm-up: the live model with the whole-run changes that are not channels (and not the price rise, which a pair must share).
+  const wholeRun = changes.filter((e) => e.change.from === undefined && e.change.lever !== "B5" && !isChannelChange(e.change, new Set()));
+  let warm = live.model;
+  if (wholeRun.length) {
+    const w = build(wholeRun);
+    if (w.error === null && w.segments[0]) warm = w.segments[0].model;
+  }
+  const start = warmupOf(warm);
+
+  const rises = changes.filter((e) => e.change.lever === "B5");
+  let pair: PreparedSegment[] | null = null;
+  const riseMonths: number[] = [];
+  if (rises.length) {
+    const p = build(changes.filter((e) => e.change.lever !== "B5"));
+    pair = p.error === null ? p.segments : null;
+    for (const e of rises) {
+      const from = e.change.from;
+      if (from === undefined) riseMonths.push(0);
+      else {
+        const hour = hoursToDate(startDate, fromDate(from), hpw);
+        if (hour >= bounds[bounds.length - 1]!) continue;
+        let m = 0;
+        if (hour > 0) while (m < bounds.length - 2 && bounds[m + 1]! <= hour) m++;
+        riseMonths.push(m);
+      }
+    }
+  }
+  return { segments: main.segments, pair, riseMonths: [...new Set(riseMonths)].sort((a, b) => a - b), start, monthStarts: live.monthStarts, markersModel: live.model, planPeople: main.plan.planPeople, problems: main.problems, later: main.plan.later, error: null };
 }

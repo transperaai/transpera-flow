@@ -47,6 +47,8 @@ export interface SandboxComparison {
     lateTasks: CompareTile;
     /** Profit over the run, the sum of the months' means; null with `profit`. */
     profit: CompareTile | null;
+    /** Net change from price rises over the run, per column (null: the column has no price rise); null when no column has one. */
+    priceNet: (number | null)[] | null;
   };
 }
 
@@ -69,6 +71,8 @@ export function compareSandbox(
   bundle: Pick<ProcessBundle, "services">,
   startDate: string,
   cutoffs: readonly [number, number, number],
+  /** Per column, the net change from its price rises over the run (null: none). */
+  priceNet: readonly (number | null)[] = [],
 ): SandboxComparison {
   const first = columns[0]!;
   const months = timelineMonths(startDate, first.months, model.hoursPerWeek);
@@ -108,6 +112,7 @@ export function compareSandbox(
       tooBusyMonths: tile(idx.map((c) => roles.reduce((n, r) => n + tooBusy(r, c), 0))),
       lateTasks: tile(columns.map((m) => m.lateTasks[last]?.mean ?? 0)),
       profit: costsShown ? tile(columns.map((m) => total(m.money!.profit))) : null,
+      priceNet: priceNet.some((v) => v !== null) ? columns.map((_, c) => priceNet[c] ?? null) : null,
     },
   };
 }

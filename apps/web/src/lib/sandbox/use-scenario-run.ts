@@ -10,13 +10,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProcessBundle, SolutionRow } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
-import { retiredSteps } from "@/lib/scenarios/broken";
 import { SimulationCancelled } from "@/lib/sim/client";
-import { monthBounds } from "@/lib/forecast/positions";
 import { runSegments, sharedSimPool } from "@/lib/forecast/sim-pool";
-import { spliceMonthly } from "@/lib/forecast/splice";
+import { spliceMonthly, spliceSamples } from "@/lib/forecast/splice";
 import type { EffectiveChange } from "./effective";
-import { scenarioModel, scenarioSegments, type ChangeProblem } from "./run";
+import { priceRiseTradeoff, type PriceRiseTradeoff } from "./price-rise";
+import { prepareScenario, type ChangeProblem, type PreparedScenario } from "./run";
 
 /** Re-runs wait this long after the last change, so a key held down or changes moved one after another run once. */
 const DEBOUNCE_MS = 150;
@@ -43,23 +42,15 @@ export interface ScenarioForecast {
   /** Ids of changes dated at or after the horizon, left out of the run. */
   later: string[];
   error: string | null;
-  /** Runs finished in this scenario's segments, and how many there are. */
+  /** With a price rise (B5), once it and the same scenario without it have run: what it gains, loses and nets. */
+  priceRise: PriceRiseTradeoff | null;
+  /** Runs finished in this scenario's segments (and its price-rise pair), and how many there are. */
   progress: [done: number, total: number];
   /** How many runs have finished since the page opened (for tests and the timeline's status attributes). */
   finished: number;
 }
 
-interface Prepared {
-  segments: { from: number; model: EngineModel }[];
-  monthStarts: number[];
-  markersModel: EngineModel;
-  planPeople: Set<string>;
-  problems: ChangeProblem[];
-  later: string[];
-  error: string | null;
-}
-
-const IDLE: ScenarioForecast = { status: "idle", run: null, problems: [], later: [], error: null, progress: [0, 0], finished: 0 };
+const IDLE: ScenarioForecast = { status: "idle", run: null, problems: [], later: [], error: null, priceRise: null, progress: [0, 0], finished: 0 };
 
 export function useScenarioRun({
   bundle,
@@ -76,41 +67,12 @@ export function useScenarioRun({
   startDate: string;
 }): ScenarioForecast {
   // The models, by the inputs' identity, so a re-render with the same inputs doesn't run anything again.
-  const prepared = useMemo((): Prepared | null => {
-    if (changes === null) return null;
-    const retired = retiredSteps(bundle);
-    const live = scenarioModel(bundle, months, startDate);
-    const fail = (error: string): Prepared => ({ segments: [], monthStarts: [], markersModel: null as unknown as EngineModel, planPeople: new Set(), problems: [], later: [], error });
-    if (live.error !== null) return fail(live.error);
-    const bounds = monthBounds(live.monthStarts, live.model.horizonWeeks * live.model.hoursPerWeek);
-    const plan = scenarioSegments(bundle, changes, solutions, startDate, bounds, live.model.hoursPerWeek);
-    if (plan.error !== null) return { ...fail(plan.error), problems: plan.problems, later: plan.later };
-    const names = new Map(solutions.map((s) => [s.id, s.name]));
-    const segments: Prepared["segments"] = [];
-    const problems: ChangeProblem[] = [...plan.problems];
-    const seen = new Set(problems.map((p) => p.changeId + p.message));
-    let error: string | null = null;
-    for (const seg of plan.segments) {
-      const built = scenarioModel(seg.bundle, months, startDate, seg.patches, seg.patchChangeIds, retired);
-      if (built.error !== null) {
-        const solutionNames = seg.solutionIds.map((id) => names.get(id) ?? "A solution");
-        // The last solution to go live is the one that changed this segment.
-        error = seg.from === 0 && !solutionNames.length ? built.error : `“${solutionNames[solutionNames.length - 1] ?? "A solution"}” can't be simulated: ${built.error}`;
-        break;
-      }
-      for (const p of built.problems) {
-        if (seen.has(p.changeId + p.message)) continue;
-        seen.add(p.changeId + p.message);
-        problems.push(p);
-      }
-      segments.push({ from: seg.from, model: built.model });
-    }
-    return { segments, monthStarts: live.monthStarts, markersModel: live.model, planPeople: plan.planPeople, problems, later: plan.later, error };
-  }, [bundle, changes, solutions, months, startDate]);
+  const prepared = useMemo((): PreparedScenario | null => (changes === null ? null : prepareScenario(bundle, changes, solutions, months, startDate)), [bundle, changes, solutions, months, startDate]);
 
-  const [state, setState] = useState<{ status: ScenarioForecast["status"]; run: ScenarioRun | null; error: string | null; progress: [number, number]; finished: number }>({
+  const [state, setState] = useState<{ status: ScenarioForecast["status"]; run: ScenarioRun | null; priceRise: PriceRiseTradeoff | null; error: string | null; progress: [number, number]; finished: number }>({
     status: "idle",
     run: null,
+    priceRise: null,
     error: null,
     progress: [0, 0],
     finished: 0,
@@ -127,23 +89,42 @@ export function useScenarioRun({
     }
     let active = true;
     let cancelJob: (() => void) | null = null;
-    const total = prepared.segments.length;
+    const pairSegments = prepared.pair ?? [];
+    const total = prepared.segments.length + pairSegments.length;
     const timer = setTimeout(async () => {
       setState((s) => ({ ...s, status: "running", error: null, progress: [0, total] }));
       try {
-        // Every segment is asked of the page's shared pool at once: it runs a few at a time, shares runs in flight with the other
-        // scenarios on the page, and keeps finished ones.
-        const job = runSegments(sharedSimPool(), prepared.segments, prepared.monthStarts, (done, count) => {
-          if (active) setState((s) => ({ ...s, progress: [done, count] }));
-        });
-        cancelJob = job.cancel;
-        const results = await job.results;
+        // Every segment (and the price rise's pair) is asked of the page's shared pool at once: it runs a few at a time, shares runs in
+        // flight with the other scenarios on the page, and keeps finished ones.
+        let doneMain = 0;
+        let donePair = 0;
+        const report = () => {
+          if (active) setState((s) => ({ ...s, progress: [doneMain + donePair, total] }));
+        };
+        const job = runSegments(sharedSimPool(), prepared.segments, prepared.monthStarts, (done) => ((doneMain = done), report()), prepared.start);
+        const pairJob = pairSegments.length ? runSegments(sharedSimPool(), pairSegments, prepared.monthStarts, (done) => ((donePair = done), report()), prepared.start) : null;
+        cancelJob = () => {
+          job.cancel();
+          pairJob?.cancel();
+        };
+        const [results, pairResults] = await Promise.all([job.results, pairJob?.results ?? Promise.resolve(null)]);
         if (!active) return;
-        const runs = prepared.segments.map((seg, i) => ({ from: seg.from, result: results[i]! }));
-        const first = runs[0]!.result;
-        const monthly = spliceMonthly(runs.map((r) => ({ from: r.from, monthly: r.result.monthly! })));
-        const run: ScenarioRun = { model: prepared.segments[0]!.model, result: { ...first, monthly }, markersModel: prepared.markersModel, planPeople: prepared.planPeople, spliced: runs.length > 1 };
-        setState((s) => ({ status: "done", run, error: null, progress: [total, total], finished: s.finished + 1 }));
+        const run = joinRun(prepared, prepared.segments, results);
+        let priceRise: PriceRiseTradeoff | null = null;
+        if (pairResults) {
+          const other = joinRun(prepared, pairSegments, pairResults);
+          const a = run.result.monthlySamples;
+          const b = other.result.monthlySamples;
+          if (a && b) {
+            const clients = other.result.monthly!.clients;
+            const first = prepared.riseMonths[0] ?? 0;
+            const clientMonthsAfter = Object.values(clients).reduce((sum, row) => sum + row.slice(first).reduce((x, st) => x + st.mean, 0), 0);
+            const mrr = run.result.monthly!.mrr;
+            const live = Object.values(run.result.monthly!.clients).reduce((x, row) => x + (row[row.length - 1]?.mean ?? 0), 0);
+            priceRise = priceRiseTradeoff(a, b, prepared.riseMonths, { clientMonthsAfter, monthlyFee: live > 0 ? (mrr[mrr.length - 1]?.mean ?? 0) / live : 0 });
+          }
+        }
+        setState((s) => ({ status: "done", run, priceRise, error: null, progress: [total, total], finished: s.finished + 1 }));
       } catch (err) {
         if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ ...s, status: "error", error: (err as Error).message }));
       }
@@ -159,5 +140,13 @@ export function useScenarioRun({
   if (!prepared) return IDLE;
   // A scenario that fails has no numbers: the page shows the failure, never the previous scenario's numbers under this one's name.
   const status = prepared.error !== null ? "error" : state.status === "idle" ? "running" : state.status;
-  return { status, run: status === "error" ? null : state.run, problems: prepared.problems, later: prepared.later, error: prepared.error ?? state.error, progress: state.progress, finished: state.finished };
+  return { status, run: status === "error" ? null : state.run, priceRise: status === "error" ? null : state.priceRise, problems: prepared.problems, later: prepared.later, error: prepared.error ?? state.error, progress: state.progress, finished: state.finished };
+}
+
+/** The runs of a prepared scenario's segments as one: months spliced, and the first segment's other figures. */
+function joinRun(prepared: PreparedScenario, segments: { from: number; model: EngineModel }[], results: SimulationResult[]): ScenarioRun {
+  const first = results[0]!;
+  const monthly = spliceMonthly(segments.map((seg, i) => ({ from: seg.from, monthly: results[i]!.monthly! })));
+  const samples = results.every((r) => r.monthlySamples) ? spliceSamples(segments.map((seg, i) => ({ from: seg.from, samples: results[i]!.monthlySamples! }))) : undefined;
+  return { model: segments[0]!.model, result: { ...first, monthly, ...(samples ? { monthlySamples: samples } : {}) }, markersModel: prepared.markersModel, planPeople: prepared.planPeople, spliced: segments.length > 1 };
 }

@@ -6,7 +6,7 @@
 
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import { leverHidden, sandboxLever } from "@transpera-flow/db";
+import { leverHidden, sandboxLever, type SandboxChange } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,6 +26,8 @@ export interface ChangeListProps {
   hiddenKinds: readonly string[];
   /** Why a lever would not move the result in this model, or null. */
   appliesReason: (leverId: string) => string | null;
+  /** The same for one change (a type on a model that keeps its clients as one pool). */
+  changeReason?: (c: SandboxChange) => string | null;
   leversHref: string | null;
   canEdit: boolean;
   /** Something to edit (a scenario, saved or new, is on screen). */
@@ -89,7 +91,7 @@ export function ChangeList(p: ChangeListProps) {
             const lever = sandboxLever(c.lever);
             const problem = problemOf.get(c.id);
             const hidden = lever ? leverHidden(lever, p.hiddenKinds) : false;
-            const reason = lever ? p.appliesReason(lever.id) : null;
+            const reason = lever ? (p.appliesReason(lever.id) ?? p.changeReason?.(c) ?? null) : null;
             return (
               <li key={c.id} data-change={c.id} data-inherited={e.inherited || undefined}>
                 <Card className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">

@@ -1,4 +1,4 @@
-import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
+import type { EngineModel, InitialState, SimulationResult } from "@transpera-flow/engine";
 import type { SimRequest, SimResponse } from "./protocol";
 
 export class SimulationCancelled extends Error {
@@ -41,14 +41,14 @@ export class SimulationClient {
 
   run(
     model: EngineModel,
-    { reps = 30, seed = 1, monthly = false, monthStarts }: { reps?: number; seed?: number; monthly?: boolean; monthStarts?: number[] } = {},
+    { reps = 30, seed = 1, monthly = false, monthStarts, initialState }: { reps?: number; seed?: number; monthly?: boolean; monthStarts?: number[]; initialState?: InitialState } = {},
   ): Promise<SimRun> {
     this.cancel();
     const worker = this.ensureWorker();
     const id = this.nextId++;
     return new Promise<SimRun>((resolve, reject) => {
       this.pending = { id, resolve, reject };
-      worker.postMessage({ id, model, reps, seed, ...(monthly ? { monthly, ...(monthStarts ? { monthStarts } : {}) } : {}) });
+      worker.postMessage({ id, model, reps, seed, ...(monthly ? { monthly, ...(monthStarts ? { monthStarts } : {}) } : {}), ...(initialState ? { initialState } : {}) });
     });
   }
 

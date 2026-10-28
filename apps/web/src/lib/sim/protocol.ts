@@ -1,4 +1,4 @@
-import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
+import type { EngineModel, InitialState, SimulationResult } from "@transpera-flow/engine";
 
 export interface SimRequest {
   id: number;
@@ -9,6 +9,8 @@ export interface SimRequest {
   monthly?: boolean;
   /** With `monthly`: where each month after the first starts, in working hours (calendar months; see `calendarMonthStarts`). */
   monthStarts?: number[];
+  /** Start from this state instead of sizing a warm-up from the model (the Sandbox pins a scenario's warm-up to the live model's). */
+  initialState?: InitialState;
 }
 
 export type SimResponse =

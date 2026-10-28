@@ -4,7 +4,7 @@
 // (a map of runs in flight). A run nobody wants any more (every asker released it) is dropped before it starts or stopped
 // while it runs. Pure of React: tested with fake workers.
 
-import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
+import type { EngineModel, InitialState, SimulationResult } from "@transpera-flow/engine";
 import { SimulationCancelled, SimulationClient, type WorkerLike } from "@/lib/sim/client";
 
 export const REPS = 30;
@@ -12,12 +12,13 @@ export const SEED = 1;
 /** The most workers a page runs at once. */
 export const POOL_SIZE = 3;
 /** Finished runs kept, most recently used last. */
-const CACHE_LIMIT = 40;
+const CACHE_LIMIT = 48;
 /** A pool with nothing to do for this long lets its workers go (they start again when asked). */
 const IDLE_MS = 20_000;
 
 /** What a run was run from: the model, the months' edges, the reps and the seed. */
-export const runKey = (model: EngineModel, monthStarts: readonly number[]): string => `${JSON.stringify(model)}|${monthStarts.join(",")}|${REPS}|${SEED}`;
+export const runKey = (model: EngineModel, monthStarts: readonly number[], start?: InitialState | null): string =>
+  `${JSON.stringify(model)}|${monthStarts.join(",")}|${REPS}|${SEED}${start ? `|w=${start.kind}:${start.kind === "warmup" ? start.hours : start.kind === "wip" ? start.items : 0}` : ""}`;
 
 /** A request for a run: its result, and a way to say it isn't wanted any more. */
 export interface RunRequest {
@@ -30,6 +31,7 @@ interface Entry {
   key: string;
   model: EngineModel;
   monthStarts: number[];
+  start: InitialState | null;
   refs: number;
   running: boolean;
   client: SimulationClient | null;
@@ -58,8 +60,8 @@ export class SimPool {
     this.remember(key, result);
   }
 
-  request(model: EngineModel, monthStarts: number[]): RunRequest {
-    const key = runKey(model, monthStarts);
+  request(model: EngineModel, monthStarts: number[], start: InitialState | null = null): RunRequest {
+    const key = runKey(model, monthStarts, start);
     const hit = this.cache.get(key);
     if (hit) {
       this.remember(key, hit);
@@ -72,7 +74,7 @@ export class SimPool {
       const promise = new Promise<SimulationResult>((res, rej) => ((resolve = res), (reject = rej)));
       // A run nobody is waiting for any more rejects without anyone to hear it.
       promise.catch(() => {});
-      entry = { key, model, monthStarts, refs: 0, running: false, client: null, promise, resolve, reject };
+      entry = { key, model, monthStarts, start, refs: 0, running: false, client: null, promise, resolve, reject };
       this.flight.set(key, entry);
       this.queue.push(entry);
       this.pump();
@@ -131,7 +133,7 @@ export class SimPool {
       entry.client = client;
       this.started++;
       client
-        .run(entry.model, { reps: REPS, seed: SEED, monthly: true, monthStarts: entry.monthStarts })
+        .run(entry.model, { reps: REPS, seed: SEED, monthly: true, monthStarts: entry.monthStarts, ...(entry.start ? { initialState: entry.start } : {}) })
         .then((run) => {
           this.remember(entry.key, run.result);
           entry.resolve(run.result);
@@ -164,8 +166,9 @@ export function runSegments(
   segments: { model: EngineModel }[],
   monthStarts: number[],
   onProgress: (done: number, total: number) => void,
+  start: InitialState | null = null,
 ): { results: Promise<SimulationResult[]>; cancel: () => void } {
-  const requests = segments.map((s) => pool.request(s.model, monthStarts));
+  const requests = segments.map((s) => pool.request(s.model, monthStarts, start));
   const cancel = () => requests.forEach((r) => r.release());
   let done = 0;
   const results = Promise.all(

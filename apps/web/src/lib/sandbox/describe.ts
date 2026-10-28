@@ -2,13 +2,14 @@
 // Pure: no React. The change list, the timeline lane and the compare view all use it.
 
 import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever, type SolutionRow } from "@transpera-flow/db";
+import { CHURN_DRIVER_SPECS, CUSTOM_DRIVER_PREFIX, type BuiltinChurnDriverId } from "@transpera-flow/engine";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { personName, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
 
 /** What names a change's target: the bundle's roles, people (as the viewer's bundle names them), steps, services; and the solutions. */
 export interface DescribeContext {
-  bundle: Pick<ProcessBundle, "roles" | "people" | "steps" | "services" | "otherProcesses" | "workspace" | "viewer">;
+  bundle: Pick<ProcessBundle, "roles" | "people" | "steps" | "services" | "otherProcesses" | "workspace" | "viewer"> & Partial<Pick<ProcessBundle, "leadSources" | "churnDrivers">>;
   solutions: readonly Pick<SolutionRow, "id" | "name">[];
   /** Every change in the list the hire numbering runs over. */
   changes: readonly SandboxChange[];
@@ -31,7 +32,9 @@ export function formatChangeValue(lever: SandboxLever, op: SandboxChange["op"], 
           ? `${formatNumber(shown, 1)} h`
           : lever.unit === "per_week"
             ? `${formatNumber(shown, 0)} a month`
-            : lever.unit === "weeks"
+            : lever.unit === "months"
+              ? `${formatNumber(shown, 0)} month${shown === 1 ? "" : "s"}`
+              : lever.unit === "weeks"
               ? `${formatNumber(shown, 0)} weeks`
               : lever.unit === "fte"
                 ? `${formatNumber(shown, 2)} FTE`
@@ -49,7 +52,12 @@ export function targetName(c: SandboxChange, ctx: DescribeContext): string | nul
   if (t === "@heaviest") return "the heaviest step";
   const b = ctx.bundle;
   switch (lever.target) {
+    case "lead_source_or_none":
+      return b.leadSources?.find((x) => x.id === t)?.name ?? "a lead source that is gone";
+    case "driver":
+      return (t.startsWith(CUSTOM_DRIVER_PREFIX) ? b.churnDrivers?.find((d) => `${CUSTOM_DRIVER_PREFIX}${d.id}` === t)?.name : CHURN_DRIVER_SPECS[t as BuiltinChurnDriverId]?.name) ?? "a driver that is gone";
     case "role":
+    case "role_or_none":
       return b.roles.find((r) => r.id === t)?.name ?? "a role that is gone";
     case "person": {
       // Other people are named as the viewer may see them ("A team member" for a Viewer who cannot).
@@ -93,9 +101,18 @@ export function describeChange(c: SandboxChange, ctx: DescribeContext): string {
       return `${name} on leave for ${formatNumber(c.value, 0)} week${c.value === 1 ? "" : "s"}`;
     case "E6":
       return `${name} goes live`;
+    case "A5":
+      return `${name ?? "Client value"}: ${formatWholeCurrency(c.params?.low ?? c.value, currency)} – ${formatWholeCurrency(c.value, currency)} – ${formatWholeCurrency(c.params?.high ?? c.value, currency)}`;
+    case "B4": {
+      const bits = [`raises churn ${formatNumber(c.value * 100, 0)}%`, c.params?.chance !== undefined ? `${formatNumber(c.params.chance * 100, 1)}% chance a month` : "measured chance", `for ${c.params?.months ?? 3} months`];
+      return `${name ?? "A driver"} ${bits.join(", ")}`;
+    }
+    case "B5":
+      return `Price ${c.value >= 0 ? "rise" : "cut"} of ${formatNumber(Math.abs(c.value) * 100, 1)}%${name ? `, ${name}` : ""}`;
     default: {
       const subject = name && lever.target !== "none" ? `${lever.label}, ${name}` : lever.label;
-      return `${subject} ${formatChangeValue(lever, c.op, c.value, currency)}`;
+      const also = c.lever === "B2" && c.params?.who === "all" ? ", new and existing clients" : "";
+      return `${subject} ${formatChangeValue(lever, c.op, c.value, currency)}${also}`;
     }
   }
 }

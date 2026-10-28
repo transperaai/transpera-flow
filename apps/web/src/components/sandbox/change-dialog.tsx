@@ -47,6 +47,9 @@ export interface ChangeDialogProps {
   people: NamedOption[];
   steps: NamedOption[];
   services: NamedOption[];
+  /** Lead sources (A1 can point at one) and the churn drivers (B4): built-ins by key, your own as `custom:<id>`. */
+  leadSources?: NamedOption[];
+  drivers?: NamedOption[];
   solutions: SolutionOption[];
   /** The run's months: "YYYY-MM" as the value, "October 2026" as the label. */
   months: { value: string; label: string }[];
@@ -64,7 +67,7 @@ export interface ChangeDialogProps {
 const OP_WORD: Record<PatchOp, string> = { set: "Set to", multiply: "Multiply by", add: "Add" };
 
 export function ChangeDialog(props: ChangeDialogProps) {
-  const { target, appliesReason, roles, people, steps, services, solutions, months, defaultMonth, defaultMonday, validate, onSubmit, onRemove, onClose } = props;
+  const { target, appliesReason, roles, people, steps, services, leadSources = [], drivers = [], solutions, months, defaultMonth, defaultMonday, validate, onSubmit, onRemove, onClose } = props;
   const editing = target.mode === "edit" ? target.change : null;
   const editedLever = editing ? sandboxLever(editing.lever) : undefined;
   const levers = editedLever && !props.levers.some((l) => l.id === editedLever.id) ? [editedLever, ...props.levers] : props.levers;
@@ -83,16 +86,39 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const [valueText, setValueText] = useState(initialValue);
   const [targetId, setTargetId] = useState<string>(editing?.target ?? "");
   const [hireName, setHireName] = useState(editing?.params?.name ?? "");
+  // Phase 3 extras: a fee range's ends (A5), when a fee applies (B2), and a driver's chance and months (B4).
+  const [lowText, setLowText] = useState(editing?.params?.low !== undefined ? String(editing.params.low) : "");
+  const [highText, setHighText] = useState(editing?.params?.high !== undefined ? String(editing.params.high) : "");
+  const [who, setWho] = useState<"new" | "all">(editing?.params?.who ?? "new");
+  const [chanceText, setChanceText] = useState(editing?.params?.chance !== undefined ? String(Math.round(editing.params.chance * 1e4) / 100) : "");
+  const [monthsText, setMonthsText] = useState(editing?.params?.months !== undefined ? String(editing.params.months) : "");
   const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : false);
   const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : defaultMonth.slice(0, 7));
   const [monday, setMonday] = useState(editing?.from && editing.from.length === 10 ? editing.from : defaultMonday);
   const [error, setError] = useState<string | null>(null);
 
   const cls = sqlTargetClass(lever);
-  const options: NamedOption[] = lever.target === "role" ? roles : lever.target === "person" ? people : lever.target === "step" ? steps : lever.target === "service" || lever.target === "service_or_none" ? services : lever.target === "solution" ? solutions.filter((s) => s.inModel || s.id === targetId) : [];
+  const options: NamedOption[] =
+    lever.target === "role" || lever.target === "role_or_none"
+      ? roles
+      : lever.target === "person"
+        ? people
+        : lever.target === "step"
+          ? steps
+          : lever.target === "service" || lever.target === "service_or_none"
+            ? services
+            : lever.target === "lead_source_or_none"
+              ? leadSources
+              : lever.target === "driver"
+                ? drivers
+                : lever.target === "solution"
+                  ? solutions.filter((s) => s.inModel || s.id === targetId)
+                  : [];
+  // These can point at one thing or at all of it (an empty target); fees still need a type when there are types.
+  const allowAll = ["A1", "B1", "B3", "B5", "D6"].includes(lever.id);
   const selectors = lever.selector ? [{ id: lever.selector, name: lever.selector === "@busiest" ? "The busiest role" : "The heaviest step" }] : [];
-  const needsTarget = cls !== "none" && !(cls === "id_or_none" && services.length === 0);
-  const effectiveTarget = needsTarget ? targetId || options[0]?.id || "" : "";
+  const needsTarget = cls !== "none" && !(cls === "id_or_none" && (allowAll ? options.length === 0 : services.length === 0));
+  const effectiveTarget = needsTarget ? (allowAll ? targetId : targetId || options[0]?.id || "") : "";
   const mustBeTimed = !lever.wholeRun;
   const canTime = lever.timed !== false;
   const isMonday = lever.timing === "monday";
@@ -119,7 +145,7 @@ export function ChangeDialog(props: ChangeDialogProps) {
 
   const build = (): { change: SandboxChange } | { error: string } => {
     const id = editing?.id ?? crypto.randomUUID();
-    if (needsTarget && !effectiveTarget) return { error: `Pick what to change.` };
+    if (needsTarget && !effectiveTarget && !allowAll) return { error: `Pick what to change.` };
     const n = fixedValue ? (lever.id === "E6" ? 1 : 0) : Number(valueText);
     if (!fixedValue && (!valueText.trim() || !Number.isFinite(n))) return { error: "Enter a value." };
     const stored = Math.round((n / scale) * 1e6) / 1e6;
@@ -141,14 +167,38 @@ export function ChangeDialog(props: ChangeDialogProps) {
     }
     const typed = hireName.trim();
     if (lever.id === "D1" && typed.length > 120) return { error: "A name can have up to 120 characters." };
+    let params: SandboxChange["params"];
+    if (lever.id === "D1" && typed) params = { name: typed };
+    if (lever.id === "A5") {
+      const low = Number(lowText);
+      const high = Number(highText);
+      if (!lowText.trim() || !highText.trim() || !Number.isFinite(low) || !Number.isFinite(high)) return { error: "Enter the lowest and the highest fee." };
+      if (low < 0 || low > stored || stored > high) return { error: "The lowest fee can't be more than the likely one, and the highest can't be less." };
+      params = { low, high };
+    }
+    if (lever.id === "B2" && who === "all") params = { who: "all" };
+    if (lever.id === "B4") {
+      const p: NonNullable<SandboxChange["params"]> = {};
+      if (chanceText.trim()) {
+        const chance = Number(chanceText) / 100;
+        if (!Number.isFinite(chance) || chance < 0 || chance > 1) return { error: "A chance is between 0% and 100%." };
+        p.chance = Math.round(chance * 1e6) / 1e6;
+      }
+      if (monthsText.trim()) {
+        const months = Number(monthsText);
+        if (!Number.isInteger(months) || months < 1 || months > 24) return { error: "A hit lasts 1 to 24 whole months." };
+        p.months = months;
+      }
+      if (Object.keys(p).length) params = p;
+    }
     const change: SandboxChange = {
       id,
       lever: lever.id,
-      target: needsTarget ? effectiveTarget : null,
+      target: needsTarget && effectiveTarget ? effectiveTarget : null,
       op: fixedValue || lever.id === "D1" || lever.id === "D3" ? "set" : op,
       value: stored,
       ...(from ? { from } : {}),
-      ...(lever.id === "D1" && typed ? { params: { name: typed } } : {}),
+      ...(params ? { params } : {}),
     };
     return { change };
   };
@@ -225,6 +275,7 @@ export function ChangeDialog(props: ChangeDialogProps) {
               <label className="flex flex-col gap-0.5">
                 <HelpLabel {...(lever.id === "D1" ? SANDBOX_HELP.hireRole : lever.id === "D3" || lever.id === "D2" ? SANDBOX_HELP.leavePerson : lever.id === "E6" ? SANDBOX_HELP.solutionPick : SANDBOX_HELP.target)} />
                 <NativeSelect aria-label="On" value={effectiveTarget} onChange={(e) => setTargetId(e.target.value)}>
+                  {allowAll ? <option value="">{lever.id === "A1" ? "All opportunities" : lever.id === "D6" ? "Everyone" : "All types"}</option> : null}
                   {selectors.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -286,6 +337,51 @@ export function ChangeDialog(props: ChangeDialogProps) {
                 <HelpLabel {...SANDBOX_HELP.hireName} />
                 <Input aria-label="Name" value={hireName} maxLength={120} placeholder={`New ${roles.find((r) => r.id === effectiveTarget)?.name ?? "hire"}`} onChange={(e) => setHireName(e.target.value)} />
               </label>
+            ) : null}
+
+            {lever.id === "A5" ? (
+              <div className="flex flex-wrap gap-3" data-fee-range>
+                <label className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
+                  <HelpLabel label="Lowest fee" description="The least a new client of this type pays." example="3,000 when most clients pay about 4,000." />
+                  <Input aria-label="Lowest fee" type="number" inputMode="decimal" min={0} value={lowText} onChange={(e) => setLowText(e.target.value)} />
+                </label>
+                <label className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
+                  <HelpLabel label="Highest fee" description="The most a new client of this type pays." example="6,000 for the occasional large client." />
+                  <Input aria-label="Highest fee" type="number" inputMode="decimal" min={0} value={highText} onChange={(e) => setHighText(e.target.value)} />
+                </label>
+                <span className="basis-full text-xs text-muted-foreground">The value above is the likely fee. Each new client&apos;s fee is drawn between the lowest and highest, most often near the likely one. Clients you already have keep theirs.</span>
+              </div>
+            ) : null}
+
+            {lever.id === "B2" ? (
+              <label className="flex flex-col gap-0.5">
+                <HelpLabel label="Who pays it" description="New clients only, or every client including the ones you already have. A rise that should carry its churn is a Price rise." example="New and existing clients: today's clients pay the new fee too." />
+                <NativeSelect aria-label="Who pays it" value={who} onChange={(e) => setWho(e.target.value as "new" | "all")}>
+                  <option value="new">New clients</option>
+                  <option value="all">New and existing clients</option>
+                </NativeSelect>
+                {who === "all" ? <span className="text-xs text-muted-foreground">This has no churn effect. For a rise that loses clients, use Price rise.</span> : null}
+              </label>
+            ) : null}
+
+            {lever.id === "B4" ? (
+              <div className="flex flex-wrap gap-3" data-driver-chance>
+                <label className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
+                  <HelpLabel label="Chance a month" description="The chance this cause hits a client in a month. Leave it blank to use what the engine measures (or the usual default for causes you enter)." example="5 means one client in twenty is hit each month." />
+                  <Input aria-label="Chance a month (%)" type="number" inputMode="decimal" min={0} max={100} placeholder="measured" value={chanceText} onChange={(e) => setChanceText(e.target.value)} />
+                </label>
+                <label className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
+                  <HelpLabel label="For (months)" description="How long a hit lasts. A second hit while one lasts only extends it." example="3 months is the usual." />
+                  <Input aria-label="For (months)" type="number" inputMode="numeric" min={1} max={24} placeholder="3" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
+                </label>
+                <span className="basis-full text-xs text-muted-foreground">The value above is how much a hit raises that client&apos;s chance of leaving, in percent. Turns the cause on.</span>
+              </div>
+            ) : null}
+
+            {lever.id === "B5" ? (
+              <p className="text-xs text-muted-foreground" data-price-rise-note>
+                A rise reaches existing and new clients, and counts the clients it loses (the Price changes driver is switched on for this run). The result shows what it gains, what it loses and what it nets.
+              </p>
             ) : null}
 
             {canTime ? (
