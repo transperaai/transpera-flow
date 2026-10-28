@@ -12,9 +12,10 @@ import { uiStatus, type StoredIssueStatus } from "./issue-status";
 import { hideAiIssueKey } from "./person-labels";
 import { partitionSteps } from "./retired";
 import type { RunRow } from "./runs";
+import type { ScenarioPatch } from "@transpera-flow/engine";
+import { patchOf, type SandboxChange } from "./sandbox-levers";
 import type {
   BlockRow,
-  ForecastPlanRow,
   SolutionIssueRow,
   SolutionRow,
   ChurnDriverRow,
@@ -41,6 +42,7 @@ import type {
   ProcessRevisionRow,
   ProcessRow,
   ProvenanceMap,
+  SandboxScenarioRow,
   ScenarioRow,
   SeasonalityRow,
   ServiceRow,
@@ -595,11 +597,55 @@ export async function loadProcessBySlug(
 
 export const SCENARIO_COLUMNS = "id, workspace_id, name, description, patch, parent_scenario_id" as const;
 
-/** A workspace's saved scenarios, oldest first. */
+/** The `SandboxScenarioRow` columns. */
+export const SANDBOX_SCENARIO_COLUMNS = "id, workspace_id, name, description, parent_id, changes, horizon_months, start_date, created_at, updated_at, created_by" as const;
+
+/**
+ * A workspace's Sandbox scenarios by name (RLS: everyone who can read the workspace, Viewers included). Empty, with a log line, if
+ * they can't be read.
+ */
+export async function loadSandboxScenarios(db: Db, workspaceId: string): Promise<SandboxScenarioRow[]> {
+  try {
+    const r = await db.selectFrom("sandbox_scenarios").select(columns(SANDBOX_SCENARIO_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("name").orderBy("id").execute();
+    // The database checks the shape of changes (private.is_sandbox_changes).
+    return r as unknown as SandboxScenarioRow[];
+  } catch (e) {
+    console.error("Couldn't load the sandbox scenarios; showing none.", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+/**
+ * A workspace's saved whole-run scenarios, oldest first: the ones the process page, the issues register, share snapshots and MCP
+ * understand. These are the Sandbox scenarios with no parent whose every change is a patch with no `from`; a scenario with a hire,
+ * a change from a month or a parent runs only in the Sandbox. `patch` is the changes as patches.
+ */
 export async function loadScenarios(db: Db, workspaceId: string): Promise<ScenarioRow[]> {
-  const r = await db.selectFrom("scenarios").select(columns(SCENARIO_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("name").execute();
-  // The database checks patch's shape (private.is_scenario_patch).
-  return r as unknown as ScenarioRow[];
+  const r = await db
+    .selectFrom("sandbox_scenarios")
+    .select(columns("id, workspace_id, name, description, parent_id, changes"))
+    .where("workspace_id", "=", workspaceId)
+    .where("parent_id", "is", null)
+    .orderBy("created_at")
+    .orderBy("name")
+    .execute();
+  const rows: ScenarioRow[] = [];
+  for (const row of r as unknown as Pick<SandboxScenarioRow, "id" | "workspace_id" | "name" | "description" | "changes">[]) {
+    const patch = wholeRunPatches(row.changes);
+    if (patch) rows.push({ id: row.id, workspace_id: row.workspace_id, name: row.name, description: row.description, patch, parent_scenario_id: null });
+  }
+  return rows;
+}
+
+/** The changes as patches when every one is a whole-run patch (the process page's kind of scenario), else null. */
+export function wholeRunPatches(changes: readonly SandboxChange[]): ScenarioPatch[] | null {
+  const out: ScenarioPatch[] = [];
+  for (const c of changes) {
+    const patch = c.from === undefined ? patchOf(c) : null;
+    if (!patch) return null;
+    out.push(patch);
+  }
+  return out;
 }
 
 export const BLOCK_COLUMNS = "id, workspace_id, name, description, type, steps, created_at, updated_at" as const;
@@ -1112,21 +1158,6 @@ export async function loadSolutions(db: Db, workspaceId: string, processId?: str
   const r = await q.orderBy("created_at", "desc").orderBy("id").execute();
   // The database checks the shapes of steps, changed_step_ids and lever_changes.
   return r as unknown as SolutionRow[];
-}
-
-/** The `ForecastPlanRow` columns. */
-export const FORECAST_PLAN_COLUMNS = "id, workspace_id, name, markers, created_at, updated_at, created_by" as const;
-
-/** A workspace's forecast plans by name (RLS: only owners, editors and agency admins read them). Empty, with a log line, if they can't be read. */
-export async function loadForecastPlans(db: Db, workspaceId: string): Promise<ForecastPlanRow[]> {
-  try {
-    const r = await db.selectFrom("forecast_plans").select(columns(FORECAST_PLAN_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("name").orderBy("id").execute();
-    // The database checks the shape of markers.
-    return r as unknown as ForecastPlanRow[];
-  } catch (e) {
-    console.error("Couldn't load the forecast plans; showing none.", e instanceof Error ? e.message : e);
-    return [];
-  }
 }
 
 /** The issues each of a workspace's solutions solves, with their verdicts. */

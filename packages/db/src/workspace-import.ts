@@ -3,8 +3,8 @@
 //
 // `checkWorkspaceBundle` says whether a parsed file is a `transpera-workspace/1` backup it can restore, with plain-sentence
 // errors, warnings and a summary. `planWorkspaceImport` turns a checked bundle into the plan the restore function takes: one
-// draft per process (its live version, or its draft when never published), the company model, issues, sources, scenarios,
-// and blocks, each row cut down to the columns the restore accepts, with every id replaced by a
+// draft per process (its live version, or its draft when never published), the company model, issues, sources, scenarios
+// (the Sandbox's; an older backup's whole-run scenarios are converted), and blocks, each row cut down to the columns the restore accepts, with every id replaced by a
 // placeholder that keeps the order of the old ids (the engine sorts by id, so a restore must not reshuffle them).
 //
 // Not restored (decisions 1 to 4 on #39): history and older versions, the company map (the new workspace keeps its own),
@@ -16,6 +16,7 @@ import { ENGINE_VERSION } from "@transpera-flow/engine";
 import type { Selectable } from "kysely";
 import type { DB } from "./db-types";
 import { payFreeIssueFields } from "./issue-pay";
+import { planSandboxScenarios } from "./sandbox-import";
 import type { WorkspaceSettings } from "./types";
 import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./workspace-bundle";
 
@@ -99,7 +100,7 @@ export const IMPORT_COLUMNS = {
     "first_principles", "deletes", "improvements", "job_done", "job_progress", "job_situation", "job_who", "measures", "requirements", "root_cause", "statements",
     "why_chain", "why_problem",
   ),
-  scenarios: cols("scenarios", "id", "parent_scenario_id", "name", "description", "patch", "created_at"),
+  sandbox_scenarios: cols("sandbox_scenarios", "id", "parent_id", "name", "description", "changes", "horizon_months", "start_date", "created_at"),
   blocks: cols("blocks", "id", "name", "description", "type", "steps", "created_at"),
   issues: cols(
     "issues", "id", "client_id", "created_at", "detected_key", "evidence", "evidence_metrics", "evidence_sources", "owner_person_id", "person_id", "process_id",
@@ -203,7 +204,7 @@ export interface ImportPlan {
   clients: Row[];
   sources: Row[];
   processes: PlanProcess[];
-  scenarios: Row[];
+  sandbox_scenarios: Row[];
   blocks: Row[];
   issues: Row[];
   services: Row[];
@@ -238,7 +239,7 @@ const pick = (row: Row, columns: readonly string[]): Row => {
 // ---------------------------------------------------------------------------------------------------------------------
 // The checker
 
-const SECTION_ARRAYS = ["processes", "scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const;
+const SECTION_ARRAYS = ["processes", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const;
 /** Sections a backup made before Suggestions were removed (28 Oct 2026) may still hold: read, counted, never restored. */
 const LEGACY_SECTIONS = ["suggestions", "suggestion_proposals"] as const;
 /** Tables whose rows have an `id` column (company-model tables without one are keyed otherwise). */
@@ -254,7 +255,10 @@ function expectedCounts(b: WorkspaceBundle): Record<string, number> {
   out.process_versions = versions.length;
   out.steps = versions.reduce((n, v) => n + rowsOf(v.steps).length, 0);
   out.edges = versions.reduce((n, v) => n + rowsOf(v.edges).length, 0);
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) out[k] = b[k].length;
+  for (const k of ["solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) out[k] = b[k].length;
+  // The Sandbox's scenarios, or (a backup made before it) the old whole-run ones.
+  if (Array.isArray(b.sandbox_scenarios)) out.sandbox_scenarios = b.sandbox_scenarios.length;
+  if (Array.isArray(b.scenarios)) out.scenarios = b.scenarios.length;
   return out;
 }
 
@@ -266,6 +270,9 @@ function shapeProblem(v: Row): string | null {
   if (!isObj(cm)) return "the company model is missing";
   for (const [k, rows] of Object.entries(cm)) if (!Array.isArray(rows)) return `company_model.${k} isn't a list`;
   for (const k of SECTION_ARRAYS) if (!Array.isArray(v[k])) return `${k} isn't a list`;
+  // The Sandbox's scenarios, or (a backup made before it) the old ones: one of the two, each a list when present.
+  if (!Array.isArray(v.sandbox_scenarios) && !Array.isArray(v.scenarios)) return "scenarios isn't a list";
+  for (const k of ["sandbox_scenarios", "scenarios"] as const) if (v[k] !== undefined && !Array.isArray(v[k])) return `${k === "scenarios" ? "scenarios" : "the sandbox scenarios"} isn't a list`;
   for (const k of LEGACY_SECTIONS) if (v[k] !== undefined && !Array.isArray(v[k])) return `${k} isn't a list`;
   if (!isObj(v.counts)) return "the counts are missing";
 
@@ -287,6 +294,11 @@ function shapeProblem(v: Row): string | null {
   }
   for (const k of SECTION_ARRAYS) {
     const p = checkTable(k, v[k] as unknown[], !NO_ID_TABLES.has(k));
+    if (p) return p;
+  }
+  for (const k of ["sandbox_scenarios", "scenarios"] as const) {
+    if (!Array.isArray(v[k])) continue;
+    const p = checkTable("scenarios", v[k] as unknown[], true);
     if (p) return p;
   }
   // Per-person times (#228): a person, a step or null ("Every step"), a factor from 0.5 to 2, and no pair twice (null counts as one value).
@@ -347,7 +359,9 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
       if (isObj(v.first_principles)) yield v.first_principles;
     }
   }
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) yield* b[k];
+  for (const k of ["solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) yield* b[k];
+  yield* rowsOf(b.sandbox_scenarios);
+  yield* rowsOf(b.scenarios);
   for (const i of b.issues) yield* rowsOf(i.events);
 }
 
@@ -376,6 +390,7 @@ export function checkWorkspaceBundle(value: unknown, options: { canManage?: bool
     ["processes", L_.processes, "processes"],
     ["issues", L_.issues, "issues"],
     ["sources", L_.sources, "sources"],
+    ["sandbox_scenarios", L_.scenarios, "scenarios"],
     ["scenarios", L_.scenarios, "scenarios"],
     ["blocks", L_.blocks, "blocks"],
   ];
@@ -515,10 +530,10 @@ export const IMPORT_REFS: Record<string, Ref[]> = {
   person_skills: [R("person_id", "people", "require"), R("step_id", "steps", "require")],
   // A null step is the "Every step" row (kept); a step that isn't in a restored version drops the row (#228).
   person_capacity_factors: [R("person_id", "people", "require"), R("step_id", "steps", "drop")],
-  scenarios: [R("parent_scenario_id", "scenarios", "null")],
+  sandbox_scenarios: [R("parent_id", "sandbox_scenarios", "null")],
   issues: [
     R("client_id", "clients", "null"), R("owner_person_id", "people", "null"), R("person_id", "people", "null"), R("process_id", "processes", "null"),
-    R("role_id", "roles", "null"), R("scenario_id", "scenarios", "null"), R("step_id", "steps", "null"),
+    R("role_id", "roles", "null"), R("scenario_id", "sandbox_scenarios", "null"), R("step_id", "steps", "null"),
   ],
   source_links: [R("source_id", "sources", "require"), R("issue_id", "issues", "drop"), R("process_id", "processes", "drop"), R("step_id", "steps", "drop")],
 };
@@ -527,7 +542,7 @@ export const IMPORT_STEP_REFS = [R("parent_step_id", "version", "null"), R("entr
 const LABELS: Record<string, string> = {
   roles: "roles", people: "people", person_roles: "role assignments", person_leave: "leave entries", lead_sources: "lead sources", seasonality: "seasonality months",
   churn_drivers: "churn drivers", market_conditions: "market conditions", market_schedule: "market schedule rows", clients: "clients", sources: "sources",
-  scenarios: "scenarios", blocks: "blocks", issues: "issues", services: "services", service_servicing: "servicing rules", client_groups: "client groups",
+  sandbox_scenarios: "scenarios", blocks: "blocks", issues: "issues", services: "services", service_servicing: "servicing rules", client_groups: "client groups",
   client_services: "client services", client_assignments: "client assignments", person_skills: "skills", person_capacity_factors: "per-person times", source_links: "source links",
   steps: "steps", edges: "edges", processes: "processes",
 };
@@ -630,11 +645,16 @@ export function planWorkspaceImport(
     services: new Set(company("services").map((r) => lc(r.id))),
     clients: new Set(company("clients").map((r) => lc(r.id))),
     sources: new Set(bundle.sources.map((r) => lc(r.id))),
-    scenarios: new Set(bundle.scenarios.map((r) => lc(r.id))),
+    sandbox_scenarios: new Set([...rowsOf(bundle.sandbox_scenarios), ...rowsOf(bundle.scenarios)].map((r) => lc(r.id))),
     steps: new Set(),
     issues: new Set(),
     version: new Set(),
   };
+
+  // The scenarios (the Sandbox's, or an older backup's converted) first: an issue may point at one that is left out.
+  const sandbox = planSandboxScenarios(rowsOf(bundle.sandbox_scenarios), rowsOf(bundle.scenarios));
+  warnings.push(...sandbox.warnings);
+  sets.sandbox_scenarios = new Set(sandbox.rows.map((r) => lc(r.id)));
 
   // Processes, with the steps and edges of the restored version.
   const stepProcess = new Map<string, string>();
@@ -749,7 +769,7 @@ export function planWorkspaceImport(
     clients: flat("clients", company("clients")),
     sources,
     processes,
-    scenarios: parentsFirst(flat("scenarios", bundle.scenarios, IMPORT_REFS.scenarios), "parent_scenario_id"),
+    sandbox_scenarios: sandbox.rows.map((r) => pick(r, IMPORT_COLUMNS.sandbox_scenarios)),
     blocks: flat("blocks", bundle.blocks).sort(byCreated),
     issues: issueRows,
     services: flat("services", company("services"), IMPORT_REFS.services),
@@ -797,7 +817,8 @@ export function planWorkspaceImport(
   const line = (key: string, count: number, label = LABELS[key] ?? key): SummaryLine => ({ key, label, count });
   const restored = [
     line("processes", processes.length, "processes, as drafts"),
-    ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "scenarios", "blocks", "issues", "sources"] as const).map((k) => line(k, plan[k].length)),
+    ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "blocks", "issues", "sources"] as const).map((k) => line(k, plan[k].length)),
+    line("scenarios", plan.sandbox_scenarios.length),
     line("person_capacity_factors", plan.person_capacity_factors.length),
   ].filter((l) => l.count > 0);
   const leftOut = [
@@ -825,7 +846,7 @@ export function planWorkspaceImport(
       issues: issueRows.length,
       people: plan.people.length,
       clients: plan.clients.length,
-      scenarios: plan.scenarios.length,
+      scenarios: plan.sandbox_scenarios.length,
       blocks: plan.blocks.length,
       personRoles: plan.person_roles.length,
       personSkills: plan.person_skills.length,

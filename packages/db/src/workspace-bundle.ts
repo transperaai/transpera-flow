@@ -62,7 +62,7 @@ export const BUNDLE_TABLES = {
   steps: T("steps"),
   edges: T("edges"),
   first_principles: T("first_principles"),
-  scenarios: T("scenarios"),
+  sandbox_scenarios: T("sandbox_scenarios"),
   solutions: T("solutions"),
   solution_issues: T("solution_issues", "solution_id", "issue_id"),
   blocks: T("blocks"),
@@ -179,7 +179,10 @@ export interface WorkspaceBundle {
   company_model: Record<string, Row[]>;
   /** Every process, the company map included, each with all of its versions. */
   processes: Row[];
-  scenarios: Row[];
+  /** The Sandbox's scenarios (`sandbox_scenarios`, named changes). */
+  sandbox_scenarios: Row[];
+  /** Only in a backup made before the Sandbox: whole-run scenarios with `patch` rows. A restore converts them. */
+  scenarios?: Row[];
   solutions: Row[];
   solution_issues: Row[];
   blocks: Row[];
@@ -294,7 +297,7 @@ export async function exportWorkspaceBundle(
   counts.process_versions = data.process_revisions.length;
   counts.steps = data.steps.length;
   counts.edges = data.edges.length;
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = data[k].length;
+  for (const k of ["sandbox_scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = data[k].length;
 
   const bundle: WorkspaceBundle = {
     format: WORKSPACE_BUNDLE_FORMAT,
@@ -313,7 +316,7 @@ export async function exportWorkspaceBundle(
     },
     company_model,
     processes,
-    scenarios: data.scenarios,
+    sandbox_scenarios: data.sandbox_scenarios,
     solutions: data.solutions,
     solution_issues: data.solution_issues,
     blocks: data.blocks,

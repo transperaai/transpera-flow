@@ -16,6 +16,7 @@ import type {
   ProcessPart,
   Provenance,
   RoleRow,
+  SandboxScenarioRow,
   ScenarioRow,
   ServiceRow,
   ServiceServicingRow,
@@ -645,6 +646,48 @@ export function northbeamScenarios(): ScenarioRow[] {
       { path: "demand.churn_monthly", op: "multiply", value: 1.5 },
     ]),
   ];
+}
+
+/** The ids of the two demo plans (the Sandbox's demo opens with them; the seed holds them as scenarios too). */
+export const NORTHBEAM_HIRE_JANUARY_ID = id("5", 5);
+export const NORTHBEAM_HIRE_MARCH_ID = id("5", 6);
+
+/**
+ * Northbeam's scenarios as the Sandbox holds them (`sandbox_scenarios`): the four of the library above, converted (same ids, so the
+ * issues that link them keep working), and the two demo plans "Hire in January" and "Hire in March" (one PPC specialist each).
+ * The demo's "Hire in March" also puts a solution live; solutions are not in the seed, so here it is the hire alone.
+ */
+export function northbeamSandboxScenarios(): SandboxScenarioRow[] {
+  const at = "2026-10-05T00:00:00.000Z";
+  const row = (scenarioId: string, name: string, description: string | null, changes: SandboxScenarioRow["changes"]): SandboxScenarioRow => ({
+    id: scenarioId,
+    workspace_id: ws,
+    name,
+    description,
+    parent_id: null,
+    changes,
+    horizon_months: 12,
+    start_date: null,
+    created_at: at,
+    updated_at: at,
+    created_by: null,
+  });
+  // Deterministic change ids (fixed per scenario), in the library's id space: 5a0d1b00-... is the library's own prefix, so these start 5b.
+  const changeId = (scenario: number, n: number) => `5b${scenario.toString(16).padStart(6, "0")}-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+  // The four of `northbeamScenarios()` as changes (written out, not converted: the seed script runs without the engine's grammar).
+  const [hireStrat, automate, moreLeads, downturn] = northbeamScenarios();
+  const converted = [
+    row(hireStrat!.id, hireStrat!.name, hireStrat!.description, [{ id: changeId(1, 1), lever: "D5", target: northbeamRoleIds.strat, op: "add", value: 1 }]),
+    row(automate!.id, automate!.name, automate!.description, [{ id: changeId(2, 1), lever: "E1", target: northbeamStepIds.audit, op: "multiply", value: 0.4 }]),
+    row(moreLeads!.id, moreLeads!.name, moreLeads!.description, [{ id: changeId(3, 1), lever: "A1", target: null, op: "multiply", value: 1.25 }]),
+    row(downturn!.id, downturn!.name, downturn!.description, [
+      { id: changeId(4, 1), lever: "A1", target: null, op: "multiply", value: 0.7 },
+      { id: changeId(4, 2), lever: "B3", target: null, op: "multiply", value: 1.5 },
+    ]),
+  ];
+  const hire = (scenarioId: string, name: string, n: number, from: string) =>
+    row(scenarioId, name, null, [{ id: changeId(0xf0 + n, 1), lever: "D1", target: northbeamRoleIds.ppc, op: "set", value: 1, from }]);
+  return [...converted, hire(NORTHBEAM_HIRE_JANUARY_ID, "Hire in January", 1, "2027-01"), hire(NORTHBEAM_HIRE_MARCH_ID, "Hire in March", 2, "2027-03")];
 }
 
 /**

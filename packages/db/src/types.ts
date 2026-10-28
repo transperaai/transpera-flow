@@ -7,6 +7,7 @@ import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/e
 import type { Selectable } from "kysely";
 import type { DB, Json } from "./db-types";
 import type { Viewer } from "./queries";
+import type { SandboxChange } from "./sandbox-levers";
 
 /**
  * What `memberships.role` can hold (migration 20270103000000): `owner` is an Agency admin, `viewer` is a Viewer. The Owner needs
@@ -703,8 +704,10 @@ export interface ProcessBundle {
 }
 
 /**
- * A saved scenario: patches applied in order on top of the baseline model
- * (docs/PRD.md §5; the grammar is in packages/engine/src/scenario.ts).
+ * A saved whole-run scenario as the process page, the issues register, share snapshots and MCP read it: patches applied in order on
+ * top of the baseline model (docs/PRD.md §5; the grammar is in packages/engine/src/scenario.ts). Since the Sandbox (sandbox
+ * phase 1) these are the standalone whole-run `sandbox_scenarios` (no parent, every change a patch with no `from`), read through
+ * `loadScenarios`; `parent_scenario_id` is always null.
  */
 export interface ScenarioRow {
   id: string;
@@ -772,23 +775,20 @@ export interface SolutionRow {
 }
 
 /**
- * One marker of a forecast plan (B7, #36). Dates are absolute ISO dates, never month offsets. The ids are checked at write
- * time but are not foreign keys: a role, person or solution deleted later leaves its marker "needs attention" in the app.
+ * A scenario of the Sandbox: a named list of changes (one lever each, for the whole run or from a month), optionally built on
+ * another scenario (`parent_id`: the parent's changes apply first). It never changes the live model; it is run against it.
  */
-export type ForecastPlanMarker =
-  /** A new person in a role from `date` (the 1st of a month). `fte` 0.1-2. `name` optional; the app shows "New <role>". */
-  | { id: string; kind: "hire"; date: string; role_id: string; fte: number; name?: string }
-  /** An existing person away for `weeks` whole weeks from `date` (a Monday). */
-  | { id: string; kind: "leave"; date: string; person_id: string; weeks: number }
-  /** A saved solution live from `date` (the 1st of a month). */
-  | { id: string; kind: "solution"; date: string; solution_id: string };
-
-/** A named set of forecast markers: hires, leave and solutions going live. It never changes the live model. */
-export interface ForecastPlanRow {
+export interface SandboxScenarioRow {
   id: string;
   workspace_id: string;
   name: string;
-  markers: ForecastPlanMarker[];
+  description: string | null;
+  parent_id: string | null;
+  changes: SandboxChange[];
+  /** The horizon the scenario opens on, 1 to 24 months. */
+  horizon_months: number;
+  /** The 1st of the month the run starts in; null: today. */
+  start_date: string | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -974,8 +974,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<MarketScheduleRow, "market_schedule">>,
   // driver is check-constrained to ChurnDriverKey; provenance is jsonb.
   Assert<Matches<Omit<ChurnDriverRow, "driver" | "provenance">, "churn_drivers">>,
-  // patch is jsonb; ScenarioPatch[] is its checked shape.
-  Assert<Matches<Omit<ScenarioRow, "patch">, "scenarios">>,
+  // changes is jsonb; SandboxChange[] is its checked shape.
+  Assert<Matches<Omit<SandboxScenarioRow, "changes">, "sandbox_scenarios">>,
   // evidence_metrics is jsonb; Record<string, number> is its app-side shape.
   // The three relation arrays are embedded from the link tables.
   Assert<Matches<Omit<IssueRow, "evidence_metrics" | "links" | "owner_ids" | "source_ids" | "status" | "resolved_how">, "issues">>,
@@ -988,6 +988,4 @@ export type _SchemaDriftChecks = [
   // steps, changed_step_ids and lever_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
   Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes">, "solutions">>,
   Assert<Matches<Omit<SolutionIssueRow, "auto_verdict" | "user_verdict">, "solution_issues">>,
-  // markers is jsonb; ForecastPlanRow has its checked shape.
-  Assert<Matches<Omit<ForecastPlanRow, "markers">, "forecast_plans">>,
 ];

@@ -231,16 +231,6 @@ export interface FirstPrinciples {
   workspace_id: string;
 }
 
-export interface ForecastPlans {
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  id: Generated<string>;
-  markers: Generated<Json>;
-  name: string;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
 export interface IssueEvents {
   actor: string | null;
   at: Generated<string>;
@@ -518,14 +508,16 @@ export interface Runs {
   workspace_id: string;
 }
 
-export interface Scenarios {
+export interface SandboxScenarios {
+  changes: Generated<Json>;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
   description: string | null;
+  horizon_months: Generated<number>;
   id: Generated<string>;
   name: string;
-  parent_scenario_id: string | null;
-  patch: Generated<Json>;
+  parent_id: string | null;
+  start_date: string | null;
   updated_at: Generated<string>;
   workspace_id: string;
 }
@@ -755,7 +747,6 @@ export interface DB {
   deployment_access: DeploymentAccess;
   edges: Edges;
   first_principles: FirstPrinciples;
-  forecast_plans: ForecastPlans;
   issue_events: IssueEvents;
   issue_links: IssueLinks;
   issue_owners: IssueOwners;
@@ -777,7 +768,7 @@ export interface DB {
   robustness_results: RobustnessResults;
   roles: Roles;
   runs: Runs;
-  scenarios: Scenarios;
+  sandbox_scenarios: SandboxScenarios;
   schema_migrations: SchemaMigrations;
   seasonality: Seasonality;
   service_servicing: ServiceServicing;

@@ -40,9 +40,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "statements",
     "why_chain"
   ],
-  "forecast_plans": [
-    "markers"
-  ],
   "issue_events": [
     "detail"
   ],
@@ -75,8 +72,8 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "params_snapshot",
     "results"
   ],
-  "scenarios": [
-    "patch"
+  "sandbox_scenarios": [
+    "changes"
   ],
   "seasonality": [
     "provenance"

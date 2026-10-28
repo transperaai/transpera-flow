@@ -584,13 +584,15 @@ select private.relayout_company_map('a0000000-0000-4000-8001-000000000001');
 
 -- Scenario library: replaces the generic one the workspace trigger created
 
-delete from public.scenarios where workspace_id in ('a0000000-0000-4000-8000-000000000001');
+delete from public.sandbox_scenarios where workspace_id in ('a0000000-0000-4000-8000-000000000001');
 
-insert into public.scenarios (id, workspace_id, name, description, patch, parent_scenario_id) values
-  ('50000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'Hire a strategist', 'A second full-time strategist to share audits, proposals and kickoffs.', '[{"path":"roles.b0000000-0000-4000-8000-000000000002.headcount","op":"add","value":1}]', null),
-  ('50000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001', 'Automate proposals', 'Templates and SEMrush exports cut hands-on time on audits and proposals by 60%.', '[{"path":"steps.e0000000-0000-4000-8000-000000000003.work_hours","op":"multiply","value":0.4}]', null),
-  ('50000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'More leads', '25% more leads every week.', '[{"path":"demand.leads_per_week","op":"multiply","value":1.25}]', null),
-  ('50000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000001', 'Downturn', '30% fewer leads a week, and client churn up by half.', '[{"path":"demand.leads_per_week","op":"multiply","value":0.7},{"path":"demand.churn_monthly","op":"multiply","value":1.5}]', null);
+insert into public.sandbox_scenarios (id, workspace_id, name, description, parent_id, changes, horizon_months) values
+  ('50000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'Hire a strategist', 'A second full-time strategist to share audits, proposals and kickoffs.', null, '[{"id":"5b000001-0000-4000-8000-000000000001","lever":"D5","target":"b0000000-0000-4000-8000-000000000002","op":"add","value":1}]', 12),
+  ('50000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001', 'Automate proposals', 'Templates and SEMrush exports cut hands-on time on audits and proposals by 60%.', null, '[{"id":"5b000002-0000-4000-8000-000000000001","lever":"E1","target":"e0000000-0000-4000-8000-000000000003","op":"multiply","value":0.4}]', 12),
+  ('50000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'More leads', '25% more leads every week.', null, '[{"id":"5b000003-0000-4000-8000-000000000001","lever":"A1","target":null,"op":"multiply","value":1.25}]', 12),
+  ('50000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000001', 'Downturn', '30% fewer leads a week, and client churn up by half.', null, '[{"id":"5b000004-0000-4000-8000-000000000001","lever":"A1","target":null,"op":"multiply","value":0.7},{"id":"5b000004-0000-4000-8000-000000000002","lever":"B3","target":null,"op":"multiply","value":1.5}]', 12),
+  ('50000000-0000-4000-8000-000000000005', 'a0000000-0000-4000-8000-000000000001', 'Hire in January', null, null, '[{"id":"5b0000f1-0000-4000-8000-000000000001","lever":"D1","target":"b0000000-0000-4000-8000-000000000005","op":"set","value":1,"from":"2027-01"}]', 12),
+  ('50000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000001', 'Hire in March', null, null, '[{"id":"5b0000f2-0000-4000-8000-000000000001","lever":"D1","target":"b0000000-0000-4000-8000-000000000005","op":"set","value":1,"from":"2027-03"}]', 12);
 
 -- Sources: what the audit recorded, which step values cite as evidence
 

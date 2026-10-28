@@ -1,6 +1,6 @@
 import { storedStatus } from "@transpera-flow/db/issue-status";
 import type { NewSourceLink } from "./source-links";
-import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "./types";
+import type { IssueRow, ProcessBundle, SandboxScenarioRow, SourceRow } from "./types";
 
 type Value = string | number | boolean | null | object;
 
@@ -25,11 +25,11 @@ function insert(table: string, rows: Record<string, Value>[]): string {
  * SQL that inserts process bundles, scenarios, issues and sources. The
  * process is linked to its revision last. Inserting a workspace gives it the
  * generic scenario library (a trigger); scenarios given for a workspace
- * replace it. Issues come last, as they can link a scenario.
+ * replace it (the Sandbox's `sandbox_scenarios`). Issues come last, as they can link a scenario.
  */
 export function seedSql(
   bundles: ProcessBundle[],
-  scenarios: ScenarioRow[] = [],
+  scenarios: SandboxScenarioRow[] = [],
   issues: IssueRow[] = [],
   sources: SourceRow[] = [],
   sourceLinks: NewSourceLink[] = [],
@@ -75,8 +75,13 @@ export function seedSql(
   const libraries = [...new Set(scenarios.map((s) => s.workspace_id))];
   if (libraries.length) {
     out.push("-- Scenario library: replaces the generic one the workspace trigger created\n");
-    out.push(`delete from public.scenarios where workspace_id in (${libraries.map(literal).join(", ")});\n`);
-    out.push(insert("scenarios", scenarios.map((r) => ({ ...r }))));
+    out.push(`delete from public.sandbox_scenarios where workspace_id in (${libraries.map(literal).join(", ")});\n`);
+    out.push(
+      insert(
+        "sandbox_scenarios",
+        scenarios.map((r) => ({ id: r.id, workspace_id: r.workspace_id, name: r.name, description: r.description, parent_id: r.parent_id, changes: r.changes, horizon_months: r.horizon_months })),
+      ),
+    );
   }
   if (sources.length) {
     out.push("-- Sources: what the audit recorded, which step values cite as evidence\n");
