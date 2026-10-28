@@ -143,9 +143,32 @@ describe("the workspace's name and currency", () => {
       const region = page.getByRole("region", { name: "Workspace" });
       expect(await region.getByLabel("Name", { exact: true }).isDisabled()).toBe(true);
       expect(await region.getByLabel("Currency", { exact: true }).isDisabled()).toBe(true);
-      expect(await region.getByText("Only Agency admins can change this.").count()).toBe(2);
+      expect(await region.getByLabel("Overheads a month", { exact: true }).isDisabled()).toBe(true);
+      expect(await region.getByText("Only Agency admins can change this.").count()).toBe(3);
       await page.close();
     }
+  }, 60_000);
+});
+
+describe("overheads a month", () => {
+  it("an owner sets them, and clears them with a blank field; the amount is in the workspace currency", async () => {
+    const { page, errors } = await mount({ canEdit: true, canManage: true });
+    const region = page.getByRole("region", { name: "Workspace" });
+    const field = region.getByLabel("Overheads a month", { exact: true });
+    expect(await field.isDisabled()).toBe(false);
+    expect(await region.innerText()).toContain("AUD a month");
+    await field.fill("18000");
+    await field.press("Enter");
+    await expect.poll(() => calls(page)).toEqual([["overheads", 18000]]);
+    await field.fill("");
+    await field.press("Enter");
+    await expect.poll(() => calls(page)).toEqual([["overheads", 18000], ["overheads", null]]);
+    // Negative amounts are refused before they are saved.
+    await field.fill("-5");
+    await field.press("Enter");
+    expect(await calls(page)).toEqual([["overheads", 18000], ["overheads", null]]);
+    expect(errors).toEqual([]);
+    await page.close();
   }, 60_000);
 });
 

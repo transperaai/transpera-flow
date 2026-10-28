@@ -123,7 +123,7 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
         </Card>
       ) : null}
 
-      <Card className="gap-2 px-4 py-4" data-money-table-card>
+      <Card className="min-w-0 gap-2 px-4 py-4" data-money-table-card>
         <div className="overflow-x-auto">
           <table className="w-full min-w-max text-xs tabular-nums" data-money-table>
             <caption className="sr-only">Sales and money by month, average of 30 runs</caption>
