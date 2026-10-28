@@ -191,7 +191,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
     });
   };
 
-  const groupsHref = props.base ? `${props.base}/settings#client-groups` : null;
+  const groupsHref = props.base ? `${props.base}/settings#client-groups-heading` : null;
   const noGroupsAtAll = services.length > 0 && services.every((s) => !s.group);
 
   return (

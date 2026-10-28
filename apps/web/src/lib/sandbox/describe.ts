@@ -2,7 +2,7 @@
 // Pure: no React. The change list, the timeline lane and the compare view all use it.
 
 import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever, type SolutionRow } from "@transpera-flow/db";
-import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { personName, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
 
@@ -14,7 +14,11 @@ export interface DescribeContext {
   changes: readonly SandboxChange[];
 }
 
-/** A value in the lever's own terms: stored units for a multiplier, the displayed unit (a month, a percent) otherwise. */
+/**
+ * A value in the lever's own terms: stored units for a multiplier, the displayed unit (a month, a percent) otherwise. Money is whole and
+ * never compacted: the change list is rendered on the server too, and compact notation differs between Node's and browsers' ICU
+ * ("£15.0K" / "£15k"), which broke hydration on any scenario with a fee or overheads change.
+ */
 export function formatChangeValue(lever: SandboxLever, op: SandboxChange["op"], value: number, currency = "GBP"): string {
   if (op === "multiply") return `×${formatNumber(value, 2)}`;
   const shown = value * (lever.displayScale ?? 1);
@@ -22,7 +26,7 @@ export function formatChangeValue(lever: SandboxLever, op: SandboxChange["op"], 
     lever.unit === "share" && lever.id !== "A6"
       ? `${formatNumber(shown * 100, 1)}%`
       : lever.unit === "money"
-        ? formatCurrency(shown, currency)
+        ? formatWholeCurrency(shown, currency)
         : lever.unit === "hours"
           ? `${formatNumber(shown, 1)} h`
           : lever.unit === "per_week"

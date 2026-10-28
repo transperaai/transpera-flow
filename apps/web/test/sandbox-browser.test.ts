@@ -153,6 +153,12 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await waitRuns(page, 1);
         // A whole-run change: opportunities x1.25.
         await openAdd(page);
+        // Every greyed lever can't be picked, so its reason is listed under the list (the demo's clients are counted per service).
+        const disabled = await page.locator("[data-change-dialog] select[aria-label='What to change'] option:disabled").allInnerTexts();
+        expect(disabled.length).toBeGreaterThan(0);
+        const greyed = await page.locator("[data-greyed-levers]").innerText();
+        for (const label of disabled) expect(greyed).toContain(label.replace(" (does nothing here)", ""));
+        expect(greyed).toContain("Settings, Clients");
         await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Opportunities coming in" });
         await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
         await page.getByLabel("Value", { exact: true }).fill("1.25");
@@ -550,6 +556,25 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await page.locator('[data-compare-section="Profit"]').count()).toBe(0);
         expect(await page.locator('[data-compare-tile="Profit over the run"]').count()).toBe(0);
         expect(await page.locator('[data-compare-section="Billed revenue"]').count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("follows the address when a link changes it: the sidebar's Sandbox link goes back to No changes and a year", async () => {
+        const { page, errors } = await mount(width, { url: `/demo/sandbox?scenario=${MARCH}&horizon=6` });
+        expect(await page.locator("[data-scenario-select] option:checked").innerText()).toBe("Hire in March");
+        expect(await page.locator("[data-forecast-alerts]").innerText()).toContain("Over the next 6 months");
+        // Picking in the page writes the address and keeps what is on screen.
+        await pick(page, "Hire in January");
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain("scenario=50000000-0000-4000-8000-000000000005");
+        expect(await page.locator("[data-scenario-select] option:checked").innerText()).toBe("Hire in January");
+        // A link to the bare page (the sidebar's Sandbox) shows what that address says, as a reload would.
+        await page.evaluate(() => window.__setHarnessUrl("/demo/sandbox"));
+        await page.waitForFunction(() => (document.querySelector("[data-scenario-select]") as HTMLSelectElement).selectedOptions[0]?.textContent === "No changes");
+        expect(await page.locator("[data-forecast-alerts]").innerText()).toContain("Over the next 12 months");
+        // And a link to a comparison opens it.
+        await page.evaluate((id) => window.__setHarnessUrl(`/demo/sandbox?compare=${id}`), JANUARY);
+        await page.waitForSelector("[data-sandbox-compare]");
         expect(errors).toEqual([]);
         await page.close();
       });

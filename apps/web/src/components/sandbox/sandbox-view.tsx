@@ -12,7 +12,7 @@
 import { useIsPhone } from "@/hooks/use-mobile";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { partOf, speedsNormalisedFor, type IssueRow, type ProcessBundle, type SandboxChange, type SandboxScenarioRow, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { offeredLevers, sandboxLever } from "@transpera-flow/db";
 import { firstCrossing, toRatingConfig } from "@transpera-flow/engine";
@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { deleteDemoScenario, saveDemoScenario, useDemoScenarios } from "@/lib/sandbox/demo";
 import type { DescribeContext } from "@/lib/sandbox/describe";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
+import { solutionReason } from "@/lib/sandbox/greyed";
 import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
@@ -102,6 +103,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const searchParams = useSearchParams();
   const canEdit = mode !== "readonly";
   const demo = mode === "demo";
+  /** The query string this page last wrote, or was opened with: any other one came from outside (a link, the sidebar). */
+  const lastWritten = useRef(searchParams.toString());
   /** Change some of the page's URL parameters (null removes one), without a scroll or a new history entry. */
   const writeUrl = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams.toString());
@@ -109,6 +112,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       if (v === null) next.delete(k);
       else next.set(k, v);
     }
+    lastWritten.current = next.toString();
     // A comma stays a comma: `?compare=a,b`.
     const qs = next.toString().replace(/%2C/gi, ",");
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -142,6 +146,27 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   // The horizon: ?horizon=1..24, else the open scenario's own, else a year.
   const horizonParam = Number(searchParams.get("horizon"));
   const [override, setOverride] = useState<number | null>(Number.isInteger(horizonParam) && horizonParam >= 1 && horizonParam <= 24 ? horizonParam : null);
+  // The page stays mounted when only the address's query changes, so state read from it once would go stale: the sidebar's
+  // "Sandbox" link (no query) left the last scenario on screen under a bare address, and a reload then showed something else.
+  // When the address changes and this page didn't write it, show what it says (as opening it fresh would).
+  useEffect(() => {
+    const now = searchParams.toString();
+    if (now === lastWritten.current) return;
+    lastWritten.current = now;
+    const id = searchParams.get("scenario") ?? searchParams.get("plan");
+    const ids = (searchParams.get("compare")?.split(",") ?? []).filter((c) => saved.some((s) => s.id === c)).slice(0, MAX_COMPARE);
+    const h = Number(searchParams.get("horizon"));
+    setSelected(id && saved.some((p) => p.id === id) ? id : null);
+    setEdit(null);
+    setCompare(ids.length ? ids : null);
+    setOverride(Number.isInteger(h) && h >= 1 && h <= 24 ? h : null);
+    setChangeTarget(null);
+    setConfirm(null);
+    setNameAsk(null);
+    setSaveNote(null);
+    // Only an address change from outside resets the page; `saved` is read as it is then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const months = override ?? savedScenario?.horizon_months ?? DEFAULT_FORECAST_MONTHS;
   const pickHorizon = (m: number) => {
     setOverride(m);
@@ -230,7 +255,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const lane = useMemo(() => (effectiveList ? laneMarkers(ctx, effectiveList, plan.problems, start, hpw) : []), [ctx, effectiveList, plan.problems, start, hpw]);
   const inSpan = useMemo(() => lane.filter((mk) => bounds !== null && hoursToDate(start, mk.date, hpw) < horizonHours), [lane, bounds, start, hpw, horizonHours]);
   const model = built.model;
-  const appliesReason = (leverId: string) => (model ? (sandboxLever(leverId)?.applies?.(model) ?? null) : null);
+  // A solution can go live only when one is saved for a process in the run (the solution options are worked out below).
+  const appliesReason = (leverId: string) => (leverId === "E6" ? solutionReason(solutionOptions) : model ? (sandboxLever(leverId)?.applies?.(model) ?? null) : null);
   const monthOptions = useMemo(() => {
     if (!built.model || !bounds) return [];
     const spans = bounds.slice(0, -1).map((s, i) => ({ start: s, end: bounds[i + 1]! }));
@@ -700,7 +726,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
         </section>
       )}
       {!compare && moneyView ? (
-        <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace` : null} span={span} />
+        <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
 
       {changeTarget && canEdit ? (
