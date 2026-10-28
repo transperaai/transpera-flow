@@ -1,15 +1,26 @@
 "use server";
 
-import type { ScenarioRow } from "@transpera-flow/db";
+import { changesFromPatch, wholeRunPatches, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { parsePatches } from "@transpera-flow/engine";
 import { isId, parseScenarioInput } from "@/lib/scenarios/validate";
 import type { RemoveScenarioResult, SaveScenarioResult } from "@/lib/scenarios/store";
 import { jsonb, pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
-const SCENARIO_COLS = ["id", "workspace_id", "name", "description", "patch", "parent_scenario_id"] as const;
+const SCENARIO_COLS = ["id", "workspace_id", "name", "description", "changes"] as const;
 
-// Saving and deleting scenarios (issue #15). Every write runs as the signed-in
+/** A `sandbox_scenarios` row as the process page's scenario: its changes as patches (it only ever writes whole-run patch scenarios). */
+const asScenario = (row: { id: string; workspace_id: string; name: string; description: string | null; changes: unknown }): ScenarioRow => ({
+  id: row.id,
+  workspace_id: row.workspace_id,
+  name: row.name,
+  description: row.description,
+  patch: wholeRunPatches(row.changes as SandboxChange[]) ?? [],
+  parent_scenario_id: null,
+});
+
+// Saving and deleting scenarios (issue #15), now rows of `sandbox_scenarios`: the process page's scenarios are the standalone whole-run
+// ones (no parent, every change a patch), written as changes and read back as patches. Every write runs as the signed-in
 // user through RLS (editors, owners and agency admins may write; everyone in
 // the workspace may read and apply). The checks in lib/scenarios/validate.ts
 // only reject malformed input early; the database checks the patch shape too.
@@ -28,8 +39,8 @@ const failure = (e: unknown) => {
     ? forbidden
     : code === "23514"
       ? ({ status: "error", message: "Some of those changes aren't allowed." } as const)
-      : code === "23503"
-        ? ({ status: "error", message: "The scenario you copied no longer exists." } as const)
+      : code === "23505"
+        ? ({ status: "error", message: "A scenario with that name already exists." } as const)
         : ({ status: "error", message: "Couldn't save. Try again." } as const);
 };
 
@@ -40,14 +51,15 @@ export async function createScenario(workspaceId: unknown, input: unknown): Prom
   if (!parsed.ok) return { status: "error", message: parsed.error };
   const db = await signedInClient();
   if (!db) return signedOut;
-  const { patch, ...rest } = parsed.value;
+  // A copy no longer builds on its source: it holds its own changes (`parent_scenario_id` is ignored).
+  const { patch, name, description } = parsed.value;
   try {
     const data = await db
-      .insertInto("scenarios")
-      .values({ ...rest, patch: jsonb(patch), workspace_id: workspaceId })
+      .insertInto("sandbox_scenarios")
+      .values({ name, description, changes: jsonb(changesFromPatch(patch)), parent_id: null, workspace_id: workspaceId })
       .returning(SCENARIO_COLS)
       .executeTakeFirstOrThrow();
-    return { status: "ok", scenario: data as unknown as ScenarioRow };
+    return { status: "ok", scenario: asScenario(data) };
   } catch (e) {
     return failure(e);
   }
@@ -60,8 +72,12 @@ export async function deleteScenario(id: unknown): Promise<RemoveScenarioResult>
   if (!db) return signedOut;
   let data;
   try {
-    data = await db.deleteFrom("scenarios").where("id", "=", id).returning("id").execute();
+    data = await db.deleteFrom("sandbox_scenarios").where("id", "=", id).returning("id").execute();
   } catch (e) {
+    if (pgCode(e) === "23503") {
+      const children = await db.selectFrom("sandbox_scenarios").select("name").where("parent_id", "=", id).orderBy("name").execute().catch(() => []);
+      return { status: "error", message: `Other scenarios build on this one${children.length ? `: ${children.map((c) => `“${c.name}”`).join(", ")}` : ""}. Delete them or change what they build on first.` };
+    }
     return failure(e);
   }
   if (!data.length) return forbidden;
@@ -83,10 +99,20 @@ export async function updateScenarioPatch(id: unknown, patch: unknown): Promise<
   if (!db) return signedOut;
   let data;
   try {
-    data = await db.updateTable("scenarios").set({ patch: jsonb(parsed.patches) }).where("id", "=", id).returning(SCENARIO_COLS).execute();
+    // Only a standalone scenario made of whole-run patches is the process page's to change: one with a parent, a hire or a change from
+    // a month is the Sandbox's, and replacing its changes with patches would lose them.
+    const current = await db.selectFrom("sandbox_scenarios").select("changes").where("id", "=", id).where("parent_id", "is", null).executeTakeFirst();
+    if (!current || wholeRunPatches(current.changes as unknown as SandboxChange[]) === null) return forbidden;
+    data = await db
+      .updateTable("sandbox_scenarios")
+      .set({ changes: jsonb(changesFromPatch(parsed.patches)) })
+      .where("id", "=", id)
+      .where("parent_id", "is", null)
+      .returning(SCENARIO_COLS)
+      .execute();
   } catch (e) {
     return failure(e);
   }
   if (!data.length) return forbidden;
-  return { status: "ok", scenario: data[0] as unknown as ScenarioRow };
+  return { status: "ok", scenario: asScenario(data[0]!) };
 }

@@ -14,7 +14,7 @@ import { RATING_RULES, bandOf, isTooBusy, type MonthBusy, type Stat } from "@tra
 import { formatNumber, formatPercent } from "@/lib/format";
 import { labelIndexes } from "@/lib/overview/axis";
 import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/timeline";
-import { longDate, shortDate, type PlanLaneMarker } from "@/lib/forecast/lane";
+import { longDate, shortDate, type PlanLaneMarker } from "@/lib/sandbox/lane";
 import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@/lib/forecast/positions";
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
@@ -91,9 +91,10 @@ export function TimelineLegend({
       )}
       {hasPlan && (
         <>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">▲</span>}>Hire in your plan</TimelineLegendItem>
-          <TimelineLegendItem swatch={<i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />}>Leave in your plan</TimelineLegendItem>
+          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">▲</span>}>Hire in your scenario</TimelineLegendItem>
+          <TimelineLegendItem swatch={<i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />}>Leave in your scenario</TimelineLegendItem>
           <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">◆</span>}>Solution goes live</TimelineLegendItem>
+          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">●</span>}>Other change from a month</TimelineLegendItem>
         </>
       )}
       {hasMarket && <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-line-2 bg-[repeating-linear-gradient(135deg,var(--line-2)_0_2px,transparent_2px_5px)]" />}>Market condition</TimelineLegendItem>}
@@ -110,7 +111,7 @@ function peakOf(row: TimelineRow, months: TimelineData["months"]): string {
   return best < 0 ? "Not there" : `Peaks at ${formatPercent(row.series[best]!.mean)} in ${months[best]!.short}`;
 }
 
-/** The "Your plan" lane (B7, issue #36): a plan's markers, which can be dragged along the months or moved by keyboard. */
+/** The scenario lane (Sandbox): a scenario's timed changes, which can be dragged along the months or moved by keyboard. */
 export interface PlanLane {
   /** The markers to draw (those inside the span), in the plan's order. */
   markers: PlanLaneMarker[];
@@ -130,8 +131,8 @@ export interface PlanLane {
 
 /** What each marker kind snaps to when it is dragged or stepped: hires and solutions by month, leave by week. */
 const snapOf = (kind: PlanLaneMarker["kind"]): "month" | "week" => (kind === "leave" ? "week" : "month");
-const KIND_WORD = { hire: "Hire", leave: "Leave", solution: "Solution" } as const;
-const LABEL_TAIL = / (starts|on leave|goes live)( \(already started\))?$/;
+const KIND_WORD = { hire: "Hire", leave: "Leave", solution: "Solution", change: "Change" } as const;
+const LABEL_TAIL = / (starts|goes live|on leave for \d+ weeks?)( \(already started\))?$/;
 
 export function ForecastTimeline({
   data,
@@ -211,7 +212,7 @@ export function ForecastTimeline({
     setAnnounce(`${mk.label.replace(" (already started)", "")} moved to ${longDate(date)}. Updating the forecast…`);
   };
   const markerKey = (e: React.KeyboardEvent, mk: PlanLaneMarker) => {
-    if (!plan || !plan.editable) return;
+    if (!plan || !plan.editable || mk.inherited) return;
     const snap = snapOf(mk.kind);
     const { first, last } = edgeDates(mk.kind);
     const steps = (dir: 1 | -1, k: number) => {
@@ -251,7 +252,7 @@ export function ForecastTimeline({
   };
   const svgLeft = () =>svgRef.current?.getBoundingClientRect().left ?? 0;
   const markerDown = (e: React.PointerEvent<SVGGElement>, mk: PlanLaneMarker) => {
-    if (!plan?.editable || e.button !== 0) return;
+    if (!plan?.editable || mk.inherited || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const x = markerX(mk);
     grab.current = { x0: e.clientX, offset: e.clientX - svgLeft() - x };
@@ -287,6 +288,7 @@ export function ForecastTimeline({
           </text>
         </>
       );
+    if (kind === "change") return <circle cx={x} cy={laneMid} r={6} fill={fill} {...stroke} />;
     return <path d={`M${x},${laneMid - 8} L${x + 7},${laneMid} L${x},${laneMid + 8} L${x - 7},${laneMid} Z`} fill={fill} {...stroke} />;
   };
   /** A row's name and what it adds, on two lines (wide) or one (narrow). */
@@ -482,7 +484,7 @@ export function ForecastTimeline({
         {plan && (
           <g data-plan-lane>
             <text x={0} y={compact ? TOP + 13 : laneMid + 4} className="fill-fg text-[12px] font-medium">
-              Your plan
+              This scenario
             </text>
             <line x1={m.l} x2={m.l + plotW} y1={laneTop + LANE} y2={laneTop + LANE} stroke="var(--line-2)" strokeWidth={1} />
             {plan.markers.map((mk) => {
@@ -507,7 +509,7 @@ export function ForecastTimeline({
                   aria-valuenow={monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek)}
                   aria-valuetext={`${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`}
                   opacity={active ? 0.4 : 1}
-                  style={{ touchAction: "none", cursor: plan.editable ? (active ? "grabbing" : "grab") : "default" }}
+                  style={{ touchAction: "none", cursor: plan.editable && !mk.inherited ? (active ? "grabbing" : "grab") : "default" }}
                   onPointerDown={(e) => markerDown(e, mk)}
                   onPointerMove={(e) => markerMove(e, mk)}
                   onPointerUp={(e) => markerUp(e, mk)}
@@ -605,7 +607,7 @@ export function ForecastTimeline({
 
 /** The same numbers as a table, for a screen reader. */
 function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy: TimelineRow[]; cutoffs: Cutoffs; plan?: PlanLane }) {
-  // Which month each plan marker falls in, for its "Your plan" column.
+  // Which month each plan marker falls in, for its "This scenario" column.
   const planMonth = (mk: PlanLaneMarker) => monthIndexOfDate(mk.date, plan!.startDate, plan!.bounds, plan!.hoursPerWeek);
   const cell = (s: MonthBusy | null, undone: number | null) =>
     s
@@ -632,7 +634,7 @@ function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy
           ))}
           <th scope="col">Market</th>
           <th scope="col">Planned</th>
-          {plan ? <th scope="col">Your plan</th> : null}
+          {plan ? <th scope="col">This scenario</th> : null}
         </tr>
       </thead>
       <tbody>

@@ -47,8 +47,8 @@ import {
   type ServiceServicingRow,
   type BlockRow,
   type ChurnDriverRow,
-  type ForecastPlanRow,
-  loadForecastPlans,
+  type SandboxScenarioRow,
+  loadSandboxScenarios,
   type ClientGroupRow,
   type DemandSettingsRow,
   type IssueEventRow,
@@ -222,14 +222,14 @@ export async function loadWorkspaceSolutions(workspaceId: string, processId?: st
 }
 
 /**
- * The workspace's forecast plans by name (B7). RLS: only Agency admins and the Owner read them, so anyone else gets
- * none. If they can't be read (say the table isn't there yet), the page shows none rather than break.
+ * The workspace's Sandbox scenarios by name. RLS: everyone who can read the workspace reads them (Viewers run and compare, they don't
+ * save). If they can't be read, the page shows none rather than break.
  */
-export async function loadWorkspaceForecastPlans(workspaceId: string): Promise<ForecastPlanRow[]> {
+export async function loadWorkspaceSandboxScenarios(workspaceId: string): Promise<SandboxScenarioRow[]> {
   try {
-    return await loadForecastPlans(await getDb(), workspaceId);
+    return await loadSandboxScenarios(await getDb(), workspaceId);
   } catch (err) {
-    console.error("Couldn't load the forecast plans; showing none.", err instanceof Error ? err.message : err);
+    console.error("Couldn't load the sandbox scenarios; showing none.", err instanceof Error ? err.message : err);
     return [];
   }
 }

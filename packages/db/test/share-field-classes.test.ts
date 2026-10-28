@@ -4,7 +4,7 @@ import type { Selectable } from "kysely";
 import type { DB } from "../src";
 import type { Viewer } from "../src/queries";
 import { SHARE_NON_TEXT_KEYS, SHARE_NON_TEXT_REASONS, type IssueShare, type OverviewShare, type ProcessShare, type SolutionShare } from "../src/share";
-import type { BlockBundle, IssueLinkRef, IssueRow, RecurrenceJson, SolutionsData, WorkspaceSettings } from "../src/types";
+import type { BlockBundle, IssueLinkRef, IssueRow, RecurrenceJson, ScenarioRow, SolutionsData, WorkspaceSettings } from "../src/types";
 
 // Every string column of every table, from the generated database types (db-types.ts), is classified here: free text, or not text (an id, a date,
 // an enum the engine reads), or the whole table is "unused" (its rows never reach a share link). The maps are exhaustive at the type
@@ -35,7 +35,6 @@ const TABLES: TableClasses = {
   demand_settings: { created_at: "not", created_by: "not", updated_at: "not", workspace_id: "not" },
   edges: { condition_tag: "text", created_at: "not", created_by: "not", from_step_id: "not", id: "not", label: "text", process_id: "not", revision_id: "not", to_step_id: "not", updated_at: "not", workspace_id: "not" },
   first_principles: { created_at: "not", created_by: "not", id: "not", job_done: "text", job_progress: "text", job_situation: "text", job_who: "text", process_id: "not", revision_id: "not", root_cause: "text", updated_at: "not", why_problem: "text", workspace_id: "not" },
-  forecast_plans: "unused",
   issue_events: "unused",
   issue_links: { created_at: "not", id: "not", issue_id: "not", process_id: "not", step_id: "not", workspace_id: "not" },
   issue_owners: "unused",
@@ -60,7 +59,8 @@ const TABLES: TableClasses = {
   robustness_results: "unused",
   roles: { color: "text", created_at: "not", created_by: "not", id: "not", name: "text", updated_at: "not", workspace_id: "not" },
   runs: "unused",
-  scenarios: { created_at: "not", created_by: "not", description: "text", id: "not", name: "text", parent_scenario_id: "not", updated_at: "not", workspace_id: "not" },
+  // Never loaded as a table: the process page's whole-run ones reach a snapshot as the `scenarios[]` shape below (loadScenarios).
+  sandbox_scenarios: "unused",
   seasonality: { created_at: "not", created_by: "not", id: "not", updated_at: "not", workspace_id: "not" },
   service_servicing: { created_at: "not", created_by: "not", id: "not", process_id: "not", service_id: "not", updated_at: "not", workspace_id: "not" },
   services: { created_at: "not", created_by: "not", entry_process_id: "not", id: "not", name: "text", path_tags: "text", pricing_model: "not", updated_at: "not", workspace_id: "not" },
@@ -100,6 +100,8 @@ const FP_JOB_WHY_TEXT = ["who", "progress", "situation", "done", "problem", "cha
 type IssueRowExtra = Exclude<StrKeys<IssueRow>, Cols<"issues">>;
 type ProcessListEntry = ProcessShare["processes"][number];
 const SHAPES = {
+  /** A snapshot's `scenarios[]`: the standalone whole-run Sandbox scenarios, as the process page reads them (ScenarioRow). */
+  scenarioRow: { id: "not", workspace_id: "not", name: "text", description: "text", parent_scenario_id: "not" },
   /** scenarios.patch[], solutions.lever_changes[] (and a play link's levers). */
   patch: { path: "not", op: "not" },
   /** issues.links[]. */
@@ -123,6 +125,7 @@ const SHAPES = {
   /** A process snapshot's `processes[]`. */
   processList: { id: "not", name: "text", parentId: "uuid", kind: "not" },
 } satisfies {
+  scenarioRow: Record<StrKeys<ScenarioRow>, Class>;
   patch: Record<StrKeys<ScenarioPatch>, Class>;
   issueLink: Record<StrKeys<IssueLinkRef>, Class>;
   issueExtra: Record<IssueRowExtra, Class>;

@@ -27,6 +27,9 @@ const nextConfig: NextConfig = {
   redirects: async () => [
     { source: "/w/:slug/library", destination: "/w/:slug/blocks", permanent: false },
     { source: "/demo/library", destination: "/demo/blocks", permanent: false },
+    // The Forecast became the Sandbox (one scenario model); the query string (?plan=, ?compare=, ?horizon=) carries over.
+    { source: "/w/:slug/forecast", destination: "/w/:slug/sandbox", permanent: false },
+    { source: "/demo/forecast", destination: "/demo/sandbox", permanent: false },
   ],
 };
 

@@ -69,7 +69,7 @@ describe("create_workspace", () => {
       expect(members.every((m) => m.source === "manual" && m.active)).toBe(true);
       // The unconfirmed address (its email isn't verified) and the unlisted one got nothing.
       expect(members).toHaveLength(2);
-      expect((await c.query("select count(*)::int as n from scenarios where workspace_id = $1", [id])).rows[0].n).toBe(4);
+      expect((await c.query("select count(*)::int as n from sandbox_scenarios where workspace_id = $1", [id])).rows[0].n).toBe(4);
     });
     await db.client.query("delete from deployment_access");
   });

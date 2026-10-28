@@ -39,7 +39,7 @@ export default async function WorkspacePeoplePage(props: PageProps<"/w/[slug]/pe
   }
   return (
     <Page title="People" eyebrow="Company" description={description} width="max-w-6xl">
-      <PeoplePage bundle={bundle} settingsHref={`/w/${slug}/settings`} forecast={{ href: `/w/${slug}/forecast` }} />
+      <PeoplePage bundle={bundle} settingsHref={`/w/${slug}/settings`} forecast={{ href: `/w/${slug}/sandbox` }} />
     </Page>
   );
 }

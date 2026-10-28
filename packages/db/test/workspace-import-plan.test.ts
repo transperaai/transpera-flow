@@ -9,6 +9,8 @@ import { ACCOUNT_KEY } from "../src/workspace-bundle";
 
 const id = () => randomUUID();
 const FREE_UUID = "123e4567-e89b-42d3-a456-426614174000";
+/** The id of the one change in the fixture's "Child" scenario: not a row id, so a restore leaves it as it is. */
+const CHANGE_ID = "6b0d1b00-0000-4000-8000-0000000000aa";
 
 interface Ids {
   [k: string]: string;
@@ -65,9 +67,9 @@ function makeBundle(): { bundle: WorkspaceBundle; ids: Ids } {
       analysis_rules: [],
     },
     processes,
-    scenarios: [
-      { id: ids.scnChild, workspace_id: w, name: "Child", description: null, parent_scenario_id: ids.scn, patch: { [`steps.${ids.sA2}.work_hours`]: 3 }, created_at: "2026-01-02" },
-      { id: ids.scn, workspace_id: w, name: "Base", description: null, parent_scenario_id: null, patch: {}, created_at: "2026-01-01" },
+    sandbox_scenarios: [
+      { id: ids.scnChild, workspace_id: w, name: "Child", description: null, parent_id: ids.scn, changes: [{ id: CHANGE_ID, lever: "E1", target: ids.sA2, op: "set", value: 3 }], horizon_months: 12, start_date: null, created_at: "2026-01-02" },
+      { id: ids.scn, workspace_id: w, name: "Base", description: null, parent_id: null, changes: [], horizon_months: 12, start_date: null, created_at: "2026-01-01" },
     ],
     solutions: [{ id: ids.sol, workspace_id: w }],
     solution_issues: [],
@@ -108,7 +110,9 @@ function recount(b: WorkspaceBundle): WorkspaceBundle {
   counts.process_versions = versions.length;
   counts.steps = versions.reduce((n, v) => n + (v.steps as Row[]).length, 0);
   counts.edges = versions.reduce((n, v) => n + (v.edges as Row[]).length, 0);
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = b[k].length;
+  for (const k of ["solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = b[k].length;
+  if (b.sandbox_scenarios) counts.sandbox_scenarios = b.sandbox_scenarios.length;
+  if (b.scenarios) counts.scenarios = b.scenarios.length;
   return { ...b, counts };
 }
 
@@ -246,7 +250,7 @@ describe("checkWorkspaceBundle: what is refused, in order", () => {
 
     const odd = clone(makeBundle().bundle) as unknown as Row;
     odd.engine_version = { toString: 1 };
-    (odd.scenarios as Row[])[0]!.created_at = { toString: 1 };
+    (odd.sandbox_scenarios as Row[])[0]!.created_at = { toString: 1 };
     (odd.company_model as Row).market_conditions = ((odd.company_model as Row).market_conditions as Row[]).map((m) => ({ ...m, preset: { toString: 1 } }));
     expect(() => checkWorkspaceBundle(odd)).not.toThrow();
     const r = checkWorkspaceBundle(odd);
@@ -277,7 +281,7 @@ describe("checkWorkspaceBundle: limits", () => {
     { name: "issues", max: L.issues, add: (b, n) => b.issues.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, number: null, source: "manual", status: "open", links: [], owner_ids: [], source_ids: [], events: [] }))), message: `The backup has ${n(L.issues + 1)} issues; a restore takes at most ${n(L.issues)}.` },
     { name: "people", max: L.people, add: (b, n) => b.company_model.people!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.people + 1)} people; a restore takes at most ${n(L.people)}.` },
     { name: "clients", max: L.clients, add: (b, n) => b.company_model.clients!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.clients + 1)} clients; a restore takes at most ${n(L.clients)}.` },
-    { name: "scenarios", max: L.scenarios, add: (b, n) => b.scenarios.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, parent_scenario_id: null }))), message: `The backup has ${n(L.scenarios + 1)} scenarios; a restore takes at most ${n(L.scenarios)}.` },
+    { name: "scenarios", max: L.scenarios, add: (b, n) => b.sandbox_scenarios.push(...filler(n - 2, () => { const sid = id(); return { id: sid, workspace_id: b.workspace.id, name: `S ${sid}`, parent_id: null, changes: [] }; })), message: `The backup has ${n(L.scenarios + 1)} scenarios; a restore takes at most ${n(L.scenarios)}.` },
     { name: "blocks", max: L.blocks, add: (b, n) => b.blocks.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.blocks + 1)} blocks; a restore takes at most ${n(L.blocks)}.` },
     { name: "sources", max: L.sources, add: (b, n) => b.sources.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, body: "" }))), message: `The backup has ${n(L.sources + 1)} sources; a restore takes at most ${n(L.sources)}.` },
     // The link tables. The fixture already restores 1 role assignment, 1 skill, 0 client assignments and 2 source links.
@@ -466,7 +470,7 @@ describe("planWorkspaceImport", () => {
     same(bundle.company_model.roles!, plan.roles);
     same(bundle.sources, plan.sources);
     same(bundle.blocks, plan.blocks);
-    same(bundle.scenarios, plan.scenarios);
+    same(bundle.sandbox_scenarios, plan.sandbox_scenarios);
     same(bundle.issues.filter((i) => i.source !== "detected"), plan.issues);
     // Order across tables too: a smaller old id always has a smaller placeholder.
     const people = bundle.company_model.people![0]!.id as string;
@@ -477,17 +481,18 @@ describe("planWorkspaceImport", () => {
     expect(m).toEqual([...m].sort());
   });
 
-  it("leaves no id but placeholders in a plan made from this backup, except free text", () => {
+  it("leaves no id but placeholders in a plan made from this backup, except free text and the ids of changes (they belong to a scenario, not to a row)", () => {
     const { plan } = planOf(makeBundle().bundle);
     const found = JSON.stringify(plan).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
-    expect(found.filter((u) => !u.startsWith(PLACEHOLDER_PREFIX))).toEqual([FREE_UUID]);
+    expect(found.filter((u) => !u.startsWith(PLACEHOLDER_PREFIX)).sort()).toEqual([CHANGE_ID, FREE_UUID].sort());
   });
 
   it("maps ids inside strings and JSON: scenario paths, detected keys, insight keys, evidence, replaced_by", () => {
     const { bundle, ids } = makeBundle();
     const { plan, placeholderOf } = planOf(bundle);
     const p = (k: string) => placeholderOf.get(ids[k]!)!;
-    expect(plan.scenarios.find((s) => s.name === "Child")!.patch).toEqual({ [`steps.${p("sA2")}.work_hours`]: 3 });
+    expect(plan.sandbox_scenarios.find((s) => s.name === "Child")!.changes).toEqual([{ id: CHANGE_ID, lever: "E1", target: p("sA2"), op: "set", value: 3 }]);
+    expect(plan.sandbox_scenarios.find((s) => s.name === "Child")!.parent_id).toBe(p("scn"));
     expect(plan.issues.find((i) => i.title === "First")!.detected_key).toBe(`perception_gap:step:${p("sA2")}.work_hours`);
     expect(plan.source_links.some((l) => l.insight_key === `perception_gap:step:${p("sA2")}.work_hours`)).toBe(true);
     const alpha = plan.processes.find((x) => x.name === "Alpha")!;
@@ -548,7 +553,7 @@ describe("planWorkspaceImport", () => {
     const { plan } = planOf(makeBundle().bundle);
     const idx = (n: string) => plan.processes.findIndex((p) => p.name === n);
     expect(idx("Alpha")).toBeLessThan(idx("Child"));
-    expect(plan.scenarios.map((s) => s.name)).toEqual(["Base", "Child"]);
+    expect(plan.sandbox_scenarios.map((s) => s.name)).toEqual(["Base", "Child"]);
     expect(plan.issues.map((i) => i.title)).toEqual(["First", "Later"]);
   });
 
@@ -565,8 +570,8 @@ describe("planWorkspaceImport", () => {
 
   it("carries the seeded scenario library like any other scenario (the restore skips equal ones)", () => {
     const b = clone(makeBundle().bundle);
-    b.scenarios.push({ id: id(), workspace_id: b.workspace.id, name: "Seeded", description: null, parent_scenario_id: null, patch: { x: 1 }, created_at: "2026-01-01" });
-    expect(planOf(recount(b)).plan.scenarios.map((s) => s.name)).toContain("Seeded");
+    b.sandbox_scenarios.push({ id: id(), workspace_id: b.workspace.id, name: "Seeded", description: null, parent_id: null, changes: [], horizon_months: 12, start_date: null, created_at: "2026-01-01" });
+    expect(planOf(recount(b)).plan.sandbox_scenarios.map((s) => s.name)).toContain("Seeded");
   });
 
   it("a backup made before Suggestions were removed still checks and plans: its suggestions and visitor ideas are counted as left out, never restored", () => {
@@ -821,7 +826,7 @@ describe("per-person times in a backup (#228): restored", () => {
     const { person_capacity_factors: _gone, ...rest } = plan;
     expect(Object.keys(rest)).toEqual([
       "format", "settings", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
-      "lever_settings", "analysis_rules", "clients", "sources", "processes", "scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services",
+      "lever_settings", "analysis_rules", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services",
       "client_assignments", "person_skills", "source_links",
     ]);
     // The new key sits right after person_skills.

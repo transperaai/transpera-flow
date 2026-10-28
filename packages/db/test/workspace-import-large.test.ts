@@ -109,7 +109,7 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
   "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "process_revisions", "steps", "edges", "first_principles", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
   "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
@@ -183,11 +183,11 @@ async function mini(): Promise<Mini> {
     await c.query("update processes set archived_at = now() where id = $1", [ids.archived]);
   });
   // Scenarios: the seeded library, a custom one that descends from "More leads", and an issue that uses "Downturn".
-  const lib = await q("select id, name from scenarios where workspace_id = $1", [ws]);
+  const lib = await q("select id, name from sandbox_scenarios where workspace_id = $1", [ws]);
   const moreLeads = lib.find((s) => s.name === "More leads")!.id;
   const downturn = lib.find((s) => s.name === "Downturn")!.id as string;
   const [custom] = await q(
-    "insert into scenarios (workspace_id, name, patch, parent_scenario_id) values ($1, 'More leads and a hire', '[{\"path\": \"demand.leads_per_week\", \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
+    "insert into sandbox_scenarios (workspace_id, name, changes, parent_id) values ($1, 'More leads and a hire', '[{\"id\": \"6a0d1b00-0000-4000-8000-000000000001\", \"lever\": \"A1\", \"target\": null, \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
     [ws, moreLeads],
   );
   await q("insert into issues (workspace_id, type, title, scenario_id, owner_person_id, status) values ($1, 'idea', 'Try the downturn', $2, $3, 'in_progress')", [ws, downturn, person!.id]);
@@ -289,7 +289,7 @@ describe("every limit at once", () => {
       ["issue_sources", L.issues],
       ["sources", L.sources],
       // The four library scenarios every new workspace has come on top of the plan's.
-      ["scenarios", L.scenarios + 4],
+      ["sandbox_scenarios", L.scenarios + 4],
       ["blocks", L.blocks],
       ["person_roles", L.personRoles],
       ["person_skills", L.personSkills],
@@ -387,12 +387,12 @@ describe("the id remap is the same as before", () => {
     expect(prefix, label).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-$/);
     expect(prefix, label).not.toBe(PLACEHOLDER_PREFIX);
 
-    // A scenario equal (name and patch) to one the new workspace already has (the library) is skipped, and what pointed at it points at the existing row.
+    // A scenario equal (name and changes, ignoring the change ids) to one the new workspace already has (the library) is skipped, and what pointed at it points at the existing row.
     const alias = new Map<string, string>();
-    for (const sc of copy.scenarios) {
+    for (const sc of copy.sandbox_scenarios) {
       const fresh = realId(sc.id as string, prefix, ws);
-      if ((await q("select 1 from public.scenarios where workspace_id = $1 and id = $2", [ws, fresh])).length > 0) continue;
-      const [existing] = await q("select id::text as id from public.scenarios where workspace_id = $1 and name = $2 and patch = $3::jsonb order by id limit 1", [ws, sc.name, JSON.stringify(sc.patch)]);
+      if ((await q("select 1 from public.sandbox_scenarios where workspace_id = $1 and id = $2", [ws, fresh])).length > 0) continue;
+      const [existing] = await q("select id::text as id from public.sandbox_scenarios where workspace_id = $1 and name = $2 and private.sandbox_changes_shape(changes) = private.sandbox_changes_shape($3::jsonb) order by id limit 1", [ws, sc.name, JSON.stringify(sc.changes)]);
       expect(existing, `${label}: a skipped scenario has an existing twin`).toBeDefined();
       alias.set(fresh, String(existing!.id));
     }
@@ -412,7 +412,7 @@ describe("the id remap is the same as before", () => {
       if (planned.length === 0) continue;
       const wanted = planned.map((r) => realId(r.id as string, prefix, ws));
       const found = Number((await q(`select count(*) from public.${table} where workspace_id = $1 and id = any($2::uuid[])`, [ws, wanted]))[0]!.count);
-      expect(found, `${label}: ${section} ids`).toBe(wanted.length - (section === "scenarios" ? alias.size : 0));
+      expect(found, `${label}: ${section} ids`).toBe(wanted.length - (section === "sandbox_scenarios" ? alias.size : 0));
       checked++;
       // Every reference column points at the row the plan named.
       const refs = (IMPORT_REFS[section] ?? []).map((r) => r.col).filter((c) => planned.some((r) => r[c] != null));

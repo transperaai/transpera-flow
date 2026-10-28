@@ -12,7 +12,7 @@ export const SEED = 1;
 /** The most workers a page runs at once. */
 export const POOL_SIZE = 3;
 /** Finished runs kept, most recently used last. */
-const CACHE_LIMIT = 24;
+const CACHE_LIMIT = 40;
 /** A pool with nothing to do for this long lets its workers go (they start again when asked). */
 const IDLE_MS = 20_000;
 

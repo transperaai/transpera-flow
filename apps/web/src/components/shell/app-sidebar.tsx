@@ -50,7 +50,7 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   library: Layers,
   sources: FileText,
   people: Users,
-  forecast: TrendingUp,
+  sandbox: TrendingUp,
   settings: Settings2,
   access: ShieldCheck,
   share: Share2,

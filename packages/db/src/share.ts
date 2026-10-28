@@ -253,7 +253,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   owner_ids: "issues.owner_ids: person ids",
   owner_person_id: "issues.owner_person_id and first principles `requirements[].owner_person_id`: a person id",
   parent_process_id: "processes.parent_process_id: a uuid",
-  parent_scenario_id: "scenarios.parent_scenario_id: a uuid",
+  parent_scenario_id: "a snapshot's scenarios[].parent_scenario_id (null: the Sandbox's build-on parents are not shared): a uuid",
   parent_step_id: "steps.parent_step_id: a uuid",
   path: "scenarios `patch[].path` and solutions `lever_changes[].path`: a selector the engine reads (steps.<id>.work_hours)",
   person_id: "issues, steps, person_* tables, client_assignments: a person id",

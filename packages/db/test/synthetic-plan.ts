@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { PLACEHOLDER_PREFIX, type Row, type WORKSPACE_IMPORT_LIMITS } from "../src";
 
 // A synthetic restore plan with `L` rows of everything: the limits (every section at its cap), or fewer. Shared by the
@@ -85,7 +86,12 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     links: [{ process_id: processes[i % processes.length]!.id, step_id: processes[i % processes.length]!.steps[1]!.id }], owner_ids: [people[i % people.length]!.id], source_ids: [sourceIds[i % sourceIds.length]],
   }));
   const scenarioCount = options.forExport ? L.scenarios - 4 : L.scenarios;
-  const scenarios = Array.from({ length: scenarioCount }, (_, i) => ({ id: mk(), name: `Scenario ${i}`, patch: [{ path: "demand.leads_per_week", op: "multiply", value: 1 + i / 1000 }], created_at: when }));
+  const sandbox_scenarios = Array.from({ length: scenarioCount }, (_, i) => ({
+    id: mk(),
+    name: `Scenario ${i}`,
+    changes: [{ id: randomUUID(), lever: "A1", target: null, op: "multiply", value: 1 + i / 1000 }],
+    created_at: when,
+  }));
   const blocks = Array.from({ length: L.blocks }, (_, i) => ({ id: mk(), name: `Block ${i}`, type: "manual", steps: { steps: [], edges: [] }, created_at: when }));
 
   // The link tables, each at its limit: 3 roles a person, 10 skills a person, one assignment a client.
@@ -157,7 +163,7 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     format: "transpera-workspace-import/1",
     settings: { hours_per_week: 38, currency: "GBP" },
     roles, people, person_roles, person_leave, lead_sources, seasonality, demand_settings: { growth_monthly: 0.01, created_at: when }, churn_drivers,
-    market_conditions, market_schedule, lever_settings: { hidden: [], created_at: when }, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, scenarios, blocks, issues, services,
+    market_conditions, market_schedule, lever_settings: { hidden: [], created_at: when }, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, sandbox_scenarios, blocks, issues, services,
     service_servicing, client_groups, client_services, client_assignments, person_skills, person_capacity_factors, source_links,
   };
 }

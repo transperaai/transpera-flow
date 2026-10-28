@@ -116,7 +116,7 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
   "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "process_revisions", "steps", "edges", "first_principles", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
   "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
@@ -361,11 +361,11 @@ async function mini(): Promise<Mini> {
     await c.query("update processes set archived_at = now() where id = $1", [ids.archived]);
   });
   // Scenarios: the seeded library, a custom one that descends from "More leads", and an issue that uses "Downturn".
-  const lib = await q("select id, name from scenarios where workspace_id = $1", [ws]);
+  const lib = await q("select id, name from sandbox_scenarios where workspace_id = $1", [ws]);
   const moreLeads = lib.find((s) => s.name === "More leads")!.id;
   const downturn = lib.find((s) => s.name === "Downturn")!.id as string;
   const [custom] = await q(
-    "insert into scenarios (workspace_id, name, patch, parent_scenario_id) values ($1, 'More leads and a hire', '[{\"path\": \"demand.leads_per_week\", \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
+    "insert into sandbox_scenarios (workspace_id, name, changes, parent_id) values ($1, 'More leads and a hire', '[{\"id\": \"6a0d1b00-0000-4000-8000-000000000001\", \"lever\": \"A1\", \"target\": null, \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
     [ws, moreLeads],
   );
   await q("insert into issues (workspace_id, type, title, scenario_id, owner_person_id, status) values ($1, 'idea', 'Try the downturn', $2, $3, 'in_progress')", [ws, downturn, person!.id]);
@@ -459,12 +459,12 @@ describe("the awkward cases", () => {
   it("doesn't duplicate the scenario library, and re-points children and issues at the existing rows", async () => {
     const m = await mini();
     const { ws, result } = await restoreInto(await bundleOf(m.ws));
-    expect(Number((await q("select count(*) from scenarios where workspace_id = $1", [ws]))[0]!.count)).toBe(5);
+    expect(Number((await q("select count(*) from sandbox_scenarios where workspace_id = $1", [ws]))[0]!.count)).toBe(5);
     expect(result.skipped.scenarios).toBe(4);
-    const moreLeads = await byName(ws, "scenarios", "More leads");
-    const custom = await byName(ws, "scenarios", "More leads and a hire");
-    expect(custom.parent_scenario_id).toBe(moreLeads.id);
-    const downturn = await byName(ws, "scenarios", "Downturn");
+    const moreLeads = await byName(ws, "sandbox_scenarios", "More leads");
+    const custom = await byName(ws, "sandbox_scenarios", "More leads and a hire");
+    expect(custom.parent_id).toBe(moreLeads.id);
+    const downturn = await byName(ws, "sandbox_scenarios", "Downturn");
     const [issue] = await q("select scenario_id from issues where workspace_id = $1 and title = 'Try the downturn'", [ws]);
     expect(issue!.scenario_id).toBe(downturn.id);
   });
@@ -506,7 +506,7 @@ describe("what is left out stays out", () => {
     for (const t of ["roles", "people", "person_roles", "person_leave", "person_skills", "services", "service_servicing", "client_groups", "clients", "client_services", "client_assignments", "lead_sources", "seasonality", "churn_drivers", "market_schedule", "blocks", "sources"]) {
       expect(await n(t, ws), t).toBe(await n(t, source));
     }
-    expect(await n("scenarios", ws)).toBe((await n("scenarios", source)) - result.skipped.scenarios! + 4);
+    expect(await n("sandbox_scenarios", ws)).toBe((await n("sandbox_scenarios", source)) - result.skipped.scenarios! + 4);
     expect(await n("market_conditions", ws)).toBe(await n("market_conditions", source));
     expect(await n("issues", ws)).toBe(await n("issues", source, "source <> 'detected'"));
     expect(await n("issue_links", ws)).toBeGreaterThanOrEqual(0);
@@ -610,7 +610,7 @@ describe("only into an empty workspace", () => {
   it("refuses a workspace with a scenario of its own, and with an archived process", async () => {
     const { plan } = await miniPlan();
     const a = await newWorkspace();
-    await q("insert into scenarios (workspace_id, name, patch) values ($1, 'Mine', '[]')", [a]);
+    await q("insert into sandbox_scenarios (workspace_id, name, changes) values ($1, 'Mine', '[]')", [a]);
     expect(await failure(() => restoreAs(admin, a, plan))).toMatchObject({ hint: "not_empty" });
     // An archived process counts: it is a process, and restoring would give its name to a second one.
     const b = await newWorkspace();
@@ -756,7 +756,7 @@ describe("limits", () => {
     ["issues", (p: ImportPlan) => { p.issues = rows(L.issues + 1); }],
     ["people", (p: ImportPlan) => { p.people = rows(L.people + 1); }],
     ["clients", (p: ImportPlan) => { p.clients = rows(L.clients + 1); }],
-    ["scenarios", (p: ImportPlan) => { p.scenarios = rows(L.scenarios + 1); }],
+    ["scenarios", (p: ImportPlan) => { p.sandbox_scenarios = rows(L.scenarios + 1); }],
     ["blocks", (p: ImportPlan) => { p.blocks = rows(L.blocks + 1); }],
     ["role assignments", (p: ImportPlan) => { p.person_roles = rows(L.personRoles + 1); }],
     ["skills", (p: ImportPlan) => { p.person_skills = rows(L.personSkills + 1); }],
@@ -774,7 +774,7 @@ describe("limits", () => {
     for (const mutate of [(sc: Row) => { sc.id = null; }, (sc: Row) => { delete sc.id; }]) {
       const copy: ImportPlan = structuredClone(plan);
       // One that equals a library scenario: the case where the replacement of a skipped one would have returned null.
-      const library = copy.scenarios.find((sc) => sc.name === "Downturn")!;
+      const library = copy.sandbox_scenarios.find((sc) => sc.name === "Downturn")!;
       mutate(library);
       const ws = await newWorkspace();
       const before = await snapshot(ws);

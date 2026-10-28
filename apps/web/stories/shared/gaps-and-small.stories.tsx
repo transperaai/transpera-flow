@@ -46,6 +46,8 @@ export const Horizon: StoryObj = {
       <HorizonPicker weeks={26} onChange={() => undefined} />
       <HorizonPicker weeks={52} onChange={() => undefined} help={false} />
       <HorizonPicker weeks={30} onChange={() => undefined} />
+      {/* The Sandbox: 3, 6, 12 and 24, and any number of months from 1 to 24. */}
+      <HorizonPicker weeks={Math.round((7 * 52) / 12)} onChange={() => undefined} options={[3, 6, 12, 24]} custom={{ min: 1, max: 24 }} />
     </div>
   ),
 };

@@ -47,7 +47,7 @@ describe.each([
     expect(line(restored, "clients")).toBe(await count("clients", ws));
     expect(line(restored, "sources")).toBe(await count("sources", ws));
     expect(line(restored, "blocks")).toBe(await count("blocks", ws));
-    expect(line(restored, "scenarios")).toBe(await count("scenarios", ws));
+    expect(line(restored, "scenarios")).toBe(await count("sandbox_scenarios", ws));
     expect(line(restored, "issues")).toBe(await count("issues", ws, "source <> 'detected'"));
     expect(line(leftOut, "solutions") - (await count("solutions", ws))).toBeGreaterThanOrEqual(0);
     expect(line(leftOut, "detections")).toBe(await count("issues", ws, "source = 'detected'"));

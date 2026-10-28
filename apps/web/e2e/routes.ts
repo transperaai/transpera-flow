@@ -6,7 +6,7 @@ export const DEMO_ROUTES: { path: string; route: string }[] = [
   { route: "/demo/blocks", path: "/demo/blocks" },
   { route: "/demo/churn-drivers", path: "/demo/churn-drivers" },
   { route: "/demo/edit", path: "/demo/edit" },
-  { route: "/demo/forecast", path: "/demo/forecast" },
+  { route: "/demo/sandbox", path: "/demo/sandbox" },
   { route: "/demo/history", path: "/demo/history" },
   { route: "/demo/issues", path: "/demo/issues" },
   { route: "/demo/issues/[number]", path: "/demo/issues/1" },

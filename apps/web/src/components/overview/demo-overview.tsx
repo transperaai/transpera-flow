@@ -19,7 +19,7 @@ export function DemoOverview() {
       hrefs={hrefs}
       processesHref="/demo/processes"
       issuesHref="/demo/issues"
-      forecastHref="/demo/forecast"
+      forecastHref="/demo/sandbox"
       // The demo's months don't move, so its screenshots and tests don't either.
       startDate={DEMO_FORECAST_START}
     />

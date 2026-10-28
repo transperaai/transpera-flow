@@ -81,7 +81,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}
       issuesHref={`${base}/issues`}
-      forecastHref={`${base}/forecast`}
+      forecastHref={`${base}/sandbox`}
       share={canEdit ? <ShareButton slug={slug} kind="overview" targetId={null} what="The Overview" /> : undefined}
     />
     </SourceLinkingScope>

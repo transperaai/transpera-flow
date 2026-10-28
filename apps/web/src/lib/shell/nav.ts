@@ -2,7 +2,7 @@
 // active item is unit-tested; the sidebar component only renders what this returns. Order and grouping follow the
 // prototype's `sidebar()` (apps/web/prototype/app-flow.html).
 
-export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "sources" | "people" | "forecast" | "settings" | "access" | "share";
+export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "sources" | "people" | "sandbox" | "settings" | "access" | "share";
 
 /** How a count badge looks: plain, or a warning (sources that link to nothing; wired in A53). */
 export type CountTone = "plain" | "warn";
@@ -58,7 +58,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     item({ key: "sources", label: "Sources", path: "/sources", icon: "sources", count: counts.unlinkedSources, tone: "warn", countNoun: "not linked to anything" }),
     item({ key: "people", label: "People", path: "/people", icon: "people" }),
     // Who gets too busy, and when (issue #35).
-    item({ key: "forecast", label: "Forecast", path: "/forecast", icon: "forecast" }),
+    item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];
   if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/levers" || rest === "/settings/calibration" || rest === "/settings/changes" }));
   // The demo has no Settings page, so its Levers are reached from the sidebar directly.

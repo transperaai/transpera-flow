@@ -238,7 +238,7 @@ export function ScenarioPanel({
                 name: copyName(source.name, scenarios.map((s) => s.name)),
                 description: source.description,
                 patch: source.patch,
-                parent_scenario_id: source.id,
+                parent_scenario_id: null,
               });
             }}
             onDelete={async (id) => {
