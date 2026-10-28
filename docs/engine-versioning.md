@@ -175,7 +175,26 @@ Added 28 Oct 2026 (`docs/plans/sandbox-p2-brief.md`). 1.11.0 adds what a run ear
 
 **Cost of the new work** (30 replications, seed 1, one machine, run alone, best of 3; "before" is the parent commit, "after" this branch): a few array adds per arrival, win, tick and service start, and O(people × months) in `monthlyOut`.
 
-PERF_TABLE
+Measured on a shared 4-core container (another agent's tests were running: load average 2 to 15), so the numbers are noisy by about 5 to 10%. Each side's figure is the best of 15 to 40 runs of the case, before and after interleaved in separate processes, the engine bundled from the parent commit (`d19f92ff`) and from this branch. Budget (brief §7): no case more than 5% slower, or 10 ms, whichever is larger.
+
+| Engine case (30 replications, seed 1) | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 32 | 32 | -0.8% |
+| northbeam groups+servicing 13w | 97 | 87 | -9.5% |
+| northbeam named roster 13w | 79 | 84 | +6.5% |
+| larkspur 26w | 91 | 77 | -15.0% |
+| large 40 steps 25 people 26w | 633 | 619 | -2.2% |
+| northbeam groups 24m, no monthly | 428 | 429 | +0.1% |
+| northbeam groups 24m, monthly | 505 | 510 | +1.0% |
+| larkspur 24m, monthly | 329 | 339 | +2.9% |
+| northbeam pipeline 12m, monthly | 80 | 86 | +7.8% |
+| downturn groups 24m | 333 | 327 | -1.8% |
+| downturn named roster 24m | 309 | 315 | +1.9% |
+| named roster 24m | 458 | 442 | -3.4% |
+
+Every case is within the budget: the three that read above +5% (the named-roster 13-week run and the 12-month pipeline run with months, +5 and +6 ms, and the same cases re-measured alone at -1.9% and +2.8%) are inside the 10 ms allowance and the noise. The cases that came out faster are noise too: nothing in the change speeds a run up.
+
+The web suite's timing tests (`apps/web/test/horizon-performance.test.ts`, best of 3 each, parent commit against this branch, same noisy machine) read the same: pipeline-only Northbeam at 24 months 266 and 266 ms (limit 1,200), full Northbeam 744 and 651 ms (limit 2,000), full Larkspur 512 and 467 ms, full Northbeam in a downturn 458 and 522 ms, and the new month-by-month cases (the Forecast's own run: calendar months, with the sales, revenue and money series) full Northbeam 691 and 719 ms, full Larkspur 430 and 453 ms (limit 2,000 each). Under heavy load (load average above 10) one case fails on the parent commit and on this branch alike; re-run alone they pass. The engine's `test:perf` passes.
 
 ## Per-person times (engine 1.10.0, C6)
 
