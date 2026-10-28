@@ -51,7 +51,11 @@ export function descendantsOf(id: string, rows: readonly Pick<SandboxScenarioRow
   const queue = [id];
   while (queue.length) {
     const at = queue.shift()!;
-    for (const r of rows) if (r.parent_id === at && !out.includes(r.id)) (out.push(r.id), queue.push(r.id));
+    for (const r of rows) {
+      if (r.parent_id !== at || out.includes(r.id)) continue;
+      out.push(r.id);
+      queue.push(r.id);
+    }
   }
   return out;
 }

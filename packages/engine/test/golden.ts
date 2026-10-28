@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, northbeamModel, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulationResult, type Stat } from "../src";
+import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, northbeamModel, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat } from "../src";
 
 export const GOLDEN_DIR = new URL("../golden/", import.meta.url);
 export const VERSION_FILE = new URL("../src/version.ts", import.meta.url);
@@ -18,6 +18,8 @@ export interface GoldenModel {
   model: () => EngineModel;
   seed: number;
   reps: number;
+  /** Options for `simulate` (the money model runs month by month). */
+  options?: SimulateOptions;
 }
 
 /**
@@ -61,6 +63,14 @@ export const GOLDEN_MODELS: GoldenModel[] = [
     reps: 30,
   },
   {
+    name: "northbeam-money",
+    description: "Northbeam with its clients counted per service, 18,000 a month of overheads and PPC priced hourly at 95 (clients won in the run bill the hours worked for them): billed revenue by kind, paid labour, overheads, profit, and the monthly sales, revenue and money series.",
+    model: northbeamWithMoney,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
     name: "larkspur",
     description: "Larkspur Creative, the messier agency: overloaded designers, a copywriter on overtime, an 18-client roster with health-driven churn, starting from WIP.",
     model: larkspurModel,
@@ -88,6 +98,10 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
     cycleHours: { mean: k.cycle.mean, p50: k.cycle.p50, p90: k.cycle.p90 },
     revenue: { newMrr: stat(k.mrrAdded), billed: stat(k.billed), ltvAdded: stat(k.ltvAdded), lostRevenue: stat(k.lostRevenue) },
     labour: stat(k.labour),
+    // Profit (engine 1.11.0): total billed revenue, hourly work, paid labour, overheads and profit over the run.
+    money: { revenue: stat(k.revenue), revenueHourly: stat(k.revenueHourly), labourCost: stat(k.labourCost!), overheads: k.overheads, profit: stat(k.profit!) },
+    // Models run month by month: the means of the monthly sales, revenue and money series.
+    ...(r.monthly ? { monthly: monthlyMeans(r.monthly) } : {}),
     overtime: { hours: stat(k.overtimeHours), cost: stat(k.overtimeCost!) },
     clients: k.clientsAtRisk && k.clientsChurned ? { atRisk: stat(k.clientsAtRisk), churned: stat(k.clientsChurned) } : null,
     touchpoints: k.touchpoints ? { onTime: stat(k.touchpoints.onTime), late: stat(k.touchpoints.late), missed: stat(k.touchpoints.missed) } : null,
@@ -139,6 +153,25 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
   };
 }
 
+const means = (stats: Stat[]) => stats.map((s) => s.mean);
+
+function monthlyMeans(m: NonNullable<SimulationResult["monthly"]>) {
+  return {
+    opportunities: means(m.sales.opportunities),
+    won: means(m.sales.won),
+    lost: means(m.sales.lost),
+    conversion: means(m.sales.conversion),
+    revenue: means(m.revenue.total),
+    recurring: means(m.revenue.recurring),
+    hourly: means(m.revenue.hourly),
+    lostToChurn: means(m.revenue.lostToChurn),
+    overtimeHours: means(m.overtimeHours),
+    labour: m.money?.labour ?? null,
+    overtimeCost: m.money ? means(m.money.overtimeCost) : null,
+    profit: m.money ? means(m.money.profit) : null,
+  };
+}
+
 export type KeyOutputs = ReturnType<typeof keyOutputs>;
 
 /** One golden model's baseline file (golden/<name>.json). */
@@ -166,7 +199,7 @@ export interface LedgerEntry {
 export function runGolden(g: GoldenModel): KeyOutputs {
   const model = g.model();
   // Through JSON, as the baselines are stored: drops undefined, keeps every double exactly.
-  return JSON.parse(JSON.stringify(keyOutputs(model, simulate(model, g.reps, g.seed)))) as KeyOutputs;
+  return JSON.parse(JSON.stringify(keyOutputs(model, simulate(model, g.reps, g.seed, g.options)))) as KeyOutputs;
 }
 
 const baselineUrl = (name: string) => new URL(`${name}.json`, GOLDEN_DIR);

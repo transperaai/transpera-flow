@@ -1,7 +1,7 @@
 # Engine versioning and golden models
 
 The engine's numbers are the product, so none may move unnoticed (docs/PRD.md §6.9 layer 3, decision D16;
-issue #22; ADR 0009). Five golden models are run at a fixed seed on every push, their key outputs are compared
+issue #22; ADR 0009). Seven golden models are run at a fixed seed on every push, their key outputs are compared
 exactly with approved baselines, and every change that moves one needs a new baseline and a new `ENGINE_VERSION`,
 which every run records.
 
@@ -13,9 +13,10 @@ which every run records.
 | `northbeam-seeded` | `northbeamWithServicing()` | Northbeam with its 26 named clients (the seed now counts clients per service: see `northbeam-groups`): SEO and PPC services with condition-tag routing, 11 named people, the 26-client roster, a 10% overtime cap, and two servicing processes whose late and missed tasks move health and churn. |
 | `northbeam-groups` | `northbeamWithClientGroups()` | Northbeam with its clients counted per service (17 SEO clients at health 83, 12 PPC clients at health 52, from `NORTHBEAM_CLIENT_GROUPS`) and simulated as unnamed clients, with the same servicing (issue #120). |
 | `northbeam-drivers` | `northbeamWithChurnDrivers()` | `northbeam-groups` with all ten churn drivers switched on at the prototype's weights and one of the user's own (a competitor undercutting): who the churn is blamed on, and what each cause measured (A56, below). |
+| `northbeam-money` | `northbeamWithMoney()` | `northbeam-groups` with 18,000 a month of overheads and PPC priced hourly at 95, run month by month (engine 1.11.0): billed revenue by kind, hourly work, paid labour, overheads, profit, and the monthly sales, revenue and money series. |
 | `larkspur` | `larkspurModel()` | Larkspur Creative, the "second, messier sample agency" (§6.9): overloaded designers, a copywriter past her week on overtime, an 18-client named roster whose health drives churn, and the corners Northbeam leaves alone (below). |
 
-Each runs with the app's defaults, 30 replications at seed 1. The outputs kept (`keyOutputs` in
+Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money` also asks for the monthly series). The outputs kept (`keyOutputs` in
 `packages/engine/test/golden.ts`) are throughput (won, lost, done, wins a week), cycle time (mean, P50, P90), new
 MRR, billed, LTV added and lost revenue, labour, overtime hours and cost, clients at risk and churned, servicing
 touchpoints, the bottleneck role, step and person, utilisation per role (total with its 10–90% range, and its
@@ -153,6 +154,47 @@ factor (the chance it had at the last tick, with health as it ended). Not change
 today's price and tenure, and the pooled billing estimate still uses the won-month churn factor. Pressures are
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
+
+## Profit (engine 1.11.0, sandbox phase 2)
+
+Added 28 Oct 2026 (`docs/plans/sandbox-p2-brief.md`). 1.11.0 adds what a run earns, what its team costs and the profit left, and the monthly sales, revenue and money series the Forecast page and the Sandbox read. **No existing simulated number moved**: nothing below draws a random number or reorders an existing sum, and the approved diff for the six existing golden models is only added keys (`money`, and `engineVersion`); `northbeam-money` is new. Approved with `golden:approve "Profit first (sandbox phase 2): ..."`.
+
+**Revenue by kind** (`ReplicationResult.revenue`, `Kpis.revenue`): total = recurring + one-off + hourly.
+- *Recurring*: every active client's fee, pro rata while active in the window. With a client roster (named clients or client groups) it is the amount `bill()` already books, so recurring + one-off equals `billed` (to rounding: the two add in a different order). Without a roster the pool accrues week by week (`accruePooled`) and **includes the interim clients, which `billed` leaves out**; `billed` is kept exactly as it was (the goldens and PRD §13 define it), and the two are documented side by side.
+- *One-off*: the price (× the market's) when the job is won.
+- *Hourly*: a client's entered fee is its bill. An existing client (a named client's `mrr`, a client group's `fee`) bills that whatever its service's pricing, so nothing already simulated moves and nothing is counted twice. A client **won during the run** on an hourly service bills the rate (service price × the market's price factor in the month it was won) for hands-on hours: (1) post-sale pipeline steps (onboarding and so on, repeat passes included: hours worked), (2) its servicing tasks while it is active, (3) its ongoing (fallback) client hours while it is active (the shape's `parts`, not `uncovered`), and for a model without a roster (4) the ongoing hours of the roles with people on the team, for each hourly client in the pool. Selling time before the win, work for existing clients and wins in the warm-up are not billed. Only the in-window part of a job is added, so nothing is reset at the end of the warm-up. An hourly service whose clients generate no work earns 0 (`hourly[id].hours` is 0 and the Forecast says so).
+- `fromNew` is the part from clients won in the run; `mrrLost` (monthly) is the fee of each client that churned, in the month of the tick that closed the week.
+
+**Labour cost** (`labourCost`): contracted capacity × weeks on the team (`presentWeeks`) × `rateOf(p)` (the person's own cost, or the mean of their roles', the rate overtime uses). **Leave is paid**; a planned hire is paid from `from`, a leaver until `until`; role-count models are covered by the synthesised people. Overtime is separate (no premium). `kpi.labour` (pipeline labour, cost per unit) is unchanged. Null when `payHidden`, as are `overtimeCost`, `profit` and the whole `MonthlyResult.money`; revenue and `overheads` are never hidden.
+
+**Overheads and profit**: `overheads = overheadMonthly × weeks × 12 / 52` (so 12 months of a 52-week run cost exactly 12 × the figure; calendar months vary by their working days, about 5%). Profit per replication = total revenue − labour − overtime − overheads; per month the same with that month's figures, and `money.profit[m]` is the spread of each replication's own profit. Overtime is worked out month by month (as `monthlyOut` always did), so the months' profits do not sum exactly to `kpi.profit`. `services.margin` stays recorded and unused: profit comes from the paid hours, so applying a margin as well would count the cost of delivery twice.
+
+**Monthly series** (`MonthlyReplication` and `MonthlyResult`): opportunities, wins, losses and conversion (`ratioStat`), clients won (not one-offs) and lost, revenue by kind, `fromNew`, fees lost to churn, overtime hours, and labour (by role and person), overtime cost, overheads and profit.
+
+**Scenario patches**: `finances.overhead_monthly` (set, multiply, add; never below 0) beside `finances.retainer`, mirrored by `private.is_scenario_patch` in migration `20270108000000_overheads.sql`, which also gives `workspaces.settings.overhead_monthly` its shape check (null, or a number from 0 to 100,000,000).
+
+**Cost of the new work** (30 replications, seed 1, one machine, run alone, best of 3; "before" is the parent commit, "after" this branch): a few array adds per arrival, win, tick and service start, and O(people × months) in `monthlyOut`.
+
+Measured on a shared 4-core container (another agent's tests were running: load average 2 to 15), so the numbers are noisy by about 5 to 10%. Each side's figure is the best of 15 to 40 runs of the case, before and after interleaved in separate processes, the engine bundled from the parent commit (`d19f92ff`) and from this branch. Budget (brief §7): no case more than 5% slower, or 10 ms, whichever is larger.
+
+| Engine case (30 replications, seed 1) | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 32 | 32 | -0.8% |
+| northbeam groups+servicing 13w | 97 | 87 | -9.5% |
+| northbeam named roster 13w | 79 | 84 | +6.5% |
+| larkspur 26w | 91 | 77 | -15.0% |
+| large 40 steps 25 people 26w | 633 | 619 | -2.2% |
+| northbeam groups 24m, no monthly | 428 | 429 | +0.1% |
+| northbeam groups 24m, monthly | 505 | 510 | +1.0% |
+| larkspur 24m, monthly | 329 | 339 | +2.9% |
+| northbeam pipeline 12m, monthly | 80 | 86 | +7.8% |
+| downturn groups 24m | 333 | 327 | -1.8% |
+| downturn named roster 24m | 309 | 315 | +1.9% |
+| named roster 24m | 458 | 442 | -3.4% |
+
+Every case is within the budget: the three that read above +5% (the named-roster 13-week run and the 12-month pipeline run with months, +5 and +6 ms, and the same cases re-measured alone at -1.9% and +2.8%) are inside the 10 ms allowance and the noise. The cases that came out faster are noise too: nothing in the change speeds a run up.
+
+The web suite's timing tests (`apps/web/test/horizon-performance.test.ts`, best of 3 each, parent commit against this branch, same noisy machine) read the same: pipeline-only Northbeam at 24 months 266 and 266 ms (limit 1,200), full Northbeam 744 and 651 ms (limit 2,000), full Larkspur 512 and 467 ms, full Northbeam in a downturn 458 and 522 ms, and the new month-by-month cases (the Forecast's own run: calendar months, with the sales, revenue and money series) full Northbeam 691 and 719 ms, full Larkspur 430 and 453 ms (limit 2,000 each). Under heavy load (load average above 10) one case fails on the parent commit and on this branch alike; re-run alone they pass. The engine's `test:perf` passes.
 
 ## Per-person times (engine 1.10.0, C6)
 

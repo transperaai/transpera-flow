@@ -53,9 +53,23 @@ async function mount(width: number, o: Options = {}): Promise<{ page: Page; erro
     await page.waitForSelector("[data-forecast-timeline], [data-sandbox-compare]", { timeout: 90_000 });
   } catch (e) {
     // Say what the page showed and what it complained about, not just that it timed out.
-    throw new Error(`${(e as Error).message}\nErrors: ${errors.join(" | ")}\nPage: ${(await page.locator("#root").innerText()).slice(0, 600)}`);
+    const el = page.locator("[data-sandbox-compare]");
+    throw new Error(`${(e as Error).message}\nErrors: ${errors.join(" | ")}\nStatus: ${await el.getAttribute("data-compare-status")}; progress: ${await page.locator("[data-compare-progress]").innerText()}; url: ${await page.evaluate(() => window.__harnessUrl)}`);
   }
   return { page, errors };
+}
+
+/** Waits for the compare view to finish; when it doesn't, says what it showed. */
+async function compareDone(page: Page, errors: string[]) {
+  try {
+    await page.waitForSelector('[data-sandbox-compare][data-compare-status="done"]', { timeout: 90_000 });
+  } catch (e) {
+    const el = page.locator("[data-sandbox-compare]");
+    const status = await el.getAttribute("data-compare-status");
+    const progress = await page.locator("[data-compare-progress]").innerText();
+    const url = await page.evaluate(() => window.__harnessUrl);
+    throw new Error(`${(e as Error).message.split("\n")[0]}\nErrors: ${errors.join(" | ")}\nStatus: ${status}; progress: ${progress}; url: ${url}`);
+  }
 }
 
 const TIMELINE = "[data-forecast-timeline]";
@@ -316,7 +330,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         const inherited = page.locator("[data-change-list] [data-change][data-inherited]");
         expect(await inherited.count()).toBe(1);
         expect(await inherited.innerText()).toContain("from Hire early (copy)");
-        expect(await inherited.getByRole("button").count()).toBe(0);
+        expect(await inherited.locator("button:not([data-slot='help'])").count()).toBe(0);
         expect(await page.locator("[data-plan-marker]").count()).toBe(1);
         // The inherited marker can't be moved.
         const m = marker(page, "hire");
@@ -409,8 +423,17 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.getByLabel("Scenario 1", { exact: true }).selectOption({ label: "Hire in January" });
         await page.getByLabel("Scenario 2", { exact: true }).selectOption({ label: "Hire in March" });
         await page.getByLabel("Scenario 3", { exact: true }).selectOption({ label: "Hire in March, then more leads" });
-        await page.waitForSelector('[data-sandbox-compare][data-compare-status="done"]', { timeout: 90_000 });
-        expect(await page.locator("[data-compare-tile]").count()).toBe(4);
+        await compareDone(page, errors);
+        // Profit over the run first (sandbox phase 2), then recurring revenue, clients at risk, months too busy and late tasks.
+        expect(await page.locator("[data-compare-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-compare-tile")))).toEqual([
+          "Profit over the run",
+          expect.stringMatching(/^Recurring revenue in /) as unknown as string,
+          expect.stringMatching(/^Clients at risk in /) as unknown as string,
+          "Months a role is too busy",
+          expect.stringMatching(/^Late tasks in /) as unknown as string,
+        ]);
+        expect(await page.locator('[data-compare-section="Profit"] [data-compare-chart="Profit"]').count()).toBe(1);
+        expect(await page.locator('[data-compare-section="Billed revenue"] [data-compare-chart="Billed revenue"]').count()).toBe(1);
         const tile = await page.locator('[data-compare-tile^="Recurring revenue in"]').innerText();
         for (const name of ["No changes", "Hire in January", "Hire in March", "Hire in March, then more leads"]) expect(tile).toContain(name);
         expect(await page.locator('[data-compare-chart="Monthly recurring revenue"]').count()).toBe(1);
@@ -435,8 +458,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.waitForSelector("[data-column-error]", { timeout: 90_000 });
         expect(await page.locator("[data-column-error]").innerText()).toContain("Broken scenario");
         expect(await page.locator("[data-column-error]").innerText()).toContain("can't be simulated");
-        await page.waitForSelector('[data-compare-chart="Monthly recurring revenue"]');
-        expect(await page.locator('[data-compare-chart="Monthly recurring revenue"] [data-line]').count()).toBe(2);
+        await page.waitForFunction(() => document.querySelectorAll('[data-compare-chart="Monthly recurring revenue"] [data-line]').length === 2, undefined, { timeout: 90_000 });
         expect(await page.locator('[data-compare-tile^="Recurring revenue in"]').innerText()).not.toContain("Broken scenario");
         // And the single view shows the failure, not the previous scenario's numbers.
         await page.getByRole("button", { name: "Back to the scenario" }).click();
@@ -470,13 +492,62 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
       });
 
       it("shares runs between the columns of the compare view: the same runs are computed once", async () => {
-        const { page, errors } = await mount(width, { url: `/demo/sandbox?compare=${MARCH},${MARCH}` });
-        await page.waitForSelector("[data-compare-progress]");
-        await page.waitForFunction(() => (window.__simRuns ?? 0) >= 3, undefined, { timeout: 90_000 });
+        const { page, errors } = await mount(width);
+        await page.waitForFunction(() => (window.__simRuns ?? 0) >= 1, undefined, { timeout: 90_000 });
+        await page.waitForTimeout(500);
+        const before = await page.evaluate(() => window.__simRuns ?? 0);
+        await page.locator("[data-scenario-compare]").click();
+        await page.getByLabel("Scenario 1", { exact: true }).selectOption({ label: "Hire in March" });
+        await page.getByLabel("Scenario 2", { exact: true }).selectOption({ label: "Hire in March" });
+        await compareDone(page, errors);
         await page.waitForTimeout(1000);
-        // The live forecast's run, and the two runs of "Hire in March" (the hire; the hire with the solution): once each, although
-        // two columns asked for both of them at the same moment, and "No changes" is the live run.
-        expect(await page.evaluate(() => window.__simRuns)).toBe(3);
+        // The two runs of "Hire in March" (the hire; the hire with the solution) once each, although two columns asked for both of them
+        // at the same moment; "No changes" is the live run, which the page had already run.
+        expect((await page.evaluate(() => window.__simRuns ?? 0)) - before).toBe(2);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows Sales and money under the timeline: revenue, labour, overheads and profit, with the profit chart and the table", async () => {
+        const { page, errors } = await mount(width);
+        await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
+        const money = page.locator("[data-forecast-money]");
+        expect(await money.locator("[data-money-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-money-tile")))).toEqual(["revenue", "labour", "overheads", "profit"]);
+        expect(await money.locator("[data-money-profit-chart] [data-compare-chart]").count()).toBe(1);
+        for (const row of ["opportunities", "won", "conversion", "revenue", "hourly", "labour", "overheads", "profit"]) expect(await money.locator(`[data-money-row="${row}"]`).count(), row).toBe(1);
+        // The demo has no overheads set, and says so.
+        expect(await money.locator('[data-money-note="no-overheads"]').count()).toBe(1);
+        expect(await money.locator("[data-money-hidden-note]").count()).toBe(0);
+        // It follows the scenario on screen: the open scenario's run replaces the live one.
+        const before = await money.locator('[data-money-row="profit"]').innerText();
+        await pick(page, "Hire in January");
+        await waitRuns(page, 1);
+        await page.waitForFunction((was) => document.querySelector('[data-money-row="profit"]')?.textContent !== was, before, { timeout: 90_000 });
+        expect(await page.locator("[data-forecast-money]").count()).toBe(1);
+        // And is not there while comparing.
+        await page.locator("[data-scenario-compare]").click();
+        expect(await page.locator("[data-forecast-money]").count()).toBe(0);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("gives a Viewer who sees only their own row the revenue and sales, and a note instead of costs and profit, on the page and in compare", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true });
+        await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
+        const money = page.locator("[data-forecast-money]");
+        expect(await money.locator("[data-money-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-money-tile")))).toEqual(["revenue"]);
+        expect(await money.locator("[data-money-hidden-note]").innerText()).toBe("Costs and profit are shown to Agency admins and the Owner.");
+        for (const gone of ["labour", "overtimeCost", "overheads", "profit"]) expect(await money.locator(`[data-money-row="${gone}"]`).count(), gone).toBe(0);
+        expect(await money.locator("[data-money-profit-chart]").count()).toBe(0);
+        expect(await money.locator('[data-money-row="revenue"]').count()).toBe(1);
+        expect(await money.locator('[data-money-row="opportunities"]').count()).toBe(1);
+        await page.locator("[data-scenario-compare]").click();
+        await page.getByLabel("Scenario 1", { exact: true }).selectOption({ label: "Hire in January" });
+        await compareDone(page, errors);
+        expect(await page.locator("[data-compare-costs-hidden]").innerText()).toBe("Costs and profit are shown to Agency admins and the Owner.");
+        expect(await page.locator('[data-compare-section="Profit"]').count()).toBe(0);
+        expect(await page.locator('[data-compare-tile="Profit over the run"]').count()).toBe(0);
+        expect(await page.locator('[data-compare-section="Billed revenue"]').count()).toBe(1);
         expect(errors).toEqual([]);
         await page.close();
       });
@@ -508,7 +579,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await pick(page, "Hire in March");
         await waitRuns(page, 1);
         expect(await changes(page).count()).toBe(2);
-        expect(await page.locator("[data-change-list]").getByRole("button").count()).toBe(0);
+        expect(await page.locator("[data-change-list] button:not([data-slot='help'])").count()).toBe(0);
         expect(await page.locator("[data-viewer-note]").innerText()).toContain("Your numbers can differ slightly");
         // Markers are drawn but can't be moved, opened or removed.
         const m = marker(page, "hire");
@@ -525,8 +596,8 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.getByRole("group", { name: "Time horizon" }).getByRole("button", { name: "6 months" }).click();
         await page.waitForFunction(() => document.querySelectorAll("[data-forecast-timeline] table tbody tr").length === 6, undefined, { timeout: 90_000 });
         await page.locator("[data-scenario-compare]").click();
-        await page.waitForSelector('[data-sandbox-compare][data-compare-status="done"]', { timeout: 90_000 });
-        expect(await page.locator("[data-compare-tile]").count()).toBe(4);
+        await compareDone(page, errors);
+        expect(await page.locator("[data-compare-tile]").count()).toBe(5);
         expect(errors).toEqual([]);
         await page.close();
       });

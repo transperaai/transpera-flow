@@ -111,6 +111,19 @@ export async function saveOvertimeCap(workspaceId: string, base: number | null, 
 }
 
 /**
+ * Fixed costs a month (rent, tools, insurance), in the workspace currency (sandbox phase 2): a number from 0 to 100,000,000, or
+ * null to remove it. The database checks the same range (`workspaces_overhead_monthly`). Refreshes on a save: the forecast reads it.
+ */
+export async function saveOverheadMonthly(workspaceId: string, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
+  const money = (v: unknown) => v === null || (number(v) && (v as number) >= 0 && (v as number) <= 100_000_000);
+  if (!isId(workspaceId) || !money(value) || !(base === null || isFiniteNumber(base))) return invalid;
+  if (!(await signedIn())) return signedOut;
+  const out = await saveField("workspaces", { id: workspaceId }, "settings.overhead_monthly", base, value);
+  if (out.status === "saved") refresh();
+  return out;
+}
+
+/**
  * Switch Per-person times (C6). Agency admins (a dedicated function writes only this key). Refreshes on a save, because the
  * page shows or hides the per-person fields.
  */

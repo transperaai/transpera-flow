@@ -2,7 +2,7 @@ import { build } from "esbuild";
 import { chromium, type Browser } from "playwright-core";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { larkspurModel, northbeamModel, northbeamWithClients, northbeamWithServices, northbeamWithServicing, simulate } from "../src";
+import { larkspurModel, northbeamModel, northbeamWithClients, northbeamWithMoney, northbeamWithServices, northbeamWithServicing, simulate, type SimulateOptions } from "../src";
 import { largeModel } from "./fixtures/large-model";
 
 // The same model and seed must give byte-identical results in Node and in a
@@ -29,19 +29,19 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function runInWorker(model: unknown, reps: number, seed: number): Promise<string> {
+async function runInWorker(model: unknown, reps: number, seed: number, options: SimulateOptions = {}): Promise<string> {
   const page = await browser.newPage();
   try {
     return await page.evaluate(
-      ({ bundle, model, reps, seed }) =>
+      ({ bundle, model, reps, seed, options }) =>
         new Promise<string>((resolve, reject) => {
-          const src = `${bundle}\nself.onmessage = (e) => self.postMessage(JSON.stringify(TransperaFlowEngine.simulate(e.data.model, e.data.reps, e.data.seed)));`;
+          const src = `${bundle}\nself.onmessage = (e) => self.postMessage(JSON.stringify(TransperaFlowEngine.simulate(e.data.model, e.data.reps, e.data.seed, e.data.options)));`;
           const worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
           worker.onmessage = (e) => resolve(e.data as string);
           worker.onerror = (e) => reject(new Error(e.message));
-          worker.postMessage({ model, reps, seed });
+          worker.postMessage({ model, reps, seed, options });
         }),
-      { bundle: engineBundle, model, reps, seed },
+      { bundle: engineBundle, model, reps, seed, options },
     );
   } finally {
     await page.close();
@@ -87,6 +87,11 @@ describe("determinism across hosts", () => {
   it("Larkspur, the messier golden agency: Node and a browser worker agree byte for byte", async () => {
     const model = larkspurModel();
     expect(await runInWorker(model, 30, 1)).toBe(JSON.stringify(simulate(model, 30, 1)));
+  }, 60_000);
+
+  it("Northbeam with overheads and hourly PPC (the northbeam-money golden model), month by month: Node and a browser worker agree byte for byte", async () => {
+    const model = northbeamWithMoney();
+    expect(await runInWorker(model, 30, 1, { monthly: true })).toBe(JSON.stringify(simulate(model, 30, 1, { monthly: true })));
   }, 60_000);
 
   it("large synthetic model: Node and a browser worker agree byte for byte", async () => {

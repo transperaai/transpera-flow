@@ -627,6 +627,23 @@ describe("planWorkspaceImport", () => {
     expect(planOf(bundle, false).summary.settings).toBe("skipped");
   });
 
+  it("settings: overheads are restored when they are null or a number from 0 to 100,000,000, and left out, with a warning, when the database would refuse them", () => {
+    for (const ok of [0, 18000, 100_000_000, null]) {
+      const b = clone(makeBundle().bundle);
+      (b.workspace.settings as Record<string, unknown>).overhead_monthly = ok;
+      const { plan, warnings } = planOf(b);
+      expect(plan.settings, String(ok)).toMatchObject({ overhead_monthly: ok });
+      expect(warnings.join(" ")).not.toContain("overhead_monthly");
+    }
+    for (const bad of [-1, "5", true, 100_000_001, Number.NaN, {}]) {
+      const b = clone(makeBundle().bundle);
+      (b.workspace.settings as Record<string, unknown>).overhead_monthly = bad;
+      const { plan, warnings } = planOf(b);
+      expect(plan.settings, String(bad)).toEqual({ hours_per_week: 40, currency: "GBP" });
+      expect(warnings.join(" "), String(bad)).toContain("overhead_monthly");
+    }
+  });
+
   it("market schedule: a preset row names the preset, a custom one its condition; presets are never inserted", () => {
     const { bundle, ids } = makeBundle();
     const { plan, placeholderOf } = planOf(bundle);

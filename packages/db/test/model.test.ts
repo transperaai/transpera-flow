@@ -94,6 +94,35 @@ function beforeServicesAndClients(): ProcessBundle {
 }
 
 describe("toEngineModel", () => {
+  describe("overheads (sandbox phase 2)", () => {
+    const withOverhead = (value: unknown, extra: Partial<ProcessBundle> = {}): ProcessBundle => {
+      const b = northbeamBundle();
+      return { ...b, ...extra, workspace: { ...b.workspace, settings: { ...b.workspace.settings, overhead_monthly: value as number } } };
+    };
+
+    it("overhead_monthly 18000 becomes overheadMonthly (a number written as a string too)", () => {
+      expect(toEngineModel(withOverhead(18000), { startDate: START }).overheadMonthly).toBe(18000);
+      expect(toEngineModel(withOverhead("12000"), { startDate: START }).overheadMonthly).toBe(12000);
+    });
+
+    it("absent, null, 0 or junk adds nothing: the model deep-equals today's", () => {
+      const today = toEngineModel(northbeamBundle(), { startDate: START });
+      for (const value of [null, 0, "", "abc", -5, Number.NaN]) {
+        const m = toEngineModel(withOverhead(value), { startDate: START });
+        expect(m, String(value)).toEqual(today);
+        expect(m).not.toHaveProperty("overheadMonthly");
+      }
+      expect(today).not.toHaveProperty("overheadMonthly");
+    });
+
+    it("is kept for a Viewer, whose model hides pay, and for a share bundle", () => {
+      const viewer = toEngineModel(withOverhead(18000, { viewer: { seesEveryone: false, ownPersonId: null } }), { startDate: START });
+      expect(viewer.payHidden).toBe(true);
+      expect(viewer.overheadMonthly).toBe(18000);
+      expect(toEngineModel(withOverhead(18000, { payHidden: true }), { startDate: START }).overheadMonthly).toBe(18000);
+    });
+  });
+
   it("resolves the Northbeam rows into exactly the engine's Northbeam with services, people, its client groups and servicing", () => {
     expect(withKeys(toEngineModel(northbeamBundle(), { startDate: START }))).toEqual(northbeamWithClientGroups());
   });

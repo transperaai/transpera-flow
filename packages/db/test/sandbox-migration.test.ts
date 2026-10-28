@@ -9,7 +9,8 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 // and every marker kind maps to a lever, clashing names are renamed, the issue and run links follow, the old tables go, and the
 // rewritten restore still restores. The rows at the base are the seeded Northbeam plus the awkward ones below.
 
-const BASE = "20261231000000";
+// The last migration before this one: the old `scenarios` check accepts finances.overhead_monthly from 20270108000000 on.
+const BASE = "20270108000000";
 const ws = NORTHBEAM_WORKSPACE_ID;
 const role = northbeamRoleIds.ppc;
 const person = northbeamPersonIds["Dan Okafor"]!;
@@ -46,6 +47,7 @@ const PATHS = [
   ["demand.active_clients", "set", 30],
   ["demand.churn_monthly", "set", 0.03],
   ["finances.retainer", "add", 100],
+  ["finances.overhead_monthly", "multiply", 1.1],
   ["health.initial", "set", 70],
   ["health.recover", "multiply", 1.25],
   ["health.late_penalty", "add", 1],
@@ -61,8 +63,8 @@ const PATHS = [
   ["steps.st1.wait_hours", "set", 4],
   ["steps.st1.rework_rate", "set", 0.05],
 ] as const;
-const LEVERS = ["A1", "B1", "B3", "B2", "X1", "X1", "X1", "X1", "B2", "A6", "X3", "D5", "C1", "X2", "D4", "E1", "E2", "E3"];
-const TARGETS = [null, null, null, null, "initial", "recover", "late_penalty", "missed_penalty", "s1", "s1", "s1", "r1", "r1", "r1", "p1", "st1", "st1", "st1"];
+const LEVERS = ["A1", "B1", "B3", "B2", "C2", "X1", "X1", "X1", "X1", "B2", "A6", "X3", "D5", "C1", "X2", "D4", "E1", "E2", "E3"];
+const TARGETS = [null, null, null, null, null, "initial", "recover", "late_penalty", "missed_penalty", "s1", "s1", "s1", "r1", "r1", "r1", "p1", "st1", "st1", "st1"];
 let before: { scenarios: number; plans: number };
 
 beforeAll(async () => {

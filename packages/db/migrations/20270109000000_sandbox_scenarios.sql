@@ -26,7 +26,7 @@
 --   6. drops `scenarios`, `forecast_plans`, `private.seed_scenario_library`, `private.scenario_library` and
 --      `private.forecast_plans_before_write`.
 -- `private.is_scenario_patch` STAYS: `public.save_solution` (20261221000000_play_links.sql) still checks a solution's lever changes
--- with it, and phase 2 widens it for `finances.overhead_monthly`. Only the `scenarios_patch_shape` check that used it goes with
+-- with it, and phase 2 (20270108000000) widened it for `finances.overhead_monthly`. Only the `scenarios_patch_shape` check that used it goes with
 -- the table.
 --
 -- Who: Viewers read scenarios now (`can_read_workspace`); the Owner and Agency admins insert, update and delete
@@ -89,6 +89,7 @@ as $$
     ('B2', 'id_or_none', null,        array['set', 'multiply', 'add'], true,  'splice', 'month',  true),
     ('B3', 'none',       null,        array['set', 'multiply', 'add'], true,  'splice', 'month',  true),
     ('C1', 'id',         '@busiest',  array['set', 'multiply', 'add'], true,  'splice', 'month',  true),
+    ('C2', 'none',       null,        array['set', 'multiply', 'add'], true,  'splice', 'month',  true),
     ('D1', 'id',         null,        array['set'],                    true,  'people', 'month',  false),
     ('D2', 'id',         null,        array['set'],                    true,  'people', 'month',  false),
     ('D3', 'id',         null,        array['set'],                    false, 'people', 'monday', false),
@@ -149,6 +150,7 @@ as $$
         when 'D2' then case when pg_catalog.jsonb_typeof(c -> 'value') = 'number' then (c ->> 'value')::numeric = 0 else false end
         when 'D3' then case when pg_catalog.jsonb_typeof(c -> 'value') = 'number' and (c ->> 'value') ~ '^[0-9]{1,2}$' then (c ->> 'value')::integer between 1 and 52 else false end
         when 'E6' then case when pg_catalog.jsonb_typeof(c -> 'value') = 'number' then (c ->> 'value')::numeric = 1 else false end
+        when 'C2' then case when pg_catalog.jsonb_typeof(c -> 'value') = 'number' then (c ->> 'op') = 'add' or (c ->> 'value')::numeric >= 0 else false end
         else true
       end
       and case
@@ -297,6 +299,7 @@ begin
       when 'demand.active_clients' then 'B1'
       when 'demand.churn_monthly' then 'B3'
       when 'finances.retainer' then 'B2'
+      when 'finances.overhead_monthly' then 'C2'
       else case when parts[1] = 'health' then 'X1' end
     end;
     target := case when parts[1] = 'health' then parts[2] end;

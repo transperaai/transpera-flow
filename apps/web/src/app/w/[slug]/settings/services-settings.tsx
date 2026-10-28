@@ -171,7 +171,7 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
           max={100}
           step={1}
           disabled={disabled}
-          hint="Gross margin as a share of price. Recorded for reporting; not in the revenue figures yet." help={{ description: "Profit as a share of the price, before overhead. It is recorded, but not yet used in the revenue figures.", example: "At 40%, a 2,500 retainer leaves 1,000 after the cost of delivering it." }} />
+          hint="Recorded for reference. Profit is worked out from the hours people are paid for, not from this." help={{ description: "Recorded for reference. Profit is worked out from the hours people are paid for, not from this.", example: "Profit comes from the team's pay and the overheads, so a 40% margin here doesn't change it." }} />
         <NumberField
           label="Expected tenure"
           value={Number(sv.tenure_months)}

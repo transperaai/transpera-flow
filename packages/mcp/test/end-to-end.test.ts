@@ -43,6 +43,9 @@ let memberId: string;
 let strangerId: string;
 let otherWorkspaceId: string;
 
+/** What a viewer's token never gets, whatever the browser would show an Agency admin: every figure that depends on individual pay. */
+const HIDDEN_COSTS = { overtimeCost: null, labourCost: null, profit: null };
+
 describe("MCP over the database (acts as the user under RLS)", () => {
   beforeAll(async () => {
     env = await startTestDb();
@@ -174,9 +177,14 @@ describe("MCP over the database (acts as the user under RLS)", () => {
     expect(run.data).not.toHaveProperty("trace");
     // The browser: toEngineModel(bundle) in ProcessView, then simulate(model, 30, 1) in the worker.
     const browser = simulate(toEngineModel(northbeamBundle(), { startDate }), 30, 1);
-    // This token is a viewer's: the same numbers as the browser, except the overtime cost, which depends on pay and is unavailable (null, not 0).
-    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
+    // This token is a viewer's: the same numbers as the browser, except the costs that depend on pay (overtime cost, labour cost and profit), which are unavailable (null, not 0).
+    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), ...HIDDEN_COSTS });
     expect(run.data).toMatchObject({ reps: 30, seed: 1, engine_version: ENGINE_VERSION });
+    // Profit first (engine 1.11.0): revenue and overheads come through, the costs and profit are null for a viewer's token.
+    const kpi = run.data.kpi as { revenue: { mean: number }; overheads: number; overtimeCost: null; labourCost: null; profit: null };
+    expect(kpi.revenue.mean).toBeGreaterThan(0);
+    expect(kpi.overheads).toBe(0);
+    expect([kpi.overtimeCost, kpi.labourCost, kpi.profit]).toEqual([null, null, null]);
   });
 
   it("run_scenario applies overrides as the browser applies a scenario, and refuses ones it can't apply", async () => {
@@ -191,8 +199,8 @@ describe("MCP over the database (acts as the user under RLS)", () => {
     await client.close();
     const browser = simulate(applyPatches(toEngineModel(northbeamBundle(), { startDate }), overrides).model, 30, 1);
     expect(run.ok).toBe(true);
-    // This token is a viewer's: the same numbers as the browser, except the overtime cost, which depends on pay and is unavailable (null, not 0).
-    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
+    // This token is a viewer's: the same numbers as the browser, except the costs that depend on pay (overtime cost, labour cost and profit), which are unavailable (null, not 0).
+    expect(run.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), ...HIDDEN_COSTS });
     expect(run.data.overrides).toEqual(overrides);
     expect(bad).toMatchObject({ ok: false, error: { code: "invalid_overrides" } });
   });
@@ -213,7 +221,7 @@ describe("MCP over the database (acts as the user under RLS)", () => {
       await client.close();
       const browser = simulate(toEngineModel(northbeamBundle(), { startDate }), 5, 1);
       expect(live.data.revision.status).toBe("published");
-      expect(live.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), overtimeCost: null });
+      expect(live.data.kpi).toEqual({ ...JSON.parse(JSON.stringify(browser.kpi)), ...HIDDEN_COSTS });
       expect(draft.data.revision.status).toBe("draft");
       expect(draft.data.kpi).not.toEqual(live.data.kpi);
       expect(process.data.steps.some((s) => Number(s.work_hours) === 30)).toBe(false);
@@ -319,7 +327,7 @@ describe("MCP over the database (acts as the user under RLS)", () => {
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editorId]);
     const editor = await connect(await issueToken(editorId), options);
     const viewer = await connect(memberToken, options);
-    const patch = [{ path: `roles.${northbeamRoleIds.strat}.headcount`, op: "add", value: 2 }];
+    const patch = [{ path: `roles.${northbeamRoleIds.strat}.headcount`, op: "add" as const, value: 2 }];
 
     // No write tool exists for anyone: not even an editor's token can save a scenario or log an issue.
     for (const client of [editor, viewer]) {

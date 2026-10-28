@@ -84,9 +84,11 @@ export interface EngineEnd {
 }
 
 /**
- * How a service is priced. Only retainers add MRR; hourly services bill
- * through servicing work, which the engine does not simulate yet, so for now
- * they add nothing to the revenue KPIs.
+ * How a service is priced. Only retainers add MRR. An hourly service bills
+ * its rate for the hands-on hours worked for clients won during the run
+ * (engine 1.11.0, docs/engine-versioning.md "Profit"); a client already
+ * there at the start bills the fee entered for it, whatever its service's
+ * pricing.
  */
 export type PricingModel = "retainer" | "one_off" | "hourly";
 
@@ -96,7 +98,7 @@ export interface EngineService {
   pricingModel: PricingModel;
   /** Monthly fee for a retainer; the whole fee for a one-off; the rate for hourly. */
   price: number;
-  /** Gross margin as a share of price (0–1); carried for reporting, not used by the KPIs yet. */
+  /** Gross margin as a share of price (0–1); recorded for reference, not used: profit comes from the hours people are paid for (see `labourCost`). */
   margin: number;
   /** Expected tenure of a retainer client, in months (LTV and lost revenue). */
   tenureMonths: number;
@@ -331,6 +333,8 @@ export interface EngineModel {
    * rate are marked `payHidden`). Omitted or false: simulated exactly as before this field existed.
    */
   payHidden?: boolean;
+  /** Fixed costs a month (rent, tools), per 52/12-week month. Omitted or 0: none. Not pay, so kept when `payHidden`. */
+  overheadMonthly?: number;
   horizonWeeks: number;
   hoursPerWeek: number;
   /**
@@ -632,9 +636,32 @@ export interface MonthlyReplication {
   /**
    * Monthly recurring revenue of the active clients at each weekly tick, averaged over the month's ticks: with a client
    * roster (named clients or client groups), each retainer client's monthly fee as it bills (`weeklyBill × 4.33`); without
-   * one, what the interim clients pay (their count × `pooledMonthlyFee`) plus each retainer won since at its price at the market's, less churn. One-off and hourly services add nothing.
+   * one, what the interim clients pay (their count × `pooledMonthlyFee`) plus each retainer won since at its price at the market's, less churn. One-off and hourly services add nothing
+   * here (hourly work bills in `revenueHourly`).
    */
   mrr: number[];
+  /** Qualified arrivals, wins and losses (at an end reached from t = 0), by month. */
+  opportunities: number[];
+  won: number[];
+  lost: number[];
+  /** Wins that become clients (not one-offs), and clients that leave (pooled: the fractional fall in the count at the tick). */
+  clientsWon: number[];
+  clientsLost: number[];
+  /** Revenue billed in the month (totals): recurring fees, one-off prices and hourly work, and of those what came from clients won in the run. */
+  revenueRecurring: number[];
+  revenueOneOff: number[];
+  revenueHourly: number[];
+  revenueFromNew: number[];
+  /** Monthly fees of the clients that left in the month (`weeklyBill` × 4.33; pooled: the fall in the pool's fees). */
+  mrrLost: number[];
+  /** Paid hours × rate in the month, overtime excluded (see `ReplicationResult.labourCost`); null when `model.payHidden`. */
+  labour: number[] | null;
+  labourByRole: Record<string, number[]> | null;
+  labourByPerson: Record<string, number[]> | null;
+  /** Overtime hours × rate in the month; null when `model.payHidden`. */
+  overtimeCost: number[] | null;
+  /** `overheadMonthly` × the month's weeks ÷ (52/12). */
+  overheads: number[];
   /**
    * With a client roster only: active clients whose health is below 50 (`AT_RISK_HEALTH`), per service key (the same keys
    * as `clients`, each present even when 0), averaged over the month's ticks. Empty without a roster.
@@ -672,6 +699,27 @@ export interface MonthlyResult {
   clients: Record<string, Stat[]>;
   /** Monthly recurring revenue per month (see `MonthlyReplication.mrr`). */
   mrr: Stat[];
+  /** Sales: qualified opportunities, wins and losses per month, and wins ÷ (wins + losses) (`ratioStat`). */
+  sales: { opportunities: Stat[]; won: Stat[]; lost: Stat[]; conversion: Stat[] };
+  clientsWon: Stat[];
+  clientsLost: Stat[];
+  /** Billed revenue per month, split three ways, with what came from clients won in the run and the fees lost to churn. */
+  revenue: { total: Stat[]; recurring: Stat[]; oneOff: Stat[]; hourly: Stat[]; fromNew: Stat[]; lostToChurn: Stat[] };
+  /** Overtime hours per month, everyone together. */
+  overtimeHours: Stat[];
+  /**
+   * Costs and profit per month; null when `model.payHidden`. `labour` (and its splits) is the same in every replication
+   * (paid hours × rate, no overtime). Profit per month is the spread of each replication's own profit, so the months'
+   * profits can differ a little from the run's `kpi.profit` (overtime is worked out month by month here).
+   */
+  money: {
+    labour: number[];
+    labourByRole: Record<string, number[]>;
+    labourByPerson: Record<string, number[]>;
+    overtimeCost: Stat[];
+    overheads: number[];
+    profit: Stat[];
+  } | null;
   /** Clients at risk (health below 50) per service key and month; empty without a client roster. */
   atRisk: Record<string, Stat[]>;
 }
@@ -694,6 +742,20 @@ export interface ReplicationResult {
   overtimeHours: number;
   /** Their cost: each person's overtime hours × their cost rate. Null when `model.payHidden`. */
   overtimeCost: number | null;
+  /**
+   * Revenue billed in the window (engine 1.11.0): recurring fees (every active client, pro rata; a pooled model's include
+   * the interim clients, which `billed` leaves out), one-off prices, and hourly work for clients won in the run. `fromNew`
+   * is the part from clients won in the run. Total = recurring + oneOff + hourly.
+   */
+  revenue: { recurring: number; oneOff: number; hourly: number; fromNew: number };
+  /** Per hourly service id: hands-on hours billed and what they bill (present, 0, when none). */
+  hourly: Record<string, { hours: number; revenue: number }>;
+  /** Paid hours × rate (capacity × weeks on the team × `rateOf`), overtime excluded; leave is paid. Null when `model.payHidden`. */
+  labourCost: number | null;
+  /** `overheadMonthly` × weeks ÷ (52/12). */
+  overheads: number;
+  /** Revenue total − labourCost − overtimeCost − overheads. Null when `model.payHidden`. */
+  profit: number | null;
   /** With a client roster: clients that churned in the measured window. */
   clientsChurned?: number;
   /** With a client roster: active clients (roster and won) with health below 50 at the horizon. */
@@ -831,6 +893,20 @@ export interface Kpis {
   overtimeHours: Stat;
   /** Overtime cost over the horizon: overtime hours × cost rate. Null when `model.payHidden`: it depends on each person's pay. */
   overtimeCost: Stat | null;
+  /**
+   * Total billed revenue (engine 1.11.0): recurring + one-off + hourly. Not `billed`, which is kept as it was (a
+   * pooled model's `billed` leaves out the interim clients; this includes them).
+   */
+  revenue: Stat;
+  revenueHourly: Stat;
+  /** By hourly service id: hands-on hours billed and their revenue. */
+  hourly: Record<string, { hours: Stat; revenue: Stat }>;
+  /** Paid hours × rate, overtime excluded. Null when `model.payHidden`. */
+  labourCost: Stat | null;
+  /** Fixed costs over the horizon (`overheadMonthly` × weeks ÷ (52/12)); never hidden. */
+  overheads: number;
+  /** Revenue − labour cost − overtime cost − overheads. Null when `model.payHidden`. */
+  profit: Stat | null;
   /** Over every completed item in every replication. */
   cycle: { mean: number; p50: number; p90: number };
   roles: Record<string, { util: Stat; pipeline: Stat; ongoing: Stat; servicing: Stat; overtime: Stat }>;
@@ -876,6 +952,9 @@ export interface ReplicationSamples {
   wipEnd: number[];
   /** Mean cycle time of the replication's completed items (0 when none completed). */
   cycleMean: number[];
+  /** Total billed revenue and profit (null when `model.payHidden`) per replication. */
+  revenue: number[];
+  profit: number[] | null;
 }
 
 export interface SimulationResult {

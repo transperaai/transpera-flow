@@ -323,6 +323,8 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     ...(people ? { people } : {}),
     ...(s.availability_floor !== undefined ? { availabilityFloor: s.availability_floor } : {}),
     ...(s.overtime_cap !== undefined && s.overtime_cap !== null ? { overtimeCap: Number(s.overtime_cap) } : {}),
+    // Overheads are not pay: kept for a Viewer or a share link too. Absent, null, 0 or junk adds nothing (a model as before).
+    ...((num(s.overhead_monthly) ?? 0) > 0 ? { overheadMonthly: num(s.overhead_monthly)! } : {}),
     ...(clients ? { clients } : {}),
     ...(clientGroups ? { clientGroups } : {}),
     ...(Object.keys(servicing.processes).length ? { servicingProcesses: servicing.processes } : {}),

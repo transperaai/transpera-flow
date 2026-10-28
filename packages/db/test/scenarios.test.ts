@@ -52,6 +52,12 @@ describe("patch shape", () => {
     healthPatches,
     [{ path: "health.missed_threshold", op: "set", value: 2 }],
     [{ path: "health.recover.x", op: "set", value: 1 }],
+    // Overheads (sandbox phase 2): accepted in both; any other finances path still refused in both.
+    [{ path: "finances.overhead_monthly", op: "multiply", value: 1.2 }],
+    [{ path: "finances.overhead_monthly", op: "set", value: 0 }, { path: "finances.retainer", op: "add", value: 100 }],
+    [{ path: "finances.margin", op: "set", value: 0.4 }],
+    [{ path: "finances.overhead", op: "set", value: 1 }],
+    [{ path: "finances.overhead_monthly.x", op: "set", value: 1 }],
     [{ path: "health.s1.recover", op: "set", value: 1 }],
     [{ path: "health", op: "set", value: 1 }],
     [{ path: "health.@busiest", op: "set", value: 1 }],
@@ -73,6 +79,13 @@ describe("patch shape", () => {
       const { rows } = await db.client.query("select private.is_scenario_patch($1::jsonb) as ok", [JSON.stringify(patch)]);
       expect(rows[0].ok, JSON.stringify(patch).slice(0, 80)).toBe(parsePatches(patch).ok);
     }
+  });
+
+  it("accepts finances.overhead_monthly and still refuses finances.margin", async () => {
+    const ok = (patch: unknown) => db.client.query("select private.is_scenario_patch($1::jsonb) as ok", [JSON.stringify(patch)]).then((r) => r.rows[0].ok as boolean);
+    expect(await ok([{ path: "finances.overhead_monthly", op: "multiply", value: 1.1 }])).toBe(true);
+    expect(await ok([{ path: "finances.retainer", op: "set", value: 4000 }])).toBe(true);
+    expect(await ok([{ path: "finances.margin", op: "set", value: 0.4 }])).toBe(false);
   });
 });
 

@@ -28,7 +28,7 @@ export const SANDBOX_HELP = {
   },
   compare: {
     label: "Compare",
-    description: "Put up to three saved scenarios side by side with “No changes” (your live model): recurring revenue, clients, clients at risk and how busy each role gets, month by month.",
+    description: "Put up to three saved scenarios side by side with “No changes” (your live model): profit, billed revenue, recurring revenue, clients, clients at risk and how busy each role gets, month by month.",
     example: "Compare “Hire in January” with “Hire in March” to see what two extra months of waiting costs.",
   },
   difference: {
@@ -36,6 +36,33 @@ export const SANDBOX_HELP = {
     description:
       "Each scenario's average minus “No changes”. Every column uses the same random runs, so a difference comes from the changes, not from chance. Each column's own range is beside it.",
     example: "+£1.2K means that scenario brings in £1.2K more that month on average.",
+  },
+  profit: {
+    label: "Profit",
+    description:
+      "What a month earns less what it costs: billed revenue, minus the team's pay for the hours they're contracted (leave is paid), minus overtime and your overheads. The months' profits can differ a little from the run's total, because overtime is worked out month by month.",
+    example: "£4.2K (−£3.1K to £11.4K) means most runs land between a small loss and £11.4K, with £4.2K the average.",
+  },
+  billed: {
+    label: "Billed revenue",
+    description:
+      "What clients are billed in the month: monthly fees (recurring), one-off prices and hourly work done for clients won in the forecast. Clients you already have pay the fee you entered for them, whatever their service.",
+    example: "£112K = £104K of fees + £6K of one-off projects + £2K of hourly work.",
+  },
+  labour: {
+    label: "Labour and overtime",
+    description: "The team's pay for the hours they're contracted to work that month (leave is paid, a planned hire is paid from their start, a leaver until their end date), plus the cost of overtime.",
+    example: "Five full-time people at £50 an hour is about £43K for a four-week month.",
+  },
+  winsPerMonth: {
+    label: "Clients won",
+    description: "New clients won in the month, on average across the runs.",
+    example: "2.4 means two or three clients most months.",
+  },
+  conversion: {
+    label: "Conversion",
+    description: "Wins as a share of enquiries that ended in a win or a loss that month. Enquiries still being worked on don't count yet.",
+    example: "14% means about one in seven decided enquiries became a client.",
   },
   revenue: {
     label: "Monthly recurring revenue",

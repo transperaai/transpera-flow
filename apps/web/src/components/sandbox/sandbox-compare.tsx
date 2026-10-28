@@ -1,7 +1,7 @@
 "use client";
 
-// Compare scenarios (docs/plans/sandbox-p1-brief.md §4): "No changes" and up to three saved scenarios as columns. Tiles for last
-// month's recurring revenue, clients at risk, months a role is too busy and late tasks; a chart per measure (recurring revenue, active
+// Compare scenarios (docs/plans/sandbox-p1-brief.md §4): "No changes" and up to three saved scenarios as columns. Tiles for profit
+// over the run (phase 2), last month's recurring revenue, clients at risk, months a role is too busy and late tasks; a chart per measure (recurring revenue, active
 // clients per type, clients at risk per group, how busy each role is) with each column's band; every figure an average with its
 // 10-90% range and its difference from "No changes". Every column runs with the same seed, so a difference comes from the changes,
 // not from chance. A column that fails shows its error and the others still show.
@@ -19,6 +19,7 @@ import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { compareSandbox, type CompareRow, type CompareTile } from "@/lib/sandbox/compare";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
+import { COSTS_HIDDEN_NOTE } from "@/components/forecast/forecast-money";
 import { CompareChart, SERIES_STYLES } from "./compare-chart";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -42,14 +43,15 @@ export interface SandboxCompareProps {
 }
 
 export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, onChange, onBack }: SandboxCompareProps) {
-  const resolved = ids.slice(0, MAX_COMPARE).map((id) => {
+  // By the ids and the saved scenarios, so a render that changes neither hands each run the same changes (a new list restarts its run).
+  const resolved = useMemo(() => ids.slice(0, MAX_COMPARE).map((id) => {
     const scenario = scenarios.find((s) => s.id === id) ?? null;
     if (!scenario) return { id, scenario: null, changes: null as EffectiveChange[] | null, error: "That scenario isn't there any more." };
     const eff = effectiveChanges(scenario, scenarios);
     if (!eff.ok) return { id, scenario, changes: null, error: eff.error };
     const limit = effectiveLimitProblem(eff.changes.map((c) => c.change));
     return limit ? { id, scenario, changes: null, error: limit } : { id, scenario, changes: eff.changes, error: null };
-  });
+  }), [ids, scenarios]);
   // The hooks are called a fixed number of times; a column that isn't there gets null and stays idle.
   const run0 = useScenarioRun({ bundle: live, changes: NO_CHANGES, solutions, months, startDate });
   const run1 = useScenarioRun({ bundle: live, changes: resolved[0]?.changes ?? null, solutions, months, startDate });
@@ -70,7 +72,6 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
     [run0.run, run0.status, run1.run, run1.status, run2.run, run2.status, run3.run, run3.status, ids, scenarios, live, startDate, cutoffs],
   );
   const names = shown.map((c) => c.name);
-  const styleOf = (k: number) => SERIES_STYLES[shown[k]!.index]!;
   const running = columns.some((c) => c.run.status === "running" && !c.error);
   const last = comparison ? comparison.months[comparison.months.length - 1]!.long : "";
   const failed = columns.filter((c) => c.error);
@@ -111,7 +112,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             Compare scenarios
             <Help {...SANDBOX_HELP.compare} />
           </h2>
-          <p className="text-sm text-muted-foreground">Recurring revenue, clients, clients at risk and how busy each role gets, with the 10–90% range from 30 runs. Differences are against “No changes”.</p>
+          <p className="text-sm text-muted-foreground">Profit, revenue, clients, clients at risk and how busy each role gets, with the 10–90% range from 30 runs. Differences are against “No changes”.</p>
         </div>
         <Button variant="outline" onClick={onBack}>
           Back to the scenario
@@ -143,7 +144,8 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
 
       {comparison && !unusable ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-compare-tiles>
+          <div className={comparison.totals.profit ? "grid gap-3 sm:grid-cols-2 lg:grid-cols-5" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"} data-compare-tiles>
+            {comparison.totals.profit ? <Tile title="Profit over the run" names={names} tile={comparison.totals.profit} format={money} diff={(v) => signed(v, money)} /> : null}
             <Tile title={`Recurring revenue in ${last}`} names={names} tile={comparison.totals.mrr} format={money} diff={(v) => signed(v, money)} />
             {comparison.totals.atRisk ? (
               <Tile title={`Clients at risk in ${last}`} names={names} tile={comparison.totals.atRisk} format={(v) => formatNumber(v, 1)} diff={(v) => signed(v, (x) => formatNumber(x, 1))} />
@@ -156,6 +158,26 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             <Tile title="Months a role is too busy" names={names} tile={comparison.totals.tooBusyMonths} format={(v) => String(v)} diff={(v) => signed(v, (x) => String(x))} />
             <Tile title={`Late tasks in ${last}`} names={names} tile={comparison.totals.lateTasks} format={(v) => formatNumber(v, 1)} diff={(v) => signed(v, (x) => formatNumber(x, 1))} />
           </div>
+
+          {comparison.profit ? (
+            <Section title="Profit" help={SANDBOX_HELP.profit}>
+              <ChartAndNumbers row={comparison.profit} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} />
+            </Section>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-compare-costs-hidden>
+              {COSTS_HIDDEN_NOTE}
+            </p>
+          )}
+
+          <Section title="Billed revenue" help={SANDBOX_HELP.billed}>
+            <ChartAndNumbers row={comparison.revenue} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} />
+          </Section>
+
+          <Section title="Wins and costs" help={SANDBOX_HELP.winsPerMonth}>
+            <ChartAndNumbers row={comparison.won} months={comparison.months} names={names} format={(v) => formatNumber(v, 1)} formatDiff={(v) => signed(v, (x) => formatNumber(x, 1))} />
+            <ChartAndNumbers row={comparison.conversion} months={comparison.months} names={names} format={formatPercent} formatDiff={(v) => signed(v, (x) => `${Math.round(x * 100)} points`)} />
+            {comparison.labour ? <ChartAndNumbers row={comparison.labour} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} /> : null}
+          </Section>
 
           <Section title="Monthly recurring revenue" help={SANDBOX_HELP.revenue}>
             <ChartAndNumbers row={comparison.mrr} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} />
@@ -191,8 +213,6 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
               />
             ))}
           </Section>
-          {/* Phase 2 (profit): the "Sales and money" comparison joins here, once the engine's money outputs are in (wired at the merge). */}
-          <div data-sandbox-money-slot="compare" hidden />
         </>
       ) : unusable ? null : (
         <Skeleton className="h-[320px] w-full" aria-busy="true" />

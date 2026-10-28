@@ -46,15 +46,15 @@ export interface CompareChartProps {
   series: CompareSeries[];
   /** How a value reads: "£48.2K", "3.4", "92%". */
   format: (v: number) => string;
-  /** How a difference reads, signed: "+£1.2K". */
-  formatDiff: (v: number) => string;
+  /** How a difference reads, signed: "+£1.2K". Not needed for one series. */
+  formatDiff?: (v: number) => string;
   /** A dashed line at this value, named: the "Too busy" line. */
   reference?: { value: number; label: string };
   /** Smallest top of the scale (a busy share never draws flatter than the line). */
   minTop?: number;
 }
 
-export function CompareChart({ title, months, series, format, formatDiff, reference, minTop = 0 }: CompareChartProps) {
+export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0 }: CompareChartProps) {
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const width = measured || 560;

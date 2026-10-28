@@ -17,6 +17,7 @@ export {
   northbeamClientKey,
   northbeamModel,
   northbeamWithChurnDrivers,
+  northbeamWithMoney,
   northbeamWithClientGroups,
   northbeamWithClients,
   northbeamWithServices,

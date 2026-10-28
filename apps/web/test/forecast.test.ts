@@ -3,9 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { northbeamPersonIds, type MarketConditionRow, type MarketScheduleRow } from "@transpera-flow/db";
 import { simulate, type EngineModel } from "@transpera-flow/engine";
+import { COSTS_HIDDEN_NOTE, ForecastMoney } from "@/components/forecast/forecast-money";
 import { ForecastTimeline } from "@/components/forecast/forecast-timeline";
 import { DEMO_FORECAST_START, DEMO_HIRE_ID, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastInsights, forecastModel } from "@/lib/forecast/forecast";
+import { forecastMoney } from "@/lib/forecast/money";
 import { calendarMonthStarts, dateAtHour, marketBands, timelineData, timelineMonths } from "@/lib/forecast/timeline";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -160,5 +162,111 @@ describe("a role left with nobody", () => {
     const html = renderToStaticMarkup(createElement(ForecastTimeline, { data: d, rows: "roles", cutoffs: CUTOFFS, label: "Forecast" }));
     expect(html).toContain("data-uncovered");
     expect(html).toContain("no one in Strategist to do about");
+  });
+});
+
+describe("sales and money (sandbox phase 2)", () => {
+  const names = timelineMonths(DEMO_FORECAST_START, result.monthly!.months, 40);
+  const run = (m: EngineModel) => simulate(m, 10, 1, { monthly: true, monthStarts: built.monthStarts! });
+  const withOverheads = { ...model, overheadMonthly: 18000 };
+  const rich = run(withOverheads);
+  const rowOf = (view: NonNullable<ReturnType<typeof forecastMoney>>, id: string) => view.rows.find((r) => r.id === id)!;
+
+  it("has four tiles and a row per figure, months as columns", () => {
+    const view = forecastMoney(rich, names)!;
+    expect(view.tiles.map((t) => t.id)).toEqual(["revenue", "labour", "overheads", "profit"]);
+    expect(view.rows.map((r) => r.id)).toEqual([
+      "opportunities", "won", "lost", "conversion", "revenue", "recurring", "oneOff", "hourly", "fromNew", "lostToChurn", "clientsWon", "clientsLost", "overtimeHours", "labour", "overtimeCost", "overheads", "profit",
+    ]);
+    for (const r of view.rows) expect(r.cells, r.id).toHaveLength(names.length);
+    expect(view.months).toBe(names);
+    expect(view.costsHidden).toBe(false);
+    expect(view.profit).toBe(rich.monthly!.money!.profit);
+  });
+
+  it("takes its tiles from the run: revenue, labour with overtime, overheads and profit", () => {
+    const view = forecastMoney(rich, names)!;
+    const tile = (id: string) => view.tiles.find((t) => t.id === id)!.stat;
+    expect(tile("revenue")).toBe(rich.kpi.revenue);
+    expect(tile("profit")).toBe(rich.kpi.profit);
+    expect(tile("overheads")).toEqual({ mean: 216_000, p10: 216_000, p90: 216_000 });
+    expect(tile("labour").mean).toBeCloseTo(rich.kpi.labourCost!.mean + rich.kpi.overtimeCost!.mean, 6);
+    // Revenue less labour and overheads is the profit.
+    expect(tile("revenue").mean - tile("labour").mean - tile("overheads").mean).toBeCloseTo(tile("profit").mean, 4);
+  });
+
+  it("adds the months up in each row's total, except the ratio", () => {
+    const view = forecastMoney(rich, names)!;
+    expect(rowOf(view, "revenue").total).toBeCloseTo(rich.kpi.revenue.mean, 4);
+    expect(rowOf(view, "won").total).toBeCloseTo(rich.kpi.won.mean, 6);
+    expect(rowOf(view, "overheads").total).toBeCloseTo(216_000, 4);
+    expect(rowOf(view, "conversion").total).toBeNull();
+    // The revenue by kind adds to the revenue.
+    expect(rowOf(view, "recurring").total! + rowOf(view, "oneOff").total! + rowOf(view, "hourly").total!).toBeCloseTo(rowOf(view, "revenue").total!, 4);
+  });
+
+  it("says no overheads are set until they are", () => {
+    expect(forecastMoney(result, names)!.noOverheads).toBe(true);
+    expect(forecastMoney(rich, names)!.noOverheads).toBe(false);
+  });
+
+  it("a Viewer's run (pay hidden) has revenue, sales and clients but no cost rows, labour, overtime cost or profit", () => {
+    const hidden = forecastMoney(run({ ...withOverheads, payHidden: true }), names)!;
+    expect(hidden.costsHidden).toBe(true);
+    expect(hidden.tiles.map((t) => t.id)).toEqual(["revenue"]);
+    expect(hidden.profit).toBeNull();
+    expect(hidden.rows.some((r) => r.cost)).toBe(false);
+    expect(hidden.rows.map((r) => r.id)).toContain("revenue");
+    expect(hidden.rows.map((r) => r.id)).toContain("opportunities");
+    expect(hidden.rows.map((r) => r.id)).toContain("overtimeHours");
+    // Their revenue is the same as an Agency admin's, and the "no overheads" note isn't theirs to read.
+    expect(hidden.tiles[0]!.stat).toEqual(forecastMoney(rich, names)!.tiles[0]!.stat);
+    expect(forecastMoney(run({ ...model, payHidden: true }), names)!.noOverheads).toBe(false);
+  });
+
+  it("names an hourly service that earned nothing", () => {
+    const quiet = { ...rich, kpi: { ...rich.kpi, hourly: { ppc: { hours: { mean: 0, p10: 0, p90: 0 }, revenue: { mean: 0, p10: 0, p90: 0 } }, seo: { hours: { mean: 5, p10: 4, p90: 6 }, revenue: { mean: 500, p10: 400, p90: 600 } } } } };
+    expect(forecastMoney(quiet, names, (id) => (id === "ppc" ? "PPC management" : id))!.hourlyWithoutHours).toEqual(["PPC management"]);
+    expect(forecastMoney(rich, names)!.hourlyWithoutHours).toEqual([]);
+  });
+
+  it("gives nothing for a run saved before profit existed", () => {
+    const older: Partial<NonNullable<typeof rich.monthly>> = { ...rich.monthly! };
+    delete older.revenue;
+    expect(forecastMoney({ ...rich, monthly: older as typeof rich.monthly }, names)).toBeNull();
+  });
+
+  describe("the section", () => {
+    const html = (props: Partial<Parameters<typeof ForecastMoney>[0]> & { run?: typeof rich } = {}) =>
+      renderToStaticMarkup(createElement(ForecastMoney, { view: forecastMoney(props.run ?? result, names, (id) => (id === "ppc" ? "PPC management" : id))!, currency: "GBP", span: "12 months", overheadsHref: "/w/acme/settings#workspace", ...props }));
+
+    it("shows the tiles, the profit chart and the table", () => {
+      const out = html({ run: rich });
+      expect(out).toContain("Sales and money");
+      for (const tile of ["revenue", "labour", "overheads", "profit"]) expect(out).toContain(`data-money-tile="${tile}"`);
+      expect(out).toContain("data-money-profit-chart");
+      expect(out).toContain('data-money-row="profit"');
+      expect(out).not.toContain("No overheads set");
+    });
+
+    it("says No overheads set, with a link to Settings for someone who can set them", () => {
+      const out = html();
+      expect(out).toContain("No overheads set");
+      expect(out).toContain('href="/w/acme/settings#workspace"');
+      expect(html({ overheadsHref: null })).not.toContain("/settings#workspace");
+    });
+
+    it("says an hourly service earned nothing", () => {
+      const quiet = { ...rich, kpi: { ...rich.kpi, hourly: { ppc: { hours: { mean: 0, p10: 0, p90: 0 }, revenue: { mean: 0, p10: 0, p90: 0 } } } } };
+      expect(html({ run: quiet })).toContain("Hourly service PPC management earned nothing: no client work is modelled for its clients");
+    });
+
+    it("gives a Viewer the note instead of costs and profit", () => {
+      const out = html({ run: run({ ...withOverheads, payHidden: true }) });
+      expect(out).toContain(COSTS_HIDDEN_NOTE);
+      expect(COSTS_HIDDEN_NOTE).toBe("Costs and profit are shown to Agency admins and the Owner.");
+      expect(out).toContain('data-money-tile="revenue"');
+      for (const gone of ['data-money-tile="profit"', 'data-money-tile="labour"', 'data-money-row="labour"', 'data-money-row="profit"', "data-money-profit-chart", "No overheads set"]) expect(out, gone).not.toContain(gone);
+    });
   });
 });

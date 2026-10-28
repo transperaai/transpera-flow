@@ -43,6 +43,8 @@ import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { forecastMoney } from "@/lib/forecast/money";
+import { ForecastMoney } from "@/components/forecast/forecast-money";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/forecast/forecast-timeline";
 import { ChangeDialog, type ChangeTarget } from "./change-dialog";
 import { ChangeList } from "./change-list";
@@ -181,7 +183,10 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   );
 
   // What is on screen: the saved scenario with the changes made to it, or a new one.
-  const working: Draft | null = edit ?? (savedScenario ? { name: savedScenario.name, description: savedScenario.description, parent_id: savedScenario.parent_id, changes: savedScenario.changes } : null);
+  const working: Draft | null = useMemo(
+    () => edit ?? (savedScenario ? { name: savedScenario.name, description: savedScenario.description, parent_id: savedScenario.parent_id, changes: savedScenario.changes } : null),
+    [edit, savedScenario],
+  );
   const workingName = working?.name ?? "New scenario";
   const dirty = edit !== null && (savedScenario === null || edit.name !== savedScenario.name || edit.parent_id !== savedScenario.parent_id || (edit.description ?? null) !== (savedScenario.description ?? null) || JSON.stringify(edit.changes) !== JSON.stringify(savedScenario.changes));
   const horizonChanged = savedScenario !== null && months !== savedScenario.horizon_months;
@@ -206,6 +211,20 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     [plan.run, live, start],
   );
   const shownData = working !== null && planData && !scenarioError ? planData : data;
+
+  // Sales and money (sandbox phase 2) for the run on screen: the open scenario's spliced run, or the live one.
+  const shownRun = useMemo(
+    () => (working !== null && plan.run && !scenarioError ? plan.run : built.model && result ? { model: built.model, result } : null),
+    [working, plan.run, scenarioError, built.model, result],
+  );
+  const serviceNames = useMemo(() => new Map(live.services.map((sv) => [sv.id, sv.name])), [live.services]);
+  const moneyView = useMemo(
+    () =>
+      shownRun?.result.monthly
+        ? forecastMoney(shownRun.result, timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek), (id) => serviceNames.get(id) ?? "Hourly")
+        : null,
+    [shownRun, start, serviceNames],
+  );
 
   const ctx: DescribeContext = useMemo(() => ({ bundle: live, solutions: planSolutions, changes: effectiveList?.map((e) => e.change) ?? [] }), [live, planSolutions, effectiveList]);
   const lane = useMemo(() => (effectiveList ? laneMarkers(ctx, effectiveList, plan.problems, start, hpw) : []), [ctx, effectiveList, plan.problems, start, hpw]);
@@ -677,10 +696,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
               ) : null}{" "}
             </p>
           </Card>
-          {/* Phase 2 (profit): the "Sales and money" section joins here, under the timeline, once the engine's money outputs are in (wired at the merge). */}
-          <div data-sandbox-money-slot="page" hidden />
         </section>
       )}
+      {!compare && moneyView ? (
+        <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace` : null} span={span} />
+      ) : null}
 
       {changeTarget && canEdit ? (
         <ChangeDialog

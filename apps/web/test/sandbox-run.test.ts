@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, type ProcessBundle, type SandboxChange, type SandboxScenarioRow, type SolutionRow } from "@transpera-flow/db";
+import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, type ProcessBundle, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
 import { applyPatches, simulate, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
@@ -513,6 +513,32 @@ function fake(n: number, level: number, c: number, m: number, extra: Partial<Mon
     clients: { svc: Array.from({ length: n }, (_, i) => stat(c + i)) },
     mrr: Array.from({ length: n }, (_, i) => stat(m + i * 10)),
     atRisk: { svc: Array.from({ length: n }, () => stat(1, 0.5)) },
+    // Sales, revenue and money (sandbox phase 2): every series moves with `level` and `m` so a splice shows which run a month came from.
+    sales: {
+      opportunities: Array.from({ length: n }, () => stat(level * 100)),
+      won: Array.from({ length: n }, (_, i) => stat(level * 10 + i)),
+      lost: Array.from({ length: n }, () => stat(level * 20)),
+      conversion: Array.from({ length: n }, () => stat(level / 2)),
+    },
+    clientsWon: Array.from({ length: n }, () => stat(level * 3)),
+    clientsLost: Array.from({ length: n }, () => stat(level)),
+    revenue: {
+      total: Array.from({ length: n }, (_, i) => stat(m * 10 + i)),
+      recurring: Array.from({ length: n }, () => stat(m * 8)),
+      oneOff: Array.from({ length: n }, () => stat(m)),
+      hourly: Array.from({ length: n }, () => stat(m)),
+      fromNew: Array.from({ length: n }, () => stat(m / 2)),
+      lostToChurn: Array.from({ length: n }, () => stat(level * 7)),
+    },
+    overtimeHours: Array.from({ length: n }, () => stat(level * 2)),
+    money: {
+      labour: Array.from({ length: n }, () => level * 200),
+      labourByRole: { r: Array.from({ length: n }, () => level * 200) },
+      labourByPerson: { p: Array.from({ length: n }, () => level * 200) },
+      overtimeCost: Array.from({ length: n }, () => stat(level * 10)),
+      overheads: Array.from({ length: n }, () => 50),
+      profit: Array.from({ length: n }, (_, i) => stat(m * 10 - level * 200 + i)),
+    },
     ...extra,
   };
 }
@@ -533,6 +559,35 @@ describe("spliceMonthly", () => {
     expect(s.lateTasks.map((x) => x.mean)).toEqual([0.5, 0.5, 0.9, 0.9, 0.9]);
     // Copied, not shifted: the busy rows are the segments' own.
     expect(s.roles.r![3]).toBe(b.roles.r![3]);
+  });
+
+  it("treats every sales, client, revenue and money series as a flow: month m is the segment holding m", () => {
+    const a = fake(5, 0.5, 10, 100);
+    const b = fake(5, 0.9, 10, 160);
+    const s = spliceMonthly([{ from: 0, monthly: a }, { from: 3, monthly: b }]);
+    const pick = <T,>(fromA: T[], fromB: T[]) => [fromA[0], fromA[1], fromA[2], fromB[3], fromB[4]];
+    expect(s.sales.won).toEqual(pick(a.sales.won, b.sales.won));
+    for (const key of ["opportunities", "lost", "conversion"] as const) expect(s.sales[key]).toEqual(pick(a.sales[key], b.sales[key]));
+    expect(s.clientsWon).toEqual(pick(a.clientsWon, b.clientsWon));
+    expect(s.clientsLost).toEqual(pick(a.clientsLost, b.clientsLost));
+    for (const key of ["total", "recurring", "oneOff", "hourly", "fromNew", "lostToChurn"] as const) expect(s.revenue[key], key).toEqual(pick(a.revenue[key], b.revenue[key]));
+    expect(s.overtimeHours).toEqual(pick(a.overtimeHours, b.overtimeHours));
+    expect(s.money!.labour).toEqual(pick(a.money!.labour, b.money!.labour));
+    expect(s.money!.labourByRole.r).toEqual(pick(a.money!.labourByRole.r!, b.money!.labourByRole.r!));
+    expect(s.money!.labourByPerson.p).toEqual(pick(a.money!.labourByPerson.p!, b.money!.labourByPerson.p!));
+    expect(s.money!.overtimeCost).toEqual(pick(a.money!.overtimeCost, b.money!.overtimeCost));
+    expect(s.money!.overheads).toEqual(pick(a.money!.overheads, b.money!.overheads));
+    expect(s.money!.profit).toEqual(pick(a.money!.profit, b.money!.profit));
+    // Not shifted like a stock: the first month of the later run is its own number.
+    expect(s.revenue.total[3]).toBe(b.revenue.total[3]);
+  });
+
+  it("has no money when any segment's is hidden", () => {
+    const hidden = fake(4, 0.5, 10, 100, { money: null });
+    expect(spliceMonthly([{ from: 0, monthly: fake(4, 0.5, 10, 100) }, { from: 2, monthly: hidden }]).money).toBeNull();
+    expect(spliceMonthly([{ from: 0, monthly: hidden }, { from: 2, monthly: fake(4, 0.5, 10, 100) }]).money).toBeNull();
+    // Revenue is never hidden.
+    expect(spliceMonthly([{ from: 0, monthly: hidden }, { from: 2, monthly: hidden }]).revenue.total).toHaveLength(4);
   });
 
   it("carries stocks on from where they were: shifted by the gap at the month before, floored at 0", () => {

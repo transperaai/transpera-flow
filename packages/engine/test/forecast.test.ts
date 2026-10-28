@@ -8,10 +8,13 @@ import {
   northbeamWithServicing,
   pooledMonthlyFee,
   ruleOfFinding,
+  runOnce,
+  SEED_STRIDE,
   withClientGroups,
   simulate,
   type EngineModel,
   type EnginePerson,
+  type EngineService,
   type MonthBusy,
   type SimulationResult,
 } from "../src";
@@ -364,7 +367,7 @@ describe("monthly recurring revenue and clients at risk (B7)", () => {
     expect(mo.mrr[0]!.mean).toBeCloseTo(mo.clients[""]![0]!.mean * pooledMonthlyFee(m), 6);
   });
 
-  it("pooled models count hourly clients as active but bill them nothing", () => {
+  it("pooled models count hourly clients as active and bill their ongoing hours", () => {
     const svc = (name: string, pricingModel: "retainer" | "hourly", price: number, mixShare: number) => ({ name, pricingModel, price, margin: 0.4, tenureMonths: 12, churnMonthly: 0, mixShare, pathTags: [] as string[] });
     // Wins are all hourly (retainer mix 0, which only sets the fee), no churn: recurring revenue stays what the interim clients pay.
     const m = { ...northbeamModel(), horizonWeeks: months(6), churnMonthly: 0, leadsPerWeek: 40, services: { r: svc("Retainer", "retainer", 2000, 0), h: svc("Hourly", "hourly", 90, 1) } };
@@ -373,7 +376,60 @@ describe("monthly recurring revenue and clients at risk (B7)", () => {
     expect(fee).toBe(2000);
     expect(r.kpi.won.mean).toBeGreaterThan(0);
     expect(r.monthly!.clients[""]!.at(-1)!.mean).toBeGreaterThan(m.activeClients);
+    // The month-by-month fees (mrr) are still only what the interim clients pay...
     for (const month of r.monthly!.mrr) expect(month.mean).toBeCloseTo(m.activeClients * fee, 6);
+    // ...and each win bills the ongoing hours of the roles with people (6.7 a week) at 90 an hour from the week it is won.
+    const run = runOnce(m, 1, true, undefined, false, true);
+    const H = m.horizonWeeks * HPW;
+    const ongoing = Object.values(m.roles).reduce((a, role) => a + role.ongoing, 0);
+    const wins = run.entities!.filter((e) => e.outcome === "won" && e.done! >= 0);
+    expect(wins.length).toBe(run.won);
+    expect(wins.length).toBeGreaterThan(5);
+    const hours = wins.reduce((a, e) => a + (ongoing * (H - e.done!)) / HPW, 0);
+    expect(run.hourly.h!.hours).toBeCloseTo(hours, 6);
+    expect(run.revenue.hourly).toBeCloseTo(hours * 90, 6);
+    expect(run.monthly!.revenueHourly.reduce((a, b) => a + b, 0)).toBeCloseTo(hours * 90, 6);
+    // Pooled recurring revenue is the interim clients' fees: it includes them, where `billed` does not.
+    expect(run.revenue.recurring).toBeCloseTo((m.activeClients * fee * m.horizonWeeks) / 4.33, 6);
+    expect(run.billed).toBe(0);
+  });
+
+  it("monthly sums equal the run's totals: sales, clients, one-off and recurring revenue", () => {
+    const one = (sv: EngineService) => ({ ...sv, pricingModel: "one_off" as const, price: 7000 });
+    const base = northbeamWithClientGroups();
+    const m: EngineModel = { ...base, horizonWeeks: months(6), services: { ...base.services, ppc: one(base.services!.ppc!) } };
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < 4; i++) {
+      const run = runOnce(m, 1 + i * SEED_STRIDE, false, undefined, false, true);
+      const mo = run.monthly!;
+      const wonClients = sum(Object.values(run.services).map((s) => s.won)) - run.services.ppc!.won;
+      expect(sum(mo.won)).toBe(run.won);
+      expect(sum(mo.lost)).toBe(run.lost);
+      expect(sum(mo.opportunities)).toBe(sum(Object.values(run.services).map((s) => s.arrivals)));
+      expect(sum(mo.clientsWon)).toBe(wonClients);
+      expect(sum(mo.clientsLost)).toBe(run.clientsChurned);
+      expect(sum(mo.revenueOneOff)).toBeCloseTo(run.revenue.oneOff, 6);
+      expect(sum(mo.revenueRecurring)).toBeCloseTo(run.revenue.recurring, 6);
+      expect(sum(mo.revenueFromNew)).toBeCloseTo(run.revenue.fromNew, 6);
+      expect(run.revenue.oneOff).toBe(run.services.ppc!.won * 7000);
+      // With a roster, a billed euro is either recurring or one-off (to rounding: the sums add in another order).
+      expect(run.revenue.recurring + run.revenue.oneOff).toBeCloseTo(run.billed, 6);
+      expect(run.revenue.hourly).toBe(0);
+    }
+  });
+
+  it("pooled months add up to the totals: sales, clients lost, fees lost and recurring revenue", () => {
+    const m = { ...northbeamModel(), horizonWeeks: months(6) };
+    const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+    const run = runOnce(m, 5, false, undefined, false, true);
+    const mo = run.monthly!;
+    expect(sum(mo.won)).toBe(run.won);
+    expect(sum(mo.clientsWon)).toBe(run.won);
+    expect(sum(mo.revenueRecurring)).toBeCloseTo(run.revenue.recurring, 6);
+    // The pool starts at 26 clients and nothing else enters or leaves it: clients lost = clients at the start + won - active at the end.
+    expect(sum(mo.clientsLost)).toBeCloseTo(m.activeClients + run.won - run.activeEnd, 9);
+    expect(sum(mo.mrrLost)).toBeGreaterThan(0);
+    expect(run.revenue.recurring).toBeGreaterThan(run.billed);
   });
 
   it("is deterministic for a seed", () => {

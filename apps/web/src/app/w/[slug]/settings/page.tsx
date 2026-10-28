@@ -16,8 +16,12 @@ import { PeopleSettings, SimulationSettings } from "./people-settings";
 import { RolesSettings } from "./roles-settings";
 import { ServicesSettings } from "./services-settings";
 import { HealthSettings } from "./servicing-settings";
+import { saveOverheadMonthly } from "./actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import { WorkspaceDetails } from "./workspace-details";
+
+/** The stored overheads as a number, or null when none are set (the database keeps only null or a number from 0 to 100,000,000). */
+const overheadOf = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/settings">) {
   const { slug } = await props.params;
@@ -53,9 +57,11 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         workspaceId={data.workspace.id}
         name={data.workspace.name}
         currency={data.workspace.settings.currency}
+        overheadMonthly={overheadOf(data.workspace.settings.overhead_monthly)}
         canManage={data.canManage}
         saveName={saveWorkspaceName}
         saveCurrency={saveWorkspaceCurrency}
+        saveOverhead={saveOverheadMonthly}
       />
       <SimulationSettings data={data} />
       <RolesSettings data={data} />

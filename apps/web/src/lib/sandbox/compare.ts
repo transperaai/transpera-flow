@@ -1,4 +1,4 @@
-// Scenarios side by side (docs/plans/sandbox-p1-brief.md §4): monthly recurring revenue, clients at risk per client group, active
+// Scenarios side by side (docs/plans/sandbox-p1-brief.md §4): profit, billed revenue, labour, wins and conversion (phase 2), monthly recurring revenue, clients at risk per client group, active
 // clients per type and how busy each role gets, for "No changes" and up to three scenarios, with each column's average and 10-90%
 // range and its difference from column 0 ("No changes"). Every column runs with the same seed, so a difference comes from the
 // scenarios, not from chance. Pure: no React.
@@ -23,6 +23,15 @@ export interface CompareTile {
 
 export interface SandboxComparison {
   months: TimelineMonth[];
+  /** Profit per month (sandbox phase 2); null when any column's costs are hidden (pay hidden: a Viewer's model has none). */
+  profit: CompareRow | null;
+  /** Billed revenue (recurring, one-off and hourly) per month. */
+  revenue: CompareRow;
+  /** Labour with overtime per month; null as `profit` is. */
+  labour: CompareRow | null;
+  /** Clients won per month, and wins as a share of wins and losses. */
+  won: CompareRow;
+  conversion: CompareRow;
   mrr: CompareRow;
   /** Active clients, one per type (service); empty when the model has no services. */
   clients: CompareRow[];
@@ -31,7 +40,14 @@ export interface SandboxComparison {
   /** One per role with work in any column (as the timeline filters), in the model's role order. Values are `MonthBusy`. */
   roles: CompareRow[];
   /** Last month's MRR, last month's clients at risk (all groups; null when pooled), months too busy (all roles), late tasks in the last month. */
-  totals: { mrr: CompareTile; atRisk: CompareTile | null; tooBusyMonths: CompareTile; lateTasks: CompareTile };
+  totals: {
+    mrr: CompareTile;
+    atRisk: CompareTile | null;
+    tooBusyMonths: CompareTile;
+    lateTasks: CompareTile;
+    /** Profit over the run, the sum of the months' means; null with `profit`. */
+    profit: CompareTile | null;
+  };
 }
 
 const row = (id: string, name: string, columns: (Stat | null)[][]): CompareRow => ({
@@ -69,8 +85,19 @@ export function compareSandbox(
   const tooBusy = (r: CompareRow, c: number) => r.values[c]!.filter((m) => m !== null && isTooBusy((m as MonthBusy).mean, cutoffs)).length;
   const sumLast = (c: number) => atRisk.reduce((sum, r) => sum + (r.values[c]![last]?.mean ?? 0), 0);
   const idx = columns.map((_, c) => c);
+  // Labour is the same in every run, so adding overtime's range gives labour with overtime's range.
+  const labourWithOvertime = (m: MonthlyResult): Stat[] | null =>
+    m.money ? m.money.labour.map((v, i) => ({ mean: v + m.money!.overtimeCost[i]!.mean, p10: v + m.money!.overtimeCost[i]!.p10, p90: v + m.money!.overtimeCost[i]!.p90 })) : null;
+  const labour = columns.map(labourWithOvertime);
+  const costsShown = columns.every((m) => m.money);
+  const total = (stats: readonly Stat[]) => stats.reduce((sum, st) => sum + st.mean, 0);
   return {
     months,
+    profit: costsShown ? row("profit", "Profit", columns.map((m) => m.money!.profit)) : null,
+    revenue: row("revenue", "Billed revenue", columns.map((m) => m.revenue.total)),
+    labour: labour.every((l) => l) ? row("labour", "Labour and overtime", labour as Stat[][]) : null,
+    won: row("won", "Clients won", columns.map((m) => m.sales.won)),
+    conversion: row("conversion", "Conversion", columns.map((m) => m.sales.conversion)),
     mrr: row("mrr", "Monthly recurring revenue", columns.map((m) => m.mrr)),
     clients,
     atRisk,
@@ -80,6 +107,7 @@ export function compareSandbox(
       atRisk: atRisk.length ? tile(idx.map(sumLast)) : null,
       tooBusyMonths: tile(idx.map((c) => roles.reduce((n, r) => n + tooBusy(r, c), 0))),
       lateTasks: tile(columns.map((m) => m.lateTasks[last]?.mean ?? 0)),
+      profit: costsShown ? tile(columns.map((m) => total(m.money!.profit))) : null,
     },
   };
 }

@@ -93,7 +93,11 @@ export function useScenarioRun({
         error = seg.from === 0 && !solutionNames.length ? built.error : `“${solutionNames[solutionNames.length - 1] ?? "A solution"}” can't be simulated: ${built.error}`;
         break;
       }
-      for (const p of built.problems) if (!seen.has(p.changeId + p.message)) (seen.add(p.changeId + p.message), problems.push(p));
+      for (const p of built.problems) {
+        if (seen.has(p.changeId + p.message)) continue;
+        seen.add(p.changeId + p.message);
+        problems.push(p);
+      }
       segments.push({ from: seg.from, model: built.model });
     }
     return { segments, monthStarts: live.monthStarts, markersModel: live.model, planPeople: plan.planPeople, problems, later: plan.later, error };

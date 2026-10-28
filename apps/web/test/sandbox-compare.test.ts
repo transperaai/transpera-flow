@@ -23,6 +23,32 @@ function fake(n: number, level: number, c: number, m: number, extra: Partial<Mon
     clients: { svc: Array.from({ length: n }, (_, i) => stat(c + i)) },
     mrr: Array.from({ length: n }, (_, i) => stat(m + i * 10)),
     atRisk: { svc: Array.from({ length: n }, () => stat(1, 0.5)) },
+    // Sales, revenue and money (sandbox phase 2): every series moves with `level` and `m` so a splice shows which run a month came from.
+    sales: {
+      opportunities: Array.from({ length: n }, () => stat(level * 100)),
+      won: Array.from({ length: n }, (_, i) => stat(level * 10 + i)),
+      lost: Array.from({ length: n }, () => stat(level * 20)),
+      conversion: Array.from({ length: n }, () => stat(level / 2)),
+    },
+    clientsWon: Array.from({ length: n }, () => stat(level * 3)),
+    clientsLost: Array.from({ length: n }, () => stat(level)),
+    revenue: {
+      total: Array.from({ length: n }, (_, i) => stat(m * 10 + i)),
+      recurring: Array.from({ length: n }, () => stat(m * 8)),
+      oneOff: Array.from({ length: n }, () => stat(m)),
+      hourly: Array.from({ length: n }, () => stat(m)),
+      fromNew: Array.from({ length: n }, () => stat(m / 2)),
+      lostToChurn: Array.from({ length: n }, () => stat(level * 7)),
+    },
+    overtimeHours: Array.from({ length: n }, () => stat(level * 2)),
+    money: {
+      labour: Array.from({ length: n }, () => level * 200),
+      labourByRole: { r: Array.from({ length: n }, () => level * 200) },
+      labourByPerson: { p: Array.from({ length: n }, () => level * 200) },
+      overtimeCost: Array.from({ length: n }, () => stat(level * 10)),
+      overheads: Array.from({ length: n }, () => 50),
+      profit: Array.from({ length: n }, (_, i) => stat(m * 10 - level * 200 + i)),
+    },
     ...extra,
   };
 }
@@ -55,6 +81,32 @@ describe("compareSandbox", () => {
     expect(lopsided.roles.find((r) => r.id === "extra")!.diff[1]).toEqual([null, null, null, null]);
     const onlyLater = compareSandbox(model, [a, { ...b, roles: { r: b.roles.r!, extra: [busy(0.6), busy(0.6), null, null] } }], { services }, START, cutoffs);
     expect(onlyLater.roles.map((r) => r.id)).toEqual(["r", "extra"]);
+  });
+
+  it("compares profit, billed revenue, labour with overtime, wins and conversion in every column", () => {
+    // fake(): profit is m * 10 - level * 200 + month; labour level * 200 and overtime level * 10; revenue m * 10 + month.
+    const c = compareSandbox(model, [a, b, c3], { services }, START, cutoffs);
+    expect(c.profit!.values[0]).toBe(a.money!.profit);
+    expect(c.profit!.diff[1]).toEqual([0, 1, 2, 3].map(() => 1600 - 180 - (1000 - 100)));
+    expect(c.revenue.diff[1]).toEqual([600, 600, 600, 600]);
+    expect(c.revenue.diff[2]).toEqual([-100, -100, -100, -100]);
+    expect(c.labour!.values[0]!.map((s) => s!.mean)).toEqual([105, 105, 105, 105]);
+    expect(c.labour!.values[1]!.map((s) => s!.mean)).toEqual([189, 189, 189, 189]);
+    expect(c.won.id).toBe("won");
+    expect(c.won.diff[1]).toEqual([4, 4, 4, 4]);
+    expect(c.conversion.diff[1]).toEqual([0.2, 0.2, 0.2, 0.2].map((v) => expect.closeTo(v, 9)));
+    // Over the run: the sum of the months' means, with the difference from column 0.
+    expect(c.totals.profit!.values.slice(0, 2)).toEqual([900 * 4 + 6, 1420 * 4 + 6]);
+    expect(c.totals.profit!.diff[0]).toBeNull();
+    expect(c.totals.profit!.diff[1]).toBe(1420 * 4 - 900 * 4);
+  });
+
+  it("has no profit or labour when any column's costs are hidden, and still compares revenue", () => {
+    const hidden = compareSandbox(model, [a, { ...b, money: null }, c3], { services }, START, cutoffs);
+    expect(hidden.profit).toBeNull();
+    expect(hidden.labour).toBeNull();
+    expect(hidden.totals.profit).toBeNull();
+    expect(hidden.revenue.diff[1]).toEqual([600, 600, 600, 600]);
   });
 
   it("totals the last month for every column, with the difference from column 0", () => {

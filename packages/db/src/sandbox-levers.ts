@@ -11,7 +11,7 @@
 
 import { parsePatchPath, type EngineModel, type PatchOp, type ScenarioPatch } from "@transpera-flow/engine";
 
-export type SandboxLeverId = "A1" | "A6" | "B1" | "B2" | "B3" | "C1" | "D1" | "D2" | "D3" | "D4" | "D5" | "E1" | "E2" | "E3" | "E6" | "X1" | "X2" | "X3";
+export type SandboxLeverId = "A1" | "A6" | "B1" | "B2" | "B3" | "C1" | "C2" | "D1" | "D2" | "D3" | "D4" | "D5" | "E1" | "E2" | "E3" | "E6" | "X1" | "X2" | "X3";
 
 /** One change: a lever, what it points at, and a value. With no `from` it applies to the whole run. */
 export interface SandboxChange {
@@ -194,6 +194,23 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     // A role's rate, which every member already reads (roles.default_cost_rate). Nothing shown in phase 1 uses cost, so it is not offered yet.
     pay: "role",
     offered: false,
+  },
+  {
+    id: "C2",
+    group: "C",
+    label: "Overheads a month",
+    description: "Your fixed costs a month (rent, tools, insurance), which come off revenue with pay to give profit.",
+    target: "none",
+    ops: ["set", "multiply", "add"],
+    range: { set: { min: 0, max: 100_000_000, step: 100 }, multiply: { min: 0, max: 5, step: 0.05 } },
+    unit: "money",
+    wholeRun: true,
+    ...SPLICE,
+    patchPath: () => "finances.overhead_monthly",
+    // No Settings -> Levers kind: always shown.
+    kind: null,
+    pay: "none",
+    offered: true,
   },
   {
     id: "D1",
@@ -449,7 +466,7 @@ export function leverOfPath(path: string): { lever: SandboxLeverId; target: stri
     case "demand":
       return { lever: t.field === "leads_per_week" ? "A1" : t.field === "active_clients" ? "B1" : "B3", target: null };
     case "finances":
-      return { lever: "B2", target: null };
+      return { lever: t.field === "overhead_monthly" ? "C2" : "B2", target: null };
     case "health":
       return { lever: "X1", target: t.field };
     case "services":
@@ -503,8 +520,11 @@ export function isMonday(d: string): boolean {
 }
 
 /** The value rules beyond the sanity bound: the ones plans already enforced (docs/plans/sandbox-p1-brief.md §1). */
-function valueProblem(lever: SandboxLever, value: number): boolean {
+function valueProblem(lever: SandboxLever, value: number, op: PatchOp): boolean {
   switch (lever.id) {
+    // Overheads can be set to, or multiplied by, nothing or more; an add may be a cut (the engine keeps the total at 0 or more).
+    case "C2":
+      return op !== "add" && value < 0;
     case "D1":
       return value < HIRE_FTE.accepted.min || value > HIRE_FTE.accepted.max;
     case "D2":
@@ -547,7 +567,7 @@ export function changeProblem(c: unknown): string | null {
       return lever.timing === "month" ? `${lever.label}: the month isn't valid.` : `${lever.label} starts on a Monday.`;
     }
   }
-  if (valueProblem(lever, c.value)) {
+  if (valueProblem(lever, c.value, c.op as PatchOp)) {
     return lever.id === "D1" ? "A hire's FTE must be between 0.1 and 2." : lever.id === "D3" ? "Leave lasts 1 to 52 whole weeks." : `${lever.label}: that value isn't valid.`;
   }
   if ("params" in c) {
