@@ -23,7 +23,7 @@ import {
   shadowPrice,
   simulate,
 } from "@transpera-flow/engine";
-import { changesFromPatch } from "@transpera-flow/db";
+import { changesFromPatch, NORTHBEAM_HIRE_JANUARY_ID } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { generateApiToken, hashApiToken, TOOL_NAMES, type McpHandlerOptions } from "../src";
 import { call, connect, createUser, issueToken as issue, post, startTestDb, userClaims, type McpTestDb } from "./helpers";
@@ -285,7 +285,15 @@ describe("MCP over the database (acts as the user under RLS)", () => {
       { b: "automate proposals", start_date: startDate },
     );
     const missing = await call(client, "compare_scenarios", { b: "Hire a unicorn", start_date: startDate });
+    // A Sandbox scenario (a hire from a month) is named, not "not found"; and a part of a name that fits it and a whole-run one is
+    // ambiguous, never quietly the whole-run one.
+    const sandboxOnly = await call(client, "compare_scenarios", { b: "Hire in January", start_date: startDate });
+    const partial = await call(client, "compare_scenarios", { b: "january", start_date: startDate });
+    const ambiguous = await call(client, "compare_scenarios", { b: "hire", start_date: startDate });
     await client.close();
+    expect(sandboxOnly).toMatchObject({ ok: false, error: { code: "sandbox_only", message: expect.stringContaining("runs only in the Sandbox") } });
+    expect(partial).toMatchObject({ ok: false, error: { code: "sandbox_only" } });
+    expect(ambiguous).toMatchObject({ ok: false, error: { code: "ambiguous" } });
     expect(r.ok).toBe(true);
     expect(r.assumptions).toEqual(expect.arrayContaining(["a defaulted to the baseline (the live model with no scenario applied)."]));
     // The app: the baseline's run and the scenario's run (30 replications, seed
@@ -302,6 +310,23 @@ describe("MCP over the database (acts as the user under RLS)", () => {
       rows.map((x) => [x.label, x.text.baseline, x.text.change, x.text.changeRange]),
     );
     expect(missing).toMatchObject({ ok: false, error: { code: "not_found" } });
+  });
+
+  it("list_issues names an issue's scenario when that scenario runs only in the Sandbox", async () => {
+    const issue = (
+      await admin.query("insert into issues (workspace_id, title, type, severity, source, status, scenario_id) values ($1, 'Hire before January', 'idea', 'serious', 'manual', 'open', $2) returning id", [
+        NORTHBEAM_WORKSPACE_ID,
+        NORTHBEAM_HIRE_JANUARY_ID,
+      ])
+    ).rows[0].id as string;
+    try {
+      const client = await connect(memberToken, options);
+      const r = await call<{ issues: { id: string; scenario: { id: string; name: string | null } | null }[] }>(client, "list_issues", { type: "idea" });
+      await client.close();
+      expect(r.data.issues.find((i) => i.id === issue)!.scenario).toEqual({ id: NORTHBEAM_HIRE_JANUARY_ID, name: "Hire in January" });
+    } finally {
+      await admin.query("delete from issues where id = $1", [issue]);
+    }
   });
 
   it("check_robustness returns a verdict within its time cap, or a partial result flagged as such", async () => {
