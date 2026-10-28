@@ -11,6 +11,7 @@ import { scenarioModel } from "@/lib/sandbox/run";
 const START = DEMO_FORECAST_START;
 const bundle = demoForecastBundle();
 const live = scenarioModel(bundle, 12, START);
+if (!live.model) throw new Error("the demo's live model should build");
 const model = live.model;
 const bounds = monthBounds(live.monthStarts, model.horizonWeeks * model.hoursPerWeek);
 const options = { bundle, bounds, startDate: START, hoursPerWeek: model.hoursPerWeek, d4Unhandled: new Set<string>() };

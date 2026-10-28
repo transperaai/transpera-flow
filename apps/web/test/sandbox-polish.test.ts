@@ -10,6 +10,9 @@ import { calendarMonthStarts, partMonthNote, timelineMonths } from "@/lib/foreca
 import { explainFull } from "@/lib/sandbox/explain";
 import { othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 import { todayValue, trafficToday } from "@/lib/sandbox/today";
+import { monthBounds } from "@/lib/forecast/positions";
+import { channelsOf } from "@/lib/sandbox/channels";
+import { scenarioModel } from "@/lib/sandbox/run";
 
 // Polish from the Sandbox click-through (see the commits on branch sandbox-polish): pure logic, a case group per item. The page's own
 // behaviour is in sandbox-browser.test.ts.
@@ -63,6 +66,33 @@ describe("1. today's value in the change dialog", () => {
   });
 });
 
+describe("1b. today's value for the phase 3 levers", () => {
+  const driver = (m: typeof model, patch: Record<string, unknown>) => ({ ...m, churnDrivers: [{ id: "late", weight: 1, enabled: true, ...patch }] }) as typeof model;
+
+  it("reads a fee range, a driver's chance and effect, a price, hours available and the hiring delay", () => {
+    expect(todayValue(lever("A5"), SEO, model, "GBP")).toBe("£3,500 a month, no range");
+    const ranged = { ...model, services: { ...model.services!, [SEO]: { ...model.services![SEO]!, priceRange: { low: 3000, high: 6000 } } } };
+    expect(todayValue(lever("A5"), SEO, ranged, "GBP")).toBe("£3,000 – £3,500 – £6,000 a month");
+    expect(todayValue(lever("B5"), SEO, model, "GBP")).toBe("£3,500 a month");
+    expect(todayValue(lever("D6"), northbeamRoleIds.ppc, model, "GBP")).toMatch(/^[\d.]+ FTE across 3 people$/);
+    expect(todayValue(lever("D6"), null, model, "GBP")).toMatch(/^[\d.]+ FTE across \d+ people$/);
+    expect(todayValue(lever("D9"), null, model, "GBP")).toBe("none: new hires start on their date");
+    expect(todayValue(lever("D9"), null, model, "GBP", { hireDelayMonths: 2 })).toBe("2 months");
+    expect(todayValue(lever("A3"), null, model, "GBP", { conversion: 0.284 })).toBe("about 28% of finished opportunities sign");
+    expect(todayValue(lever("A3"), null, model, "GBP")).toBeNull();
+    expect(todayValue(lever("B4"), "late", driver(model, {}), "GBP", { causes: [{ id: "late", chance: 0.042 } as never] })).toBe("Late or missed servicing work: counted by its weight (1), measured chance 4.2% a month");
+    expect(todayValue(lever("B4"), "late", driver(model, { chance: 0.1, effect: 0.5, effectMonths: 2 }), "GBP")).toBe("Late or missed servicing work: 10% chance a month, raises churn 50% for 2 months");
+    expect(todayValue(lever("B4"), "late", driver(model, { enabled: false }), "GBP")).toBe("Late or missed servicing work: switched off");
+    expect(todayValue(lever("B4"), "nonsense", model, "GBP")).toBeNull();
+  });
+
+  it("names a role's rate (C1) and no one's pay", () => {
+    const paid = { ...model, people: Object.fromEntries(Object.entries(model.people!).map(([id, p]) => [id, { ...p, cost: 98765 }])) };
+    for (const l of ["A3", "A5", "B4", "B5", "D6", "D9"]) expect(todayValue(lever(l), l === "A5" || l === "B5" ? SEO : l === "D6" ? northbeamRoleIds.ppc : l === "B4" ? "late" : null, paid, "GBP", { conversion: 0.3 }) ?? "", l).not.toContain("987");
+    expect(todayValue(lever("C1"), northbeamRoleIds.ppc, model, "GBP")).toMatch(/an hour$/);
+  });
+});
+
 describe("2. traffic by type as percentages", () => {
   const mix = Object.fromEntries(Object.entries(model.services!).map(([id, s]) => [id, s.mixShare]));
 
@@ -98,6 +128,24 @@ describe("2. traffic by type as percentages", () => {
     expect(after[SEO]!.mixShare / total).toBeCloseTo(0.4, 6);
     // The other two still split the rest 45 : 20.
     expect(after[PPC_SERVICE]!.mixShare / after.extra!.mixShare).toBeCloseTo(0.45 / 0.2, 6);
+  });
+
+  it("works when timed: the mix channel holds the weight for the share asked, from its month, and nothing before", () => {
+    const live = scenarioModel(bundle, 12, DEMO_FORECAST_START);
+    const m = live.model!;
+    const bounds = monthBounds(live.monthStarts!, m.horizonWeeks * m.hoursPerWeek);
+    const weight = shareToWeight(0.7, othersTotal(mix, SEO))!;
+    const change: SandboxChange = { id: randomUUID(), lever: "A6", target: SEO, op: "set", value: weight, from: "2027-03" };
+    const { channels, problems } = channelsOf(m, [change], { bundle, bounds, startDate: DEMO_FORECAST_START, hoursPerWeek: m.hoursPerWeek, d4Unhandled: new Set() });
+    expect(problems).toEqual([]);
+    const seo = channels!.mix![SEO]!;
+    const other = m.services![PPC_SERVICE]!.mixShare;
+    const first = seo.findIndex((w) => w === weight);
+    expect(first).toBeGreaterThan(0);
+    expect(seo.slice(0, first).every((w) => w === m.services![SEO]!.mixShare)).toBe(true);
+    expect(seo[seo.length - 1]! / (seo[seo.length - 1]! + other)).toBeCloseTo(0.7, 6);
+    // The change list words it as a share for a timed change too.
+    expect(describeChange(change, { bundle, solutions: [], changes: [change], mix })).toContain("70%");
   });
 
   it("reads a saved set change as '→ 40%' in the change list, and a weight of another kind as before", () => {

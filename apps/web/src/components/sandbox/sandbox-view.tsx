@@ -862,7 +862,13 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           currency={live.workspace.settings.currency}
           today={(leverId, targetId) => {
             const lever = sandboxLever(leverId);
-            return lever && model ? todayValue(lever, targetId, model, live.workspace.settings.currency) : null;
+            if (!lever || !model) return null;
+            // What the live run measured, for the levers whose "today" is an outcome (conversion, a driver's chance).
+            const finished = result ? result.kpi.won.mean + result.kpi.lost.mean : 0;
+            return todayValue(lever, targetId, model, live.workspace.settings.currency, {
+              conversion: result && finished > 0 ? result.kpi.won.mean / finished : null,
+              causes: result?.churnCauses?.causes,
+            });
           }}
           mix={mix}
           validate={(change) => {
