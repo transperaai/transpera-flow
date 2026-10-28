@@ -553,7 +553,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           scenarios={saved}
           selectedId={savedScenario?.id ?? null}
           unsavedName={savedScenario === null && edit ? edit.name : null}
-          dirty={dirty || horizonChanged}
+          // A Viewer may change the horizon, but has nothing to save: no "Unsaved changes" for them.
+          dirty={dirty || (canEdit && horizonChanged)}
           hasScenario={working !== null}
           canEdit={canEdit}
           parentName={parentName}
