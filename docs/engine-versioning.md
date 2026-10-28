@@ -225,6 +225,25 @@ target (< 5 s for a 40-step model). The 40-step, 25-person model was not measure
 is 5 s, and the numbers above leave plenty of room, but a 24-month run of it should be timed when a model that size
 exists to test with. Timing tests can fail on a loaded machine; re-run them alone before concluding.
 
+## Sandbox scenarios: seven segments (sandbox phase 1, no engine change)
+
+A scenario with changes from several months runs once per distinct change month, each a full 30-replication run, and the monthly
+numbers are spliced (`spliceMonthly`). The most the database allows is six capped change months, so seven runs
+(`MAX_SEGMENTS`). The browser spreads them over the page's three workers and keeps finished runs by what they were run from, so a
+change that leaves a segment alone does not run it again. `apps/web/test/sandbox-performance.test.ts` (tagged `perf`) builds the
+worst scenario on the demo's full Northbeam (five timed patches and a solution going live in six different months, plus a hire, a leave and a leaver in
+those months: seven segments), times each segment's `simulate(model, 30, 1, { monthly, monthStarts })` at 12 months one after the other
+(the slowest case), and holds each under 4 × 250 ms (the full Northbeam's 250 ms, scaled for a year as the 24-month test scales it)
+and the seven together under 7 s. Measured on a quiet 4-core container, engine 1.11.0:
+
+| Run | Segments (ms) | Total | Limit |
+| --- | --- | --- | --- |
+| 1 | 538, 810, 761, 784, 757, 596, 737 | 4,984 ms | 7,000 ms |
+| 2 | 802, 733, 583, 689, 733, 556, 710 | 4,807 ms | 7,000 ms |
+
+Each run is about 0.7 s, inside the 1 s limit but not by a wide margin: with another process using the CPU one segment reached
+1.2 s and the test failed, so re-run it alone before concluding. Spliced numbers cost about 4 ms.
+
 ## Where the version goes
 
 - `SimulationResult.engineVersion` on every run, in the browser worker and on the server.
