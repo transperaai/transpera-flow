@@ -37,7 +37,7 @@ describe("the facts, issues, sources and solutions over the connector", () => {
     ids.other = (await one("insert into workspaces (name, slug) values ('Elsewhere', $1) returning id", [`facts-other-${tag}`])).id as string;
     [ids.editor, ids.viewer, ids.stranger] = [randomUUID(), randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6)", [ids.editor, `f-editor-${tag}@example.com`, ids.viewer, `f-viewer-${tag}@example.com`, ids.stranger, `f-stranger-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer'), ($4, $5, 'owner')", [ids.ws, ids.editor, ids.viewer, ids.other, ids.stranger]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer'), ($4, $5, 'owner')", [ids.ws, ids.editor, ids.viewer, ids.other, ids.stranger]);
     ids.role = (await one("insert into roles (workspace_id, name, headcount) values ($1, 'Strategist', 1) returning id", [ids.ws])).id as string;
     // More work than one strategist can do, so the run has facts to show: ten leads a week at six hours each.
     const person = (await one("insert into people (workspace_id, name, fte) values ($1, 'Maya Collins', 1) returning id", [ids.ws])).id as string;
@@ -152,7 +152,7 @@ describe("the facts, issues, sources and solutions over the connector", () => {
     const tag = randomUUID().slice(0, 8);
     const member = randomUUID();
     await admin.query("insert into auth.users (id, email) values ($1, $2)", [member, `f-pay-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ids.ws, member]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [ids.ws, member]);
     const token = await apiToken(member);
     const old =
       "Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap, costing about £1,040 at cost rates over the 26-week run. The cap is used up.";

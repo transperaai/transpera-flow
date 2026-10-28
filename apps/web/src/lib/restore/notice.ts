@@ -7,7 +7,7 @@ export const RESTORE_NOTICE_COOKIE = "tf-restore-notice";
 export function restoredMessage(processes: number, settings: string): string {
   const n = `${processes} ${processes === 1 ? "process" : "processes"}`;
   const base = `Restored ${n} as drafts. Publish each one to see its numbers.`;
-  return settings === "skipped" ? `${base} The backup's workspace settings were not applied: only an owner or agency admin can apply them.` : base;
+  return settings === "skipped" ? `${base} The backup's workspace settings were not applied: only an Agency admin or the Owner can apply them.` : base;
 }
 
 export function noticeCookieValue(message: string): string {

@@ -16,7 +16,7 @@ export default async function ChangeLogPage(props: PageProps<"/w/[slug]/settings
       {data.changes ? (
         <ChangeLog entries={data.changes} model={data.model} people={data.people} stepNames={data.stepNames} />
       ) : (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Only owners can read the change log.</p>
+        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Only Agency admins and the Owner can read the change log.</p>
       )}
     </Page>
   );

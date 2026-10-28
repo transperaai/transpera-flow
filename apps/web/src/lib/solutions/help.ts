@@ -8,11 +8,6 @@ export const SOLUTIONS_LIST_HELP = {
     description: "Opens the Editor on a copy of a process. Change the steps, simulate, and save it as a solution. The live map and its draft don't change, and you can link the solution to issues afterwards.",
     example: "Try an AI lead check before the sales call, save it as “AI lead qualifier”, and compare it with live.",
   },
-  type: {
-    label: "Solution type",
-    description: "How the solution was made. “By hand” means someone built it in the Editor. “AI block” means it was built from a block the AI suggested.",
-    example: "“AI lead qualifier” is an AI block. “Fast track for partner leads” was built by hand.",
-  },
   changes: {
     label: "What it changes",
     description: "The process the solution is a copy of, and the steps it adds or changes. The live process stays as it is.",

@@ -10,7 +10,7 @@ import { Help } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { issueHref } from "@/lib/issues/pages";
 import { SOLUTIONS_LIST_HELP, newOnProcessHelp } from "@/lib/solutions/help";
-import { builtBy, builtDate, changesLine, effectiveVerdict, linksOf, solutionHref, solutionType, VERDICT_WORDS, type SolutionsData } from "@/lib/solutions/cards";
+import { builtBy, builtDate, changesLine, effectiveVerdict, linksOf, solutionHref, VERDICT_WORDS, type SolutionsData } from "@/lib/solutions/cards";
 import { solutionEditorHref } from "@/lib/solutions/links";
 import { cn } from "@/lib/utils";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -79,7 +79,6 @@ export function SolutionCards({
             canEdit={canEdit}
             viewerId={viewerId}
             memberNames={memberNames}
-            aiIds={data.aiIds}
             from={from}
           />
         </li>
@@ -98,7 +97,6 @@ function SolutionCard({
   canEdit,
   viewerId,
   memberNames,
-  aiIds,
   from,
 }: {
   solution: SolutionRow;
@@ -110,22 +108,11 @@ function SolutionCard({
   canEdit: boolean;
   viewerId?: string | null;
   memberNames?: Readonly<Record<string, string>>;
-  aiIds?: readonly string[];
   from: string;
 }) {
-  const type = solutionType(s, aiIds);
   return (
     <Card className="h-full gap-2 p-3" data-testid="solution-card" data-solution={s.id}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <span className="inline-flex items-center text-xs font-semibold">
-          <span
-            data-solution-type={type}
-            className={cn("inline-flex h-5 items-center rounded-full border px-2", type === "AI block" ? "border-accent/50 bg-accent/10" : "border-border bg-muted")}
-          >
-            {type}
-          </span>
-          <Help {...SOLUTIONS_LIST_HELP.type} />
-        </span>
         <span className="text-xs text-muted-foreground">
           {builtBy(s.created_by, viewerId, demo, memberNames)} · {builtDate(s)}
         </span>

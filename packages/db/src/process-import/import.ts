@@ -119,7 +119,7 @@ const SOURCE_FIELDS = ["id", "workspace_id", "kind", "title", "speakers", "recor
 
 /** A write RLS, a trigger or a check refused, as an ImportError the caller can act on. */
 export function writeError(error: DbError, what: string): ImportError {
-  if (error.code === "42501") return new ImportError("forbidden", `You don't have permission to ${what} in this workspace (editors and owners can).`);
+  if (error.code === "42501") return new ImportError("forbidden", `You don't have permission to ${what} in this workspace (Agency admins and the Owner can).`);
   if (error.code === "23514") return new ImportError("invalid_input", `Some of those values aren't allowed: ${error.message ?? ""}`.trim());
   if (error.code === "23503") return new ImportError("not_found", "Something that change refers to no longer exists.");
   if (error.code === "23505") return new ImportError("duplicate", `That already exists: ${error.message ?? ""}`.trim());
@@ -151,7 +151,7 @@ async function openDraft(ctx: ImportContext, proc: { id: string; name: string })
   const data = await writing("edit processes", () => rpc(ctx.db, "open_draft", { target_process: proc.id }));
   const r = data as { status: string; revision_id?: string; number?: number; created?: boolean };
   // open_draft locks the process for update, so a process the user may read but not edit is not found.
-  if (r.status !== "ok") throw new ImportError("forbidden", `You don't have permission to edit '${proc.name}' (editors and owners can).`);
+  if (r.status !== "ok") throw new ImportError("forbidden", `You don't have permission to edit '${proc.name}' (Agency admins and the Owner can).`);
   return { revision_id: r.revision_id!, number: r.number!, created: r.created === true };
 }
 
@@ -476,7 +476,7 @@ async function prepareImport(scope: ImportScope, json: ProcessJson, create: { id
 /** Refuse unless the caller can edit the workspace's processes (editors and owners). */
 async function requireCanEdit(ctx: ImportContext, ws: WorkspaceRef): Promise<void> {
   const canEdit = await writing("edit processes", () => rpc(ctx.db, "can_edit_workspace", { ws: ws.id }));
-  if (canEdit !== true) throw new ImportError("forbidden", `You don't have permission to edit processes in '${ws.name}' (editors and owners can).`);
+  if (canEdit !== true) throw new ImportError("forbidden", `You don't have permission to edit processes in '${ws.name}' (Agency admins and the Owner can).`);
 }
 
 /**

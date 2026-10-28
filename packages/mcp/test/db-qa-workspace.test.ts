@@ -30,7 +30,7 @@ describe("the QA workspace scripts", () => {
     const qa = async () => (await admin.query("select id from workspaces where slug = 'copperleaf-qa'")).rows as { id: string }[];
     await admin.query(sql("reset-workspace.sql"));
 
-    // An agency admin, with a token and no email address, gets the membership.
+    // The Owner (the agency-admin flag), with a token and no email address, gets an owner (Agency admin) membership.
     const adminId = randomUUID();
     await admin.query("insert into auth.users (id, raw_app_meta_data) values ($1, '{\"agency_admin\": true}')", [adminId]);
     const { token, hash } = generateApiToken();
@@ -38,7 +38,7 @@ describe("the QA workspace scripts", () => {
 
     await admin.query(sql("setup-workspace.sql"));
     const [ws] = await qa();
-    expect((await admin.query("select role from memberships where workspace_id = $1 and user_id = $2", [ws!.id, adminId])).rows).toEqual([{ role: "agency_admin" }]);
+    expect((await admin.query("select role from memberships where workspace_id = $1 and user_id = $2", [ws!.id, adminId])).rows).toEqual([{ role: "owner" }]);
     // The slug guard: a second run fails and changes nothing.
     await expect(admin.query(sql("setup-workspace.sql"))).rejects.toThrow(/already exists/);
     await admin.query("rollback"); // the script's own begin is still open on this connection, as in an editor tab

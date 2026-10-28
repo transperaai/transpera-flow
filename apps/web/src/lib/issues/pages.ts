@@ -93,8 +93,6 @@ export { RATINGS_WORST_FIRST };
 export interface SolutionTest {
   id: string;
   name: string;
-  /** "Built into the process" or "AI block", as the prototype's Type column. */
-  type: string;
   built: string;
   /** The automatic verdict against this issue's target. */
   auto: "pass" | "fail" | "unchecked" | null;

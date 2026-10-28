@@ -243,7 +243,7 @@ export function ScenarioLibrary({
       </div>
       <p className="text-xs text-fg-3">
         Apply one to compare it with today; apply more to stack them, in the order applied.
-        {!canEdit && " You can apply and compare scenarios; editors can save and delete them."}
+        {!canEdit && " You can apply and compare scenarios; Agency admins can save and delete them."}
       </p>
       {error && (
         <p role="alert" className="rounded-token border border-crit bg-crit-soft px-2 py-1 text-xs">

@@ -118,7 +118,6 @@ export function solutionsFixture(): { data: SolutionsData; issues: ReturnType<ty
     data: {
       solutions: [solution("s1", { name: "AI lead qualifier" }), solution("s2", { name: "Faster proposals", created_at: "2026-10-03T10:00:00.000Z" })],
       links: [link("s1", a!.id), link("s1", b!.id, { auto_verdict: "fail", holds_pct: 40, user_verdict: "fail" })],
-      aiIds: ["s1"],
     },
   };
 }

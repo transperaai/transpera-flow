@@ -52,7 +52,7 @@ export const SHARE_HELP = {
   },
   name: {
     label: "Name",
-    description: "Only you and other editors see this, on Share links.",
+    description: "Only you and other Agency admins see this, on Share links.",
     example: "For Northbeam's board, October.",
   },
 } as const;

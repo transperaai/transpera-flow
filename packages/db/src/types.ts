@@ -798,8 +798,6 @@ export interface ForecastPlanRow {
 export interface SolutionsData {
   solutions: SolutionRow[];
   links: SolutionIssueRow[];
-  /** Ids of solutions that were built from an AI idea (a built proposal names them). Left out when that isn't known: they read "By hand". */
-  aiIds?: string[];
 }
 
 /** One issue a solution solves: the automatic verdict against the issue's target, and the user's own. */

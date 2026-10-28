@@ -184,7 +184,7 @@ export const FACTOR_HELP = {
 export const SPEEDS_NORMALISED_NOTE = {
   text: "Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what Agency admins see.",
   description: "Each person's times are visible only to them and to Agency admins.",
-  example: "Maya sees her own times and an editor sees everyone's, so a member's run uses each role's normal time instead.",
+  example: "Maya sees her own times and an Agency admin sees everyone's, so a Viewer's run uses each role's normal time instead.",
 } as const;
 
 /** How a factor reads in words: "normal time" at 1, "20% faster" below, "25% slower" above. */

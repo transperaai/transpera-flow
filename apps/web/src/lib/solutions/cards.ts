@@ -18,15 +18,6 @@ export const solutionHref = (base: string, id: string): string => `${base}/solut
 /** The list: `/w/<slug>/solutions` or `/demo/solutions`. */
 export const solutionsListHref = (base: string): string => `${base}/solutions`;
 
-export type SolutionType = "By hand" | "AI block";
-
-/**
- * How a solution was made: "AI block" when its id is in `aiIds`, else "By hand". Nothing supplies `aiIds` any more (the Suggestions
- * table that recorded built ideas was dropped 28 Oct 2026), so every solution reads "By hand"; the AI marks are S1's to remove.
- */
-export function solutionType(solution: Pick<SolutionRow, "id">, aiIds?: readonly string[]): SolutionType {
-  return aiIds?.includes(solution.id) ? "AI block" : "By hand";
-}
 
 /**
  * Who built it, for a card: "You" for the viewer, the person linked to that member (`names`, by user id) when there is one,
@@ -100,7 +91,6 @@ export function solutionTests(issueId: string, data: SolutionsData, base: string
   return solutionsForIssue(data, issueId).map(({ solution, link }) => ({
     id: solution.id,
     name: solution.name,
-    type: solutionType(solution, data.aiIds),
     built: builtDate(solution, now),
     auto: link.auto_verdict ?? "unchecked",
     holds: link.holds_pct === null ? null : link.holds_pct / 100,

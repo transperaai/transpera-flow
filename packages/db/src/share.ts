@@ -209,13 +209,11 @@ export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
  * and `plan` (workspaces) are not here: the database checks neither, so a name typed into one is looked for like any free text
  * (a `color` that is a whole hex colour is no text: `SHARE_HEX_COLOR`, the database's rule too).
  */
-// Keys of the dropped AI and findings tables (28 Oct 2026) stay on the list: `private.share_snapshot_problem` carries the same list
-// and a test keeps the two equal, so a key is removed in a migration that re-creates that function, not here. A key no snapshot
+// `private.share_snapshot_problem` carries the same list and a test keeps the two equal, so a key is added or removed here and in a
+// migration that re-creates that function (20270104000000 removed the dropped AI and findings tables' keys). A key no snapshot
 // shape carries must say "not in a snapshot".
 export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   agreed_by: "first principles `deletes[].agreed_by`: a person id, saved from a person picker (the MCP tool resolves a name to an id or drops it)",
-  ai_key: "findings.ai_key: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
-  analysis_id: "findings.analysis_id: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   archived_at: "processes.archived_at: a timestamp",
   archived_by: "processes.archived_by: a user id",
   at: "provenance `at` (and a settled conflict's `resolved.at`): a timestamp; provenance is emptied in every snapshot anyway",
@@ -230,8 +228,6 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   created_by: "every table: a user id",
   currency: "workspaces.settings.currency: an ISO 4217 code such as GBP",
   dataset_id: "provenance `dataset_id`: a uuid; provenance is emptied in every snapshot anyway",
-  decided_at: "findings.decided_at: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
-  decided_by: "findings.decided_by: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   detected_key: "issues.detected_key: `<detector>:<kind>:<id>` or `finding:<origin>:<id>`, built by the engine or the database",
   dismissed_revision_id: "issues.dismissed_revision_id: a uuid",
   draft_revision_id: "processes.draft_revision_id: a uuid",
@@ -245,20 +241,14 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   hiddenLevers: "a play link's top-level `hiddenLevers`: known lever kind ids only, checked by both sides (and only at the top)",
   id: "every table and JSON shape with an id: a uuid, or a first principles measure's local id",
   import_source: "suggestions and proposals: not in a snapshot; an enum of where an import came from",
-  input_hash: "ai_analyses.input_hash: not in a snapshot; a hash",
   insight_key: "source_links.insight_key: not in a snapshot; an engine key",
   issueId: "an issue link's top-level `issueId`: a uuid",
   issue_id: "issue_links, solution_issues: a uuid",
-  key: "findings `facts[].key`: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   kind: "steps, processes, first principles statements, the snapshot itself and its process list: an enum",
   kpi: "first principles `measures[].kpi`: an enum key of the engine's measures",
   linked_parameter: "first principles `statements[].linked_parameter`: a parameter path the engine reads",
   live_revision_id: "processes.live_revision_id: a uuid",
-  market_pending_at: "ai_settings.market_pending_at: not in a snapshot; a timestamp",
-  model: "ai_analyses.model: not in a snapshot; a model id",
-  model_hash: "ai_analyses.model_hash: not in a snapshot; a hash",
   op: "scenarios `patch[].op` and solutions `lever_changes[].op`: the enum set, multiply or add",
-  origin: "findings.origin: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   outcome: "steps.outcome: the enum won, lost or done",
   owner_ids: "issues.owner_ids: person ids",
   owner_person_id: "issues.owner_person_id and first principles `requirements[].owner_person_id`: a person id",
@@ -270,10 +260,8 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   preset: "market_conditions.preset: an enum",
   pricing_model: "services.pricing_model: an enum",
   process_id: "every per-process table and issues `links[]`: a uuid",
-  proposed_via: "findings.proposed_via: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   published_at: "process_revisions.published_at: a timestamp",
   published_by: "process_revisions.published_by: a user id",
-  rating: "findings.rating: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   recorded_at: "sources.recorded_at: not in a snapshot; a date",
   replaced_by: "steps.replaced_by: a uuid",
   replaces_step_ids: "a solution idea's payload: not in a snapshot; step ids",
@@ -286,7 +274,6 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   revision_id: "steps, edges, first_principles: a uuid",
   rework_to_step_id: "steps.rework_to_step_id: a uuid",
   role_id: "issues, person_roles, client_assignments, steps: a uuid",
-  run_id: "findings.run_id: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   scenario_id: "issues.scenario_id and first principles `improvements[].scenario_id`: a uuid",
   service_id: "client_groups, client_services, service_servicing: a uuid",
   severity: "issues.severity: an enum",
@@ -297,7 +284,6 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   source_ids: "issues.source_ids: uuids",
   stage: "first principles `improvements[].stage`: an enum",
   start_date: "people, person_leave, clients, client_services: a date",
-  started_at: "ai_runs.started_at: not in a snapshot; a timestamp",
   status: "process_revisions, issues: an enum",
   step_id: "steps-linked tables, issues `links[]`, first principles shapes: a uuid",
   suggestion_id: "provenance `suggestion_id`: a uuid; provenance is emptied in every snapshot anyway",
@@ -305,8 +291,6 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   to_step_id: "edges.to_step_id: a uuid",
   type: "issues.type: an enum",
   updated_at: "every table: a timestamp",
-  updated_by: "findings.updated_by: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
-  user_id: "ai_runs.user_id: not in a snapshot; a user id",
   user_verdict: "solution_issues.user_verdict: the enum pass or fail",
   verdict: "first principles `requirements[].verdict`: an enum",
   wait_dist: "steps.wait_dist: a distribution name",
@@ -559,7 +543,6 @@ async function loadRevisionGraph(db: Db, revisionId: string): Promise<Graph> {
 async function loadSolutionsData(db: Db, ws: string, processId?: string): Promise<SolutionsData> {
   const [solutions, links] = await Promise.all([loadSolutions(db, ws, processId), loadSolutionIssues(db, ws)]);
   const ids = new Set(solutions.map((s) => s.id));
-  // `aiIds` (which solutions came from an AI idea) is left out: AI ideas aren't shared, so every solution reads "By hand".
   return { solutions, links: links.filter((l) => ids.has(l.solution_id)) };
 }
 

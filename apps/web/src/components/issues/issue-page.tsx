@@ -464,7 +464,6 @@ function SolutionsTable({ solutions }: { solutions: readonly SolutionTest[] }) {
         <thead>
           <tr className="border-b border-border text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
             <th className="px-4 py-2">Solution</th>
-            <th className="px-3 py-2">Type</th>
             <th className="px-3 py-2">Built</th>
             <th className="px-3 py-2">Automatic</th>
             <th className="px-3 py-2 text-right">Holds in</th>
@@ -479,7 +478,6 @@ function SolutionsTable({ solutions }: { solutions: readonly SolutionTest[] }) {
                   {s.name}
                 </Link>
               </td>
-              <td className="px-3 py-2 text-xs">{s.type}</td>
               <td className="px-3 py-2 text-xs whitespace-nowrap">{s.built}</td>
               <td className="px-3 py-2">
                 <Verdict v={s.auto} />

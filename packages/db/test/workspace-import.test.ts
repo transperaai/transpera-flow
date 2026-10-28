@@ -469,7 +469,7 @@ describe("the awkward cases", () => {
     expect(issue!.scenario_id).toBe(downturn.id);
   });
 
-  it("applies the settings for an owner", async () => {
+  it("applies the settings for an Agency admin (an owner membership)", async () => {
     const m = await mini();
     const { ws, result } = await restoreInto(await bundleOf(m.ws));
     expect(result.settings).toBe("applied");
@@ -558,7 +558,7 @@ describe("who may restore", () => {
     const before = await snapshot(ws);
     const e = await failure(() => restoreAs(user, ws, plan));
     expect(e.code).toBe("42501");
-    expect(e.message).toMatch(/Only owners, editors and agency admins/);
+    expect(e.message).toBe("Only Agency admins and the Owner can restore a backup.");
     expect(await snapshot(ws)).toEqual(before);
   });
 

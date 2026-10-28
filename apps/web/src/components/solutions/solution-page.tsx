@@ -26,12 +26,11 @@ import { issueHref } from "@/lib/issues/pages";
 import { deleteSolution, saveSolutionNotes, saveSolutionVerdict } from "@/app/w/[slug]/solution-page-actions";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
 import { linkSolutionToIssue } from "@/app/w/[slug]/solution-actions";
-import { builtBy, builtDate, changesLine, linkableIssues, linksOf, MAX_NOTES, solutionType, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
+import { builtBy, builtDate, changesLine, linkableIssues, linksOf, MAX_NOTES, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
 import { addDemoLink, removeDemoSolution, setDemoNotes, setDemoVerdict, useDemoSolutions, type VerdictPatch } from "@/lib/solutions/demo";
 import { demoLinkVerdict } from "@/lib/solutions/demo-link";
 import { SOLUTION_PAGE_HELP, newOnProcessHelp } from "@/lib/solutions/help";
 import { solutionEditorHref } from "@/lib/solutions/links";
-import { cn } from "@/lib/utils";
 import { EDIT_ONLY } from "@/lib/phone";
 import { useIsPhone } from "@/hooks/use-mobile";
 
@@ -106,7 +105,6 @@ export function SolutionPage(props: SolutionPageProps) {
   const links = linksOf(data, solution.id);
   const issueById = new Map(issues.map((i) => [i.id, i]));
   const processName = processes.find((p) => p.id === solution.process_id)?.name ?? "a process";
-  const type = solutionType(solution, data.aiIds);
   const toLink = linkableIssues(issues, solution.process_id, new Set(links.map((l) => l.issue_id)));
 
   const putLink = (link: SolutionIssueRow) =>
@@ -134,12 +132,6 @@ export function SolutionPage(props: SolutionPageProps) {
           </nav>
           <h1 className="font-heading text-2xl leading-tight font-semibold tracking-tight break-words">{solution.name}</h1>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span
-              data-solution-type={type}
-              className={cn("inline-flex h-5 items-center rounded-full border px-2 text-xs font-semibold", type === "AI block" ? "border-accent/50 bg-accent/10" : "border-border bg-muted")}
-            >
-              {type}
-            </span>
             <span className="flex items-center text-sm text-muted-foreground" data-built>
               Built by {builtBy(solution.created_by, viewerId, mode === "demo", props.memberNames)} · {builtDate(solution)} · changes {processName}
               <Help {...SOLUTION_PAGE_HELP.built} />

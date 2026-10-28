@@ -127,7 +127,9 @@ function queries(section: "-- PREFLIGHT" | "-- POST-APPLY CHECK:", n: number): s
 
 describe("share money rule: the header's checks and rollback, run on a test database", () => {
   beforeAll(async () => {
-    db = await createTestDb({ supabaseDefaultPrivileges: true });
+    // The database as production had it when this migration was written: 20270104000000_strip_followups.sql replaces
+    // share_snapshot_problem again (it drops the AI and findings keys), so its md5s and rollback are only true of the database before it.
+    db = await createTestDb({ supabaseDefaultPrivileges: true, upTo: "20261231000000" });
   }, 120_000);
   afterAll(async () => {
     await db?.close();

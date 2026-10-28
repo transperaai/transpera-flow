@@ -26,18 +26,22 @@ describe("share links: the leak check's helpers and lists", () => {
 
   it("the database's list of keys that are no text is the app's (B4's migration replaced the function with one more key, hiddenLevers)", () => {
     // The newest definition of `private.share_snapshot_problem` is the one that counts: B4's (20261221000000) copies B3's and adds a
-    // key; the money-rule follow-up (20261224500000) copies B4's and keeps its list.
+    // key; the money-rule follow-up (20261224500000) copies B4's and keeps its list; the strip follow-up (20270104000000) copies the
+    // money rule's and drops the keys of the AI and findings tables (dropped in 20270101000000).
     const read = (f: string) => readFileSync(join(__dirname, "..", "migrations", f), "utf8");
-    const lists = [migrationText, read("20261221000000_play_links.sql"), read("20261224500000_share_money_rule.sql")].map((text) => {
+    const lists = [migrationText, read("20261221000000_play_links.sql"), read("20261224500000_share_money_rule.sql"), read("20270104000000_strip_followups.sql")].map((text) => {
       const m = /^  non_text_keys constant text\[\] := array\[([^\]]*)\]/m.exec(text)!;
       return [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
     });
-    // The newest (the follow-up's) is the app's. B4's is the app's plus the two keys the follow-up made free text (color, plan);
-    // B3's is B4's without the one key B4 added.
+    // The newest (the strip follow-up's) is the app's. The money rule's is the app's plus the AI and findings keys; B4's is that plus
+    // the two keys the money rule made free text (color, plan); B3's is B4's without the one key B4 added.
+    const aiAndFindings = ["ai_key", "analysis_id", "decided_at", "decided_by", "input_hash", "key", "market_pending_at", "model", "model_hash", "origin", "proposed_via", "rating", "run_id", "started_at", "updated_by", "user_id"];
     const dropped = ["color", "plan"];
-    expect([...lists[2]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
-    expect([...lists[1]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS, ...dropped].sort());
-    expect([...lists[0]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS.filter((k) => k !== "hiddenLevers"), ...dropped].sort());
+    for (const k of aiAndFindings) expect(SHARE_NON_TEXT_KEYS, k).not.toContain(k);
+    expect([...lists[3]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
+    expect([...lists[2]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS, ...aiAndFindings].sort());
+    expect([...lists[1]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS, ...aiAndFindings, ...dropped].sort());
+    expect([...lists[0]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS.filter((k) => k !== "hiddenLevers"), ...aiAndFindings, ...dropped].sort());
   });
 });
 

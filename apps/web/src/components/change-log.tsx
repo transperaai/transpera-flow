@@ -11,7 +11,7 @@ export function ChangeLog({ entries, model, people, stepNames }: { entries: Audi
       <h2 id="changes-heading" className="mb-1 text-base font-bold">
         Recent changes to the company model
       </h2>
-      <p className="mb-2 text-fg-2">Every change to settings, services, people, clients and demand, made in the app. Only owners see this log.</p>
+      <p className="mb-2 text-fg-2">Every change to settings, services, people, clients and demand, made in the app. Only Agency admins and the Owner see this log.</p>
       {entries.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">No changes yet.</p>
       ) : (

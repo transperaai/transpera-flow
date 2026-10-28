@@ -7,9 +7,7 @@ import { MrrChart } from "@/components/overview/charts";
 import { demoMarket } from "@/lib/market-demo";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { SCHEDULE_KEY, compareMaps, overallResult, pinProblems, stressConditions, stressTargets, toneWord } from "@/lib/solutions/compare";
-import { solutionType } from "@/lib/solutions/cards";
 import { runStress, stressKey, type StressRow } from "@/lib/solutions/stress";
-import { demoSolutionsNow, markDemoSolutionAi } from "@/lib/solutions/demo";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkTarget } from "@/lib/solutions/verdict";
@@ -179,25 +177,6 @@ describe("the stress runner", () => {
     expect(hook).toMatch(/\[base, solved, key, reps, seed\]/);
     expect(hook).toMatch(/onerror[\s\S]*stop\(\)/);
     expect(hook).toMatch(/\? held\.value : WAITING/);
-  });
-});
-
-describe("the demo marks an AI solution as an AI block", () => {
-  it("records the solution once", () => {
-    expect(demoSolutionsNow().aiIds).not.toContain("sol-direct");
-    markDemoSolutionAi("sol-direct");
-    expect(demoSolutionsNow().aiIds).toContain("sol-direct");
-    markDemoSolutionAi("sol-direct");
-    expect(demoSolutionsNow().aiIds.filter((i) => i === "sol-direct")).toHaveLength(1);
-    expect(solutionType({ id: "sol-direct" }, demoSolutionsNow().aiIds)).toBe("AI block");
-  });
-});
-
-describe("the solution's type", () => {
-  it("reads AI block for a solution built from an AI idea, and By hand otherwise or when nothing is known", () => {
-    expect(solutionType({ id: "s1" }, ["s1"])).toBe("AI block");
-    expect(solutionType({ id: "s2" }, ["s1"])).toBe("By hand");
-    expect(solutionType({ id: "s1" })).toBe("By hand");
   });
 });
 

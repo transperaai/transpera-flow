@@ -114,7 +114,7 @@ const SHAPES = {
   blockBundle: { entry_step_id: "not" },
   /** bundle.viewer, set by the redaction. */
   viewer: { ownPersonId: "uuid" },
-  solutionsData: { aiIds: "uuid" },
+  solutionsData: {},
   /** The snapshot itself, per kind. */
   overview: { kind: "not", workspaceName: "text" },
   process: { kind: "not", workspaceName: "text", hiddenLevers: "not" },
@@ -200,14 +200,11 @@ describe("every key on the no-text list carries a reason", () => {
 
   it("the generic keys say which shape they belong to", () => {
     const shapeOf: Record<string, RegExp> = {
-      key: /facts\[\]\.key/,
       by: /provenance/,
       at: /provenance/,
-      origin: /findings\.origin/,
       status: /issues/,
       kind: /steps/,
       type: /issues\.type/,
-      model: /ai_analyses/,
       path: /patch\[\]\.path/,
       op: /patch\[\]\.op/,
     };
