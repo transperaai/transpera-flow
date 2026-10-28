@@ -3,7 +3,7 @@
 
 import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever, type SolutionRow } from "@transpera-flow/db";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
-import { personName, viewerOf } from "@/lib/viewer";
+import { canSeePerson, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
 import { othersTotal, percentText, weightToShare } from "./traffic";
 
@@ -43,6 +43,14 @@ export function formatChangeValue(lever: SandboxLever, op: SandboxChange["op"], 
   return `→ ${text}`;
 }
 
+const LABELLED = /^Team member \d+$/;
+
+/** A person as the reader may see them: their name, or "Team member N" (the one the database labelled them with, else their place in the team). */
+export function viewerPersonName(b: Pick<DescribeContext["bundle"], "people" | "viewer">, person: { id: string; name: string }): string {
+  if (canSeePerson(viewerOf(b), person.id)) return person.name;
+  return LABELLED.test(person.name) ? person.name : `Team member ${b.people.findIndex((p) => p.id === person.id) + 1}`;
+}
+
 /** The name of what a change points at. */
 export function targetName(c: SandboxChange, ctx: DescribeContext): string | null {
   const lever = sandboxLever(c.lever);
@@ -55,9 +63,11 @@ export function targetName(c: SandboxChange, ctx: DescribeContext): string | nul
     case "role":
       return b.roles.find((r) => r.id === t)?.name ?? "a role that is gone";
     case "person": {
-      // Other people are named as the viewer may see them ("A team member" for a Viewer who cannot).
+      // Other people are named as the viewer may see them. A Viewer's bundle already has "Team member N" for the others (the alerts and
+      // the chart read the same names), so that is what they get here too; a bundle that was not labelled by the database is labelled by
+      // position, never "A team member", so one person reads the same everywhere.
       const found = b.people.find((p) => p.id === t);
-      return found ? personName(viewerOf(b), t, found.name) : "someone who is gone";
+      return found ? viewerPersonName(b, found) : "someone who is gone";
     }
     case "step":
       return [...b.steps, ...(b.otherProcesses ?? []).flatMap((p) => p.steps)].find((s) => s.id === t)?.name ?? "a step that is gone";

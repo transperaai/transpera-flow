@@ -38,6 +38,8 @@ interface Options {
   broken?: boolean;
   many?: boolean;
   dan?: boolean;
+  nobody?: boolean;
+  leah?: boolean;
 }
 
 async function mount(width: number, o: Options = {}): Promise<{ page: Page; errors: string[] }> {
@@ -86,7 +88,8 @@ const waitRuns = (page: Page, n: number) =>
   );
 const pick = (page: Page, label: string) => page.locator("[data-scenario-select]").selectOption({ label });
 const marker = (page: Page, kind?: string) => page.locator(kind ? `[data-plan-marker][data-kind="${kind}"]` : "[data-plan-marker]").first();
-const valuetext = async (m: Locator) => (await m.getAttribute("aria-valuetext")) ?? "";
+/** What a marker says: a slider's value text; a marker that can't be moved is an image, whose label says it all. */
+const valuetext = async (m: Locator) => (await m.getAttribute("aria-valuetext")) ?? (await m.getAttribute("aria-label")) ?? "";
 const button = (page: Page, name: string) => page.locator("[data-scenario-bar]").getByRole("button", { name, exact: true });
 /** Waits for the status line to say just "Saved" (a rerun after a save says "Updating the forecast…" first). */
 const isSaved = (page: Page) => page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent === "Saved", undefined, { timeout: 90_000 });
@@ -811,6 +814,69 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await page.locator("[data-compare-tile]").count()).toBe(5);
         expect(errors).toEqual([]);
         await page.close();
+      });
+
+      it("reads one person the same everywhere for a Viewer: 'Team member N', as the rest of the page names them", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true, leah: true, url: "/demo/sandbox?scenario=50000000-0000-4000-8000-0000000000a1" });
+        await waitRuns(page, 1);
+        // Leah Brooks is the fourth person on the team.
+        expect(await changes(page).first().innerText()).toContain("Team member 4 on leave for 2 weeks");
+        expect(await valuetext(marker(page, "leave"))).toContain("Team member 4 on leave for 2 weeks");
+        const body = await page.locator("body").innerText();
+        expect(body).not.toContain("A team member");
+        expect(body).not.toContain("Leah Brooks");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("hides the costs from a Viewer's compare, and the title says so: 'Wins', not 'Wins and costs'", async () => {
+        const viewer = await mount(width, { mode: "readonly", dan: true, url: `/demo/sandbox?compare=${JANUARY}` });
+        await compareDone(viewer.page, viewer.errors);
+        expect(await viewer.page.locator('[data-compare-section="Wins"]').count()).toBe(1);
+        expect(await viewer.page.locator('[data-compare-section="Wins and costs"]').count()).toBe(0);
+        expect((await viewer.page.locator('[data-compare-section="Wins"] h2').innerText()).split("\n")[0]).toBe("Wins");
+        const admin = await mount(width, { url: `/demo/sandbox?compare=${JANUARY}` });
+        await compareDone(admin.page, admin.errors);
+        expect((await admin.page.locator('[data-compare-section="Wins and costs"] h2').innerText()).split("\n")[0]).toBe("Wins and costs");
+        expect(viewer.errors.concat(admin.errors)).toEqual([]);
+        await Promise.all([viewer.page.close(), admin.page.close()]);
+      });
+
+      it("tells a Viewer with no row of their own why 'By person' is empty", async () => {
+        const viewer = await mount(width, { mode: "readonly", nobody: true });
+        await viewer.page.getByRole("button", { name: "By person", exact: true }).click();
+        expect(await viewer.page.locator("[data-people-empty]").innerText()).toContain("By person shows only your own row, and there is none to show");
+        await viewer.page.getByRole("button", { name: "By role", exact: true }).click();
+        expect(await viewer.page.locator("[data-people-empty]").count()).toBe(0);
+        // Someone who sees everyone has rows, and no note.
+        const admin = await mount(width);
+        await admin.page.getByRole("button", { name: "By person", exact: true }).click();
+        expect(await admin.page.locator("[data-people-empty]").count()).toBe(0);
+        expect(await admin.page.locator("[data-row]").count()).toBeGreaterThan(0);
+        expect(viewer.errors.concat(admin.errors)).toEqual([]);
+        await Promise.all([viewer.page.close(), admin.page.close()]);
+      });
+
+      it("draws a Viewer's markers as plain images: no grab cursor, not announced as sliders; an editor's are sliders", async () => {
+        const viewer = await mount(width, { mode: "readonly", url: `/demo/sandbox?scenario=${MARCH}` });
+        await waitRuns(viewer.page, 1);
+        const markers = viewer.page.locator("[data-plan-marker]");
+        expect(await markers.count()).toBeGreaterThan(0);
+        for (const m of await markers.all()) {
+          expect(await m.getAttribute("role")).toBe("img");
+          for (const attr of ["aria-valuenow", "aria-valuemin", "aria-valuemax", "aria-valuetext", "tabindex"]) expect(await m.getAttribute(attr), attr).toBeNull();
+          expect(await m.evaluate((el) => getComputedStyle(el).cursor)).toBe("default");
+          expect(await m.getAttribute("aria-label")).toMatch(/^(Hire|Solution|Change|Leave): .+, \d+ \w+ 20\d\d/);
+        }
+        const editor = await mount(width, { url: `/demo/sandbox?scenario=${MARCH}` });
+        await waitRuns(editor.page, 1);
+        for (const m of await editor.page.locator("[data-plan-marker]").all()) {
+          // The scenario's own markers can be moved (a phone is read only, and a parent's can't be moved; none here).
+          expect(await m.getAttribute("role")).toBe(width < 640 ? "img" : "slider");
+          expect(await m.evaluate((el) => getComputedStyle(el).cursor)).toBe(width < 640 ? "default" : "grab");
+        }
+        expect(viewer.errors.concat(editor.errors)).toEqual([]);
+        await Promise.all([viewer.page.close(), editor.page.close()]);
       });
 
       it("shows a Viewer who sees only their own row other people as 'A team member'", async () => {

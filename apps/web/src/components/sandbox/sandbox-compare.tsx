@@ -205,7 +205,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             <ChartAndNumbers row={comparison.revenue} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} />
           </Section>
 
-          <Section title="Wins and costs" help={SANDBOX_HELP.winsPerMonth}>
+          <Section title={comparison.labour ? "Wins and costs" : "Wins"} help={SANDBOX_HELP.winsPerMonth}>
             <ChartAndNumbers row={comparison.won} months={comparison.months} names={names} format={(v) => formatNumber(v, 1)} formatDiff={(v) => signed(v, (x) => formatNumber(x, 1))} />
             <ChartAndNumbers row={comparison.conversion} months={comparison.months} names={names} format={formatPercent} formatDiff={(v) => signed(v, (x) => `${Math.round(x * 100)} points`)} />
             {comparison.labour ? <ChartAndNumbers row={comparison.labour} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} /> : null}

@@ -209,3 +209,30 @@ describe("6. part months are labelled", () => {
     expect(m[0]).toMatchObject({ span: "from 5 Oct to 23 Oct", label: "October 2026 (from 5 Oct to 23 Oct)" });
   });
 });
+
+describe("7. Viewer wording", () => {
+  const leah = bundle.people.find((p) => p.name === "Leah Brooks")!;
+  const dan = bundle.people.find((p) => p.name === "Dan Okafor")!;
+  const leave: SandboxChange = { id: randomUUID(), lever: "D3", target: leah.id, op: "set", value: 2, from: "2027-02-08" };
+  /** The bundle as `team_capacity` hands it to a Viewer linked to Dan: his name, "Team member N" for everyone else. */
+  const labelled = {
+    ...bundle,
+    viewer: { seesEveryone: false, ownPersonId: dan.id },
+    people: bundle.people.map((p, i) => (p.id === dan.id ? p : { ...p, name: `Team member ${i + 1}`, cost_rate: null })),
+  };
+
+  it("names a person in the change list as the rest of the page does (the model's name), not 'A team member'", () => {
+    const ctx = { bundle: labelled, solutions: [], changes: [leave] };
+    const inModel = forecastModel(labelled, 12, DEMO_FORECAST_START).model!.people![leah.id]!.name;
+    expect(inModel).toBe("Team member 4");
+    expect(describeChange(leave, ctx)).toBe(`${inModel} on leave for 2 weeks`);
+    expect(describeChange({ ...leave, target: dan.id }, ctx)).toBe("Dan Okafor on leave for 2 weeks");
+  });
+
+  it("labels a bundle the database did not label by position, so a Viewer never reads a real name or 'A team member'", () => {
+    const raw = { ...bundle, viewer: { seesEveryone: false, ownPersonId: dan.id } };
+    expect(describeChange(leave, { bundle: raw, solutions: [], changes: [leave] })).toBe("Team member 4 on leave for 2 weeks");
+    // Someone who sees everyone reads names.
+    expect(describeChange(leave, { bundle, solutions: [], changes: [leave] })).toBe("Leah Brooks on leave for 2 weeks");
+  });
+});

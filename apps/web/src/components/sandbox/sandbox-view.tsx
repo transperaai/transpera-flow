@@ -790,6 +790,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
                 example="At 85%, someone with 40 hours spends more than 34 of them on work."
               />
             </div>
+            {rows === "people" && shownData && shownData.people.length === 0 && !viewerOf(live).seesEveryone ? (
+              <p className="text-sm text-muted-foreground" data-people-empty>
+                By person shows only your own row, and there is none to show: you aren&apos;t linked to a person on the team, or they have no work in this span. Agency admins and the Owner see everyone.
+              </p>
+            ) : null}
             {shownData ? (
               <ForecastTimeline
                 data={shownData}

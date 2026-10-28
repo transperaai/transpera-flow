@@ -496,21 +496,28 @@ export function ForecastTimeline({
               const hitW = wide ? Math.max(28, x1 - x0 + 8) : 28;
               const active = drag?.id === mk.id && drag.moved;
               const name = mk.label.replace(LABEL_TAIL, "");
+              // Only a marker that can be moved is a slider with a grab cursor. A Viewer's, a phone's and a parent's change are just drawn.
+              const movable = plan.editable && !mk.inherited;
+              const said = `${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`;
               return (
                 <g
                   key={mk.id}
-                  role="slider"
-                  tabIndex={0}
-                  className="group cursor-grab outline-none"
+                  {...(movable
+                    ? {
+                        role: "slider",
+                        tabIndex: 0,
+                        "aria-label": `${KIND_WORD[mk.kind]}: ${name}`,
+                        "aria-valuemin": 0,
+                        "aria-valuemax": n - 1,
+                        "aria-valuenow": monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek),
+                        "aria-valuetext": said,
+                      }
+                    : { role: "img", "aria-label": `${KIND_WORD[mk.kind]}: ${said}` })}
+                  className={movable ? "group cursor-grab outline-none" : "group outline-none"}
                   data-plan-marker={mk.id}
                   data-kind={mk.kind}
-                  aria-label={`${KIND_WORD[mk.kind]}: ${name}`}
-                  aria-valuemin={0}
-                  aria-valuemax={n - 1}
-                  aria-valuenow={monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek)}
-                  aria-valuetext={`${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`}
                   opacity={active ? 0.4 : 1}
-                  style={{ touchAction: "none", cursor: plan.editable && !mk.inherited ? (active ? "grabbing" : "grab") : "default" }}
+                  style={{ touchAction: "none", cursor: movable ? (active ? "grabbing" : "grab") : "default" }}
                   onPointerDown={(e) => markerDown(e, mk)}
                   onPointerMove={(e) => markerMove(e, mk)}
                   onPointerUp={(e) => markerUp(e, mk)}
