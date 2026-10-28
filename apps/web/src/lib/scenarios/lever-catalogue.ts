@@ -52,7 +52,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "How many enquiries become leads",
     description: "Out of every enquiry, how many are worth following up.",
     example: "6 in 10 partner enquiries, but only 1 in 4 website ones.",
-    control: "later",
+    control: "sandbox",
   },
   {
     id: "demand.seasonal",

@@ -83,7 +83,7 @@ describe("the registry and the engine's patches", () => {
     for (const l of SANDBOX_LEVERS) if (l.kind !== null) expect(catalogue, l.id).toContain(l.kind);
     // The kinds the catalogue says are changed in the Sandbox are the ones of the levers with no slider.
     const sandboxKinds = LEVER_KINDS.filter((k) => k.control === "sandbox").map((k) => k.id).sort();
-    expect(sandboxKinds).toEqual(["finances.roleCost", "people.leave", "people.starters"]);
+    expect(sandboxKinds).toEqual(["demand.conversion", "finances.roleCost", "people.leave", "people.starters"]);
     for (const id of sandboxKinds) expect(SANDBOX_LEVERS.some((l) => l.kind === id), id).toBe(true);
   });
 

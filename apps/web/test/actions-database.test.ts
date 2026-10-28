@@ -91,6 +91,8 @@ describe("headline numbers", () => {
 describe("sandbox scenarios", () => {
   const hire = { id: "11111111-1111-4111-8111-111111111111", lever: "D1", target: northbeamRoleIds.strat, op: "set", value: 1, from: "2027-02" };
   const lead = (n: number, from?: string) => ({ id: `22222222-2222-4222-8222-00000000000${n}`, lever: "A1", target: null, op: "multiply", value: 1.2, ...(from ? { from } : {}) });
+  // Headcount by role (D5) is a capped lever: each month it starts from costs a run, so it is what the six-month limit counts.
+  const cut = (n: number, from?: string) => ({ id: `22222222-2222-4222-8222-00000000000${n}`, lever: "D5", target: "role-1", op: "add", value: -1, ...(from ? { from } : {}) });
   const input = (name: string, changes: unknown[] = [hire], extra: Record<string, unknown> = {}) => ({ name, description: null, parent_id: null, changes, horizon_months: 12, ...extra });
 
   it("saves a scenario with its changes, changes it only if nobody else has, and deletes it", async () => {
@@ -124,12 +126,12 @@ describe("sandbox scenarios", () => {
 
   it("checks the limits on the effective changes (a scenario with its parents'), and on the scenarios that build on the one being saved", async () => {
     const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
-    const months = (...ms: string[]) => ms.map((m, i) => lead(i + 1, `2027-${m}`));
+    const months = (...ms: string[]) => ms.map((m, i) => cut(i + 1, `2027-${m}`));
     const parent = await saveSandboxScenario(WS, null, input("Base", months("01", "02", "03", "04")), null);
     if (parent.status !== "ok") throw new Error(JSON.stringify(parent));
-    const child = await saveSandboxScenario(WS, null, input("Base plus", [{ ...lead(5, "2027-05") }], { parent_id: parent.scenario.id }), null);
+    const child = await saveSandboxScenario(WS, null, input("Base plus", [{ ...cut(5, "2027-05") }], { parent_id: parent.scenario.id }), null);
     expect(child.status).toBe("ok");
-    const over = await saveSandboxScenario(WS, null, input("Base plus more", [lead(5, "2027-05"), lead(6, "2027-06"), { ...lead(7, "2027-07") }], { parent_id: parent.scenario.id }), null);
+    const over = await saveSandboxScenario(WS, null, input("Base plus more", [cut(5, "2027-05"), cut(6, "2027-06"), { ...cut(7, "2027-07") }], { parent_id: parent.scenario.id }), null);
     expect(over).toMatchObject({ status: "error", message: expect.stringMatching(/more than 6 different months/) });
     const grow = await saveSandboxScenario(WS, parent.scenario.id, input("Base", months("01", "02", "03", "04", "06", "07")), parent.scenario.updated_at);
     expect(grow).toMatchObject({ status: "error", message: expect.stringMatching(/“Base plus” builds on this one/) });
