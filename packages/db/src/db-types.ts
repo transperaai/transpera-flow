@@ -701,52 +701,6 @@ export interface Steps {
   y: Generated<Numeric>;
 }
 
-export interface SuggestionProposals {
-  applied: Json | null;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  created_via: Generated<string>;
-  detail: string | null;
-  evidence: Generated<Json>;
-  id: Generated<string>;
-  import_source: string | null;
-  issue_id: string | null;
-  kind: string;
-  note: string | null;
-  payload: Generated<Json>;
-  proposer_email: string | null;
-  proposer_name: string | null;
-  review_note: string | null;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
-  share_link_id: string | null;
-  status: Generated<string>;
-  title: string;
-  updated_at: Generated<string>;
-  visitor_text: Json | null;
-  workspace_id: string;
-}
-
-export interface Suggestions {
-  applied: Json | null;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  created_via: Generated<string>;
-  evidence: Generated<Json>;
-  id: Generated<string>;
-  import_source: string | null;
-  note: string | null;
-  patch: Json;
-  review_note: string | null;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
-  status: Generated<string>;
-  target_id: string | null;
-  target_table: string;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
 export interface UserTours {
   dismissed_at: Generated<string>;
   tour: string;
@@ -853,8 +807,6 @@ export interface DB {
   source_links: SourceLinks;
   sources: Sources;
   steps: Steps;
-  suggestion_proposals: SuggestionProposals;
-  suggestions: Suggestions;
   user_tours: UserTours;
   workspace_access_emails: WorkspaceAccessEmails;
   workspace_domains: WorkspaceDomains;

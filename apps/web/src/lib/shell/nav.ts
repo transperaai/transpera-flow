@@ -2,10 +2,10 @@
 // active item is unit-tested; the sidebar component only renders what this returns. Order and grouping follow the
 // prototype's `sidebar()` (apps/web/prototype/app-flow.html).
 
-export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "suggestions" | "sources" | "people" | "forecast" | "settings" | "access" | "share";
+export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "sources" | "people" | "forecast" | "settings" | "access" | "share";
 
-/** How a count badge looks: plain, "AI" (pending suggestions) or a warning (sources that link to nothing; wired in A53). */
-export type CountTone = "plain" | "ai" | "warn";
+/** How a count badge looks: plain, or a warning (sources that link to nothing; wired in A53). */
+export type CountTone = "plain" | "warn";
 
 export interface NavItem {
   key: string;
@@ -38,7 +38,6 @@ export interface NavCounts {
   openIssues?: number;
   /** Solutions arrive with A49; until then there is nothing to count. */
   solutions?: number;
-  pendingSuggestions?: number;
   /** Sources linked to nothing; wired in A53. */
   unlinkedSources?: number;
 }
@@ -61,7 +60,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     // Who gets too busy, and when (issue #35).
     item({ key: "forecast", label: "Forecast", path: "/forecast", icon: "forecast" }),
   ];
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/levers" || rest === "/settings/calibration" }));
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/levers" || rest === "/settings/calibration" || rest === "/settings/changes" }));
   // The demo has no Settings page, so its Levers are reached from the sidebar directly.
   if (extra.levers) company.push(item({ key: "levers", label: "Levers", path: "/settings/levers", icon: "settings" }));
   if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
@@ -83,7 +82,6 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
         item({ key: "issues", label: "Issues", path: "/issues", icon: "issues", count: counts.openIssues, tone: "plain", countNoun: "open" }),
         item({ key: "solutions", label: "Solutions", path: "/solutions", icon: "solutions", count: counts.solutions, tone: "plain" }),
         item({ key: "library", label: "Block library", path: "/blocks", icon: "library" }),
-        item({ key: "suggestions", label: "Suggestions", path: "/suggestions", icon: "suggestions", count: counts.pendingSuggestions, tone: "ai", countNoun: "pending" }),
       ],
     },
     { key: "company", label: "Company", items: company },

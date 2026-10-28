@@ -47,8 +47,8 @@ export const SHARE_HELP = {
   },
   play: {
     label: "Let people try changes",
-    description: "Visitors can move the levers you show (Settings → Levers) and see what would change. Nothing they do is saved. They can send you what they tried: it arrives in Suggestions, and nothing changes unless you build it.",
-    example: "A client tries one more strategist and sends it as “Hire for onboarding”.",
+    description: "Visitors can move the levers you show (Settings → Levers) and see what would change. Nothing they do is saved.",
+    example: "A client tries one more strategist to see what it does to the numbers.",
   },
   name: {
     label: "Name",
@@ -168,7 +168,7 @@ function Form({ slug, kind, targetId, what, create, onClose }: ShareButtonProps 
         </p>
         {input.play && (
           <p className="text-sm text-fg-2" data-share-play-done>
-            People who open it can send you ideas. You&apos;ll find them in Suggestions.
+            People who open it can try changes. Nothing they do is saved.
           </p>
         )}
         <DialogFooter>

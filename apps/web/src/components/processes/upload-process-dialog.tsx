@@ -302,8 +302,7 @@ function Preview({ upload, loaded, onBack, onCancel }: { upload: UploadProcess; 
           </p>
           {p.extras && (
             <p className="text-sm" data-upload-extra-counts>
-              <b>{p.extras.sources.length}</b> {p.extras.sources.length === 1 ? "source" : "sources"} · <b>{p.extras.suggestions.length}</b> {p.extras.suggestions.length === 1 ? "suggestion" : "suggestions"} · <b>{p.extras.proposals.length}</b>{" "}
-              {p.extras.proposals.length === 1 ? "proposal" : "proposals"}
+              <b>{p.extras.sources.length}</b> {p.extras.sources.length === 1 ? "source" : "sources"}
               {p.extras.firstPrinciplesParts > 0 && (
                 <>
                   {" "}
@@ -330,38 +329,13 @@ function Preview({ upload, loaded, onBack, onCancel }: { upload: UploadProcess; 
         </div>
       )}
 
-      {!stopped && p.extras && (p.extras.sources.length > 0 || p.extras.suggestions.length > 0 || p.extras.proposals.length > 0 || p.extras.notes.length > 0) && (
+      {!stopped && p.extras && (p.extras.sources.length > 0 || p.extras.notes.length > 0) && (
         <section className="flex flex-col gap-2 text-sm" data-upload-extras>
           <h3 className="font-medium">Comes with it</h3>
           {p.extras.sources.length > 0 && (
             <p className="text-xs text-muted-foreground">
               Added to Sources and linked to this process: {p.extras.sources.map((s) => s.title).join("; ")}.
             </p>
-          )}
-          {p.extras.suggestions.length > 0 && (
-            <div>
-              <p className="text-xs text-muted-foreground">Waiting in Suggestions for someone to accept or reject. Nothing about your company changes until then.</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
-                {p.extras.suggestions.slice(0, MAX_SHOWN).map((s, i) => (
-                  <li key={i} className="break-words">
-                    {s.headline}
-                  </li>
-                ))}
-                {p.extras.suggestions.length > MAX_SHOWN && <li>…and {p.extras.suggestions.length - MAX_SHOWN} more.</li>}
-              </ul>
-            </div>
-          )}
-          {p.extras.proposals.length > 0 && (
-            <div>
-              <p className="text-xs text-muted-foreground">Proposed issues and ideas, waiting in Suggestions. None is created until someone accepts it.</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
-                {p.extras.proposals.map((x, i) => (
-                  <li key={i} className="break-words">
-                    {x.kind === "issue" ? "Issue" : `Idea for ${x.forIssue}`}: {x.title}
-                  </li>
-                ))}
-              </ul>
-            </div>
           )}
           {p.extras.notes.length > 0 && <Problems tone="warning" title="Left out or changed" items={p.extras.notes} dataKey="notes" />}
         </section>

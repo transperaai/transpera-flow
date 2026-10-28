@@ -18,7 +18,7 @@ async function exportOf(workspaceId: string, email: string): Promise<WorkspaceBu
   const bundle = await db.as(user.claims, async (c) => {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
-      return (await c.query(`select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
+      return (await c.query(`select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit: true, now: new Date("2026-10-05T12:00:00Z") });
@@ -49,7 +49,6 @@ describe.each([
     expect(line(restored, "blocks")).toBe(await count("blocks", ws));
     expect(line(restored, "scenarios")).toBe(await count("scenarios", ws));
     expect(line(restored, "issues")).toBe(await count("issues", ws, "source <> 'detected'"));
-    expect(line(restored, "suggestions")).toBe(await count("suggestions", ws, "status = 'pending'"));
     expect(line(leftOut, "solutions") - (await count("solutions", ws))).toBeGreaterThanOrEqual(0);
     expect(line(leftOut, "detections")).toBe(await count("issues", ws, "source = 'detected'"));
   });

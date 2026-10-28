@@ -23,7 +23,7 @@ const { loadShareLinks } = await import("@/lib/share/list");
 const { workspaceIsEmpty } = await import("@/lib/restore/empty");
 const { loadImports, loadLeadSourceOptions } = await import("@/lib/calibration/import-data");
 const { loadLatestChecks } = await import("@/lib/calibration/client-data");
-const { loadIdeaIssueIds, loadLastChange } = await import("@/lib/process-page/data");
+const { loadLastChange } = await import("@/lib/process-page/data");
 
 let tdb: TestDb;
 const ws = NORTHBEAM_WORKSPACE_ID;
@@ -229,7 +229,7 @@ describe("share links list", () => {
     actAs("owner");
     const links = await loadShareLinks(ws);
     expect(links).toHaveLength(1);
-    expect(links[0]).toMatchObject({ kind: "overview", mode: "view", ideas: null, what: "The Overview", madeBy: "Priya Shah", opens: 0, status: expect.anything() });
+    expect(links[0]).toMatchObject({ kind: "overview", mode: "view", what: "The Overview", madeBy: "Priya Shah", opens: 0, status: expect.anything() });
     actAs("viewer");
     expect(await loadShareLinks(ws)).toEqual([]);
   });
@@ -245,14 +245,14 @@ describe("restore/empty", () => {
     expect(await workspaceIsEmpty(current, fresh)).toBe(false);
   });
 
-  it("asks in one statement, and sees the last table it checks", async () => {
+  it("asks in one statement, and sees a row in any table it checks", async () => {
     actAs("agency");
     const other = (await tdb.client.query("insert into workspaces (name, slug) values ('Other', 'other-empty') returning id")).rows[0].id as string;
     let statements = 0;
     const counting = current.withPlugin({ transformQuery: ({ node }) => (statements++, node), transformResult: async ({ result }) => result });
     expect(await workspaceIsEmpty(counting, other)).toBe(true);
     expect(statements).toBe(1);
-    await tdb.client.query("insert into suggestion_proposals (workspace_id, kind, title) values ($1, 'issue', 'An idea')", [other]);
+    await tdb.client.query("insert into issues (workspace_id, title, type) values ($1, 'An issue', 'delay')", [other]);
     expect(await workspaceIsEmpty(current, other)).toBe(false);
   });
 });
@@ -281,11 +281,5 @@ describe("process page reads", () => {
     expect(out).not.toBeNull();
     expect(out!.by).toMatch(/A team member|The system/);
     expect(await loadLastChange(randomUUID(), {})).toBeNull();
-  });
-
-  it("returns the issues an idea is waiting for, none for an empty list", async () => {
-    actAs("viewer");
-    expect(await loadIdeaIssueIds(ws, [])).toEqual([]);
-    expect(await loadIdeaIssueIds(ws, [randomUUID()])).toEqual([]);
   });
 });

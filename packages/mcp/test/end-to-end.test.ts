@@ -313,79 +313,47 @@ describe("MCP over the database (acts as the user under RLS)", () => {
     expect(elapsed).toBeLessThan(15_000);
   });
 
-  it("save_scenario and log_issue write as the user: an editor can, a viewer can't", async () => {
+  it("is read-only: no tool saves a scenario or logs an issue, and what the app saved is read back (compared by name, listed with names hidden from a viewer)", async () => {
     const editorId = await createUser(admin, "analysis-editor@example.com");
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editorId]);
     const editor = await connect(await issueToken(editorId), options);
     const viewer = await connect(memberToken, options);
     const patch = [{ path: `roles.${northbeamRoleIds.strat}.headcount`, op: "add", value: 2 }];
 
-    expect(await call(viewer, "save_scenario", { name: "Two more strategists", overrides: patch })).toMatchObject({
-      ok: false,
-      error: { code: "forbidden" },
-    });
-    const saved = await call<{ scenario: { id: string; name: string; patch: unknown } }>(editor, "save_scenario", {
-      name: "Two more strategists",
-      description: "From Claude",
-      overrides: patch,
-    });
-    expect(saved).toMatchObject({ ok: true, data: { scenario: { name: "Two more strategists", patch } } });
-    expect(await call(editor, "save_scenario", { name: "two MORE strategists", overrides: patch })).toMatchObject({
-      ok: false,
-      error: { code: "name_taken" },
-    });
-    expect(
-      await call(editor, "save_scenario", { name: "Broken", overrides: [{ path: "steps.gone.work_hours", op: "set", value: 1 }] }),
-    ).toMatchObject({ ok: false, error: { code: "invalid_overrides" } });
-    const stored = await admin.query("select created_by, patch from scenarios where id = $1", [saved.data.scenario.id]);
-    expect(stored.rows).toEqual([{ created_by: editorId, patch }]);
+    // No write tool exists for anyone: not even an editor's token can save a scenario or log an issue.
+    for (const client of [editor, viewer]) {
+      const names = (await client.listTools()).tools.map((t) => t.name);
+      for (const gone of ["save_scenario", "log_issue", "propose_issue", "propose_finding", "set_company", "upsert_person", "add_source", "import_process", "publish_process"]) expect(names).not.toContain(gone);
+      expect(await client.callTool({ name: "save_scenario", arguments: { name: "Nope", overrides: patch } }).then((r) => r.isError, () => true)).toBe(true);
+    }
+
+    // A scenario and issues the app saved (made here as the database's owner).
+    const scenario = (await admin.query("insert into scenarios (workspace_id, name, description, patch, created_by) values ($1, 'Two more strategists', 'From the app', $2, $3) returning id", [NORTHBEAM_WORKSPACE_ID, JSON.stringify(patch), editorId])).rows[0].id as string;
     // The saved scenario can be compared straight away, by name.
     const compared = await call<{ headline: string }>(viewer, "compare_scenarios", { b: "Two more strategists", reps: 5, start_date: "2026-10-05" });
     expect(compared.data.headline).toMatch(/^“Two more strategists” /);
 
-    const issue = {
-      title: "Proposals wait for the strategist",
-      type: "bottleneck",
-      rating: "bad",
-      step: "audit & proposal",
-      person: "Maya Collins",
-      owner: "Arjun",
-      scenario: "Two more strategists",
-      evidence: "Interview 12 Sep: proposals wait up to a week.",
-    };
-    expect(await call(viewer, "log_issue", issue)).toMatchObject({ ok: false, error: { code: "forbidden" } });
-    expect(await call(editor, "log_issue", { ...issue, client: "Acme" })).toMatchObject({ ok: false, error: { code: "not_found" } });
-    expect(await call(editor, "log_issue", { ...issue, step: "nowhere" })).toMatchObject({ ok: false, error: { code: "not_found" } });
-    const logged = await call<{ issue: { id: string; source: string; step: { name: string }; scenario: { id: string } } }>(editor, "log_issue", issue);
-    expect(logged.ok).toBe(true);
-    expect(logged.data.issue).toMatchObject({ source: "manual", status: "open", step: { name: "Audit & proposal" }, scenario: { id: saved.data.scenario.id } });
-    // A client on the roster, by name (issue #18).
-    const churn = await call<{ issue: { id: string; client: { id: string; name: string } } }>(editor, "log_issue", {
-      title: "Swift Courier may not renew",
-      type: "churn_risk",
-      client: "swift courier co",
-      evidence: "Renewal call due; unhappy with lead volume.",
-    });
-    expect(churn.ok).toBe(true);
-    expect(churn.data.issue.client).toEqual({ id: northbeamClientIds.c12, name: "Swift Courier Co" });
-    expect((await admin.query("select client_id from issues where id = $1", [churn.data.issue.id])).rows[0].client_id).toBe(northbeamClientIds.c12);
+    const logged = (
+      await admin.query(
+        `insert into issues (workspace_id, title, type, severity, source, status, process_id, step_id, person_id, owner_person_id, scenario_id, evidence, created_by)
+         values ($1, 'Proposals wait for the strategist', 'bottleneck', 'serious', 'manual', 'open', $2, $3, $4, $5, $6, 'Interview 12 Sep: proposals wait up to a week.', $7) returning id`,
+        [NORTHBEAM_WORKSPACE_ID, NORTHBEAM_PROCESS_ID, northbeamStepIds.audit, northbeamPersonIds["Maya Collins"], northbeamPersonIds["Arjun Mehta"], scenario, editorId],
+      )
+    ).rows[0].id as string;
+    // A client on the roster, by id (issue #18).
+    const churn = (
+      await admin.query(
+        "insert into issues (workspace_id, title, type, severity, source, status, client_id, evidence) values ($1, 'Swift Courier may not renew', 'churn_risk', 'serious', 'manual', 'open', $2, 'Renewal call due; unhappy with lead volume.') returning id",
+        [NORTHBEAM_WORKSPACE_ID, northbeamClientIds.c12],
+      )
+    ).rows[0].id as string;
     const aboutSwift = await call<{ issues: { id: string; client: { name: string } }[]; filters: { client: { name: string } } }>(viewer, "list_issues", {
       client: northbeamClientIds.c12,
     });
-    expect(aboutSwift.data.issues.map((i) => i.id)).toEqual([churn.data.issue.id]);
+    expect(aboutSwift.data.issues.map((i) => i.id)).toEqual([churn]);
     expect(aboutSwift.data.issues[0]!.client.name).toBe("Swift Courier Co");
     expect(aboutSwift.data.filters.client.name).toBe("Swift Courier Co");
-    await admin.query("delete from issues where id = $1", [churn.data.issue.id]);
-
-    const row = (await admin.query("select * from issues where id = $1", [logged.data.issue.id])).rows[0];
-    expect(row).toMatchObject({
-      process_id: NORTHBEAM_PROCESS_ID,
-      step_id: northbeamStepIds.audit,
-      person_id: northbeamPersonIds["Maya Collins"],
-      scenario_id: saved.data.scenario.id,
-      created_by: editorId,
-      source: "manual",
-    });
+    await admin.query("delete from issues where id = $1", [churn]);
 
     // list_issues shows it to the viewer, with the step and ids; the viewer is linked to no person, so (B1 2a, Q2) the names of
     // the person and owner are hidden, and the editor sees them.
@@ -394,14 +362,14 @@ describe("MCP over the database (acts as the user under RLS)", () => {
       status: "open",
     });
     expect(list.ok).toBe(true);
-    expect(list.data.issues.find((i) => i.id === logged.data.issue.id)).toMatchObject({
+    expect(list.data.issues.find((i) => i.id === logged)).toMatchObject({
       step: { name: "Audit & proposal" },
       person: { id: northbeamPersonIds["Maya Collins"], name: null },
       client: null,
       owner: { name: null },
     });
     const asEditor = await call<{ issues: { id: string; person: { name: string }; owner: { name: string } }[] }>(editor, "list_issues", { type: "bottleneck", status: "open" });
-    expect(asEditor.data.issues.find((i) => i.id === logged.data.issue.id)).toMatchObject({ person: { name: "Maya Collins" }, owner: { name: "Arjun Mehta" } });
+    expect(asEditor.data.issues.find((i) => i.id === logged)).toMatchObject({ person: { name: "Maya Collins" }, owner: { name: "Arjun Mehta" } });
     const ideas = await call<{ issues: { type: string }[] }>(viewer, "list_issues", { type: "idea" });
     expect(ideas.data.issues.every((i) => i.type === "idea")).toBe(true);
     const withDetected = await call<{ detected: { key: string }[] }>(viewer, "list_issues", { include_detected: true });
@@ -411,8 +379,8 @@ describe("MCP over the database (acts as the user under RLS)", () => {
 
     await editor.close();
     await viewer.close();
-    await admin.query("delete from issues where id = $1", [logged.data.issue.id]);
-    await admin.query("delete from scenarios where id = $1", [saved.data.scenario.id]);
+    await admin.query("delete from issues where id = $1", [logged]);
+    await admin.query("delete from scenarios where id = $1", [scenario]);
   });
 
   it("hides another workspace from the analysis tools", async () => {
@@ -422,8 +390,8 @@ describe("MCP over the database (acts as the user under RLS)", () => {
       ["compare_scenarios", { workspace: "northbeam", b: "Hire a strategist" }],
       ["check_robustness", { workspace: "northbeam", scenario: "Hire a strategist" }],
       ["list_issues", { workspace: "northbeam" }],
-      ["log_issue", { workspace: "northbeam", title: "x", type: "idea" }],
-      ["save_scenario", { workspace: "northbeam", name: "x", overrides: [{ path: "demand.leads_per_week", op: "add", value: 1 }] }],
+      ["get_facts", { workspace: "northbeam" }],
+      ["list_solutions", { workspace: "northbeam" }],
     ] as const) {
       expect(await call(client, tool, args), tool).toMatchObject({ ok: false, error: { code: "not_found" } });
     }

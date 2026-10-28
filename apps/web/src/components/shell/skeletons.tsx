@@ -54,7 +54,7 @@ export function PageSkeleton({
   );
 }
 
-/** Issues, processes, solutions, suggestions: a row of filter pills, then a bordered list of rows (the Sources pattern). */
+/** Issues, processes, solutions: a row of filter pills, then a bordered list of rows (the Sources pattern). */
 export function ListSkeleton({ rows = 5, filters = true }: { rows?: number; filters?: boolean }) {
   return (
     <Loading name="list" label="Loading the list" className="flex flex-col gap-3">

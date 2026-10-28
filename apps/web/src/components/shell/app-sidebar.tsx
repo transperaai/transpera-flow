@@ -15,7 +15,6 @@ import {
   Settings2,
   Share2,
   ShieldCheck,
-  Sparkles,
   TrendingUp,
   Users,
   type LucideIcon,
@@ -49,7 +48,6 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   issues: CircleAlert,
   solutions: Lightbulb,
   library: Layers,
-  suggestions: Sparkles,
   sources: FileText,
   people: Users,
   forecast: TrendingUp,
@@ -60,7 +58,6 @@ const ICONS: Record<NavIcon, LucideIcon> = {
 
 const BADGE: Record<CountTone, string> = {
   plain: "bg-muted text-fg-2",
-  ai: "bg-accent-soft text-accent",
   warn: "border border-warn bg-warn-soft text-fg",
 };
 

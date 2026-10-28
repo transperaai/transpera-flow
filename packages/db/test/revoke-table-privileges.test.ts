@@ -57,7 +57,9 @@ const isExtraForClients = (line: string) => new RegExp(`^\\S+ (anon|authenticate
 let before: { acl: string[]; defaults: unknown[]; dml: unknown[]; grantBack: string; extra: unknown[] };
 
 beforeAll(async () => {
-  db = await createTestDb({ supabaseDefaultPrivileges: true });
+  // The database as production had it when this migration was written: 20270102000000_drop_suggestions.sql dropped two of the
+  // tables whose privileges are checked here (suggestions, suggestion_proposals).
+  db = await createTestDb({ supabaseDefaultPrivileges: true, upTo: "20261231000000" });
   // The harness ran every migration, this one included. Put production's state back: Supabase's default privileges for tables
   // made by postgres, and, as production has them, the extra privileges for authenticated (not anon) on every public relation
   // where authenticated holds a table-level privilege (TRUNCATE left off one), plus a column-level REFERENCES.

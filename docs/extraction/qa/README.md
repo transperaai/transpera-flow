@@ -1,5 +1,7 @@
 # QA guide: transcript to draft, timed (issue #27)
 
+> **Out of date, 28 Oct 2026.** This guide ran the MCP extraction flow, which is removed (MCP is read-only; docs/plans/cut-list.md item 5). To rerun it now, use the `process-file` skill on the two transcripts, upload the files in the app, and enter the company facts by hand. Steps that mention `/extract-process`, API tokens, `list_workspaces` or the Suggestions page no longer apply.
+
 Copperleaf Marketing is an invented paid media agency (37.5 hour week, so a working day is 7.5 hours: a deliberate trap). The process is **Enquiry to signed client** (a pipeline). The two transcripts are messy on purpose. `ANSWER-KEY.md` lists what each planted item should become. **Do not open it until after the timed run.**
 
 ## Once, untimed

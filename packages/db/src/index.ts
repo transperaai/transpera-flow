@@ -87,20 +87,6 @@ export {
   type ModelSnapshot,
   type SnapshotProcess,
 } from "./company";
-export {
-  applySuggestion,
-  describeSuggestion,
-  patchProblem,
-  PLAIN_COLUMNS,
-  SUGGESTION_COLUMNS,
-  SuggestionError,
-  suggestionProvenance,
-  suggestionTarget,
-  type ApplyOptions,
-  type SuggestionChange,
-  type SuggestionView,
-} from "./suggestions";
-export { countPendingProposals, loadPlayContacts, loadProposals, PROPOSAL_ROW_COLUMNS, type PlayContact } from "./proposals";
 export { changesSinceRun, runResults, type RunResults, type RunRow } from "./runs";
 export {
   NORTHBEAM_DOMAIN,
@@ -213,9 +199,7 @@ export {
   loadLiveRevisions,
   loadRun,
   loadRuns,
-  loadSuggestions,
   RUN_COLUMNS,
-  SUGGESTION_ROW_COLUMNS,
   SOURCE_COLUMNS,
   SOURCE_LINK_COLUMNS,
   SCENARIO_COLUMNS,
@@ -280,22 +264,13 @@ export {
   EVIDENCE_FIELD_WORDS,
   EVIDENCE_FIELDS,
   MAX_FILE_SOURCES,
-  MAX_FILE_SUGGESTIONS,
   sectionCounts,
   SOURCE_KINDS,
   type Backing,
   type EvidenceField,
   type FileCitation,
-  type FileClient,
-  type FileCompany,
-  type FileDemand,
   type FileFirstPrinciples,
-  type FileLeadSource,
-  type FilePerson,
-  type FileProposal,
   type FileRange,
-  type FileRole,
-  type FileService,
   type FileSource,
 } from "./process-file-2";
 export { claudePrompt2, PROCESS_FILE_EXAMPLE_2, PROCESS_FILE_SCHEMA_2 } from "./process-file-2-schema";

@@ -74,7 +74,6 @@ describe("workspace settings", () => {
     actAs("viewer");
     const v = await data.loadWorkspaceSettings("northbeam");
     expect(v!.canEdit).toBe(false);
-    expect(v!.canManage).toBe(false);
     actAs("stranger");
     expect(await data.loadWorkspaceSettings("northbeam")).toBeNull();
   });
@@ -91,7 +90,6 @@ describe("workspace settings", () => {
     expect(typeof (await data.loadCompanyId(ws))).toBe("string");
     expect(await data.loadWorkspaceSolutions(ws)).toHaveProperty("solutions");
     expect(await data.loadWorkspaceForecastPlans(ws)).toEqual([]);
-    expect(typeof (await data.loadPendingIdeaCount(ws))).toBe("number");
   });
 
   it("finds an earlier version of a process, or null for the live one", async () => {
@@ -102,27 +100,18 @@ describe("workspace settings", () => {
   });
 });
 
-describe("suggestions page", () => {
+describe("change log page", () => {
   it("shows the log and the people behind it to owners only", async () => {
     actAs("owner");
-    const page = await companyData.loadSuggestionsPage("northbeam");
+    const page = await companyData.loadChangeLogPage("northbeam");
     expect(page!.workspace.slug).toBe("northbeam");
-    expect(page!.canEdit).toBe(true);
     expect(Array.isArray(page!.changes)).toBe(true);
     expect(page!.people[users.owner!.id]).toBe("owner@loaders.example.com");
     actAs("viewer");
-    const v = await companyData.loadSuggestionsPage("northbeam");
-    expect(v!.canEdit).toBe(false);
+    const v = await companyData.loadChangeLogPage("northbeam");
     expect(v!.changes).toBeNull();
     actAs("stranger");
-    expect(await companyData.loadSuggestionsPage("northbeam")).toBeNull();
-  });
-
-  it("counts what waits and finds no idea where there is none", async () => {
-    actAs("editor");
-    expect(typeof (await companyData.pendingSuggestionCount(ws))).toBe("number");
-    expect(await companyData.loadIdeaProposal(ws, randomUUID())).toBeNull();
-    expect(await companyData.loadIssueIdeas(ws, randomUUID())).toEqual({ ideas: [], lookups: expect.any(Object) });
+    expect(await companyData.loadChangeLogPage("northbeam")).toBeNull();
   });
 });
 

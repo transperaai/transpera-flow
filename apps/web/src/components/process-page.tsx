@@ -84,15 +84,12 @@ export function ProcessPage({
   notice,
   play,
   aboutInfo,
-  ideaIssueIds = [],
   share,
 }: {
   /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
   share?: ReactNode;
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
   aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
-  /** Issues with a solution idea waiting, for the status track's "Solution idea". */
-  ideaIssueIds?: readonly string[];
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
   bundle: ProcessBundle;
   /** The earlier version being shown (`?version=N`), or null for live. */
@@ -157,10 +154,9 @@ export function ProcessPage({
   const solData = mode === "demo" ? inTab : (solutions?.data ?? NO_SOLUTIONS_DATA);
   const solBase = solutions?.base ?? (mode === "demo" ? "/demo" : "");
   const canBuild = !isReadOnly(mode) && viewingVersion === null && !!solutions?.base;
-  const ideaSet = useMemo(() => new Set(ideaIssueIds), [ideaIssueIds]);
   const issueExtra = (issue: IssueRow) => (
     <IssueTrackView
-      track={trackOf(issue, linkedSolutions(solData, issue.id), ideaSet.has(issue.id))}
+      track={trackOf(issue, linkedSolutions(solData, issue.id))}
       base={solBase}
       buildHref={canBuild && (issue.status === "open" || issue.status === "testing") ? buildSolutionHref(solBase, issue, `${solBase}/p/${bundle.process.id}#issues`) : null}
     />

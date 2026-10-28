@@ -7,7 +7,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { processRatings, trailOf } from "@/lib/processes/rows";
 import { DEMO_LIVE_VERSION, demoBundleAtVersion, demoHistory } from "@/lib/history/demo";
 import { authorLabel } from "@/lib/history/versions";
-import { demoProposals } from "@/lib/suggestions/demo";
 import { parseVersion } from "@/lib/process-version";
 import { withDemoGroups } from "@/lib/demo/nested";
 import { demoBundle, demoSources } from "@/lib/sources/demo";
@@ -46,7 +45,6 @@ export default async function DemoProcessPage(props: PageProps<"/demo/p/[process
       editHref={`/demo/edit?process=${bundle.process.id}${nested === "1" ? "&nested=1" : ""}`}
       historyHref={`/demo/p/${bundle.process.id}/history`}
       solutions={{ data: { solutions: [], links: [] }, base: "/demo" }}
-      ideaIssueIds={demoProposals().flatMap((p) => (p.kind === "solution_idea" && p.status === "pending" && p.issue_id ? [p.issue_id] : []))}
       aboutInfo={{
         trail: trailOf({ id: bundle.process.id, parentId: bundle.process.parent_process_id }, byId).map((t) => t.name),
         hasDraft: false,

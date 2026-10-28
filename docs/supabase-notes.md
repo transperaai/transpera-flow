@@ -530,3 +530,17 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
   fallback path.
 - Production had 1 user with 2 identities (Google and email). Only the Google one became a Better Auth account; email
   sign-in doesn't exist on the new stack.
+
+## Drop Suggestions (28 Oct 2026, S2)
+
+Verified only against plain Postgres 16 (`packages/db/test/drop-suggestions.test.ts`), not against Neon. Migration
+`20270102000000_drop_suggestions.sql` drops `review_suggestions`, `private.apply_suggestion`, `review_proposals`, `build_proposal`,
+`submit_play_proposal`, `play_proposal_contacts`, `private.play_patch_problem`, the tables `suggestion_proposals` and `suggestions`
+and their two trigger functions, then replaces `audit_company_write`, `company_needs_review`, `import_process_bundle` and
+`import_workspace_bundle`.
+
+- [ ] On Neon, the migration runs on a copy that holds real `suggestions` and `suggestion_proposals` rows (it drops them with their data;
+      nothing is converted) and the `audit_log` rows with `target_table = 'suggestions'` stay readable in Settings -> Change log.
+- [ ] A backup exported before this migration (it carries `suggestions` / `suggestion_proposals` sections) still checks and restores, with
+      those sections left out.
+- [ ] `anon` still has EXECUTE on `open_share_link` only (no `submit_play_proposal`).

@@ -17,7 +17,6 @@ import type {
   RoleRow,
   SeasonalityRow,
   ServiceRow,
-  SuggestionTarget,
   WorkspaceRow,
 } from "./types";
 
@@ -69,7 +68,7 @@ export interface FieldMeta {
 }
 
 /** Tables of the company model with fields people see. */
-export type CompanyTable = SuggestionTarget | "roles";
+export type CompanyTable = "workspaces" | "services" | "people" | "clients" | "lead_sources" | "seasonality" | "demand_settings" | "roles";
 
 /**
  * Every company-model field a suggestion can set or a run snapshot records,

@@ -10,7 +10,6 @@ import { SCHEDULE_KEY, compareMaps, overallResult, pinProblems, stressConditions
 import { solutionType } from "@/lib/solutions/cards";
 import { runStress, stressKey, type StressRow } from "@/lib/solutions/stress";
 import { demoSolutionsNow, markDemoSolutionAi } from "@/lib/solutions/demo";
-import { markDemoIdeaBuilt } from "@/lib/demo/company-store";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkTarget } from "@/lib/solutions/verdict";
@@ -183,16 +182,14 @@ describe("the stress runner", () => {
   });
 });
 
-describe("the demo marks a solution built from an idea as an AI block", () => {
-  it("records the solution when Build it marks the idea built", () => {
+describe("the demo marks an AI solution as an AI block", () => {
+  it("records the solution once", () => {
     expect(demoSolutionsNow().aiIds).not.toContain("sol-direct");
     markDemoSolutionAi("sol-direct");
     expect(demoSolutionsNow().aiIds).toContain("sol-direct");
     markDemoSolutionAi("sol-direct");
     expect(demoSolutionsNow().aiIds.filter((i) => i === "sol-direct")).toHaveLength(1);
-    markDemoIdeaBuilt("any-idea", "sol-from-idea");
-    expect(demoSolutionsNow().aiIds).toContain("sol-from-idea");
-    expect(solutionType({ id: "sol-from-idea" }, demoSolutionsNow().aiIds)).toBe("AI block");
+    expect(solutionType({ id: "sol-direct" }, demoSolutionsNow().aiIds)).toBe("AI block");
   });
 });
 

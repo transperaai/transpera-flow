@@ -6,13 +6,11 @@ import { ShareButton } from "@/components/share/share-dialog";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { Page } from "@/components/shell/page";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
-import { IssueIdeas } from "@/components/idea-card";
-import { loadIssueIdeas } from "@/lib/company-data";
 import { findIssue } from "@/lib/issues/pages";
 import { loadProcessForEditing, loadProcessNames, loadMemberNames, loadWorkspaceIssueEvents, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
- * One issue (A48): where it sits on the map, what is wrong, the solutions tested, AI ideas and its history, with its
+ * One issue (A48): where it sits on the map, what is wrong, the solutions tested and its history, with its
  * target, owners, links and sources beside. `[number]` is the issue's number in the workspace (an id works too).
  */
 export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/issues/[number]">) {
@@ -29,7 +27,7 @@ export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/iss
   const own = processId && processId !== probe.live.process.id ? await loadProcessForEditing(slug, processId) : probe;
   const { live, draft } = own ?? probe;
   const bundle = isUnpublished(live) && draft ? draft : live;
-  const [canEdit, sources, processes, events, liveRevisions, viewerId, solutions, memberNames, aiIdeas] = await Promise.all([
+  const [canEdit, sources, processes, events, liveRevisions, viewerId, solutions, memberNames] = await Promise.all([
     canEditWorkspace(ws),
     loadWorkspaceSources(ws),
     loadProcessNames(ws),
@@ -38,7 +36,6 @@ export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/iss
     currentUserId(),
     loadWorkspaceSolutions(ws),
     loadMemberNames(ws),
-    loadIssueIdeas(ws, issue.id),
   ]);
   const base = `/w/${slug}`;
   return (
@@ -56,18 +53,6 @@ export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/iss
         buildHref={buildSolutionHref(base, issue, `${base}/issues/${issue.number}`) ?? solutionEditorHref(base, bundle.process.id, { issueId: issue.id })}
         viewerId={viewerId}
         liveRevisions={liveRevisions}
-        ideas={
-          <IssueIdeas
-            key="ideas"
-            issueId={issue.id}
-            base={base}
-            from={`${base}/issues/${issue.number}`}
-            canEdit={canEdit}
-            initial={aiIdeas.ideas}
-            lookups={aiIdeas.lookups}
-            workspaceId={ws}
-          />
-        }
         solutions={solutions}
         memberNames={memberNames}
         share={canEdit && issue.number != null ? <ShareButton slug={slug} kind="issue" targetId={issue.id} what={`Issue #${issue.number}`} /> : undefined}

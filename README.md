@@ -103,31 +103,19 @@ claude mcp add --transport http transpera-flow https://<host>/api/mcp \
   --header "Authorization: Bearer tf_…"
 ```
 
-Tools: `list_workspaces`, `set_active_workspace`, `get_workspace_summary`,
-`get_process`, `run_scenario`, and the analysis tools `save_scenario`,
-`compare_scenarios`, `check_robustness` (time-capped; a capped check is flagged
-`partial`), `get_bottlenecks` (with the shadow price: extra completions per
-quarter from one more FTE in the top bottleneck role; see
-`packages/engine/src/shadow-price.ts`), `log_issue` and `list_issues`, and the
-process-building tools `add_source` (it needs `links`, or `link_later: true` when the next call cites it), `link_source`, `create_process`, `add_step`,
-`update_step`, `remove_step`, `connect_steps`, `set_routing`, `import_process`,
-`publish_process`, `discard_draft`, `list_templates` and `create_from_template`, and the first-principles tools `get_first_principles`
-and `update_first_principles` (Claude fills them in from transcripts, into the draft).
-Building tools write only into a process's draft (`open_draft`), never live;
-left-out numbers become assumptions, cited numbers keep their evidence, and
-values someone entered are flagged as conflicts instead of overwritten
-(`packages/mcp/src/building.ts`). Every MCP row write is audit-logged with
-`actor_kind = 'mcp'`. The company-model tools are `set_company`, `upsert_service`,
-`upsert_person`, `upsert_client`, `upsert_role`, `set_demand` and
-`list_suggestions`: they create suggestions a person accepts on the Suggestions
-page, and the database refuses company-model writes made with a token, roles
-included. A missing role is suggested with `upsert_role` and can be used in
-`import_process` once accepted. The endpoint acts as the token's user under
-RLS through the same database pool as the web app; no extra environment variables. How it
-checks the token and acts as its owner:
+The server is **read-only**: Claude and ChatGPT query and report, and nothing they call writes company data, sources, issues,
+drafts or processes (docs/plans/cut-list.md item 5). Tools: `list_workspaces`, `set_active_workspace` (the only state it
+changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`, `get_first_principles`,
+`list_issues`, `list_solutions`, `list_sources`, `list_templates`, `run_scenario`, `compare_scenarios`, `check_robustness`
+(time-capped; a capped check is flagged `partial`) and `get_bottlenecks` (with the shadow price: extra completions per quarter
+from one more FTE in the top bottleneck role; see `packages/engine/src/shadow-price.ts`). `run_scenario` and
+`compare_scenarios` take their changes as arguments and save nothing. The database also refuses company-model writes made with a
+token. The endpoint acts as the token's user under RLS through the same database pool as the web app; no extra environment
+variables. How it checks the token and acts as its owner:
 [`docs/adr/0018-mcp-tokens-checked-in-app-code.md`](docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 
-To turn interview transcripts into a draft process, use the `/extract-process` skill: [`docs/extraction/README.md`](docs/extraction/README.md).
+To turn interview transcripts into a process, use the `process-file` skill and upload the files in the app:
+[`docs/import/README.md`](docs/import/README.md). The upload code lives in `packages/db/src/process-import`.
 
 ## Error reporting (Sentry)
 

@@ -19,10 +19,10 @@ const UUID_WHOLE = new RegExp(`^${UUID}$`);
 // test/monitoring-scrub.test.ts checks every static route segment under src/app is here, and that no name is.
 export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app).
-  "access", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "churn-drivers", "demo", "edit",
+  "access", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "changes", "churn-drivers", "demo", "edit",
   "export", "first-principles", "forecast", "history", "issues", "levers", "library", "login", "logo", "market", "mcp", "monitoring-check",
   "overview", "p", "people", "privacy", "processes", "restore", "s", "settings", "share", "signout", "solutions",
-  "sources", "suggestions", "tokens", "w",
+  "sources", "tokens", "w",
   // Next's build files.
   "_next", "chunks", "css", "media", "static",
   // Better Auth (/api/auth/sign-in/social, /api/auth/get-session), and `v1`, the version prefix of an API the app calls.

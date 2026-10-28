@@ -20,7 +20,7 @@ describe("workspaceNav: groups and order", () => {
     expect(g.map((x) => x.label)).toEqual([null, "Improve", "Company"]);
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
-      ["issues", "solutions", "library", "suggestions"],
+      ["issues", "solutions", "library"],
       ["sources", "people", "forecast", "settings", "access"],
     ]);
   });
@@ -31,7 +31,6 @@ describe("workspaceNav: groups and order", () => {
       "Issues",
       "Solutions",
       "Block library",
-      "Suggestions",
       "Sources",
       "People",
       "Forecast",
@@ -66,7 +65,6 @@ describe("workspaceNav: the active item", () => {
       ["/w/s/issues", "issues"],
       ["/w/s/solutions", "solutions"],
       ["/w/s/blocks", "library"],
-      ["/w/s/suggestions", "suggestions"],
       ["/w/s/sources", "sources"],
     ] as const)
       expect(active(nav(path))).toEqual([key]);
@@ -92,7 +90,6 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/issues",
       "/w/s/solutions",
       "/w/s/blocks",
-      "/w/s/suggestions",
       "/w/s/sources",
       "/w/s/people",
       "/w/s/forecast",
@@ -108,12 +105,11 @@ describe("workspaceNav: hrefs", () => {
 });
 
 describe("workspaceNav: counts", () => {
-  const counts = { processes: 3, openIssues: 4, solutions: 0, pendingSuggestions: 2, unlinkedSources: 1 };
-  it("counts processes, open issues and pending suggestions, and warns about unlinked sources", () => {
+  const counts = { processes: 3, openIssues: 4, solutions: 0, unlinkedSources: 1 };
+  it("counts processes and open issues, and warns about unlinked sources", () => {
     const g = nav("/w/s", { counts });
     expect(item(g, "processes")).toMatchObject({ count: 3, tone: "plain" });
     expect(item(g, "issues")).toMatchObject({ count: 4, tone: "plain", countNoun: "open" });
-    expect(item(g, "suggestions")).toMatchObject({ count: 2, tone: "ai", countNoun: "pending" });
     expect(item(g, "sources")).toMatchObject({ count: 1, tone: "warn" });
   });
   it("has no count where nothing is counted", () => {
@@ -125,17 +121,16 @@ describe("workspaceNav: counts", () => {
   });
   it("names a count for screen readers", () => {
     expect(countLabel(item(nav("/w/s", { counts }), "issues") as NavItem)).toBe("Issues, 4 open");
-    expect(countLabel(item(nav("/w/s", { counts }), "suggestions") as NavItem)).toBe("Suggestions, 2 pending");
   });
 });
 
 describe("demoNav", () => {
-  const d = (pathname: string, counts = { pendingSuggestions: 2, openIssues: 5, processes: 4 }) => demoNav({ pathname, counts });
+  const d = (pathname: string, counts = { openIssues: 5, processes: 4 }) => demoNav({ pathname, counts });
   it("lists Northbeam's items in the same groups, without Settings or Access", () => {
     const g = d("/demo");
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
-      ["issues", "solutions", "library", "suggestions"],
+      ["issues", "solutions", "library"],
       ["sources", "people", "forecast", "levers"],
     ]);
   });
@@ -157,15 +152,13 @@ describe("demoNav", () => {
     expect(active(d("/demo/p/abc"))).toEqual(["processes"]);
     expect(active(d("/demo/processes"))).toEqual(["processes"]);
     expect(active(d("/demo/issues"))).toEqual(["issues"]);
-    expect(active(d("/demo/suggestions"))).toEqual(["suggestions"]);
     expect(active(d("/demo/sources"))).toEqual(["sources"]);
     expect(active(d("/demo/overview"))).toEqual(["overview"]);
     expect(active(d("/demo/people"))).toEqual(["people"]);
     expect(active(d("/demo/forecast"))).toEqual(["forecast"]);
   });
   it("sends Issues to its own page", () => expect(item(d("/demo"), "issues")).toMatchObject({ href: "/demo/issues" }));
-  it("counts the seed's open issues, pending suggestions and processes", () => {
-    expect(item(d("/demo"), "suggestions")?.count).toBe(2);
+  it("counts the seed's open issues and processes", () => {
     expect(item(d("/demo"), "issues")?.count).toBe(5);
     expect(item(d("/demo"), "processes")?.count).toBe(4);
   });

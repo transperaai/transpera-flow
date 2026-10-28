@@ -8,7 +8,7 @@ import { ShareButton } from "@/components/share/share-dialog";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
-import { loadIdeaIssueIds, loadLastChange } from "@/lib/process-page/data";
+import { loadLastChange } from "@/lib/process-page/data";
 import { loadProcessFirstPrinciples } from "@/lib/first-principles/data";
 import { processRatings, trailOf } from "@/lib/processes/rows";
 import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
@@ -41,14 +41,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     currentUserId(),
     loadMemberNames(live.workspace.id),
   ]);
-  // Who last published the live version, and which of this process's issues a solution idea is waiting for.
-  const [lastChange, ideaIssueIds] = await Promise.all([
-    isUnpublished(live) ? null : loadLastChange(live.revision.id, memberNames),
-    loadIdeaIssueIds(
-      live.workspace.id,
-      issues.filter((i) => i.process_id === live.process.id || i.links.some((l) => l.process_id === live.process.id)).map((i) => i.id),
-    ),
-  ]);
+  // Who last published the live version.
+  const lastChange = isUnpublished(live) ? null : await loadLastChange(live.revision.id, memberNames);
   // First principles of the version on screen, and whether the draft has answers live doesn't (A54).
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const fpIds = [shown.revision.id, ...(draft && draft !== shown ? [draft.revision.id] : [])];
@@ -81,7 +75,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
-      ideaIssueIds={ideaIssueIds}
       aboutInfo={{ trail: trailOf({ id: live.process.id, parentId: live.process.parent_process_id }, byId).map((t) => t.name), hasDraft: draft !== null && !isUnpublished(live), lastChange }}
       // Owners and editors share the published version of an ordinary process (not an earlier version, an archived one or the company map).
       share={canEdit && !earlier && !archivedAt && !isUnpublished(live) && !live.process.is_company ? <ShareButton slug={slug} kind="process" targetId={live.process.id} what={live.process.name} /> : undefined}

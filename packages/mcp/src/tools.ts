@@ -1,14 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { PROCESS_TEMPLATES } from "@transpera-flow/db/process-import";
 import { listProcesses, loadLiveCompanyPart, loadProcessBundle, ModelError, toEngineModel } from "@transpera-flow/db";
 import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
 import { ANALYSIS_TOOL_NAMES, registerAnalysisTools } from "./analysis-tools";
-import { registerSuggestionTools, SUGGESTION_TOOL_NAMES } from "./suggestion-tools";
-import { BUILDING_TOOL_NAMES, registerBuildingTools } from "./building-tools";
 import { FIRST_PRINCIPLES_TOOL_NAMES, registerFirstPrinciplesTools } from "./first-principles-tools";
-import { FINDINGS_TOOL_NAMES, registerFindingsTools } from "./findings-tools";
+import { FACT_TOOL_NAMES, registerFactTools } from "./facts-tools";
 
 /** The browser's defaults (apps/web useSimulation): 30 replications, seed 1. */
 export const DEFAULT_REPS = 30;
@@ -21,11 +20,10 @@ export const TOOL_NAMES = [
   "get_workspace_summary",
   "get_process",
   "run_scenario",
+  "list_templates",
   ...ANALYSIS_TOOL_NAMES,
-  ...SUGGESTION_TOOL_NAMES,
-  ...BUILDING_TOOL_NAMES,
   ...FIRST_PRINCIPLES_TOOL_NAMES,
-  ...FINDINGS_TOOL_NAMES,
+  ...FACT_TOOL_NAMES,
 ] as const;
 
 const workspaceArg = z
@@ -91,7 +89,10 @@ export function summarizeRun(model: EngineModel, result: SimulationResult) {
   };
 }
 
-/** An MCP server exposing the v1 tools (read, analysis and process building), acting as the context's user. */
+/**
+ * An MCP server exposing the read-only tools, acting as the context's user. Nothing it exposes writes company data (docs/plans/
+ * cut-list.md item 5): `set_active_workspace` only stores a preference on the API token, and `run_scenario` simulates without saving.
+ */
 export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: "transpera-flow", version: "0.1.0" });
 
@@ -203,7 +204,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, workspace, assumptions);
         const proc = await resolveProcess(ctx, ws, process, assumptions, { allowCompany: true });
-        // A process built over MCP has only a draft until it is first published.
+        // A process that has not been published yet has only a draft.
         const which = revision ?? (!proc.live_revision_id && proc.draft_revision_id ? "draft" : "live");
         if (!revision) assumptions.push(which === "live" ? "revision defaulted to live." : "revision defaulted to draft: the process hasn't been published yet.");
         const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, which));
@@ -282,10 +283,30 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       }),
   );
 
+  server.registerTool(
+    "list_templates",
+    {
+      title: "List templates",
+      description: "The process templates the app can start a new process from, with their steps.",
+      annotations: { readOnlyHint: true },
+    },
+    () =>
+      runTool(async () => ({
+        templates: PROCESS_TEMPLATES.map((t) => ({
+          id: t.id,
+          name: t.name,
+          industry: t.industry,
+          kind: t.kind,
+          entity_name: t.entity_name,
+          description: t.description,
+          steps: t.steps.map((s) => ({ name: s.name, kind: s.kind ?? "task" })),
+        })),
+        text: `${PROCESS_TEMPLATES.length} ${PROCESS_TEMPLATES.length === 1 ? "template" : "templates"}: ${PROCESS_TEMPLATES.map((t) => `${t.name} (${t.kind})`).join(", ")}.`,
+      })),
+  );
+
   registerAnalysisTools(server, ctx);
-  registerSuggestionTools(server, ctx);
-  registerBuildingTools(server, ctx);
   registerFirstPrinciplesTools(server, ctx);
-  registerFindingsTools(server, ctx);
+  registerFactTools(server, ctx);
   return server;
 }

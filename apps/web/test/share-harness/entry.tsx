@@ -21,7 +21,6 @@ import { ShareButton } from "@/components/share/share-dialog";
 import { ShareLinksTable } from "@/components/share/share-links-table";
 import { SharedView } from "@/components/share/shared-view";
 import type { ShareInput } from "@/lib/share/input";
-import type { PlayIdeaInput, PlayResult } from "@/lib/share/play-input";
 import type { ShareLinkRow } from "@/lib/share/list";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { demoBundle } from "@/lib/sources/demo";
@@ -30,8 +29,8 @@ declare global {
   interface Window {
     workerScripts: Record<string, string>;
     workerPosts: string[];
-    /** `play` (B4): a play link, with the kinds the workspace hides; the Send action is stood in for (`playSubmits`, `playAnswer`). */
-    mountShare: (kind: ShareKind, toggles: ShareToggles, options?: { mode?: "view" | "play"; hidden?: string[]; visitorEmail?: string | null }) => { clientNames: string[]; personNames: string[]; personFirst: string[] };
+    /** `play` (B4): a play link, with the kinds the workspace hides. */
+    mountShare: (kind: ShareKind, toggles: ShareToggles, options?: { mode?: "view" | "play"; hidden?: string[]}) => { clientNames: string[]; personNames: string[]; personFirst: string[] };
     unmountShare: () => void;
     /** The Share dialog, with its Server Action stood in for: what it asked to make, and what to answer. */
     mountShareDialog: () => void;
@@ -41,8 +40,6 @@ declare global {
     mountShareList: (links: ShareLinkRow[]) => void;
     shareRefreshes: string[];
     shareRevokes: string[];
-    playSubmits: PlayIdeaInput[];
-    playAnswer: PlayResult;
   }
 }
 
@@ -151,18 +148,12 @@ function snapshotOf(kind: ShareKind, toggles: ShareToggles, hidden: string[] = [
 }
 
 let root: Root | null = null;
-window.playSubmits = [];
-window.playAnswer = { status: "ok" };
 window.mountShare = (kind, toggles, options = {}) => {
   const { snapshot, secrets } = snapshotOf(kind, toggles, options.hidden);
   root = createRoot(document.getElementById("root")!);
   root.render(
     <SharedView
-      data={{ snapshot, snapshotAt: "2026-10-05T09:00:00Z", expiresAt: toggles.people || toggles.financials ? "2026-11-05T23:59:59Z" : null, mode: options.mode ?? "view", token: "x".repeat(43), visitorEmail: options.visitorEmail ?? null }}
-      submit={async (input) => {
-        window.playSubmits.push(input);
-        return window.playAnswer;
-      }}
+      data={{ snapshot, snapshotAt: "2026-10-05T09:00:00Z", expiresAt: toggles.people || toggles.financials ? "2026-11-05T23:59:59Z" : null, mode: options.mode ?? "view" }}
     />,
   );
   return {

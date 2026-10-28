@@ -10,7 +10,6 @@ import {
   loadSetupCounts,
   type SetupCounts,
   loadSolutionIssues,
-  loadProposals,
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
@@ -215,7 +214,7 @@ export async function loadWorkspaceSolutions(workspaceId: string, processId?: st
     const db = await getDb();
     const [solutions, links] = await Promise.all([loadSolutions(db, workspaceId, processId), loadSolutionIssues(db, workspaceId)]);
     const ids = new Set(solutions.map((s) => s.id));
-    return { solutions, links: links.filter((l) => ids.has(l.solution_id)), aiIds: await loadAiSolutionIds(db, workspaceId) };
+    return { solutions, links: links.filter((l) => ids.has(l.solution_id)) };
   } catch (err) {
     console.error("Couldn't load the solutions; showing none.", err instanceof Error ? err.message : err);
     return { solutions: [], links: [] };
@@ -232,16 +231,6 @@ export async function loadWorkspaceForecastPlans(workspaceId: string): Promise<F
   } catch (err) {
     console.error("Couldn't load the forecast plans; showing none.", err instanceof Error ? err.message : err);
     return [];
-  }
-}
-
-/** How many AI solution ideas are waiting in Suggestions (pending proposals of kind solution idea). Zero if they can't be read. */
-export async function loadPendingIdeaCount(workspaceId: string): Promise<number> {
-  try {
-    return (await loadProposals(await getDb(), workspaceId, "pending")).filter((p) => p.kind === "solution_idea").length;
-  } catch (err) {
-    console.error("Couldn't count AI ideas; showing none.", err instanceof Error ? err.message : err);
-    return 0;
   }
 }
 
@@ -269,23 +258,6 @@ export async function loadMemberNames(workspaceId: string): Promise<Record<strin
   } catch (err) {
     console.error("Couldn't load member names; showing none.", err instanceof Error ? err.message : err);
     return {};
-  }
-}
-
-/**
- * The ids of solutions built from an AI idea: a proposal of kind solution idea that was built records the solution it made in
- * `applied.solution_id`. Empty if they can't be read (so every solution reads "By hand").
- */
-async function loadAiSolutionIds(db: Awaited<ReturnType<typeof getDb>>, workspaceId: string): Promise<string[]> {
-  try {
-    // Only what is needed: a built solution idea's `applied`, which names the solution `build_proposal` made.
-    const data = await db.selectFrom("suggestion_proposals").select("applied").where("workspace_id", "=", workspaceId).where("kind", "=", "solution_idea").where("status", "=", "built").execute();
-    return data.flatMap((p) => {
-      const id = (p.applied as { solution_id?: unknown } | null)?.solution_id;
-      return typeof id === "string" ? [id] : [];
-    });
-  } catch {
-    return [];
   }
 }
 

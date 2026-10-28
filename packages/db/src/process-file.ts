@@ -8,9 +8,7 @@
 // goes ahead (something is odd, or was filled in for you). Every message names the step or link it is about.
 
 import {
-  checkCompany,
   checkFirstPrinciples,
-  checkProposals,
   checkSources,
   PROCESS_FILE_FORMAT_2,
   readAssumed,
@@ -19,9 +17,7 @@ import {
   STEP_FIELDS_2,
   type EvidenceField,
   type FileCitation,
-  type FileCompany,
   type FileFirstPrinciples,
-  type FileProposal,
   type FileRange,
   type FileSource,
   type Env,
@@ -104,8 +100,6 @@ export interface ProcessFile {
   groups: ProcessFileGroup[];
   // What /2 adds (a /1 file never has these).
   sources?: FileSource[];
-  company?: FileCompany;
-  proposals?: FileProposal[];
   first_principles?: FileFirstPrinciples;
 }
 
@@ -221,7 +215,7 @@ export const PROCESS_FILE_EXAMPLE = {
 // ---------------------------------------------------------------------------
 
 const TOP_FIELDS = ["$schema", "format", "name", "kind", "description", "entity_name", "steps", "links", "groups"];
-const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "company", "proposals", "first_principles"];
+const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "first_principles"];
 const STEP_FIELDS = ["id", "name", "type", "role", "person", "hands_on_hours", "wait_hours", "rework_rate", "notes", "x", "y"];
 const STEP_FIELDS_V2 = [...STEP_FIELDS, ...STEP_FIELDS_2];
 const LINK_FIELDS = ["from", "to", "probability", "label"];
@@ -529,8 +523,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   }
 
   // What /2 adds: where rework goes, then the sections that refer to the steps.
-  let company: FileCompany | undefined;
-  let proposals: FileProposal[] = [];
   let firstPrinciples: FileFirstPrinciples | undefined;
   if (v2) {
     for (const s of steps) {
@@ -544,8 +536,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       }
     }
     const view = { ids, has: (id: string) => byId.has(id), name: stepName };
-    company = checkCompany(input.company, env);
-    proposals = checkProposals(input.proposals, view, env);
     firstPrinciples = checkFirstPrinciples(input.first_principles, view, env);
   }
 
@@ -669,7 +659,7 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       steps: normalised,
       links,
       groups,
-      ...(v2 ? { sources: env.sources, ...(company ? { company } : {}), proposals, ...(firstPrinciples ? { first_principles: firstPrinciples } : {}) } : {}),
+      ...(v2 ? { sources: env.sources, ...(firstPrinciples ? { first_principles: firstPrinciples } : {}) } : {}),
     },
     errors,
     warnings,

@@ -77,7 +77,7 @@ async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
       // As JSON, the way PostgREST answers (dates as text, numbers as numbers), not as pg's Date objects.
-      return (await c.query(`select to_jsonb(t) as j from (select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
+      return (await c.query(`select to_jsonb(t) as j from (select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit: true, now: new Date("2026-10-05T12:00:00Z") });
@@ -116,8 +116,8 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
   "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events", "suggestions",
-  "suggestion_proposals", "solutions", "audit_log",
+  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -370,8 +370,6 @@ async function mini(): Promise<Mini> {
   );
   await q("insert into issues (workspace_id, type, title, scenario_id, owner_person_id, status) values ($1, 'idea', 'Try the downturn', $2, $3, 'in_progress')", [ws, downturn, person!.id]);
   await q("insert into issues (workspace_id, type, title, source, status, resolution) values ($1, 'delay', 'Quotes are slow', 'manual', 'done', 'wont_fix')", [ws]);
-  await q("insert into suggestions (workspace_id, target_table, target_id, patch) values ($1, 'workspaces', $1, '{\"set\": {\"hours_per_week\": 35}}')", [ws]);
-  await q("insert into suggestion_proposals (workspace_id, kind, title, detail) values ($1, 'issue', 'Proposed issue', 'Looks slow')", [ws]);
   miniCache = { ws, ...ids, library: { downturn }, custom: custom!.id as string };
   return miniCache;
 }
@@ -471,15 +469,12 @@ describe("the awkward cases", () => {
     expect(issue!.scenario_id).toBe(downturn.id);
   });
 
-  it("points a suggestion that targets the workspace at the new workspace (rank 0), and applies the settings for an owner", async () => {
+  it("applies the settings for an owner", async () => {
     const m = await mini();
     const { ws, result } = await restoreInto(await bundleOf(m.ws));
     expect(result.settings).toBe("applied");
     const [row] = await q("select settings from workspaces where id = $1", [ws]);
     expect(row!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
-    const s = await q("select target_id, status, created_via, import_source from suggestions where workspace_id = $1 and target_table = 'workspaces'", [ws]);
-    expect(s).toEqual([{ target_id: ws, status: "pending", created_via: "upload", import_source: "backup.json" }]);
-    expect(await q("select title, status, created_via, import_source from suggestion_proposals where workspace_id = $1", [ws])).toEqual([{ title: "Proposed issue", status: "pending", created_via: "upload", import_source: "backup.json" }]);
   });
 
   it("keeps the order of market conditions: restored custom ones keep their old date, so they list before the new presets", async () => {
@@ -501,7 +496,7 @@ describe("the awkward cases", () => {
 });
 
 describe("what is left out stays out", () => {
-  it("writes drafts, no solutions or history, no files, only pending suggestions, and the counts of the source minus the left-outs", async () => {
+  it("writes drafts, no solutions or history, no files, and the counts of the source minus the left-outs", async () => {
     const source = NORTHBEAM_WORKSPACE_ID;
     const bundle = await bundleOf(source);
     const { ws, result } = await restoreInto(bundle, "owner", { label: "northbeam.json" });
@@ -515,10 +510,6 @@ describe("what is left out stays out", () => {
     expect(await n("market_conditions", ws)).toBe(await n("market_conditions", source));
     expect(await n("issues", ws)).toBe(await n("issues", source, "source <> 'detected'"));
     expect(await n("issue_links", ws)).toBeGreaterThanOrEqual(0);
-    expect(await n("suggestions", ws)).toBe(await n("suggestions", source, "status = 'pending'"));
-    expect(await n("suggestion_proposals", ws)).toBe(await n("suggestion_proposals", source, "status = 'pending'"));
-    expect(await n("suggestions", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
-    expect(await n("suggestion_proposals", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
     // A source keeps its link to the original (the uploaded files and their columns are gone: step 4).
     expect(await n("sources", ws, "file_url is not null")).toBe(await n("sources", source, "file_url is not null"));
     // Steps and edges: those of the live versions of the source's processes.
@@ -544,21 +535,13 @@ describe("what is left out stays out", () => {
 });
 
 describe("who may restore", () => {
-  it("lets an editor restore, with the workspace settings as one pending suggestion an owner accepts", async () => {
+  it("lets an editor restore, with the workspace settings left out", async () => {
     const m = await mini();
     const bundle = await bundleOf(m.ws);
     const { ws, result } = await restoreInto(bundle, "editor", { canManage: false, label: "mini.json" });
-    expect(result.settings).toBe("suggested");
+    expect(result.settings).toBe("skipped");
     const [row] = await q("select settings from workspaces where id = $1", [ws]);
     expect(row!.settings).not.toMatchObject({ hours_per_week: 37 });
-    const pending = await q("select id, patch, created_via, import_source, status from suggestions where workspace_id = $1 and note = 'Workspace settings from a backup.'", [ws]);
-    expect(pending.length).toBe(1);
-    expect(pending[0]).toMatchObject({ created_via: "upload", import_source: "mini.json", status: "pending" });
-    const owner = await member(ws, "owner");
-    const reply = await as(owner.claims, async (c) => (await c.query("select public.review_suggestions($1::uuid[], 'accept') as r", [[pending[0]!.id]])).rows[0].r);
-    expect(JSON.stringify(reply)).not.toContain("error");
-    const [after] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(after!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
   });
 
   const ok: [string, (ws: string) => Promise<User>][] = [
@@ -655,12 +638,12 @@ describe("all or nothing", () => {
   it("leaves nothing behind when the last section fails (processes, map versions and the audit log included)", async () => {
     const { plan } = await miniPlan();
     const bad: ImportPlan = structuredClone(plan);
-    bad.suggestions.push({ id: `${PLACEHOLDER_PREFIX}ffffffffff01`, target_table: "not_a_table", target_id: null, patch: { set: {} }, evidence: [], note: null } as Row);
+    bad.source_links.push({ source_id: bad.sources[0]!.id, kind: "not_a_kind" } as Row);
     const ws = await newWorkspace();
     const before = await snapshot(ws);
     const e = await failure(() => restoreAs(admin, ws, bad));
-    expect(e.hint).toBe("section:suggestions");
-    expect(e.message).toMatch(/suggestions could not be restored/);
+    expect(e.hint).toBe("section:source_links");
+    expect(e.message).toMatch(/source_links could not be restored/);
     expect(await snapshot(ws)).toEqual(before);
   });
 });
@@ -693,7 +676,6 @@ describe("ids", () => {
     attempts.push({ where: "issues.owner_ids", mutate: (p) => { const i = p.issues.find((r) => Array.isArray(r.owner_ids) && r.owner_ids.length > 0); if (!i) return false; (i.owner_ids as string[])[0] = real; return true; } });
     attempts.push({ where: "issues.links", mutate: (p) => { const i = p.issues.find((r) => Array.isArray(r.links) && r.links.length > 0); if (!i) return false; (i.links as Row[])[0]!.process_id = real; return true; } });
     attempts.push({ where: "market_schedule.condition_id", mutate: (p) => { const r = p.market_schedule.find((x) => x.condition_id != null); if (!r) return false; r.condition_id = real; return true; } });
-    attempts.push({ where: "suggestions.target_id", mutate: (p) => { const r = p.suggestions.find((x) => x.target_id != null); if (!r) return false; r.target_id = real; return true; } });
     void flat;
     let tried = 0;
     for (const a of attempts) {
@@ -703,17 +685,9 @@ describe("ids", () => {
       const e = await failure(() => restoreAs(admin, ws, copy));
       expect(e.code, a.where).toBe("22023");
     }
-    // Northbeam has rows for most columns; the few without (no suggestions, say) are covered by the Mini plan below.
+    // Northbeam has rows for most columns; the few without are covered by the Mini plan below.
     expect(tried).toBeGreaterThan(25);
     expect(Number((await q("select count(*) from roles where workspace_id = $1", [ws]))[0]!.count)).toBe(0);
-  });
-
-  it("refuses a real uuid in the Mini plan's suggestion target and issue links", async () => {
-    const { plan } = await miniPlan();
-    const ws = await newWorkspace();
-    const copy: ImportPlan = structuredClone(plan);
-    copy.suggestions[0]!.target_id = "11111111-2222-4333-8444-555555555555";
-    expect((await failure(() => restoreAs(admin, ws, copy))).code).toBe("22023");
   });
 
   it("leaves a uuid typed into free text alone", async () => {
@@ -750,7 +724,7 @@ describe("SQL and TS agree", () => {
     expect(allow).toEqual(JSON.parse(JSON.stringify(IMPORT_COLUMNS)));
     const list = (name: string) => [...(new RegExp(`${name} constant text\\[\\] := array\\[(.*?)\\];`, "s").exec(src)![1]!.matchAll(/'([^']+)'/g))].map((m) => m[1]!);
     const tsRefs = Object.entries(IMPORT_REFS).flatMap(([s, refs]) => refs.map((r) => `${s}.${r.col}`));
-    expect(list("ref_cols").sort()).toEqual([...tsRefs, "market_schedule.condition_id", "suggestions.target_id"].sort());
+    expect(list("ref_cols").sort()).toEqual([...tsRefs, "market_schedule.condition_id"].sort());
     expect(list("step_ref_cols").sort()).toEqual(IMPORT_STEP_REFS.map((r) => r.col).sort());
   });
 
@@ -766,9 +740,8 @@ describe("SQL and TS agree", () => {
 
   it("restores a plan that carries every allowed column of the tables that take them (the columns exist)", async () => {
     // Each allowed column of each flat table exists in that table (so the dynamic insert can name it).
-    const tables: Record<string, string> = { proposals: "suggestion_proposals" };
     for (const [section, columns] of Object.entries(IMPORT_COLUMNS)) {
-      const table = tables[section] ?? section;
+      const table = section;
       const have = (await q("select column_name from information_schema.columns where table_schema = 'public' and table_name = $1", [table])).map((r) => r.column_name);
       for (const c of columns) expect(have, `${table}.${c}`).toContain(c);
     }
@@ -797,8 +770,6 @@ describe("limits", () => {
     ["clients", (p: ImportPlan) => { p.clients = rows(L.clients + 1); }],
     ["scenarios", (p: ImportPlan) => { p.scenarios = rows(L.scenarios + 1); }],
     ["blocks", (p: ImportPlan) => { p.blocks = rows(L.blocks + 1); }],
-    ["suggestions", (p: ImportPlan) => { p.suggestions = rows(L.suggestions + 1); }],
-    ["proposals", (p: ImportPlan) => { p.proposals = rows(L.proposals + 1); }],
     ["role assignments", (p: ImportPlan) => { p.person_roles = rows(L.personRoles + 1); }],
     ["skills", (p: ImportPlan) => { p.person_skills = rows(L.personSkills + 1); }],
     ["per-person times", (p: ImportPlan) => { p.person_capacity_factors = rows(L.capacityFactors + 1); }],

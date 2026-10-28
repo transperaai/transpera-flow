@@ -1,6 +1,6 @@
 "use server";
 
-import { createProcessFromTemplate, PROCESS_TEMPLATES, ToolError } from "@transpera-flow/mcp";
+import { createProcessFromTemplate, PROCESS_TEMPLATES, ImportError } from "@transpera-flow/db/process-import";
 import { isId } from "@/lib/editor/validate";
 import type { LibraryCreateInput, LibraryCreateResult } from "@/lib/editor/library-create";
 import { rpc } from "@transpera-flow/db/client";
@@ -31,10 +31,10 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
     let name = typeof input.name === "string" && input.name.trim() ? input.name.trim().slice(0, MAX_NAME) : template.name;
     for (let n = 2; !input.name && taken.has(name.toLowerCase()) && n < 100; n++) name = `${template.name} ${n}`;
     try {
-      const made = await createProcessFromTemplate({ db, tokenHash: "", userId, activeWorkspaceId: workspaceId, today: new Date().toISOString().slice(0, 10) }, workspaceId, template.id, name);
+      const made = await createProcessFromTemplate({ db, userId }, workspaceId, template.id, name);
       return { process: { ...made, live: false } };
     } catch (e) {
-      if (e instanceof ToolError) {
+      if (e instanceof ImportError) {
         if (e.code === "name_taken") return { error: "There is already a process with that name. Give it another name." };
         if (e.code === "forbidden") return { error: "Only editors and owners can add processes." };
       }

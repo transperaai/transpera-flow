@@ -1,7 +1,7 @@
 "use client";
 
 // The Solutions list (issue #115, A50; prototype: "Solutions"): every solution that has been built and simulated, as cards, with
-// "✎ New solution" and, when AI ideas are waiting, a bar that links to Suggestions. The demo keeps its solutions in this tab.
+// "✎ New solution". The demo keeps its solutions in this tab.
 
 import Link from "next/link";
 import { useState } from "react";
@@ -72,7 +72,6 @@ export function SolutionsList({
   mode,
   viewerId,
   memberNames,
-  ideas = 0,
 }: {
   /** As loaded with the page; the demo ignores it and shows what this tab has saved. */
   data?: SolutionsData;
@@ -84,28 +83,12 @@ export function SolutionsList({
   mode: "live" | "demo" | "readonly";
   viewerId?: string | null;
   memberNames?: Readonly<Record<string, string>>;
-  /** AI ideas waiting in Suggestions (A52 supplies the count). Zero hides the bar. */
-  ideas?: number;
 }) {
   const inTab = useDemoSolutions();
   const shown = mode === "demo" ? inTab : (data ?? NO_SOLUTIONS_DATA);
   const canEdit = mode !== "readonly";
   return (
     <div className="flex flex-col gap-4" data-solutions-list>
-      {ideas > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-token border border-line bg-panel px-3 py-2 text-sm" data-ideas-bar>
-          <span>
-            <b>
-              {ideas} AI {ideas === 1 ? "idea" : "ideas"}
-            </b>{" "}
-            not built yet. Ideas live in Suggestions until someone builds them; then they become solutions here.
-          </span>
-          <Link href={`${base}/suggestions`} className="font-medium text-accent hover:underline">
-            See ideas →
-          </Link>
-          <Help {...SOLUTIONS_LIST_HELP.ideas} className="ml-0" />
-        </div>
-      )}
       <SolutionCards data={shown} issues={issues} processes={processes} base={base} demo={mode === "demo"} canEdit={canEdit} viewerId={viewerId} memberNames={memberNames} from={solutionsListHref(base)} />
     </div>
   );

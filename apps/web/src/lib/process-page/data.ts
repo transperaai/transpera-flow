@@ -17,23 +17,3 @@ export async function loadLastChange(liveRevisionId: string, memberNames: Readon
     return null;
   }
 }
-
-/** Which of these issues an AI solution idea is waiting for ("Solution idea" on the status track): only the issue ids, no idea contents. */
-export async function loadIdeaIssueIds(workspaceId: string, issueIds: readonly string[]): Promise<string[]> {
-  if (issueIds.length === 0) return [];
-  try {
-    const db = await getDb();
-    const data = await db
-      .selectFrom("suggestion_proposals")
-      .select("issue_id")
-      .where("workspace_id", "=", workspaceId)
-      .where("kind", "=", "solution_idea")
-      .where("status", "=", "pending")
-      .where("issue_id", "in", [...issueIds])
-      .execute();
-    return [...new Set(data.flatMap((r) => (r.issue_id ? [r.issue_id] : [])))];
-  } catch (err) {
-    console.error("Couldn't read the AI ideas; showing none.", err instanceof Error ? err.message : err);
-    return [];
-  }
-}

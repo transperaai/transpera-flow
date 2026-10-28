@@ -7,12 +7,10 @@ import type { IssueRow } from "@transpera-flow/db";
 import { issueProcessId } from "./area";
 
 /** The Editor in solution mode on `processId`, optionally for an issue. `base` is `/w/<slug>` or `/demo`. */
-export function solutionEditorHref(base: string, processId: string, opts: { issueId?: string | null; from?: string | null; idea?: string | null } = {}): string {
+export function solutionEditorHref(base: string, processId: string, opts: { issueId?: string | null; from?: string | null } = {}): string {
   const q = new URLSearchParams({ mode: "solution" });
   if (opts.issueId) q.set("issue", opts.issueId);
   if (opts.from) q.set("from", opts.from);
-  // A52: the suggestion (solution idea) whose steps the Editor places; saving the solution marks it built.
-  if (opts.idea) q.set("idea", opts.idea);
   // The demo's Editor is one page for the sample; `process` picks a servicing process there, as elsewhere in the demo.
   return base === "/demo" ? `/demo/edit?${q.toString()}${processId ? `&process=${encodeURIComponent(processId)}` : ""}` : `${base}/p/${processId}/edit?${q.toString()}`;
 }

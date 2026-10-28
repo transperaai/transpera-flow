@@ -141,7 +141,7 @@ describe("provenance and the company-model triggers", () => {
     await db.client.query("delete from churn_drivers");
   });
 
-  it("audits every change, and refuses an API token (it suggests instead)", async () => {
+  it("audits every change, and refuses an API token", async () => {
     // As the editor, then read the log as the owner of the database (the audit log isn't readable by members).
     await db.client.query("begin");
     try {
@@ -160,7 +160,7 @@ describe("provenance and the company-model triggers", () => {
       db.as({ ...users.editor!.claims, api_token_id: "00000000-0000-0000-0000-000000000001" }, async (c) =>
         c.query("insert into churn_drivers (workspace_id, driver) values ($1, 'late')", [ws]),
       ),
-    ).rejects.toThrow(/by review|suggestion/);
+    ).rejects.toThrow(/can't be changed through an API token/);
   });
 });
 

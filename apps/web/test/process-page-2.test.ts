@@ -55,8 +55,7 @@ describe("the issue status track", () => {
   it("an open issue with nothing proposed is at Open", () => {
     expect(trackOf(issue("open"), []).stage).toBe(0);
   });
-  it("an AI idea waiting, or a solution with no verdict yet, is a Solution idea", () => {
-    expect(trackOf(issue("open"), [], true).stage).toBe(1);
+  it("a solution with no verdict yet is a Solution idea", () => {
     const data = { solutions: [sol("a")], links: [link("a", "i")] };
     expect(trackOf(issue("open"), linkedSolutions(data, "i")).stage).toBe(1);
   });

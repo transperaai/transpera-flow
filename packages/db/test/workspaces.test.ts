@@ -102,7 +102,7 @@ describe("create_workspace", () => {
       code: "42501",
       message: expect.stringMatching(/created in the app/),
     });
-    await expect(db.as(claims, (c) => c.query("insert into workspaces (name, slug) values ('Via token', 'via-token')"))).rejects.toThrow(/only by review/);
+    await expect(db.as(claims, (c) => c.query("insert into workspaces (name, slug) values ('Via token', 'via-token')"))).rejects.toThrow(/can't be changed through an API token/);
     // The same insert as the signed-in admin goes through.
     await db.as(users.agency!.claims, (c) => c.query("insert into workspaces (name, slug) values ('Via token', 'via-token')"));
   });

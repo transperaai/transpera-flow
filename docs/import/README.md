@@ -29,8 +29,8 @@ The `process-file` skill turns a mix of materials (interview transcripts, rough 
 ## Upload
 
 1. In the app, open **Processes**, then **Upload process**, and choose a file (or drop it). Do this once per file.
-2. The preview shows the counts per section (steps, sources, suggestions, proposals), the conflicts between your sources, the conflicts with your company's own values, any role to map, and the **Missing for simulation** list. Fix anything it quotes by asking Claude to correct the file, or edit the draft afterwards.
-3. Create. Each file becomes a **draft**: nothing is live until you publish it. Company facts wait on **Suggestions** to accept or reject, as do the issues, and nothing is applied silently.
+2. The preview shows the counts per section (steps, sources, first principles), the conflicts between your sources, any role to map, and the **Missing for simulation** list. Fix anything it quotes by asking Claude to correct the file, or edit the draft afterwards.
+3. Create. Each file becomes a **draft**: nothing is live until you publish it. Nothing about your company changes: the upload adds the process (as a draft), its sources and its first principles, and never touches people, clients, services, demand or issues. Enter those in the app. A file's `company` or `proposals` field is ignored, with a warning.
 4. Fill the gaps (the still-open list in the summary says which to ask first), place each draft with the library, then publish.
 
 ## The examples

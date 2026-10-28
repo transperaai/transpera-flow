@@ -270,7 +270,7 @@ describe("the Share dialog", () => {
     await page.close();
   });
 
-  it("'Let people try changes' is off by default, has an (i), and a process link made with it on is a play link; the done text says where the ideas go (B4)", async () => {
+  it("'Let people try changes' is off by default, has an (i), and a process link made with it on is a play link; the done text says nothing is saved (B4)", async () => {
     const { page, errors } = await mountBare("mountShareDialog");
     await page.click("[data-share-open]");
     await page.waitForSelector("[data-share-dialog]");
@@ -292,25 +292,21 @@ describe("the Share dialog", () => {
     await again.page.click("[data-share-create]");
     await again.page.waitForSelector("[data-share-done]");
     expect((await again.page.evaluate(() => window.shareCreates))[0]).toMatchObject({ kind: "process", play: true });
-    expect(await again.page.locator("[data-share-play-done]").innerText()).toBe("People who open it can send you ideas. You'll find them in Suggestions.");
+    expect(await again.page.locator("[data-share-play-done]").innerText()).toBe("People who open it can try changes. Nothing they do is saved.");
     expect(errors).toEqual([]);
     await again.page.close();
   });
 
-  it("a play link in the Share links table says 'Try changes' and how many ideas were sent, linking to Suggestions; a view link shows —", async () => {
-    const view: ShareLinkRow = { id: "00000000-0000-4000-8000-00000000f010", kind: "process", mode: "view", ideas: null, what: "Lead to live", label: null, showPeople: false, showFinancials: false, emails: [], expiresAt: null, snapshotAt: "2026-10-01T09:00:00Z", createdAt: "2026-10-01T09:00:00Z", madeBy: "Maya Collins", opens: 0, lastOpenedAt: null, status: "active" };
-    const play: ShareLinkRow = { ...view, id: "00000000-0000-4000-8000-00000000f011", mode: "play", ideas: 3 };
-    const none: ShareLinkRow = { ...view, id: "00000000-0000-4000-8000-00000000f012", mode: "play", ideas: 0 };
+  it("a play link in the Share links table says 'Try changes'; a view link doesn't", async () => {
+    const view: ShareLinkRow = { id: "00000000-0000-4000-8000-00000000f010", kind: "process", mode: "view", what: "Lead to live", label: null, showPeople: false, showFinancials: false, emails: [], expiresAt: null, snapshotAt: "2026-10-01T09:00:00Z", createdAt: "2026-10-01T09:00:00Z", madeBy: "Maya Collins", opens: 0, lastOpenedAt: null, status: "active" };
+    const play: ShareLinkRow = { ...view, id: "00000000-0000-4000-8000-00000000f011", mode: "play" };
+    const none: ShareLinkRow = { ...view, id: "00000000-0000-4000-8000-00000000f012", mode: "play" };
     const { page, errors } = await mountBare("mountShareList", [view, play, none]);
     await page.waitForSelector("[data-share-links]");
     const rows = page.locator("[data-share-link]");
     expect(await rows.nth(0).locator("[data-share-play]").count()).toBe(0);
-    expect(await rows.nth(0).locator("[data-share-ideas]").innerText()).toBe("—");
     expect(await rows.nth(1).locator("[data-share-play]").innerText()).toBe("Try changes");
-    expect(await rows.nth(1).locator("[data-share-ideas]").innerText()).toBe("3 sent");
-    expect(await rows.nth(1).locator("[data-share-ideas] a").getAttribute("href")).toBe("/w/northbeam/suggestions");
-    expect(await rows.nth(2).locator("[data-share-ideas]").innerText()).toBe("None sent");
-    expect(await page.getByRole("button", { name: "About Ideas" }).count()).toBe(1);
+    expect(await page.locator("[data-share-ideas]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -344,7 +340,6 @@ describe("the Share links table", () => {
     id: "00000000-0000-4000-8000-00000000f001",
     kind: "overview",
     mode: "view",
-    ideas: null,
     what: "The Overview",
     label: null,
     showPeople: false,

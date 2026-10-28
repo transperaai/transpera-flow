@@ -5,17 +5,12 @@ import { ToolError } from "./result";
 export interface ToolContext {
   db: Db;
   tokenHash: string;
-  /** Who acts, when it is known without looking the token up (the web app's upload acts as the signed-in user, with no token). */
+  /** The token's owner. */
   userId?: string | null;
   /** The token's active workspace (set_active_workspace), if any. */
   activeWorkspaceId: string | null;
   /** ISO date used when a tool needs "today". */
   today: string;
-  /**
-   * Called after `publish_process` has made a version live (A46: the web app starts its AI analysis here, after the
-   * response). A failure in it never reaches the caller.
-   */
-  onPublished?: (processId: string) => void;
 }
 
 export interface WorkspaceRef {

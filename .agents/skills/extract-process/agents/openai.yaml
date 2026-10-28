@@ -1,5 +1,0 @@
-interface:
-  display_name: "Extract process"
-  short_description: "Transcripts to a draft process with evidence"
-policy:
-  allow_implicit_invocation: false

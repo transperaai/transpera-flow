@@ -102,17 +102,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "wait_params",
     "work_params"
   ],
-  "suggestion_proposals": [
-    "applied",
-    "evidence",
-    "payload",
-    "visitor_text"
-  ],
-  "suggestions": [
-    "applied",
-    "evidence",
-    "patch"
-  ],
   "workspace_headlines": [
     "numbers"
   ],

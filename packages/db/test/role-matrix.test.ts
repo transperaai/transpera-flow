@@ -5,7 +5,6 @@ import {
   NORTHBEAM_REVISION_ID,
   NORTHBEAM_WORKSPACE_ID,
   northbeamIssues,
-  northbeamLeadSourceIds,
   northbeamPersonIds,
   northbeamRoleIds,
   northbeamServicingProcessIds,
@@ -45,7 +44,7 @@ const owns: Record<string, Record<string, number>> = {};
 /** `settings.health_recover` as stored when the matrix starts (Northbeam: absent, so null), the base a save is made against. */
 let healthRecover = "null";
 const headlineNumbers = JSON.stringify({ flow_efficiency: 0.4, processes_attention: 1, processes_total: 4, client_groups_at_risk: 0, client_groups_total: 2 });
-const ids = { suggestion: "", proposal: "", client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "", seedCal: "" };
+const ids = { client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "", seedCal: "" };
 
 /** A SQL statement and its parameters. */
 type Q = [sql: string, params: unknown[]];
@@ -196,21 +195,6 @@ const TABLES: TableCase[] = [
     delete: ["delete from blocks where workspace_id = $1 and name = 'x seed'", [ws]],
   },
   named("sources", "title"),
-  {
-    table: "suggestions",
-    insert: (tag) => [
-      "insert into suggestions (workspace_id, target_table, target_id, patch, evidence, note) values ($1, 'lead_sources', $2, $3::jsonb, '[]', $4)",
-      [ws, northbeamLeadSourceIds.ads, JSON.stringify({ set: { volume_week: 33 } }), `x ${tag}`],
-    ],
-    update: ["update suggestions set note = note where workspace_id = $1 and note = 'x seed'", [ws]],
-    delete: null,
-  },
-  {
-    table: "suggestion_proposals",
-    insert: (tag) => ["insert into suggestion_proposals (workspace_id, kind, title) values ($1, 'issue', $2)", [ws, `x ${tag}`]],
-    update: ["update suggestion_proposals set review_note = review_note where workspace_id = $1 and title = 'x seed'", [ws]],
-    delete: null,
-  },
   // Settings tables.
   singleton("lever_settings"),
   singleton("analysis_rules"),
@@ -406,13 +390,6 @@ beforeAll(async () => {
     await db.client.query("insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, '2027-03-01', '2027-03-05')", [person[role], ws]);
     await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, null, 0.9)", [person[role], ws]);
   }
-  // A suggestion about the member's person, one about another person (the spare), and the non-people one the table case seeds.
-  for (const [who, tag] of [[person.member, "x person own"], [person.spare, "x person other"]] as const) {
-    await db.client.query(
-      "insert into suggestions (workspace_id, target_table, target_id, patch, evidence, note) values ($1, 'people', $2, $3::jsonb, '[]', $4)",
-      [ws, who, JSON.stringify({ set: { fte: 0.8 } }), tag],
-    );
-  }
   // What each table holds now, and each linked person's share of it.
   for (const t of TABLES) {
     totals[t.table] = await rowsIn(db.client, t.table);
@@ -426,8 +403,6 @@ beforeAll(async () => {
     }
   }
   healthRecover = JSON.stringify((await db.client.query("select settings -> 'health_recover' as v from workspaces where id = $1", [ws])).rows[0].v ?? null);
-  ids.suggestion = (await db.client.query("select id from suggestions where workspace_id = $1 and note = 'x seed'", [ws])).rows[0].id;
-  ids.proposal = (await db.client.query("select id from suggestion_proposals where workspace_id = $1 and title = 'x seed'", [ws])).rows[0].id;
 }, 120_000);
 
 afterAll(async () => {
@@ -475,16 +450,6 @@ describe("reads", () => {
       });
     });
   }
-
-  it("suggestions: a member reads the suggestion about their own person and the non-people one, not the one about another person; an editor reads all three", async () => {
-    const notes = async (role: RoleName) =>
-      (await db.as(callers[role]!.claims, async (c) => (await c.query("select note from suggestions where workspace_id = $1 order by note", [ws])).rows)).map((r) => r.note as string);
-    expect(await notes("member")).toEqual(["x person own", "x seed"]);
-    expect(await notes("viewer")).toEqual(["x seed"]);
-    expect(await notes("member, no person")).toEqual(["x seed"]);
-    expect(await notes("editor")).toEqual(["x person other", "x person own", "x seed"]);
-    expect(await notes("owner")).toEqual(["x person other", "x person own", "x seed"]);
-  });
 
   it("memberships: owners, editors and agency admins read every row; a member or viewer only their own, so labels can't be tied to people (B1 2/3)", async () => {
     const total = Number((await db.client.query("select count(*) from memberships where workspace_id = $1", [ws])).rows[0].count);
@@ -540,9 +505,9 @@ describe("writes", () => {
     });
   }
 
-  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, suggestions, clients and headlines are never deleted", async () => {
+  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, clients and headlines are never deleted", async () => {
     await db.as(callers.owner!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });
@@ -626,8 +591,6 @@ describe("functions", () => {
       call: (c) => c.query("select public.resolve_issue($1, $2, 'not_a_problem', 'Matrix', 'resolved') as r", [ws, openIssue]),
       refusal: { throws: /you cannot change issues/ },
     },
-    { name: "review_suggestions", call: (c) => c.query("select public.review_suggestions(array[$1::uuid], 'reject', null) as r", [ids.suggestion]), refusal: { status: "not_found" } },
-    { name: "review_proposals", call: (c) => c.query("select public.review_proposals(array[$1::uuid], 'reject', null) as r", [ids.proposal]), refusal: { status: "not_found" } },
     { name: "create_library_process", call: (c) => c.query("select public.create_library_process($1, 'Matrix process', 'pipeline') as r", [ws]), refusal: { status: "not_found" } },
     {
       name: "save_fields",
@@ -810,7 +773,7 @@ describe("client health rules (B1 3/3)", () => {
     const token = { ...callers.editor!.claims, api_token_id: "00000000-0000-4000-8000-0000000000cc" };
     await db.as(token, async (c) => {
       await c.query("savepoint s");
-      await expect(save(c, baseNow, '{"health_recover": 7}')).rejects.toMatchObject({ code: "42501", message: expect.stringMatching(/changes only by review/) });
+      await expect(save(c, baseNow, '{"health_recover": 7}')).rejects.toMatchObject({ code: "42501", message: expect.stringMatching(/can't be changed through an API token/) });
       await c.query("rollback to savepoint s");
     });
   });
@@ -989,47 +952,8 @@ describe("open_share_link (B3)", () => {
   });
 });
 
-describe("play links (B4): submit_play_proposal and play_proposal_contacts", () => {
-  const tok = "z".repeat(43);
-
-  it("anon and every signed-in role may call submit_play_proposal, and an unknown token gets {status: gone} from each", async () => {
-    const call = "select public.submit_play_proposal($1, 'T', null, 'N', 'n@x.example', null, '[]'::jsonb) as r";
-    await db.client.query("begin");
-    try {
-      await db.client.query("set local role anon");
-      expect((await db.client.query(call, [tok])).rows[0].r).toEqual({ status: "gone" });
-    } finally {
-      await db.client.query("rollback");
-    }
-    for (const role of Object.keys(ROLES) as RoleName[]) {
-      await db.as(callers[role]!.claims, async (c) => {
-        expect((await c.query(call, [tok])).rows[0].r, role).toEqual({ status: "gone" });
-      });
-    }
-  });
-
-  it("play_proposal_contacts: anon holds no execute right; owners, editors and agency admins get {}; members, viewers and strangers are refused (42501)", async () => {
-    await db.client.query("begin");
-    try {
-      await db.client.query("set local role anon");
-      await expect(db.client.query("select public.play_proposal_contacts($1)", [ws])).rejects.toMatchObject({ code: "42501" });
-    } finally {
-      await db.client.query("rollback");
-    }
-    for (const role of Object.keys(ROLES) as RoleName[]) {
-      await db.as(callers[role]!.claims, async (c) => {
-        await c.query("savepoint s");
-        const r = await c.query("select public.play_proposal_contacts($1) as r", [ws]).then(
-          (x) => ({ ok: true as const, v: x.rows[0].r }),
-          (e: { code?: string }) => ({ ok: false as const, code: e.code }),
-        );
-        if (ROLES[role].writes) expect(r, role).toEqual({ ok: true, v: {} });
-        else expect(r, role).toEqual({ ok: false, code: "42501" });
-      });
-    }
-  });
-
-  it("the only write a play link can make: anon holds no INSERT, UPDATE, DELETE or TRUNCATE on any table, and the public functions anon can execute are what they were plus submit_play_proposal", async () => {
+describe("play links (B4): they write nothing", () => {
+  it("anon holds no INSERT, UPDATE, DELETE or TRUNCATE on any table, and the public functions anon can execute are the helpers, the token functions and open_share_link", async () => {
     await db.client.query("begin");
     try {
       const writes = (
@@ -1044,17 +968,18 @@ describe("play links (B4): submit_play_proposal and play_proposal_contacts", () 
       const fns = (
         await db.client.query("select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'execute') order by 1")
       ).rows.map((r) => r.proname as string);
-      // Before B4: every anon-executable function except submit_play_proposal (the stable helpers the policies use, the token
-      // functions, B3's open_share_link ...), and since then mcp_token_lookup, which /api/mcp calls as anon with a token's hash (ADR 0018).
-      const before = fns.filter((f) => f !== "submit_play_proposal");
-      expect(fns).toContain("submit_play_proposal");
-      expect(before).toEqual([
+      // The stable helpers the policies use, the token functions, B3's open_share_link ..., and mcp_token_lookup, which /api/mcp
+      // calls as anon with a token's hash (ADR 0018). Sending a visitor's idea (submit_play_proposal) is gone.
+      expect(fns).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
         "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "reconcile_after_access_change", "set_updated_at",
         "stamp_provenance", "use_api_token", "workspace_logo", "workspace_role",
       ]);
-      // And none of the functions that act on visitors' ideas or build solutions.
-      for (const f of ["play_proposal_contacts", "review_proposals", "build_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity"]) expect(fns, f).not.toContain(f);
+      // And none of the functions that acted on visitors' ideas or built solutions exists any more, or is open to anon.
+      for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity"]) expect(fns, f).not.toContain(f);
+      for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "play_patch_problem"]) {
+        expect((await db.client.query("select count(*)::int n from pg_proc where proname = $1", [f])).rows[0].n, `${f} is dropped`).toBe(0);
+      }
     } finally {
       await db.client.query("rollback");
     }
