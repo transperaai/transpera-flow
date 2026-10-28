@@ -8,6 +8,7 @@ import { ForecastTimeline } from "@/components/forecast/forecast-timeline";
 import { DEMO_FORECAST_START, DEMO_HIRE_ID, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastInsights, forecastModel } from "@/lib/forecast/forecast";
 import { forecastMoney } from "@/lib/forecast/money";
+import { spliceMonthly } from "@/lib/forecast/splice";
 import { calendarMonthStarts, dateAtHour, marketBands, timelineData, timelineMonths } from "@/lib/forecast/timeline";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -230,6 +231,31 @@ describe("sales and money (sandbox phase 2)", () => {
     expect(forecastMoney(rich, names)!.hourlyWithoutHours).toEqual([]);
   });
 
+  it("a plan's spliced run takes its tiles from the spliced months, not from the first segment's run", () => {
+    // A plan whose second segment (from month 6) adds overheads: the first segment's own kpi knows nothing of them.
+    const monthly = spliceMonthly([
+      { from: 0, monthly: result.monthly! },
+      { from: 6, monthly: rich.monthly! },
+    ]);
+    const plan = { ...result, monthly };
+    const view = forecastMoney(plan, names, undefined, { spliced: true })!;
+    const tile = (id: string) => view.tiles.find((t) => t.id === id)!;
+    const months = (id: string) => view.rows.find((r) => r.id === id)!.total!;
+    expect(tile("overheads").stat.mean).toBeCloseTo(months("overheads"), 6);
+    expect(tile("overheads").stat.mean).toBeGreaterThan(0);
+    expect(result.kpi.overheads).toBe(0);
+    expect(tile("revenue").stat.mean).toBeCloseTo(months("revenue"), 6);
+    expect(tile("profit").stat.mean).toBeCloseTo(months("profit"), 6);
+    expect(tile("labour").stat.mean).toBeCloseTo(months("labour") + months("overtimeCost"), 6);
+    expect(tile("profit").stat.mean).not.toBeCloseTo(result.kpi.profit!.mean, 0);
+    // No run-wide range is made up from the months' percentiles.
+    expect(tile("profit").ranged).toBe(false);
+    expect(tile("profit").stat.p10).toBe(tile("profit").stat.mean);
+    // The live run keeps the run's own figures and ranges.
+    const live = forecastMoney(rich, names)!;
+    expect(live.tiles.every((t) => t.ranged)).toBe(true);
+  });
+
   it("gives nothing for a run saved before profit existed", () => {
     const older: Partial<NonNullable<typeof rich.monthly>> = { ...rich.monthly! };
     delete older.revenue;
@@ -247,6 +273,16 @@ describe("sales and money (sandbox phase 2)", () => {
       expect(out).toContain("data-money-profit-chart");
       expect(out).toContain('data-money-row="profit"');
       expect(out).not.toContain("No overheads set");
+      // Monthly overtime (and so its cost and profit) needn't add up to the run's: the note names both.
+      expect(out).toContain("except overtime cost and profit");
+    });
+
+    it("a plan's tiles say they add up the months, and a figure with no spread says it is the same in every run", () => {
+      const plan = { ...rich, monthly: spliceMonthly([{ from: 0, monthly: result.monthly! }, { from: 6, monthly: rich.monthly! }]) };
+      const out = renderToStaticMarkup(createElement(ForecastMoney, { view: forecastMoney(plan, names, undefined, { spliced: true })!, currency: "GBP", span: "12 months" }));
+      expect(out).toContain("The months added up");
+      expect(out).not.toContain("Fixed each month");
+      expect(html({ run: rich })).toContain("The same in every run");
     });
 
     it("says No overheads set, with a link to Settings for someone who can set them", () => {

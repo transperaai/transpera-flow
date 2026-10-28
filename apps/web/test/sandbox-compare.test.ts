@@ -93,6 +93,8 @@ describe("compareSandbox", () => {
     expect(c.labour!.values[0]!.map((s) => s!.mean)).toEqual([105, 105, 105, 105]);
     expect(c.labour!.values[1]!.map((s) => s!.mean)).toEqual([189, 189, 189, 189]);
     expect(c.won.id).toBe("won");
+    // Every win, one-off jobs included: not "Clients won", which is a different series (wins that become clients).
+    expect(c.won.name).toBe("Wins");
     expect(c.won.diff[1]).toEqual([4, 4, 4, 4]);
     expect(c.conversion.diff[1]).toEqual([0.2, 0.2, 0.2, 0.2].map((v) => expect.closeTo(v, 9)));
     // Over the run: the sum of the months' means, with the difference from column 0.

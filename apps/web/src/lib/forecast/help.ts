@@ -52,17 +52,17 @@ export const SANDBOX_HELP = {
   labour: {
     label: "Labour and overtime",
     description: "The team's pay for the hours they're contracted to work that month (leave is paid, a planned hire is paid from their start, a leaver until their end date), plus the cost of overtime.",
-    example: "Five full-time people at £50 an hour is about £43K for a four-week month.",
+    example: "Five full-time people at £50 an hour is about £43K a month (52 weeks over 12 months, 4⅓ weeks each).",
   },
   winsPerMonth: {
-    label: "Clients won",
-    description: "New clients won in the month, on average across the runs.",
-    example: "2.4 means two or three clients most months.",
+    label: "Wins",
+    description: "Enquiries won in the month, on average across the runs: new retainer and hourly clients, and one-off jobs (which don't stay on as clients).",
+    example: "2.4 means two or three wins most months.",
   },
   conversion: {
     label: "Conversion",
     description: "Wins as a share of enquiries that ended in a win or a loss that month. Enquiries still being worked on don't count yet.",
-    example: "14% means about one in seven decided enquiries became a client.",
+    example: "14% means about one in seven decided enquiries was won.",
   },
   revenue: {
     label: "Monthly recurring revenue",

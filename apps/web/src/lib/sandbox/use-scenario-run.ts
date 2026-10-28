@@ -28,6 +28,11 @@ export interface ScenarioRun {
   markersModel: EngineModel;
   /** Ids of the people the scenario added (its hires, and the second row of an FTE change). */
   planPeople: Set<string>;
+  /**
+   * The run is spliced from more than one segment: `result.monthly` follows the scenario, but `result.kpi` is the first segment's
+   * alone, so whole-run figures must come from the months.
+   */
+  spliced: boolean;
 }
 
 export interface ScenarioForecast {
@@ -137,7 +142,7 @@ export function useScenarioRun({
         const runs = prepared.segments.map((seg, i) => ({ from: seg.from, result: results[i]! }));
         const first = runs[0]!.result;
         const monthly = spliceMonthly(runs.map((r) => ({ from: r.from, monthly: r.result.monthly! })));
-        const run: ScenarioRun = { model: prepared.segments[0]!.model, result: { ...first, monthly }, markersModel: prepared.markersModel, planPeople: prepared.planPeople };
+        const run: ScenarioRun = { model: prepared.segments[0]!.model, result: { ...first, monthly }, markersModel: prepared.markersModel, planPeople: prepared.planPeople, spliced: runs.length > 1 };
         setState((s) => ({ status: "done", run, error: null, progress: [total, total], finished: s.finished + 1 }));
       } catch (err) {
         if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ ...s, status: "error", error: (err as Error).message }));

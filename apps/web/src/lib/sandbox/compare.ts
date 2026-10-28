@@ -96,7 +96,7 @@ export function compareSandbox(
     profit: costsShown ? row("profit", "Profit", columns.map((m) => m.money!.profit)) : null,
     revenue: row("revenue", "Billed revenue", columns.map((m) => m.revenue.total)),
     labour: labour.every((l) => l) ? row("labour", "Labour and overtime", labour as Stat[][]) : null,
-    won: row("won", "Clients won", columns.map((m) => m.sales.won)),
+    won: row("won", "Wins", columns.map((m) => m.sales.won)),
     conversion: row("conversion", "Conversion", columns.map((m) => m.sales.conversion)),
     mrr: row("mrr", "Monthly recurring revenue", columns.map((m) => m.mrr)),
     clients,

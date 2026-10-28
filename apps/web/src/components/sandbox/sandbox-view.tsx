@@ -214,14 +214,14 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
 
   // Sales and money (sandbox phase 2) for the run on screen: the open scenario's spliced run, or the live one.
   const shownRun = useMemo(
-    () => (working !== null && plan.run && !scenarioError ? plan.run : built.model && result ? { model: built.model, result } : null),
+    () => (working !== null && plan.run && !scenarioError ? plan.run : built.model && result ? { model: built.model, result, spliced: false } : null),
     [working, plan.run, scenarioError, built.model, result],
   );
   const serviceNames = useMemo(() => new Map(live.services.map((sv) => [sv.id, sv.name])), [live.services]);
   const moneyView = useMemo(
     () =>
       shownRun?.result.monthly
-        ? forecastMoney(shownRun.result, timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek), (id) => serviceNames.get(id) ?? "Hourly")
+        ? forecastMoney(shownRun.result, timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek), (id) => serviceNames.get(id) ?? "Hourly", { spliced: shownRun.spliced })
         : null,
     [shownRun, start, serviceNames],
   );

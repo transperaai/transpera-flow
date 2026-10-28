@@ -148,7 +148,7 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
           </table>
         </div>
         <p className="text-xs text-muted-foreground">
-          Hover a figure for its 10–90% range. Months add to the run&apos;s totals, except profit, where overtime is worked out month by month, so the months can differ a little from the total above.
+          Hover a figure for its 10–90% range. Months add to the run&apos;s totals, except overtime cost and profit: overtime is worked out month by month, so those months can add to a little more or less than the Labour and Profit tiles above.
         </p>
       </Card>
 
@@ -176,7 +176,9 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
 
 function Tile({ tile, format: fmt }: { tile: MoneyTile; format: (v: number) => string }) {
   const { stat } = tile;
-  const range = stat.p10 === stat.p90 ? null : `${fmt(stat.p10)} to ${fmt(stat.p90)}`;
+  const range = !tile.ranged || stat.p10 === stat.p90 ? null : `${fmt(stat.p10)} to ${fmt(stat.p90)}`;
+  // A plan's tile adds up its months (each month keeps its range in the table); otherwise a figure with no spread is the same in every run.
+  const below = range ? `Range ${range}` : !tile.ranged ? "The months added up; each month's range is in the table" : "The same in every run";
   return (
     <Card className="gap-1 px-4 py-3" data-money-tile={tile.id}>
       <h3 className="flex items-center text-xs font-medium text-fg-2">
@@ -186,7 +188,7 @@ function Tile({ tile, format: fmt }: { tile: MoneyTile; format: (v: number) => s
       <p className="font-heading text-2xl font-semibold tabular-nums" data-money-value>
         {fmt(stat.mean)}
       </p>
-      <p className="text-xs text-muted-foreground tabular-nums">{range ? `Range ${range}` : "Fixed each month"}</p>
+      <p className="text-xs text-muted-foreground tabular-nums">{below}</p>
     </Card>
   );
 }
