@@ -11,7 +11,27 @@
 
 import { parsePatchPath, type EngineModel, type PatchOp, type ScenarioPatch } from "@transpera-flow/engine";
 
-export type SandboxLeverId = "A1" | "A6" | "B1" | "B2" | "B3" | "C1" | "C2" | "D1" | "D2" | "D3" | "D4" | "D5" | "E1" | "E2" | "E3" | "E6" | "X1" | "X2" | "X3";
+export type SandboxLeverId =
+  | "A1" | "A3" | "A5" | "A6"
+  | "B1" | "B2" | "B3" | "B4" | "B5"
+  | "C1" | "C2"
+  | "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "D9"
+  | "E1" | "E2" | "E3" | "E6"
+  | "X1" | "X2" | "X3";
+
+/**
+ * Extras of a change, by lever (only the lever's own keys are accepted; `paramsProblem`): D1 a hire's `name`; A5 the `low` and
+ * `high` of the fee range around the change's value (the likely fee); B4 the driver's monthly `chance` (0-1, absent: measured or the
+ * default) and the `months` a hit lasts (1-24); B2 `who` pays the new fee: `new` clients (the default) or `all` clients.
+ */
+export interface SandboxParams {
+  name?: string;
+  low?: number;
+  high?: number;
+  chance?: number;
+  months?: number;
+  who?: "new" | "all";
+}
 
 /** One change: a lever, what it points at, and a value. With no `from` it applies to the whole run. */
 export interface SandboxChange {
@@ -22,12 +42,14 @@ export interface SandboxChange {
   value: number;
   /** "YYYY-MM" (from the 1st of the month), or "YYYY-MM-DD" (a Monday) for leave (D3). `until` is reserved for a later phase. */
   from?: string;
-  /** Extras of one lever: a hire's name (D1). Later levers widen this. */
-  params?: { name: string };
+  /** Extras of one lever (see `SandboxParams`). */
+  params?: SandboxParams;
 }
 
-export type SandboxTarget = "none" | "service" | "service_or_none" | "role" | "person" | "step" | "solution" | "health_rule";
-export type SandboxUnit = "per_week" | "clients" | "share" | "money" | "people" | "fte" | "hours" | "weeks" | "none";
+export type SandboxTarget =
+  | "none" | "service" | "service_or_none" | "role" | "role_or_none" | "person" | "step" | "solution" | "health_rule"
+  | "lead_source_or_none" | "driver";
+export type SandboxUnit = "per_week" | "clients" | "share" | "money" | "people" | "fte" | "hours" | "weeks" | "months" | "none";
 
 export interface SandboxLever {
   id: SandboxLeverId;
@@ -46,13 +68,28 @@ export interface SandboxLever {
   displayScale?: number;
   /** Can apply to the whole run (no `from`). Leave (D3) cannot. */
   wholeRun: boolean;
-  /** How a change from a month reaches the engine; false: it cannot be timed. Later phases add "channel". */
-  timed: false | "people" | "splice";
+  /**
+   * How a change from a month reaches the engine; false: it cannot be timed. `channel`: the engine reads a per-month value while it
+   * runs (packages/engine/src/channels.ts), so any number of months is one run and the months before are exactly the run without it.
+   */
+  timed: false | "people" | "splice" | "channel";
   timing?: "month" | "monday";
   /** Its timed months count toward the cap of 6 (each costs one more run). */
   capped: boolean;
   /** The whole-run patch (and the spliced segment's patch). */
   patchPath?: (target: string | null) => string;
+  /** The changes this lever is a patch for; omitted: all of them. (A1 only without a lead source, B1 and B3 only without a type, B2 only for new clients.) */
+  patchWhen?: (change: SandboxChange) => boolean;
+  /**
+   * How a change that is not a patch reaches the model before the run (the runner's `edits.ts`): a lead source's volume, the conversion
+   * channel, a service's fee range, a client roster, fees for existing clients, a churn driver, a price rise with its churn driver, the
+   * people's hours, and the hiring delay.
+   */
+  edit?: "leadSource" | "conversion" | "feeRange" | "roster" | "fees" | "driver" | "priceRise" | "hours" | "hireDelay";
+  /** The keys its `params` may hold. */
+  params?: readonly (keyof SandboxParams)[];
+  /** Params it cannot do without (A5's range). */
+  paramsRequired?: boolean;
   /** The people-over-time edit. */
   people?: "hire" | "leaver" | "leave" | "fte";
   /** A solution going live (E6). */
@@ -65,6 +102,8 @@ export interface SandboxLever {
   offered: boolean;
   /** Why it would not move the result in this model, or null (design suggestion 8). */
   applies?: (model: EngineModel) => string | null;
+  /** The same for one change: a type on a model that keeps its clients as one pool. */
+  changeApplies?: (model: EngineModel, change: SandboxChange) => string | null;
 }
 
 export const MAX_CHANGES = 200;
@@ -82,6 +121,8 @@ export const HIRE_FTE = { accepted: { min: 0.1, max: 2 }, offered: { min: 0.1, m
 
 const WEEKS_PER_MONTH = 52 / 12;
 const SPLICE = { timed: "splice", timing: "month", capped: true } as const;
+/** A change from a month is read by the engine while it runs: one run for any number of months, and nothing counts toward the six-month cap. */
+const CHANNEL = { timed: "channel", timing: "month", capped: false } as const;
 
 /** A model with a client roster (named clients, or client groups with clients counted): the pooled client count and churn do nothing. */
 function hasClientRoster(model: EngineModel): boolean {
@@ -89,23 +130,62 @@ function hasClientRoster(model: EngineModel): boolean {
   return Object.values(model.clientGroups ?? {}).some((g) => g.count > 0);
 }
 
-const ROSTER_REASON = "Your clients are counted per service or by name, so this does nothing here. Change them in Settings, Clients.";
+const POOL_REASON = "Your clients are counted as one pool, so there is no type to point at. Count your clients per service in Settings, Clients.";
+const ROSTER_NEEDED = "Needs clients counted per service or by name (Settings, Clients).";
+/** A change pointing at a type on a model that keeps its clients as one pool. */
+const needsRoster = (m: EngineModel, c: SandboxChange): string | null => (c.target !== null && !hasClientRoster(m) ? POOL_REASON : null);
 
 export const SANDBOX_LEVERS: readonly SandboxLever[] = [
   {
     id: "A1",
     group: "A",
     label: "Opportunities coming in",
-    description: "How many opportunities arrive a month (the qualified leads, in total).",
-    target: "none",
+    description: "How many opportunities arrive a month, in total or from one lead source.",
+    target: "lead_source_or_none",
     ops: ["set", "multiply", "add"],
-    range: { set: { min: 0, max: 10_000, step: 1 }, multiply: { min: 0, max: 5, step: 0.05 } },
+    range: { set: { min: 0, max: 50_000, step: 1 }, multiply: { min: 0, max: 5, step: 0.05 } },
     unit: "per_week",
     displayScale: WEEKS_PER_MONTH,
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: () => "demand.leads_per_week",
+    patchWhen: (c) => c.target === null,
+    edit: "leadSource",
     kind: "demand.enquiries",
+    pay: "none",
+    offered: true,
+  },
+  {
+    id: "A3",
+    group: "A",
+    label: "Conversion rate",
+    description: "The share of qualified opportunities you win, as a multiple of today's.",
+    target: "none",
+    ops: ["multiply"],
+    range: { multiply: { min: 0, max: 5, step: 0.05 } },
+    unit: "none",
+    wholeRun: true,
+    ...CHANNEL,
+    edit: "conversion",
+    kind: "demand.conversion",
+    pay: "none",
+    offered: true,
+  },
+  {
+    id: "A5",
+    group: "A",
+    label: "Client value range",
+    description: "What a new client of a type pays as a range: the lowest, the most likely and the highest fee.",
+    target: "service",
+    ops: ["set"],
+    range: { set: { min: 0, max: 10_000_000, step: 50 } },
+    unit: "money",
+    wholeRun: true,
+    ...CHANNEL,
+    edit: "feeRange",
+    params: ["low", "high"],
+    paramsRequired: true,
+    kind: "finances.prices",
     pay: "none",
     offered: true,
   },
@@ -119,7 +199,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     range: { set: { min: 0, max: 1000, step: 1 }, multiply: { min: 0, max: 5, step: 0.05 } },
     unit: "share",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: (t) => `services.${t}.mix_share`,
     kind: null,
     pay: "none",
@@ -130,52 +210,96 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     id: "B1",
     group: "B",
     label: "Clients on the book",
-    description: "How many clients you start with.",
-    target: "none",
+    description: "How many clients you start with, in total or of one type.",
+    target: "service_or_none",
     ops: ["set", "multiply", "add"],
-    range: { set: { min: 0, max: 100_000, step: 1 } },
+    range: { set: { min: 0, max: 2_000, step: 1 } },
     unit: "clients",
     wholeRun: true,
     timed: false,
     capped: false,
     patchPath: () => "demand.active_clients",
+    patchWhen: (c) => c.target === null,
+    edit: "roster",
     kind: "clients.count",
     pay: "none",
     offered: true,
-    applies: (m) => (hasClientRoster(m) ? ROSTER_REASON : null),
+    changeApplies: needsRoster,
   },
   {
     id: "B2",
     group: "B",
     label: "Fees",
-    description: "What a new client pays each month, per service. Clients already on the book keep their fee.",
+    description: "What clients pay each month, per service: new clients only, or new and existing clients.",
     target: "service_or_none",
     ops: ["set", "multiply", "add"],
     range: { set: { min: 0, max: 10_000_000, step: 50 }, multiply: { min: 0, max: 5, step: 0.05 } },
     unit: "money",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: (t) => (t ? `services.${t}.price` : "finances.retainer"),
+    patchWhen: (c) => c.params?.who !== "all",
+    edit: "fees",
+    params: ["who"],
     kind: "finances.prices",
     pay: "none",
     offered: true,
+    changeApplies: (m, c) => (c.params?.who === "all" ? needsRoster(m, c) : null),
   },
   {
     id: "B3",
     group: "B",
     label: "Base churn",
     description: "The chance a client leaves in a month when nothing is going wrong.",
-    target: "none",
+    target: "service_or_none",
     ops: ["set", "multiply", "add"],
     range: { set: { min: 0, max: 1, step: 0.005 }, multiply: { min: 0, max: 5, step: 0.05 } },
     unit: "share",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: () => "demand.churn_monthly",
+    patchWhen: (c) => c.target === null,
+    edit: "roster",
     kind: "clients.churn",
     pay: "none",
     offered: true,
-    applies: (m) => (hasClientRoster(m) ? ROSTER_REASON : null),
+  },
+  {
+    id: "B4",
+    group: "B",
+    label: "Churn driver as a chance",
+    description: "How likely a cause of churn is to hit a client in a month, and how much a hit raises that client's chance of leaving.",
+    target: "driver",
+    ops: ["set"],
+    range: { set: { min: 0, max: 5, step: 0.05 } },
+    unit: "share",
+    displayScale: 100,
+    wholeRun: true,
+    ...CHANNEL,
+    edit: "driver",
+    params: ["chance", "months"],
+    kind: "clients.causes",
+    pay: "none",
+    offered: true,
+    applies: (m) => (hasClientRoster(m) ? null : ROSTER_NEEDED),
+  },
+  {
+    id: "B5",
+    group: "B",
+    label: "Price rise",
+    description: "Raise (or cut) the fee of existing and new clients, with the clients it loses and what it nets.",
+    target: "service_or_none",
+    ops: ["set"],
+    range: { set: { min: -1, max: 4, step: 0.01 } },
+    unit: "share",
+    displayScale: 100,
+    wholeRun: true,
+    ...CHANNEL,
+    edit: "priceRise",
+    kind: "finances.prices",
+    pay: "none",
+    offered: true,
+    changeApplies: needsRoster,
   },
   {
     id: "C1",
@@ -188,12 +312,12 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     range: { set: { min: 0, max: 10_000, step: 1 }, multiply: { min: 0, max: 5, step: 0.05 } },
     unit: "money",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: (t) => `roles.${t}.cost_rate`,
     kind: "finances.roleCost",
-    // A role's rate, which every member already reads (roles.default_cost_rate). Nothing shown in phase 1 uses cost, so it is not offered yet.
+    // A role's rate, which every member already reads (roles.default_cost_rate), not an individual's pay: offered from phase 3.
     pay: "role",
-    offered: false,
+    offered: true,
   },
   {
     id: "C2",
@@ -205,7 +329,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     range: { set: { min: 0, max: 100_000_000, step: 100 }, multiply: { min: 0, max: 5, step: 0.05 } },
     unit: "money",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: () => "finances.overhead_monthly",
     // No Settings -> Levers kind: always shown.
     kind: null,
@@ -226,6 +350,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     timing: "month",
     capped: false,
     people: "hire",
+    params: ["name"],
     kind: "people.starters",
     pay: "none",
     offered: true,
@@ -278,8 +403,8 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     wholeRun: true,
     timed: "people",
     timing: "month",
-    // It splits the person in two rows, but for someone pinned to a step or assigned clients it falls back to a splice, so it counts.
-    capped: true,
+    // Person rows with dates, or for someone pinned to a step or assigned clients the capacity channel: one run either way.
+    capped: false,
     patchPath: (t) => `people.${t}.fte`,
     people: "fte",
     kind: "people.hours",
@@ -304,6 +429,39 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     offered: true,
   },
   {
+    id: "D6",
+    group: "D",
+    label: "Hours available",
+    description: "The hours a role's people (or everyone) have in a week, as a multiple of today's.",
+    target: "role_or_none",
+    ops: ["multiply"],
+    range: { multiply: { min: 0.1, max: 2, step: 0.05 } },
+    unit: "none",
+    wholeRun: true,
+    ...CHANNEL,
+    edit: "hours",
+    kind: "people.hours",
+    pay: "none",
+    offered: true,
+  },
+  {
+    id: "D9",
+    group: "D",
+    label: "Hiring delay",
+    description: "Months from deciding to hire to the person starting, for the hires in this scenario.",
+    target: "none",
+    ops: ["set"],
+    range: { set: { min: 0, max: 6, step: 1 } },
+    unit: "months",
+    wholeRun: true,
+    timed: false,
+    capped: false,
+    edit: "hireDelay",
+    kind: "people.starters",
+    pay: "none",
+    offered: true,
+  },
+  {
     id: "E1",
     group: "E",
     label: "Step time",
@@ -314,7 +472,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     range: { multiply: { min: 0.1, max: 2, step: 0.05 }, set: { min: 0, max: 1000, step: 0.25 } },
     unit: "hours",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: (t) => `steps.${t}.work_hours`,
     kind: "process.time",
     pay: "none",
@@ -331,7 +489,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     range: { multiply: { min: 0.1, max: 2, step: 0.05 }, set: { min: 0, max: 80, step: 1 } },
     unit: "hours",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: (t) => `steps.${t}.wait_hours`,
     kind: "process.wait",
     pay: "none",
@@ -348,7 +506,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     range: { multiply: { min: 0.1, max: 2, step: 0.05 }, set: { min: 0, max: 0.95, step: 0.01 } },
     unit: "share",
     wholeRun: true,
-    ...SPLICE,
+    ...CHANNEL,
     patchPath: (t) => `steps.${t}.rework_rate`,
     kind: "process.rework",
     pay: "none",
@@ -436,6 +594,8 @@ export function sqlTargetClass(lever: SandboxLever): "none" | "id" | "id_or_none
     case "none":
       return "none";
     case "service_or_none":
+    case "lead_source_or_none":
+    case "role_or_none":
       return "id_or_none";
     case "health_rule":
       return "health";
@@ -480,10 +640,13 @@ export function leverOfPath(path: string): { lever: SandboxLeverId; target: stri
   }
 }
 
-/** The whole-run patch of a change, or null for a lever that is not a patch (hire, leaver, leave, solution). */
+/**
+ * The whole-run patch of a change, or null for a lever that is not a patch (hire, leaver, leave, solution), or a change of one that is
+ * not (a lead source's volume, a client roster's count or churn, fees for existing clients). Those reach the model as edits and channels.
+ */
 export function patchOf(change: SandboxChange): ScenarioPatch | null {
   const lever = LEVER_BY_ID.get(change.lever);
-  if (!lever?.patchPath) return null;
+  if (!lever?.patchPath || (lever.patchWhen && !lever.patchWhen(change))) return null;
   return { path: lever.patchPath(change.target), op: change.op, value: change.value };
 }
 
@@ -519,9 +682,20 @@ export function isMonday(d: string): boolean {
   return date.toISOString().slice(0, 10) === d && date.getUTCDay() === 1;
 }
 
-/** The value rules beyond the sanity bound: the ones plans already enforced (docs/plans/sandbox-p1-brief.md §1). */
+/** The value rules beyond the sanity bound: the ones plans already enforced (docs/plans/sandbox-p1-brief.md §1) and phase 3's levers'. */
 function valueProblem(lever: SandboxLever, value: number, op: PatchOp): boolean {
   switch (lever.id) {
+    case "A3":
+    case "B4":
+      return value < 0 || value > 5;
+    case "A5":
+      return value < 0;
+    case "B5":
+      return value < -1 || value > 4;
+    case "D6":
+      return value < 0.1 || value > 2;
+    case "D9":
+      return !Number.isInteger(value) || value < 0 || value > 6;
     // Overheads can be set to, or multiplied by, nothing or more; an add may be a cut (the engine keeps the total at 0 or more).
     case "C2":
       return op !== "add" && value < 0;
@@ -571,12 +745,41 @@ export function changeProblem(c: unknown): string | null {
     return lever.id === "D1" ? "A hire's FTE must be between 0.1 and 2." : lever.id === "D3" ? "Leave lasts 1 to 52 whole weeks." : `${lever.label}: that value isn't valid.`;
   }
   if ("params" in c) {
-    const p = c.params;
-    if (lever.id !== "D1" || !isObject(p) || Object.keys(p).some((k) => k !== "name") || typeof p.name !== "string" || p.name.length < 1 || p.name.length > 120) {
-      return "A name can have up to 120 characters.";
-    }
+    const problem = paramsProblem(lever, c.params, c.value);
+    if (problem) return problem;
+  } else if (lever.paramsRequired) {
+    return `${lever.label} needs ${lever.id === "A5" ? "a lowest and a highest fee" : "its extras"}.`;
   }
   return null;
+}
+
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Why a change's `params` are not valid for its lever (as `private.is_sandbox_change` judges them), or null: only the lever's own keys
+ * (D1 a name of 1 to 120 characters; A5 `low` and `high` with 0 <= low <= value <= high <= 1e9; B4 an optional `chance` 0 to 1 and
+ * `months` 1 to 24; B2 `who` = new | all).
+ */
+export function paramsProblem(lever: SandboxLever, params: unknown, value: number): string | null {
+  const keys = lever.params ?? [];
+  if (!isObject(params) || keys.length === 0 || Object.keys(params).some((k) => !(keys as readonly string[]).includes(k))) return `${lever.label} doesn't take those extras.`;
+  const p = params;
+  switch (lever.id) {
+    case "D1":
+      return typeof p.name === "string" && p.name.length >= 1 && p.name.length <= 120 ? null : "A name can have up to 120 characters.";
+    case "A5":
+      return isNum(p.low) && isNum(p.high) && p.low >= 0 && p.low <= value && value <= p.high && p.high <= 1_000_000_000
+        ? null
+        : "A value range needs 0 <= lowest <= likely <= highest.";
+    case "B4":
+      if ("chance" in p && !(isNum(p.chance) && p.chance >= 0 && p.chance <= 1)) return "A chance is between 0% and 100%.";
+      if ("months" in p && !(isNum(p.months) && Number.isInteger(p.months) && p.months >= 1 && p.months <= 24)) return "A hit lasts 1 to 24 months.";
+      return null;
+    case "B2":
+      return Object.keys(p).length === 1 && (p.who === "new" || p.who === "all") ? null : "Fees apply to new clients or to new and existing clients.";
+    default:
+      return `${lever.label} doesn't take those extras.`;
+  }
 }
 
 /** Size of the list as the database counts it: `jsonb::text` has a space after every comma and colon. */

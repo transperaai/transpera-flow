@@ -181,6 +181,8 @@ function services(): ServiceRow[] {
     name,
     pricing_model: "retainer",
     price,
+    price_low: null,
+    price_high: null,
     margin,
     tenure_months: tenure,
     churn_monthly_base: churn,

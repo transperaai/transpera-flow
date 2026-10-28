@@ -64,7 +64,7 @@ export type Db = Kysely<DB>;
 
 /** The `ServiceRow` columns. */
 export const SERVICE_COLUMNS =
-  "id, workspace_id, name, pricing_model, price, margin, tenure_months, churn_monthly_base, churn_health_sensitivity, mix_share, entry_process_id, path_tags, fallback_ongoing_load, active" as const;
+  "id, workspace_id, name, pricing_model, price, price_low, price_high, margin, tenure_months, churn_monthly_base, churn_health_sensitivity, mix_share, entry_process_id, path_tags, fallback_ongoing_load, active" as const;
 
 /** The `ServiceServicingRow` columns. */
 export const SERVICE_SERVICING_COLUMNS = "id, workspace_id, service_id, process_id, recurrence, sla_hours, provenance" as const;
@@ -233,7 +233,7 @@ export async function loadClientGroups(db: Db, workspaceId: string): Promise<Cli
 }
 
 /** The `ChurnDriverRow` columns. */
-export const CHURN_DRIVER_COLUMNS = "id, workspace_id, driver, name, description, example, weight, enabled, value, month, provenance" as const;
+export const CHURN_DRIVER_COLUMNS = "id, workspace_id, driver, name, description, example, weight, enabled, value, month, chance, effect, effect_months, provenance" as const;
 
 /** The churn drivers a workspace has set, built-ins first (by creation order), then its own by name. */
 export async function loadChurnDrivers(db: Db, workspaceId: string): Promise<ChurnDriverRow[]> {

@@ -283,6 +283,9 @@ export interface ServiceRow {
   churn_health_sensitivity: number;
   /** Relative share of arrivals. */
   mix_share: number;
+  /** Fee range of a client won on this service (sandbox phase 3, A5): its fee is drawn between these, most often near `price`. Null: no range. */
+  price_low: number | null;
+  price_high: number | null;
   /** Process its arrivals enter; null means the workspace's pipeline (whichever process is simulated). */
   entry_process_id: string | null;
   /** Condition tags its entities follow (`edges.condition_tag`). */
@@ -588,7 +591,16 @@ export interface ChurnDriverRow {
   value: number | null;
   /** Price changes: the month of the run the rise takes effect. */
   month: number | null;
-  /** Provenance of weight, enabled, value and month. */
+  /**
+   * Chance mode (sandbox phase 3, B4): the chance a client is hit in a month, in percent (0-100). Null: measured for late, resp, onb,
+   * rework and load, a default for the rest. Only an `effect` switches the driver from its weight to events.
+   */
+  chance: number | null;
+  /** Chance mode: how much a hit raises that client's churn, in percent (0-500). Null: the driver runs on its weight. */
+  effect: number | null;
+  /** Chance mode: months a hit lasts (1-24). Null: 3. */
+  effect_months: number | null;
+  /** Provenance of weight, enabled, value, month, chance, effect and effect_months. */
   provenance: ProvenanceMap;
 }
 

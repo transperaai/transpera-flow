@@ -47,7 +47,8 @@ export function seedSql(
     // The workspace's other processes (servicing, issue #19), each linked to its live revision last, like the main one.
     const others = b.otherProcesses ?? [];
     out.push(insert("processes", [process, ...others.map(({ process: { live_revision_id: _live, ...p } }) => p)]));
-    out.push(insert("services", b.services.map((r) => ({ ...r }))));
+    // The fee range (phase 3) is left out while null, so the seed still loads into a database built up to an older migration (the tests that migrate in steps).
+    out.push(insert("services", b.services.map(({ price_low, price_high, ...r }) => ({ ...r, ...(price_low !== null ? { price_low } : {}), ...(price_high !== null ? { price_high } : {}) }))));
     out.push(insert("lead_sources", (b.leadSources ?? []).map((r) => ({ ...r }))));
     out.push(insert("seasonality", (b.seasonality ?? []).map((r) => ({ ...r }))));
     out.push(insert("demand_settings", b.demand ? [{ ...b.demand }] : []));

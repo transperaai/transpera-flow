@@ -133,7 +133,7 @@ describe("provenance and the company-model triggers", () => {
     await db.as(users.editor!.claims, async (c) => {
       await c.query("insert into churn_drivers (workspace_id, driver, weight, value) values ($1, 'results', 1.5, 6)", [ws]);
       const first = (await c.query("select provenance from churn_drivers where driver = 'results'")).rows[0].provenance;
-      expect(Object.keys(first).sort()).toEqual(["enabled", "month", "value", "weight"]);
+      expect(Object.keys(first).sort()).toEqual(["chance", "effect", "effect_months", "enabled", "month", "value", "weight"]);
       expect(first.weight).toMatchObject({ source: "entered", by: users.editor!.id });
       await c.query("update churn_drivers set weight = 2 where driver = 'results'");
       expect((await c.query("select provenance from churn_drivers where driver = 'results'")).rows[0].provenance.weight.source).toBe("entered");
@@ -175,6 +175,9 @@ describe("the engine model", () => {
     example: null,
     value: null,
     month: null,
+    chance: null,
+    effect: null,
+    effect_months: null,
     provenance: {},
     ...over,
   });

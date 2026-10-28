@@ -82,7 +82,7 @@ export const IMPORT_COLUMNS = {
   lead_sources: cols("lead_sources", "id", "name", "conversion_to_qualified", "volume_week", "provenance", "created_at"),
   seasonality: cols("seasonality", "id", "month", "multiplier", "provenance", "created_at"),
   demand_settings: cols("demand_settings", "growth_monthly", "provenance", "created_at"),
-  churn_drivers: cols("churn_drivers", "id", "name", "description", "driver", "enabled", "example", "month", "value", "weight", "provenance", "created_at"),
+  churn_drivers: cols("churn_drivers", "id", "name", "description", "driver", "enabled", "example", "month", "value", "weight", "chance", "effect", "effect_months", "provenance", "created_at"),
   market_conditions: cols("market_conditions", "id", "name", "churn", "conv", "cycle", "hire", "leads", "pay", "price", "created_at"),
   market_schedule: cols("market_schedule", "id", "condition_id", "from_month", "to_month", "created_at"),
   lever_settings: cols("lever_settings", "hidden", "created_at"),
@@ -109,7 +109,7 @@ export const IMPORT_COLUMNS = {
   ),
   services: cols(
     "services", "id", "name", "active", "churn_health_sensitivity", "churn_monthly_base", "entry_process_id", "fallback_ongoing_load", "margin", "mix_share",
-    "path_tags", "price", "pricing_model", "tenure_months", "provenance", "created_at",
+    "path_tags", "price", "price_high", "price_low", "pricing_model", "tenure_months", "provenance", "created_at",
   ),
   service_servicing: cols("service_servicing", "id", "process_id", "service_id", "recurrence", "sla_hours", "provenance", "created_at"),
   client_groups: cols("client_groups", "id", "service_id", "client_count", "churn_monthly", "fee", "starting_health", "stay_months", "provenance", "created_at"),

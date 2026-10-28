@@ -166,6 +166,8 @@ function services(): ServiceRow[] {
     name: sv.name,
     pricing_model: sv.pricingModel,
     price: sv.price,
+    price_low: null,
+    price_high: null,
     margin: sv.margin,
     tenure_months: sv.tenureMonths,
     churn_monthly_base: sv.churnMonthly,

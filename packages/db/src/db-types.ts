@@ -99,10 +99,13 @@ export interface CapacityFactorProposals {
 }
 
 export interface ChurnDrivers {
+  chance: Numeric | null;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
   description: string | null;
   driver: string | null;
+  effect: Numeric | null;
+  effect_months: number | null;
   enabled: Generated<boolean>;
   example: string | null;
   id: Generated<string>;
@@ -552,6 +555,8 @@ export interface Services {
   name: string;
   path_tags: Generated<string[]>;
   price: Generated<Numeric>;
+  price_high: Numeric | null;
+  price_low: Numeric | null;
   pricing_model: Generated<string>;
   provenance: Generated<Json>;
   tenure_months: Generated<Numeric>;

@@ -401,6 +401,10 @@ function engineServices(bundle: ProcessBundle, processId: string): Record<string
       mixShare: Number(sv.mix_share),
       pathTags: sv.path_tags.map((t) => t.trim()).filter(Boolean),
       ...(fallback ? { fallbackOngoing: fallback } : {}),
+      // A fee range (sandbox phase 3): only when both ends are set and they aren't both the price itself.
+      ...(num(sv.price_low) !== null && num(sv.price_high) !== null && !(num(sv.price_low) === Number(sv.price) && num(sv.price_high) === Number(sv.price))
+        ? { priceRange: { low: num(sv.price_low)!, high: num(sv.price_high)! } }
+        : {}),
     };
   }
   return services;
@@ -552,6 +556,10 @@ export function engineChurnDrivers(bundle: ProcessBundle): EngineChurnDriver[] |
       ...(d.value !== null && d.value !== undefined ? { value: Number(d.value) } : {}),
       ...(d.month !== null && d.month !== undefined ? { month: Number(d.month) } : {}),
       ...(d.driver === null ? { name: d.name ?? "" } : {}),
+      // Chance mode (sandbox phase 3): stored in percent, the engine takes fractions. A row with none maps exactly as before.
+      ...(d.chance !== null && d.chance !== undefined ? { chance: Number(d.chance) / 100 } : {}),
+      ...(d.effect !== null && d.effect !== undefined ? { effect: Number(d.effect) / 100 } : {}),
+      ...(d.effect_months !== null && d.effect_months !== undefined ? { effectMonths: Number(d.effect_months) } : {}),
     });
   }
   return out.length ? out : undefined;
