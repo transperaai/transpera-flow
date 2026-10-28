@@ -6,7 +6,7 @@
 // 10-90% range and its difference from "No changes". Every column runs with the same seed, so a difference comes from the changes,
 // not from chance. A column that fails shows its error and the others still show.
 
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import type { ProcessBundle, SandboxScenarioRow, SolutionRow } from "@transpera-flow/db";
 import type { Stat } from "@transpera-flow/engine";
 import { Help, type HelpProps } from "@/components/help";
@@ -49,15 +49,17 @@ interface Resolved {
   error: string | null;
 }
 
+/** A column's changes by the saved scenarios they were worked out from (a module cache: the same scenarios give the same lists). */
+const RESOLVED = new WeakMap<SandboxScenarioRow[], Map<string, Resolved>>();
+
 export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, onChange, onBack }: SandboxCompareProps) {
   // One column's changes are worked out once per scenario and kept while the saved scenarios are the same, so a render, or a change to
   // the other columns' ids, hands a running column the same changes (a new list would restart its run).
-  const cache = useRef(new Map<string, { scenarios: SandboxScenarioRow[]; value: Resolved }>());
   const resolved = useMemo(
     () =>
       ids.slice(0, MAX_COMPARE).map((id): Resolved => {
-        const hit = cache.current.get(id);
-        if (hit && hit.scenarios === scenarios) return hit.value;
+        const hit = RESOLVED.get(scenarios)?.get(id);
+        if (hit) return hit;
         const scenario = scenarios.find((s) => s.id === id) ?? null;
         let value: Resolved;
         if (!scenario) value = { id, scenario: null, changes: null, error: "That scenario isn't there any more." };
@@ -69,7 +71,9 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             value = limit ? { id, scenario, changes: null, error: limit } : { id, scenario, changes: eff.changes, error: null };
           }
         }
-        cache.current.set(id, { scenarios, value });
+        const byId = RESOLVED.get(scenarios) ?? new Map<string, Resolved>();
+        byId.set(id, value);
+        RESOLVED.set(scenarios, byId);
         return value;
       }),
     [ids, scenarios],

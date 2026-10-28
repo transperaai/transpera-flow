@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { northbeamBundle, northbeamRoleIds, northbeamScenarios, northbeamServiceIds, northbeamStepIds, toEngineModel, type ScenarioRow } from "@transpera-flow/db";
+import { northbeamBundle, northbeamRoleIds, northbeamScenarios, northbeamServiceIds, northbeamStepIds, patchOf, toEngineModel, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { applyPatches, simulate } from "@transpera-flow/engine";
 import { buildLevers, leverPatches, neutral } from "@/lib/scenarios/levers";
 import { copyName, describePatch, effectivePatches, headlineSubject, scenarioProblems } from "@/lib/scenarios/scenarios";
@@ -176,7 +176,13 @@ describe("parseScenarioInput", () => {
 describe("scenario Server Actions", () => {
   let world: World;
   let W: string;
-  const scenarios = async () => (await world.tdb.client.query("select id, workspace_id, name, description, patch, parent_scenario_id from scenarios where workspace_id = $1", [W])).rows;
+  // The Sandbox's table: a scenario's patch is its changes, each one a whole-run patch.
+  const scenarios = async () =>
+    (await world.tdb.client.query("select id, workspace_id, name, description, changes, parent_id from sandbox_scenarios where workspace_id = $1", [W])).rows.map(({ changes, parent_id, ...row }) => ({
+      ...row,
+      patch: (changes as SandboxChange[]).map((c) => patchOf(c)),
+      parent_scenario_id: parent_id,
+    }));
 
   beforeAll(async () => {
     world = await createWorld("scenco");
@@ -186,7 +192,7 @@ describe("scenario Server Actions", () => {
     await world?.tdb.close();
   });
   beforeEach(async () => {
-    await world.tdb.client.query("delete from scenarios where workspace_id = $1", [W]);
+    await world.tdb.client.query("delete from sandbox_scenarios where workspace_id = $1", [W]);
     signInAs(world, "editor");
   });
 

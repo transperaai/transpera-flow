@@ -88,14 +88,16 @@ describe("the registry and the engine's patches", () => {
 
   it("offers the levers a person may add: not the migrated-only ones, not role cost yet, and not a hidden kind; levers with no kind are always offered", () => {
     const all = offeredLevers().map((l) => l.id);
-    expect(all).toEqual(["A1", "A6", "B1", "B2", "B3", "D1", "D2", "D3", "D4", "D5", "E1", "E2", "E3", "E6"]);
+    expect(all).toEqual(["A1", "A6", "B1", "B2", "B3", "C2", "D1", "D2", "D3", "D4", "D5", "E1", "E2", "E3", "E6"]);
     expect(all).not.toContain("C1");
     for (const x of ["X1", "X2", "X3"]) expect(all).not.toContain(x);
     const hidden = offeredLevers(["people.starters", "process.time", "finances.prices"]).map((l) => l.id);
     expect(hidden).not.toContain("D1");
     expect(hidden).not.toContain("E1");
     expect(hidden).not.toContain("B2");
-    expect(hidden).toContain("A6");
+    expect(hidden).toContain("E6");
+    // C2 (overheads) has no Settings, Levers kind: always offered.
+    expect(hidden).toContain("C2");
     expect(hidden).toContain("E6");
     // Hiding a kind doesn't change what a saved change does; the Sandbox only says so.
     expect(leverHidden(sandboxLever("D1")!, ["people.starters"])).toBe(true);

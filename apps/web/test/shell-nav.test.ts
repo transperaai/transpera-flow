@@ -33,7 +33,7 @@ describe("workspaceNav: groups and order", () => {
       "Block library",
       "Sources",
       "People",
-      "Forecast",
+      "Sandbox",
       "Settings",
       "Access",
     ]);

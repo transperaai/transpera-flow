@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { northbeamBundle, northbeamScenarios, northbeamStepIds, toEngineModel, type ProcessBundle, type ScenarioRow } from "@transpera-flow/db";
+import { northbeamBundle, northbeamScenarios, northbeamStepIds, patchOf, toEngineModel, type ProcessBundle, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { brokenScenarioKey, checkScenario, detectBrokenScenarios, repointPatch } from "@transpera-flow/engine";
 import { discardChange } from "@/lib/drafts/discard";
 import { diffBundles } from "@/lib/drafts/diff";
@@ -197,7 +197,7 @@ describe("re-pointing a saved scenario", () => {
   afterAll(async () => {
     await tdb?.close();
   });
-  const storedPatch = async (id: string) => (await tdb.client.query("select patch from scenarios where id = $1", [id])).rows[0].patch;
+  const storedPatch = async (id: string) => ((await tdb.client.query("select changes from sandbox_scenarios where id = $1", [id])).rows[0].changes as SandboxChange[]).map((c) => patchOf(c));
 
   it("in memory (the demo)", async () => {
     const store = new MemoryScenarioStore("ws");

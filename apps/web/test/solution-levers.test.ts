@@ -93,11 +93,11 @@ describe("the Sandbox's scenarios (amends D46)", () => {
   const bounds = monthBounds(monthStarts, live.horizonWeeks * live.hoursPerWeek);
   const live_ = (id: string, date: string, solutionId: string): EffectiveChange => ({ change: { id, lever: "E6", target: solutionId, op: "set", value: 1, from: date.slice(0, 7) }, scenarioId: "s", scenarioName: "S", inherited: false });
   const marker = (date: string) => [live_("11111111-1111-4111-8111-111111111111", date, DEMO_FORECAST_SOLUTION_ID)];
-  const planSegments = (b: typeof bundle, changes: EffectiveChange[], solutions: SolutionRow[], start: string, bounds_: number[], hpw: number) => scenarioSegments(b, changes, solutions, start, bounds_, hpw);
+  const segmentsOf = (b: typeof bundle, changes: EffectiveChange[], solutions: SolutionRow[], start: string, bounds_: number[], hpw: number) => scenarioSegments(b, changes, solutions, start, bounds_, hpw);
 
   it("a segment carries the lever changes of the solutions live by then, and the run applies them", () => {
     const withLevers = { ...DEMO_FORECAST_SOLUTION, lever_changes: [LEADS] } as SolutionRow;
-    const { segments } = planSegments(bundle, marker("2027-01-01"), [withLevers], DEMO_FORECAST_START, bounds, 40);
+    const { segments } = segmentsOf(bundle, marker("2027-01-01"), [withLevers], DEMO_FORECAST_START, bounds, 40);
     expect(segments[0]!.patches).toEqual([]);
     const last = segments[segments.length - 1]!;
     expect(last.patches).toEqual([LEADS]);
@@ -111,21 +111,21 @@ describe("the Sandbox's scenarios (amends D46)", () => {
     const A = { ...DEMO_FORECAST_SOLUTION, id: "00000000-0000-4000-8000-0000000000a1", lever_changes: [LEADS, slow] } as SolutionRow;
     const B = { ...DEMO_FORECAST_SOLUTION, id: "00000000-0000-4000-8000-0000000000a2", lever_changes: [] } as SolutionRow;
     const two = [live_("11111111-1111-4111-8111-111111111111", "2026-12-01", A.id), live_("22222222-2222-4222-8222-222222222222", "2027-03-01", B.id)];
-    const { segments } = planSegments(bundle, two, [A, B], DEMO_FORECAST_START, bounds, 40);
+    const { segments } = segmentsOf(bundle, two, [A, B], DEMO_FORECAST_START, bounds, 40);
     // Where only A is live its changes count; once B replaces it, none do.
     expect(segments.some((s) => s.solutionIds.length === 1 && s.patches.length === 2)).toBe(true);
     expect(segments[segments.length - 1]!.solutionIds).toEqual([A.id, B.id]);
     expect(segments[segments.length - 1]!.patches).toEqual([]);
     // Both with x0.8 on one step: the model shows x0.8, not x0.64.
     const both = { ...B, lever_changes: [slow] } as SolutionRow;
-    const last = planSegments(bundle, two, [A, both], DEMO_FORECAST_START, bounds, 40).segments.at(-1)!;
+    const last = segmentsOf(bundle, two, [A, both], DEMO_FORECAST_START, bounds, 40).segments.at(-1)!;
     expect(last.patches).toEqual([slow]);
     const base = forecastModel(last.bundle, 12, DEMO_FORECAST_START).model!.steps.find((x) => x.id === step)!.work;
     expect(forecastModel(last.bundle, 12, DEMO_FORECAST_START, last.patches).model!.steps.find((x) => x.id === step)!.work).toBeCloseTo(base * 0.8, 6);
   });
 
   it("with none, the plan's models are the same as before", () => {
-    const { segments } = planSegments(bundle, marker("2027-01-01"), [DEMO_FORECAST_SOLUTION], DEMO_FORECAST_START, bounds, 40);
+    const { segments } = segmentsOf(bundle, marker("2027-01-01"), [DEMO_FORECAST_SOLUTION], DEMO_FORECAST_START, bounds, 40);
     for (const s of segments) {
       expect(s.patches).toEqual([]);
       expect(JSON.stringify(forecastModel(s.bundle, 12, DEMO_FORECAST_START, s.patches).model)).toBe(JSON.stringify(forecastModel(s.bundle, 12, DEMO_FORECAST_START).model));
