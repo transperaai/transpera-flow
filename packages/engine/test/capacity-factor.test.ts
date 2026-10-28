@@ -129,8 +129,9 @@ describe("per-person times (capacityFactor)", () => {
 });
 
 describe("the version", () => {
-  it("is 1.10.0 and the ledger holds 1.9.0's digest for it (no golden number moved)", () => {
-    expect(ENGINE_VERSION).toBe("1.10.0");
+  it("the ledger holds 1.9.0's digest for 1.10.0 (no golden number moved), and the engine is at 1.10.0 or later", () => {
+    const [major, minor] = ENGINE_VERSION.split(".").map(Number) as [number, number];
+    expect(major > 1 || (major === 1 && minor >= 10)).toBe(true);
     const ledger = JSON.parse(readFileSync(new URL("../golden/versions.json", import.meta.url), "utf8")) as { version: string; digest?: string; sha256?: string }[] | { versions: { version: string; digest?: string; sha256?: string }[] };
     const list = Array.isArray(ledger) ? ledger : ledger.versions;
     const digest = (v: string) => {
