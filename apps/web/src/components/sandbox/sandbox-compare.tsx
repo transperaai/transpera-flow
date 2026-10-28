@@ -6,7 +6,7 @@
 // 10-90% range and its difference from "No changes". Every column runs with the same seed, so a difference comes from the changes,
 // not from chance. A column that fails shows its error and the others still show.
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { ProcessBundle, SandboxScenarioRow, SolutionRow } from "@transpera-flow/db";
 import type { Stat } from "@transpera-flow/engine";
 import { Help, type HelpProps } from "@/components/help";
@@ -42,16 +42,38 @@ export interface SandboxCompareProps {
   onBack: () => void;
 }
 
+interface Resolved {
+  id: string;
+  scenario: SandboxScenarioRow | null;
+  changes: EffectiveChange[] | null;
+  error: string | null;
+}
+
 export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, onChange, onBack }: SandboxCompareProps) {
-  // By the ids and the saved scenarios, so a render that changes neither hands each run the same changes (a new list restarts its run).
-  const resolved = useMemo(() => ids.slice(0, MAX_COMPARE).map((id) => {
-    const scenario = scenarios.find((s) => s.id === id) ?? null;
-    if (!scenario) return { id, scenario: null, changes: null as EffectiveChange[] | null, error: "That scenario isn't there any more." };
-    const eff = effectiveChanges(scenario, scenarios);
-    if (!eff.ok) return { id, scenario, changes: null, error: eff.error };
-    const limit = effectiveLimitProblem(eff.changes.map((c) => c.change));
-    return limit ? { id, scenario, changes: null, error: limit } : { id, scenario, changes: eff.changes, error: null };
-  }), [ids, scenarios]);
+  // One column's changes are worked out once per scenario and kept while the saved scenarios are the same, so a render, or a change to
+  // the other columns' ids, hands a running column the same changes (a new list would restart its run).
+  const cache = useRef(new Map<string, { scenarios: SandboxScenarioRow[]; value: Resolved }>());
+  const resolved = useMemo(
+    () =>
+      ids.slice(0, MAX_COMPARE).map((id): Resolved => {
+        const hit = cache.current.get(id);
+        if (hit && hit.scenarios === scenarios) return hit.value;
+        const scenario = scenarios.find((s) => s.id === id) ?? null;
+        let value: Resolved;
+        if (!scenario) value = { id, scenario: null, changes: null, error: "That scenario isn't there any more." };
+        else {
+          const eff = effectiveChanges(scenario, scenarios);
+          if (!eff.ok) value = { id, scenario, changes: null, error: eff.error };
+          else {
+            const limit = effectiveLimitProblem(eff.changes.map((c) => c.change));
+            value = limit ? { id, scenario, changes: null, error: limit } : { id, scenario, changes: eff.changes, error: null };
+          }
+        }
+        cache.current.set(id, { scenarios, value });
+        return value;
+      }),
+    [ids, scenarios],
+  );
   // The hooks are called a fixed number of times; a column that isn't there gets null and stays idle.
   const run0 = useScenarioRun({ bundle: live, changes: NO_CHANGES, solutions, months, startDate });
   const run1 = useScenarioRun({ bundle: live, changes: resolved[0]?.changes ?? null, solutions, months, startDate });

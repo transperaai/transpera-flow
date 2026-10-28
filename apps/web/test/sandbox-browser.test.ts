@@ -213,7 +213,9 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         const { page, errors } = await mount(width);
         await newScenario(page);
         await addHire(page);
-        await waitRuns(page, 1);
+        // The empty scenario ran once, and the hire runs it again.
+        await waitRuns(page, 2);
+        const base = await runs(page);
         const m = marker(page, "hire");
         const before = await valuetext(m);
         await m.click();
@@ -222,7 +224,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.keyboard.press("Escape");
         await page.waitForSelector("[data-change-dialog]", { state: "detached" });
         expect(await valuetext(m)).toBe(before);
-        expect(await runs(page)).toBe(1);
+        expect(await runs(page)).toBe(base);
         await dragTo(page, m, 8, { release: false });
         expect(await page.locator("[data-plan-ghost]").count()).toBe(1);
         await page.keyboard.press("Escape");
@@ -230,7 +232,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await page.locator("[data-plan-ghost]").count()).toBe(0);
         expect(await valuetext(m)).toBe(before);
         await page.waitForTimeout(600);
-        expect(await runs(page)).toBe(1);
+        expect(await runs(page)).toBe(base);
         expect(errors).toEqual([]);
         await page.close();
       });
