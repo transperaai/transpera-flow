@@ -1,6 +1,6 @@
 "use client";
 
-// The Block library page (issue #116): a card for each saved block with its type, how many solutions use it, its name and
+// The Block library page (issue #116): a card for each saved block with how many solutions use it, its name and
 // description and a small map of its steps. "✎ New block" opens the Editor in block mode. On the demo the blocks live in this
 // tab (lib/blocks/demo.ts), so a block saved from the Editor shows here at once.
 
@@ -8,7 +8,6 @@ import Link from "next/link";
 import { Layers } from "lucide-react";
 import type { BlockRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Page } from "@/components/shell/page";
@@ -17,8 +16,6 @@ import { useDemoBlocks } from "@/lib/blocks/demo";
 import { cn } from "@/lib/utils";
 import { BlockMap } from "./block-map";
 import { EDIT_ONLY } from "@/lib/phone";
-
-const TYPE_LABEL: Record<BlockRow["type"], string> = { manual: "By hand", ai: "AI" };
 
 /** "Used in 2 solutions". Solutions arrive with A49 and don't record the blocks they use yet, so until then it is 0. */
 export const usageText = (n: number) => `Used in ${n} ${n === 1 ? "solution" : "solutions"}`;
@@ -30,7 +27,7 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
     <Page
       title="Block library"
       eyebrow="Improve"
-      description="Saved bundles of steps. Drop one into a solution, or into a process in the Editor. AI solutions are blocks too."
+      description="Saved bundles of steps. Drop one into a solution, or into a process in the Editor."
       actions={
         newHref ? (
           <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
@@ -64,15 +61,7 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
               <li key={b.id}>
                 <Card className="h-full" data-block={b.id}>
                   <div className="flex flex-col gap-2 px-(--card-spacing)">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="flex items-center">
-                        <Badge variant={b.type === "ai" ? "default" : "outline"}>{TYPE_LABEL[b.type]}</Badge>
-                        <Help
-                          label="Block type"
-                          description="“By hand” blocks were built or saved by a person. “AI” blocks were made by the AI's solution ideas. Both are inserted the same way."
-                          example="“Client sign-off” is by hand; an “AI lead qualifier” the AI suggested is marked AI."
-                        />
-                      </span>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <span className="flex items-center text-xs text-muted-foreground">
                         {usageText(0)}
                         <Help

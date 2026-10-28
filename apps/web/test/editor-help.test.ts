@@ -116,9 +116,14 @@ describe("every (i) on the Editor screen", () => {
 });
 
 describe("every control of the block library (issue #116)", () => {
-  it("names its (i)s: the library's New block, type and usage count", () => {
+  it("names its (i)s: the library's New block and usage count", () => {
     const tags = helpTags(read("components/blocks/block-library.tsx"));
-    expect(tags.map((t) => /label="([^"]+)"/.exec(t)?.[1])).toEqual(["New block", "Block type", "Used in"]);
+    expect(tags.map((t) => /label="([^"]+)"/.exec(t)?.[1])).toEqual(["New block", "Used in"]);
+  });
+
+  it("marks no block as made by AI: in-app AI and its solution ideas are gone (cut list items 1 and 2)", () => {
+    expect(read("components/blocks/block-library.tsx")).not.toMatch(/\bAI\b/);
+    expect(read("components/editor/palette.tsx")).not.toMatch(/"AI"|=== "ai"/);
   });
 
   it("has a button for each thing the block (i)s describe", () => {
