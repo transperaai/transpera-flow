@@ -40,6 +40,7 @@ import { deleteDemoScenario, saveDemoScenario, useDemoScenarios } from "@/lib/sa
 import type { DescribeContext } from "@/lib/sandbox/describe";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { solutionReason } from "@/lib/sandbox/greyed";
+import { todayValue } from "@/lib/sandbox/today";
 import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
@@ -251,7 +252,9 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     [shownRun, start, serviceNames],
   );
 
-  const ctx: DescribeContext = useMemo(() => ({ bundle: live, solutions: planSolutions, changes: effectiveList?.map((e) => e.change) ?? [] }), [live, planSolutions, effectiveList]);
+  // The weight of each service type in the live model: what "Traffic by type" percentages are shares of.
+  const mix = useMemo(() => Object.fromEntries(Object.entries(built.model?.services ?? {}).map(([id, sv]) => [id, sv.mixShare])), [built.model]);
+  const ctx: DescribeContext = useMemo(() => ({ bundle: live, solutions: planSolutions, changes: effectiveList?.map((e) => e.change) ?? [], mix }), [live, planSolutions, effectiveList, mix]);
   const lane = useMemo(() => (effectiveList ? laneMarkers(ctx, effectiveList, plan.problems, start, hpw) : []), [ctx, effectiveList, plan.problems, start, hpw]);
   const inSpan = useMemo(() => lane.filter((mk) => bounds !== null && hoursToDate(start, mk.date, hpw) < horizonHours), [lane, bounds, start, hpw, horizonHours]);
   const model = built.model;
@@ -744,6 +747,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           defaultMonth={monthOptions[1]?.value ?? monthOptions[0]?.value ?? start.slice(0, 7)}
           defaultMonday={mondayOnOrBefore(addDays(start, 7))}
           currency={live.workspace.settings.currency}
+          today={(leverId, targetId) => {
+            const lever = sandboxLever(leverId);
+            return lever && model ? todayValue(lever, targetId, model, live.workspace.settings.currency) : null;
+          }}
+          mix={mix}
           validate={(change) => {
             const others = (working?.changes ?? []).filter((c) => c.id !== change.id);
             const parsed = parseSandboxInput({ name: "x", parent_id: working?.parent_id ?? null, changes: [...others, change], horizon_months: months }, { ...parseContext, selfId: selected });

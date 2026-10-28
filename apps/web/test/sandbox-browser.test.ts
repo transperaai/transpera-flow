@@ -187,6 +187,57 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.close();
       });
 
+      onTablet("shows what each lever stands at today before it is changed", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await openAdd(page);
+        const today = () => page.locator("[data-change-dialog] [data-today]").innerText();
+        const lever = (label: string) => page.getByLabel("What to change", { exact: true }).selectOption({ label });
+        expect(await today()).toBe("Today: about 30 opportunities a month");
+        await lever("Fees");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "SEO retainer" });
+        expect(await today()).toBe("Today: £3,500 a month");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "PPC management" });
+        expect(await today()).toBe("Today: £4,200 a month");
+        await lever("Headcount by role");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "PPC specialist" });
+        expect(await today()).toBe("Today: 3 people");
+        await lever("Rework");
+        expect(await today()).toMatch(/^Today: done again [\d.]+% of the time$/);
+        // A lever with nothing to say shows no line.
+        await lever("Solution goes live");
+        expect(await page.locator("[data-change-dialog] [data-today]").count()).toBe(0);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("sets traffic by type as a percentage of all traffic, shows the split, and reads it back as a percentage", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Traffic by type" });
+        expect(await page.locator("[data-change-dialog] [data-today]").innerText()).toBe("Today: SEO retainer 55%, PPC management 45%");
+        // Only "Set to" is offered, in percent.
+        expect(await page.getByLabel("How", { exact: true }).count()).toBe(0);
+        expect(await page.locator("[data-change-dialog]").innerText()).toContain("% of all opportunities");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "SEO retainer" });
+        await page.getByLabel("Share (%)", { exact: true }).fill("100");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-change-dialog-error]").innerText()).toContain("0% to 99%");
+        await page.getByLabel("Share (%)", { exact: true }).fill("40");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-change-list] [data-change]");
+        expect(await changes(page).first().innerText()).toContain("Traffic by type, SEO retainer → 40%");
+        // Stored as the weight that makes it 40% beside the other type's 0.45.
+        await waitRuns(page, 1);
+        await changes(page).first().getByRole("button", { name: /^Edit/ }).click();
+        await page.waitForSelector("[data-change-dialog]");
+        expect(await page.getByLabel("Share (%)", { exact: true }).inputValue()).toBe("40");
+        await page.keyboard.press("Escape");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
       onTablet("moves a change by keyboard: a month a key press, three months a page, Delete removes", async () => {
         const { page, errors } = await mount(width);
         await newScenario(page);

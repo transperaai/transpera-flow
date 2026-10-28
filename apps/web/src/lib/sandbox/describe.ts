@@ -5,6 +5,7 @@ import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { personName, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
+import { othersTotal, percentText, weightToShare } from "./traffic";
 
 /** What names a change's target: the bundle's roles, people (as the viewer's bundle names them), steps, services; and the solutions. */
 export interface DescribeContext {
@@ -12,6 +13,8 @@ export interface DescribeContext {
   solutions: readonly Pick<SolutionRow, "id" | "name">[];
   /** Every change in the list the hire numbering runs over. */
   changes: readonly SandboxChange[];
+  /** The live model's traffic weight per service type (id to `mix_share`): what a "Traffic by type" percentage is a share of. Else the bundle's active services. */
+  mix?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -93,6 +96,14 @@ export function describeChange(c: SandboxChange, ctx: DescribeContext): string {
       return `${name} on leave for ${formatNumber(c.value, 0)} week${c.value === 1 ? "" : "s"}`;
     case "E6":
       return `${name} goes live`;
+    case "A6": {
+      // A traffic change is a share of all opportunities: the stored weight against the other types' weights today.
+      if (c.op === "set" && c.target) {
+        const mix = ctx.mix ?? Object.fromEntries(ctx.bundle.services.filter((s) => s.active).map((s) => [s.id, Number(s.mix_share)]));
+        return `${lever.label}, ${name} → ${percentText(weightToShare(c.value, othersTotal(mix, c.target)))}`;
+      }
+      return `${lever.label}, ${name} ${formatChangeValue(lever, c.op, c.value, currency)}`;
+    }
     default: {
       const subject = name && lever.target !== "none" ? `${lever.label}, ${name}` : lever.label;
       return `${subject} ${formatChangeValue(lever, c.op, c.value, currency)}`;
