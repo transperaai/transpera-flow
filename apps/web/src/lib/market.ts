@@ -23,7 +23,8 @@ export const FACTORS: readonly { key: MarketFactorKey; label: string; descriptio
 ];
 
 /** What each factor does in the simulation today, for the small print under the sliders. */
-export const UNUSED_FACTORS: readonly MarketFactorKey[] = ["hire", "pay"];
+// Time to hire acts through the Sandbox's hiring delay (D9) only; late payments (pay) change nothing yet.
+export const UNUSED_FACTORS: readonly MarketFactorKey[] = ["pay"];
 
 export const CONDITION_HELP: Record<string, { description: string; example: string }> = {
   boom: { description: "Business is booming: lots of enquiries, fewer clients leave, but hiring is hard.", example: "25% more enquiries, 15% fewer clients leaving." },

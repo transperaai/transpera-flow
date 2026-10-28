@@ -40,10 +40,12 @@ export async function saveChurnDriver(workspaceId: string, key: string, patch: u
   if (!(await signedIn())) return signedOut;
   const db = await getDb();
 
+  const { effectMonths, ...rest } = parsed;
+  const columns = { ...rest, ...(effectMonths !== undefined ? { effect_months: effectMonths } : {}) };
   const update = async (id: string): Promise<DriverResult> => {
     let data;
     try {
-      data = await db.updateTable("churn_drivers").set(parsed).where("id", "=", id).where("workspace_id", "=", workspaceId).returning("id").execute();
+      data = await db.updateTable("churn_drivers").set(columns).where("id", "=", id).where("workspace_id", "=", workspaceId).returning("id").execute();
     } catch (e) {
       return failed(e);
     }
@@ -77,6 +79,9 @@ export async function saveChurnDriver(workspaceId: string, key: string, patch: u
         enabled: parsed.enabled ?? spec.defaultEnabled,
         value: parsed.value !== undefined ? parsed.value : spec.defaultValue,
         month: builtin === "price" ? (parsed.month ?? 1) : null,
+        chance: parsed.chance ?? null,
+        effect: parsed.effect ?? null,
+        effect_months: parsed.effectMonths ?? null,
       })
       .returning("id")
       .executeTakeFirstOrThrow();

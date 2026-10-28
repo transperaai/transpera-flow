@@ -156,7 +156,7 @@ function ConditionCard({
         ))}
       </div>
       <p className="text-xs text-fg-2">
-        100% means the same as today. Time to hire and Late payments are saved with the market but don&apos;t change the simulation yet.
+        100% means the same as today. Time to hire stretches the Sandbox&apos;s hiring delay; Late payments don&apos;t change the simulation yet.
       </p>
     </div>
   );

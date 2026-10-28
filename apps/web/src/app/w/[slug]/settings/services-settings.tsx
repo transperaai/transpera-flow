@@ -33,6 +33,12 @@ const tagsSaver =
 
 const pricingOptions = PRICING_MODELS.map((m) => ({ value: m, label: PRICING_LABELS[m] }));
 
+/** A warning (not a refusal) when the fee range doesn't hold the fee: the engine uses the fee as the end of the range. */
+const rangeWarning = (sv: { price: number; price_low?: number | null; price_high?: number | null }): string | undefined =>
+  (sv.price_low != null && Number(sv.price_low) > Number(sv.price)) || (sv.price_high != null && Number(sv.price_high) < Number(sv.price))
+    ? "The range doesn't hold the fee above. The engine uses the fee as the end of the range."
+    : undefined;
+
 /** "per month", "one-off" or "per hour", for a price. */
 const priceUnit = (model: PricingModel) => (model === "retainer" ? "/month" : model === "hourly" ? "/hour" : " one-off");
 
@@ -161,6 +167,26 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
           min={0}
           step={50}
           disabled={disabled} help={{ description: "What a client pays: per month for a retainer, per hour for hourly work.", example: "2,500 a month." }} />
+        <NumberField
+          label="Fee range: lowest"
+          value={sv.price_low === null || sv.price_low === undefined ? null : Number(sv.price_low)}
+          save={serviceSaver(sv.id, "price_low")}
+          unit={`${currency}${priceUnit(sv.pricing_model)}`}
+          min={0}
+          step={50}
+          disabled={disabled}
+          hint={rangeWarning(sv)}
+          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs. Leave both blank for one fee.", example: "3,000 to 6,000 around a 4,200 fee." }} />
+        <NumberField
+          label="Fee range: highest"
+          value={sv.price_high === null || sv.price_high === undefined ? null : Number(sv.price_high)}
+          save={serviceSaver(sv.id, "price_high")}
+          unit={`${currency}${priceUnit(sv.pricing_model)}`}
+          min={0}
+          step={50}
+          disabled={disabled}
+          hint={rangeWarning(sv)}
+          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs.", example: "6,000 for the occasional large client." }} />
         <NumberField
           label="Margin"
           value={Number(sv.margin)}

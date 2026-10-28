@@ -112,6 +112,26 @@ export const VALUE_HELP: Partial<Record<BuiltinChurnDriverId, HelpCopy & { label
   },
 };
 
+/** Chance mode's controls and what they mean (sandbox phase 3, B4). */
+export const CHANCE_HELP = {
+  mode: {
+    description: "Weight: the cause adds a steady extra churn. Chance and effect: each month a client is hit by the cause with a chance, and while a hit lasts that client's churn is higher.",
+    example: "Late work: a 40% chance a month, raising that client's churn by 60% for 3 months.",
+  },
+  chance: {
+    description: "The chance a client is hit by this cause in a month. Blank means what the simulation measures (late, response, onboarding, rework and overload); causes you enter have a usual default.",
+    example: "5% means one client in twenty is hit each month.",
+  },
+  effect: {
+    description: "How much a hit raises that client's chance of leaving while it lasts. Hits don't stack: a second hit only extends the first.",
+    example: "60% means a hit client is 60% more likely to leave.",
+  },
+  months: { description: "How long a hit lasts, from the hit.", example: "3 months." },
+  priceChance: { description: "The chance a client notices a rise and is hit. A rise hits each client once.", example: "50% means half the clients react to a rise." },
+  priceEffect: { description: "How much a 10% rise raises a hit client's chance of leaving. A 20% rise counts double.", example: "100% means a 10% rise doubles that client's churn for the months it lasts." },
+  same: "Same expected churn as the weight gave in the last run. It matches in expectation, not draw for draw.",
+} as const;
+
 export const PRICE_MONTH_HELP = {
   label: "Takes effect in month",
   description: "The month the price rise starts, counted from today (1 to 24).",
@@ -132,6 +152,10 @@ export interface DriverState {
   enabled: boolean;
   value: number | null;
   month: number | null;
+  /** Chance mode (sandbox phase 3): an effect (percent) means the driver is counted as events. Chance in percent a month (null: measured or the usual default), months a hit lasts (null: 3). */
+  chance: number | null;
+  effect: number | null;
+  effectMonths: number | null;
 }
 
 /** The ten built-ins in the screen's order (each from its row or at its default), then your own in creation order. */
@@ -151,6 +175,9 @@ export function driverStates(rows: readonly ChurnDriverRow[]): DriverState[] {
       enabled: r ? r.enabled : spec.defaultEnabled,
       value: spec.valueRange ? (r && r.value !== null ? Number(r.value) : spec.defaultValue) : null,
       month: id === "price" ? (r?.month ?? 1) : null,
+      chance: r?.chance != null ? Number(r.chance) : null,
+      effect: r?.effect != null ? Number(r.effect) : null,
+      effectMonths: r?.effect_months != null ? Number(r.effect_months) : null,
     };
   });
   for (const r of rows) {
@@ -166,6 +193,9 @@ export function driverStates(rows: readonly ChurnDriverRow[]): DriverState[] {
       enabled: r.enabled,
       value: r.value !== null ? Number(r.value) : CUSTOM_DRIVER_VALUE.default,
       month: null,
+      chance: r.chance != null ? Number(r.chance) : null,
+      effect: r.effect != null ? Number(r.effect) : null,
+      effectMonths: r.effect_months != null ? Number(r.effect_months) : null,
     });
   }
   return out;
@@ -180,6 +210,9 @@ export function toEngineDrivers(states: readonly DriverState[]): EngineChurnDriv
     ...(d.value !== null ? { value: d.value } : {}),
     ...(d.builtin === "price" && d.month !== null ? { month: d.month } : {}),
     ...(d.builtin === null ? { name: d.name } : {}),
+    ...(d.chance !== null ? { chance: d.chance / 100 } : {}),
+    ...(d.effect !== null ? { effect: d.effect / 100 } : {}),
+    ...(d.effectMonths !== null ? { effectMonths: d.effectMonths } : {}),
   }));
 }
 
@@ -192,7 +225,7 @@ export const engineIdOf = (d: Pick<DriverState, "key" | "builtin">): string => d
  * doesn't re-run anything.
  */
 export function pressureKey(states: readonly DriverState[]): string {
-  return JSON.stringify(states.map((d) => [d.key, d.builtin ? d.value : [d.name, d.value], d.month]));
+  return JSON.stringify(states.map((d) => [d.key, d.builtin ? d.value : [d.name, d.value], d.month, d.chance, d.effect, d.effectMonths]));
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -244,6 +277,10 @@ export interface DriverPatch {
   enabled?: boolean;
   value?: number | null;
   month?: number | null;
+  /** Chance mode: null clears them, back to the weight. */
+  chance?: number | null;
+  effect?: number | null;
+  effectMonths?: number | null;
   name?: string;
   description?: string | null;
   example?: string | null;
@@ -285,6 +322,20 @@ export function parseDriverPatch(key: unknown, patch: unknown): DriverPatch | nu
         if (key !== "price" || !(Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 24)) return null;
         out.month = v as number;
         break;
+      case "chance":
+      case "effect":
+      case "effectMonths": {
+        // Tenure and market have no events.
+        if (key === "tenure" || key === "market") return null;
+        if (v === null) {
+          out[k] = null;
+          break;
+        }
+        const ok = k === "chance" ? isNum(v) && v >= 0 && v <= 100 : k === "effect" ? isNum(v) && v >= 0 && v <= 500 : Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 24;
+        if (!ok) return null;
+        out[k] = v as number;
+        break;
+      }
       case "name":
         if (!custom || typeof v !== "string" || v.trim().length < 1 || v.trim().length > 80) return null;
         out.name = v.trim();

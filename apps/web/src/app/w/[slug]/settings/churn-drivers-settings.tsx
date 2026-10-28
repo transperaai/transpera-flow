@@ -7,12 +7,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModelError, toEngineModel, type ChurnDriverRow, type ProcessBundle, type Viewer } from "@transpera-flow/db";
-import { CHURN_DRIVER_SPECS, CHURN_WEIGHT_MAX, CHURN_WEIGHT_MIN, CUSTOM_DRIVER_VALUE, projectChurn, type ChurnCauses, type EngineModel } from "@transpera-flow/engine";
+import { CHURN_DRIVER_SPECS, CHURN_WEIGHT_MAX, CHURN_WEIGHT_MIN, CUSTOM_DRIVER_VALUE, equivalentEvents, projectChurn, type ChurnCauses, type EngineModel } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
+  CHANCE_HELP,
   CONTROL_HELP,
   DRIVER_HELP,
   MAX_CUSTOM_DRIVERS,
@@ -175,7 +176,7 @@ export function ChurnDriversSettings({
   const causeOf = (d: DriverState) => causes?.causes.find((c) => c.id === engineIdOf(d));
 
   const projection = useMemo(
-    () => (causes ? projectChurn(causes, states.map((d) => ({ id: engineIdOf(d), weight: d.weight, enabled: d.enabled }))) : null),
+    () => (causes ? projectChurn(causes, states.map((d) => ({ id: engineIdOf(d), weight: d.weight, enabled: d.enabled, ...(d.effect !== null ? { effect: d.effect / 100, chance: d.chance !== null ? d.chance / 100 : null, months: d.effectMonths ?? 3 } : {}) }))) : null),
     [causes, states],
   );
   const customs = states.filter((d) => !d.builtin).length;
@@ -269,7 +270,7 @@ export function ChurnDriversSettings({
 }
 
 function newCustom(key: string, rowId: string | null): DriverState {
-  return { key, builtin: null, rowId, name: NEW_DRIVER_NAME, description: "", example: "", weight: 1, enabled: true, value: CUSTOM_DRIVER_VALUE.default, month: null };
+  return { key, builtin: null, rowId, name: NEW_DRIVER_NAME, description: "", example: "", weight: 1, enabled: true, value: CUSTOM_DRIVER_VALUE.default, month: null, chance: null, effect: null, effectMonths: null };
 }
 
 function SaveStatus({ state }: { state: SaveState }) {
@@ -326,6 +327,9 @@ function DriverRow({
           {sourceLabel(d)} · now: {valueNow(d, cause, model, viewer)}
           {d.builtin ? historyNote(d.builtin, history) : ""}
         </span>
+        {d.builtin !== "tenure" && d.builtin !== "market" && (
+          <ChanceControls d={d} cause={cause} canEdit={canEdit} onChange={onChange} />
+        )}
         {(valueHelp || !d.builtin) && (
           <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
             <NumberBox
@@ -357,7 +361,7 @@ function DriverRow({
         )}
       </div>
 
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      <label className={cn("flex flex-col gap-1 text-xs text-muted-foreground", d.effect !== null && "opacity-50")}>
         <span className="flex items-center">
           Weight
           <Help label={`Weight for ${d.name}`} {...CONTROL_HELP.weight} />
@@ -369,7 +373,7 @@ function DriverRow({
           max={CHURN_WEIGHT_MAX}
           step={0.1}
           value={d.weight}
-          disabled={!canEdit}
+          disabled={!canEdit || d.effect !== null}
           aria-label={`Weight for ${d.name}`}
           onChange={(e) => onChange({ weight: Number(e.target.value) })}
           className="w-full accent-[var(--accent)] disabled:opacity-50"
@@ -548,5 +552,90 @@ function NumberBox({
         </span>
       )}
     </label>
+  );
+}
+
+/**
+ * How a cause is counted (sandbox phase 3, B4): by its weight, or as events (a chance a month and an effect while a hit lasts).
+ * Switching to events pre-fills the chance and effect that give about the churn the weight gave in the last run.
+ */
+function ChanceControls({ d, cause, canEdit, onChange }: { d: DriverState; cause: ChurnCauses["causes"][number] | undefined; canEdit: boolean; onChange: (patch: DriverPatch) => void }) {
+  const events = d.effect !== null;
+  const isPrice = d.builtin === "price";
+  const measured = d.builtin !== null && CHURN_DRIVER_SPECS[d.builtin].events === "measured";
+  const [note, setNote] = useState<string | null>(null);
+  const switchTo = (on: boolean) => {
+    if (!on) {
+      setNote(null);
+      return onChange({ chance: null, effect: null, effectMonths: null });
+    }
+    if (cause) {
+      const eq = equivalentEvents({ id: engineIdOf(d), custom: d.builtin === null, pressure: cause.pressure, chance: cause.chance, value: d.value }, d.weight);
+      onChange({ chance: eq.chance === null ? null : Math.round(eq.chance * 1e4) / 100, effect: Math.round(eq.effect * 1e4) / 100, effectMonths: eq.months });
+      setNote(CHANCE_HELP.same);
+    } else onChange({ chance: null, effect: 50, effectMonths: 3 });
+  };
+  const measuredText = cause?.chance != null ? `Measured: ${(cause.chance * 100).toLocaleString("en-GB", { maximumFractionDigits: 1 })}% a month` : "Measured";
+  return (
+    <div className="flex flex-col gap-1.5" data-driver-mode={events ? "chance" : "weight"}>
+      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+        How it&apos;s counted
+        <Help label="How it's counted" {...CHANCE_HELP.mode} />
+        <span role="group" aria-label={`How ${d.name} is counted`} className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+          {[false, true].map((on) => (
+            <button
+              key={String(on)}
+              type="button"
+              aria-pressed={events === on}
+              disabled={!canEdit}
+              onClick={() => events !== on && switchTo(on)}
+              className={cn("rounded-md px-2 py-0.5 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring", events === on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            >
+              {on ? "Chance and effect" : "Weight"}
+            </button>
+          ))}
+        </span>
+      </span>
+      {events && (
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+          <NumberBox
+            label={isPrice ? "Clients who notice a rise" : "Chance a month"}
+            unit="%"
+            help={{ label: isPrice ? "Clients who notice a rise" : "Chance a month", ...(isPrice ? CHANCE_HELP.priceChance : CHANCE_HELP.chance) }}
+            value={d.chance}
+            min={0}
+            max={100}
+            step={0.5}
+            disabled={!canEdit}
+            onCommit={(v) => onChange({ chance: v })}
+          />
+          <NumberBox
+            label="Raises that client's churn by"
+            unit={isPrice ? "% per 10% rise" : "%"}
+            help={{ label: "Effect", ...(isPrice ? CHANCE_HELP.priceEffect : CHANCE_HELP.effect) }}
+            value={d.effect}
+            min={0}
+            max={500}
+            step={5}
+            disabled={!canEdit}
+            onCommit={(v) => v !== null && onChange({ effect: v })}
+          />
+          <NumberBox
+            label="For"
+            unit="months"
+            help={{ label: "For (months)", ...CHANCE_HELP.months }}
+            value={d.effectMonths ?? 3}
+            min={1}
+            max={24}
+            step={1}
+            whole
+            disabled={!canEdit}
+            onCommit={(v) => v !== null && onChange({ effectMonths: v })}
+          />
+          {measured && d.chance === null && <span className="text-xs text-muted-foreground">{measuredText}. Type a chance to override it.</span>}
+        </div>
+      )}
+      {events && note && <span className="text-xs text-muted-foreground">{note}</span>}
+    </div>
   );
 }
