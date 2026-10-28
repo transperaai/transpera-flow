@@ -138,6 +138,7 @@ const SETTING_KEYS: Record<keyof WorkspaceSettings, true> = {
   client_health_benchmark_low: true,
   client_health_benchmark_high: true,
   capacity_factor_enabled: true,
+  overhead_monthly: true,
 };
 export const WORKSPACE_SETTING_KEYS = Object.keys(SETTING_KEYS) as readonly (keyof WorkspaceSettings)[];
 
@@ -767,8 +768,10 @@ export function planWorkspaceImport(
   const known: Record<string, unknown> = {};
   const unknown: string[] = [];
   for (const [k, v] of Object.entries(settingsIn)) {
-    if (Object.hasOwn(SETTING_KEYS, k)) known[k] = v;
-    else unknown.push(k);
+    if (!Object.hasOwn(SETTING_KEYS, k)) unknown.push(k);
+    // The database refuses overheads that aren't null or a number from 0 to 100,000,000 (workspaces_overhead_monthly): leave them out rather than fail the restore.
+    else if (k === "overhead_monthly" && v !== null && !(typeof v === "number" && v >= 0 && v <= 100_000_000)) warnings.push('The workspace setting "overhead_monthly" wasn\'t a number from 0 to 100,000,000 and was left out.');
+    else known[k] = v;
   }
   for (const k of unknown.sort()) warnings.push(`The workspace setting "${k}" isn't one this version knows and was left out.`);
   plan.settings = Object.keys(known).length ? known : null;

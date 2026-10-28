@@ -40,6 +40,8 @@ import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { SPEEDS_NORMALISED_NOTE } from "@/lib/people";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
+import { forecastMoney } from "@/lib/forecast/money";
+import { ForecastMoney } from "./forecast-money";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "./forecast-timeline";
 import { NO_CHANGES, NameDialog, ConfirmDialog, PlanBar, UNSAVED_PLAN } from "./plan-bar";
 import { COMPARE_LIVE, PlanCompare } from "./plan-compare";
@@ -180,6 +182,16 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
     [plan.run, live, start],
   );
   const shownData = workingMarkers !== null && planData ? planData : data;
+  // Sales and money (sandbox phase 2) for the run on screen: the open plan's spliced run, or the live one.
+  const shownRun = workingMarkers !== null && plan.run ? plan.run : built.model && result ? { model: built.model, result } : null;
+  const serviceNames = useMemo(() => new Map(live.services.map((sv) => [sv.id, sv.name])), [live.services]);
+  const moneyView = useMemo(
+    () =>
+      shownRun?.result.monthly
+        ? forecastMoney(shownRun.result, timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek), (id) => serviceNames.get(id) ?? "Hourly")
+        : null,
+    [shownRun, start, serviceNames],
+  );
 
   const lane = useMemo(() => laneMarkers(live, workingMarkers ?? [], planSolutions, plan.problems, start, hpw), [live, workingMarkers, planSolutions, plan.problems, start, hpw]);
   const inSpan = useMemo(() => lane.filter((mk) => bounds !== null && hoursToDate(start, mk.date, hpw) < horizonHours), [lane, bounds, start, hpw, horizonHours]);
@@ -569,6 +581,9 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
           </Card>
         </section>
       )}
+      {!comparing && moneyView ? (
+        <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace` : null} span={span} />
+      ) : null}
 
       {markerTarget ? (
         <PlanMarkerDialog

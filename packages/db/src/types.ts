@@ -61,6 +61,12 @@ export interface WorkspaceSettings {
    */
   client_health_benchmark_low?: number;
   client_health_benchmark_high?: number;
+  /**
+   * Fixed costs a month (rent, tools, insurance) in the workspace currency, 0 to 100,000,000; the forecast takes them off
+   * revenue with pay to show profit (sandbox phase 2). Absent or null: none. Not pay, so Viewers see it. Checked by
+   * `workspaces_overhead_monthly`.
+   */
+  overhead_monthly?: number | null;
   /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
   capacity_factor_enabled?: boolean;
 }

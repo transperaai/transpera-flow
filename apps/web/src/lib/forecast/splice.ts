@@ -12,7 +12,9 @@ const ZERO: Stat = { mean: 0, p10: 0, p90: 0 };
  * Segments sorted by `from`, the first at 0, all with the same `months`.
  *
  * Flows (`roles`, `people`, `uncovered`, `waits`, `lateTasks`): month `m` takes the value of the segment whose range holds
- * `m`; a key missing in that segment gives null (a zero `Stat` for `lateTasks`). Stocks (`clients`, `mrr`, `atRisk`): the
+ * `m`; a key missing in that segment gives null (a zero `Stat` for `lateTasks`). The sales, client-movement, revenue,
+ * overtime-hour and money series (sandbox phase 2) are flows too: what happens in a month is that month's, so month `m`
+ * is the segment holding `m`'s own number; `money` is null if any segment's is (pay hidden). Stocks (`clients`, `mrr`, `atRisk`): the
  * first segment as is; a later segment starting at `k` is shifted by the gap it leaves at `k − 1` (the spliced value there
  * less its own), and floored at 0, so only the change from month `k` follows its run. A key missing on either side counts as 0.
  */
@@ -60,8 +62,43 @@ export function spliceMonthly(segments: readonly { from: number; monthly: Monthl
   const atRisk: Record<string, Stat[]> = {};
   for (const key of keysOf((r) => r.atRisk)) atRisk[key] = stock((r, m) => r.atRisk[key]?.[m]);
 
+  // The money series: flows, month by month from the segment holding the month.
+  const at = (m: number) => segments[segmentOf(m)]!.monthly;
+  const series = (get: (r: MonthlyResult, m: number) => Stat | undefined): Stat[] => Array.from({ length: n }, (_, m) => get(at(m), m) ?? ZERO);
+  const numbers = (get: (r: MonthlyResult, m: number) => number | undefined): number[] => Array.from({ length: n }, (_, m) => get(at(m), m) ?? 0);
+  const moneyKeys = (pick: (money: NonNullable<MonthlyResult["money"]>) => Record<string, number[]>) =>
+    [...new Set(segments.flatMap((s) => (s.monthly.money ? Object.keys(pick(s.monthly.money)) : [])))].sort();
+  const money: MonthlyResult["money"] = segments.some((s) => s.monthly.money === null)
+    ? null
+    : {
+        labour: numbers((r, m) => r.money!.labour[m]),
+        labourByRole: Object.fromEntries(moneyKeys((x) => x.labourByRole).map((key) => [key, numbers((r, m) => r.money!.labourByRole[key]?.[m])])),
+        labourByPerson: Object.fromEntries(moneyKeys((x) => x.labourByPerson).map((key) => [key, numbers((r, m) => r.money!.labourByPerson[key]?.[m])])),
+        overtimeCost: series((r, m) => r.money!.overtimeCost[m]),
+        overheads: numbers((r, m) => r.money!.overheads[m]),
+        profit: series((r, m) => r.money!.profit[m]),
+      };
+
   return {
     months: first.months,
+    sales: {
+      opportunities: series((r, m) => r.sales.opportunities[m]),
+      won: series((r, m) => r.sales.won[m]),
+      lost: series((r, m) => r.sales.lost[m]),
+      conversion: series((r, m) => r.sales.conversion[m]),
+    },
+    clientsWon: series((r, m) => r.clientsWon[m]),
+    clientsLost: series((r, m) => r.clientsLost[m]),
+    revenue: {
+      total: series((r, m) => r.revenue.total[m]),
+      recurring: series((r, m) => r.revenue.recurring[m]),
+      oneOff: series((r, m) => r.revenue.oneOff[m]),
+      hourly: series((r, m) => r.revenue.hourly[m]),
+      fromNew: series((r, m) => r.revenue.fromNew[m]),
+      lostToChurn: series((r, m) => r.revenue.lostToChurn[m]),
+    },
+    overtimeHours: series((r, m) => r.overtimeHours[m]),
+    money,
     roles,
     uncovered,
     people,
