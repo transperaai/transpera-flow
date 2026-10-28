@@ -1,7 +1,7 @@
 {
   "model": "larkspur",
   "description": "Larkspur Creative, the messier agency: overloaded designers, a copywriter on overtime, an 18-client roster with health-driven churn, starting from WIP.",
-  "engineVersion": "1.10.0",
+  "engineVersion": "1.11.0",
   "seed": 1,
   "reps": 30,
   "outputs": {
@@ -20,6 +20,13 @@
       "lostRevenue": { "mean": 3103813.3333333335, "p10": 2777200, "p90": 3490600 }
     },
     "labour": { "mean": 81112.80521321713, "p10": 64448.000703718426, "p90": 98699.5061064244 },
+    "money": {
+      "revenue": { "mean": 391500.57055296807, "p10": 354807.3591166208, "p90": 436001.80449241743 },
+      "revenueHourly": { "mean": 0, "p10": 0, "p90": 0 },
+      "labourCost": { "mean": 432412.5, "p10": 432412.5, "p90": 432412.5 },
+      "overheads": 0,
+      "profit": { "mean": -45651.318684701975, "p10": -84186.39088337921, "p90": -1390.5267527093715 }
+    },
     "overtime": {
       "hours": { "mean": 105.31976083711189, "p10": 35.834140182251076, "p90": 146.25 },
       "cost": { "mean": 4739.389237670034, "p10": 1612.5363082012984, "p90": 6581.25 }

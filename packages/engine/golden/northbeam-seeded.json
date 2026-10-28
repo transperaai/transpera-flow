@@ -1,7 +1,7 @@
 {
   "model": "northbeam-seeded",
   "description": "Northbeam with its 26 named clients: SEO and PPC services, named people, the roster with assignments, 10% overtime cap and two servicing processes. The seed now counts clients per service (northbeam-groups); this stays the reference for named rosters.",
-  "engineVersion": "1.10.0",
+  "engineVersion": "1.11.0",
   "seed": 1,
   "reps": 30,
   "outputs": {
@@ -20,6 +20,13 @@
       "lostRevenue": { "mean": 4500300, "p10": 3969000, "p90": 5254200 }
     },
     "labour": { "mean": 34516.11584371178, "p10": 27865.088725554433, "p90": 41920.77001414096 },
+    "money": {
+      "revenue": { "mean": 367128.56478893955, "p10": 347621.74232119066, "p90": 398338.9542929723 },
+      "revenueHourly": { "mean": 0, "p10": 0, "p90": 0 },
+      "labourCost": { "mean": 291200, "p10": 291200, "p90": 291200 },
+      "overheads": 0,
+      "profit": { "mean": 75928.56478893956, "p10": 56421.74232119066, "p90": 107138.95429297228 }
+    },
     "overtime": {
       "hours": { "mean": 0, "p10": 0, "p90": 0 },
       "cost": { "mean": 0, "p10": 0, "p90": 0 }
