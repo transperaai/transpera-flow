@@ -487,7 +487,7 @@ describe("per-person times", () => {
     const note = page.locator("[data-person-times-off]");
     await note.waitFor({ timeout: 60_000 });
     expect(await note.innerText()).toContain("Switch Per-person times on in Settings → Simulation");
-    expect(await note.locator("a").getAttribute("href")).toBe("/w/harness/settings#simulation");
+    expect(await note.locator("a").getAttribute("href")).toBe("/w/harness/settings#simulation-heading");
     expect(await page.locator("[data-person-times]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
