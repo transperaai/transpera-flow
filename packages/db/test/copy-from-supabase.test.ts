@@ -658,7 +658,19 @@ describe("import, the rest", () => {
     await runImport(target.client, { dir: exportDir });
     expect((await runVerify(target.client, exportDir)).ok).toBe(true);
     const later = migrationFiles().filter((f) => f.split("_")[0]! > COPY_BASE_VERSION);
+    const counts = async () => ({
+      drivers: await count(target, "churn_drivers"),
+      services: await count(target, "services"),
+    });
+    const before = await counts();
     expect((await applyMigrations(target.client)).files).toEqual(later);
+    // Sandbox phase 3 (20270112000000): the copied drivers and services are all still there, the new columns are null on every one (so
+    // every workspace runs as before), and every saved scenario still passes the change check.
+    expect(later).toContain("20270112000000_churn_chances_and_fee_ranges.sql");
+    expect(await counts()).toEqual(before);
+    expect((await target.client.query("select count(*)::int as n from public.churn_drivers where chance is not null or effect is not null or effect_months is not null")).rows[0].n).toBe(0);
+    expect((await target.client.query("select count(*)::int as n from public.services where price_low is not null or price_high is not null")).rows[0].n).toBe(0);
+    expect((await target.client.query("select count(*)::int as n from public.sandbox_scenarios where not private.is_sandbox_changes(changes)")).rows[0].n).toBe(0);
     await signInAndRead(target);
     // Verify belongs between the import and migrate; past the base it says so rather than passing.
     if (later.length > 0) expect((await runVerify(target.client, exportDir)).ok).toBe(false);

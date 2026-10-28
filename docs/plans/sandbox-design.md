@@ -100,7 +100,7 @@ and service levels. They stay as they are in the live model but are not levers.
 | D7 | Speed, per person | Capacity factor: how fast this person works, overall or on a step | 0.5–2 | Yes | Patch **new** `people.<id>.capacity_factor[.<step>]`; timed by splice |
 | D8 | Skills | Who can do which steps | Add or remove | Yes | Patch **new** `people.<id>.skills`; timed by splice |
 | D9 | Hiring delay (later) | How long a hire takes to start | 0–6 months | Yes | Wire the market's ignored `hire` factor |
-| D10 | Pay inflation (later) | Role cost rises over time | ×0–5 | Yes | Wire the market's ignored `pay` factor: role cost channel |
+| D10 | Pay inflation (later) | Role cost rises over time | ×0–5 | Yes | Built as C1 (role cost) from a month, through the role-cost channel (phase 3). **Not** the market's `pay` factor: that is late payments (Downturn has `pay` 1.35), and read as wages it would raise labour 35% in a downturn. A compounding % a year is not built. |
 
 ### E. Process
 

@@ -90,7 +90,6 @@ describe("headline numbers", () => {
 
 describe("sandbox scenarios", () => {
   const hire = { id: "11111111-1111-4111-8111-111111111111", lever: "D1", target: northbeamRoleIds.strat, op: "set", value: 1, from: "2027-02" };
-  const lead = (n: number, from?: string) => ({ id: `22222222-2222-4222-8222-00000000000${n}`, lever: "A1", target: null, op: "multiply", value: 1.2, ...(from ? { from } : {}) });
   // Headcount by role (D5) is a capped lever: each month it starts from costs a run, so it is what the six-month limit counts.
   const cut = (n: number, from?: string) => ({ id: `22222222-2222-4222-8222-00000000000${n}`, lever: "D5", target: "role-1", op: "add", value: -1, ...(from ? { from } : {}) });
   const input = (name: string, changes: unknown[] = [hire], extra: Record<string, unknown> = {}) => ({ name, description: null, parent_id: null, changes, horizon_months: 12, ...extra });

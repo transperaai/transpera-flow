@@ -35,3 +35,12 @@ Neither could hold the other's change, and nothing compared them.
 - A restore reads `sandbox_scenarios`; a backup from before this migration is converted by `planSandboxScenarios`.
 - A new lever is a registry entry, a row in `private.sandbox_levers()`, and a value rule in `valueProblem` and `is_sandbox_change`.
 - The shared simulation pool keeps 40 finished runs, so a compare of four columns reuses runs between switches.
+
+## Note, 28 Oct 2026 (sandbox phase 3, engine 1.12.0)
+
+- **C1 (role cost) is now offered.** It is a role's rate (`pay: "role"`), which every member can already read in Settings; no lever stores one person's pay.
+- **Timed levers run in one run through monthly channels** (A1, A3, A5, A6, B2, B3, B4, B5, C1, C2, D4's fallback, D6, E1 to E3). Only a solution going live (E6) and a headcount cut (D5) still splice, so only they count toward the 6 change months and the 7 runs. D4 is uncapped.
+- New levers: A3 conversion, A5 client value range, B4 churn driver as a chance, B5 price rise (with its measured trade-off), D6 hours available, D9 hiring delay. They are model edits and channels applied by the runner, not scenario patches, so `private.is_scenario_patch` and `save_solution` are unchanged and such a scenario is not shown on the process page or to MCP.
+- B1 and B3 act on client groups and named rosters (a named roster can only gain average clients). Saved scenarios that hold them move on those workspaces.
+- Sandbox runs pin their warm-up to the live run's, so the months before a timed change equal the live run exactly.
+- The shared simulation pool keeps 48 finished runs (was 40).
