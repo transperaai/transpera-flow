@@ -92,14 +92,6 @@ describe("screens whose controls come in as props that are undefined without can
     expect(page).toContain('const canEdit = !isReadOnly(mode);');
     expect(page).toMatch(/\{canEdit && \(\s*<div[^>]*>\s*(\{props\.share\}\s*)?<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
   });
-
-  it("Suggestions: Accept and Dismiss only with canEdit, and the page says who reviews", () => {
-    const page = read(PAGE("suggestions"));
-    expect(page.match(/canEdit=\{data\.canEdit\}/g)).toHaveLength(2);
-    expect(page).toContain("You can view suggestions; editors and owners review them.");
-    expect(read("components/suggestions-review.tsx")).toContain("{canEdit && selectable.length > 0 && (");
-    expect(read("components/proposals-review.tsx")).toMatch(/\{canEdit && \(/);
-  });
 });
 
 describe("the Editor and the Settings", () => {

@@ -1,77 +1,15 @@
-# Extracting a process from interview transcripts
+# Interview transcripts and the process-file skill
 
-Turn recorded audit interviews into a draft process with cited evidence, using Claude and the Transpera Flow MCP server. Product background: `docs/PRD.md` §7.1b (intake and drafts) and §7.2 (the extraction prompt).
+Removed 28 Oct 2026 (docs/plans/cut-list.md item 5): the `extract-process` skill and the MCP flow that wrote a draft process, sources,
+first principles and company suggestions through MCP. MCP is read-only now; Claude and ChatGPT only query.
 
-The prompt is a skill: [`.agents/skills/extract-process/SKILL.md`](../../.agents/skills/extract-process/SKILL.md), reachable as `.claude/skills/extract-process`. It is user-invoked only. It ends at a draft and pending suggestions; you publish from the canvas.
+To turn interviews into a process, use the `process-file` skill (`.claude/skills/process-file`). It writes `transpera-process/2` files that
+you upload in the app (Processes -> Upload process). See [`docs/import/README.md`](../import/README.md).
 
-## Connect
+What stays here is test material:
 
-1. Create a token at `/settings/tokens` (the "API tokens" page). It is shown once.
-2. Claude Code:
-   ```sh
-   claude mcp add --transport http transpera-flow https://<host>/api/mcp \
-     --header "Authorization: Bearer tf_…"
-   ```
-3. Claude desktop. Custom connectors that expect OAuth do not fit a bearer token, so bridge with `mcp-remote` in `claude_desktop_config.json`:
-   ```json
-   {
-     "mcpServers": {
-       "transpera-flow": {
-         "command": "npx",
-         "args": ["-y", "mcp-remote", "https://<host>/api/mcp", "--header", "Authorization:${TF_AUTH}"],
-         "env": { "TF_AUTH": "Bearer tf_…" }
-       }
-     }
-   }
-   ```
-   The shape follows the `mcp-remote` README (no space after the colon, the token in `env`, because some desktop clients mangle spaces in `args`). **Verify on first use**: it has not been tried against this server. The endpoint accepts POST only (a GET answers 405), which is expected.
-
-## Load the prompt
-
-- Claude Code inside this repo: type `/extract-process`.
-- Claude Code elsewhere: link the skill once, `ln -s <repo>/.agents/skills/extract-process ~/.claude/skills/extract-process`.
-- Claude desktop: create a Project and paste the body of `SKILL.md` (everything after the frontmatter) into its instructions, or upload the skill folder if your account supports custom skills.
-
-## Run it on a transcript
-
-1. Attach or paste the transcript, and say which workspace it belongs to.
-2. Answer the questions it asks (workspace, new process or an existing one).
-3. Read its summary: conflicts, assumptions, first principles, suggestions, open questions, timing notes and a ledger of every number heard.
-4. In the app: the canvas checklist rail (conflicts first), confirm or override each value, check the process's first principles card, accept or reject on the workspace's Suggestions page, then Publish (child processes are published too).
-
-## What it writes
-
-- **Sources.** One `add_source` per transcript with `link_later: true` (or `links` when it supports something that exists), then `link_source {process}` for every transcript once the draft exists. A source with no link shows as "Not linked to anything yet" and does not count as evidence.
-- **Steps.** `import_process`, every number cited with a verbatim quote or assumed with reasoning. A step the interviewee breaks into parts, each with its own time, becomes a **group** (`steps` inside the step); a sub-procedure that is a piece of work of its own becomes a **child process** (`process`, or `child_process` for an existing one) with its own page and versions. A list of small actions with one stated time stays one step. The numbers always sit on the inner steps.
-- **First principles.** `update_first_principles` writes the seven answers into the draft: only what a transcript supports, each item citing a quote as `"<quote>" [<source title> | <speaker> | <time>]` or starting `Assumed:` with its reasoning. A stated target becomes a success measure with the KPI's unit and an explicit comparator (`atMost` for "within", with days converted at the workspace's hours per day); with no KPI that fits, `kpi` is left out. Sections nobody spoke to (deletes, root cause) stay empty and become open questions. The flags it returns (a team as owner, no deletes, no root cause) go in the summary.
-- **Suggestions.** People, clients, roles and demand through `upsert_*` and `set_demand`. Problems and ideas through `propose_issue` and `propose_solution_idea`, which land on the Suggestions page too; the skill never logs an issue itself. Perception-gap issues appear on their own when two speakers' numbers are twice as far apart or more. `propose_*` answer `switched_off` when an owner has turned the AI switch off in Settings, AI analysis, and the skill reports the item as an open question.
-
-## A second interview
-
-Same conversation or a new one; tell it the process name. Expect `created: false` and a diff against live, so publish after the first interview to make the diff meaningful. Speakers who disagree become a range and a conflict on the step while the value is still an estimate. A value someone confirmed on the canvas is kept: the new one is flagged as a conflict and no range is built.
-
-## Troubleshooting
-
-| Error code | Meaning |
-|---|---|
-| `ambiguous` | A name matched several rows; the reply lists `candidates`. Pass the exact name or id. |
-| `not_found` | Roles, services and people must already exist. A missing role is suggested with `upsert_role` and can be used once accepted; a role, person or client that is only a pending suggestion cannot be referenced yet. |
-| `name_taken` | A process or step of that name exists; import with `target`, or use `update_step`. |
-| `forbidden` | The token's user needs the editor role in the workspace. |
-| `unresolved` | Publishing is refused while assumptions or conflicts remain. Publishing is a human step. |
-
-## Known limits
-
-- Routing has no evidence: a routing disagreement cannot become a conflict in the app, and the summary reports it as untracked.
-- First principles have no evidence field either: quotes are written into the text and checked by the fixture lint, not by the app.
-- Groups and child processes are written only through `import_process`; a step cannot be moved into a group with `update_step`.
-- A solution idea needs an issue that already exists: a wish with no issue goes into first principles, and the issue is proposed first.
-- A range cited without a value cannot conflict. The skill cites the midpoint of a symmetric hedge as the value.
-- `get_workspace_summary` lists no clients, services or lead sources, and there is no list of sources.
-- Servicing links and their SLAs are set in Settings; MCP cannot set them.
-- A servicing process alone cannot be simulated (`run_scenario` answers `invalid_model`), so cycle times cannot be checked until a pipeline exists beside it.
-
-## Examples and QA
-
-- `docs/extraction/examples/tidewater`: a solved dry run on invented interviews, replayed by the test suite. It includes a first-principles call; nesting is shown in the skill's worked example, not in this run (nothing in these interviews calls for it).
-- `docs/extraction/qa`: the timed QA pack for issue #27 (see its `README.md`).
+- `examples/tidewater`: two invented interviews (Tidewater Digital, Monthly client report). `docs/import/examples/tidewater-monthly-client-report.json`
+  is the process file built from them, and `packages/db/test/process-file-skill-fixtures.test.ts` checks that every quote is word for word.
+- `qa`: the Copperleaf Marketing (QA) interviews, their answer key and the scripts that set up and reset the QA workspace
+  (`packages/mcp/test/db-qa-workspace.test.ts` runs them). The answer key was written for the MCP flow: its "suggestion" items are now
+  facts to enter in the app by hand, and its tool payloads are history.

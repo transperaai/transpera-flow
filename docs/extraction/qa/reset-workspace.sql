@@ -1,5 +1,5 @@
 -- Remove the Copperleaf Marketing (QA) workspace and everything in it: its
--- processes, sources, suggestions, issues, memberships and company model
+-- processes, sources, issues, memberships and company model
 -- (issue #27; docs/extraction/qa/README.md). It touches only the workspace whose
 -- slug is `copperleaf-qa`, and does nothing if there isn't one. API tokens that
 -- pointed at it keep working and simply have no active workspace.

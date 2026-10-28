@@ -86,7 +86,7 @@ describe("restoreFailure", () => {
   });
 
   it("has words for every section the function writes, and a fallback", () => {
-    for (const s of ["settings", "roles", "processes", "steps", "issues", "source_links", "proposals", "archive", "log"]) expect(sectionInWords(s)).not.toBe("part of the backup");
+    for (const s of ["settings", "roles", "processes", "steps", "issues", "source_links", "archive", "log"]) expect(sectionInWords(s)).not.toBe("part of the backup");
     expect(sectionInWords("nonsense")).toBe("part of the backup");
   });
 });
@@ -95,7 +95,7 @@ describe("the notice a restore leaves", () => {
   it("says how many processes came back as drafts, and when settings wait for an owner", () => {
     expect(restoredMessage(5, "applied")).toBe("Restored 5 processes as drafts. Publish each one to see its numbers.");
     expect(restoredMessage(1, "none")).toBe("Restored 1 process as drafts. Publish each one to see its numbers.");
-    expect(restoredMessage(2, "suggested")).toMatch(/waiting for an owner to accept/);
+    expect(restoredMessage(2, "skipped")).toMatch(/were not applied/);
   });
 
   it("round-trips through the cookie value, and ignores anything else", () => {

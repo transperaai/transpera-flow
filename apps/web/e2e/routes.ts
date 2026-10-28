@@ -23,7 +23,6 @@ export const DEMO_ROUTES: { path: string; route: string }[] = [
   { route: "/demo/settings/levers", path: "/demo/settings/levers" },
   { route: "/demo/solutions", path: "/demo/solutions" },
   { route: "/demo/sources", path: "/demo/sources" },
-  { route: "/demo/suggestions", path: "/demo/suggestions" },
   // Not a demo page, but public and worth the same checks.
   { route: "/privacy", path: "/privacy" },
 ];

@@ -97,8 +97,8 @@ describe("the cards", () => {
       ["s1", "pass", 0.92, null, "/w/s/solutions/s1"],
     ]);
     expect(solutionSummaries(data)).toEqual({
-      [issueA!.id]: { tested: 2, passed: true, ideas: 0 },
-      [issueB!.id]: { tested: 1, passed: true, ideas: 0 },
+      [issueA!.id]: { tested: 2, passed: true },
+      [issueB!.id]: { tested: 1, passed: true },
     });
     expect(solutionSummaries(NO_SOLUTIONS_DATA)).toEqual({});
     expect(solutionHref("/demo", "s1")).toBe("/demo/solutions/s1");

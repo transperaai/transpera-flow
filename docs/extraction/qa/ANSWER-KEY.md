@@ -1,5 +1,8 @@
 # Answer key: Copperleaf Marketing (QA)
 
+> **Out of date, 28 Oct 2026.** Written for the removed MCP extraction flow. The "suggestions" below are company facts to enter in the app by hand now; the tool payloads are history. The planted conflicts, traps and numbers still apply to the `process-file` skill.
+
+
 **Do not open this before or during the timed run.** It is for judging afterwards. Claude must never see it: run Claude outside the repo (see `README.md`), so this file, the dry-run examples and the skill's tests are out of reach.
 
 The two transcripts are invented and deliberately messy. This key lists what each planted item is and how a good run handles it, in prose. It holds no tool payloads: a correct run is judged by what the draft, the checklist and the Suggestions page end up showing.

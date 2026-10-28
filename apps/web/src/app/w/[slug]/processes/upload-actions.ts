@@ -21,14 +21,14 @@ const GENERIC = "Couldn't read that. Try again.";
 
 /** The signed-in editor's context, or why there isn't one. */
 async function editorContext(workspaceId: string): Promise<{ ctx: Awaited<ReturnType<typeof context>> & object } | { error: string }> {
-  const ctx = await context(workspaceId);
+  const ctx = await context();
   if (!ctx) return { error: "Your session has ended. Sign in again." };
   const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: workspaceId }).catch(() => null);
   if (canEdit !== true) return { error: "Only editors and owners can upload a process." };
   return { ctx };
 }
 
-async function context(workspaceId: string) {
+async function context() {
   const user = await getSessionUser();
   if (!user) return null;
   const userId = user.id;

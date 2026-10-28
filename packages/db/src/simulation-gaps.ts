@@ -96,7 +96,7 @@ export const gapLines = (gaps: readonly SimulationGap[]): string[] => gaps.map((
  * The check's input for a checked file. `hasRole` says whether a role the file names will end up on its step (the company has
  * it, or the person uploading mapped it): the preview calls this again as the person maps roles.
  */
-export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: string) => boolean; volume: GapInput["volume"]; volumeSuggested?: boolean }): GapInput {
+export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: string) => boolean; volume: GapInput["volume"]}): GapInput {
   const outgoing = new Map<string, ProcessFile["links"]>();
   for (const l of file.links) outgoing.set(l.from, [...(outgoing.get(l.from) ?? []), l]);
   // A reason for assuming a value is not a value: without a number the importer still fills in its default.

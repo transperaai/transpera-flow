@@ -25,8 +25,7 @@ a `ClaimsDriver` that sets the role and `request.jwt.claims` for each statement 
   flag the last sign-in recorded.
 - **Every tool runs as the owner.** The handler builds claims with the app's own `claimsFor` (the one place claims are made):
   `{ sub, role: "authenticated", email, app_metadata, api_token_id }`, and gives the tools `createDb(pool, claims)`. RLS, the
-  SECURITY DEFINER functions and the `api_token_id` checks in SQL (a token may not review suggestions, accept findings or
-  write the company model directly) apply unchanged. `McpHandlerOptions` takes the pool and `claimsFor` instead of Supabase's
+  SECURITY DEFINER functions and the `api_token_id` checks in SQL (a token may not write the company model directly) apply unchanged. `McpHandlerOptions` takes the pool and `claimsFor` instead of Supabase's
   URL and key; the web route passes `appPool()` and `claimsFor`.
 - **Nothing in the MCP path can bypass RLS.** The pool's login is the database owner, so the role switch in the driver is the
   only thing between a statement and RLS-free access. The claims are built for `authenticated` only (a user and a token id, no
@@ -43,3 +42,12 @@ a `ClaimsDriver` that sets the role and `request.jwt.claims` for each statement 
   the owner's claims under the same RLS.
 - Numbers and dates reach the tools as PostgREST sent them (`createPool` parsers), so tool results keep their shape.
 - Tests: the MCP end-to-end suites run against a throwaway Postgres through the real handler, with no PostgREST container in CI.
+
+## Amendment, 28 Oct 2026: MCP is read-only
+
+Austin's decision (docs/plans/cut-list.md item 2): Claude and ChatGPT only query. The MCP server has no tool that writes company data,
+sources, issues, drafts or processes, and no tool that proposes anything. Every tool is a read, run as the token owner under RLS.
+The one thing a token still changes is its own `active_workspace_id` (`set_active_workspace`), which is the token's setting and not
+workspace data. The database trigger that stops an API token writing the company model directly stays as a second lock. The upload
+code that MCP used to share with the web app's "Upload process" moved to `packages/db/src/process-import` (`@transpera-flow/db/process-import`)
+and only the web app calls it.

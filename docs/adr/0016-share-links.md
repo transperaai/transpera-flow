@@ -188,3 +188,11 @@ the visitor moves the shown levers in their browser and can send what they tried
 - **Rejected:** a per-visitor account (the point is to ask outsiders); emailing replies (needs SMTP, a paid service); translating ids (would move
   every number); refusing a visitor whose text names someone (an oracle for the team's and clients' names); accepting a visitor's idea as a
   saved scenario (the PRD's old `scenario_submissions`, superseded by D37).
+
+## Amendment, 28 Oct 2026: play links no longer send ideas
+
+A play link still lets a visitor try changes (move the levers the workspace shows, in their browser, on the redacted copy; nothing is
+saved). The "send your idea" step is gone (docs/plans/cut-list.md item 2): migration `20270102000000_drop_suggestions.sql` drops
+`public.submit_play_proposal`, `play_proposal_contacts`, `private.play_patch_problem` and the tables the ideas landed in, and `anon` no
+longer holds any EXECUTE beyond opening a link. The Share links table has no Ideas column. The "Play links" paragraphs above that
+describe the proposal, its rate limits, its held text and Build it are historical.

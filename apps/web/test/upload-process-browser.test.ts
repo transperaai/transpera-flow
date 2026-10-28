@@ -320,16 +320,13 @@ describe("the Upload process dialog with a transpera-process/2 file", () => {
   /** The company has the example's roles, so only roles a test changes are unknown. */
   const WITH_MD: HarnessCompany = { ...COMPANY, roles: [...COMPANY.roles, { id: "10000000-0000-4000-8000-000000000003", name: "Managing director" }] };
 
-  it("shows the counts per section, what waits in Suggestions, and says nothing is applied", async () => {
+  it("shows the counts per section and what comes with the file", async () => {
     const { page, errors } = await mount();
     await choose(page, file("v2.json", json(v2())));
     expect(await page.locator("[data-upload-counts]").innerText()).toBe("8 steps · 7 links · a pipeline");
-    expect(await page.locator("[data-upload-extra-counts]").innerText()).toBe("3 sources · 4 suggestions · 1 proposal · first principles: 3 parts");
+    expect(await page.locator("[data-upload-extra-counts]").innerText()).toBe("3 sources · first principles: 3 parts");
     const extras = await page.locator("[data-upload-extras]").innerText();
     expect(extras).toContain("Interview with Maya Chen, managing director");
-    expect(extras).toContain("Nothing about your company changes until then.");
-    expect(extras).toContain("The file suggests adding service Monthly retainer");
-    expect(extras).toContain("Issue: Proposals sit for a day before review");
     expect(await page.locator("[data-upload-problems=error]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
@@ -373,7 +370,7 @@ describe("the Upload process dialog with a transpera-process/2 file", () => {
     expect(gaps).toContain("Discovery call has no role");
     expect(gaps).toContain("Write proposal has no hands-on time");
     expect(gaps).toContain("Client decides: branch odds missing");
-    expect(gaps).toContain("No incoming volume yet: accept the lead volume suggestion, or add it in Settings");
+    expect(gaps).toContain("No incoming volume: add lead volume in Settings");
     expect(await page.locator("[data-upload-create]").isEnabled()).toBe(true);
     // Mapping the unknown role to one of the company's clears that gap, live; a role left blank keeps it.
     await page.locator("#upload-role-0").selectOption({ label: "Consultant" });
@@ -385,7 +382,6 @@ describe("the Upload process dialog with a transpera-process/2 file", () => {
 
   it("shows no Missing for simulation group when nothing is missing", async () => {
     const f = v2();
-    f.company.demand = undefined;
     const { page } = await mount({ ...WITH_MD, hasVolume: true });
     await choose(page, file("whole.json", json(f)));
     await page.waitForSelector("[data-upload-counts]");

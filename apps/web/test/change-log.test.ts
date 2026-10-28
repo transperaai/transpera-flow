@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companyOf, northbeamBundle, northbeamPersonIds, northbeamRoleIds, northbeamServiceIds, northbeamStepIds } from "@transpera-flow/db";
+import { companyOf, northbeamBundle, northbeamPersonIds, northbeamRoleIds, northbeamStepIds } from "@transpera-flow/db";
 import { auditStepId, auditStepIds, describeAuditEntry, newestStepNames, type AuditEntry } from "@/lib/change-log/audit";
 import { defaultRunName, parseSaveRun } from "@/lib/runs/runs";
 

@@ -213,7 +213,7 @@ describe("restore route", () => {
   });
 
   it.each([
-    ["an editor (can't manage)", () => editor, "suggested"],
+    ["an editor (can't manage)", () => editor, "skipped"],
     ["an owner (can manage)", () => owner, "applied"],
   ])("restores a real backup for %s, passing canManage on as the database says", async (_who, who, settings) => {
     const { id, slug, base } = await newWorkspace();
@@ -248,7 +248,7 @@ describe("restore route", () => {
     const cases: [ReturnType<typeof dbError>, number, RegExp][] = [
       [dbError("42501", "Only owners, editors and agency admins can restore a backup."), 403, /Only owners, editors and agency admins/],
       [dbError("23514", "This workspace isn't empty: it already has roles. Backups restore only into a new, empty workspace.", "not_empty"), 409, /Backups restore only into an empty workspace/],
-      [dbError("23514", 'import_workspace_bundle: suggestions could not be restored: new row for relation "suggestions" violates check constraint "suggestions_target_table"', "section:suggestions"), 422, /Couldn't restore the pending suggestions: a row didn't fit this workspace's rules/],
+      [dbError("23514", 'import_workspace_bundle: issues could not be restored: new row for relation "issues" violates check constraint "issues_status_check"', "section:issues"), 422, /Couldn't restore the issues: a row didn't fit this workspace's rules/],
       [dbError("55000", "import_workspace_bundle: archive could not be restored: A new process can't start archived", "section:archive"), 422, /Couldn't restore the archived processes: A new process can't start archived\./],
       [dbError("57014", "canceling statement due to statement timeout"), 504, /too big to restore in one go \(the database ran out of time\)\. Nothing was restored\./],
       [dbError("XX000", 'select * from secret_table where "x" = $1 failed'), 500, /^The restore failed\. Nothing was restored\. Try again\.$/],
