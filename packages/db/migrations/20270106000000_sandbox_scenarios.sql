@@ -211,7 +211,7 @@ create index sandbox_scenarios_parent_idx on public.sandbox_scenarios (parent_id
 create trigger set_updated_at before update on public.sandbox_scenarios
   for each row execute function public.set_updated_at();
 
--- The parent chain (at most 5 deep, no cycle), the workspace stays put, and the 900 cap for people. No permission check here: the
+-- The parent chain (at most 5 deep, no cycle), the workspace stays put, and the cap of 1000 scenarios a workspace for people (a restore at its limit of 900 lands beside the library's 4). No permission check here: the
 -- library trigger below is SECURITY DEFINER and inserts while a user creates a workspace (auth.uid() is set, the membership may
 -- not be yet). RLS decides who may write. The cap applies to people only: the migration and the library trigger run with no user.
 create function private.sandbox_scenarios_before_write() returns trigger
@@ -226,8 +226,8 @@ begin
   if tg_op = 'INSERT' then
     new.created_by := coalesce(auth.uid(), new.created_by);
     if auth.uid() is not null
-      and (select pg_catalog.count(*) from public.sandbox_scenarios s where s.workspace_id = new.workspace_id) >= 900 then
-      raise exception 'sandbox_scenarios: a workspace keeps at most 900 scenarios' using errcode = '23514';
+      and (select pg_catalog.count(*) from public.sandbox_scenarios s where s.workspace_id = new.workspace_id) >= 1000 then
+      raise exception 'sandbox_scenarios: a workspace keeps at most 1000 scenarios' using errcode = '23514';
     end if;
   elsif new.workspace_id is distinct from old.workspace_id then
     raise exception 'sandbox_scenarios: a scenario stays in its workspace' using errcode = '23514';

@@ -20,7 +20,7 @@ describe("pages that pass canEdit into a read only mode", () => {
     ["the solution page", PAGE("solutions/[id]")],
     ["the Block library", PAGE("blocks")],
     ["Sources", PAGE("sources")],
-    ["the Forecast", PAGE("forecast")],
+    ["the Sandbox", PAGE("sandbox")],
     ["Settings → Levers", PAGE("settings/levers")],
     ["Settings → Historical data", PAGE("settings/calibration")],
   ])("%s", (_, file) => {

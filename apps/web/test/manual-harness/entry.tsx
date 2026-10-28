@@ -1,14 +1,13 @@
-// Clients, workspace details, saved scenarios and deleting a solution on a bare page, for ../manual-entry-browser.test.ts
+// Clients, workspace details and deleting a solution on a bare page, for ../manual-entry-browser.test.ts
 // (issue #182, B19). Bundled by esbuild and driven through `window.mountManual`; nothing here ships. The server is stood in
 // for by an in-memory store that answers as the server actions do (and, as `refresh()` does, re-renders with what was saved).
 // The writes themselves are tested over PostgREST in packages/mcp/test/postgrest-manual-entry.test.ts.
 
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { ClientAssignmentRow, ClientRow, ClientServiceRow, ScenarioRow } from "@transpera-flow/db";
+import type { ClientAssignmentRow, ClientRow, ClientServiceRow } from "@transpera-flow/db";
 import { ClientsSettings, type ClientOps } from "@/app/w/[slug]/settings/clients-settings";
 import { WorkspaceDetails } from "@/app/w/[slug]/settings/workspace-details";
-import { SavedScenarios } from "@/components/levers/saved-scenarios";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
 import { parseNewClient, type ClientSources } from "@/lib/clients";
 
@@ -42,9 +41,6 @@ const client = (id: string, name: string, over: Partial<ClientRow> = {}): Client
   active: true,
   ...over,
 });
-
-const scenario = (id: string, name: string, changes: number): ScenarioRow =>
-  ({ id, workspace_id: WS, name, description: "", patch: Array.from({ length: changes }, () => ({ path: "demand.leads_per_week", op: "multiply", value: 1.2 })), parent_scenario_id: null }) as unknown as ScenarioRow;
 
 function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] } }: { canEdit: boolean; canManage: boolean; sources?: ClientSources }) {
   const [clients, setClients] = useState<ClientRow[]>([
@@ -125,14 +121,6 @@ function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] 
         canEdit={canEdit}
         sources={sources}
         ops={ops}
-      />
-      <SavedScenarios
-        scenarios={[scenario("50000000-0000-4000-8000-000000000001", "Hire a strategist", 1), scenario("50000000-0000-4000-8000-000000000002", "More leads", 2)]}
-        canEdit={canEdit}
-        remove={async (id) => {
-          log("delete scenario", id);
-          return { status: "ok" };
-        }}
       />
       {canEdit && (
         <DeleteSolution

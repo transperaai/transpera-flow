@@ -73,7 +73,8 @@ export const MAX_SOLUTION_CHANGES = 4;
 export const MAX_CHANGE_MONTHS = 6;
 export const MAX_SCENARIO_NAME = 120;
 export const MAX_SCENARIO_DESCRIPTION = 2000;
-export const MAX_SCENARIOS = 900;
+/** A workspace keeps at most this many: the restore's limit of 900 plus the library's 4, with room. */
+export const MAX_SCENARIOS = 1000;
 export const MAX_PARENT_DEPTH = 5;
 export const MAX_HORIZON_MONTHS = 24;
 /** A hire's FTE the database accepts, and the narrower range the dialog offers. */

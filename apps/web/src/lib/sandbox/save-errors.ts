@@ -6,7 +6,7 @@ export function sandboxFailure(error: { code?: string | null; message?: string |
   const message = error?.message ?? "";
   if (error?.code === "23505") return "A scenario with that name already exists.";
   if (error?.code === "23514") {
-    if (/at most 900 scenarios/.test(message)) return "This workspace already has 900 scenarios. Delete one first.";
+    if (/at most 1000 scenarios/.test(message)) return "This workspace already has 1,000 scenarios. Delete one first.";
     if (/at most 5 deep/.test(message)) return "Scenarios can build on each other up to 5 deep.";
     if (/build on itself/.test(message)) return "A scenario can't build on itself.";
     if (/different months|sandbox_scenarios_changes/.test(message)) return "That scenario has changes the database doesn't allow: up to 200 changes, from up to 6 different months, with up to 4 solutions.";

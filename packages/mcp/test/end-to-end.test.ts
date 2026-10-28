@@ -23,6 +23,7 @@ import {
   shadowPrice,
   simulate,
 } from "@transpera-flow/engine";
+import { changesFromPatch } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { generateApiToken, hashApiToken, TOOL_NAMES, type McpHandlerOptions } from "../src";
 import { call, connect, createUser, issueToken as issue, post, startTestDb, userClaims, type McpTestDb } from "./helpers";
@@ -328,7 +329,7 @@ describe("MCP over the database (acts as the user under RLS)", () => {
     }
 
     // A scenario and issues the app saved (made here as the database's owner).
-    const scenario = (await admin.query("insert into scenarios (workspace_id, name, description, patch, created_by) values ($1, 'Two more strategists', 'From the app', $2, $3) returning id", [NORTHBEAM_WORKSPACE_ID, JSON.stringify(patch), editorId])).rows[0].id as string;
+    const scenario = (await admin.query("insert into sandbox_scenarios (workspace_id, name, description, changes, created_by) values ($1, 'Two more strategists', 'From the app', $2, $3) returning id", [NORTHBEAM_WORKSPACE_ID, JSON.stringify(changesFromPatch(patch)), editorId])).rows[0].id as string;
     // The saved scenario can be compared straight away, by name.
     const compared = await call<{ headline: string }>(viewer, "compare_scenarios", { b: "Two more strategists", reps: 5, start_date: "2026-10-05" });
     expect(compared.data.headline).toMatch(/^“Two more strategists” /);
@@ -380,7 +381,7 @@ describe("MCP over the database (acts as the user under RLS)", () => {
     await editor.close();
     await viewer.close();
     await admin.query("delete from issues where id = $1", [logged]);
-    await admin.query("delete from scenarios where id = $1", [scenario]);
+    await admin.query("delete from sandbox_scenarios where id = $1", [scenario]);
   });
 
   it("hides another workspace from the analysis tools", async () => {

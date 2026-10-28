@@ -88,24 +88,108 @@ describe("headline numbers", () => {
   });
 });
 
-describe("forecast plans", () => {
-  it("saves a plan with its markers, changes it only if nobody else has, and deletes it", async () => {
-    const { savePlan, deletePlan } = await import("@/app/w/[slug]/forecast-plan-actions");
-    const marker = { id: "11111111-1111-4111-8111-111111111111", kind: "hire", date: "2027-02-01", role_id: northbeamRoleIds.strat, fte: 1 };
-    const made = await savePlan(WS, null, { name: "Hire early", markers: [marker] }, null);
+describe("sandbox scenarios", () => {
+  const hire = { id: "11111111-1111-4111-8111-111111111111", lever: "D1", target: northbeamRoleIds.strat, op: "set", value: 1, from: "2027-02" };
+  const lead = (n: number, from?: string) => ({ id: `22222222-2222-4222-8222-00000000000${n}`, lever: "A1", target: null, op: "multiply", value: 1.2, ...(from ? { from } : {}) });
+  const input = (name: string, changes: unknown[] = [hire], extra: Record<string, unknown> = {}) => ({ name, description: null, parent_id: null, changes, horizon_months: 12, ...extra });
+
+  it("saves a scenario with its changes, changes it only if nobody else has, and deletes it", async () => {
+    const { saveSandboxScenario, deleteSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const made = await saveSandboxScenario(WS, null, input("Hire early", [hire], { horizon_months: 24 }), null);
     expect(made.status).toBe("ok");
     if (made.status !== "ok") return;
-    expect((await one("select markers from forecast_plans where id = $1", [made.plan.id])).markers).toEqual([marker]);
-    const renamed = await savePlan(WS, made.plan.id, { name: "Hire earlier", markers: [marker] }, made.plan.updated_at);
-    expect(renamed).toMatchObject({ status: "ok", plan: { name: "Hire earlier" } });
+    expect(made.scenario).toMatchObject({ name: "Hire early", horizon_months: 24, parent_id: null });
+    expect((await one("select changes, created_by from sandbox_scenarios where id = $1", [made.scenario.id]))).toMatchObject({ changes: [hire], created_by: editor.id });
+    const renamed = await saveSandboxScenario(WS, made.scenario.id, input("Hire earlier"), made.scenario.updated_at);
+    expect(renamed).toMatchObject({ status: "ok", scenario: { name: "Hire earlier" } });
     // The page still holds the first version: someone changed it since.
-    expect(await savePlan(WS, made.plan.id, { name: "Stale", markers: [marker] }, made.plan.updated_at)).toEqual({
+    expect(await saveSandboxScenario(WS, made.scenario.id, input("Stale"), made.scenario.updated_at)).toEqual({
       status: "error",
-      message: "Someone else changed or deleted this plan. Reload to see it.",
+      message: "Someone else changed or deleted this scenario. Reload to see it.",
     });
-    expect(await savePlan(WS, null, { name: "Hire earlier", markers: [] }, null)).toMatchObject({ status: "error", message: "A plan with that name already exists." });
-    expect(await deletePlan(WS, made.plan.id)).toEqual({ status: "ok" });
-    expect(await deletePlan(WS, made.plan.id)).toMatchObject({ status: "error" });
+    expect((await one("select name from sandbox_scenarios where id = $1", [made.scenario.id])).name).toBe("Hire earlier");
+    expect(await saveSandboxScenario(WS, null, input("hire earlier", []), null)).toMatchObject({ status: "error", message: "A scenario with that name already exists." });
+    expect(await deleteSandboxScenario(WS, made.scenario.id)).toEqual({ status: "ok" });
+    expect(await deleteSandboxScenario(WS, made.scenario.id)).toMatchObject({ status: "error" });
+  });
+
+  it("refuses what is not valid before it reaches the database, with the reason", async () => {
+    const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    expect(await saveSandboxScenario("nope", null, input("x"), null)).toEqual({ status: "error", message: "That scenario isn't valid." });
+    expect(await saveSandboxScenario(WS, null, input("x", [{ ...hire, value: 3 }]), null)).toEqual({ status: "error", message: "A hire's FTE must be between 0.1 and 2." });
+    expect(await saveSandboxScenario(WS, null, input("   "), null)).toEqual({ status: "error", message: "Give the scenario a name." });
+    expect(await saveSandboxScenario(WS, null, input("x", [], { parent_id: "33333333-3333-4333-8333-333333333333" }), null)).toEqual({ status: "error", message: "The scenario this one builds on isn't there any more." });
+    expect(await saveSandboxScenario(WS, "33333333-3333-4333-8333-333333333333", input("x"), null)).toEqual({ status: "error", message: "That scenario isn't valid." });
+  });
+
+  it("checks the limits on the effective changes (a scenario with its parents'), and on the scenarios that build on the one being saved", async () => {
+    const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const months = (...ms: string[]) => ms.map((m, i) => lead(i + 1, `2027-${m}`));
+    const parent = await saveSandboxScenario(WS, null, input("Base", months("01", "02", "03", "04")), null);
+    if (parent.status !== "ok") throw new Error(JSON.stringify(parent));
+    const child = await saveSandboxScenario(WS, null, input("Base plus", [{ ...lead(5, "2027-05") }], { parent_id: parent.scenario.id }), null);
+    expect(child.status).toBe("ok");
+    const over = await saveSandboxScenario(WS, null, input("Base plus more", [lead(5, "2027-05"), lead(6, "2027-06"), { ...lead(7, "2027-07") }], { parent_id: parent.scenario.id }), null);
+    expect(over).toMatchObject({ status: "error", message: expect.stringMatching(/more than 6 different months/) });
+    const grow = await saveSandboxScenario(WS, parent.scenario.id, input("Base", months("01", "02", "03", "04", "06", "07")), parent.scenario.updated_at);
+    expect(grow).toMatchObject({ status: "error", message: expect.stringMatching(/“Base plus” builds on this one/) });
+    expect((await one("select jsonb_array_length(changes) as n from sandbox_scenarios where id = $1", [parent.scenario.id])).n).toBe(4);
+  });
+
+  it("refuses to delete a scenario others build on, naming them", async () => {
+    const { saveSandboxScenario, deleteSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const parent = await saveSandboxScenario(WS, null, input("Parent plan", []), null);
+    if (parent.status !== "ok") throw new Error(JSON.stringify(parent));
+    const a = await saveSandboxScenario(WS, null, input("Child B", [], { parent_id: parent.scenario.id }), null);
+    const b = await saveSandboxScenario(WS, null, input("Child A", [], { parent_id: parent.scenario.id }), null);
+    expect(a.status === "ok" && b.status === "ok").toBe(true);
+    expect(await deleteSandboxScenario(WS, parent.scenario.id)).toEqual({ status: "error", message: "Other scenarios build on this one: “Child A”, “Child B”. Delete them or change what they build on first." });
+    expect(Number((await one("select count(*) from sandbox_scenarios where id = $1", [parent.scenario.id])).count)).toBe(1);
+    if (a.status === "ok" && b.status === "ok") {
+      expect(await deleteSandboxScenario(WS, a.scenario.id)).toEqual({ status: "ok" });
+      expect(await deleteSandboxScenario(WS, b.scenario.id)).toEqual({ status: "ok" });
+    }
+    expect(await deleteSandboxScenario(WS, parent.scenario.id)).toEqual({ status: "ok" });
+  });
+
+  it("refuses a Viewer, and a signed-out caller, writing nothing", async () => {
+    const { saveSandboxScenario, deleteSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const mine = await saveSandboxScenario(WS, null, input("Viewer test"), null);
+    if (mine.status !== "ok") throw new Error(JSON.stringify(mine));
+    await signInAs({ tdb }, viewer);
+    expect(await saveSandboxScenario(WS, null, input("By a viewer"), null)).toEqual({ status: "error", message: "You don't have permission to change scenarios here." });
+    expect(await saveSandboxScenario(WS, mine.scenario.id, input("Hijacked"), mine.scenario.updated_at)).toEqual({ status: "error", message: "Someone else changed or deleted this scenario. Reload to see it." });
+    expect(await deleteSandboxScenario(WS, mine.scenario.id)).toMatchObject({ status: "error" });
+    expect((await one("select name from sandbox_scenarios where id = $1", [mine.scenario.id])).name).toBe("Viewer test");
+    // A Viewer reads it, though.
+    expect((await tdb.dbAs({ sub: viewer.id, role: "authenticated", app_metadata: {} } as never).selectFrom("sandbox_scenarios").select("name").where("id", "=", mine.scenario.id).execute()).map((r) => r.name)).toEqual(["Viewer test"]);
+    await signInAs({ tdb }, admin);
+    expect(await deleteSandboxScenario(WS, mine.scenario.id)).toEqual({ status: "ok" });
+  });
+
+  it("the process page's createScenario writes a standalone whole-run sandbox row; updateScenarioPatch leaves the Sandbox's own alone", async () => {
+    const { createScenario, deleteScenario, updateScenarioPatch } = await import("@/app/w/[slug]/scenario-actions");
+    const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const patch = [{ path: "demand.leads_per_week", op: "multiply", value: 1.3 }];
+    const made = await createScenario(WS, { name: "More leads, process page", description: "d", patch, parent_scenario_id: "44444444-4444-4444-8444-444444444444" });
+    if (made.status !== "ok") throw new Error(JSON.stringify(made));
+    expect(made.scenario).toMatchObject({ name: "More leads, process page", patch, parent_scenario_id: null });
+    const stored = await one("select changes, parent_id from sandbox_scenarios where id = $1", [made.scenario.id]);
+    expect(stored.parent_id).toBeNull();
+    expect(stored.changes).toEqual([{ id: expect.any(String), lever: "A1", target: null, op: "multiply", value: 1.3 }]);
+    const repointed = await updateScenarioPatch(made.scenario.id, [{ path: "demand.leads_per_week", op: "multiply", value: 1.4 }]);
+    expect(repointed).toMatchObject({ status: "ok", scenario: { patch: [{ path: "demand.leads_per_week", op: "multiply", value: 1.4 }] } });
+    // A scenario with a hire from a month is the Sandbox's: the process page can't replace its changes with patches.
+    const timed = await saveSandboxScenario(WS, null, input("With a hire"), null);
+    if (timed.status !== "ok") throw new Error(JSON.stringify(timed));
+    expect(await updateScenarioPatch(timed.scenario.id, patch)).toMatchObject({ status: "error" });
+    expect((await one("select changes from sandbox_scenarios where id = $1", [timed.scenario.id])).changes).toEqual([hire]);
+    // And it can't delete one that others build on.
+    const child = await saveSandboxScenario(WS, null, input("Builds on it", [], { parent_id: made.scenario.id }), null);
+    expect(await deleteScenario(made.scenario.id)).toEqual({ status: "error", message: "Other scenarios build on this one: “Builds on it”. Delete them or change what they build on first." });
+    if (child.status === "ok") await tdb.client.query("delete from sandbox_scenarios where id = $1", [child.scenario.id]);
+    expect(await deleteScenario(made.scenario.id)).toEqual({ status: "ok" });
+    await tdb.client.query("delete from sandbox_scenarios where id = $1", [timed.scenario.id]);
   });
 });
 

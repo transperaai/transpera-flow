@@ -164,6 +164,7 @@ export function ProcessView({
   const weeks = pickedMonths === null ? null : horizonWeeks(pickedMonths);
   const hidden = useHiddenLevers(mode === "demo", hiddenLevers);
   const leversHref = settingsHref ? `${settingsHref}/levers` : mode === "demo" ? "/demo/settings/levers" : undefined;
+  const sandboxHref = settingsHref ? settingsHref.replace(/\/settings$/, "/sandbox") : mode === "demo" ? "/demo/sandbox" : undefined;
 
   const workingModel = useEngineModel(working, weeks);
   const liveModel = useEngineModel(live, weeks);
@@ -576,6 +577,7 @@ export function ProcessView({
                 retired={retired}
                 hiddenLevers={hidden}
                 leversHref={leversHref}
+                sandboxHref={sandboxHref}
                 viewer={live.viewer}
               />
             )

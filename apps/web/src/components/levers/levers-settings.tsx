@@ -29,6 +29,7 @@ const SAVE_DELAY_MS = 400;
 const CONTROL_NOTE: Record<LeverKind["control"], string> = {
   slider: "Slider on process pages",
   settings: "Set in Settings",
+  sandbox: "Changed in the Sandbox",
   later: "No slider yet. Hiding this has no effect yet.",
 };
 

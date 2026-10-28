@@ -92,7 +92,7 @@ describe("workspace settings", () => {
     expect(await data.loadWorkspaceOverview("nope")).toBeNull();
     expect(typeof (await data.loadCompanyId(ws))).toBe("string");
     expect(await data.loadWorkspaceSolutions(ws)).toHaveProperty("solutions");
-    expect(await data.loadWorkspaceForecastPlans(ws)).toEqual([]);
+    expect(await data.loadWorkspaceSandboxScenarios(ws)).toEqual(expect.any(Array));
   });
 
   it("finds an earlier version of a process, or null for the live one", async () => {

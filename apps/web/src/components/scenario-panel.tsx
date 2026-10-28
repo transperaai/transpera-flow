@@ -41,6 +41,7 @@ export function ScenarioPanel({
   retired = NO_RETIRED,
   hiddenLevers = NO_HIDDEN,
   leversHref,
+  sandboxHref,
   viewer,
   library = true,
 }: {
@@ -63,6 +64,8 @@ export function ScenarioPanel({
   hiddenLevers?: readonly string[];
   /** The Levers settings page, linked from the panel when some are hidden. */
   leversHref?: string;
+  /** The Sandbox, where scenarios with hires, changes from a month or a parent are made and run; the library links to it. */
+  sandboxHref?: string;
   /** Who is looking: a member or viewer gets people rows and levers for their own person only (B1 2b). */
   viewer?: Viewer;
   /** Show the saved scenarios (the library). A play link's visitor sees only the levers (B4). Default: shown. */
@@ -202,6 +205,7 @@ export function ScenarioPanel({
             problems={problems}
             retired={retired}
             canEdit={canEdit}
+            sandboxHref={sandboxHref}
             leverCount={moved.length}
             busy={busy}
             error={error}

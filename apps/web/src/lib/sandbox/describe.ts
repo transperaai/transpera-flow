@@ -3,11 +3,12 @@
 
 import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever, type SolutionRow } from "@transpera-flow/db";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import { personName, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
 
 /** What names a change's target: the bundle's roles, people (as the viewer's bundle names them), steps, services; and the solutions. */
 export interface DescribeContext {
-  bundle: Pick<ProcessBundle, "roles" | "people" | "steps" | "services" | "otherProcesses" | "workspace">;
+  bundle: Pick<ProcessBundle, "roles" | "people" | "steps" | "services" | "otherProcesses" | "workspace" | "viewer">;
   solutions: readonly Pick<SolutionRow, "id" | "name">[];
   /** Every change in the list the hire numbering runs over. */
   changes: readonly SandboxChange[];
@@ -46,8 +47,11 @@ export function targetName(c: SandboxChange, ctx: DescribeContext): string | nul
   switch (lever.target) {
     case "role":
       return b.roles.find((r) => r.id === t)?.name ?? "a role that is gone";
-    case "person":
-      return b.people.find((p) => p.id === t)?.name ?? "someone who is gone";
+    case "person": {
+      // Other people are named as the viewer may see them ("A team member" for a Viewer who cannot).
+      const found = b.people.find((p) => p.id === t);
+      return found ? personName(viewerOf(b), t, found.name) : "someone who is gone";
+    }
     case "step":
       return [...b.steps, ...(b.otherProcesses ?? []).flatMap((p) => p.steps)].find((s) => s.id === t)?.name ?? "a step that is gone";
     case "service":

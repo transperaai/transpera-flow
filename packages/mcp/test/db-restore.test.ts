@@ -24,7 +24,7 @@ function smallPlan() {
   const empty = {
     format: "transpera-workspace-import/1", settings: { hours_per_week: 36 }, roles: [{ id: P(1), name: "Analyst", color: "#336699" }], people: [{ id: P(2), name: "Ada" }],
     person_roles: [{ person_id: P(2), role_id: P(1) }], person_leave: [], lead_sources: [], seasonality: [], demand_settings: null, churn_drivers: [], market_conditions: [],
-    market_schedule: [], lever_settings: null, analysis_rules: null, clients: [], sources: [], scenarios: [], blocks: [], issues: [], services: [], service_servicing: [],
+    market_schedule: [], lever_settings: null, analysis_rules: null, clients: [], sources: [], sandbox_scenarios: [], blocks: [], issues: [], services: [], service_servicing: [],
     client_groups: [], client_services: [], client_assignments: [], person_skills: [], source_links: [],
   };
   return {

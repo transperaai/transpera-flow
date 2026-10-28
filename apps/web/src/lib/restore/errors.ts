@@ -22,7 +22,7 @@ const SECTION_WORDS: Record<string, string> = {
   settings: "the workspace settings", roles: "the roles", people: "the people", person_roles: "the role assignments", person_leave: "the leave entries",
   lead_sources: "the lead sources", seasonality: "the seasonality", demand_settings: "the demand settings", churn_drivers: "the churn drivers",
   market_conditions: "the market conditions", market_schedule: "the market schedule", lever_settings: "the lever settings", analysis_rules: "the analysis rules",
-  clients: "the clients", sources: "the sources", processes: "the processes", scenarios: "the scenarios", blocks: "the blocks", issues: "the issues",
+  clients: "the clients", sources: "the sources", processes: "the processes", scenarios: "the scenarios", sandbox_scenarios: "the scenarios", blocks: "the blocks", issues: "the issues",
   steps: "the steps and edges", services: "the services", service_servicing: "the servicing rules", client_groups: "the client groups",
   client_services: "the client services", client_assignments: "the client assignments", person_skills: "the skills", person_capacity_factors: "the per-person times", source_links: "the source links",
   archive: "the archived processes", log: "the import log",

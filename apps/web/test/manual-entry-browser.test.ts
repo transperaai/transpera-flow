@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Adding things by hand (issue #182, B19) in a real browser: an editor adds a client, edits it, gives it services and
 // someone to look after it, and makes it inactive, which hides it (there is no delete); an owner changes the workspace's name
-// and currency; an editor deletes a saved scenario and a solution after a confirm. A viewer sees everything and can change
+// and currency; an editor deletes a solution after a confirm (saved scenarios are deleted in the Sandbox now). A viewer sees everything and can change
 // nothing. The server is stood in for (manual-harness/entry.tsx); the writes are tested over PostgREST in
 // packages/mcp/test/postgrest-manual-entry.test.ts.
 
@@ -150,19 +150,6 @@ describe("the workspace's name and currency", () => {
 });
 
 describe("deleting", () => {
-  it("an editor deletes a saved scenario after confirming, and can change their mind", async () => {
-    const { page } = await mount({ canEdit: true, canManage: false });
-    const region = page.locator("[data-saved-scenarios]");
-    await region.getByRole("button", { name: "Delete Hire a strategist" }).click();
-    await region.getByRole("button", { name: "Keep" }).click();
-    expect(await calls(page)).toEqual([]);
-    await region.getByRole("button", { name: "Delete More leads" }).click();
-    await region.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect.poll(() => region.locator("[data-scenario]").evaluateAll((els) => els.map((e) => e.getAttribute("data-scenario")))).toEqual(["Hire a strategist"]);
-    expect(await calls(page)).toEqual([["delete scenario", "50000000-0000-4000-8000-000000000002"]]);
-    await page.close();
-  }, 60_000);
-
   it("an editor deletes a solution after a confirm that says what is kept", async () => {
     const { page, errors } = await mount({ canEdit: true, canManage: false });
     await page.getByRole("button", { name: "Delete solution" }).click();
@@ -181,7 +168,7 @@ describe("deleting", () => {
 });
 
 describe("a viewer", () => {
-  it("sees clients and scenarios but can add, change and delete nothing", async () => {
+  it("sees clients but can add, change and delete nothing", async () => {
     const { page, errors } = await mount({ canEdit: false, canManage: false });
     const region = clientsRegion(page);
     expect(await region.getByRole("button", { name: "Add client" }).count()).toBe(0);
@@ -192,7 +179,6 @@ describe("a viewer", () => {
       expect(await row.getByLabel(label, { exact: true }).isDisabled(), label).toBe(true);
     }
     expect(await row.getByLabel("SEO", { exact: true }).isDisabled()).toBe(true);
-    expect(await page.locator("[data-saved-scenarios]").getByRole("button").count()).toBe(0);
     expect(await page.getByRole("button", { name: "Delete solution" }).count()).toBe(0);
     expect(await calls(page)).toEqual([]);
     expect(errors).toEqual([]);

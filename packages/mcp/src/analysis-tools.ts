@@ -49,7 +49,7 @@ const workspaceArg = z.string().optional().describe("Workspace id, slug or name.
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 const scenarioRefs = z
   .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(10)])
-  .describe("A saved scenario's id or name, or several to stack in order (as applying them in the app does).");
+  .describe("A saved scenario's id or name, or several to stack in order (as applying them in the app does). Only whole-run scenarios (one that has changes from a month, a hire or a parent runs only in the Sandbox).");
 const repsArg = z.number().int().min(1).max(MAX_REPS).optional().describe(`Replications (default ${DEFAULT_REPS}, as in the app)`);
 const seedArg = z.number().int().min(0).optional().describe(`Random seed (default ${DEFAULT_SEED}, as in the app)`);
 const startDateArg = z

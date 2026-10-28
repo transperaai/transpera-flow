@@ -108,7 +108,9 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
   const personFactors: PersonCapacityFactorRow[] = [...(bundle.personCapacityFactors ?? [])];
   const names = hireNames(bundle, changes);
   const pinned = new Set([...bundle.steps, ...(bundle.otherProcesses ?? []).flatMap((p) => p.steps)].map((s) => s.person_id).filter((id): id is string => !!id));
-  const assigned = new Set((bundle.clientAssignments ?? []).map((a) => a.person_id));
+  // Clients counted per service replace the named roster in the engine (its assignments are ignored), so then nobody is assigned.
+  const countedPerService = (bundle.clientGroups ?? []).some((g) => g.client_count > 0);
+  const assigned = new Set(countedPerService ? [] : (bundle.clientAssignments ?? []).map((a) => a.person_id));
 
   // Every person's stretches, starting with the one row they have.
   const stretches = new Map<string, Stretch[]>();

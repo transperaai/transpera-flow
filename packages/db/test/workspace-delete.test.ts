@@ -136,7 +136,7 @@ describe("deleting one role or person keeps its guards", () => {
     expect(await stepsNaming(db.client, "person_id", sam)).toBe(1);
   });
 
-  it("the two constraints are deferred, still NO ACTION and validated; the other two NO ACTION ones stay immediate", async () => {
+  it("the two constraints are deferred, still NO ACTION and validated; the other NO ACTION ones (market schedule, solutions, a scenario's parent) stay immediate", async () => {
     const rows = (
       await db.client.query(
         `select conname, confdeltype, condeferrable, condeferred, convalidated from pg_constraint
@@ -145,6 +145,7 @@ describe("deleting one role or person keeps its guards", () => {
     ).rows;
     expect(rows).toEqual([
       { conname: "market_schedule_condition_id_workspace_id_fkey", confdeltype: "a", condeferrable: false, condeferred: false, convalidated: true },
+      { conname: "sandbox_scenarios_parent", confdeltype: "a", condeferrable: false, condeferred: false, convalidated: true },
       { conname: "solutions_base_revision_id_process_id_workspace_id_fkey", confdeltype: "a", condeferrable: false, condeferred: false, convalidated: true },
       { conname: "steps_person_id_workspace_id_fkey", confdeltype: "a", condeferrable: true, condeferred: true, convalidated: true },
       { conname: "steps_role_id_workspace_id_fkey", confdeltype: "a", condeferrable: true, condeferred: true, convalidated: true },

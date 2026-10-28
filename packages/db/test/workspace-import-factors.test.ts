@@ -449,7 +449,7 @@ const bodyOf = (sql: string) => {
 };
 const FN = "public.import_workspace_bundle(uuid, jsonb, text)";
 /** The migration that defines the function now (it applies the settings for every restorer: 20270104000000), and its body. */
-const LATEST_FILE = "20270104000000_strip_followups.sql";
+const LATEST_FILE = "20270106000000_sandbox_scenarios.sql";
 const bodyOfFunction = (sql: string, name: string) => {
   const fn = sql.slice(sql.search(new RegExp(`^create (?:or replace )?function ${name.replace(".", "\\.")}\\(`, "mi")));
   return fn.slice(fn.indexOf("$$") + 2, fn.indexOf("$$", fn.indexOf("$$") + 2));
@@ -524,7 +524,9 @@ describe("the function and the migration", () => {
     const copy = await plan();
     // B21's function reads the two sections Suggestions had (removed 28 Oct 2026), so the plan for it carries them, empty, and it
     // checks their tables are empty: stand-ins for the length of this transaction.
-    Object.assign(copy, { suggestions: [], proposals: [] });
+    Object.assign(copy, { suggestions: [], proposals: [], scenarios: [] });
+    // Its issues can't point at a scenario: B21's function writes the stand-in table below, which no foreign key reaches.
+    for (const issue of (copy as unknown as { issues: { scenario_id?: unknown }[] }).issues) issue.scenario_id = null;
     // In a transaction that is rolled back: the operator's `begin;` and `commit;` are left out, everything between them runs.
     await db.client.query("begin");
     try {
@@ -534,6 +536,11 @@ describe("the function and the migration", () => {
       await db.client.query("create table public.suggestions (workspace_id uuid)");
       await db.client.query("create table public.suggestion_proposals (workspace_id uuid)");
       await db.client.query("grant select on public.suggestions, public.suggestion_proposals to authenticated");
+      // And the scenarios table and library that the Sandbox migration (20270106000000) replaced: B21's function still reads them.
+      await db.client.query("create table public.scenarios (workspace_id uuid, id uuid, name text, patch jsonb, parent_scenario_id uuid, description text, created_at timestamptz)");
+      await db.client.query("grant select, insert on public.scenarios to authenticated");
+      await db.client.query("create function private.scenario_library() returns table (name text, description text, patch jsonb) language sql as $$ select null::text, null::text, null::jsonb where false $$");
+      await db.client.query("grant execute on function private.scenario_library() to authenticated");
       await db.client.query(rollback.replace(/^begin;/, "").replace(/commit;$/, ""));
       const [fn] = await q(`select prosecdef, proconfig, md5(prosrc) as md5 from pg_proc where oid = '${FN}'::regprocedure`);
       expect(fn!.md5).toBe(B21_MD5);
@@ -569,7 +576,8 @@ describe("the function and the migration", () => {
     const to = lines.indexOf("--        $smoke$;");
     expect(from).toBeGreaterThan(0);
     expect(to).toBeGreaterThan(from);
-    const block = lines.slice(from, to + 1).map((l) => l.slice("--        ".length)).join("\n");
+    // The block restores through the live function, which since the Sandbox migration takes `sandbox_scenarios` where it took `scenarios`.
+    const block = lines.slice(from, to + 1).map((l) => l.slice("--        ".length)).join("\n").replace('"scenarios":[]', '"sandbox_scenarios":[]');
     expect(block).toContain("<agency admin user id>");
     const workspaces = async () => Number((await q("select count(*) from public.workspaces"))[0]!.count);
     const before = await workspaces();

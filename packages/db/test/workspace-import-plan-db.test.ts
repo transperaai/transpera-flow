@@ -56,7 +56,9 @@ describe.each([
   it("plans with placeholders only, no account keys, and the same order as the source ids", async () => {
     const bundle = await exportOf(ws, `plan2.${name.toLowerCase()}@example.com`);
     const { plan, placeholderOf } = planWorkspaceImport(bundle, { canManage: true });
-    const found = JSON.stringify(plan).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
+    // The ids of a scenario's changes belong to the scenario, not to a row, so they are not placeholders; every other id is.
+    const withoutChangeIds = { ...plan, sandbox_scenarios: plan.sandbox_scenarios.map((sc) => ({ ...sc, changes: (sc.changes as { id?: unknown }[]).map(({ id: _id, ...c }) => c) })) };
+    const found = JSON.stringify(withoutChangeIds).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
     expect(found.filter((u) => !u.startsWith(PLACEHOLDER_PREFIX))).toEqual([]);
     expect(JSON.stringify(plan)).not.toMatch(/"(created_by|email|workspace_id|hidden)"/);
     const old = [...placeholderOf.keys()].filter((k) => k !== bundle.workspace.id).sort();

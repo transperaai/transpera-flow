@@ -254,16 +254,16 @@ describe("names, parents and the cap", () => {
     await expect(db.client.query("update sandbox_scenarios set workspace_id = $2 where id = $1", [id, other])).rejects.toThrow(/stays in its workspace/);
   });
 
-  it("the 900 cap applies to people only (the migration and the library trigger run with no user)", async () => {
+  it("the cap of 1000 applies to people only (the migration and the library trigger run with no user)", async () => {
     const w = (await db.client.query("insert into workspaces (name, slug) values ('Capped', 'capped') returning id")).rows[0].id;
-    await db.client.query("insert into sandbox_scenarios (workspace_id, name) select $1, 'S' || g from generate_series(1, 896) g", [w]);
-    expect((await db.client.query("select count(*)::int as n from sandbox_scenarios where workspace_id = $1", [w])).rows[0].n).toBe(900);
+    await db.client.query("insert into sandbox_scenarios (workspace_id, name) select $1, 'S' || g from generate_series(1, 996) g", [w]);
+    expect((await db.client.query("select count(*)::int as n from sandbox_scenarios where workspace_id = $1", [w])).rows[0].n).toBe(1000);
     // No user: more is fine.
     await db.client.query("insert into sandbox_scenarios (workspace_id, name) values ($1, 'No user')", [w]);
     // An Agency admin: refused.
     await expect(
       db.as(users.admin!.claims, (c) => c.query("insert into sandbox_scenarios (workspace_id, name) values ($1, 'One too many')", [w])),
-    ).rejects.toThrow(/at most 900 scenarios/);
+    ).rejects.toThrow(/at most 1000 scenarios/);
   });
 
   it("keeps updated_at current (compared in SQL: the timestamps can share a millisecond)", async () => {

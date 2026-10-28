@@ -98,11 +98,11 @@ describe("adding things by hand", () => {
 
   it("an editor deletes a saved scenario; a viewer can't", async () => {
     const mk = async (name: string) =>
-      (await one("insert into scenarios (workspace_id, name, patch) values ($1, $2, '[{\"path\": \"demand.leads_per_week\", \"op\": \"multiply\", \"value\": 1.2}]') returning id", [ids.ws, name])).id as string;
+      (await one("insert into sandbox_scenarios (workspace_id, name, changes) values ($1, $2, '[{\"id\": \"6a0d1b00-0000-4000-8000-000000000001\", \"lever\": \"A1\", \"target\": null, \"op\": \"multiply\", \"value\": 1.2}]') returning id", [ids.ws, name])).id as string;
     const [keep, gone] = [await mk("Keep me"), await mk("Delete me")];
-    expect(await viewer.deleteFrom("scenarios").where("id", "=", keep).returning("id").execute()).toEqual([]);
-    expect(await editor.deleteFrom("scenarios").where("id", "=", gone).returning("id").execute()).toEqual([{ id: gone }]);
-    expect((await one("select count(*)::int as n from scenarios where id = any($1)", [[keep, gone]])).n).toBe(1);
+    expect(await viewer.deleteFrom("sandbox_scenarios").where("id", "=", keep).returning("id").execute()).toEqual([]);
+    expect(await editor.deleteFrom("sandbox_scenarios").where("id", "=", gone).returning("id").execute()).toEqual([{ id: gone }]);
+    expect((await one("select count(*)::int as n from sandbox_scenarios where id = any($1)", [[keep, gone]])).n).toBe(1);
   });
 
   it("an editor deletes a solution, and its issue link lands in the audit log and the issue's history; a viewer can't", async () => {

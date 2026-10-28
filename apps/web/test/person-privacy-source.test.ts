@@ -30,7 +30,8 @@ const NAMES = [
   "lib/churn-drivers.ts",
   "lib/scenarios/scenarios.ts",
   "lib/scenarios/broken.ts",
-  "components/forecast/forecast-view.tsx",
+  "components/sandbox/sandbox-view.tsx",
+  "lib/sandbox/describe.ts",
 ];
 
 describe("per-person screens use the viewer helpers", () => {

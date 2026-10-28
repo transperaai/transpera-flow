@@ -14,6 +14,8 @@ export type LeverControl =
   | "slider"
   /** Not a slider: changed on a Settings page, which the row links to. */
   | "settings"
+  /** Changed in the Sandbox (a hire, leave, a role's cost): not a slider; hiding it takes it off the Sandbox's list for new changes. */
+  | "sandbox"
   /** No control built yet: the choice is kept and applies when one arrives. */
   | "later";
 
@@ -91,7 +93,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "New starters",
     description: "When someone new joins. They take a while to get up to speed.",
     example: "A new strategist starts in February.",
-    control: "later",
+    control: "sandbox",
   },
   {
     id: "people.leave",
@@ -99,7 +101,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "Time off",
     description: "Holidays and leave.",
     example: "Maya is away for 2 weeks in July.",
-    control: "later",
+    control: "sandbox",
   },
   // Process
   {
@@ -186,7 +188,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "Cost of each role",
     description: "What an hour of each role costs you.",
     example: "A strategist hour costs A$95.",
-    control: "later",
+    control: "sandbox",
   },
   {
     id: "finances.fixed",

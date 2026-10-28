@@ -50,7 +50,7 @@ const PRODUCT = [
   "links", "live", "map", "marker", "markers", "market", "mcp", "member", "members", "model", "models",
   "owner", "owners", "parent", "people", "person", "placeholder", "plan", "plans", "play", "principles", "process",
   "processes", "proposal", "proposals", "report", "result", "results", "revision", "revisions", "role", "roles", "run",
-  "runs", "scenario", "scenarios", "service", "services", "servicing", "settings", "share", "simulate", "simulation",
+  "runs", "sandbox", "scenario", "scenarios", "service", "services", "servicing", "settings", "share", "simulate", "simulation",
   "snapshot", "solution", "solutions", "source", "sources", "start", "step", "steps", "suggestion", "suggestions", "team",
   "terminal", "token", "tokens", "version", "versions", "viewer", "viewers", "wait", "workspace", "workspaces",
 ];

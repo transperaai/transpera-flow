@@ -21,7 +21,7 @@ describe("workspaceNav: groups and order", () => {
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
       ["issues", "solutions", "library"],
-      ["sources", "people", "forecast", "settings", "access"],
+      ["sources", "people", "sandbox", "settings", "access"],
     ]);
   });
   it("labels the items as the prototype does", () => {
@@ -92,7 +92,7 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/blocks",
       "/w/s/sources",
       "/w/s/people",
-      "/w/s/forecast",
+      "/w/s/sandbox",
       "/w/s/settings",
       "/w/s/settings/access",
     ]);
@@ -131,7 +131,7 @@ describe("demoNav", () => {
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
       ["issues", "solutions", "library"],
-      ["sources", "people", "forecast", "levers"],
+      ["sources", "people", "sandbox", "levers"],
     ]);
   });
   it("has no AI analysis item or page: in-app AI is gone (cut list item 1)", () => {
@@ -155,7 +155,7 @@ describe("demoNav", () => {
     expect(active(d("/demo/sources"))).toEqual(["sources"]);
     expect(active(d("/demo/overview"))).toEqual(["overview"]);
     expect(active(d("/demo/people"))).toEqual(["people"]);
-    expect(active(d("/demo/forecast"))).toEqual(["forecast"]);
+    expect(active(d("/demo/sandbox"))).toEqual(["sandbox"]);
   });
   it("sends Issues to its own page", () => expect(item(d("/demo"), "issues")).toMatchObject({ href: "/demo/issues" }));
   it("counts the seed's open issues and processes", () => {

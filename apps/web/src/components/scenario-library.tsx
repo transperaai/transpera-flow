@@ -5,6 +5,7 @@
 // Anyone who can see the process can apply and compare; only editors save
 // and delete (the database enforces it too).
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import type { BrokenPatch, EngineModel, RetiredSteps } from "@transpera-flow/engine";
@@ -189,6 +190,7 @@ export function ScenarioLibrary({
   problems,
   retired = {},
   canEdit,
+  sandboxHref,
   leverCount,
   busy,
   error,
@@ -208,6 +210,8 @@ export function ScenarioLibrary({
   /** Steps the model no longer has, to name them in broken changes. */
   retired?: RetiredSteps;
   canEdit: boolean;
+  /** The Sandbox, for scenarios with a hire or changes from a month: this list shows the whole-run ones. */
+  sandboxHref?: string;
   /** Levers moved off neutral, which "Save" would store. */
   leverCount: number;
   busy: boolean;
@@ -245,6 +249,15 @@ export function ScenarioLibrary({
         Apply one to compare it with today; apply more to stack them, in the order applied.
         {!canEdit && " You can apply and compare scenarios; Agency admins can save and delete them."}
       </p>
+      {sandboxHref ? (
+        <p className="text-xs text-fg-3" data-open-in-sandbox>
+          These are the whole-run scenarios.{" "}
+          <Link href={sandboxHref} className="underline">
+            Open in Sandbox
+          </Link>{" "}
+          to add a hire, a change from a month, or to run and compare them over time.
+        </p>
+      ) : null}
       {error && (
         <p role="alert" className="rounded-token border border-crit bg-crit-soft px-2 py-1 text-xs">
           {error}

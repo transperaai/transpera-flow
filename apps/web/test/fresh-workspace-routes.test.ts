@@ -80,7 +80,7 @@ const PAGES: [string, () => Promise<Page>][] = [
   ["/issues", async () => (await import("@/app/w/[slug]/issues/page")).default as Page],
   ["/solutions", async () => (await import("@/app/w/[slug]/solutions/page")).default as Page],
   ["/people", async () => (await import("@/app/w/[slug]/people/page")).default as Page],
-  ["/forecast", async () => (await import("@/app/w/[slug]/forecast/page")).default as Page],
+  ["/sandbox", async () => (await import("@/app/w/[slug]/sandbox/page")).default as Page],
   ["/settings/calibration", async () => (await import("@/app/w/[slug]/settings/calibration/page")).default as Page],
   ["/overview", async () => (await import("@/app/w/[slug]/overview/page")).default as Page],
   ["/", async () => (await import("@/app/w/[slug]/page")).default as Page],
@@ -150,7 +150,7 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
   it("tells a reader that an Agency admin publishes first", async () => {
     state.variant = variant;
     state.canEdit = false;
-    const out = await html(await (await import("@/app/w/[slug]/forecast/page")).default as Page);
+    const out = await html(await (await import("@/app/w/[slug]/sandbox/page")).default as Page);
     expect(out).toContain("An Agency admin publishes a process first, then this page fills in.");
     expect(out).not.toContain("Open Processes");
   });

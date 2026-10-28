@@ -9,6 +9,7 @@ import {
   larkspurBundle,
   northbeamBundle,
   northbeamIssues,
+  northbeamSandboxScenarios,
   northbeamScenarios,
   northbeamSources,
   northbeamSourceLinks,
@@ -81,7 +82,7 @@ async function loadSeeded(claims: Record<string, unknown>, wsId: string): Promis
 describe("seed", () => {
   it("seed.sql is up to date with the fixtures", () => {
     const onDisk = readFileSync(new URL("../seed.sql", import.meta.url), "utf8");
-    expect(onDisk).toBe(seedSql([northbeamBundle(), larkspurBundle()], northbeamScenarios(), northbeamIssues(), northbeamSources(), northbeamSourceLinks()));
+    expect(onDisk).toBe(seedSql([northbeamBundle(), larkspurBundle()], northbeamSandboxScenarios(), northbeamIssues(), northbeamSources(), northbeamSourceLinks(), northbeamScenarios()));
   });
 
   it("round-trips: rows loaded from the database resolve to the same engine model", async () => {
