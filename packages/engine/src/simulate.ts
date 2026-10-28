@@ -1492,6 +1492,12 @@ export function runOnce(
     const raw = plan?.drivers.get(d.id);
     if (raw) chanceCh[i + 1] = raw.map((r) => (r ? normaliseEvents(d.id, d.value, r) : null));
   });
+  /**
+   * Whether the model has the driver switched on. A driver a channel gives events from a month is on in the run, but in the months
+   * the channel doesn't (null) it is as the model says: off stays off, so the months before the channel are the run without it.
+   */
+  const modelOn = Uint8Array.from(don);
+  for (let s = 1; s < nSlots; s++) if (chanceCh[s]?.some(Boolean)) don[s] = 1;
   /** Switched-on slots that are in chance mode at some point of the run. */
   const evSlots: number[] = [];
   for (let s = 1; s < nSlots; s++) if (don[s] && (staticEv[s] || chanceCh[s])) evSlots.push(s);
@@ -2190,7 +2196,7 @@ export function runOnce(
       const e = eventsInMonth(s, chTick);
       curEv[s] = e;
       if (!e) {
-        dw[s] = dwBase[s]!;
+        dw[s] = modelOn[s] ? dwBase[s]! : 0;
         continue;
       }
       chanceNow.push(s);

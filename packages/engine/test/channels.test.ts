@@ -100,6 +100,7 @@ function casesFor(model: EngineModel, roster: boolean): [string, EngineChannels,
     ...own,
     ["fee +8% for one service", { starts: STARTS, fee: { [svc[0]!]: from(3, 1.08) } }],
     ["a driver as a chance", { starts: STARTS, drivers: { late: [null, null, null, { chance: null, effect: 0.6, months: 3 }] } }],
+    ["a driver switched off in the model, as a chance from a month", { starts: STARTS, drivers: { resp: [null, null, null, { chance: 0.3, effect: 1, months: 3 }] } }],
     ["an entered driver as a chance", { starts: STARTS, drivers: { results: [null, null, null, { chance: 0.2, effect: 1, months: 2 }] } }, { churnDrivers: [{ id: "results", weight: 1, enabled: true, value: 5 }] }],
     ["the price driver on a rise", { starts: STARTS, fee: { "*": from(3, 1.1) }, drivers: { price: [null, null, null, { chance: 0.5, effect: 1, months: 3 }] } }, { churnDrivers: [{ id: "price", weight: 1, enabled: true, value: 0 }] }],
   ];
