@@ -43,7 +43,10 @@ const membership = async (userId: string, workspaceId = ws) =>
   (await db.client.query("select role, source, active, person_id from memberships where user_id = $1 and workspace_id = $2", [userId, workspaceId]))
     .rows[0] as { role: string; source: string; active: boolean; person_id: string | null } | undefined;
 
-/** A user holding `role` in Northbeam and a sign-in rule for their address, so the members list still shows them. */
+/**
+ * A user holding `role` in Northbeam and a sign-in rule for their address, so the members list still shows them. The rule gives
+ * them the same membership in every other workspace too (the list applies at once, 20270105000000).
+ */
 async function withRole(email: string, role: "owner" | "viewer", listed = true) {
   const user = await createUser(db, email);
   await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
@@ -159,7 +162,7 @@ describe("linking members to people", () => {
     const owner = await createUser(db, "link-owner@transpera.example", { agency_admin: true });
     const viewer = await withRole("link-viewer2@northbeam.example", "viewer");
     const target = northbeamPersonIds["Leah Brooks"]!;
-    const updated = await commitAs(owner.claims, async (c) => (await c.query("update memberships set person_id = $1 where user_id = $2", [target, viewer.id])).rowCount);
+    const updated = await commitAs(owner.claims, async (c) => (await c.query("update memberships set person_id = $1 where user_id = $2 and workspace_id = $3", [target, viewer.id, ws])).rowCount);
     expect(updated).toBe(1);
     expect(await myPerson(viewer.claims, ws)).toBe(target);
   });
@@ -178,7 +181,7 @@ describe("linking members to people", () => {
   it("returns null for an inactive membership, for another workspace and for someone with no membership", async () => {
     const user = await withRole("inactive-link@northbeam.example", "viewer");
     const mine = await person(ws, "Linked Lee");
-    await db.client.query("update memberships set person_id = $1 where user_id = $2", [mine, user.id]);
+    await db.client.query("update memberships set person_id = $1 where user_id = $2 and workspace_id = $3", [mine, user.id, ws]);
     expect(await myPerson(user.claims, ws)).toBe(mine);
     await db.client.query("update memberships set active = false where user_id = $1", [user.id]);
     expect(await myPerson(user.claims, ws)).toBeNull();
