@@ -238,6 +238,34 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.close();
       });
 
+      onTablet("explains a result that looks worse because a role is full, and links to a hire for that role", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await waitRuns(page, 1);
+        // Nothing is full and nothing is worse with no changes: no note.
+        expect(await page.locator("[data-full-note]").count()).toBe(0);
+        // Twice the opportunities fills the strategist, and fewer deals are won than with no changes.
+        await openAdd(page);
+        await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
+        await page.getByLabel("Value", { exact: true }).fill("2");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await waitRuns(page, 2);
+        const note = page.locator("[data-with-this-scenario] [data-full-note]").first();
+        await note.waitFor();
+        expect(await note.innerText()).toMatch(/^The strategist role is full from \w+ 20\d\d, so new work waits and fewer deals are won \(\d+ against \d+ with no changes\)\./);
+        // The link opens a hire for that role, from the month it is full.
+        await note.getByRole("button", { name: "Try a hire for this role" }).click();
+        await page.waitForSelector("[data-change-dialog]");
+        expect(await page.getByLabel("What to change", { exact: true }).inputValue()).toBe("D1");
+        expect(await page.getByLabel("On", { exact: true }).evaluate((el: HTMLSelectElement) => el.selectedOptions[0]!.textContent)).toBe("Strategist");
+        expect(await page.getByLabel("From a month").isChecked()).toBe(true);
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector('[data-plan-marker][data-kind="hire"]');
+        expect(await changes(page).last().innerText()).toContain("New Strategist starts");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
       onTablet("moves a change by keyboard: a month a key press, three months a page, Delete removes", async () => {
         const { page, errors } = await mount(width);
         await newScenario(page);

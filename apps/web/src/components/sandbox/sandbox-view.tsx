@@ -41,10 +41,12 @@ import type { DescribeContext } from "@/lib/sandbox/describe";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { solutionReason } from "@/lib/sandbox/greyed";
 import { todayValue } from "@/lib/sandbox/today";
+import { explainFull } from "@/lib/sandbox/explain";
+import { EDIT_ONLY } from "@/lib/phone";
 import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
-import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { canSeePerson, namedForViewer, viewerOf } from "@/lib/viewer";
 import { forecastMoney } from "@/lib/forecast/money";
 import { ForecastMoney } from "@/components/forecast/forecast-money";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/forecast/forecast-timeline";
@@ -282,6 +284,26 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     return lines;
   }, [working, compare, plan.run, plan.status, result, built.model, cutoffs, start, months]);
 
+  /** Why a scenario that fills a role or person can look worse: it says so, with a hire to try. Worked out from the two runs already on screen. */
+  const fullNotes = useMemo(() => {
+    if (working === null || compare || !plan.run || !result?.monthly || !built.model || plan.status === "error") return [];
+    const monthly = plan.run.result.monthly;
+    if (!monthly) return [];
+    const viewer = viewerOf(live);
+    const people = Object.fromEntries(
+      Object.entries(plan.run.model.people ?? {})
+        .filter(([id]) => canSeePerson(viewer, id))
+        .map(([id, p]) => [id, { name: p.name, roles: p.roles }]),
+    );
+    return explainFull({
+      live: result.monthly,
+      scenario: monthly,
+      monthNames: timelineMonths(start, monthly.months, built.model.hoursPerWeek).map((mo) => mo.long),
+      roles: plan.run.model.roles,
+      people,
+    });
+  }, [working, compare, plan.run, plan.status, result, built.model, start, live]);
+
   const changeChanges = (fn: (changes: SandboxChange[]) => SandboxChange[]) => {
     setSaveNote(null);
     setEdit((prev) => {
@@ -498,6 +520,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onRemove: removeChange,
         }
       : undefined;
+  // A hire can be offered when its lever is on in Settings, Levers and does something in this model.
+  const hireOffered = offeredLevers(hiddenLevers).some((l) => l.id === "D1") && !appliesReason("D1");
   const solutionOptions = planSolutions.map((s) => ({
     id: s.id,
     name: s.name,
@@ -641,10 +665,29 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
                   </p>
                 ) : withThisScenario === null ? (
                   <p className="text-sm text-muted-foreground">Working out what this scenario does…</p>
-                ) : withThisScenario.length ? (
+                ) : withThisScenario.length || fullNotes.length ? (
                   <ul className="list-disc pl-5 text-sm">
                     {withThisScenario.map((line) => (
                       <li key={line}>{line}</li>
+                    ))}
+                    {fullNotes.map((note) => (
+                      <li key={note.text} data-full-note>
+                        {note.text}
+                        {canEdit && note.hireRoleId && hireOffered ? (
+                          <>
+                            {" "}
+                            <button
+                              type="button"
+                              className={cn("underline", EDIT_ONLY)}
+                              data-edit-entry
+                              data-full-note-hire={note.hireRoleId}
+                              onClick={() => setChangeTarget({ mode: "add", preset: { lever: "D1", target: note.hireRoleId!, month: monthOptions[note.month]?.value } })}
+                            >
+                              Try a hire for this role
+                            </button>
+                          </>
+                        ) : null}
+                      </li>
                     ))}
                   </ul>
                 ) : (

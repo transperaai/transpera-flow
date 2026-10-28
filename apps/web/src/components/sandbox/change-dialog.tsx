@@ -21,7 +21,8 @@ import { greyedLevers, listWords } from "@/lib/sandbox/greyed";
 import { longDate, weekdayDate } from "@/lib/sandbox/lane";
 import { MAX_TRAFFIC_PERCENT, othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 
-export type ChangeTarget = { mode: "add" } | { mode: "edit"; change: SandboxChange };
+/** `preset`: an add that starts on a lever, target and month (the "Try a hire" link under "With this scenario"). */
+export type ChangeTarget = { mode: "add"; preset?: { lever: string; target: string; month?: string } } | { mode: "edit"; change: SandboxChange };
 
 export interface NamedOption {
   id: string;
@@ -73,8 +74,9 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const editing = target.mode === "edit" ? target.change : null;
   const editedLever = editing ? sandboxLever(editing.lever) : undefined;
   const levers = editedLever && !props.levers.some((l) => l.id === editedLever.id) ? [editedLever, ...props.levers] : props.levers;
+  const preset = target.mode === "add" && target.preset && levers.some((l) => l.id === target.preset!.lever) ? target.preset : null;
   const firstUsable = levers.find((l) => !appliesReason(l.id))?.id ?? levers[0]?.id ?? "A1";
-  const [leverId, setLeverId] = useState<string>(editing?.lever ?? firstUsable);
+  const [leverId, setLeverId] = useState<string>(editing?.lever ?? preset?.lever ?? firstUsable);
   const lever = sandboxLever(leverId) ?? levers[0]!;
   const offeredOps = (l: SandboxLever): PatchOp[] => {
     const ops = (Object.keys(l.range) as PatchOp[]).filter((o) => l.ops.includes(o));
@@ -88,10 +90,10 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const trafficEdit = editing && editing.lever === "A6" && editing.op === "set" && editing.target ? Math.round(weightToShare(editing.value, othersTotal(mix, editing.target)) * 1000) / 10 : null;
   const initialValue = editing && editing.lever === lever.id ? String(trafficEdit ?? Math.round(editing.value * scaleOf(editing.op) * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
   const [valueText, setValueText] = useState(initialValue);
-  const [targetId, setTargetId] = useState<string>(editing?.target ?? "");
+  const [targetId, setTargetId] = useState<string>(editing?.target ?? preset?.target ?? "");
   const [hireName, setHireName] = useState(editing?.params?.name ?? "");
-  const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : false);
-  const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : defaultMonth.slice(0, 7));
+  const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : preset?.month !== undefined);
+  const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : (preset?.month ?? defaultMonth).slice(0, 7));
   const [monday, setMonday] = useState(editing?.from && editing.from.length === 10 ? editing.from : defaultMonday);
   const [error, setError] = useState<string | null>(null);
 

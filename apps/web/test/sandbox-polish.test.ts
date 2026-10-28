@@ -6,6 +6,7 @@ import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
 import { describeChange } from "@/lib/sandbox/describe";
 import { patchOf } from "@transpera-flow/db";
+import { explainFull } from "@/lib/sandbox/explain";
 import { othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 import { todayValue, trafficToday } from "@/lib/sandbox/today";
 
@@ -110,5 +111,64 @@ describe("2. traffic by type as percentages", () => {
 
   it("offers only 'Set to' for a new change", () => {
     expect(Object.keys(lever("A6").range)).toEqual(["set"]);
+  });
+});
+
+describe("3. explaining a result that looks worse because someone is full", () => {
+  const stat = (mean: number) => ({ mean, p10: mean, p90: mean });
+  const busy = (...means: (number | null)[]) => means.map((m) => (m === null ? null : { ...stat(m), capacity: 40, work: 40 * m }));
+  const run = (o: { strat: (number | null)[]; dan?: (number | null)[]; lost: number[]; won: number[] }) => ({
+    roles: { strat: busy(...o.strat), sales: busy(0.5, 0.5, 0.5, 0.5) },
+    people: { dan: busy(...(o.dan ?? [0.5, 0.5, 0.5, 0.5])) },
+    clientsLost: o.lost.map(stat),
+    sales: { opportunities: [], won: o.won.map(stat), lost: [], conversion: [] },
+  });
+  const live = run({ strat: [0.7, 0.7, 0.7, 0.7], lost: [6, 6, 7, 7], won: [10, 10, 10, 10] });
+  const monthNames = ["January 2027", "February 2027", "March 2027", "April 2027"];
+  const roles = { strat: { name: "Strategist" }, sales: { name: "Sales" } };
+  const input = (scenario: ReturnType<typeof run>, extra: Partial<Parameters<typeof explainFull>[0]> = {}) => ({ live, scenario, monthNames, roles, people: {}, ...extra });
+
+  it("says who is full, from when, and what got worse (38 against 26)", () => {
+    const scenario = run({ strat: [0.8, 0.9, 1, 1], lost: [8, 9, 10, 11], won: [10, 10, 9, 8] });
+    const [note, ...rest] = explainFull(input(scenario));
+    expect(rest).toEqual([]);
+    expect(note!.text).toBe("The strategist role is full from March 2027, so new work waits and more clients leave (38 against 26 with no changes) and fewer deals are won (37 against 40 with no changes).");
+    expect(note!.hireRoleId).toBe("strat");
+    expect(note!.month).toBe(2);
+  });
+
+  it("says only what got worse", () => {
+    expect(explainFull(input(run({ strat: [1, 1, 1, 1], lost: [6, 6, 7, 7], won: [8, 8, 8, 8] })))[0]!.text).toBe(
+      "The strategist role is full from January 2027, so new work waits and fewer deals are won (32 against 40 with no changes).",
+    );
+    expect(explainFull(input(run({ strat: [1, 1, 1, 1], lost: [9, 9, 9, 9], won: [10, 10, 10, 10] })))[0]!.text).toMatch(/so new work waits and more clients leave \(36 against 26 with no changes\)\.$/);
+  });
+
+  it("says nothing when nobody is full, when it is full no sooner than before, or when nothing got worse", () => {
+    expect(explainFull(input(run({ strat: [0.8, 0.9, 0.95, 0.9], lost: [9, 9, 9, 9], won: [5, 5, 5, 5] })))).toEqual([]);
+    expect(explainFull(input(run({ strat: [1, 1, 1, 1], lost: [5, 5, 6, 6], won: [11, 11, 11, 11] })))).toEqual([]);
+    // Full in the live forecast too, from the same month.
+    const fullLive = { ...live, roles: { ...live.roles, strat: busy(1, 1, 1, 1) } };
+    expect(explainFull({ ...input(run({ strat: [1, 1, 1, 1], lost: [9, 9, 9, 9], won: [5, 5, 5, 5] })), live: fullLive })).toEqual([]);
+    // Full sooner than live: counts.
+    expect(explainFull({ ...input(run({ strat: [1, 1, 1, 1], lost: [9, 9, 9, 9], won: [5, 5, 5, 5] })), live: { ...live, roles: { ...live.roles, strat: busy(0.9, 1, 1, 1) } } })).toHaveLength(1);
+  });
+
+  it("names a person who is full when their role is not named, only if the reader may see them", () => {
+    const scenario = run({ strat: [0.8, 0.8, 0.8, 0.8], dan: [0.9, 1, 1, 1], lost: [9, 9, 9, 9], won: [10, 10, 10, 10] });
+    const dan = { dan: { name: "Dan Okafor", roles: ["sales"] } };
+    expect(explainFull(input(scenario, { people: dan }))[0]).toMatchObject({ text: expect.stringMatching(/^Dan Okafor is full from February 2027, so new work waits and more clients leave/) as unknown as string, hireRoleId: "sales", month: 1 });
+    expect(explainFull(input(scenario, { people: {} }))).toEqual([]);
+    // The person's role is named already: one sentence.
+    const both = run({ strat: [1, 1, 1, 1], dan: [1, 1, 1, 1], lost: [9, 9, 9, 9], won: [10, 10, 10, 10] });
+    expect(explainFull(input(both, { people: { dan: { name: "Dan Okafor", roles: ["strat"] } } }))).toHaveLength(1);
+  });
+
+  it("keeps acronyms in a role's name and limits the sentences", () => {
+    const r = { ...roles, ppc: { name: "PPC specialist" } };
+    const scenario = { ...run({ strat: [1, 1, 1, 1], lost: [9, 9, 9, 9], won: [10, 10, 10, 10] }), roles: { strat: busy(1, 1, 1, 1), sales: busy(1, 1, 1, 1), ppc: busy(1, 1, 1, 1) } };
+    const notes = explainFull({ ...input(scenario), roles: r, live: { ...live, roles: { strat: busy(0.5), sales: busy(0.5), ppc: busy(0.5) } } });
+    expect(notes).toHaveLength(2);
+    expect(explainFull({ ...input(scenario), roles: r, limit: 3, live: { ...live, roles: { strat: busy(0.5), sales: busy(0.5), ppc: busy(0.5) } } }).map((n) => n.text.split(" is full")[0])).toEqual(["The strategist role", "The sales role", "The PPC specialist role"]);
   });
 });
