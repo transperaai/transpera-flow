@@ -2,6 +2,7 @@
 
 import { changesFromPatch, wholeRunPatches, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { parsePatches } from "@transpera-flow/engine";
+import { sql } from "kysely";
 import { isId, parseScenarioInput } from "@/lib/scenarios/validate";
 import type { RemoveScenarioResult, SaveScenarioResult } from "@/lib/scenarios/store";
 import { jsonb, pgCode } from "@/app/action-db";
@@ -108,6 +109,8 @@ export async function updateScenarioPatch(id: unknown, patch: unknown): Promise<
       .set({ changes: jsonb(changesFromPatch(parsed.patches)) })
       .where("id", "=", id)
       .where("parent_id", "is", null)
+      // Only if the Sandbox hasn't changed it since it was read (a change from a month added there would otherwise be overwritten).
+      .where(sql<boolean>`changes = ${JSON.stringify(current.changes)}::jsonb`)
       .returning(SCENARIO_COLS)
       .execute();
   } catch (e) {
