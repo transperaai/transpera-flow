@@ -202,7 +202,7 @@ export const countFilled = (fp: FirstPrinciples): number => Object.values(stepsF
 export type FpFlagLevel = "bad" | "warn" | "ok" | "info";
 export interface FpFlag {
   level: FpFlagLevel;
-  /** A stable name for the rule, for tests and for the AI review later. */
+  /** A stable name for the rule, for tests. */
   code:
     | "job_incomplete"
     | "truth_no_source"

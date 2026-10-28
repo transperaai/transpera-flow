@@ -50,7 +50,7 @@ export function sharedOptions(): SharedOptions | null {
       databaseQueryData: false,
       stackFrameVariables: false,
     },
-    // No `sentry-trace` or `baggage` header on the server's own requests (Anthropic): tracing is off, and they would
+    // No `sentry-trace` or `baggage` header on the server's own requests: tracing is off, and they would
     // carry the release and the DSN's public key to other companies.
     tracePropagationTargets: [],
     // By default the SDK rewrites "Failed to fetch" to name the host, in the app's own error too (which the UI may show).

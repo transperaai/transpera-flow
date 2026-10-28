@@ -25,7 +25,7 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
     return (
       <Page title="Issues" eyebrow="Improve" description={DESCRIPTION}>
         <NotPublished
-          what="Issues are problems you confirm on a published process: its findings, or ones you log by hand."
+          what="Issues are problems you log on a published process."
           canEdit={canEdit}
           base={`/w/${slug}`}
           firstDraft={state.firstDraft}

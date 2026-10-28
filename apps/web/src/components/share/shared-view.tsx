@@ -139,7 +139,6 @@ function Screen({ snapshot, play }: { snapshot: ShareSnapshot; play?: PlayConfig
             parts={snapshot.parts}
             company={snapshot.company}
             issues={snapshot.issues}
-            sources={[]}
             mode="share"
             firstPrinciples={snapshot.firstPrinciples}
             solutions={snapshot.solutions}
@@ -147,7 +146,6 @@ function Screen({ snapshot, play }: { snapshot: ShareSnapshot; play?: PlayConfig
             hrefs={{}}
             processesHref=""
             issuesHref=""
-            findings={snapshot.findings}
           />
         </ShareLinkingScope>
       );
@@ -223,7 +221,6 @@ function ProcessScreen({ snapshot, play }: { snapshot: Extract<ShareSnapshot, { 
         historyHref=""
         solutions={{ data: snapshot.solutions, base: "", viewerId: null, memberNames: {} }}
         aboutInfo={{ trail: trailOf({ id: bundle.process.id, parentId: byId.get(bundle.process.id)?.parentId ?? null }, byId).map((t) => t.name), hasDraft: false, lastChange: null }}
-        findings={snapshot.findings}
         firstPrinciples={{ doc: snapshot.firstPrinciples, href: "", draftChanged: false, inheritedFrom: null }}
         inside={[]}
         play={play}

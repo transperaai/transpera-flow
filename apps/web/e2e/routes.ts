@@ -18,7 +18,6 @@ export const DEMO_ROUTES: { path: string; route: string }[] = [
   { route: "/demo/p/[processId]/history", path: `/demo/p/${PIPELINE}/history` },
   { route: "/demo/people", path: "/demo/people" },
   { route: "/demo/processes", path: "/demo/processes" },
-  { route: "/demo/settings/ai", path: "/demo/settings/ai" },
   { route: "/demo/settings/calibration", path: "/demo/settings/calibration" },
   { route: "/demo/settings/levers", path: "/demo/settings/levers" },
   { route: "/demo/solutions", path: "/demo/solutions" },

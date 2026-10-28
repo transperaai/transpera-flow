@@ -181,15 +181,6 @@ const TABLES: TableCase[] = [
     delete: ["delete from issues where workspace_id = $1 and title = 'x seed'", [ws]],
   },
   {
-    table: "findings",
-    insert: (tag) => [
-      "insert into findings (workspace_id, origin, status, rating, type, title) values ($1, 'manual', 'accepted', 'good', 'manual', $2)",
-      [ws, `x ${tag}`],
-    ],
-    update: ["update findings set title = title where workspace_id = $1 and title = 'x seed'", [ws]],
-    delete: null,
-  },
-  {
     table: "solutions",
     insert: (tag) => [
       "insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, $4, $5::jsonb)",
@@ -221,7 +212,6 @@ const TABLES: TableCase[] = [
     delete: null,
   },
   // Settings tables.
-  singleton("ai_settings", false),
   singleton("lever_settings"),
   singleton("analysis_rules"),
   singleton("demand_settings"),
@@ -423,10 +413,6 @@ beforeAll(async () => {
       [ws, who, JSON.stringify({ set: { fte: 0.8 } }), tag],
     );
   }
-  // Two analysis runs: one started by the editor, one by the member (ai_runs keeps the runner's name).
-  for (const [role, name] of [["editor", "Ed Itor"], ["member", "Mem Ber"]] as const) {
-    await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, $3)", [ws, callers[role]!.id, name]);
-  }
   // What each table holds now, and each linked person's share of it.
   for (const t of TABLES) {
     totals[t.table] = await rowsIn(db.client, t.table);
@@ -522,48 +508,6 @@ describe("reads", () => {
     }
   });
 
-  it("ai_runs: editors and owners read both runs, a member only their own, a viewer none", async () => {
-    const names = async (role: RoleName) =>
-      (await db.as(callers[role]!.claims, async (c) => (await c.query("select user_name from ai_runs where workspace_id = $1 order by user_name", [ws])).rows)).map((r) => r.user_name as string);
-    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) expect(await names(role), role).toEqual(["Ed Itor", "Mem Ber"]);
-    expect(await names("member")).toEqual(["Mem Ber"]);
-    expect(await names("viewer")).toEqual([]);
-    expect(await names("member, no person")).toEqual([]);
-    expect(await names("signed in, no membership")).toEqual([]);
-  });
-
-  it("person_labels (B1 2b) reads like every other column of findings and ai_analyses: every member of the workspace reads it, only owners and editors write it", async () => {
-    const labels = { "Team member A": person.member };
-    await db.client.query("update findings set person_labels = $2 where workspace_id = $1 and title = 'x seed'", [ws, JSON.stringify(labels)]);
-    // An analysis, seeded as a restore would (triggers off).
-    await db.client.query("begin");
-    await db.client.query("set local session_replication_role = replica");
-    const run = (await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, 'Seeder') returning id", [ws, callers.editor!.id])).rows[0].id;
-    await db.client.query(
-      "insert into ai_analyses (workspace_id, process_id, revision_id, status, trigger, input_hash, run_id, created_by, person_labels) values ($1, $2, $3, 'ok', 'manual', 'h', $4, $5, $6)",
-      [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, run, callers.editor!.id, JSON.stringify(labels)],
-    );
-    await db.client.query("commit");
-    for (const [role, { reads, writes }] of Object.entries(ROLES) as [RoleName, (typeof ROLES)[RoleName]][]) {
-      await db.as(callers[role]!.claims, async (c) => {
-        const found = await c.query("select person_labels from findings where workspace_id = $1 and title = 'x seed'", [ws]);
-        const analyses = await c.query("select person_labels from ai_analyses where workspace_id = $1", [ws]);
-        if (reads) {
-          expect(found.rows.map((r) => r.person_labels), role).toEqual([labels]);
-          expect(analyses.rows.map((r) => r.person_labels), role).toEqual([labels]);
-        } else {
-          expect(found.rows, role).toEqual([]);
-          expect(analyses.rows, role).toEqual([]);
-        }
-        const wrote = await refused(c, () => c.query("update findings set person_labels = '{}' where workspace_id = $1 and title = 'x seed'", [ws]));
-        if (writes) expect(wrote, role).toBeGreaterThan(0);
-        else expect(wrote, role).toMatch(/refused|no rows/);
-      });
-    }
-    await db.client.query("delete from ai_analyses where workspace_id = $1", [ws]);
-    await db.client.query("update findings set person_labels = '{}' where workspace_id = $1", [ws]);
-  });
-
   it("scopes the readers to their own workspace: nothing of Larkspur's shows in Northbeam's view", async () => {
     await db.as(callers.member!.claims, async (c) => {
       expect(Number((await c.query("select count(*) from workspaces")).rows[0].count)).toBe(1);
@@ -596,9 +540,9 @@ describe("writes", () => {
     });
   }
 
-  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions, clients and headlines are never deleted", async () => {
+  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, suggestions, clients and headlines are never deleted", async () => {
     await db.as(callers.owner!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });
@@ -1106,7 +1050,7 @@ describe("play links (B4): submit_play_proposal and play_proposal_contacts", () 
       expect(fns).toContain("submit_play_proposal");
       expect(before).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
-        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "reconcile_after_access_change", "report_download", "set_updated_at",
+        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "reconcile_after_access_change", "set_updated_at",
         "stamp_provenance", "use_api_token", "workspace_logo", "workspace_role",
       ]);
       // And none of the functions that act on visitors' ideas or build solutions.

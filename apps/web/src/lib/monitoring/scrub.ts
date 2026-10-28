@@ -14,19 +14,19 @@ const UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 const UUID_WHOLE = new RegExp(`^${UUID}$`);
 
 // The path segments an address may keep (deny by default): the app's own static route segments, Next's build files, and the
-// Better Auth's and Anthropic's API words the app calls. Any other segment becomes "[part]": a source's file name, a
+// Better Auth's and other APIs' words the app calls. Any other segment becomes "[part]": a source's file name, a
 // workspace's slug, a share token, anything new.
 // test/monitoring-scrub.test.ts checks every static route segment under src/app is here, and that no name is.
 export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app).
-  "access", "ai", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "churn-drivers", "demo", "edit",
+  "access", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "churn-drivers", "demo", "edit",
   "export", "first-principles", "forecast", "history", "issues", "levers", "library", "login", "logo", "market", "mcp", "monitoring-check",
-  "narrate", "overview", "p", "people", "privacy", "processes", "restore", "s", "settings", "share", "signout", "solutions",
+  "overview", "p", "people", "privacy", "processes", "restore", "s", "settings", "share", "signout", "solutions",
   "sources", "suggestions", "tokens", "w",
   // Next's build files.
   "_next", "chunks", "css", "media", "static",
-  // Better Auth (/api/auth/sign-in/social, /api/auth/get-session) and Anthropic (/v1/messages).
-  "get-session", "google", "messages", "microsoft", "sign-in", "sign-out", "social", "v1",
+  // Better Auth (/api/auth/sign-in/social, /api/auth/get-session), and `v1`, the version prefix of an API the app calls.
+  "get-session", "google", "microsoft", "sign-in", "sign-out", "social", "v1",
 ]);
 
 // A route pattern's placeholders (Next's `[slug]`, and the ones this file writes).

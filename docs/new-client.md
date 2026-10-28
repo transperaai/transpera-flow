@@ -61,7 +61,6 @@ Settings → Environment Variables. "Sensitive" variables cannot be read back af
 | `MICROSOFT_CLIENT_ID` | Entra app (client) ID. Only with Microsoft | Production, Preview | No | Austin, dashboard |
 | `MICROSOFT_CLIENT_SECRET` | Entra client secret value | Production, Preview | Yes | Austin, dashboard |
 | `MICROSOFT_TENANT_ID` | The client's Entra tenant. Required with Microsoft; never `common` | Production, Preview | No | Austin, dashboard |
-| `ANTHROPIC_API_KEY` | Narration (Claude), server side | Production, Preview | Yes | Austin, dashboard |
 | `NEXT_PUBLIC_SENTRY_DSN` | Error reporting; nothing is sent without it | Production, Preview | No | Austin, dashboard (optional) |
 | `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` | Source-map upload at build | Production, Preview | Token: Yes | Austin, dashboard (optional) |
 

@@ -38,7 +38,7 @@ export default function PrivacyPage() {
             picture. We use them only to identify you and show who made changes.
           </li>
           <li>
-            <strong>Workspace data:</strong> the processes, people, roles, clients, findings and scenarios you or we
+            <strong>Workspace data:</strong> the processes, people, roles, clients, issues and scenarios you or we
             enter while modelling your business. This can include staff names, working hours and cost rates.
           </li>
           <li>
@@ -74,11 +74,6 @@ export default function PrivacyPage() {
             is sent, and IP addresses are not stored. Hosted in the European Union (Germany).
           </li>
           <li>Google: sign-in. You sign in with your Google account; the app handles the sign-in itself and Google sends it your name, email address and profile picture.</li>
-          <li>
-            Anthropic: explains a saved run, only when someone asks. It receives the
-            figures being described and the names of the process, its steps, roles and scenarios; the names of your staff and
-            clients are replaced with labels before anything is sent. Anthropic doesn&rsquo;t use it to train models.
-          </li>
         </ul>
       </Section>
 

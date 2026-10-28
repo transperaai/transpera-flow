@@ -14,13 +14,11 @@ import { RATING_STYLE } from "@/lib/map/rating";
 
 /** What a screen knows about a step beyond its own numbers. */
 export interface StepExtras {
-  /** Titles of what the analysis found on the step and nobody has acknowledged yet. */
-  insights: string[];
   /** Titles of the confirmed (tracked) open issues on the step. */
   issues: string[];
 }
 
-export const NO_EXTRAS: StepExtras = { insights: [], issues: [] };
+export const NO_EXTRAS: StepExtras = { issues: [] };
 
 /** The titles of the sources cited for a step's numbers, in order of first use. */
 export function sourcesOf(step: Pick<StepRow, "provenance">, titles: Readonly<Record<string, string>> | undefined): string[] {
@@ -123,7 +121,6 @@ export function StepDetail({
           )}
         </dd>
       </dl>
-      <List title="Insights" items={extras.insights} empty="Nothing found on this step yet." />
       <List title="Confirmed issues" items={extras.issues} empty="No confirmed issues." />
       {linking ? (
         <LinkedSources

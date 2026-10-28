@@ -1,14 +1,10 @@
 import { notFound } from "next/navigation";
-import { isBlank } from "@transpera-flow/engine";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { createUpload, previewUpload } from "@/app/w/[slug]/processes/upload-actions";
 import { Overview } from "@/components/overview/overview";
 import { StartOverview } from "@/components/overview/start-overview";
 import { setupChecklist } from "@/lib/overview/setup";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
-import { aiConfigured, loadLatestAiViews, loadWorkspaceAiSettings, loadWorkspaceFindings } from "@/lib/ai/data";
-import { analysisBaseHash, isStale } from "@/lib/ai/model-hash";
-import { NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { canEditWorkspace } from "@/lib/access-data";
@@ -48,7 +44,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     );
   }
   const ws = live.workspace.id;
-  const [parts, company, issues, sources, canEdit, firstPrinciples, solutions, findings, aiSettings] = await Promise.all([
+  const [parts, company, issues, sources, canEdit, firstPrinciples, solutions] = await Promise.all([
     loadLiveParts(ws),
     loadLiveCompany(ws),
     loadWorkspaceIssues(ws),
@@ -56,14 +52,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     canEditWorkspace(ws),
     loadLiveFirstPrinciples(live.process.id, live.revision.id),
     loadWorkspaceSolutions(ws),
-    loadWorkspaceFindings(ws, { viewer: live.viewer, people: live.people }),
-    loadWorkspaceAiSettings(ws),
   ]);
-  // The latest analysis of the whole company (B17), stored against the company map; out of date once the company model changed.
-  const aiView = company ? ((await loadLatestAiViews([company.process.id], { viewer: live.viewer, people: live.people }))[company.process.id] ?? null) : null;
-  // Out of date once what it read changed (model, first principles, Anthropic model, sources); the page adds the facts.
-  const baseHash = aiView ? analysisBaseHash(live, firstPrinciples, "company", { readSources: aiSettings.read_sources, model: NARRATION_MODEL }) : null;
-  const stale = isStale(aiView, { base: baseHash, revisionId: company?.revision.id ?? null });
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
   const found = company && mapVersion ? await loadCompanyVersion(ws, mapVersion) : null;
@@ -82,7 +71,6 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       company={view.map}
       viewingMapVersion={view.viewingVersion}
       issues={issues}
-      sources={sources}
       mode={canEdit ? "live" : "readonly"}
       firstPrinciples={firstPrinciples}
       solutions={solutions}
@@ -94,8 +82,6 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}
       issuesHref={`${base}/issues`}
       forecastHref={`${base}/forecast`}
-      ai={{ view: aiView, stale, configured: aiConfigured(), hasFirstPrinciples: firstPrinciples !== null && !isBlank(firstPrinciples), versionNumber: null }}
-      findings={findings}
       share={canEdit ? <ShareButton slug={slug} kind="overview" targetId={null} what="The Overview" /> : undefined}
     />
     </SourceLinkingScope>

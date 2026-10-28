@@ -18,7 +18,6 @@
     "visual:docker": "bash visual/docker.sh"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.129.0",
     "@sentry/nextjs": "10.76.1",
     "@transpera-flow/db": "workspace:*",
     "@transpera-flow/engine": "workspace:*",

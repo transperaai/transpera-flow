@@ -1,10 +1,7 @@
 import { defaultCompanyPart, northbeamIssues, partOf, processesOf } from "@transpera-flow/db";
 import { Overview } from "@/components/overview/overview";
-import { demoAiView } from "@/lib/ai/demo";
-import { demoFindings } from "@/lib/findings/demo";
 import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
-import { DEMO_LIVE_VERSION } from "@/lib/history/demo";
-import { demoBundle, demoSources } from "@/lib/sources/demo";
+import { demoBundle } from "@/lib/sources/demo";
 
 /** The Overview of the Northbeam demo (issue #100): the landing page of `/demo`, also at `/demo/overview`. No database. */
 export function DemoOverview() {
@@ -18,7 +15,6 @@ export function DemoOverview() {
       parts={parts}
       company={defaultCompanyPart(live.workspace.id, parts)}
       issues={northbeamIssues()}
-      sources={demoSources()}
       mode="demo"
       hrefs={hrefs}
       processesHref="/demo/processes"
@@ -26,9 +22,6 @@ export function DemoOverview() {
       forecastHref="/demo/forecast"
       // The demo's months don't move, so its screenshots and tests don't either.
       startDate={DEMO_FORECAST_START}
-      // Written in advance: the demo never calls an AI.
-      ai={{ view: demoAiView(live.process.id), configured: true, hasFirstPrinciples: true, versionNumber: DEMO_LIVE_VERSION }}
-      findings={demoFindings()}
     />
   );
 }

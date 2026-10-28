@@ -14,7 +14,6 @@ export const maxDuration = 300;
 async function handle(request: Request): Promise<Response> {
   const env = authEnv();
   if (!env) return Response.json({ error: "The database is not configured" }, { status: 503 });
-  // AI analysis runs only when someone presses "Analyse" (B17), so a publish through MCP starts nothing.
   return handleMcpRequest(request, {
     pool: appPool(),
     claimsFor,

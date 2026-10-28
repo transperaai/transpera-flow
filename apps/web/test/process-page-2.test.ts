@@ -303,8 +303,8 @@ describe("the supporting data panels", () => {
 describe("the process page layout", () => {
   const page = read("components/process-page.tsx");
   const at = (s: string) => page.indexOf(s);
-  it("runs About, First principles, Map, Insights, Issues and solutions, Supporting data, then Sources", () => {
-    const order = ["<AboutProcess", 'id="first-principles"', 'id="map"', 'id="insights"', 'id="issues"', 'id="supporting-data"', "<ProcessSources"].map(at);
+  it("runs About, First principles, Map, Facts, Issues and solutions, Supporting data, then Sources", () => {
+    const order = ["<AboutProcess", 'id="first-principles"', 'id="map"', 'id="facts"', 'id="issues"', 'id="supporting-data"', "<ProcessSources"].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(page).toContain("Other improvements");

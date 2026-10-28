@@ -165,7 +165,7 @@ export function RestoreBackup({ slug, canManage = true, post }: { slug: string; 
                 </div>
               )}
               <p className="text-fg-2">
-                A backup never holds members, people&apos;s emails, API tokens, share links, AI settings, findings or calibration, so they are not restored. Dismissed items come
+                A backup never holds members, people&apos;s emails, API tokens, share links or calibration, so they are not restored. Dismissed items come
                 back dismissed and may show again after the first publish. This workspace keeps its own company map.
               </p>
               {check.warnings.length > 0 && (

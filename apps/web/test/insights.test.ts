@@ -4,7 +4,7 @@ import { mapFeed, registerEntries } from "@/lib/issues/register";
 import { MemoryIssueStore } from "@/lib/issues/store";
 import { parsePromoteInput } from "@/lib/issues/validate";
 import { acknowledgeInsight, dismissInsight } from "@/lib/insights/actions";
-import { buildInsights, filterByRating, ratingCountsOf, rest, sourceOf, type Detection } from "@/lib/insights/insights";
+import { buildInsights, filterByRating, ratingCountsOf, rest, type Detection } from "@/lib/insights/insights";
 import type { IssuesState } from "@/lib/issues/use-issues";
 
 // Insights v2 (issue #110, A45).
@@ -66,10 +66,6 @@ describe("insight rows", () => {
   it("has nothing more to say when the number is the whole evidence", () => {
     expect(rest("Only one sentence.")).toBe("");
     expect(rest("No full stop")).toBe("");
-  });
-
-  it("supports AI as a source", () => {
-    expect(sourceOf(det("a", "bad", 1, { origin: "ai" }))).toEqual({ kind: "ai", name: "AI" });
   });
 
   it("counts and filters by rating", () => {

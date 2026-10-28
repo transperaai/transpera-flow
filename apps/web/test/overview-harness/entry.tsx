@@ -1,5 +1,5 @@
-// The Overview's map tier and findings tier on a bare page, for ../overview-browser.test.ts (issue #173): the company map
-// with Play and the horizon picker, run for the horizon picked, and the findings by process. Bundled by esbuild and driven
+// The Overview's map tier and by-process tier on a bare page, for ../overview-browser.test.ts (issue #173): the company map
+// with Play and the horizon picker, run for the horizon picked, and the groups by process. Bundled by esbuild and driven
 // through `window.mountOverview`; nothing here ships. The simulation runs on the page (a few runs, so the test is quick);
 // the app runs the same model in a worker.
 
@@ -9,13 +9,11 @@ import { partOf, toEngineModel } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
-import { FindingsByProcess } from "@/components/overview/findings-by-process";
+import { ProcessGroups } from "@/components/overview/process-groups";
 import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
 import { horizonLabel, horizonWeeks } from "@/lib/horizon";
-import { buildInsights } from "@/lib/insights/insights";
-import { registerEntries } from "@/lib/issues/register";
-import { findingsByProcess } from "@/lib/overview/by-process";
+import { groupByProcess } from "@/lib/overview/by-process";
 import { companyMap } from "@/lib/overview/company-map";
 import { timeSplitOf, workingShare } from "@/lib/overview/health";
 import { rerate } from "@/lib/rules/edit";
@@ -33,7 +31,7 @@ const live = demoBundle();
 const parts = [partOf(live), ...(live.otherProcesses ?? [])];
 const base = toEngineModel(live);
 const baseResult = simulate(base, 3, 1);
-const groups = findingsByProcess({ parts, pipelineId: live.process.id, insights: buildInsights(registerEntries([], rerate(base, baseResult, {}, live.process.id))), issues: [], solutions: [] });
+const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: rerate(base, baseResult, {}, live.process.id), issues: [], solutions: [] });
 
 function Harness() {
   const [months, setMonths] = useState(3);
@@ -67,7 +65,7 @@ function Harness() {
           stepDetail={false}
         />
       </div>
-      <FindingsByProcess groups={groups} renderFindings={(g) => <ul data-rendered>{g.insights.map((i) => <li key={i.key}>{i.title}</li>)}</ul>} />
+      <ProcessGroups groups={groups} renderItems={(g) => <ul data-rendered>{g.facts.map((f) => <li key={f.key}>{f.title}</li>)}</ul>} />
     </div>
   );
 }

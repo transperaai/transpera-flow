@@ -9,12 +9,10 @@
 // Real ids stay in a snapshot: they seed the engine's random streams, so replacing them would move every number (Q5).
 
 import { compareRatingsDesc, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
-import { loadFindings } from "./findings";
 import { shareToggles } from "./share-reader";
 import { shareMoneyRegex } from "./money";
 import { loadFirstPrinciplesFor } from "./first-principles";
 import { loadLeverSettings } from "./lever-settings";
-import { nameFinding } from "./person-labels";
 import { EMAIL, MIN_TOKEN, clientNames, clientSpans, nameSpans, nameTokenIndex, normaliseView, pickSpans, replaceSpans, scriptParts, scriptSpans, spansOf, tokens, type Span, type View } from "./share-text";
 import {
   isUnpublished,
@@ -33,7 +31,6 @@ import {
 import { partitionSteps } from "./retired";
 import type {
   EdgeRow,
-  FindingRow,
   IssueRow,
   ProcessBundle,
   ProcessPart,
@@ -101,7 +98,6 @@ export interface OverviewShare extends ShareSnapshotBase {
   solutions: SolutionsData;
   /** For each solution copied from an earlier version than live: that version's steps and edges, for the before and after. */
   solutionBases: Record<string, Graph>;
-  findings: FindingRow[];
   firstPrinciples: FirstPrinciples | null;
 }
 
@@ -115,7 +111,6 @@ export interface ProcessShare extends ShareSnapshotBase {
   issues: IssueRow[];
   liveRevisions: Record<string, string>;
   solutions: SolutionsData;
-  findings: FindingRow[];
   firstPrinciples: FirstPrinciples | null;
 }
 
@@ -214,10 +209,13 @@ export const SHARE_FREE_TEXT_KEYS: readonly string[] = [
  * and `plan` (workspaces) are not here: the database checks neither, so a name typed into one is looked for like any free text
  * (a `color` that is a whole hex colour is no text: `SHARE_HEX_COLOR`, the database's rule too).
  */
+// Keys of the dropped AI and findings tables (28 Oct 2026) stay on the list: `private.share_snapshot_problem` carries the same list
+// and a test keeps the two equal, so a key is removed in a migration that re-creates that function, not here. A key no snapshot
+// shape carries must say "not in a snapshot".
 export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   agreed_by: "first principles `deletes[].agreed_by`: a person id, saved from a person picker (the MCP tool resolves a name to an id or drops it)",
-  ai_key: "findings.ai_key: a hash of the AI finding's title, or with People off the row id (nameFinding swaps it); never shown",
-  analysis_id: "findings.analysis_id: a uuid",
+  ai_key: "findings.ai_key: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
+  analysis_id: "findings.analysis_id: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   archived_at: "processes.archived_at: a timestamp",
   archived_by: "processes.archived_by: a user id",
   at: "provenance `at` (and a settled conflict's `resolved.at`): a timestamp; provenance is emptied in every snapshot anyway",
@@ -232,8 +230,8 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   created_by: "every table: a user id",
   currency: "workspaces.settings.currency: an ISO 4217 code such as GBP",
   dataset_id: "provenance `dataset_id`: a uuid; provenance is emptied in every snapshot anyway",
-  decided_at: "findings.decided_at: a timestamp",
-  decided_by: "findings.decided_by: a user id",
+  decided_at: "findings.decided_at: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
+  decided_by: "findings.decided_by: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   detected_key: "issues.detected_key: `<detector>:<kind>:<id>` or `finding:<origin>:<id>`, built by the engine or the database",
   dismissed_revision_id: "issues.dismissed_revision_id: a uuid",
   draft_revision_id: "processes.draft_revision_id: a uuid",
@@ -251,8 +249,8 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   insight_key: "source_links.insight_key: not in a snapshot; an engine key",
   issueId: "an issue link's top-level `issueId`: a uuid",
   issue_id: "issue_links, solution_issues: a uuid",
-  key: "findings `facts[].key`: an engine fact key `<detector>:<subject>:<id>`, or the step id a quote is cited on (quotes are dropped)",
-  kind: "steps, processes, findings `facts[]`, first principles statements, the snapshot itself and its process list: an enum",
+  key: "findings `facts[].key`: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
+  kind: "steps, processes, first principles statements, the snapshot itself and its process list: an enum",
   kpi: "first principles `measures[].kpi`: an enum key of the engine's measures",
   linked_parameter: "first principles `statements[].linked_parameter`: a parameter path the engine reads",
   live_revision_id: "processes.live_revision_id: a uuid",
@@ -260,7 +258,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   model: "ai_analyses.model: not in a snapshot; a model id",
   model_hash: "ai_analyses.model_hash: not in a snapshot; a hash",
   op: "scenarios `patch[].op` and solutions `lever_changes[].op`: the enum set, multiply or add",
-  origin: "findings.origin: the enum ai or manual",
+  origin: "findings.origin: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   outcome: "steps.outcome: the enum won, lost or done",
   owner_ids: "issues.owner_ids: person ids",
   owner_person_id: "issues.owner_person_id and first principles `requirements[].owner_person_id`: a person id",
@@ -272,10 +270,10 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   preset: "market_conditions.preset: an enum",
   pricing_model: "services.pricing_model: an enum",
   process_id: "every per-process table and issues `links[]`: a uuid",
-  proposed_via: "findings.proposed_via: the enum connector, or null",
+  proposed_via: "findings.proposed_via: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   published_at: "process_revisions.published_at: a timestamp",
   published_by: "process_revisions.published_by: a user id",
-  rating: "findings.rating: an enum (risk, bad, good, great)",
+  rating: "findings.rating: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   recorded_at: "sources.recorded_at: not in a snapshot; a date",
   replaced_by: "steps.replaced_by: a uuid",
   replaces_step_ids: "a solution idea's payload: not in a snapshot; step ids",
@@ -288,7 +286,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   revision_id: "steps, edges, first_principles: a uuid",
   rework_to_step_id: "steps.rework_to_step_id: a uuid",
   role_id: "issues, person_roles, client_assignments, steps: a uuid",
-  run_id: "findings.run_id: a uuid",
+  run_id: "findings.run_id: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   scenario_id: "issues.scenario_id and first principles `improvements[].scenario_id`: a uuid",
   service_id: "client_groups, client_services, service_servicing: a uuid",
   severity: "issues.severity: an enum",
@@ -296,18 +294,18 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   solutionId: "a solution link's top-level `solutionId`: a uuid",
   solution_id: "solution_issues.solution_id: a uuid",
   source_id: "provenance `evidence[].source_id`: a uuid; provenance is emptied in every snapshot anyway",
-  source_ids: "findings.source_ids: uuids",
+  source_ids: "issues.source_ids: uuids",
   stage: "first principles `improvements[].stage`: an enum",
   start_date: "people, person_leave, clients, client_services: a date",
   started_at: "ai_runs.started_at: not in a snapshot; a timestamp",
-  status: "process_revisions, issues, findings: an enum",
+  status: "process_revisions, issues: an enum",
   step_id: "steps-linked tables, issues `links[]`, first principles shapes: a uuid",
   suggestion_id: "provenance `suggestion_id`: a uuid; provenance is emptied in every snapshot anyway",
   timestamp: "provenance `evidence[].timestamp`: a time in a recording or a page; provenance is emptied in every snapshot anyway",
   to_step_id: "edges.to_step_id: a uuid",
-  type: "issues.type, findings.type: an enum",
+  type: "issues.type: an enum",
   updated_at: "every table: a timestamp",
-  updated_by: "findings.updated_by: a user id",
+  updated_by: "findings.updated_by: not in a snapshot (the findings table was dropped 28 Oct 2026; the database list still carries the key)",
   user_id: "ai_runs.user_id: not in a snapshot; a user id",
   user_verdict: "solution_issues.user_verdict: the enum pass or fail",
   verdict: "first principles `requirements[].verdict`: an enum",
@@ -402,9 +400,6 @@ function redactBundle(b: Obj, toggles: ShareToggles, secrets: ShareSecrets): Obj
 /** Keys whose value never goes into a snapshot, and what stands in for it. */
 /** A role-rate change (`roles.<id>.cost_rate`) inside a scenario's patch or a solution's lever changes: the visitor's browser would price work at the real rate. */
 const isRatePatch = (v: unknown): boolean => isObj(v) && typeof v.path === "string" && /cost_rate$/.test(v.path);
-/** A fact of a finding that quotes a source word for word. */
-const isQuoteFact = (v: unknown): boolean => isObj(v) && v.kind === "quote";
-
 const BLANKED: Record<string, unknown> = {
   provenance: {},
   cost_rate: null,
@@ -436,8 +431,6 @@ export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, s
       else if (Object.hasOwn(BLANKED, k)) out[k] = structuredClone(BLANKED[k]);
       // A step's own cost figure: a money field, hidden with Financials off.
       else if (k === "cost_override" && !toggles.financials) out[k] = null;
-      // Word-for-word quotes from sources never go out (they name people and clients as the speaker said them).
-      else if (k === "facts" && Array.isArray(v)) out[k] = v.filter((f) => !isQuoteFact(f)).map((x) => walk(x, k));
       // With Financials off, no role-rate change in a scenario's patch or a solution's lever changes.
       else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isRatePatch(p)).map((x) => walk(x, k));
       else out[k] = walk(v, k);
@@ -521,7 +514,6 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
       if ((k === "personCapacityFactors" || k === "person_capacity_factors") && Array.isArray(v) && v.length) found.add("speeds");
       // Evidence notes of any JSON type: only an empty object (or null) is clean.
       if (k === "provenance" && v !== null && v !== undefined && !(isObj(v) && Object.keys(v).length === 0)) found.add("evidence");
-      if (k === "facts" && Array.isArray(v) && v.some(isQuoteFact)) found.add("evidence");
       if (!toggles.financials) {
         if (k === "default_cost_rate" && v !== 0 && v != null) found.add("costs");
         if (k === "margin" && v !== 0 && v != null) found.add("costs");
@@ -579,15 +571,10 @@ async function firstPrinciplesOf(db: Db, processId: string, revisionId: string):
   }
 }
 
-/** The accepted findings, named for the snapshot's own viewer (labels with People off). */
-async function acceptedFindings(db: Db, ws: string, bundle: ProcessBundle): Promise<FindingRow[]> {
-  return (await loadFindings(db, ws, ["accepted"])).map((f) => nameFinding(f, { viewer: bundle.viewer, people: bundle.people }));
-}
-
 /**
  * Builds the snapshot of one page for a share link, as the caller of `db` (an owner, editor or agency admin: RLS and
  * `share_team_capacity` refuse anyone else). Mirrors each page's data and leaves out what the brief lists: sources, AI views,
- * proposed findings, AI ideas, issue history, author names, drafts and earlier versions. Throws `ShareBuildError` for a page
+ * AI ideas, issue history, author names, drafts and earlier versions. Throws `ShareBuildError` for a page
  * that can't be shared. The result is already redacted; call `shareSnapshotLeaks` on it before saving.
  */
 export async function loadShareData(
@@ -613,12 +600,11 @@ export async function loadShareData(
       loadSolutionsData(rdb, ws),
       firstPrinciplesOf(rdb, live.process.id, live.revision.id),
     ]);
-    const findings = await acceptedFindings(rdb, ws, live);
     const liveRevision = new Map(parts.map((p) => [p.process.id, p.revision.id]));
     const older = solutions.solutions.filter((s) => liveRevision.has(s.process_id) && liveRevision.get(s.process_id) !== s.base_revision_id);
     const graphs = await Promise.all(older.map((s) => loadRevisionGraph(rdb, s.base_revision_id).catch(() => null)));
     const solutionBases: Record<string, Graph> = Object.fromEntries(older.flatMap((s, i) => (graphs[i] ? [[s.id, graphs[i]!]] : [])));
-    raw = { ...base, kind: "overview", live, parts, company, issues, solutions, solutionBases, findings, firstPrinciples };
+    raw = { ...base, kind: "overview", live, parts, company, issues, solutions, solutionBases, firstPrinciples };
   } else if (target.kind === "process") {
     const found = await db
       .selectFrom("processes")
@@ -642,7 +628,6 @@ export async function loadShareData(
       firstPrinciplesOf(rdb, live.process.id, live.revision.id),
       loadLeverSettings(rdb, ws),
     ]);
-    const findings = await acceptedFindings(rdb, ws, live);
     raw = {
       ...base,
       kind: "process",
@@ -653,7 +638,6 @@ export async function loadShareData(
       issues,
       liveRevisions,
       solutions,
-      findings,
       firstPrinciples,
     };
   } else if (target.kind === "issue") {

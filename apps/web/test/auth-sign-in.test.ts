@@ -37,7 +37,7 @@ const passes = (res: Response) => res.headers.get("x-middleware-next") === "1";
 describe("proxy", () => {
   it("sends a visitor with no session cookie to /login", () => {
     stubAuthEnv(true);
-    for (const path of ["/", "/w/northbeam", "/w/northbeam/settings/access?x=1", "/api/narrate"]) {
+    for (const path of ["/", "/w/northbeam", "/w/northbeam/settings/access?x=1", "/w/northbeam/export/bundle"]) {
       const res = visit(path);
       expect(res.status, path).toBe(307);
       expect(location(res), path).toBe("https://app.example.com/login");

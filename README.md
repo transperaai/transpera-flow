@@ -129,16 +129,6 @@ checks the token and acts as its owner:
 
 To turn interview transcripts into a draft process, use the `/extract-process` skill: [`docs/extraction/README.md`](docs/extraction/README.md).
 
-## Narration (Claude)
-
-"Explain this run" can be drafted by Claude
-(`claude-opus-5-5`), server-side only, when `ANTHROPIC_API_KEY` is set in the
-server's environment (Vercel: Production and Preview). Without it the templated
-text prints and the UI says narration needs the key. Every number in a draft is
-checked against the run's figures; one redraft, then the template. Tests use
-fakes and never call the API. The public `/demo` uses a stand-in writer, never
-the API. See [`docs/adr/0011-narration.md`](docs/adr/0011-narration.md).
-
 ## Error reporting (Sentry)
 
 Errors from the browser, the Node server and the edge runtime go to Sentry when

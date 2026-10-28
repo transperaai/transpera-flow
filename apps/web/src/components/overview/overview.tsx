@@ -4,13 +4,12 @@
 //
 // 1. The company map, with Play and the horizon (1, 3, 6, 12 or 24 months). The cards and charts follow the horizon.
 // 2. The health strip: Process health, Open issues, Flow efficiency, Improvement delivered.
-// 3. Findings by process: the AI analysis of the company (Analyse, its read, the findings waiting for review, Add a
-//    finding), "Across the company", then one row per process, each with its accepted findings and the run's facts (B17).
+// 3. By process: "Across the company", then one row per process, each with the run's facts (D40) and its open issues.
 // 4. Trends: open issues, time split by process, team load by role, issues opened versus resolved, before and after per
 //    solution.
 //
 // Two simulations of the company model feed it, in workers, each once:
-// - one at the workspace's own length, with today's team, which the findings are rated from (so they don't move with the
+// - one at the workspace's own length, with today's team, which the facts are rated from (so they don't move with the
 //   horizon);
 // - one at the horizon picked, month by month, with planned hires, end dates and leave (the forecast's model, B6), which
 //   the map plays and the flow efficiency, time split, team load and the forecast's "too busy" alerts read.
@@ -22,7 +21,7 @@
 
 import { sortWithoutMoney } from "@transpera-flow/db";
 import { useShareFinancialsHidden } from "@/components/share/share-context";
-import { isReadOnly, type ScreenMode } from "@/lib/mode";
+import type { ScreenMode } from "@/lib/mode";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import type { FirstPrinciples } from "@transpera-flow/engine";
 import dynamic from "next/dynamic";
@@ -32,8 +31,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
-import { ModelError, toEngineModel, type FindingRow, type IssueRow, type ProcessBundle, type ProcessPart, type SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, ratingOfStored, resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
+import { ratingOfStored, resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { PageHeader } from "@/components/shell/page";
@@ -44,13 +43,12 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { horizonLabel, horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/lib/horizon";
 import { perceptionGapDetections } from "@/lib/issues/perception";
-import { issueFormOptions } from "@/lib/issues/draft";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { sortFindings } from "@/lib/overview/findings";
-import { COMPANY_GROUP, findingsByProcess, type FindingGroup } from "@/lib/overview/by-process";
-import { countByRating, openIssues, openedVersusResolved, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
+import { COMPANY_GROUP, groupByProcess, type ProcessGroup } from "@/lib/overview/by-process";
+import { openIssues, openedVersusResolved, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
 import { improvementDelivered, impactPairs, solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { useImpacts } from "@/lib/overview/use-impacts";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
@@ -61,20 +59,11 @@ import { useAbsenceTest } from "@/lib/sim/absence";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { NO_SOLUTIONS_DATA, type SolutionsData } from "@/lib/solutions/cards";
-import { analyseCompany } from "@/app/w/[slug]/ai-actions";
 import { recordHeadline } from "@/app/w/[slug]/headline-actions";
 import { headlineNumbers } from "@/lib/overview/headline";
-import { AnalysisPanel } from "@/components/findings/analysis-panel";
-import { FactsList } from "@/components/findings/facts-list";
-import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
-import type { AiPanelData } from "@/lib/ai/types";
-import { demoAnalyse } from "@/lib/findings/demo";
-import { useFindings } from "@/lib/findings/use-findings";
-import { pageDetections, proposedFindings } from "@/lib/findings/view";
-import { InsightsSection } from "@/components/insights";
-import { buildInsights } from "@/lib/insights/insights";
+import { FactsList } from "@/components/facts-list";
 import { useIssues } from "@/lib/issues/use-issues";
-import { FindingsByProcess } from "./findings-by-process";
+import { ProcessGroups } from "./process-groups";
 import { FlowEfficiencyCard, ImprovementCard, OpenIssuesCard, ProcessHealthCard } from "./health-cards";
 import { RatingPill } from "./rating-pill";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -99,8 +88,6 @@ export interface OverviewProps {
   company?: ProcessPart | null;
   /** Tracked issues: the confirmed ones colour and badge the map. */
   issues: IssueRow[];
-  /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
-  sources?: SourceRow[];
   mode: ScreenMode;
   /** The pipeline's live first principles, whose success measures rule 11 (goals met) rates. */
   firstPrinciples?: FirstPrinciples | null;
@@ -123,16 +110,10 @@ export interface OverviewProps {
   issuesHref: string;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
-  /** The latest AI analysis of the whole company (B17): its read, and whether it is out of date. */
-  ai?: AiPanelData;
-  /** The workspace's findings (B17): the accepted ones are listed by process, the proposed ones wait for review. */
-  findings?: FindingRow[];
   /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
   share?: ReactNode;
 }
 
-const NO_SOURCES: SourceRow[] = [];
-const NO_FINDINGS: FindingRow[] = [];
 const NO_BASES: SolutionBases = {};
 
 /** The company's engine model, the same object while it is unchanged. */
@@ -205,7 +186,6 @@ export function Overview({
   parts,
   company,
   issues,
-  sources = NO_SOURCES,
   mode,
   firstPrinciples,
   solutions,
@@ -219,8 +199,6 @@ export function Overview({
   viewingMapVersion = null,
   issuesHref,
   forecastHref,
-  ai,
-  findings: initialFindings = NO_FINDINGS,
   share,
 }: OverviewProps) {
   const router = useRouter();
@@ -283,33 +261,10 @@ export function Overview({
     () => (base && baseResult ? (hideMoney ? sortWithoutMoney : sortFindings)([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings]) : null),
     [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, forecastFindings, hideMoney],
   );
-  // Acknowledging an insight tracks it here, so it badges the map straight away.
-  // A dismissed insight stays away until its process's next published version: each part is at its live revision.
+  // Issues logged here badge the map straight away. Each part is at its live revision.
   const liveRevisions = useMemo(() => Object.fromEntries(parts.map((p) => [p.process.id, p.revision.id])), [parts]);
   const state = useIssues(live.workspace.id, issues, mode, liveRevisions);
-  // The findings (B17): the accepted ones are listed, with the issues acknowledged before; the proposed ones wait for review.
-  const findingsState = useFindings(live.workspace.id, initialFindings, mode);
-  const findings = useMemo(() => (facts ? pageDetections({ findings: findingsState.findings, issues: state.issues, facts }) : null), [facts, findingsState.findings, state.issues]);
-  const entries = useMemo(() => registerEntries(state.issues, findings ?? [], state.revisionOf), [state.issues, state.revisionOf, findings]);
-  const formOptions = useMemo(
-    () =>
-      issueFormOptions({
-        processes: parts.map((p) => ({ id: p.process.id, name: p.process.name })),
-        steps: parts.flatMap((p) => p.steps),
-        people: live.people.filter((p) => p.active),
-        sources,
-      }),
-    [parts, live.people, sources],
-  );
-  const findingOptions = useMemo<FindingDialogOptions>(
-    () => ({
-      processes: parts.map((p) => ({ id: p.process.id, name: p.process.name })),
-      company: true,
-      steps: parts.flatMap((p) => p.steps.filter((s) => s.kind !== "start" && s.kind !== "end").map((s) => ({ id: s.id, name: s.name, processId: p.process.id }))),
-    }),
-    [parts],
-  );
-  const insightList = useMemo(() => (findings ? buildInsights(entries) : null), [findings, entries]);
+  const entries = useMemo(() => registerEntries(state.issues, [], state.revisionOf), [state.issues, state.revisionOf]);
   const feed = useMemo(() => mapFeed(entries), [entries]);
   const openIssueBadges = useMemo(() => Object.fromEntries(Object.entries(feed.badges).map(([id, b]) => [id, b.count])), [feed]);
   const rating = useMemo(() => stepRatingOf(feed.ratings), [feed]);
@@ -319,8 +274,8 @@ export function Overview({
   const solutionsData = mode === "demo" ? inTab : (solutions ?? NO_SOLUTIONS_DATA);
 
   const groups = useMemo(
-    () => (insightList ? findingsByProcess({ parts, pipelineId: live.process.id, insights: insightList, facts: facts ?? [], issues: state.issues, solutions: solutionsData.solutions }) : null),
-    [insightList, parts, live.process.id, facts, state.issues, solutionsData.solutions],
+    () => (facts ? groupByProcess({ parts, pipelineId: live.process.id, facts, issues: state.issues, solutions: solutionsData.solutions }) : null),
+    [facts, parts, live.process.id, state.issues, solutionsData.solutions],
   );
 
   // The company map: open groups in place; opening one moves its neighbours.
@@ -328,16 +283,10 @@ export function Overview({
   const [lit, setLit] = useState<string[] | null>(null);
   const map = useMemo(() => companyMap(live, parts, expanded, company), [live, parts, expanded, company]);
   const stepNames = useMemo(() => new Map(map.bundle.steps.map((s) => [s.id, s.name])), [map]);
-  const processNames = useMemo(() => new Map(parts.map((p) => [p.process.id, p.process.name])), [parts]);
   const openProcess = (stepId: string) => {
     const process = map.processOfStep.get(stepId);
     const href = process ? hrefs[process] : undefined;
     if (href) router.push(href);
-  };
-  const processOfStep = (stepId: string) => map.processOfStep.get(stepId) ?? null;
-  const processNameOfStep = (stepId: string) => {
-    const process = processOfStep(stepId);
-    return process ? (processNames.get(process) ?? null) : null;
   };
 
   // The health strip.
@@ -395,40 +344,21 @@ export function Overview({
   // "Updated" is when the run came in: the numbers are simulated each time the page opens.
   const updated = useMemo(() => (baseResult ? new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null), [baseResult]);
 
-  const renderFindings = (g: FindingGroup) => {
-    const own = new Set(g.issues.map((i) => i.id));
-    const manual = g.issues.filter((i) => !i.detected_key && (i.status === "open" || i.status === "testing"));
+  const renderItems = (g: ProcessGroup) => {
+    const open = g.issues.filter((i) => i.status === "open" || i.status === "testing");
     return (
       <div className="flex flex-col gap-3">
-        {g.insights.length > 0 && (
-          <InsightsSection
-            state={{ ...state, issues: state.issues.filter((i) => own.has(i.id)) }}
-            detected={g.insights.map((i) => i.detection)}
-            processId={g.id === COMPANY_GROUP ? live.process.id : g.id}
-            scenarios={[]}
-            formOptions={formOptions}
-            currency={live.workspace.settings.currency}
-            stepName={(id) => stepNames.get(id) ?? null}
-            processName={processNameOfStep}
-            processOfStep={processOfStep}
-            onLight={setLit}
-            registerHref={issuesHref}
-            canEdit={!isReadOnly(mode)}
-            findings={findingsState}
-            findingOptions={findingOptions}
-          />
-        )}
         {g.facts.length > 0 && (
           <div className="flex flex-col gap-1.5" data-group-facts>
             <p className="text-xs font-medium text-muted-foreground">Facts from the run</p>
             <FactsList facts={g.facts} currency={live.workspace.settings.currency} stepName={(id) => stepNames.get(id) ?? null} onLight={setLit} initialLimit={4} />
           </div>
         )}
-        {manual.length > 0 && (
-          <div className="flex flex-col gap-1.5" data-manual-issues>
-            <p className="text-xs font-medium text-muted-foreground">Logged by hand</p>
+        {open.length > 0 && (
+          <div className="flex flex-col gap-1.5" data-open-issues>
+            <p className="text-xs font-medium text-muted-foreground">Open issues</p>
             <ul className="flex flex-col gap-1 text-sm">
-              {manual.map((i) => (
+              {open.map((i) => (
                 <li key={i.id} className="flex flex-wrap items-center gap-2">
                   <RatingPill rating={ratingOfStored(i.severity)} />
                   <Link href={`${issuesHref}/${i.number ?? i.id}`} className="hover:underline">
@@ -563,9 +493,9 @@ export function Overview({
         </section>
 
         <Section
-          id="findings"
-          title="Findings by process"
-          description={<FindingsLine groups={groups} />}
+          id="by-process"
+          title="By process"
+          description="What the latest run measured, and the open issues, process by process."
           action={
             <Link href={issuesHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
               See all issues
@@ -573,24 +503,7 @@ export function Overview({
             </Link>
           }
         >
-          {ai && (
-            <AnalysisPanel
-              mode={mode}
-              scope="company"
-              ai={ai}
-              findings={findingsState}
-              proposed={proposedFindings(findingsState.findings)}
-              options={findingOptions}
-              defaultProcessId={null}
-              stepName={(id) => stepNames.get(id) ?? null}
-              analyse={(force) => (mode === "demo" ? demoAnalyse(findingsState, live.process.id) : analyseCompany(live.workspace.id, force))}
-              facts={facts}
-              canRun={viewingMapVersion === null}
-              firstPrinciplesHref={hrefs[live.process.id] ? `${hrefs[live.process.id]}/first-principles` : undefined}
-              short
-            />
-          )}
-          <FindingsByProcess groups={groups} renderFindings={renderFindings} />
+          <ProcessGroups groups={groups} renderItems={renderItems} />
         </Section>
 
         <Section id="trends" title="Trends" description={`Simulated over the next ${span} where a chart looks ahead; the issues are as recorded.`} sectionRef={trendsRef}>
@@ -647,22 +560,5 @@ export function Overview({
         </Section>
       </div>
     </div>
-  );
-}
-
-/** Under the tier's title: the processes' findings counted by rating, worst first. */
-function FindingsLine({ groups }: { groups: FindingGroup[] | null }) {
-  if (!groups) return <Skeleton className="h-5 w-72 max-w-full" />;
-  const counts = countByRating(groups.flatMap((g) => g.insights.filter((i) => !i.issue || i.issue.status === "open" || i.issue.status === "testing").map((i) => i.rating))).filter((c) => c.rating !== "great");
-  return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground" data-findings-counts>
-      {counts.map((c, i) => (
-        <span key={c.rating} className="inline-flex items-center gap-1.5">
-          {i > 0 && <span aria-hidden>·</span>}
-          <i aria-hidden className="size-2 rounded-full" style={{ background: `var(--rate-${c.rating})` }} />
-          <b className="font-semibold text-foreground tabular-nums">{c.count}</b> {RATING_LABELS[c.rating].toLowerCase()}
-        </span>
-      ))}
-    </p>
   );
 }

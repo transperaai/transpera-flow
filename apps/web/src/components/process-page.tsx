@@ -1,8 +1,7 @@
 "use client";
 
 // The process page (issue #103, A38): a read-only review of one process on a single scrolling column, no tabs and no
-// drawers. About this process, First principles, Map, Findings (the AI analysis with its review list, and the accepted
-// findings), Facts from the run (the evidence, B17), Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
+// drawers. About this process, First principles, Map, Facts from the run (the evidence, B17), Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
 import { isReadOnly } from "@/lib/mode";
@@ -10,21 +9,14 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
-import type { FindingRow, IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
+import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
 import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
-import { AnalysisPanel } from "@/components/findings/analysis-panel";
-import { FactsList } from "@/components/findings/facts-list";
-import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
-import { analyseProcess } from "@/app/w/[slug]/ai-actions";
-import type { AiPanelData } from "@/lib/ai/types";
-import { demoAnalyse } from "@/lib/findings/demo";
-import { useFindings } from "@/lib/findings/use-findings";
-import { findingsIn, proposedFindings } from "@/lib/findings/view";
+import { FactsList } from "@/components/facts-list";
 import { FirstPrinciplesCard } from "@/components/first-principles/first-principles-card";
 import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
@@ -56,8 +48,6 @@ import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { PLAY_HELP, PlaySection, type PlayConfig } from "@/components/share/play-section";
 import { EDIT_ONLY } from "@/lib/phone";
-
-const NO_FINDINGS: FindingRow[] = [];
 
 const RATING_PILL: Record<Rating, string> = {
   risk: "border-crit bg-crit-soft",
@@ -93,22 +83,16 @@ export function ProcessPage({
   processPicker,
   notice,
   play,
-  ai,
-  findings: initialFindings = NO_FINDINGS,
   aboutInfo,
   ideaIssueIds = [],
   share,
 }: {
   /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
   share?: ReactNode;
-  /** The workspace's findings (B17): this process's accepted ones are listed, its proposed ones wait for review. */
-  findings?: FindingRow[];
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
   aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
-  /** Issues with an AI solution idea waiting, for the status track's "Solution idea". */
+  /** Issues with a solution idea waiting, for the status track's "Solution idea". */
   ideaIssueIds?: readonly string[];
-  /** The latest AI analysis of this process (B17): its read, when and by what it was written, and whether it is out of date. */
-  ai?: AiPanelData;
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
   bundle: ProcessBundle;
   /** The earlier version being shown (`?version=N`), or null for live. */
@@ -163,7 +147,7 @@ export function ProcessPage({
     return q ? `${pathname}?${q}` : pathname;
   })();
 
-  // First principles (A54): the card shows them, and their success measures feed rule 11 (goals met) in the insights.
+  // First principles (A54): the card shows them, and their success measures feed rule 11 (goals met) in the facts.
   const demoFirstPrinciples = useDemoFirstPrinciples(bundle.process.id);
   const fpDoc = mode === "demo" ? demoFirstPrinciples : (firstPrinciples?.doc ?? null);
   const successMeasures = useSuccessMeasures(bundle.process.id, mode === "demo", firstPrinciples?.doc);
@@ -182,22 +166,7 @@ export function ProcessPage({
     />
   );
 
-  // Findings (B17): this process's and those of the processes inside it. Written in the live version only.
   const old = viewingVersion !== null;
-  const findingsState = useFindings(bundle.workspace.id, initialFindings, mode === "demo" || mode === "share" ? mode : mode === "live" && !old ? "live" : "readonly");
-  const scope = useMemo(() => {
-    const steps = processSteps(bundle);
-    const ids = new Set(steps.map((s) => s.id));
-    const processIds = new Set([bundle.process.id, ...(bundle.otherProcesses ?? []).filter((o) => o.steps.some((s) => ids.has(s.id))).map((o) => o.process.id)]);
-    const processOfStep = new Map<string, string>([...bundle.steps.map((s) => [s.id, bundle.process.id] as const), ...(bundle.otherProcesses ?? []).flatMap((o) => o.steps.map((s) => [s.id, o.process.id] as const))]);
-    const options: FindingDialogOptions = {
-      processes: [bundle.process, ...(bundle.otherProcesses ?? []).map((o) => o.process)].filter((p) => processIds.has(p.id)).map((p) => ({ id: p.id, name: p.name })),
-      company: false,
-      steps: steps.filter((s) => s.kind !== "start" && s.kind !== "end").map((s) => ({ id: s.id, name: s.name, processId: processOfStep.get(s.id) ?? bundle.process.id })),
-    };
-    return { processIds, options };
-  }, [bundle]);
-  const ownFindings = useMemo(() => findingsIn(findingsState.findings, { processIds: scope.processIds }), [findingsState.findings, scope]);
   const stepNameOf = useMemo(() => new Map(processSteps(bundle).map((s) => [s.id, s.name])), [bundle]);
 
   const issuesUi = useProcessIssues({
@@ -214,9 +183,6 @@ export function ProcessPage({
     // A dismissed insight is measured against the live revision; an earlier version or a draft isn't one.
     liveRevisions: liveRevisions ?? (viewingVersion === null && liveVersion > 0 ? { [bundle.process.id]: bundle.revision.id } : undefined),
     successMeasures,
-    findings: ownFindings,
-    findingsState,
-    findingOptions: scope.options,
     // A badge on the map takes you down to the issues on that step.
     onShowIssues: () => document.getElementById("issues")?.scrollIntoView({ behavior: "smooth", block: "start" }),
   });
@@ -284,7 +250,7 @@ export function ProcessPage({
                 {RATING_LABELS[rating]}
                 <Help
                   label="Process rating"
-                  description="The worst rating among the confirmed open issues on this process and the processes inside it: Great, Good, Bad or Operational risk. Insights nobody has confirmed yet don't count."
+                  description="The worst rating among the confirmed open issues on this process and the processes inside it: Great, Good, Bad or Operational risk. Facts from the run don't count until someone logs an issue."
                   example="Bad, not urgent: one confirmed issue is rated Bad and none is worse."
                 />
               </span>
@@ -374,7 +340,7 @@ export function ProcessPage({
           hint="Coloured by rating. Red badges are confirmed issues. Click a step for detail."
           help={{
             label: "Map colours",
-            description: "A step is coloured by the worst rating among its confirmed open issues. Red badges count confirmed issues. Things the analysis only noticed show under Insights until someone confirms them.",
+            description: "A step is coloured by the worst rating among its confirmed open issues. Red badges count confirmed issues. Facts from the run show under Facts until someone logs an issue.",
             example: "A step with one Bad issue is orange with a badge of 1; a step with only an unconfirmed insight stays plain.",
           }}
         >
@@ -405,29 +371,7 @@ export function ProcessPage({
           </Section>
         )}
 
-        <Section id="insights" title="Findings" hint="What AI and your team concluded from the facts. Nothing reaches the map until someone acknowledges it as an issue.">
-          <div className="flex flex-col gap-3">
-            {ai && (
-              <AnalysisPanel
-                mode={mode}
-                scope="process"
-                ai={ai}
-                findings={findingsState}
-                proposed={proposedFindings(ownFindings)}
-                options={scope.options}
-                defaultProcessId={bundle.process.id}
-                stepName={(id) => stepNameOf.get(id) ?? null}
-                analyse={(force) => (mode === "demo" ? demoAnalyse(findingsState, bundle.process.id) : analyseProcess(bundle.process.id, force))}
-                facts={issuesUi.facts}
-                canRun={!old && !unpublished}
-                firstPrinciplesHref={firstPrinciples?.href}
-              />
-            )}
-            {issuesUi.insightsList}
-          </div>
-        </Section>
-
-        <Section id="facts" title="Facts from the run" hint="What the simulation measured. These are evidence, not findings: AI and your team draw findings from them.">
+        <Section id="facts" title="Facts from the run" hint="What the simulation measured. These are evidence, not issues: log an issue below when one matters.">
           <FactsList facts={issuesUi.facts} currency={bundle.workspace.settings.currency} stepName={(id) => stepNameOf.get(id) ?? null} />
         </Section>
 

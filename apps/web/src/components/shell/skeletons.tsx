@@ -126,7 +126,7 @@ export function TableSkeleton({ columns = 5, rows = 6 }: { columns?: number; row
   );
 }
 
-/** One card with four field rows: Restore, a share form, AI analysis, Branding, Levers, Calibration, Access. */
+/** One card with four field rows: Restore, a share form, Branding, Levers, Calibration, Access. */
 export function FormSkeleton() {
   return (
     <Loading name="form" label="Loading the form">
@@ -169,7 +169,7 @@ function SectionShape({ children }: { children: ReactNode }) {
   );
 }
 
-/** The Overview: its own header, the company map, a row of four health cards, then the findings. */
+/** The Overview: its own header, the company map, a row of four health cards, then the by-process list. */
 export function OverviewSkeleton() {
   return (
     <div>

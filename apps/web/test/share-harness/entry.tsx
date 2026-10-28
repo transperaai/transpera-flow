@@ -125,10 +125,10 @@ function snapshotOf(kind: ShareKind, toggles: ShareToggles, hidden: string[] = [
   let raw: ShareSnapshot;
   switch (kind) {
     case "overview":
-      raw = { ...base, kind, live, parts: [partOf(live), ...(live.otherProcesses ?? [])], company: null, issues, solutions, solutionBases: {}, findings: [], firstPrinciples: null };
+      raw = { ...base, kind, live, parts: [partOf(live), ...(live.otherProcesses ?? [])], company: null, issues, solutions, solutionBases: {}, firstPrinciples: null };
       break;
     case "process":
-      raw = { ...base, kind, bundle: live, hiddenLevers: hidden, processes, scenarios: [], issues, liveRevisions: { [live.process.id]: live.revision.id }, solutions, findings: [], firstPrinciples: null };
+      raw = { ...base, kind, bundle: live, hiddenLevers: hidden, processes, scenarios: [], issues, liveRevisions: { [live.process.id]: live.revision.id }, solutions, firstPrinciples: null };
       break;
     case "issue":
       raw = { ...base, kind, issueId: issue.id, bundle: live, issues, processes: processes.map(({ id, name }) => ({ id, name })), liveRevisions: { [live.process.id]: live.revision.id }, solutions };

@@ -8,8 +8,7 @@ import { describe, expect, it } from "vitest";
 // components as TypeScript and holds each (i) to a description and an example in plain words.
 
 const DIR = join(__dirname, "..", "src", "components", "first-principles");
-// The AI review panel (A46) is drawn by components/ai; it fills the slot the flow once held as a placeholder, so its (i)s are held to the same rules.
-const FILES = [...readdirSync(DIR).filter((f) => f.endsWith(".tsx")), "../ai/ai-review-panel.tsx"];
+const FILES = [...readdirSync(DIR).filter((f) => f.endsWith(".tsx"))];
 
 /** The components that draw a control and carry its (i) in a `help` prop. */
 const WITH_HELP = new Set(["TextAnswer", "PickAnswer", "NumberAnswer", "Choice", "AddButton", "Field"]);
@@ -112,8 +111,7 @@ describe("the first-principles flow's (i)s", () => {
       "Simulation number",
       "Target",
       "Met today",
-      "AI checks",
-      "AI review",
+      "Checks",
     ]) {
       expect(labels.has(label), label).toBe(true);
     }
