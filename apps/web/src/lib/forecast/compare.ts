@@ -85,7 +85,7 @@ export function comparePlans(
     profit,
     revenue: row("revenue", "Billed revenue", a.revenue.total, b.revenue.total),
     labour: labourA && labourB ? row("labour", "Labour and overtime", labourA, labourB) : null,
-    won: row("won", "Clients won", a.sales.won, b.sales.won),
+    won: row("won", "Wins", a.sales.won, b.sales.won),
     conversion: row("conversion", "Conversion", a.sales.conversion, b.sales.conversion),
     mrr: row("mrr", "Monthly recurring revenue", a.mrr, b.mrr),
     atRisk,

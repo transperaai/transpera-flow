@@ -527,6 +527,8 @@ describe("comparePlans", () => {
     expect(c.labour!.a.map((s) => s!.mean)).toEqual([0, 1, 2, 3].map(() => 100 + 5));
     expect(c.labour!.b.map((s) => s!.mean)).toEqual([0, 1, 2, 3].map(() => 180 + 9));
     expect(c.won.id).toBe("won");
+    // Every win, one-off jobs included: not "Clients won", which is a different series (wins that become clients).
+    expect(c.won.name).toBe("Wins");
     expect(c.won.diff).toEqual([4, 4, 4, 4]);
     expect(c.conversion.diff).toEqual([0.2, 0.2, 0.2, 0.2].map((v) => expect.closeTo(v, 9)));
     // Over the run: the sum of the months' means.
