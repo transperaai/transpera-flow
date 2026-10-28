@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, type ProcessBundle, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
+import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, sandboxLever, type ProcessBundle, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
 import { applyPatches, simulate, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
@@ -10,6 +10,7 @@ import { timelineData } from "@/lib/forecast/timeline";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { DEMO_SCENARIOS, DEMO_THEN_LEADS_ID, deleteDemoScenario, demoScenariosNow, resetDemoScenarios, saveDemoScenario } from "@/lib/sandbox/demo";
 import { descendantsOf, effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
+import { formatChangeValue } from "@/lib/sandbox/describe";
 import { laneMarkers } from "@/lib/sandbox/lane";
 import { applyPeopleChanges, hireNames, leaveEnd, MAX_SEGMENTS, scenarioModel, scenarioSegments, withSolution } from "@/lib/sandbox/run";
 import { SANDBOX_CHANGED_ELSEWHERE, sandboxFailure } from "@/lib/sandbox/save-errors";
@@ -836,5 +837,15 @@ describe("sandboxFailure", () => {
     expect(sandboxFailure({ code: "XX000", message: "boom" })).toBe("Couldn't save the scenario. Try again.");
     expect(sandboxFailure(null)).toBe("Couldn't save the scenario. Try again.");
     expect(SANDBOX_CHANGED_ELSEWHERE).toBe("Someone else changed or deleted this scenario. Reload to see it.");
+  });
+});
+
+describe("a change's value in words", () => {
+  // The change list is rendered on the server and again in the browser. Compact money ("£15.0K" in Node, "£15k" in Chrome) made React
+  // throw a hydration error (#418) on every scenario with an overheads or fee change, so money is written out in full.
+  it("writes money in full, never compacted", () => {
+    expect(formatChangeValue(sandboxLever("C2")!, "set", 15000, "GBP")).toBe("→ £15,000");
+    expect(formatChangeValue(sandboxLever("B2")!, "add", 1250000, "GBP")).toBe("+£1,250,000");
+    expect(formatChangeValue(sandboxLever("B2")!, "multiply", 1.1, "GBP")).toBe("×1.1");
   });
 });
