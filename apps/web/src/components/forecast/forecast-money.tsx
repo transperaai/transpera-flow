@@ -148,7 +148,7 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
           </table>
         </div>
         <p className="text-xs text-muted-foreground">
-          Hover a figure for its 10–90% range. Months add to the run&apos;s totals, except profit, where overtime is worked out month by month, so the months can differ a little from the total above.
+          Hover a figure for its 10–90% range. Months add to the run&apos;s totals, except overtime cost and profit: overtime is worked out month by month, so those months can add to a little more or less than the Labour and Profit tiles above.
         </p>
       </Card>
 

@@ -273,6 +273,8 @@ describe("sales and money (sandbox phase 2)", () => {
       expect(out).toContain("data-money-profit-chart");
       expect(out).toContain('data-money-row="profit"');
       expect(out).not.toContain("No overheads set");
+      // Monthly overtime (and so its cost and profit) needn't add up to the run's: the note names both.
+      expect(out).toContain("except overtime cost and profit");
     });
 
     it("a plan's tiles say they add up the months, and a figure with no spread says it is the same in every run", () => {
