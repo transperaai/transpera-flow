@@ -65,7 +65,7 @@
 -- tables cannot be rebuilt from this table (a scenario with changes from a month has no shape there). For a database that holds
 -- nothing worth keeping, the drop list is:
 --     drop table public.sandbox_scenarios;  drop function private.sandbox_library(), private.seed_sandbox_library(), private.sandbox_changes_shape(jsonb),
---       private.sandbox_scenarios_before_write(), private.is_sandbox_changes(jsonb), private.is_sandbox_change(jsonb),
+--       private.sandbox_scenarios_before_write(), private.sandbox_scenario_count(uuid), private.is_sandbox_changes(jsonb), private.is_sandbox_change(jsonb),
 --       private.is_monday(text), private.sandbox_levers();
 --     -- then re-create scenarios, forecast_plans, import_workspace_bundle from 20261002000000, 20261219000000 and 20270104000000.
 
@@ -211,6 +211,17 @@ create index sandbox_scenarios_parent_idx on public.sandbox_scenarios (parent_id
 create trigger set_updated_at before update on public.sandbox_scenarios
   for each row execute function public.set_updated_at();
 
+-- How many scenarios a workspace has, whoever asks. SECURITY DEFINER so the count does not run the read policy on every row it scans: a
+-- restore of 900 scenarios counted the rows already inserted for each new row, as the user, and the policy made that 20 seconds.
+create function private.sandbox_scenario_count(ws uuid) returns integer
+language sql stable security definer
+set search_path = ''
+as $$
+  select pg_catalog.count(*)::integer from public.sandbox_scenarios s where s.workspace_id = ws
+$$;
+revoke all on function private.sandbox_scenario_count(uuid) from public, anon;
+grant execute on function private.sandbox_scenario_count(uuid) to authenticated;
+
 -- The parent chain (at most 5 deep, no cycle), the workspace stays put, and the cap of 1000 scenarios a workspace for people (a restore at its limit of 900 lands beside the library's 4). No permission check here: the
 -- library trigger below is SECURITY DEFINER and inserts while a user creates a workspace (auth.uid() is set, the membership may
 -- not be yet). RLS decides who may write. The cap applies to people only: the migration and the library trigger run with no user.
@@ -226,7 +237,7 @@ begin
   if tg_op = 'INSERT' then
     new.created_by := coalesce(auth.uid(), new.created_by);
     if auth.uid() is not null
-      and (select pg_catalog.count(*) from public.sandbox_scenarios s where s.workspace_id = new.workspace_id) >= 1000 then
+      and private.sandbox_scenario_count(new.workspace_id) >= 1000 then
       raise exception 'sandbox_scenarios: a workspace keeps at most 1000 scenarios' using errcode = '23514';
     end if;
   elsif new.workspace_id is distinct from old.workspace_id then
