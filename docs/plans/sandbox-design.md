@@ -211,12 +211,13 @@ each scenario's band.
 1. **One scenario model.** The new table, migrating plans and scenarios; the sandbox page with saving, running and
    comparing; every lever that exists today as a patch or marker, whole-run or timed. Mechanisms: patches, people
    over time, splice.
-2. **Engine changes for Austin's levers:** churn drivers as chances (B4), client value ranges (A5), and the price-rise
+2. **Profit first (Austin, 28 Oct).** Overheads (C2), hourly billing (C3), labour and overtime cost, profit, and the new
+   monthly series (opportunities, won, lost, conversion, billed revenue, overtime).
+3. **Engine changes for Austin's levers:** churn drivers as chances (B4), client value ranges (A5), and the price-rise
    trade-off (B5). Then monthly channels for step work, step wait, rework, role cost and hours, and every remaining timed
    lever from A–E. ENGINE minor bump; goldens refreshed.
-3. **Finance and new outputs:** overheads, hourly billing, labour and overtime cost, profit, plus the new monthly
-   series (opportunities, won, lost, conversion, billed revenue, overtime), and time by purpose (G).
-4. **Extras:** goal seek, tornado chart, exports, the read-only share link, MCP `list_scenarios`/`run_scenario`.
+4. **Time by purpose (G),** with the default categories.
+5. **Extras:** goal seek, tornado chart, exports, the read-only share link, MCP `list_scenarios`/`run_scenario`.
 
 ## Decided (Austin, 28 Oct)
 
@@ -229,9 +230,8 @@ each scenario's band.
 - Compare three scenarios side by side.
 - Changes can be whole-run or timed; scenarios are saved, run and compared.
 
+- Profit early (phase 2). The default purpose categories are fine for now.
+
 ## Questions for Austin
 
-1. **Profit:** do you want profit early (overheads, staff cost and hourly billing, phase 3), before the timed levers of
-   phase 2?
-2. **Purpose categories (G):** is the default list right, or do you have your own categories?
-3. **Head of CS:** should they be able to save scenarios (Editor), or only run the ones you save (Viewer)?
+1. **Roles.** Austin wants three: himself, agency admin and viewer. The proposed mapping is still to be confirmed.

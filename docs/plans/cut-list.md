@@ -15,8 +15,8 @@ Started 27 Oct 2026 during QA of the Neon preview. These changes are built **aft
    - Remove the MCP company-model write tools (`set_company`, `upsert_service`, `upsert_person`, `upsert_client`,
      `set_demand`) and the suggestion tools (`list_suggestions`, review).
    - Remove the MCP finding proposals (B20) and the AI solution ideas.
-   - Remove the share-link "Try your own changes → send an idea" submission (visitor proposals). Whether the play
-     sandbox itself stays is still open (below).
+   - Remove the share-link "Try your own changes → send an idea" submission (visitor proposals). The play links
+     themselves stay (item 7).
 3. **Findings are removed; issues are logged directly (Austin: 2b).** An issue is created by a person, by hand.
    - Remove findings (`public.findings`), "findings by hand" and the accept/dismiss step.
    - Keep the engine's **facts** as read-only evidence on pages.
@@ -24,18 +24,25 @@ Started 27 Oct 2026 during QA of the Neon preview. These changes are built **aft
    personnel, lead volume and others: scenarios with whole-run and timed changes, saved, run and compared. Design draft:
    `docs/plans/sandbox-design.md`.
 
+## Decided 28 Oct (Austin)
+
+5. **MCP is fully read-only.** Claude or ChatGPT can query everything, but no MCP tool writes. That removes:
+   - process drafts (`import_process`, `add_step`, `update_step` and the rest of the building tools, plus the extraction
+     skill's write path);
+   - `add_source`;
+   - `log_issue` and the other issue writes;
+   - `set_active_workspace`, which only stores a preference on the token, stays.
+6. **Existing AI data is dropped completely:** AI analyses, AI findings (accepted or not), AI runs, narrations, the AI
+   settings, and their tables. Nothing is converted into issues.
+7. **Share-link play links stay.** Visitors try levers on a link and nothing is saved. Only "send an idea" goes
+   (item 2).
+8. **Sandbox:** profit comes early (phase 2), and the default purpose categories are fine for now. See
+   `docs/plans/sandbox-design.md`.
+
 ## Open questions
 
-- **MCP and processes.** Item 2 makes MCP read-only for *company data*. Should MCP still be able to:
-  - draft process changes (`import_process`, `add_step` and the like write drafts that someone publishes in the app)?
-  - add sources?
-  - log issues?
-- **Existing data.**
-  - Production has AI analyses and findings.
-  - Some findings are accepted but not yet issues: should they become issues, or be dropped?
-  - Should the AI text be kept, read-only, or deleted?
-- **Share-link play sandbox.** Without "send an idea", should play links stay (visitors try levers, nothing is saved),
-  or go?
+- **Roles.** Austin wants three roles: himself, agency admin and viewer. The exact mapping is to be confirmed (see the
+  design's "Who uses it").
 
 ## Forecast sandbox: brainstorm notes
 
