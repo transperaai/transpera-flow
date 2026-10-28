@@ -115,6 +115,9 @@ describe("services: constraints", () => {
     ["churn_monthly_base", "-0.01"],
     ["mix_share", "-0.5"],
     ["name", "'  '"],
+    // The fee range (sandbox phase 3): not below 0.
+    ["price_low", "-1"],
+    ["price_high", "-1"],
   ];
   it.each(bad)("rejects %s = %s", async (col, value) => {
     await expect(
@@ -186,6 +189,39 @@ describe("services: save_fields", () => {
     });
     await db.as(users.editor!.claims, async (c) => {
       await expect(saveFields(c, { id: seo }, { margin: 0.45 }, { margin: 2 })).rejects.toThrow(/check constraint/);
+    });
+  });
+});
+
+describe("services: the fee range (sandbox phase 3)", () => {
+  it("is null by default, on every seeded service", async () => {
+    const { rows } = await db.client.query("select price_low, price_high from services where workspace_id = $1", [ws]);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r).toEqual({ price_low: null, price_high: null });
+  });
+
+  it("saves one end at a time through save_fields, with the price on either side of it, and clears with null", async () => {
+    await db.as(users.editor!.claims, async (c) => {
+      const low = await saveFields(c, { id: seo }, { price_low: null }, { price_low: 3000 });
+      expect(low.status).toBe("saved");
+      // The other end is still unset, and the price is 3,500: no cross-column check, the engine uses the price as an end.
+      const high = await saveFields(c, { id: seo }, { price_high: null }, { price_high: 3200 });
+      expect(high.status).toBe("saved");
+      const row = (await c.query("select price, price_low, price_high, provenance from services where id = $1", [seo])).rows[0];
+      expect([Number(row.price), Number(row.price_low), Number(row.price_high)]).toEqual([3500, 3000, 3200]);
+      expect(row.provenance.price_low).toMatchObject({ source: "entered", by: users.editor!.id });
+      const cleared = await saveFields(c, { id: seo }, { price_low: 3000, price_high: 3200 }, { price_low: null, price_high: null });
+      expect(cleared.status).toBe("saved");
+    });
+  });
+
+  it("a viewer can't set a range, and a negative end is refused", async () => {
+    await db.as(users.viewer!.claims, async (c) => {
+      const r = await saveFields(c, { id: seo }, { price_low: null }, { price_low: 1 });
+      expect(r.status).toBe("not_found");
+    });
+    await db.as(users.editor!.claims, async (c) => {
+      await expect(saveFields(c, { id: seo }, { price_high: null }, { price_high: -5 })).rejects.toThrow(/check constraint/);
     });
   });
 });

@@ -174,7 +174,7 @@ async function loadPipeline(claims: Record<string, unknown>, wsId: string): Prom
       clientAssignments: await many("select * from client_assignments where workspace_id = $1", [wsId]),
       clientGroups: await many("select id, workspace_id, service_id, client_count, fee, churn_monthly, stay_months, starting_health, provenance from client_groups where workspace_id = $1 order by created_at, id", [wsId]),
       servicingLinks: await many("select * from service_servicing where workspace_id = $1", [wsId]),
-      churnDrivers: await many("select id, workspace_id, driver, name, description, example, weight, enabled, value, month, provenance from churn_drivers where workspace_id = $1 order by created_at, id", [wsId]),
+      churnDrivers: await many("select id, workspace_id, driver, name, description, example, weight, enabled, value, month, chance, effect, effect_months, provenance from churn_drivers where workspace_id = $1 order by created_at, id", [wsId]),
       marketConditions: await many("select id, workspace_id, name, preset, leads, conv, cycle, price, churn, hire, pay from market_conditions where workspace_id = $1 order by created_at, id", [wsId]),
       marketSchedule: await many("select id, workspace_id, from_month, to_month, condition_id from market_schedule where workspace_id = $1 order by from_month, id", [wsId]),
       otherProcesses,
@@ -789,5 +789,37 @@ describe("limits", () => {
     const ws = await newWorkspace();
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/2" }))).code).toBe("22023");
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/1" }))).code).toBe("22023");
+  });
+});
+
+describe("the columns phase 3 added (chance, effect, effect_months; price_low, price_high)", () => {
+  const driverRows = (ws: string) => q("select driver, chance, effect, effect_months from churn_drivers where workspace_id = $1 order by driver", [ws]);
+  const rangeOf = (ws: string) => q("select name, price_low, price_high from services where workspace_id = $1 order by name", [ws]);
+
+  it("a backup that carries them restores them, and one from before them restores null", async () => {
+    await q("insert into churn_drivers (workspace_id, driver, chance, effect, effect_months) values ($1, 'late', 12.5, 60, 3), ($1, 'load', null, 40, null)", [NORTHBEAM_WORKSPACE_ID]);
+    await q("update services set price_low = 3000, price_high = 6000 where workspace_id = $1 and name = 'PPC management'", [NORTHBEAM_WORKSPACE_ID]);
+    try {
+      const bundle = await exportOf(NORTHBEAM_WORKSPACE_ID);
+      const withIt = await restoreInto(bundle);
+      expect((await driverRows(withIt.ws)).map((r) => [r.driver, r.chance === null ? null : Number(r.chance), r.effect === null ? null : Number(r.effect), r.effect_months])).toEqual([
+        ["late", 12.5, 60, 3],
+        ["load", null, 40, null],
+      ]);
+      expect((await rangeOf(withIt.ws)).map((r) => [r.name, r.price_low === null ? null : Number(r.price_low), r.price_high === null ? null : Number(r.price_high)])).toEqual([
+        ["PPC management", 3000, 6000],
+        ["SEO retainer", null, null],
+      ]);
+      // A backup taken before these columns existed has none of the keys.
+      const old = structuredClone(bundle);
+      for (const d of old.company_model.churn_drivers ?? []) for (const k of ["chance", "effect", "effect_months"]) delete d[k];
+      for (const sv of old.company_model.services ?? []) for (const k of ["price_low", "price_high"]) delete sv[k];
+      const without = await restoreInto(old);
+      for (const r of await driverRows(without.ws)) expect([r.chance, r.effect, r.effect_months], String(r.driver)).toEqual([null, null, null]);
+      for (const r of await rangeOf(without.ws)) expect([r.price_low, r.price_high], String(r.name)).toEqual([null, null]);
+    } finally {
+      await q("delete from churn_drivers where workspace_id = $1", [NORTHBEAM_WORKSPACE_ID]);
+      await q("update services set price_low = null, price_high = null where workspace_id = $1", [NORTHBEAM_WORKSPACE_ID]);
+    }
   });
 });
