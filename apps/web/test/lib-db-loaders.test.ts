@@ -44,9 +44,10 @@ beforeAll(async () => {
   for (const role of ["owner", "editor", "viewer", "stranger"] as const) {
     const email = `${role}@loaders.example.com`;
     const u = await createUser(tdb, email);
-    // The sign-in list names them too (the members list only shows people it still lets in).
+    // The sign-in list names them too (the members list only shows people it still lets in). The rule makes their membership at
+    // once (20270105000000); the insert below states it anyway.
     if (role !== "stranger") await tdb.client.query("insert into deployment_access (kind, value, role) values ('email', $1, $2)", [email, role === "editor" || role === "owner" ? "agency_admin" : "viewer"]);
-    if (role !== "stranger") await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
+    if (role !== "stranger") await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role) on conflict (workspace_id, user_id) do update set role = excluded.role", [ws, u.id, role]);
     users[role] = { id: u.id, email, claims: { sub: u.id, role: "authenticated", email } };
   }
   processId = (await tdb.client.query("select id from processes where workspace_id = $1 and live_revision_id is not null and not is_company order by created_at, id limit 1", [ws])).rows[0].id as string;

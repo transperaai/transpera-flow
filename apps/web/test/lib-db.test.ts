@@ -49,9 +49,10 @@ beforeAll(async () => {
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     const email = `${role}@lib.example.com`;
     const u = await createUser(tdb, email);
-    // The sign-in list names them too (the members list only shows people it still lets in).
+    // The sign-in list names them too (the members list only shows people it still lets in). The rule makes their membership at
+    // once (20270105000000); the insert below states it anyway.
     await tdb.client.query("insert into deployment_access (kind, value, role) values ('email', $1, $2)", [email, role === "editor" || role === "owner" ? "agency_admin" : "viewer"]);
-    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role) on conflict (workspace_id, user_id) do update set role = excluded.role", [ws, u.id, role]);
     users[role] = { id: u.id, email, claims: { sub: u.id, role: "authenticated", email } };
   }
   const agency = await createUser(tdb, "agency@lib.example.com", { agency_admin: true });
@@ -107,8 +108,11 @@ describe("access-data", () => {
 
 describe("data.ts", () => {
   it("lists the workspaces the user can see, in name order", async () => {
+    // A Viewer on the sign-in list is a Viewer in every workspace (three roles, 20270103000000; the list applies at once, 20270105000000).
+    const every = (await tdb.client.query("select id, name, slug from workspaces order by name")).rows;
+    expect(every.map((w) => w.slug)).toContain("northbeam");
     actAs("viewer");
-    expect(await listWorkspaces()).toEqual([{ id: ws, name: expect.any(String), slug: "northbeam" }]);
+    expect(await listWorkspaces()).toEqual(every);
     actAs("stranger");
     expect(await listWorkspaces()).toEqual([]);
   });
