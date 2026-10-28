@@ -134,6 +134,7 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
           labelled.has(i) ? (
             <text key={mo.index} x={x(i)} y={HEIGHT - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
               {mo.short}
+              {mo.partial ? "*" : ""}
             </text>
           ) : null,
         )}
@@ -162,7 +163,8 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
           className="pointer-events-none absolute top-1 z-10 w-max max-w-64 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
           style={{ left: Math.min(Math.max(x(hover) - 80, 0), Math.max(0, width - 220)) }}
         >
-          <p className="font-medium">{shown.long}</p>
+          <p className="font-medium">{shown.label}</p>
+          {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
           {series.map((s, k) => (
             <p key={k} className="tabular-nums">
               {s.name}: {s.values[hover] ? format(s.values[hover]!.mean) : "—"}
@@ -186,7 +188,7 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
         <tbody>
           {months.map((mo, i) => (
             <tr key={mo.index}>
-              <th scope="row">{mo.long}</th>
+              <th scope="row">{mo.label}</th>
               {series.map((s, k) => (
                 <td key={k}>{s.values[i] ? `${format(s.values[i]!.mean)} (${format(s.values[i]!.p10)} to ${format(s.values[i]!.p90)})` : "not there"}</td>
               ))}

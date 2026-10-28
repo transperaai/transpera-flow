@@ -18,6 +18,15 @@ export interface TimelineMonth {
   long: string;
   /** "October": what the alerts say. */
   name: string;
+  /** The first and last working day it covers (ISO dates). The first month starts today, and the last may stop short of its month's end. */
+  from: string;
+  to: string;
+  /** The first month starts part-way through its calendar month, or the last ends before its calendar month does: a part month. */
+  partial: boolean;
+  /** What a part month covers, "from 28 Oct", "to 27 Oct" (or both); null for a whole month. */
+  span: string | null;
+  /** `long`, and for a part month what it covers: "November 2026 (from 28 Oct)". For tables and tooltips. */
+  label: string;
 }
 
 /** Working days a month has to have to stand alone: a first or last part of a month shorter than this joins its neighbour. */
@@ -52,14 +61,44 @@ export function calendarMonthStarts(startDate: string, horizonWeeks: number, hou
  * joined to its neighbour takes the neighbour's name).
  */
 export function timelineMonths(startDate: string, months: MonthlyResult["months"], hoursPerWeek: number): TimelineMonth[] {
+  const last = months.length - 1;
   return months.map((mo, index) => {
     const mid = dateAtHour(startDate, (mo.start + mo.end) / 2, hoursPerWeek);
     const month = mid.getUTCMonth();
     const year = mid.getUTCFullYear();
     const name = MONTH_NAMES[month]!;
     const yy = String(year % 100).padStart(2, "0");
-    return { index, name, long: `${name} ${year}`, short: index === 0 || month === 0 ? `${name.slice(0, 3)} ${yy}` : name.slice(0, 3) };
+    // The days it covers. Only the first month (it starts today) and the last (the horizon is weeks, not months) can be part of one.
+    const first = dateAtHour(startDate, mo.start, hoursPerWeek);
+    const final = dateAtHour(startDate, Math.max(mo.start, mo.end - 1e-6), hoursPerWeek);
+    const partStart = index === 0 && !isMonthEdge(first, -1);
+    const partEnd = index === last && !isMonthEdge(final, 1);
+    const span = partStart || partEnd ? [partStart ? `from ${dayMonth(first)}` : "", partEnd ? `to ${dayMonth(final)}` : ""].filter(Boolean).join(" ") : null;
+    const long = `${name} ${year}`;
+    return { index, name, long, short: index === 0 || month === 0 ? `${name.slice(0, 3)} ${yy}` : name.slice(0, 3), from: isoDay(first), to: isoDay(final), partial: span !== null, span, label: span ? `${long} (${span})` : long };
   });
+}
+
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const dayMonth = (d: Date) => `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]!.slice(0, 3)}`;
+
+/** Is `d` the first (`-1`) or last (`1`) working day of its calendar month? Its neighbouring working day, before or after, is in another month. */
+function isMonthEdge(d: Date, dir: -1 | 1): boolean {
+  const n = new Date(d);
+  do n.setUTCDate(n.getUTCDate() + dir);
+  while (n.getUTCDay() === 0 || n.getUTCDay() === 6);
+  return n.getUTCMonth() !== d.getUTCMonth();
+}
+
+/**
+ * A line saying which columns are part months, for under a chart or table: "Part months: the first column covers from 5 Oct, the last
+ * to 27 Oct; the others are whole months." Null when every month is whole.
+ */
+export function partMonthNote(months: readonly Pick<TimelineMonth, "partial" | "span" | "index">[]): string | null {
+  const parts = months.filter((m) => m.partial);
+  if (!parts.length) return null;
+  const which = (m: (typeof parts)[number]) => (m.index === 0 ? "the first column" : "the last column");
+  return `Part month${parts.length > 1 ? "s" : ""}: ${parts.map((m) => `${which(m)} covers ${m.span}`).join(", ")}; the others are whole months.`;
 }
 
 /** Something planned that changes someone's hours: a hire starting, someone leaving for good, or leave. */

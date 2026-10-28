@@ -3,8 +3,10 @@
 
 import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever, type SolutionRow } from "@transpera-flow/db";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
-import { personName, viewerOf } from "@/lib/viewer";
+import { A_TEAM_MEMBER } from "@transpera-flow/db";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
+import { othersTotal, percentText, weightToShare } from "./traffic";
 
 /** What names a change's target: the bundle's roles, people (as the viewer's bundle names them), steps, services; and the solutions. */
 export interface DescribeContext {
@@ -12,6 +14,8 @@ export interface DescribeContext {
   solutions: readonly Pick<SolutionRow, "id" | "name">[];
   /** Every change in the list the hire numbering runs over. */
   changes: readonly SandboxChange[];
+  /** The live model's traffic weight per service type (id to `mix_share`): what a "Traffic by type" percentage is a share of. Else the bundle's active services. */
+  mix?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -40,6 +44,15 @@ export function formatChangeValue(lever: SandboxLever, op: SandboxChange["op"], 
   return `→ ${text}`;
 }
 
+const LABELLED = /^Team member \d+$/;
+
+/** A person as the reader may see them: their name, or "Team member N" (the one the database labelled them with, else their place in the team). */
+export function viewerPersonName(b: Pick<DescribeContext["bundle"], "people" | "viewer">, person: { id: string; name: string }): string {
+  const [named] = namedForViewer(viewerOf(b), [person]);
+  if (named!.name !== A_TEAM_MEMBER) return named!.name;
+  return LABELLED.test(person.name) ? person.name : `Team member ${b.people.findIndex((p) => p.id === person.id) + 1}`;
+}
+
 /** The name of what a change points at. */
 export function targetName(c: SandboxChange, ctx: DescribeContext): string | null {
   const lever = sandboxLever(c.lever);
@@ -52,9 +65,11 @@ export function targetName(c: SandboxChange, ctx: DescribeContext): string | nul
     case "role":
       return b.roles.find((r) => r.id === t)?.name ?? "a role that is gone";
     case "person": {
-      // Other people are named as the viewer may see them ("A team member" for a Viewer who cannot).
+      // Other people are named as the viewer may see them. A Viewer's bundle already has "Team member N" for the others (the alerts and
+      // the chart read the same names), so that is what they get here too; a bundle that was not labelled by the database is labelled by
+      // position, never "A team member", so one person reads the same everywhere.
       const found = b.people.find((p) => p.id === t);
-      return found ? personName(viewerOf(b), t, found.name) : "someone who is gone";
+      return found ? viewerPersonName(b, found) : "someone who is gone";
     }
     case "step":
       return [...b.steps, ...(b.otherProcesses ?? []).flatMap((p) => p.steps)].find((s) => s.id === t)?.name ?? "a step that is gone";
@@ -93,6 +108,14 @@ export function describeChange(c: SandboxChange, ctx: DescribeContext): string {
       return `${name} on leave for ${formatNumber(c.value, 0)} week${c.value === 1 ? "" : "s"}`;
     case "E6":
       return `${name} goes live`;
+    case "A6": {
+      // A traffic change is a share of all opportunities: the stored weight against the other types' weights today.
+      if (c.op === "set" && c.target) {
+        const mix = ctx.mix ?? Object.fromEntries(ctx.bundle.services.filter((s) => s.active).map((s) => [s.id, Number(s.mix_share)]));
+        return `${lever.label}, ${name} → ${percentText(weightToShare(c.value, othersTotal(mix, c.target)))}`;
+      }
+      return `${lever.label}, ${name} ${formatChangeValue(lever, c.op, c.value, currency)}`;
+    }
     default: {
       const subject = name && lever.target !== "none" ? `${lever.label}, ${name}` : lever.label;
       return `${subject} ${formatChangeValue(lever, c.op, c.value, currency)}`;

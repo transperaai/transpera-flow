@@ -38,6 +38,8 @@ interface Options {
   broken?: boolean;
   many?: boolean;
   dan?: boolean;
+  nobody?: boolean;
+  leah?: boolean;
 }
 
 async function mount(width: number, o: Options = {}): Promise<{ page: Page; errors: string[] }> {
@@ -86,8 +88,11 @@ const waitRuns = (page: Page, n: number) =>
   );
 const pick = (page: Page, label: string) => page.locator("[data-scenario-select]").selectOption({ label });
 const marker = (page: Page, kind?: string) => page.locator(kind ? `[data-plan-marker][data-kind="${kind}"]` : "[data-plan-marker]").first();
-const valuetext = async (m: Locator) => (await m.getAttribute("aria-valuetext")) ?? "";
+/** What a marker says: a slider's value text; a marker that can't be moved is an image, whose label says it all. */
+const valuetext = async (m: Locator) => (await m.getAttribute("aria-valuetext")) ?? (await m.getAttribute("aria-label")) ?? "";
 const button = (page: Page, name: string) => page.locator("[data-scenario-bar]").getByRole("button", { name, exact: true });
+/** Waits for the status line to say just "Saved" (a rerun after a save says "Updating the forecast…" first). */
+const isSaved = (page: Page) => page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent === "Saved", undefined, { timeout: 90_000 });
 const status = (page: Page) => page.locator("[data-scenario-status-line]").innerText();
 const options = (page: Page) => page.locator("[data-scenario-select] option").allInnerTexts();
 const changes = (page: Page) => page.locator("[data-change-list] [data-change]");
@@ -183,6 +188,85 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await changes(page).first().innerText()).toContain("Opportunities coming in ×1.25");
         expect(await changes(page).nth(1).innerText()).toContain("from Apr 2027");
         expect(await status(page)).toContain("Unsaved changes");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("shows what each lever stands at today before it is changed", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await openAdd(page);
+        const today = () => page.locator("[data-change-dialog] [data-today]").innerText();
+        const lever = (label: string) => page.getByLabel("What to change", { exact: true }).selectOption({ label });
+        expect(await today()).toBe("Today: about 30 opportunities a month");
+        await lever("Fees");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "SEO retainer" });
+        expect(await today()).toBe("Today: £3,500 a month");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "PPC management" });
+        expect(await today()).toBe("Today: £4,200 a month");
+        await lever("Headcount by role");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "PPC specialist" });
+        expect(await today()).toBe("Today: 3 people");
+        await lever("Rework");
+        expect(await today()).toMatch(/^Today: done again [\d.]+% of the time$/);
+        // A lever with nothing to say shows no line.
+        await lever("Solution goes live");
+        expect(await page.locator("[data-change-dialog] [data-today]").count()).toBe(0);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("sets traffic by type as a percentage of all traffic, shows the split, and reads it back as a percentage", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Traffic by type" });
+        expect(await page.locator("[data-change-dialog] [data-today]").innerText()).toBe("Today: SEO retainer 55%, PPC management 45%");
+        // Only "Set to" is offered, in percent.
+        expect(await page.getByLabel("How", { exact: true }).count()).toBe(0);
+        expect(await page.locator("[data-change-dialog]").innerText()).toContain("% of all opportunities");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "SEO retainer" });
+        await page.getByLabel("Share (%)", { exact: true }).fill("100");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-change-dialog-error]").innerText()).toContain("0% to 99%");
+        await page.getByLabel("Share (%)", { exact: true }).fill("40");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-change-list] [data-change]");
+        expect(await changes(page).first().innerText()).toContain("Traffic by type, SEO retainer → 40%");
+        // Stored as the weight that makes it 40% beside the other type's 0.45.
+        await waitRuns(page, 1);
+        await changes(page).first().getByRole("button", { name: /^Edit/ }).click();
+        await page.waitForSelector("[data-change-dialog]");
+        expect(await page.getByLabel("Share (%)", { exact: true }).inputValue()).toBe("40");
+        await page.keyboard.press("Escape");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("explains a result that looks worse because a role is full, and links to a hire for that role", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await waitRuns(page, 1);
+        // Nothing is full and nothing is worse with no changes: no note.
+        expect(await page.locator("[data-full-note]").count()).toBe(0);
+        // Twice the opportunities fills the strategist, and fewer deals are won than with no changes.
+        await openAdd(page);
+        await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
+        await page.getByLabel("Value", { exact: true }).fill("2");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await waitRuns(page, 2);
+        const note = page.locator("[data-with-this-scenario] [data-full-note]").first();
+        await note.waitFor();
+        expect(await note.innerText()).toMatch(/^The strategist role is full from \w+ 20\d\d, so new work waits and fewer deals are won \(\d+ against \d+ with no changes\)\./);
+        // The link opens a hire for that role, from the month it is full.
+        await note.getByRole("button", { name: "Try a hire for this role" }).click();
+        await page.waitForSelector("[data-change-dialog]");
+        expect(await page.getByLabel("What to change", { exact: true }).inputValue()).toBe("D1");
+        expect(await page.getByLabel("On", { exact: true }).evaluate((el: HTMLSelectElement) => el.selectedOptions[0]!.textContent)).toBe("Strategist");
+        expect(await page.getByLabel("From a month").isChecked()).toBe(true);
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector('[data-plan-marker][data-kind="hire"]');
+        expect(await changes(page).last().innerText()).toContain("New Strategist starts");
         expect(errors).toEqual([]);
         await page.close();
       });
@@ -304,12 +388,26 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         const { page, errors } = await mount(width);
         await pick(page, "Hire in January");
         await waitRuns(page, 1);
-        // Rename and save.
+        // Rename: saved at once, not left as an unsaved change.
         await button(page, "Rename").click();
         await page.getByLabel("Scenario name").fill("Hire early");
         await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-sandbox-name-dialog]", { state: "detached" });
+        expect(await status(page)).toBe("Saved");
+        expect(await options(page)).toEqual(["No changes", "Hire early", "Hire in March", "Hire in March, then more leads"]);
+        expect(await page.locator("[data-scenario-select] option:checked").innerText()).toBe("Hire early");
+        expect(await page.locator("[data-scenario-save]").count()).toBe(0);
+        // A rename to a name that is taken is refused in the dialog.
+        await button(page, "Rename").click();
+        await page.getByLabel("Scenario name").fill("hire in march");
+        await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-sandbox-name-dialog]").innerText()).toContain("A scenario with that name already exists.");
+        await page.getByRole("button", { name: "Cancel" }).click();
+        // An edit that is not saved yet: switching away asks first.
+        await waitRuns(page, 1);
+        await marker(page, "hire").focus();
+        await page.keyboard.press("ArrowRight");
         expect(await status(page)).toContain("Unsaved changes");
-        // Switching away asks first.
         await pick(page, "No changes");
         expect(await page.getByRole("dialog").innerText()).toContain("Discard your changes to “Hire early”?");
         await page.getByRole("button", { name: "Keep editing" }).click();
@@ -358,6 +456,8 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
         await page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent?.includes("Other scenarios build on this one"));
         expect(await status(page)).toContain("“Early, then more”");
+        // The refusal says how to free it, and the way is there.
+        expect(await status(page)).toContain("choose “Change what it builds on”");
         expect(await options(page)).toContain("Hire early (copy)");
         // Delete the child first, then the parent.
         await pick(page, "Early, then more");
@@ -370,6 +470,90 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
         await page.waitForFunction(() => !document.querySelector("[data-scenario-select]")?.textContent?.includes("Hire early (copy)"));
         expect(await options(page)).toEqual(["No changes", "Hire early", "Hire in March", "Hire in March, then more leads"]);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("changes or clears what a saved scenario builds on, and says why a choice is refused", async () => {
+        const { page, errors } = await mount(width);
+        const dialog = page.locator("[data-sandbox-parent-dialog]");
+        const parentPick = () => dialog.getByLabel("Builds on", { exact: true });
+        const submit = () => dialog.locator("button[type=submit]").click();
+        // A loop is refused, with the reason, and nothing changes: "Hire in March" can't build on the one that builds on it.
+        await pick(page, "Hire in March");
+        await button(page, "Change what it builds on").click();
+        expect(await parentPick().evaluate((el: HTMLSelectElement) => el.selectedOptions[0]!.textContent)).toBe("Nothing (start from the live model)");
+        await parentPick().selectOption({ label: "Hire in March, then more leads" });
+        await submit();
+        expect(await dialog.locator("[data-parent-dialog-error]").innerText()).toBe("A scenario can't build on itself or on one that builds on it.");
+        await page.getByRole("button", { name: "Cancel" }).click();
+        expect(await page.locator("[data-scenario-parent]").count()).toBe(0);
+        // Another parent for the one that builds on it: saved at once.
+        await pick(page, "Hire in March, then more leads");
+        await waitRuns(page, 1);
+        expect(await page.locator("[data-scenario-parent]").innerText()).toContain("Builds on “Hire in March”");
+        expect(await changes(page).count()).toBe(3);
+        await button(page, "Change what it builds on").click();
+        expect(await parentPick().evaluate((el: HTMLSelectElement) => el.selectedOptions[0]!.textContent)).toBe("Hire in March");
+        await parentPick().selectOption({ label: "Hire in January" });
+        await submit();
+        await page.waitForSelector("[data-sandbox-parent-dialog]", { state: "detached" });
+        await isSaved(page);
+        expect(await page.locator("[data-scenario-parent]").innerText()).toContain("Builds on “Hire in January”");
+        expect(await changes(page).count()).toBe(2);
+        // Clear it.
+        await button(page, "Change what it builds on").click();
+        await parentPick().selectOption({ label: "Nothing (start from the live model)" });
+        await submit();
+        await page.waitForSelector("[data-sandbox-parent-dialog]", { state: "detached" });
+        expect(await page.locator("[data-scenario-parent]").count()).toBe(0);
+        expect(await changes(page).count()).toBe(1);
+        await isSaved(page);
+        // And "Hire in March" is free to be deleted once nothing builds on it.
+        await pick(page, "Hire in March");
+        await button(page, "Delete").click();
+        await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
+        await page.waitForFunction(() => ![...document.querySelectorAll("[data-scenario-select] option")].some((o) => o.textContent === "Hire in March"));
+        expect(await options(page)).toEqual(["No changes", "Hire in January", "Hire in March, then more leads"]);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("labels the first and last columns as part months in the chart's table and tooltip, the money table and compare", async () => {
+        const { page, errors } = await mount(width);
+        // The run starts on Monday 5 October: the first column covers from then; the last stops where the 12 months do.
+        const first = "October 2026 (from 5 Oct)";
+        expect(await page.locator("[data-forecast-timeline] table tbody tr th").first().innerText()).toBe(first);
+        expect(await page.locator("[data-forecast-timeline] table tbody tr th").nth(1).innerText()).toBe("November 2026");
+        expect(await page.locator("[data-forecast-timeline] table tbody tr th").last().innerText()).toMatch(/^\w+ 2027 \(to \d+ \w+\)$/);
+        expect(await page.locator("[data-forecast-timeline-section] [data-part-month-note]").innerText()).toMatch(/^\* Part months: the first column covers from 5 Oct, the last column covers to \d+ \w+; the others are whole months\.$/);
+        // The tooltip over the first column says so.
+        await page.locator(`${TIMELINE} > svg`).scrollIntoViewIfNeeded();
+        const svg = (await page.locator(`${TIMELINE} > svg`).boundingBox())!;
+        const compact = svg.width < 520;
+        await page.mouse.move(svg.x + (compact ? 2 : 176) + 8, svg.y + 40);
+        await page.waitForFunction(() => document.querySelector("[data-forecast-timeline] [role=presentation]")?.textContent?.includes("Part month"));
+        expect(await page.locator("[data-forecast-timeline] [role=presentation]").innerText()).toContain(first);
+        await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
+        const heads = await page.locator("[data-money-table] thead th").allInnerTexts();
+        expect(heads[1]).toBe("Oct 26*");
+        expect(heads[2]).toBe("Nov");
+        expect(await page.locator("[data-money-table] thead th").nth(1).getAttribute("title")).toBe("Part month: covers from 5 Oct");
+        expect(await page.locator("[data-money-table-card] [data-part-month-note]").innerText()).toContain("Part months: the first column covers from 5 Oct");
+        // And in compare.
+        await pick(page, "Hire in January");
+        await page.locator("[data-scenario-compare]").click();
+        await compareDone(page, errors);
+        expect(await page.locator("[data-sandbox-compare] [data-part-month-note]").first().innerText()).toContain("Part months: the first column covers from 5 Oct");
+        const row = page.locator('[data-compare-table="revenue"] tbody tr th').first();
+        await page.locator('[data-compare-row="revenue"] summary').click();
+        expect(await row.innerText()).toBe(first);
+        const chart = page.locator('[data-compare-row="revenue"] [data-compare-chart]');
+        await chart.locator("svg").scrollIntoViewIfNeeded();
+        const box = (await chart.locator("svg").boundingBox())!;
+        await page.mouse.move(box.x + (box.width < 480 ? 50 : 60) + 2, box.y + 60);
+        await page.waitForFunction(() => document.querySelector('[data-compare-row="revenue"] [role=presentation]')?.textContent?.includes("Part month"));
+        expect(await chart.locator("[role=presentation]").innerText()).toContain(first);
         expect(errors).toEqual([]);
         await page.close();
       });
@@ -630,6 +814,69 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await page.locator("[data-compare-tile]").count()).toBe(5);
         expect(errors).toEqual([]);
         await page.close();
+      });
+
+      it("reads one person the same everywhere for a Viewer: 'Team member N', as the rest of the page names them", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true, leah: true, url: "/demo/sandbox?scenario=50000000-0000-4000-8000-0000000000a1" });
+        await waitRuns(page, 1);
+        // Leah Brooks is the fourth person on the team.
+        expect(await changes(page).first().innerText()).toContain("Team member 4 on leave for 2 weeks");
+        expect(await valuetext(marker(page, "leave"))).toContain("Team member 4 on leave for 2 weeks");
+        const body = await page.locator("body").innerText();
+        expect(body).not.toContain("A team member");
+        expect(body).not.toContain("Leah Brooks");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("hides the costs from a Viewer's compare, and the title says so: 'Wins', not 'Wins and costs'", async () => {
+        const viewer = await mount(width, { mode: "readonly", dan: true, url: `/demo/sandbox?compare=${JANUARY}` });
+        await compareDone(viewer.page, viewer.errors);
+        expect(await viewer.page.locator('[data-compare-section="Wins"]').count()).toBe(1);
+        expect(await viewer.page.locator('[data-compare-section="Wins and costs"]').count()).toBe(0);
+        expect((await viewer.page.locator('[data-compare-section="Wins"] h2').innerText()).split("\n")[0]).toBe("Wins");
+        const admin = await mount(width, { url: `/demo/sandbox?compare=${JANUARY}` });
+        await compareDone(admin.page, admin.errors);
+        expect((await admin.page.locator('[data-compare-section="Wins and costs"] h2').innerText()).split("\n")[0]).toBe("Wins and costs");
+        expect(viewer.errors.concat(admin.errors)).toEqual([]);
+        await Promise.all([viewer.page.close(), admin.page.close()]);
+      });
+
+      it("tells a Viewer with no row of their own why 'By person' is empty", async () => {
+        const viewer = await mount(width, { mode: "readonly", nobody: true });
+        await viewer.page.getByRole("button", { name: "By person", exact: true }).click();
+        expect(await viewer.page.locator("[data-people-empty]").innerText()).toContain("By person shows only your own row, and there is none to show");
+        await viewer.page.getByRole("button", { name: "By role", exact: true }).click();
+        expect(await viewer.page.locator("[data-people-empty]").count()).toBe(0);
+        // Someone who sees everyone has rows, and no note.
+        const admin = await mount(width);
+        await admin.page.getByRole("button", { name: "By person", exact: true }).click();
+        expect(await admin.page.locator("[data-people-empty]").count()).toBe(0);
+        expect(await admin.page.locator("[data-row]").count()).toBeGreaterThan(0);
+        expect(viewer.errors.concat(admin.errors)).toEqual([]);
+        await Promise.all([viewer.page.close(), admin.page.close()]);
+      });
+
+      it("draws a Viewer's markers as plain images: no grab cursor, not announced as sliders; an editor's are sliders", async () => {
+        const viewer = await mount(width, { mode: "readonly", url: `/demo/sandbox?scenario=${MARCH}` });
+        await waitRuns(viewer.page, 1);
+        const markers = viewer.page.locator("[data-plan-marker]");
+        expect(await markers.count()).toBeGreaterThan(0);
+        for (const m of await markers.all()) {
+          expect(await m.getAttribute("role")).toBe("img");
+          for (const attr of ["aria-valuenow", "aria-valuemin", "aria-valuemax", "aria-valuetext", "tabindex"]) expect(await m.getAttribute(attr), attr).toBeNull();
+          expect(await m.evaluate((el) => getComputedStyle(el).cursor)).toBe("default");
+          expect(await m.getAttribute("aria-label")).toMatch(/^(Hire|Solution|Change|Leave): .+, \d+ \w+ 20\d\d/);
+        }
+        const editor = await mount(width, { url: `/demo/sandbox?scenario=${MARCH}` });
+        await waitRuns(editor.page, 1);
+        for (const m of await editor.page.locator("[data-plan-marker]").all()) {
+          // The scenario's own markers can be moved (a phone is read only, and a parent's can't be moved; none here).
+          expect(await m.getAttribute("role")).toBe(width < 640 ? "img" : "slider");
+          expect(await m.evaluate((el) => getComputedStyle(el).cursor)).toBe(width < 640 ? "default" : "grab");
+        }
+        expect(viewer.errors.concat(editor.errors)).toEqual([]);
+        await Promise.all([viewer.page.close(), editor.page.close()]);
       });
 
       it("shows a Viewer who sees only their own row other people as 'A team member'", async () => {

@@ -8,7 +8,7 @@ export function sandboxFailure(error: { code?: string | null; message?: string |
   if (error?.code === "23514") {
     if (/at most 1000 scenarios/.test(message)) return "This workspace already has 1,000 scenarios. Delete one first.";
     if (/at most 5 deep/.test(message)) return "Scenarios can build on each other up to 5 deep.";
-    if (/build on itself/.test(message)) return "A scenario can't build on itself.";
+    if (/build on itself/.test(message)) return "A scenario can't build on itself or on one that builds on it.";
     if (/different months|sandbox_scenarios_changes/.test(message)) return "That scenario has changes the database doesn't allow: up to 200 changes, from up to 6 different months, with up to 4 solutions.";
     return "Some of those changes aren't allowed.";
   }
@@ -16,6 +16,15 @@ export function sandboxFailure(error: { code?: string | null; message?: string |
   if (error?.code === "42501") return "You don't have permission to change scenarios here.";
   return "Couldn't save the scenario. Try again.";
 }
+
+/** Why a scenario others build on can't be deleted: names them and says how to free it (the Sandbox's "Change what it builds on"). */
+export function buildOnRefusal(names: readonly string[]): string {
+  const list = names.map((n) => `“${n}”`).join(", ");
+  return `Other scenarios build on this one${list ? `: ${list}` : ""}. In the Sandbox, open ${names.length === 1 ? "it" : "each one"} and choose “${CHANGE_PARENT}” (or delete ${names.length === 1 ? "it" : "them"}), then try again.`;
+}
+
+/** The scenario bar's button that changes or clears what a scenario builds on. */
+export const CHANGE_PARENT = "Change what it builds on";
 
 export const SANDBOX_SIGNED_OUT = "Your session has ended. Sign in again.";
 export const SANDBOX_CHANGED_ELSEWHERE = "Someone else changed or deleted this scenario. Reload to see it.";
