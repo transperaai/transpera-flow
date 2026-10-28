@@ -3,6 +3,7 @@ export * from "./issue-status";
 export * from "./source-links";
 export * from "./calibration";
 export * from "./sandbox-levers";
+export { planSandboxScenarios, type SandboxImport } from "./sandbox-import";
 export type { Json } from "./db-types";
 export type { DB } from "./db-types";
 export type { Claims } from "./client";

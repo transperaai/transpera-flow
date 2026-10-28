@@ -102,7 +102,9 @@ as $$
     ('X2', 'id',         '@busiest',  array['set', 'multiply', 'add'], true,  'no',     null,     false),
     ('X3', 'id',         null,        array['set', 'multiply', 'add'], true,  'no',     null,     false)
 $$;
-revoke all on function private.sandbox_levers() from public, anon, authenticated;
+-- The check constraint calls it as the person writing, so authenticated may execute it (as the other check helpers below).
+revoke all on function private.sandbox_levers() from public, anon;
+grant execute on function private.sandbox_levers() to authenticated;
 
 -- A real date that is a Monday, without raising (a check constraint must not throw).
 create function private.is_monday(d text) returns boolean
@@ -411,7 +413,9 @@ begin
   return null;
 end;
 $$;
-revoke all on function private.sandbox_library(), private.seed_sandbox_library() from public, anon, authenticated;
+revoke all on function private.sandbox_library() from public, anon;
+grant execute on function private.sandbox_library() to authenticated;
+revoke all on function private.seed_sandbox_library() from public, anon, authenticated;
 create trigger seed_sandbox_library after insert on public.workspaces
   for each row execute function private.seed_sandbox_library();
 
@@ -423,7 +427,9 @@ set search_path = ''
 as $$
   select coalesce(pg_catalog.jsonb_agg(t.e - 'id' order by t.o), '[]'::jsonb) from pg_catalog.jsonb_array_elements(changes) with ordinality t(e, o)
 $$;
-revoke all on function private.sandbox_changes_shape(jsonb) from public, anon, authenticated;
+-- import_workspace_bundle is SECURITY INVOKER: the caller runs these two (as they ran private.scenario_library()).
+revoke all on function private.sandbox_changes_shape(jsonb) from public, anon;
+grant execute on function private.sandbox_changes_shape(jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- The restore
@@ -725,6 +731,9 @@ begin
         where not ((r.value ->> 'id')::uuid = any (skip_ids));
         n := jsonb_array_length(rows);
         if n > 0 then
+          -- A row without a horizon gets the default (populating a record from json would give it null, not the column default).
+          select jsonb_agg(case when r.value ? 'horizon_months' and jsonb_typeof(r.value -> 'horizon_months') = 'number' then r.value else r.value || '{"horizon_months": 12}'::jsonb end order by r.ord)
+            into rows from jsonb_array_elements(rows) with ordinality r(value, ord);
           select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> sec) c
           where exists (select 1 from jsonb_array_elements(rows) r where r.value ? c);
           -- One statement, so the parent foreign key (no action) is checked at its end, whatever the order of the rows.

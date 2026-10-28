@@ -146,8 +146,9 @@ export function planSandboxScenarios(current: readonly unknown[], legacy: readon
       name: r.name,
       description: typeof r.description === "string" ? r.description.slice(0, MAX_SCENARIO_DESCRIPTION) : null,
       changes: r.changes,
+      // Always given: the restore inserts the columns any row carries, and a row without one would get null, not the default.
+      horizon_months: typeof r.horizon_months === "number" && Number.isInteger(r.horizon_months) && r.horizon_months >= 1 && r.horizon_months <= 24 ? r.horizon_months : 12,
     };
-    if (typeof r.horizon_months === "number" && Number.isInteger(r.horizon_months) && r.horizon_months >= 1 && r.horizon_months <= 24) row.horizon_months = r.horizon_months;
     if (isFirstOfMonth(r.start_date)) row.start_date = r.start_date;
     if (r.created_at !== undefined) row.created_at = r.created_at;
     return row;
