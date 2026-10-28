@@ -197,7 +197,7 @@ describe("API tokens", () => {
       ];
       for (const [sql, params] of writes) {
         await useClaims(c, token());
-        await fails(c, sql, params, "42501", /only by review/);
+        await fails(c, sql, params, "42501", /can't be changed through an API token/);
         await useClaims(c, users.editor!.claims);
         await c.query("savepoint ok");
         expect((await c.query(sql, params)).rowCount, sql).toBe(1);

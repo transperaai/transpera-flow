@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checklistItems, openConflict, type EdgeRow, type StepRow } from "@transpera-flow/db";
+import { checklistItems, openConflict, type EdgeRow, type StepRow } from "../../src";
 import {
   buildNewStep,
   buildStepChange,
@@ -12,9 +12,9 @@ import {
   revisionDiff,
   type Graph,
   type ImportInput,
-} from "../src/building";
-import { ToolError } from "../src/result";
-import { PROCESS_TEMPLATES } from "../src/templates";
+} from "../../src/process-import/building";
+import { ImportError } from "../../src/process-import/errors";
+import { PROCESS_TEMPLATES } from "../../src/process-import/templates";
 
 const owner = { revision_id: "r0000000-0000-4000-8000-000000000001", workspace_id: "w1", process_id: "p1" };
 const stamp = { at: "2026-10-13T09:00:00.000Z", by: "u0000000-0000-4000-8000-000000000001" };
@@ -70,14 +70,14 @@ const edge = (id: string, from: string, to: string, probability = 1): EdgeRow =>
   label: null,
 });
 
-const errorOf = (fn: () => unknown): ToolError => {
+const errorOf = (fn: () => unknown): ImportError => {
   try {
     fn();
   } catch (err) {
-    if (err instanceof ToolError) return err;
+    if (err instanceof ImportError) return err;
     throw err;
   }
-  throw new Error("expected a ToolError");
+  throw new Error("expected a ImportError");
 };
 
 describe("resolveName", () => {

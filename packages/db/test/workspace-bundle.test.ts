@@ -21,7 +21,7 @@ async function exportAs(claims: Record<string, unknown> | null, workspaceId = ws
   return db.as(claims, async (c) => {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
-      return (await c.query(`select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
+      return (await c.query(`select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit, now: new Date("2026-10-05T12:00:00Z") });
@@ -101,7 +101,7 @@ describe("workspace bundle export", () => {
     expect(text).not.toContain("Other Co");
     // A reader that leaked a foreign row (a policy mistake) is still filtered.
     const leaky = await db.as(editor.claims, async (c) => {
-      const read: TableReader = async (table) => (await c.query(`select ${Object.values(BUNDLE_TABLES).find((x) => x.table === table)!.columns ?? "*"} from public.${table} where workspace_id in ($1, $2)`, [ws, other])).rows as Row[];
+      const read: TableReader = async (table) => (await c.query(`select * from public.${table} where workspace_id in ($1, $2)`, [ws, other])).rows as Row[];
       return exportWorkspaceBundle(ws, async (id) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null, read, { canEdit: true });
     });
     expect(JSON.stringify(leaky)).not.toContain("Secret role");
@@ -150,9 +150,8 @@ describe("workspace bundle export", () => {
         "update steps set provenance = jsonb_build_object('work_hours', jsonb_build_object('source', 'entered', 'by', $1::text, 'at', now())) where revision_id = $2 and id = (select id from steps where revision_id = $2 and kind = 'task' limit 1)",
         [owner.id, rev],
       );
-      // A suggestion accepted.
-      const s = (await c.query("insert into suggestions (workspace_id, target_table, target_id, patch, evidence) values ($1, 'lead_sources', $2, '{\"set\": {\"volume_week\": 33}}', '[]') returning id", [ws, ads])).rows[0].id;
-      await c.query("select public.review_suggestions($1::uuid[], 'accept', 'ok')", [[s]]);
+      // A lead source's volume changed by a person (provenance records who).
+      await c.query("update lead_sources set volume_week = 33 where id = $1", [ads]);
     });
     // The ids really are in the database, in the places that matter: the test can fail.
     const raw = async (sql: string) => Number((await db.client.query(sql, [owner.id])).rows[0].n);
@@ -160,7 +159,6 @@ describe("workspace bundle export", () => {
     expect(await raw("select count(*) n from workspaces where provenance::text like '%' || $1 || '%'")).toBeGreaterThan(0);
     expect(await raw("select count(*) n from steps where provenance::text like '%' || $1 || '%'")).toBeGreaterThan(0);
     expect(await raw("select count(*) n from lead_sources where provenance::text like '%' || $1 || '%'")).toBeGreaterThan(0);
-    expect(await raw("select count(*) n from suggestions where reviewed_by = $1")).toBeGreaterThan(0);
 
     const b = await exportAs(owner.claims);
     const text = JSON.stringify(b);
@@ -174,26 +172,24 @@ describe("workspace bundle export", () => {
     expect((issue.events as Row[])[0]).not.toHaveProperty("actor");
   });
 
-  it("gives a viewer what is published, and an editor everything: drafts and pending suggestions", async () => {
+  it("gives a viewer what is published, and an editor everything: drafts", async () => {
     const editor = await member("bundle.scope.editor@northbeam.example", "editor");
     const viewer = await member("bundle.scope.viewer@northbeam.example", "viewer");
     const proc = (await db.client.query("select id from processes where workspace_id = $1 and not is_company and live_revision_id is not null limit 1", [ws])).rows[0].id;
-    // A draft and a pending suggestion exist (made as the database owner; the export is what is under test).
+    // A draft exists (made as the database owner; the export is what is under test).
     await db.client.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify(editor.claims)]);
     await db.client.query("set role authenticated");
     await db.client.query("select public.open_draft($1)", [proc]);
-    await db.client.query("insert into suggestions (workspace_id, target_table, target_id, patch, evidence) select $1, 'lead_sources', id, '{\"set\": {\"volume_week\": 77}}', '[]' from lead_sources where workspace_id = $1 limit 1", [ws]);
     await db.client.query("reset role");
     const drafts = (b: NonNullable<Awaited<ReturnType<typeof exportAs>>>) => b.processes.flatMap((p) => p.versions as Row[]).filter((v) => v.status === "draft");
     const all = (await exportAs(editor.claims, ws, true))!;
     expect(all.scope).toBe("everything");
     expect(drafts(all).length).toBeGreaterThan(0);
-    expect(all.suggestions.some((s) => s.status === "pending")).toBe(true);
+    expect(all).not.toHaveProperty("suggestions");
+    expect(all).not.toHaveProperty("suggestion_proposals");
     const v = (await exportAs(viewer.claims, ws, false))!;
     expect(v.scope).toBe("published");
     expect(drafts(v)).toHaveLength(0);
-    expect(v.suggestions).toHaveLength(0);
-    expect(v.suggestion_proposals).toHaveLength(0);
     // Nothing of a draft's steps or edges either, and no process points at one.
     const kept = new Set(v.processes.flatMap((p) => (p.versions as Row[]).map((x) => x.id)));
     expect(v.counts.steps).toBe(v.processes.reduce((n, p) => n + (p.versions as Row[]).reduce((m, x) => m + (x.steps as Row[]).length, 0), 0));

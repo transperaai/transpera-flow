@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyFirstPrinciples, firstPrinciplesFlags, type FirstPrinciples } from "@transpera-flow/engine";
-import { mergeFirstPrinciples, type FpInput } from "../src/first-principles";
-import { ToolError } from "../src/result";
+import { mergeFirstPrinciples, type FpInput } from "../../src/process-import/first-principles";
+import { ImportError } from "../../src/process-import/errors";
 
 // Merging what Claude reads in a transcript into a process's first principles (issue #119, A54): pure, no database.
 
@@ -141,7 +141,7 @@ describe("what can't be placed", () => {
 
   it("refuses a list that would grow past its limit", () => {
     const many = Array.from({ length: 51 }, (_, i) => ({ text: `Statement ${i}` }));
-    expect(() => merge({ statements: many })).toThrow(ToolError);
+    expect(() => merge({ statements: many })).toThrow(ImportError);
   });
 
   it("drops blank items and clears an owner when given null", () => {

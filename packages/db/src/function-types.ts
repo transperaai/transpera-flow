@@ -9,7 +9,6 @@ export interface Functions {
   add_source: { Args: { p_workspace: string; p_source: Json; p_links: Json }; Returns: string };
   agency_workspace_list: { Args: never; Returns: { id: string; name: string; slug: string; open_risk_issues: number; last_activity: string | null; numbers: Json | null; computed_at: string | null }[] };
   apply_calibration: { Args: { p_calibration: string; p_keys: string[] }; Returns: Json };
-  build_proposal: { Args: { p_proposal: string; p_workspace: string; p_process: string; p_base_revision: string; p_name: string; p_steps: Json; p_changed: Json; p_levers: Json; p_links: Json }; Returns: Json };
   can_edit_workspace: { Args: { ws: string }; Returns: boolean };
   can_manage_workspace: { Args: { ws: string }; Returns: boolean };
   can_read_workspace: { Args: { ws: string }; Returns: boolean };
@@ -29,7 +28,6 @@ export interface Functions {
   my_person_id: { Args: { ws: string }; Returns: string };
   open_draft: { Args: { target_process: string }; Returns: Json };
   open_share_link: { Args: { token: string }; Returns: Json };
-  play_proposal_contacts: { Args: { ws: string }; Returns: Json };
   publish_process: { Args: { target_process: string; accept_estimates?: boolean }; Returns: Json };
   qualifies_for_domain: { Args: { uid: string; domain: string }; Returns: boolean };
   reconcile_access: { Args: { uid: string }; Returns: null };
@@ -43,8 +41,6 @@ export interface Functions {
     | { Args: { p_workspace: string; p_id: string; p_how: string; p_note: string; p_status: string; p_solution: string }; Returns: Json };
   resolve_my_access: { Args: never; Returns: { workspace_id: string; role: "agency_admin" | "owner" | "editor" | "member" | "viewer"; source: string }[] };
   restore_version: { Args: { target_process: string; source_revision: string; replace_draft?: boolean }; Returns: Json };
-  review_proposals: { Args: { ids: string[]; decision: string; note?: string }; Returns: Json };
-  review_suggestions: { Args: { ids: string[]; decision: string; note?: string }; Returns: Json };
   revision_history: { Args: { target_process: string }; Returns: { revision_id: string; number: number; status: string; published_at: string | null; author_kind: string | null; author_name: string | null; changes: Json | null; note: string | null }[] };
   save_capacity_factor: { Args: { person: string; step: string; base: number; value: number }; Returns: Json };
   save_capacity_factor_switch: { Args: { ws: string; base: Json; changes: Json }; Returns: Json };
@@ -55,7 +51,6 @@ export interface Functions {
   save_solution: { Args: { p_workspace: string; p_process: string; p_base_revision: string; p_name: string; p_steps: Json; p_changed?: Json; p_levers?: Json; p_links?: Json }; Returns: Json };
   search_sources: { Args: { p_workspace: string; p_search?: string; p_kind?: string; p_process?: string; p_unlinked?: boolean; p_sort?: string; p_limit?: number; p_offset?: number }; Returns: { id: string; workspace_id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; file_url: string | null; created_at: string; updated_at: string; excerpt: string; has_body: boolean; total: number }[] };
   share_team_capacity: { Args: { ws: string; show_people: boolean }; Returns: Json };
-  submit_play_proposal: { Args: { token: string; title: string; note: string | null; name: string; email: string; issue: string | null; levers: Json }; Returns: Json };
   take_link_fetch: { Args: never; Returns: number };
   team_capacity: { Args: { ws: string }; Returns: Json };
   unlinked_source_count: { Args: { p_workspace: string }; Returns: number };

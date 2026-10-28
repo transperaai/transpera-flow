@@ -87,8 +87,6 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
   const scenarioCount = options.forExport ? L.scenarios - 4 : L.scenarios;
   const scenarios = Array.from({ length: scenarioCount }, (_, i) => ({ id: mk(), name: `Scenario ${i}`, patch: [{ path: "demand.leads_per_week", op: "multiply", value: 1 + i / 1000 }], created_at: when }));
   const blocks = Array.from({ length: L.blocks }, (_, i) => ({ id: mk(), name: `Block ${i}`, type: "manual", steps: { steps: [], edges: [] }, created_at: when }));
-  const suggestions = Array.from({ length: L.suggestions }, (_, i) => ({ id: mk(), target_table: "people", target_id: people[i % people.length]!.id, patch: { set: { notes: `n${i}` } }, evidence: [], note: null, created_at: when }));
-  const proposals = Array.from({ length: L.proposals }, (_, i) => ({ id: mk(), kind: "issue", title: `Proposal ${i}`, detail: "d", payload: {}, evidence: [], created_at: when }));
 
   // The link tables, each at its limit: 3 roles a person, 10 skills a person, one assignment a client.
   const person_roles = people.flatMap((p) => roles.map((r) => ({ person_id: p.id, role_id: r.id, created_at: when }))).slice(0, L.personRoles);
@@ -160,6 +158,6 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     settings: { hours_per_week: 38, currency: "GBP" },
     roles, people, person_roles, person_leave, lead_sources, seasonality, demand_settings: { growth_monthly: 0.01, created_at: when }, churn_drivers,
     market_conditions, market_schedule, lever_settings: { hidden: [], created_at: when }, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, scenarios, blocks, issues, services,
-    service_servicing, client_groups, client_services, client_assignments, person_skills, person_capacity_factors, source_links, suggestions, proposals,
+    service_servicing, client_groups, client_services, client_assignments, person_skills, person_capacity_factors, source_links,
   };
 }

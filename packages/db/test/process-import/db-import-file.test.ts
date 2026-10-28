@@ -3,25 +3,25 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE, processTextFrom, type ProcessFile } from "@transpera-flow/db";
-import { rpc } from "@transpera-flow/db/client";
-import { fetchPublicPage, importProcessFile, previewProcessFile, PUBLIC_POLICY, takeLinkFetch, ToolError } from "../src";
-import type { ToolContext } from "../src/context";
-import { startTestDb, userClaims, type McpTestDb } from "./helpers";
+import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE, processTextFrom, type ProcessFile } from "../../src";
+import { rpc } from "../../src/client";
+import { fetchPublicPage, importProcessFile, previewProcessFile, PUBLIC_POLICY, takeLinkFetch, ImportError } from "../../src/process-import";
+import type { ImportContext } from "../../src/process-import/context";
+import { startTestDb, userClaims, type ImportTestDb } from "./helpers";
 
 // Upload a process (issue #166, B13), end to end as the web app does it: a checked transpera-process/1 file → the shared
 // import code → Kysely under RLS as the signed-in user → Postgres with every migration. Runs on a throwaway database
 // (test/helpers.ts), in a workspace of its own.
 
 
-let env: McpTestDb;
+let env: ImportTestDb;
 let admin: pg.Client;
 let workspaceId: string;
 let consultantId: string;
 let managerId: string;
-let editorCtx: ToolContext;
-let viewerCtx: ToolContext;
-let strangerCtx: ToolContext;
+let editorCtx: ImportContext;
+let viewerCtx: ImportContext;
+let strangerCtx: ImportContext;
 let editorId: string;
 let otherWorkspaceRoleId: string;
 
@@ -33,8 +33,8 @@ async function createUser(email: string) {
 }
 
 /** What the web app builds for a signed-in user: a database handle carrying their claims, no API token. */
-function contextFor(userId: string): ToolContext {
-  return { db: env.dbAs(userClaims(userId)), tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-02" };
+function contextFor(userId: string): ImportContext {
+  return { db: env.dbAs(userClaims(userId)), userId };
 }
 
 /** The example, with its roles renamed to roles the workspace has, as a checked file. */
@@ -215,7 +215,7 @@ describe("uploading a process file (a draft, as the user)", () => {
     const preview = await previewProcessFile(editorCtx, workspaceId, example());
     expect(preview.nameTaken?.name).toBe("Enquiry to signed client");
     const err = await importProcessFile(editorCtx, example(), { workspaceId, source: "again.json" }).catch((e) => e);
-    expect(err).toBeInstanceOf(ToolError);
+    expect(err).toBeInstanceOf(ImportError);
     expect(err.message).toBe("You already have a process called 'Enquiry to signed client'. Give this one a different name.");
     expect(await processCount()).toBe(before);
     const renamed = await importProcessFile(editorCtx, example(), { workspaceId, source: "again.json", name: "Enquiry to signed client (copy)" });

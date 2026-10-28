@@ -43,8 +43,6 @@ export interface GapInput {
   steps: GapStep[];
   /** Incoming volume: known, missing, or not known here (a page that did not load demand says nothing about it). */
   volume: "known" | "missing" | "unknown";
-  /** For a file: it carries lead volume as a suggestion, so the volume gap says to accept it. */
-  volumeSuggested?: boolean;
 }
 
 export type GapFix = { type: "step"; stepId: string } | { type: "settings"; where: "demand" | "services" };
@@ -80,9 +78,7 @@ export function findGaps(input: GapInput): SimulationGap[] {
       text:
         input.kind === "servicing"
           ? "No recurrence: link this process to a service and set how often it repeats in Settings"
-          : input.volumeSuggested
-            ? "No incoming volume yet: accept the lead volume suggestion, or add it in Settings"
-            : "No incoming volume: add lead volume in Settings or accept the suggestion",
+          : "No incoming volume: add lead volume in Settings",
       fix: { type: "settings", where: input.kind === "servicing" ? "services" : "demand" },
     });
   }
@@ -109,7 +105,6 @@ export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: stri
   return {
     kind: file.kind,
     volume: opts.volume,
-    ...(opts.volumeSuggested ? { volumeSuggested: true } : {}),
     steps: file.steps.map((s): GapStep => {
       const kind = s.type === "step" ? "work" : s.type === "wait" ? "wait" : s.type === "decision" ? "decision" : "other";
       const leaving = outgoing.get(s.id) ?? [];

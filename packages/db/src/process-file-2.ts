@@ -1,10 +1,10 @@
-// What `transpera-process/2` adds to the /1 file (issue #167, B14): evidence for every number, a list of sources, facts about
-// the company, proposed issues and ideas, and first principles. The steps, links and groups are checked in process-file.ts
+// What `transpera-process/2` adds to the /1 file (issue #167, B14): evidence for every number, a list of sources, and first
+// principles. (It used to carry facts about the company and proposed issues and ideas as well; Suggestions are gone,
+// docs/plans/cut-list.md item 2, and a file that still has them gets a warning that they are not read.) The steps, links and groups are checked in process-file.ts
 // (shared with /1); this module checks the new parts and holds their types, schema pieces and the prompt's extra rules.
 // Pure: no I/O and no framework.
 //
-// A file never changes anything live. Company facts become suggestions, proposals become proposals, and both wait for a
-// person; first principles go to the new draft; sources are added and linked to the process.
+// A file never changes anything live: first principles go to the new draft; sources are added and linked to the process.
 
 // The engine's lists (ratings, issue types, first-principles values, success measures) are written out here, not imported: this
 // module and the schema generator (scripts/gen-import-schema.ts) run under plain Node, which can't load the engine's source. A
@@ -14,8 +14,6 @@ import { isObject, norm, q, suggest } from "@transpera-flow/db/process-file-util
 
 export const PROCESS_FILE_FORMAT_2 = "transpera-process/2";
 
-export const RATINGS = ["great", "good", "bad", "risk"] as const;
-export const ISSUE_TYPES = ["bottleneck", "spof", "manual", "delay", "failure", "idea", "capacity", "sla", "churn_risk", "perception_gap", "broken_scenario"] as const;
 export const FP_KINDS = ["truth", "assumption"] as const;
 export const FP_VERDICTS = ["keep", "change", "drop", "challenge"] as const;
 export const FP_COMPARATORS = ["atLeast", "atMost"] as const;
@@ -31,11 +29,7 @@ const MAX_QUOTE = 2000;
 const MAX_CITATIONS = 10;
 const MAX_REASON = 2000;
 const MAX_BODY = 500_000;
-const MAX_COMPANY_ITEMS = 100;
-const MAX_PROPOSALS = 50;
 const MAX_TEXT = 2000;
-/** Most suggestions one file can ask for in all (the review page lists each). */
-export const MAX_FILE_SUGGESTIONS = 300;
 
 /** The step fields that can carry evidence, as the file names them. */
 export const EVIDENCE_FIELDS = ["hands_on_hours", "wait_hours", "rework_rate", "waiting_now", "sla_hours"] as const;
@@ -82,83 +76,6 @@ export interface FileSource {
 export interface FileRange {
   min: number;
   max: number;
-}
-
-export interface FilePerson extends Backing {
-  name: string;
-  roles?: string[];
-  fte?: number;
-  hours_per_week?: number;
-  cost_rate?: number;
-  email?: string;
-  start_date?: string;
-  leave?: { start_date: string; end_date: string; note?: string }[];
-}
-export interface FileRole extends Backing {
-  name: string;
-}
-export interface FileClient extends Backing {
-  name: string;
-  services?: string[];
-  mrr?: number;
-  start_date?: string;
-  health?: number;
-  notes?: string;
-  active?: boolean;
-  assignments?: Record<string, string>;
-}
-export interface FileService extends Backing {
-  name: string;
-  pricing_model?: "retainer" | "one_off" | "hourly";
-  price?: number;
-  margin?: number;
-  tenure_months?: number;
-  monthly_churn?: number;
-  mix_share?: number;
-}
-export interface FileLeadSource extends Backing {
-  name: string;
-  volume_per_week?: number;
-  conversion_to_qualified?: number;
-}
-export interface FileDemand extends Backing {
-  lead_sources: FileLeadSource[];
-  growth_monthly?: number;
-  seasonality?: number[];
-}
-
-/** Facts about the company. Each becomes a suggestion for a person to accept or reject. */
-export interface FileCompany {
-  people: FilePerson[];
-  roles: FileRole[];
-  clients: FileClient[];
-  services: FileService[];
-  demand?: FileDemand;
-}
-
-export interface FileProposedStep {
-  name: string;
-  kind?: string;
-  role?: string;
-}
-
-/** A proposed issue, or a solution idea for an issue you already track. Neither is created until a person accepts it. */
-export interface FileProposal extends Backing {
-  type: "issue" | "solution_idea";
-  title: string;
-  detail?: string;
-  /** Issues: great, good, bad or risk (default good). */
-  rating?: (typeof RATINGS)[number];
-  issue_type?: (typeof ISSUE_TYPES)[number];
-  /** Step ids of this process it touches (issues). Without any it touches the whole process. */
-  steps?: string[];
-  target_measure?: string;
-  target_now?: string;
-  target_goal?: string;
-  /** Solution ideas: the issue it is for, by number (12 or "#12") or title. The issue must exist already. */
-  for_issue?: string;
-  proposed_steps?: FileProposedStep[];
-  expect?: string;
 }
 
 export interface FileFirstPrinciples {
@@ -481,287 +398,10 @@ export function readStepExtras(raw: Record<string, unknown>, label: string, env:
 }
 
 // ---------------------------------------------------------------------------
-// Company
+// First principles
 // ---------------------------------------------------------------------------
 
 const ITEM_FIELDS = ["evidence", "assumed"];
-
-function list(raw: unknown, key: string, max: number, env: Env): unknown[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    env.errors.push(`company.${key} should be a list.`);
-    return [];
-  }
-  if (raw.length > max) env.errors.push(`company.${key} lists ${raw.length}; the most in one file is ${max}.`);
-  return raw.slice(0, max);
-}
-
-function named(raw: unknown, key: string, i: number, env: Env): { item: Record<string, unknown>; name: string; where: string } | null {
-  if (!isObject(raw)) {
-    env.errors.push(`company.${key} item ${i + 1} should be an object with a name.`);
-    return null;
-  }
-  const name = typeof raw.name === "string" ? raw.name.trim() : "";
-  const where = name ? `company.${key} ${q(name)}` : `company.${key} item ${i + 1}`;
-  if (!name) {
-    env.errors.push(`${where} has no name.`);
-    return null;
-  }
-  if (name.length > 200) {
-    env.errors.push(`${where}'s name is ${name.length} characters long; the most is 200.`);
-    return null;
-  }
-  return { item: raw, name, where };
-}
-
-const dayOf = (v: unknown, where: string, what: string, env: Env): string | undefined => {
-  if (v === undefined || v === null) return undefined;
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v).toISOString().startsWith(v)) return v;
-  env.errors.push(`${where}: ${what} should be a day like 2026-09-30.`);
-  return undefined;
-};
-
-const COMPANY_KEYS = ["people", "roles", "clients", "services", "demand"];
-const PERSON_FIELDS = ["name", "roles", "fte", "hours_per_week", "cost_rate", "email", "start_date", "leave", ...ITEM_FIELDS];
-const ROLE_FIELDS = ["name", ...ITEM_FIELDS];
-const CLIENT_FIELDS = ["name", "services", "mrr", "start_date", "health", "notes", "active", "assignments", ...ITEM_FIELDS];
-const SERVICE_FIELDS = ["name", "pricing_model", "price", "margin", "tenure_months", "monthly_churn", "mix_share", ...ITEM_FIELDS];
-const DEMAND_FIELDS = ["lead_sources", "growth_monthly", "seasonality", ...ITEM_FIELDS];
-const LEAD_FIELDS = ["name", "volume_per_week", "conversion_to_qualified", ...ITEM_FIELDS];
-
-/** The file's `company`: people, roles, clients, services and demand. */
-export function checkCompany(raw: unknown, env: Env): FileCompany | undefined {
-  if (raw === undefined) return undefined;
-  if (!isObject(raw)) {
-    env.errors.push('"company" should be an object with people, roles, clients, services and demand.');
-    return undefined;
-  }
-  unknownFields(raw, COMPANY_KEYS, "The company section", env);
-  const company: FileCompany = { people: [], roles: [], clients: [], services: [] };
-
-  list(raw.people, "people", MAX_COMPANY_ITEMS, env).forEach((r, i) => {
-    const n = named(r, "people", i, env);
-    if (!n) return;
-    const { item, name, where } = n;
-    unknownFields(item, PERSON_FIELDS, where, env);
-    const person: FilePerson = { name, ...readBacking(item, where, env, { warnIfBare: true }) };
-    const roles = strings(item.roles, where, "roles", 20, env);
-    if (roles) person.roles = roles;
-    const fte = number(item.fte, where, "fte", 0.01, 1.5, env, "1 is full time");
-    if (fte !== undefined) person.fte = fte;
-    const hours = number(item.hours_per_week, where, "hours_per_week", 0.5, 168, env);
-    if (hours !== undefined) person.hours_per_week = hours;
-    const rate = number(item.cost_rate, where, "cost_rate", 0, 100_000, env, "the hourly cost");
-    if (rate !== undefined) person.cost_rate = rate;
-    const email = text(item.email, 320, where, "email", env);
-    if (email) person.email = email;
-    const start = dayOf(item.start_date, where, "start_date", env);
-    if (start) person.start_date = start;
-    if (item.leave !== undefined && item.leave !== null) {
-      if (!Array.isArray(item.leave) || item.leave.length > 50) env.errors.push(`${where}: leave should be a list of {"start_date", "end_date"} days, like 2026-12-07.`);
-      else {
-        const leave: NonNullable<FilePerson["leave"]> = [];
-        item.leave.forEach((l, j) => {
-          if (!isObject(l)) return void env.errors.push(`${where}: leave ${j + 1} should be an object with a start_date and an end_date.`);
-          unknownFields(l, ["start_date", "end_date", "note"], `${where}, leave ${j + 1}`, env);
-          const from = dayOf(l.start_date, where, `leave ${j + 1} start_date`, env);
-          const to = dayOf(l.end_date, where, `leave ${j + 1} end_date`, env);
-          if (l.start_date === undefined || l.end_date === undefined) return void env.errors.push(`${where}: leave ${j + 1} needs a start_date and an end_date.`);
-          if (!from || !to) return;
-          if (to < from) return void env.errors.push(`${where}: leave ${j + 1} ends (${to}) before it starts (${from}).`);
-          const note = text(l.note, 500, where, "a leave note", env);
-          leave.push({ start_date: from, end_date: to, ...(note ? { note } : {}) });
-        });
-        if (leave.length) person.leave = leave;
-      }
-    }
-    company.people.push(person);
-  });
-
-  list(raw.roles, "roles", MAX_COMPANY_ITEMS, env).forEach((r, i) => {
-    const n = named(r, "roles", i, env);
-    if (!n) return;
-    unknownFields(n.item, ROLE_FIELDS, n.where, env);
-    company.roles.push({ name: n.name, ...readBacking(n.item, n.where, env, { warnIfBare: true }) });
-  });
-
-  list(raw.clients, "clients", MAX_COMPANY_ITEMS, env).forEach((r, i) => {
-    const n = named(r, "clients", i, env);
-    if (!n) return;
-    const { item, name, where } = n;
-    unknownFields(item, CLIENT_FIELDS, where, env);
-    const client: FileClient = { name, ...readBacking(item, where, env, { warnIfBare: true }) };
-    const services = strings(item.services, where, "services", 20, env);
-    if (services) client.services = services;
-    const mrr = number(item.mrr, where, "mrr", 0, 1e9, env, "monthly recurring revenue");
-    if (mrr !== undefined) client.mrr = mrr;
-    const start = dayOf(item.start_date, where, "start_date", env);
-    if (start) client.start_date = start;
-    const health = number(item.health, where, "health", 0, 100, env, "0 to 100");
-    if (health !== undefined) client.health = health;
-    const notes = text(item.notes, MAX_TEXT, where, "notes", env);
-    if (notes) client.notes = notes;
-    if (item.active !== undefined && item.active !== null) {
-      if (typeof item.active === "boolean") client.active = item.active;
-      else env.errors.push(`${where}: active should be true or false.`);
-    }
-    if (item.assignments !== undefined && item.assignments !== null) {
-      if (!isObject(item.assignments) || Object.values(item.assignments).some((v) => typeof v !== "string" || !v.trim())) {
-        env.errors.push(`${where}: assignments should be a role and a person, like {"Account director": "Tom Whitfield"}.`);
-      } else if (Object.keys(item.assignments).length) client.assignments = Object.fromEntries(Object.entries(item.assignments).map(([k, v]) => [k.trim(), (v as string).trim()]));
-    }
-    company.clients.push(client);
-  });
-
-  list(raw.services, "services", MAX_COMPANY_ITEMS, env).forEach((r, i) => {
-    const n = named(r, "services", i, env);
-    if (!n) return;
-    const { item, name, where } = n;
-    unknownFields(item, SERVICE_FIELDS, where, env);
-    const service: FileService = { name, ...readBacking(item, where, env, { warnIfBare: true }) };
-    if (item.pricing_model !== undefined) {
-      if (item.pricing_model === "retainer" || item.pricing_model === "one_off" || item.pricing_model === "hourly") service.pricing_model = item.pricing_model;
-      else env.errors.push(`${where}: pricing_model should be retainer, one_off or hourly.`);
-    }
-    for (const [key, min, max, hint] of [
-      ["price", 0, 1e9, "the monthly fee, the whole fee or the hourly rate"],
-      ["margin", 0, 1, "a share from 0 to 1"],
-      ["tenure_months", 0, 1200, ""],
-      ["monthly_churn", 0, 1, "a share from 0 to 1, 0.02 is 2% a month"],
-      ["mix_share", 0, 1e6, "the relative share of new work"],
-    ] as const) {
-      const v = number(item[key], where, key, min, max, env, hint);
-      if (v !== undefined) service[key] = v;
-    }
-    company.services.push(service);
-  });
-
-  if (raw.demand !== undefined) {
-    if (!isObject(raw.demand)) env.errors.push('company.demand should be an object with "lead_sources", and optionally "growth_monthly" and "seasonality".');
-    else {
-      const d = raw.demand;
-      const where = "company.demand";
-      unknownFields(d, DEMAND_FIELDS, where, env);
-      const demand: FileDemand = { lead_sources: [], ...readBacking(d, where, env) };
-      list(d.lead_sources, "demand.lead_sources", MAX_COMPANY_ITEMS, env).forEach((r, i) => {
-        const n = named(r, "demand.lead_sources", i, env);
-        if (!n) return;
-        const { item, name, where: w } = n;
-        unknownFields(item, LEAD_FIELDS, w, env);
-        const lead: FileLeadSource = { name, ...readBacking(item, w, env, { warnIfBare: !demand.evidence.length && demand.assumed === undefined }) };
-        const vol = number(item.volume_per_week, w, "volume_per_week", 0, 1e7, env, "leads a week");
-        if (vol !== undefined) lead.volume_per_week = vol;
-        const conv = number(item.conversion_to_qualified, w, "conversion_to_qualified", 0, 1, env, "a share from 0 to 1");
-        if (conv !== undefined) lead.conversion_to_qualified = conv;
-        demand.lead_sources.push(lead);
-      });
-      const growth = number(d.growth_monthly, where, "growth_monthly", -0.99, 10, env, "0.02 is +2% a month");
-      if (growth !== undefined) demand.growth_monthly = growth;
-      if (d.seasonality !== undefined) {
-        if (Array.isArray(d.seasonality) && d.seasonality.length === 12 && d.seasonality.every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100)) demand.seasonality = d.seasonality as number[];
-        else env.errors.push(`${where}: seasonality should be twelve multipliers, January first (1 means no effect).`);
-      }
-      company.demand = demand;
-    }
-  }
-
-  const total =
-    company.people.length + company.roles.length + company.clients.length + company.services.length + (company.demand ? company.demand.lead_sources.length + (company.demand.growth_monthly !== undefined ? 1 : 0) + (company.demand.seasonality ? 12 : 0) : 0);
-  if (total > MAX_FILE_SUGGESTIONS) env.errors.push(`The company section would make ${total} suggestions; the most in one file is ${MAX_FILE_SUGGESTIONS}.`);
-  return company;
-}
-
-// ---------------------------------------------------------------------------
-// Proposals
-// ---------------------------------------------------------------------------
-
-const PROPOSAL_FIELDS = ["type", "title", "detail", "rating", "issue_type", "steps", "target_measure", "target_now", "target_goal", "for_issue", "proposed_steps", ...ITEM_FIELDS];
-const PROPOSED_STEP_FIELDS = ["name", "kind", "role"];
-
-/** The file's `proposals`: issues and solution ideas found in the materials. */
-export function checkProposals(raw: unknown, steps: StepsView, env: Env): FileProposal[] {
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw)) {
-    env.errors.push('"proposals" should be a list of proposed issues and ideas.');
-    return [];
-  }
-  if (raw.length > MAX_PROPOSALS) env.errors.push(`The file has ${raw.length} proposals; the most in one file is ${MAX_PROPOSALS}.`);
-  const out: FileProposal[] = [];
-  const titles = new Set<string>();
-  const stepRefs = (v: unknown, where: string, what: string): string[] | undefined => {
-    const refs = strings(v, where, what, 30, env);
-    if (!refs) return undefined;
-    const ok: string[] = [];
-    for (const r of refs) {
-      if (steps.has(r)) ok.push(r);
-      else {
-        const near = suggest(r, steps.ids, env.budget);
-        env.errors.push(`${where} lists ${q(r)} in ${what}, which isn't a step.${near ? ` Did you mean ${q(near)}?` : ""}`);
-      }
-    }
-    return ok;
-  };
-  raw.slice(0, MAX_PROPOSALS).forEach((r, i) => {
-    if (!isObject(r)) return void env.errors.push(`Proposal ${i + 1} should be an object with a type and a title.`);
-    const title = typeof r.title === "string" ? r.title.trim() : "";
-    const where = title ? `Proposal ${q(title)}` : `Proposal ${i + 1}`;
-    if (!title) return void env.errors.push(`${where} has no title.`);
-    if (title.length > 200) return void env.errors.push(`${where}'s title is ${title.length} characters long; the most is 200.`);
-    unknownFields(r, PROPOSAL_FIELDS, where, env);
-    if (r.type !== "issue" && r.type !== "solution_idea") return void env.errors.push(`${where} has the type ${typeof r.type === "string" ? q(r.type) : "missing"}. Use "issue" (a problem worth tracking) or "solution_idea" (an idea for an issue you already track).`);
-    const key = `${r.type}|${norm(title)}`;
-    if (titles.has(key)) env.warnings.push(`${where} appears twice. Both are kept.`);
-    titles.add(key);
-    const p: FileProposal = { type: r.type, title, ...readBacking(r, where, env, { warnIfBare: true }) };
-    const detail = text(r.detail, 5000, where, "detail", env);
-    if (detail) p.detail = detail;
-    if (r.type === "issue") {
-      if (r.rating !== undefined) {
-        if (typeof r.rating === "string" && (RATINGS as readonly string[]).includes(r.rating)) p.rating = r.rating as FileProposal["rating"];
-        else env.errors.push(`${where}: rating should be great, good, bad or risk.`);
-      }
-      if (r.issue_type !== undefined) {
-        if (typeof r.issue_type === "string" && (ISSUE_TYPES as readonly string[]).includes(r.issue_type)) p.issue_type = r.issue_type as FileProposal["issue_type"];
-        else env.errors.push(`${where}: issue_type should be one of ${ISSUE_TYPES.join(", ")}.`);
-      }
-      const touched = stepRefs(r.steps, where, "steps");
-      if (touched?.length) p.steps = touched;
-      for (const k of ["target_measure", "target_now", "target_goal"] as const) {
-        const v = text(r[k], 200, where, k, env);
-        if (v) p[k] = v;
-      }
-      for (const k of ["for_issue", "proposed_steps", "expect"]) if (r[k] !== undefined) env.warnings.push(`${where} is an issue, so its ${q(k)} was ignored.`);
-    } else {
-      const forIssue = typeof r.for_issue === "number" ? String(r.for_issue) : typeof r.for_issue === "string" ? r.for_issue.trim() : "";
-      if (!forIssue) env.errors.push(`${where} is a solution idea, so it needs "for_issue": the number (like 12) or title of an issue you already track.`);
-      else p.for_issue = forIssue;
-      if (!Array.isArray(r.proposed_steps) || !r.proposed_steps.length) env.errors.push(`${where} is a solution idea, so it needs "proposed_steps": the steps it would put in place, in order.`);
-      else {
-        if (r.proposed_steps.length > 30) env.errors.push(`${where} has ${r.proposed_steps.length} proposed steps; the most is 30.`);
-        p.proposed_steps = [];
-        r.proposed_steps.slice(0, 30).forEach((s, j) => {
-          if (!isObject(s) || typeof s.name !== "string" || !s.name.trim()) return void env.errors.push(`${where}: proposed step ${j + 1} needs a name.`);
-          unknownFields(s, PROPOSED_STEP_FIELDS, `${where}, proposed step ${q(s.name)}`, env);
-          const step: FileProposedStep = { name: s.name.trim().slice(0, 200) };
-          const kind = text(s.kind, 40, where, "a proposed step's kind", env);
-          const role = text(s.role, 200, where, "a proposed step's role", env);
-          if (kind) step.kind = kind;
-          if (role) step.role = role;
-          p.proposed_steps!.push(step);
-        });
-      }
-      const expect = text(r.expect, 1000, where, "expect", env);
-      if (expect) p.expect = expect;
-      for (const k of ["rating", "issue_type", "steps", "target_measure", "target_now", "target_goal"]) if (r[k] !== undefined) env.warnings.push(`${where} is a solution idea, so its ${q(k)} was ignored.`);
-    }
-    out.push(p);
-  });
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// First principles
-// ---------------------------------------------------------------------------
 
 const FP_KEYS = ["job", "truths", "requirements", "measures", "why"];
 
@@ -886,14 +526,10 @@ export function checkFirstPrinciples(raw: unknown, steps: StepsView, env: Env): 
 /** How many things each v2 section will make, for the preview and for tests. */
 export function sectionCounts(file: {
   sources?: readonly FileSource[];
-  company?: FileCompany;
-  proposals?: readonly FileProposal[];
   first_principles?: FileFirstPrinciples;
-}): { sources: number; company: number; proposals: number; firstPrinciples: number } {
-  const c = file.company;
-  const company = c ? c.people.length + c.roles.length + c.clients.length + c.services.length + (c.demand ? c.demand.lead_sources.length + (c.demand.growth_monthly !== undefined ? 1 : 0) + (c.demand.seasonality ? 1 : 0) : 0) : 0;
+}): { sources: number; firstPrinciples: number } {
   const f = file.first_principles;
   const firstPrinciples = f ? (f.job ? 1 : 0) + f.truths.length + f.requirements.length + f.measures.length + (f.why ? 1 : 0) : 0;
-  return { sources: file.sources?.length ?? 0, company, proposals: file.proposals?.length ?? 0, firstPrinciples };
+  return { sources: file.sources?.length ?? 0, firstPrinciples };
 }
 

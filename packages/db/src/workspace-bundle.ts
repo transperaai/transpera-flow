@@ -5,7 +5,7 @@
 // What it holds: the workspace and its settings; the company model (roles, people, services, client groups, named clients
 // flagged hidden, demand, market, churn drivers, levers, analysis rules); every process with ALL its versions (published,
 // superseded and draft: steps, edges and first principles of each, the company map included); scenarios, solutions and
-// blocks; issues with their links, owners, sources and history; sources and their links; pending and decided suggestions.
+// blocks; issues with their links, owners, sources and history; sources and their links.
 // Rows keep their database ids and column names so references stay intact and nothing is lost. The step `kind` and
 // `outcome` values and the edge `label` and `condition_tag` are the ones a `transpera-process/2` file uses.
 //
@@ -30,8 +30,6 @@ interface TableSpec {
   table: string;
   /** Stable order, which also pages. */
   order: readonly string[];
-  /** The columns to read, when not all of them: `suggestion_proposals.proposer_email` is not readable by the app's users, so a `select *` would be refused. */
-  columns?: string;
 }
 
 const T = (table: string, ...order: string[]): TableSpec => ({ table, order: order.length ? order : ["id"] });
@@ -76,20 +74,15 @@ export const BUNDLE_TABLES = {
   issue_events: T("issue_events"),
   sources: T("sources"),
   source_links: T("source_links"),
-  suggestions: T("suggestions"),
-  suggestion_proposals: {
-    ...T("suggestion_proposals"),
-    columns: "id, workspace_id, kind, title, detail, payload, evidence, note, issue_id, status, created_via, applied, review_note, reviewed_at, created_at, updated_at, import_source",
-  },
 } as const satisfies Record<string, TableSpec>;
 
 /**
  * Keys that name an account or a person's contact details, in a column or at any depth of a JSON column: who made, changed,
  * reviewed or published something (`created_by`, `updated_by`, `reviewed_by`, `published_by`, `edited_by`, any `*_by`; the
  * `by` in `provenance` and `resolved`), who did it in a history (`actor`), `user_id`, `author`, `uid`, and emails and names
- * typed by a proposer. The migrations write `auth.uid()` into exactly these. Matched without regard to case.
+ * typed by someone. The migrations write `auth.uid()` into exactly these. Matched without regard to case.
  */
-export const ACCOUNT_KEY = /^(by|actor|actor_id|user_id|uid|author|author_id|email|proposer_email|proposer_name|user_name|user_email)$|_by$|^(created|updated|edited|reviewed|published|accepted|resolved)_by_/i;
+export const ACCOUNT_KEY = /^(by|actor|actor_id|user_id|uid|author|author_id|email|user_name|user_email)$|_by$|^(created|updated|edited|reviewed|published|accepted|resolved)_by_/i;
 
 /** Keys that end in `_by` but are not accounts: the steps that took over a retired step's work, and the person who agreed a first-principles item. */
 const NOT_ACCOUNTS = new Set(["replaced_by", "agreed_by"]);
@@ -162,10 +155,9 @@ export function dbReader(db: Db, options: ReaderOptions = {}): TableReader {
     if (!spec) throw new Error(`Not a bundle table: ${table}`);
     const all: Row[] = [];
     // Table and column names come from BUNDLE_TABLES (code), never from a caller, and go in as identifiers.
-    const select = spec.columns ? sql.join(spec.columns.split(",").map((c) => sql.id(c.trim()))) : sql.raw("*");
     const order = sql.join(spec.order.map((c) => sql.id(c)));
     for (;;) {
-      const { rows: data } = await sql<Row>`select ${select} from ${sql.table(table)} where ${sql.id("workspace_id")} = ${workspaceId} order by ${order} limit ${pageSize} offset ${all.length}`.execute(db);
+      const { rows: data } = await sql<Row>`select * from ${sql.table(table)} where ${sql.id("workspace_id")} = ${workspaceId} order by ${order} limit ${pageSize} offset ${all.length}`.execute(db);
       if (data.length === 0) break;
       all.push(...data);
       if (all.length > maxRows) throw new BundleTooLargeError(`${table} has more than ${maxRows} rows`);
@@ -178,7 +170,7 @@ export interface WorkspaceBundle {
   format: typeof WORKSPACE_BUNDLE_FORMAT;
   exported_at: string;
   engine_version: string;
-  /** "everything" for an editor or owner; "published" for a viewer (no drafts, no pending suggestions or proposals). */
+  /** "everything" for an editor or owner; "published" for a viewer (no drafts). */
   scope: "everything" | "published";
   /** What the file is, for a person opening it. */
   about: string;
@@ -195,8 +187,9 @@ export interface WorkspaceBundle {
   issues: Row[];
   sources: Row[];
   source_links: Row[];
-  suggestions: Row[];
-  suggestion_proposals: Row[];
+  /** Only in a backup made before Suggestions were removed (28 Oct 2026). A restore reads and counts them, and restores neither. */
+  suggestions?: Row[];
+  suggestion_proposals?: Row[];
   /** Rows per section, so a reader can tell a truncated file. */
   counts: Record<string, number>;
 }
@@ -213,7 +206,7 @@ const group = (rows: Row[], key: string): Map<string, Row[]> => {
 export interface ExportOptions {
   /**
    * Whether the user may edit the workspace. Editors and owners get everything; `false` gives what is published (no draft
-   * versions, no pending suggestions or proposals). The export route no longer calls this for viewers (only agency admins,
+   * versions). The export route no longer calls this for viewers (only agency admins,
    * owners and editors may export, issue #39), but bundles made that way exist, and the import checker accepts them.
    */
   canEdit: boolean;
@@ -247,14 +240,12 @@ export async function exportWorkspaceBundle(
   const total = Object.values(raw).reduce((n, rows) => n + rows.length, 0);
   if (total > MAX_BUNDLE_ROWS) throw new BundleTooLargeError(`${total} rows in all`);
 
-  // A viewer gets what is published (the same as the live app shows a reader), not working drafts or pending suggestions.
+  // A viewer gets what is published (the same as the live app shows a reader), not working drafts.
   if (!options.canEdit) {
     raw.process_revisions = raw.process_revisions.filter((r) => r.status !== "draft");
     const kept = new Set(raw.process_revisions.map((r) => r.id));
     for (const t of ["steps", "edges", "first_principles"] as const) raw[t] = raw[t].filter((r) => kept.has(r.revision_id));
     raw.processes = raw.processes.map((p) => ({ ...p, draft_revision_id: null }));
-    raw.suggestions = [];
-    raw.suggestion_proposals = [];
   }
 
   // Everyone's account is scrubbed from everything, by key at any depth and then by the ids those keys held.
@@ -304,7 +295,7 @@ export async function exportWorkspaceBundle(
   counts.process_versions = data.process_revisions.length;
   counts.steps = data.steps.length;
   counts.edges = data.edges.length;
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) counts[k] = data[k].length;
+  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = data[k].length;
 
   const bundle: WorkspaceBundle = {
     format: WORKSPACE_BUNDLE_FORMAT,
@@ -330,8 +321,6 @@ export async function exportWorkspaceBundle(
     issues,
     sources: data.sources,
     source_links: data.source_links,
-    suggestions: data.suggestions,
-    suggestion_proposals: data.suggestion_proposals,
     counts,
   };
   // Export allows far more than a restore takes (MAX_TABLE_ROWS against WORKSPACE_IMPORT_LIMITS). A workspace over a restore limit is

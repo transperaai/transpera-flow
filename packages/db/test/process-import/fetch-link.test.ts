@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP, type AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PROCESS_FILE_EXAMPLE, processTextFrom } from "@transpera-flow/db";
-import { checkLink, fetchPublicPage, isPublicAddress, LinkError, NOT_PUBLIC_ADVICE, PUBLIC_POLICY, type FetchPolicy } from "../src";
+import { PROCESS_FILE_EXAMPLE, processTextFrom } from "../../src";
+import { checkLink, fetchPublicPage, isPublicAddress, LinkError, NOT_PUBLIC_ADVICE, PUBLIC_POLICY, type FetchPolicy } from "../../src/process-import";
 
 // Fetching a page by link, with the SSRF guard (issue #166, B13 slice 2): which addresses count as public, what is refused
 // before and after DNS and redirects, and the size and time limits, against a local server. The local server stands in for

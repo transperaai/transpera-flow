@@ -5,8 +5,8 @@ import { checkProcessFile, findGaps, gapInputFromFile, type ProcessFile } from "
 
 // The process-file skill's output (issue #167, B14 part 2, .agents/skills/process-file/SKILL.md), written by hand the way the skill
 // would write it, for the two interview packs in the repo: Tidewater (docs/extraction/examples/tidewater) and the Copperleaf QA
-// interviews (docs/extraction/qa). They live in docs/import/examples/. Pure: no database. The upload of the same files over
-// PostgREST is packages/mcp/test/postgrest-skill-fixtures.test.ts.
+// interviews (docs/extraction/qa). They live in docs/import/examples/. Pure: no database. The upload of the same files is
+// test/process-import/db-skill-fixtures.test.ts.
 
 const IMPORT = new URL("../../../docs/import/", import.meta.url);
 const read = (url: URL) => readFileSync(url, "utf8");
@@ -47,7 +47,7 @@ const checked = (p: Pack) => {
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** Every quote in the file, wherever it sits: step evidence, link evidence, company, proposals, first principles. */
+/** Every quote in the file, wherever it sits: step evidence, link evidence, first principles. */
 function citations(v: unknown): Obj[] {
   if (Array.isArray(v)) return v.flatMap(citations);
   if (!isObj(v)) return [];
@@ -81,7 +81,7 @@ describe.each(PACKS)("$name", (pack) => {
     const f = raw(pack);
     const sources = new Map(Object.entries(pack.transcripts).map(([id, path]) => [id, lines(path)]));
     const cites = citations(f);
-    expect(cites.length).toBeGreaterThan(20);
+    expect(cites.length).toBeGreaterThan(10);
     for (const c of cites) {
       const transcript = sources.get(c.source as string);
       expect(transcript, `source ${String(c.source)} has a transcript`).toBeDefined();
@@ -117,10 +117,6 @@ describe.each(PACKS)("$name", (pack) => {
         expect(Array.isArray(l.evidence) || typeof l.assumed === "string", `link ${String(l.from)} to ${String(l.to)}`).toBe(true);
       }
     }
-    for (const section of ["people", "clients"] as const) {
-      for (const item of (f.company?.[section] ?? []) as Obj[]) expect(item.evidence ?? item.assumed, `${section}: ${String(item.name)}`).toBeDefined();
-    }
-    for (const p of f.proposals as Obj[]) expect((p.evidence as unknown[]).length, String(p.title)).toBeGreaterThan(0);
   });
 
   it("a conflict is kept as two quotes with their own numbers, never averaged into one", () => {
@@ -168,21 +164,10 @@ describe("Tidewater: Monthly client report", () => {
     expect(noVolume.map((g) => g.kind)).toEqual(["hands_on", "volume"]);
   });
 
-  it("puts company facts in company, issues in proposals, and only what was said in first principles", () => {
+  it("carries no company facts or proposals, and puts in first principles only what was said", () => {
     const f = checked(pack).file;
-    expect(f.company!.people.map((p) => [p.name, p.fte, p.start_date])).toEqual([
-      ["Priti Rao", 0.6, undefined],
-      ["Jonah Pike", undefined, "2026-10-12"],
-      ["Owen Hart", undefined, undefined],
-    ]);
-    expect(f.company!.people[2]!.leave).toEqual([{ start_date: "2026-12-21", end_date: "2026-12-31", note: "Booked and paid for" }]);
-    expect(f.company!.clients[1]!.assignments).toEqual({ "Account manager": "Hana Iqbal", "SEO specialist": "Owen Hart" });
-    expect(f.company!.clients.map((c) => [c.name, c.mrr])).toEqual([
-      ["Marlow Physio", 2900],
-      ["Quayside Vets", undefined],
-    ]);
-    expect(f.company!.demand!.lead_sources).toMatchObject([{ name: "Referrals", volume_per_week: 3 }]);
-    expect(f.proposals!.map((p) => p.type)).toEqual(["issue", "issue", "issue"]);
+    expect(f).not.toHaveProperty("company");
+    expect(f).not.toHaveProperty("proposals");
     expect(f.first_principles!.measures![0]).toMatchObject({ kpi: "cycleHours", comparator: "atMost", target: 40 });
     expect(f.first_principles!.job).toBeUndefined();
   });
@@ -258,29 +243,10 @@ describe("Copperleaf: Enquiry to signed client", () => {
     expect(gaps.map((g) => g.text)).toEqual(["Pitch deck has no role", "Send contract has no hands-on time"]);
   });
 
-  it("suggests only what was said and settled, and leaves the rest as open questions", () => {
+  it("carries no company facts or proposals, and first principles hold only what a speaker stated", () => {
     const f = checked(pack).file;
-    expect(f.company!.people.map((p) => p.name)).toEqual(["Ellie Marsh", "Kofi Mensah", "Ruby Chen", "Maddie Kerr"]);
-    // The later correction wins (Tom: "Ruby starts on the ninth, not the second").
-    expect(f.company!.people.find((p) => p.name === "Ruby Chen")!.start_date).toBe("2026-11-09");
-    expect(f.company!.people.find((p) => p.name === "Kofi Mensah")!.leave).toEqual([{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family abroad; booked" }]);
-    const client = (name: string) => f.company!.clients.find((c) => c.name === name)!;
-    expect(client("Brambleway Farm Shop").active).toBe(false);
-    expect(client("Harlow and Pike Opticians").assignments).toEqual({ "Account director": "Tom Whitfield" });
-    const lead = (name: string) => f.company!.demand!.lead_sources.find((l) => l.name === name)!;
-    expect(f.company!.demand!.lead_sources.map((l) => l.name)).toEqual(["Website enquiries", "LinkedIn"]);
-    expect(lead("Website enquiries").volume_per_week).toBe(9);
-    expect(lead("LinkedIn").volume_per_week).toBeUndefined();
-    expect(lead("LinkedIn").evidence!.map((c) => c.value)).toEqual([2, 1]);
-    expect(f.company!.roles.map((r) => r.name)).toEqual(["Designer"]);
-    expect(f.company!.demand!.seasonality).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5]);
-    expect(f.company!.clients.map((c) => c.name)).toEqual(["Ashgrove Garden Centre", "Harlow and Pike Opticians", "Brambleway Farm Shop"]);
-    expect(f.proposals!.map((p) => p.title)).toEqual([
-      "Proposals wait about a week on Grace's desk",
-      "Proposals need a second version because the budget comes up late",
-      "The pitch deck is briefed the day before it is due",
-      "Chasing clients to sign takes a lot of Tom's time",
-    ]);
+    expect(f).not.toHaveProperty("company");
+    expect(f).not.toHaveProperty("proposals");
     // First principles hold only the two rules a speaker stated.
     expect(f.first_principles!.requirements).toHaveLength(2);
     expect(f.first_principles!.job).toBeUndefined();

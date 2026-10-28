@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { takeLinkFetch, LINK_FETCHES_PER_MINUTE } from "../src";
-import { createUser, startTestDb, userClaims, type McpTestDb } from "./helpers";
+import { takeLinkFetch, LINK_FETCHES_PER_MINUTE } from "../../src/process-import";
+import { createUser, startTestDb, userClaims, type ImportTestDb } from "./helpers";
 
 // The link limit's answers, against a throwaway database: the real counter (`take_link_fetch`, also tested in packages/db), the
 // function missing before its migration is applied, and any other failure.
 
-let env: McpTestDb;
+let env: ImportTestDb;
 
 beforeAll(async () => {
   env = await startTestDb();

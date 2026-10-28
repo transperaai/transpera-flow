@@ -47,7 +47,6 @@ const NULLABLE_TABLE_COLUMNS: Record<string, readonly string[]> = {
 
 // Arguments with no default that the function nevertheless accepts as null (the catalog can't say): typed `| null`.
 const NULLABLE_ARGS: Record<string, readonly string[]> = {
-  submit_play_proposal: ["note", "issue"],
 };
 
 const q = (s: string) => JSON.stringify(s);

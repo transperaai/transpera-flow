@@ -1,6 +1,5 @@
 // Upload a process (issue #166, B13): a checked `transpera-process/1` file (packages/db/src/process-file.ts) becomes a new
-// process with a draft revision. The file is turned into the same process_json `import_process` takes and written by the
-// same code (`importNewProcess` in building-tools.ts), so matching, defaults, the editor's graph rules, evidence marks
+// process with a draft revision. The file is turned into a process_json and written by `importNewProcess` (import.ts), so matching, defaults, the editor's graph rules, evidence marks
 // ("to confirm") and auto-layout are not duplicated here. What this adds: roles are only ever matched to roles the company
 // already has (an unknown one is mapped by the person uploading, or left blank; none is created), people are never created,
 // and the upload is written to the change log as "Imported from <file or link>".
@@ -15,13 +14,13 @@ import {
   type GapInput,
   type ProcessFile,
   type SimulationGap,
-} from "@transpera-flow/db";
-import { rpc } from "@transpera-flow/db/client";
+} from "../index";
+import { rpc } from "../client";
 import { normalizeName } from "./building";
-import { importNewProcess, type ImportBundle, type ImportBundleResult, type ImportEdgeJson, type ImportStepJson, type ProcessJson } from "./building-tools";
-import { planFileExtras, type ExtrasPlan, type FileIds, type SuggestionView } from "./file-extras";
-import { resolveWorkspace, type ToolContext } from "./context";
-import { ToolError } from "./result";
+import { importNewProcess, type ImportBundle, type ImportBundleResult, type ImportEdgeJson, type ImportStepJson, type ProcessJson } from "./import";
+import { planFileExtras, type FileIds } from "./file-extras";
+import { resolveWorkspace, type ImportContext } from "./context";
+import { ImportError } from "./errors";
 
 type Named = { id: string; name: string };
 
@@ -44,20 +43,16 @@ export interface ImportPreview {
   /** A /2 file: what it carries beyond the steps, as the upload would write it. */
   extras?: {
     sources: { title: string; kind: string; date: string | null }[];
-    suggestions: SuggestionView[];
-    proposals: ExtrasPlan["proposalViews"];
     firstPrinciplesParts: number;
     /** Left out or changed, in plain words. */
     notes: string[];
-    /** Where the file disagrees with the company's own values. */
-    conflicts: string[];
   };
   /** What the process still lacks for meaningful simulation numbers (issue #167), as the preview shows it. */
   gap: { input: GapInput; roleOf: Record<string, string>; gaps: SimulationGap[] };
 }
 
 /** The company's roles and people, as the ones a file can name. */
-async function lookups(ctx: ToolContext, workspaceId: string): Promise<{ roles: Named[]; people: Named[] }> {
+async function lookups(ctx: ImportContext, workspaceId: string): Promise<{ roles: Named[]; people: Named[] }> {
   const roles = await ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", workspaceId).where("active", "=", true).orderBy("name").execute();
   const people = await ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", workspaceId).orderBy("name").execute();
   return { roles, people };
@@ -66,14 +61,14 @@ async function lookups(ctx: ToolContext, workspaceId: string): Promise<{ roles: 
 const byName = (list: readonly Named[], name: string): Named | undefined => list.find((x) => normalizeName(x.name) === normalizeName(name));
 
 /** An existing process with this name (ignoring case and punctuation), as the import itself would refuse it. */
-async function processNamed(ctx: ToolContext, workspaceId: string, name: string): Promise<Named | null> {
+async function processNamed(ctx: ImportContext, workspaceId: string, name: string): Promise<Named | null> {
   const found = (await listProcesses(ctx.db, workspaceId)).find((p) => normalizeName(p.name) === normalizeName(name));
   return found ? { id: found.id, name: found.name } : null;
 }
 
 /** Everything the preview needs to know about the company to show what an upload would do. */
-export async function previewProcessFile(ctx: ToolContext, workspaceId: string, file: ProcessFile, name?: string): Promise<ImportPreview> {
-  const ws = await resolveWorkspace(ctx, workspaceId, []);
+export async function previewProcessFile(ctx: ImportContext, workspaceId: string, file: ProcessFile, name?: string): Promise<ImportPreview> {
+  const ws = await resolveWorkspace(ctx, workspaceId);
   // The old call ignored an error here (canEdit then read as false), so keep that.
   const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: ws.id }).catch(() => null);
   const { roles, people } = await lookups(ctx, ws.id);
@@ -93,11 +88,8 @@ export async function previewProcessFile(ctx: ToolContext, workspaceId: string, 
     const plan = await planFileExtras(ctx, ws, file, previewIds(file));
     extras = {
       sources: (file.sources ?? []).map((x) => ({ title: x.title, kind: x.kind, date: x.date ?? null })),
-      suggestions: plan.suggestionViews,
-      proposals: plan.proposalViews,
       firstPrinciplesParts: plan.firstPrinciplesParts,
       notes: plan.notes,
-      conflicts: plan.conflicts,
     };
   }
   // Incoming volume: the company's lead sources (a servicing process has no recurrence until it is linked to a service).
@@ -106,8 +98,7 @@ export async function previewProcessFile(ctx: ToolContext, workspaceId: string, 
     const company = await loadCompanyModel(ctx.db, ws);
     if (company.leadSources.some((l) => Number(l.volume_week) > 0)) volume = "known";
   }
-  const suggestedVolume = !!file.company?.demand?.lead_sources.some((l) => (l.volume_per_week ?? 0) > 0);
-  const gapInput = gapInputFromFile(file, { hasRole: (r) => !!byName(roles, r), volume, volumeSuggested: suggestedVolume });
+  const gapInput = gapInputFromFile(file, { hasRole: (r) => !!byName(roles, r), volume });
   return {
     workspace: { id: ws.id, name: ws.name },
     roles,
@@ -149,7 +140,7 @@ export interface ImportFileResult {
   to_confirm: number;
   /** Things worth a look: graph warnings, steps left without a role or person, a change-log entry that couldn't be written. */
   warnings: string[];
-  /** A /2 file: what was written beside the process (sources, pending suggestions and proposals, first principles). */
+  /** A /2 file: what was written beside the process (sources, first principles). */
   bundle?: ImportBundleResult;
 }
 
@@ -273,18 +264,18 @@ export function fileToProcessJson(
  * Create a new process, with a draft, from a checked file. Acts as the signed-in user (RLS), so it needs an editor. Writes
  * nothing if any of it is invalid, never publishes, and creates no role, person, client or other company data.
  */
-export async function importProcessFile(ctx: ToolContext, file: ProcessFile, opts: ImportFileOptions): Promise<ImportFileResult> {
-  const ws = await resolveWorkspace(ctx, opts.workspaceId, []);
+export async function importProcessFile(ctx: ImportContext, file: ProcessFile, opts: ImportFileOptions): Promise<ImportFileResult> {
+  const ws = await resolveWorkspace(ctx, opts.workspaceId);
   const name = (opts.name ?? file.name).trim();
-  if (!name) throw new ToolError("invalid_input", "Give the process a name.");
+  if (!name) throw new ImportError("invalid_input", "Give the process a name.");
   const clash = await processNamed(ctx, ws.id, name);
-  if (clash) throw new ToolError("name_taken", `You already have a process called '${clash.name}'. Give this one a different name.`, [clash]);
+  if (clash) throw new ImportError("name_taken", `You already have a process called '${clash.name}'. Give this one a different name.`, [clash]);
 
   const { roles, people } = await lookups(ctx, ws.id);
   const warnings: string[] = [];
   const mapped = new Map<string, string | null>();
   for (const [from, to] of opts.roleMap ?? []) {
-    if (to !== null && !roles.some((r) => r.id === to)) throw new ToolError("invalid_input", `Role '${from}' was matched to a role that isn't one of this company's.`);
+    if (to !== null && !roles.some((r) => r.id === to)) throw new ImportError("invalid_input", `Role '${from}' was matched to a role that isn't one of this company's.`);
     mapped.set(normalizeName(from), to);
   }
   let blankRoles = 0;
@@ -310,16 +301,12 @@ export async function importProcessFile(ctx: ToolContext, file: ProcessFile, opt
   let bundle: ImportBundle | undefined;
   if (ids) {
     const plan = await planFileExtras(ctx, ws, file, ids);
-    warnings.push(...plan.notes, ...plan.conflicts);
+    warnings.push(...plan.notes);
     bundle = {
       processId: ids.processId,
       importSource: opts.source,
       sources: plan.sources,
-      extras: {
-        ...(plan.firstPrinciples ? { first_principles: plan.firstPrinciples as never } : {}),
-        suggestions: plan.suggestions as never,
-        proposals: plan.proposals as never,
-      },
+      extras: { ...(plan.firstPrinciples ? { first_principles: plan.firstPrinciples as never } : {}) },
     };
   }
   const out = await importNewProcess(ctx, ws.id, json, [], bundle);

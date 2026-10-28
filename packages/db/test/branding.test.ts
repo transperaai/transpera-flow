@@ -166,7 +166,7 @@ describe("saving through save_fields", () => {
   });
 
   it("an MCP caller (an API token) is refused by the needs_review trigger", async () => {
-    await refused(save({ ...users.owner!.claims, api_token_id: randomUUID() }), "42501", /company model changes only by review/);
+    await refused(save({ ...users.owner!.claims, api_token_id: randomUUID() }), "42501", /company model can't be changed through an API token/);
     expect(await q("select branding from workspaces where id = $1", [ws])).toEqual([{ branding: {} }]);
   });
 

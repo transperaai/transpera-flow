@@ -4,11 +4,11 @@
 // `checkWorkspaceBundle` says whether a parsed file is a `transpera-workspace/1` backup it can restore, with plain-sentence
 // errors, warnings and a summary. `planWorkspaceImport` turns a checked bundle into the plan the restore function takes: one
 // draft per process (its live version, or its draft when never published), the company model, issues, sources, scenarios,
-// blocks and pending suggestions, each row cut down to the columns the restore accepts, with every id replaced by a
+// and blocks, each row cut down to the columns the restore accepts, with every id replaced by a
 // placeholder that keeps the order of the old ids (the engine sorts by id, so a restore must not reshuffle them).
 //
 // Not restored (decisions 1 to 4 on #39): history and older versions, the company map (the new workspace keeps its own),
-// solutions, decided suggestions, detections, issue history, source files and everything about who made what. Per-person times
+// solutions, suggestions (removed 28 Oct 2026; an older backup still holds them), detections, issue history, source files and everything about who made what. Per-person times
 // (C6, `person_capacity_factors`) are restored (#228), so a restored workspace simulates like the original; the switch itself
 // is restored like any setting.
 
@@ -48,8 +48,6 @@ export const WORKSPACE_IMPORT_LIMITS = {
   clients: 3000,
   scenarios: 900,
   blocks: 900,
-  suggestions: 1500,
-  proposals: 900,
   /** The link tables, each row about 0.1 ms: sized with the limits above (under 1 role assignment and 2 skills a person, a client assignment for 4 in 10 clients, a few links a source). */
   personRoles: 1200,
   personSkills: 3000,
@@ -120,8 +118,6 @@ export const IMPORT_COLUMNS = {
   /** No `created_at`: nothing orders per-person times by it. */
   person_capacity_factors: cols("person_capacity_factors", "person_id", "step_id", "factor", "provenance"),
   source_links: cols("source_links", "id", "insight_key", "issue_id", "kind", "process_id", "source_id", "step_id"),
-  suggestions: cols("suggestions", "id", "target_table", "target_id", "patch", "evidence", "note", "created_at"),
-  proposals: cols("suggestion_proposals", "id", "kind", "title", "detail", "payload", "evidence", "note", "issue_id", "created_at"),
 } as const;
 
 /** The keys of `WorkspaceSettings`, which the type checker keeps complete. */
@@ -156,10 +152,10 @@ export interface ImportSummary {
   restored: SummaryLine[];
   /** "Stays in the file". */
   leftOut: SummaryLine[];
-  /** Whether the workspace settings would be written (an owner or agency admin), suggested (an editor), or aren't in the file. */
-  settings: "applied" | "suggested" | "none";
+  /** Whether the workspace settings would be written (a caller who can manage the workspace), left out (anyone else), or aren't in the file. */
+  settings: "applied" | "skipped" | "none";
   /** The numbers the limits are checked against. */
-  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; suggestions: number; proposals: number; personRoles: number; personSkills: number; capacityFactors: number; clientAssignments: number; sourceLinks: number; clientServices: number; personLeave: number; companyOther: number; planBytes: number };
+  measures: { processes: number; steps: number; edges: number; sources: number; sourceChars: number; issues: number; people: number; clients: number; scenarios: number; blocks: number; personRoles: number; personSkills: number; capacityFactors: number; clientAssignments: number; sourceLinks: number; clientServices: number; personLeave: number; companyOther: number; planBytes: number };
 }
 
 export interface BundleCheck {
@@ -218,8 +214,6 @@ export interface ImportPlan {
   person_skills: Row[];
   person_capacity_factors: Row[];
   source_links: Row[];
-  suggestions: Row[];
-  proposals: Row[];
 }
 
 export const PLACEHOLDER_PREFIX = "00000000-0000-4000-8000-";
@@ -244,7 +238,9 @@ const pick = (row: Row, columns: readonly string[]): Row => {
 // ---------------------------------------------------------------------------------------------------------------------
 // The checker
 
-const SECTION_ARRAYS = ["processes", "scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const;
+const SECTION_ARRAYS = ["processes", "scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const;
+/** Sections a backup made before Suggestions were removed (28 Oct 2026) may still hold: read, counted, never restored. */
+const LEGACY_SECTIONS = ["suggestions", "suggestion_proposals"] as const;
 /** Tables whose rows have an `id` column (company-model tables without one are keyed otherwise). */
 const NO_ID_TABLES = new Set(["person_roles", "person_skills", "person_capacity_factors", "client_services", "client_assignments", "demand_settings", "lever_settings", "analysis_rules", "solution_issues"]);
 
@@ -258,7 +254,7 @@ function expectedCounts(b: WorkspaceBundle): Record<string, number> {
   out.process_versions = versions.length;
   out.steps = versions.reduce((n, v) => n + rowsOf(v.steps).length, 0);
   out.edges = versions.reduce((n, v) => n + rowsOf(v.edges).length, 0);
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) out[k] = b[k].length;
+  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) out[k] = b[k].length;
   return out;
 }
 
@@ -270,6 +266,7 @@ function shapeProblem(v: Row): string | null {
   if (!isObj(cm)) return "the company model is missing";
   for (const [k, rows] of Object.entries(cm)) if (!Array.isArray(rows)) return `company_model.${k} isn't a list`;
   for (const k of SECTION_ARRAYS) if (!Array.isArray(v[k])) return `${k} isn't a list`;
+  for (const k of LEGACY_SECTIONS) if (v[k] !== undefined && !Array.isArray(v[k])) return `${k} isn't a list`;
   if (!isObj(v.counts)) return "the counts are missing";
 
   const checkTable = (name: string, rows: unknown[], needId: boolean): string | null => {
@@ -350,7 +347,7 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
       if (isObj(v.first_principles)) yield v.first_principles;
     }
   }
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) yield* b[k];
+  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) yield* b[k];
   for (const i of b.issues) yield* rowsOf(i.events);
 }
 
@@ -361,7 +358,7 @@ export function checkWorkspaceBundle(value: unknown, options: { canManage?: bool
     restored: [],
     leftOut: [],
     settings: "none",
-    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, suggestions: 0, proposals: 0, personRoles: 0, personSkills: 0, capacityFactors: 0, clientAssignments: 0, sourceLinks: 0, clientServices: 0, personLeave: 0, companyOther: 0, planBytes: 0 },
+    measures: { processes: 0, steps: 0, edges: 0, sources: 0, sourceChars: 0, issues: 0, people: 0, clients: 0, scenarios: 0, blocks: 0, personRoles: 0, personSkills: 0, capacityFactors: 0, clientAssignments: 0, sourceLinks: 0, clientServices: 0, personLeave: 0, companyOther: 0, planBytes: 0 },
   };
   const stop = (message: string): BundleCheck => ({ ok: false, errors: [message], warnings: [], summary: empty });
 
@@ -381,8 +378,6 @@ export function checkWorkspaceBundle(value: unknown, options: { canManage?: bool
     ["sources", L_.sources, "sources"],
     ["scenarios", L_.scenarios, "scenarios"],
     ["blocks", L_.blocks, "blocks"],
-    ["suggestions", L_.suggestions, "suggestions"],
-    ["suggestion_proposals", L_.proposals, "proposals"],
   ];
   for (const [k, max, what] of WORK_CAP) {
     const list = value[k];
@@ -431,7 +426,7 @@ export function checkWorkspaceBundle(value: unknown, options: { canManage?: bool
   errors.push(...limitProblems(summary.measures));
 
   if (bundle.engine_version !== ENGINE_VERSION) warnings.push(`This backup was made with engine ${typeof bundle.engine_version === "string" ? bundle.engine_version : "unknown"}; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
-  if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts and no pending suggestions.");
+  if (bundle.scope === "published") warnings.push("This backup was made by a viewer: it has no drafts.");
   for (const line of summary.leftOut) if (line.count > 0 && !QUIET_LEFT_OUT.has(line.key)) warnings.push(`Stays in the file: ${num(line.count)} ${line.label}.`);
   warnings.push(...planned.warnings);
 
@@ -456,8 +451,6 @@ function limitProblems(m: ImportSummary["measures"]): string[] {
   over(m.clients, L.clients, "clients");
   over(m.scenarios, L.scenarios, "scenarios");
   over(m.blocks, L.blocks, "blocks");
-  over(m.suggestions, L.suggestions, "pending suggestions");
-  over(m.proposals, L.proposals, "pending proposals");
   over(m.personRoles, L.personRoles, "role assignments");
   over(m.personSkills, L.personSkills, "skills");
   over(m.capacityFactors, L.capacityFactors, "per-person times");
@@ -486,7 +479,7 @@ export function restoreSizeWarning(bundle: WorkspaceBundle): string | null {
   const parts: [number, number, string][] = [
     [m.processes, L.processes, "processes"], [m.steps, L.steps, "steps"], [m.edges, L.edges, "edges"], [m.sources, L.sources, "sources"],
     [m.sourceChars, L.sourceChars, "characters of source text"], [m.issues, L.issues, "issues"], [m.people, L.people, "people"], [m.clients, L.clients, "clients"],
-    [m.scenarios, L.scenarios, "scenarios"], [m.blocks, L.blocks, "blocks"], [m.suggestions, L.suggestions, "pending suggestions"], [m.proposals, L.proposals, "pending proposals"],
+    [m.scenarios, L.scenarios, "scenarios"], [m.blocks, L.blocks, "blocks"],
     [m.personRoles, L.personRoles, "role assignments"], [m.personSkills, L.personSkills, "skills"], [m.capacityFactors, L.capacityFactors, "per-person times"], [m.clientAssignments, L.clientAssignments, "client assignments"],
     [m.sourceLinks, L.sourceLinks, "source links"], [m.clientServices, L.clientServices, "client services"], [m.personLeave, L.personLeave, "leave entries"],
     [m.companyOther, L.companyOther, "other company settings rows"], [m.planBytes, L.planBytes, "bytes once prepared"],
@@ -528,7 +521,6 @@ export const IMPORT_REFS: Record<string, Ref[]> = {
     R("role_id", "roles", "null"), R("scenario_id", "scenarios", "null"), R("step_id", "steps", "null"),
   ],
   source_links: [R("source_id", "sources", "require"), R("issue_id", "issues", "drop"), R("process_id", "processes", "drop"), R("step_id", "steps", "drop")],
-  proposals: [R("issue_id", "issues", "drop")],
 };
 export const IMPORT_STEP_REFS = [R("parent_step_id", "version", "null"), R("entry_step_id", "version", "null"), R("rework_to_step_id", "version", "null"), R("person_id", "people", "null"), R("role_id", "roles", "null"), R("child_process_id", "processes", "null")];
 
@@ -536,8 +528,8 @@ const LABELS: Record<string, string> = {
   roles: "roles", people: "people", person_roles: "role assignments", person_leave: "leave entries", lead_sources: "lead sources", seasonality: "seasonality months",
   churn_drivers: "churn drivers", market_conditions: "market conditions", market_schedule: "market schedule rows", clients: "clients", sources: "sources",
   scenarios: "scenarios", blocks: "blocks", issues: "issues", services: "services", service_servicing: "servicing rules", client_groups: "client groups",
-  client_services: "client services", client_assignments: "client assignments", person_skills: "skills", person_capacity_factors: "per-person times", source_links: "source links", suggestions: "pending suggestions",
-  proposals: "pending proposals", steps: "steps", edges: "edges", processes: "processes",
+  client_services: "client services", client_assignments: "client assignments", person_skills: "skills", person_capacity_factors: "per-person times", source_links: "source links",
+  steps: "steps", edges: "edges", processes: "processes",
 };
 
 /** The rows with each reference checked against what is restored: a row whose required reference is missing is dropped; an optional one is cleared. */
@@ -731,15 +723,13 @@ export function planWorkspaceImport(
     return true;
   });
 
-  const restoredIds = new Set<string>([lc(bundle.workspace.id)]);
   const personSkills = flat("person_skills", company("person_skills"), IMPORT_REFS.person_skills);
   // The export may carry a numeric as a string; the plan holds a number.
   const capacityFactors = flat("person_capacity_factors", company("person_capacity_factors"), IMPORT_REFS.person_capacity_factors).map((r) => ({ ...r, factor: Number(r.factor) }));
   const sourceLinks = flat("source_links", linkRows, IMPORT_REFS.source_links);
 
-  const pendingSuggestions = bundle.suggestions.filter((s) => s.status === "pending");
-  const pendingProposals = bundle.suggestion_proposals.filter((s) => s.status === "pending");
-  const decided = bundle.suggestions.length - pendingSuggestions.length + (bundle.suggestion_proposals.length - pendingProposals.length);
+  // A backup made before Suggestions were removed holds suggestions and visitor ideas; none is restored.
+  const legacySuggestions = rowsOf(bundle.suggestions).length + rowsOf(bundle.suggestion_proposals).length;
 
   const plan: ImportPlan = {
     format: PLAN_FORMAT,
@@ -770,8 +760,6 @@ export function planWorkspaceImport(
     person_skills: personSkills,
     person_capacity_factors: capacityFactors,
     source_links: sourceLinks,
-    suggestions: [],
-    proposals: [],
   };
 
   // Settings: only the keys of WorkspaceSettings.
@@ -785,25 +773,6 @@ export function planWorkspaceImport(
   for (const k of unknown.sort()) warnings.push(`The workspace setting "${k}" isn't one this version knows and was left out.`);
   plan.settings = Object.keys(known).length ? known : null;
 
-  // Pending suggestions and proposals, last: they point at what is restored.
-  for (const set of [sets.processes!, sets.steps!, sets.roles!, sets.people!, sets.services!, sets.clients!, sets.sources!, sets.scenarios!, sets.issues!]) for (const id of set) restoredIds.add(id);
-  for (const k of ["blocks", "lead_sources", "seasonality", "churn_drivers", "person_leave", "client_groups", "service_servicing"] as const) for (const r of plan[k]) restoredIds.add(lc(r.id));
-  for (const p of processes) for (const e of p.edges) restoredIds.add(lc(e.id));
-  plan.suggestions = pendingSuggestions
-    .filter((s) => {
-      const ok = s.target_id == null || restoredIds.has(lc(s.target_id));
-      if (!ok) note("suggestions", "dropped");
-      return ok;
-    })
-    .map((s) => pick(s, IMPORT_COLUMNS.suggestions))
-    .sort(byCreated);
-  // A visitor's idea from a play link (B4) may be for no issue. A restored row becomes an `upload` idea, and the table's rule says
-  // an idea that isn't for an issue must be a play-link one, so those are left out (with a note) rather than failing the restore.
-  const restorableProposals = pendingProposals.filter((p) => !(p.kind === "solution_idea" && (p.issue_id == null || p.issue_id === "")));
-  if (restorableProposals.length < pendingProposals.length) warnings.push("Visitor ideas not tied to an issue aren't restored.");
-  plan.proposals = flat("proposals", restorableProposals, IMPORT_REFS.proposals).sort(byCreated);
-
-  // A pending suggestion only counted as dropped above if it pointed at nothing restored; the lists are final now.
   for (const [section, e] of dropped) {
     const label = LABELS[section] ?? section;
     if (e.dropped) warnings.push(`${num(e.dropped)} ${label} pointed at something that isn't in the backup or isn't restored, and were left out.`);
@@ -828,7 +797,7 @@ export function planWorkspaceImport(
   const line = (key: string, count: number, label = LABELS[key] ?? key): SummaryLine => ({ key, label, count });
   const restored = [
     line("processes", processes.length, "processes, as drafts"),
-    ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "scenarios", "blocks", "issues", "sources", "suggestions", "proposals"] as const).map((k) => line(k, plan[k].length)),
+    ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "scenarios", "blocks", "issues", "sources"] as const).map((k) => line(k, plan[k].length)),
     line("person_capacity_factors", plan.person_capacity_factors.length),
   ].filter((l) => l.count > 0);
   const leftOut = [
@@ -836,7 +805,7 @@ export function planWorkspaceImport(
     line("company_map", companyVersions, "versions of the company map (the new workspace keeps its own)"),
     line("unpublished_drafts", unpublishedDrafts, "unpublished drafts"),
     line("solutions", bundle.solutions.length + solutionLinks, "solutions and their links"),
-    line("decided_suggestions", decided, "decided suggestions and proposals"),
+    line("suggestions_removed", legacySuggestions, "suggestions and visitor ideas (Suggestions were removed, so none is restored)"),
     line("detections", detections, "detected insights (they show again until dismissed)"),
     line("step_links", stepLinksGone, "source links to steps no longer in the process"),
     line("history", issueEvents, "issue history entries"),
@@ -846,7 +815,7 @@ export function planWorkspaceImport(
   const summary: ImportSummary = {
     restored,
     leftOut,
-    settings: plan.settings === null ? "none" : options.canManage ? "applied" : "suggested",
+    settings: plan.settings === null ? "none" : options.canManage ? "applied" : "skipped",
     measures: {
       processes: processes.length,
       steps: stepCount,
@@ -858,8 +827,6 @@ export function planWorkspaceImport(
       clients: plan.clients.length,
       scenarios: plan.scenarios.length,
       blocks: plan.blocks.length,
-      suggestions: plan.suggestions.length,
-      proposals: plan.proposals.length,
       personRoles: plan.person_roles.length,
       personSkills: plan.person_skills.length,
       capacityFactors: plan.person_capacity_factors.length,
@@ -890,7 +857,7 @@ function assertOnlyPlaceholders(plan: ImportPlan): void {
   for (const section of Object.keys(plan) as (keyof ImportPlan)[]) {
     const v = plan[section];
     if (!Array.isArray(v) || section === "processes") continue;
-    flatFields(section, v as Row[], section === "market_schedule" ? ["condition_id"] : section === "suggestions" ? ["target_id"] : section === "issues" ? ["owner_ids", "source_ids"] : []);
+    flatFields(section, v as Row[], section === "market_schedule" ? ["condition_id"] : section === "issues" ? ["owner_ids", "source_ids"] : []);
   }
   for (const i of plan.issues) for (const l of rowsOf(i.links)) {
       bad("issues.links", l.process_id);

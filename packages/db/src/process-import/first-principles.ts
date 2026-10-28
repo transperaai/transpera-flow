@@ -26,7 +26,7 @@ import {
   type SuccessKpi,
 } from "@transpera-flow/engine";
 import { normalizeName, resolveName } from "./building";
-import { ToolError } from "./result";
+import { ImportError } from "./errors";
 
 export interface FpInput {
   job?: Partial<FirstPrinciples["job"]>;
@@ -61,7 +61,7 @@ function lookup(items: readonly { id: string; name: string }[], ref: string | nu
   try {
     return resolveName(items, ref, kind, "").id;
   } catch (err) {
-    if (err instanceof ToolError) {
+    if (err instanceof ImportError) {
       const candidates = Array.isArray(err.candidates) && err.candidates.length && err.code === "ambiguous" ? ` It could be ${(err.candidates as { name: string }[]).map((c) => c.name).join(", ")}.` : "";
       warnings.push(`${where}: no single ${kind} matches '${ref}'.${candidates}`);
       return null;
@@ -81,7 +81,7 @@ function mergeList<I, T>(current: readonly T[], input: readonly I[] | undefined,
     if (at >= 0) out[at] = mode === "replace" ? fresh : update(out[at]!, i);
     else out.push(fresh);
   }
-  if (out.length > FP_MAX_ITEMS) throw new ToolError("invalid_input", `A list can hold at most ${FP_MAX_ITEMS} items; this one would have ${out.length}.`);
+  if (out.length > FP_MAX_ITEMS) throw new ImportError("invalid_input", `A list can hold at most ${FP_MAX_ITEMS} items; this one would have ${out.length}.`);
   return out;
 }
 

@@ -1,23 +1,22 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { checkProcessFile, findGaps, gapInputFromBundle, PROCESS_FILE_EXAMPLE_2 } from "@transpera-flow/db";
-import { rpc } from "@transpera-flow/db/client";
-import { importProcessFile, previewProcessFile, ToolError } from "../src";
-import type { ToolContext } from "../src/context";
-import { startTestDb, userClaims, type McpTestDb } from "./helpers";
+import { checkProcessFile, findGaps, gapInputFromBundle, PROCESS_FILE_EXAMPLE_2 } from "../../src";
+import { importProcessFile, previewProcessFile, ImportError } from "../../src/process-import";
+import type { ImportContext } from "../../src/process-import/context";
+import { startTestDb, userClaims, type ImportTestDb } from "./helpers";
 
 // Upload a transpera-process/2 file (issue #167, B14), end to end as the web app does it: checked file → shared import code →
 // Kysely under RLS as the signed-in user → `import_process_bundle`. Every section lands (draft with step evidence, sources and
-// their links, first principles, pending suggestions, pending proposals) and nothing company-level is applied. Runs on a
+// their links, first principles) and nothing company-level is touched. Runs on a
 // throwaway database (test/helpers.ts).
 
 
-let env: McpTestDb;
+let env: ImportTestDb;
 let admin: pg.Client;
 let workspaceId: string;
-let editorCtx: ToolContext;
-let viewerCtx: ToolContext;
+let editorCtx: ImportContext;
+let viewerCtx: ImportContext;
 let editorId: string;
 let mdRoleId: string;
 
@@ -28,8 +27,8 @@ async function createUser(email: string) {
   return id;
 }
 
-function contextFor(userId: string): ToolContext {
-  return { db: env.dbAs(userClaims(userId)), tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-05" };
+function contextFor(userId: string): ImportContext {
+  return { db: env.dbAs(userClaims(userId)), userId };
 }
 
 // Loosely typed on purpose: the tests change a file one way at a time, by reaching into it.
@@ -47,8 +46,6 @@ const count = async (sql: string, params: unknown[] = []) => Number((await q(sql
 const counts = async () => ({
   processes: await count("select count(*) n from processes where workspace_id = $1", [workspaceId]),
   sources: await count("select count(*) n from sources where workspace_id = $1", [workspaceId]),
-  suggestions: await count("select count(*) n from suggestions where workspace_id = $1", [workspaceId]),
-  proposals: await count("select count(*) n from suggestion_proposals where workspace_id = $1", [workspaceId]),
   fp: await count("select count(*) n from first_principles where workspace_id = $1", [workspaceId]),
 });
 
@@ -70,7 +67,7 @@ describe("uploading a transpera-process/2 file ", () => {
     await env?.close();
   });
 
-  it("every section lands: draft with step evidence, sources and links, first principles, pending suggestions and proposals", async () => {
+  it("every section lands: draft with step evidence, sources and links, first principles; no company data is touched", async () => {
     const people = await count("select count(*) n from people where workspace_id = $1", [workspaceId]);
     const roles = await count("select count(*) n from roles where workspace_id = $1", [workspaceId]);
     const services = await count("select count(*) n from services where workspace_id = $1", [workspaceId]);
@@ -78,8 +75,7 @@ describe("uploading a transpera-process/2 file ", () => {
     const issues = await count("select count(*) n from issues where workspace_id = $1", [workspaceId]);
     const file = v2();
     const r = await importProcessFile(editorCtx, file, { workspaceId, source: "v2.json" });
-    expect(r.bundle).toEqual({ sources: 3, suggestions: expect.any(Number), proposals: 1, first_principles: true });
-    expect(r.bundle!.suggestions).toBeGreaterThanOrEqual(3);
+    expect(r.bundle).toEqual({ sources: 3, first_principles: true });
     const proc = (await q("select * from processes where workspace_id = $1 and name = $2", [workspaceId, file.name]))[0];
     expect(proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import" });
 
@@ -118,36 +114,15 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(fp.measures[0]).toMatchObject({ kpi: "winRate", comparator: "atLeast", target: 0.3 });
     expect(JSON.stringify(fp.statements)).toContain("The job, as said");
 
-    // Company facts: pending suggestions with their evidence; nothing applied.
-    const sugg = await q("select target_table, target_id, status, patch, evidence, note from suggestions where workspace_id = $1 order by target_table", [workspaceId]);
-    expect(sugg.every((s) => s.status === "pending")).toBe(true);
-    const byTable = (t: string) => sugg.filter((s) => s.target_table === t);
-    expect(byTable("roles")[0]).toMatchObject({ patch: { set: { name: "Account manager" } }, note: "Assumed: The SOP names the role but nobody holds it yet." });
-    expect(byTable("services")[0].patch.set).toMatchObject({ name: "Monthly retainer", price: 1500, pricing_model: "retainer" });
-    expect(byTable("services")[0].evidence[0]).toMatchObject({ source_id: sources.notes.id, timestamp: "page 2" });
-    expect(byTable("lead_sources")[0].patch.set).toMatchObject({ name: "Website form", volume_week: 8 });
-    // Maya exists already: the suggestion is a change to her, not a new person (fte 0.5 → 1).
-    expect(byTable("people")[0]).toMatchObject({ target_id: expect.any(String) });
-    expect(byTable("people")[0].patch.set).toMatchObject({ fte: 1 });
+    // Uploading never adds or changes people, roles, services, lead sources or issues.
     expect(await count("select count(*) n from people where workspace_id = $1", [workspaceId])).toBe(people);
     expect(await count("select count(*) n from roles where workspace_id = $1", [workspaceId])).toBe(roles);
     expect(await count("select count(*) n from services where workspace_id = $1", [workspaceId])).toBe(services);
     expect(await count("select count(*) n from lead_sources where workspace_id = $1", [workspaceId])).toBe(leads);
     expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues);
-
-    // Proposals: a pending issue linked to the new process and step, with its quote.
-    const prop = (await q("select * from suggestion_proposals where workspace_id = $1 and title = 'Proposals sit for a day before review'", [workspaceId]))[0];
-    expect(prop).toMatchObject({ kind: "issue", status: "pending" });
-    expect(prop.payload).toMatchObject({ severity: "warning", type: "delay", links: [{ process_id: proc.id, step_id: steps["Write proposal"].id }] });
-    expect(prop.evidence[0]).toMatchObject({ source_id: sources.transcript.id, speaker: "Maya Chen" });
-
-    // A person accepting the proposal makes a real issue linked to the new process's step (the draft's), as for any proposal.
-    const review = await rpc(editorCtx.db, "review_proposals", { ids: [prop.id], decision: "accept" });
-    expect(JSON.stringify(review)).toContain("accepted");
-    expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues + 1);
   });
 
-  it("the preview says what each section would make and where the sources disagree, and writes nothing", async () => {
+  it("the preview says what each section would make, and writes nothing", async () => {
     const before = await counts();
     const file = v2((f) => {
       f.steps.find((s: { id: string }) => s.id === "proposal").evidence.hands_on_hours.push({ source: "sales-sop", time: "page 3", quote: "Allow a day to write a proposal.", value: 8 });
@@ -156,16 +131,11 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(checked.conflicts).toHaveLength(1);
     const p = await previewProcessFile(editorCtx, workspaceId, file);
     expect(p.extras!.sources).toHaveLength(3);
-    expect(p.extras!.suggestions.length).toBeGreaterThanOrEqual(4);
-    expect(p.extras!.suggestions.map((s) => s.subject).join("|")).toContain("Monthly retainer");
-    expect(p.extras!.proposals).toEqual([{ kind: "issue", title: "Proposals sit for a day before review", forIssue: null }]);
     expect(p.extras!.firstPrinciplesParts).toBeGreaterThan(0);
-    // Maya's fte differs from the company's: shown as a conflict, not applied.
-    expect(p.extras!.conflicts.join("\n")).toMatch(/Person Maya Chen: fte is 0\.5 in your company, 1 in the file/);
     expect(await counts()).toEqual(before);
   });
 
-  it("is all or nothing: a name already taken leaves no source, suggestion, proposal or first principles behind", async () => {
+  it("is all or nothing: a name already taken leaves no source or first principles behind", async () => {
     const first = v2();
     await importProcessFile(editorCtx, first, { workspaceId, source: "first.json" });
     const before = await counts();
@@ -175,39 +145,32 @@ describe("uploading a transpera-process/2 file ", () => {
 
   it("a viewer is refused whole", async () => {
     const before = await counts();
-    await expect(importProcessFile(viewerCtx, v2(), { workspaceId, source: "v.json" })).rejects.toBeInstanceOf(ToolError);
+    await expect(importProcessFile(viewerCtx, v2(), { workspaceId, source: "v.json" })).rejects.toBeInstanceOf(ImportError);
     expect(await counts()).toEqual(before);
   });
 
-  it("leaves out what can't be placed and says so: an idea for an issue that doesn't exist, a role the company lacks", async () => {
-    const file = v2((f) => {
-      f.proposals.push({ type: "solution_idea", title: "Automate review", for_issue: "#999", proposed_steps: [{ name: "Bot" }], assumed: "A hunch." });
-      f.company.people.push({ name: "New Hire", roles: ["Account manager"], assumed: "Starts next month." });
-    });
-    const before = await counts();
-    const r = await importProcessFile(editorCtx, file, { workspaceId, source: "gaps.json" });
-    const after = await counts();
-    expect(after.proposals - before.proposals).toBe(1);
-    expect(r.warnings.join("\n")).toMatch(/Proposal 'Automate review' was left out/);
-    expect(r.warnings.join("\n")).toMatch(/Person 'New Hire': the role 'Account manager' isn't one of yours yet \(the file suggests it/);
-    const hire = (await q("select patch from suggestions where workspace_id = $1 and patch -> 'set' ->> 'name' = 'New Hire'", [workspaceId]))[0];
-    expect(hire.patch.roles).toBeUndefined();
+  it("a file made before Suggestions were removed still uploads: its company facts and proposals are not read, and the company is untouched", async () => {
+    const people = await count("select count(*) n from people where workspace_id = $1", [workspaceId]);
+    const roles = await count("select count(*) n from roles where workspace_id = $1", [workspaceId]);
+    const issues = await count("select count(*) n from issues where workspace_id = $1", [workspaceId]);
+    const raw = JSON.parse(JSON.stringify(PROCESS_FILE_EXAMPLE_2));
+    raw.name = `Old v2 ${randomUUID().slice(0, 8)}`;
+    raw.company = { people: [{ name: "New Hire", roles: ["Account manager"], assumed: "Starts next month." }] };
+    raw.proposals = [{ type: "issue", title: "Slow review", assumed: "A hunch." }];
+    const checked = checkProcessFile(raw);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings.join("\n")).toMatch(/company/);
+    expect(checked.warnings.join("\n")).toMatch(/proposals/);
+    expect(checked.file).not.toHaveProperty("company");
+    expect(checked.file).not.toHaveProperty("proposals");
+    const r = await importProcessFile(editorCtx, checked.file!, { workspaceId, source: "old.json" });
+    expect(r.bundle).toEqual({ sources: 3, first_principles: true });
+    expect(await count("select count(*) n from people where workspace_id = $1", [workspaceId])).toBe(people);
+    expect(await count("select count(*) n from roles where workspace_id = $1", [workspaceId])).toBe(roles);
+    expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues);
   });
 
-  it("a solution idea for an issue you track becomes a pending proposal", async () => {
-    const issue = (await q("select id from issues where workspace_id = $1 and number is not null and status = 'open' limit 1", [workspaceId]))[0];
-    expect(issue).toBeDefined();
-    const number = (await q("select number from issues where id = $1", [issue.id]))[0].number;
-    const file = v2((f) => {
-      f.proposals.push({ type: "solution_idea", title: "Fast-track review", for_issue: `#${number}`, proposed_steps: [{ name: "Auto-review", kind: "task", role: "Managing director" }], expect: "Same-day review.", assumed: "A hunch." });
-    });
-    await importProcessFile(editorCtx, file, { workspaceId, source: "idea.json" });
-    const idea = (await q("select kind, issue_id, payload from suggestion_proposals where workspace_id = $1 and title = 'Fast-track review'", [workspaceId]))[0];
-    expect(idea).toMatchObject({ kind: "solution_idea", issue_id: issue.id });
-    expect(idea.payload.steps[0]).toMatchObject({ name: "Auto-review", role: "Managing director" });
-  });
-
-  it("a /1 file still uploads unchanged: no sources, suggestions, proposals or first principles", async () => {
+  it("a /1 file still uploads unchanged: no sources or first principles", async () => {
     const before = await counts();
     const f = JSON.parse(JSON.stringify(PROCESS_FILE_EXAMPLE_2));
     const v1 = checkProcessFile({ format: "transpera-process/1", name: `V1 ${randomUUID().slice(0, 6)}`, steps: f.steps.map((s: Record<string, unknown>) => ({ id: s.id, name: s.name, type: s.type, role: s.role, hands_on_hours: s.hands_on_hours, wait_hours: s.wait_hours })), links: f.links.map((l: Record<string, unknown>) => ({ from: l.from, to: l.to, probability: l.probability, label: l.label })) });
@@ -274,19 +237,6 @@ describe("uploading a transpera-process/2 file ", () => {
     expect((await q("select provenance from steps where revision_id = $1 and name = 'Client decides'", [r.revision_id]))[0].provenance.branch_odds).toBeUndefined();
   });
 
-  it("an upload's suggestions and proposals say where they came from, and the reviewer sees it", async () => {
-    const r = await importProcessFile(editorCtx, v2(), { workspaceId, source: "from-claude.json" });
-    expect(r.bundle!.proposals).toBe(1);
-    const rows = await q("select created_via, import_source from suggestions where workspace_id = $1 and import_source = 'from-claude.json'", [workspaceId]);
-    expect(rows.length).toBeGreaterThan(2);
-    expect(rows.every((x) => x.created_via === "upload")).toBe(true);
-    const prop = await q("select created_via, import_source from suggestion_proposals where workspace_id = $1 and import_source = 'from-claude.json'", [workspaceId]);
-    expect(prop).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
-    // The app reads the proposal's source column as the signed-in user.
-    const read = await editorCtx.db.selectFrom("suggestion_proposals").select(["created_via", "import_source"]).where("import_source", "=", "from-claude.json").execute();
-    expect(read).toEqual([{ created_via: "upload", import_source: "from-claude.json" }]);
-  });
-
   describe("Missing for simulation", () => {
     const gapsOf = async (revisionId: string, processId: string) => {
       const proc = (await q("select * from processes where id = $1", [processId]))[0];
@@ -324,7 +274,7 @@ describe("uploading a transpera-process/2 file ", () => {
         "Write proposal has no hands-on time",
         "Wait for payment has no wait time",
         "Client decides: branch odds missing",
-        "No incoming volume: add lead volume in Settings or accept the suggestion",
+        "No incoming volume: add lead volume in Settings",
       ]);
       const r = await importProcessFile(editorCtx, file, { workspaceId, source: "sparse.json" });
       const proc = (await q("select id from processes where draft_revision_id = $1", [r.revision_id]))[0].id;
@@ -345,7 +295,7 @@ describe("uploading a transpera-process/2 file ", () => {
       expect(await gapsOf(r.revision_id, proc)).not.toContain("Wait for payment has no wait time");
       await fill("update edges set probability = 0.7 where revision_id = $1 and from_step_id = $2 and to_step_id = $3", [r.revision_id, await step("Client decides"), await step("Yes")]);
       expect(await gapsOf(r.revision_id, proc)).not.toContain("Client decides: branch odds missing");
-      expect(await gapsOf(r.revision_id, proc)).toEqual(["No incoming volume: add lead volume in Settings or accept the suggestion"]);
+      expect(await gapsOf(r.revision_id, proc)).toEqual(["No incoming volume: add lead volume in Settings"]);
     });
 
     it("values the file states, backs with a quote or marks assumed are not gaps", async () => {
@@ -370,10 +320,10 @@ describe("uploading a transpera-process/2 file ", () => {
         ],
       }).file!;
       const preview = await previewProcessFile(editorCtx, workspaceId, file);
-      expect(preview.gap.gaps.map((g) => g.text)).toEqual(["No incoming volume: add lead volume in Settings or accept the suggestion"]);
+      expect(preview.gap.gaps.map((g) => g.text)).toEqual(["No incoming volume: add lead volume in Settings"]);
       const r = await importProcessFile(editorCtx, file, { workspaceId, source: "complete.json" });
       const proc = (await q("select id from processes where draft_revision_id = $1", [r.revision_id]))[0].id;
-      expect(await gapsOf(r.revision_id, proc)).toEqual(["No incoming volume: add lead volume in Settings or accept the suggestion"]);
+      expect(await gapsOf(r.revision_id, proc)).toEqual(["No incoming volume: add lead volume in Settings"]);
     });
   });
 });

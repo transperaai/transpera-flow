@@ -1,6 +1,5 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Pool } from "pg";
-import type { Db } from "@transpera-flow/db";
 import { createDb, rpcRows, type Claims } from "@transpera-flow/db/client";
 import { hashApiToken, looksLikeApiToken } from "./tokens";
 import { createMcpServer } from "./tools";
@@ -32,8 +31,6 @@ export interface McpHandlerOptions {
   checkUser: (user: TokenUser) => Promise<TokenUser | null>;
   /** For tests: the current date. */
   now?: () => Date;
-  /** Called with the token's db and the process id after `publish_process` made a version live (A46: AI analysis). */
-  onPublished?: (db: Db, processId: string) => void;
 }
 
 function jsonRpcError(status: number, message: string, headers: Record<string, string> = {}): Response {
@@ -82,7 +79,6 @@ export async function handleMcpRequest(request: Request, options: McpHandlerOpti
     userId: use.user_id,
     activeWorkspaceId: use.active_workspace_id,
     today: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
-    ...(options.onPublished ? { onPublished: (processId: string) => options.onPublished!(db, processId) } : {}),
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   try {

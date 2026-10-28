@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { absolutePositions, type EdgeRow, type StepRow } from "@transpera-flow/db";
-import { flattenNesting, graphWarnings, layoutSteps, nestingProblem, planImport, revisionDiff, type ImportInput, type ImportStep } from "../src/building";
-import { ToolError } from "../src/result";
+import { absolutePositions, type EdgeRow, type StepRow } from "../../src";
+import { flattenNesting, graphWarnings, layoutSteps, nestingProblem, planImport, revisionDiff, type ImportInput, type ImportStep } from "../../src/process-import/building";
+import { ImportError } from "../../src/process-import/errors";
 
 // Nested steps in import_process (issue #102): groups written inside a step's
 // `steps`, or given a `parent`; the group's first step; the rules that keep the
@@ -20,10 +20,10 @@ const failure = (fn: () => unknown): string => {
   try {
     fn();
   } catch (e) {
-    if (e instanceof ToolError) return e.message;
+    if (e instanceof ImportError) return e.message;
     throw e;
   }
-  throw new Error("expected a ToolError");
+  throw new Error("expected a ImportError");
 };
 
 // Sales with a Qualify group (receive, check) and a Discovery step, then Won and Lost.

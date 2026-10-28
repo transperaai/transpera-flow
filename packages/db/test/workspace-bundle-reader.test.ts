@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BUNDLE_TABLES, BundleTooLargeError, dbReader, type Db } from "../src";
+import { BundleTooLargeError, dbReader, type Db } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // The bundle reader pages through a table, orders stably and filters to the workspace, against Postgres as a real
@@ -20,10 +20,7 @@ beforeAll(async () => {
   db = tdb.dbAs(owner.claims as never);
   await tdb.client.query("insert into roles (workspace_id, name) select $1, 'Role ' || g from generate_series(1, 2005) g", [ws]);
   await tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Not ours')", [otherWs]);
-  await tdb.client.query(
-    "insert into suggestion_proposals (workspace_id, kind, title, payload, created_via, import_source, proposer_email) select $1, 'issue', 'Idea ' || g, '{}', 'upload', 'x', 'visitor@example.com' from generate_series(1, 3) g",
-    [ws],
-  );
+  await tdb.client.query("insert into lead_sources (workspace_id, name) select $1, 'Source ' || g from generate_series(1, 3) g", [ws]);
 });
 afterAll(async () => {
   await tdb?.close();
@@ -41,7 +38,7 @@ describe("dbReader", () => {
 
   it("is not truncated whatever the page size", async () => {
     for (const pageSize of [1000, 100, 7, 1]) {
-      const rows = await dbReader(db, { pageSize })("suggestion_proposals", ws);
+      const rows = await dbReader(db, { pageSize })("lead_sources", ws);
       expect(rows, `page size ${pageSize}`).toHaveLength(3);
       expect(new Set(rows.map((r) => r.id)).size).toBe(3);
     }
@@ -55,13 +52,9 @@ describe("dbReader", () => {
     await expect(dbReader(db, { pageSize: 10, maxRows: 30 })("roles", ws)).rejects.toThrow(/too large to export/);
   });
 
-  it("reads an empty table as no rows, and never asks for a column the app can't read", async () => {
+  it("reads an empty table as no rows", async () => {
     expect(await dbReader(db)("roles", otherWs)).toEqual([]);
-    const rows = await dbReader(db)("suggestion_proposals", ws);
-    expect(rows).toHaveLength(3);
-    const columns = BUNDLE_TABLES.suggestion_proposals.columns.split(",").map((c) => c.trim());
-    expect(columns).not.toContain("proposer_email");
-    expect(Object.keys(rows[0]!).sort()).toEqual([...columns].sort());
+    expect(await dbReader(db)("lead_sources", ws)).toHaveLength(3);
   });
 
   it("refuses a table that is not part of a bundle", async () => {

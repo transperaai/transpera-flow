@@ -42,8 +42,8 @@ import {
   type StepOutcome,
   type StepPatch,
   type StepRow,
-} from "@transpera-flow/db";
-import { ToolError } from "./result";
+} from "../index";
+import { ImportError } from "./errors";
 
 /** Step kinds the step tools create (the editor's palette). */
 export const BUILD_STEP_KINDS = ["task", "wait", "decision", "start", "end"] as const satisfies readonly StepKind[];
@@ -181,9 +181,9 @@ export function resolveName<T extends { id: string; name: string }>(
   for (const tier of tiers) {
     const found = tier();
     if (found.length === 1) return found[0]!;
-    if (found.length > 1) throw new ToolError("ambiguous", `'${ref}' matches more than one ${kind}${where}; pass its id or full name`, list(found));
+    if (found.length > 1) throw new ImportError("ambiguous", `'${ref}' matches more than one ${kind}${where}; pass its id or full name`, list(found));
   }
-  throw new ToolError("not_found", `No ${kind}${where} matches '${ref}'`, list(items).slice(0, 50));
+  throw new ImportError("not_found", `No ${kind}${where} matches '${ref}'`, list(items).slice(0, 50));
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ export function nextOutcome(steps: readonly Pick<StepRow, "kind" | "outcome">[])
 /** Reject values the editor's validation or the table's checks would. */
 export function checkStepFields(f: StepFields, label: string): void {
   const bad = (msg: string) => {
-    throw new ToolError("invalid_input", `${label}: ${msg}`);
+    throw new ImportError("invalid_input", `${label}: ${msg}`);
   };
   if (f.name !== undefined && (!f.name.trim() || f.name.length > 200)) bad("name must be 1–200 characters.");
   if (f.tool && f.tool.length > 200) bad("tool must be at most 200 characters.");
@@ -383,10 +383,10 @@ export function buildNewStep(
   opts: { outcome: StepOutcome; origin?: string },
 ): BuiltStep {
   const name = f.name?.trim();
-  if (!name) throw new ToolError("invalid_input", "A new step needs a name.");
+  if (!name) throw new ImportError("invalid_input", "A new step needs a name.");
   checkStepFields(f, `Step '${name}'`);
   const kind: BuildStepKind = f.kind ?? (f.outcome ? "end" : "task");
-  if (f.outcome && kind !== "end") throw new ToolError("invalid_input", `Step '${name}': only end steps have an outcome.`);
+  if (f.outcome && kind !== "end") throw new ImportError("invalid_input", `Step '${name}': only end steps have an outcome.`);
   const assumptions: string[] = [];
   const outcome = kind === "end" ? (f.outcome ?? opts.outcome) : null;
   if (kind === "end" && !f.outcome) assumptions.push(`Step '${name}': outcome defaulted to ${outcome}.`);
@@ -507,7 +507,7 @@ export function buildStepChange(row: StepRow, f: StepFields, stamp: Stamp, opts:
     } else b.set("outcome", null);
   }
   if (f.outcome !== undefined && f.outcome !== null) {
-    if (kind !== "end") throw new ToolError("invalid_input", `${label}: only end steps have an outcome.`);
+    if (kind !== "end") throw new ImportError("invalid_input", `${label}: only end steps have an outcome.`);
     b.set("outcome", f.outcome);
   }
 
@@ -809,25 +809,25 @@ export function flattenNesting<T extends NestedStep>(
   const out: Omit<T, "steps" | "child_process" | "process">[] = [];
   const holders: Holder<T["process"]>[] = [];
   const walk = (list: readonly NestedStep[], parent: string | null, depth: number) => {
-    if (depth > MAX_NESTING_DEPTH) throw new ToolError("invalid_input", `Groups are nested more than ${MAX_NESTING_DEPTH} deep (inside '${parent}'); flatten the structure.`);
+    if (depth > MAX_NESTING_DEPTH) throw new ImportError("invalid_input", `Groups are nested more than ${MAX_NESTING_DEPTH} deep (inside '${parent}'); flatten the structure.`);
     for (const step of list) {
       const { steps: inside, child_process, process, ...rest } = step as NestedStep & Record<string, unknown>;
       let kind = rest.kind as string | undefined;
       if (inside !== undefined) {
-        if (kind !== undefined && kind !== "group") throw new ToolError("invalid_input", `Step '${step.name}' has steps inside it, so it is a group, not '${kind}'.`);
+        if (kind !== undefined && kind !== "group") throw new ImportError("invalid_input", `Step '${step.name}' has steps inside it, so it is a group, not '${kind}'.`);
         kind = "group";
       }
       if (child_process !== undefined || process !== undefined) {
-        if (child_process !== undefined && process !== undefined) throw new ToolError("invalid_input", `Step '${step.name}' gives both child_process and process; give one.`);
-        if (inside !== undefined) throw new ToolError("invalid_input", `Step '${step.name}' can't hold both steps and a child process.`);
-        if (kind !== undefined && kind !== "subprocess") throw new ToolError("invalid_input", `Step '${step.name}' holds a child process, so it is a subprocess step, not '${kind}'.`);
+        if (child_process !== undefined && process !== undefined) throw new ImportError("invalid_input", `Step '${step.name}' gives both child_process and process; give one.`);
+        if (inside !== undefined) throw new ImportError("invalid_input", `Step '${step.name}' can't hold both steps and a child process.`);
+        if (kind !== undefined && kind !== "subprocess") throw new ImportError("invalid_input", `Step '${step.name}' holds a child process, so it is a subprocess step, not '${kind}'.`);
         kind = "subprocess";
         holders.push({ step: step.name, ...(child_process !== undefined ? { child_process } : {}), ...(process !== undefined ? { process: process as T["process"] } : {}) });
       }
       if (parent !== null) {
         const said = rest.parent as string | null | undefined;
         if (said !== undefined && said !== null && normalizeName(said) !== normalizeName(parent)) {
-          throw new ToolError("invalid_input", `Step '${step.name}' is listed inside '${parent}' but says its parent is '${said}'.`);
+          throw new ImportError("invalid_input", `Step '${step.name}' is listed inside '${parent}' but says its parent is '${said}'.`);
         }
         rest.parent = parent;
       }
@@ -900,8 +900,8 @@ export function planImport(
   const names = new Map<string, string>();
   for (const s of input.steps) {
     const n = normalizeName(s.name);
-    if (!n) throw new ToolError("invalid_input", "Every step in process_json needs a name.");
-    if (names.has(n)) throw new ToolError("invalid_input", `process_json lists two steps called '${s.name}'; step names must be unique.`);
+    if (!n) throw new ImportError("invalid_input", "Every step in process_json needs a name.");
+    if (names.has(n)) throw new ImportError("invalid_input", `process_json lists two steps called '${s.name}'; step names must be unique.`);
     names.set(n, s.name);
   }
 
@@ -911,18 +911,18 @@ export function planImport(
     let match: StepRow | undefined;
     let by: "id" | "name" | "new" = "new";
     if (s.id !== undefined) {
-      if (!isUuid(s.id)) throw new ToolError("invalid_input", `Step '${s.name}': id must be a step's UUID (leave it out for a new step).`);
+      if (!isUuid(s.id)) throw new ImportError("invalid_input", `Step '${s.name}': id must be a step's UUID (leave it out for a new step).`);
       match = draft.steps.find((d) => d.id === s.id);
       if (match) by = "id";
       else if (draft.retired.some((d) => d.id === s.id)) {
-        throw new ToolError("invalid_input", `Step '${s.name}' (${s.id}) was split or replaced in this draft; use the steps that replaced it.`);
+        throw new ImportError("invalid_input", `Step '${s.name}' (${s.id}) was split or replaced in this draft; use the steps that replaced it.`);
       }
     }
     if (!match) {
       const n = normalizeName(s.name);
       const found = draft.steps.filter((d) => !usedDraft.has(d.id) && normalizeName(d.name) === n);
       if (found.length > 1) {
-        throw new ToolError(
+        throw new ImportError(
           "ambiguous",
           `Step '${s.name}' matches more than one step in the draft; give its id`,
           found.map((d) => ({ id: d.id, name: d.name })),
@@ -933,7 +933,7 @@ export function planImport(
         by = "name";
       }
     }
-    if (match && usedDraft.has(match.id)) throw new ToolError("invalid_input", `Two steps in process_json match '${match.name}' (${match.id}).`);
+    if (match && usedDraft.has(match.id)) throw new ImportError("invalid_input", `Two steps in process_json match '${match.name}' (${match.id}).`);
     const id = match?.id ?? (s.id && ![...draft.steps, ...draft.retired].some((d) => d.id === s.id) ? s.id : opts.newId());
     if (match) usedDraft.add(match.id);
     idOf.push(id);
@@ -988,7 +988,7 @@ export function planImport(
   for (const g of removeSteps.filter((s) => s.kind === "group")) {
     const stays = [...rows.values()].filter((r) => r.parent_step_id === g.id && !removing.has(r.id));
     if (stays.length) {
-      throw new ToolError("invalid_input", `Group '${g.name}' isn't in process_json, so remove_missing would remove it and the steps inside it; '${stays[0]!.name}' is listed, so list the group too or give the step a different parent.`);
+      throw new ImportError("invalid_input", `Group '${g.name}' isn't in process_json, so remove_missing would remove it and the steps inside it; '${stays[0]!.name}' is listed, so list the group too or give the step a different parent.`);
     }
   }
   for (const s of removeSteps) rows.delete(s.id);
@@ -1031,7 +1031,7 @@ export function planImport(
     const from = ref(e.from, "an edge's from");
     const to = ref(e.to, "an edge's to");
     const list = byFrom.get(from) ?? [];
-    if (list.some((x) => x.to === to)) throw new ToolError("invalid_input", `process_json connects '${e.from}' to '${e.to}' twice.`);
+    if (list.some((x) => x.to === to)) throw new ImportError("invalid_input", `process_json connects '${e.from}' to '${e.to}' twice.`);
     list.push({ edge: e, to });
     byFrom.set(from, list);
   }
@@ -1068,7 +1068,7 @@ export function planImport(
         continue;
       }
       const problem = connectionProblem(graphNow(), from, to);
-      if (problem) throw new ToolError("invalid_input", problem);
+      if (problem) throw new ImportError("invalid_input", problem);
       const row: EdgeRow = {
         id: opts.newId(),
         ...owner,
@@ -1107,12 +1107,12 @@ export function planImport(
 
   const after: Graph = { steps, edges };
   const start = startProblem(after);
-  if (start) throw new ToolError("invalid_input", start);
+  if (start) throw new ImportError("invalid_input", start);
   const nesting = nestingProblem(after);
-  if (nesting) throw new ToolError("invalid_input", nesting);
+  if (nesting) throw new ImportError("invalid_input", nesting);
   for (const s of steps) {
     const problem = reworkProblem(after, s.id, s.rework_to_step_id);
-    if (problem) throw new ToolError("invalid_input", `Step '${s.name}': ${problem}`);
+    if (problem) throw new ImportError("invalid_input", `Step '${s.name}': ${problem}`);
   }
 
   // New steps without a position are laid out by distance from the start.

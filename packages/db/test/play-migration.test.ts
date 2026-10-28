@@ -209,7 +209,9 @@ function preflight(n: number): string {
 
 describe("play links: the header's md5s, its rollback and its preflight, run on a test database", () => {
   beforeAll(async () => {
-    db = await createTestDb({ supabaseDefaultPrivileges: true });
+    // The database as production had it when this migration was written: 20270102000000_drop_suggestions.sql removed the
+    // functions it replaced or added, so its md5s, rollback and smoke test are only true of the database before it.
+    db = await createTestDb({ supabaseDefaultPrivileges: true, upTo: "20261231000000" });
   }, 120_000);
   afterAll(async () => {
     await db?.close();

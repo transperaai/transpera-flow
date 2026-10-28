@@ -4,7 +4,7 @@ import { NORTHBEAM_WORKSPACE_ID } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // B14 (1/2, issue #167, migration 20261129000000): `import_process_bundle` writes a /2 upload (process, draft, sources and their
-// links, first principles, pending suggestions and proposals) in one transaction, and a step's "branch odds not given" marker
+// links, first principles) in one transaction, and a step's "branch odds not given" marker
 // goes away when anyone writes its branches' probabilities. Made with Supabase's default privileges, as production.
 
 const ws = NORTHBEAM_WORKSPACE_ID;
@@ -93,30 +93,24 @@ function node(name: string, source: string) {
 
 const count = async (sql: string, params: unknown[] = []) => Number((await db.client.query(sql, params)).rows[0].n);
 
-function extras(source: string, proc: string, stepId: string) {
+function extras(source: string) {
   return {
-    import_source: "talk.json",
     sources: [{ ref: source, kind: "transcript", title: `Talk with Sam ${source.slice(0, 8)}`, speakers: ["Sam"], recorded_at: "2026-09-30", body: "Sam: Fifteen minutes." }],
     first_principles: { job_who: "A founder", job_done: "Signed", statements: [{ text: "Leads go cold", kind: "truth", source: "Sam", test: "", linked_parameter: null }], requirements: [], deletes: [], improvements: [], why_problem: "", why_chain: [""], root_cause: "", measures: [] },
-    suggestions: [
-      { target_table: "people", target_id: null, patch: { set: { name: "Bundle Person", fte: 1 } }, evidence: [{ source_id: source, speaker: "Sam", quote: "Fifteen minutes.", timestamp: "00:01" }], note: "Assumed: named in the SOP" },
-      { target_table: "roles", target_id: null, patch: { set: { name: "Bundle Role" } }, evidence: [], note: null },
-    ],
-    proposals: [{ kind: "issue", title: "Review is slow", detail: "Said so.", payload: { severity: "warning", type: "delay", links: [{ process_id: proc, step_id: stepId }] }, evidence: [{ source_id: source, quote: "Fifteen minutes." }], note: null, issue_id: null }],
   };
 }
 
 describe("import_process_bundle", () => {
-  it("writes the process, sources, links, first principles, pending suggestions and proposals as the signed-in editor, and applies nothing live", async () => {
+  it("writes the process, sources, links and first principles as the signed-in editor, and touches nothing company-level", async () => {
     const source = randomUUID();
     const n = node("Bundle ok", source);
     const peopleBefore = await count("select count(*) n from people where workspace_id = $1", [ws]);
     const rolesBefore = await count("select count(*) n from roles where workspace_id = $1", [ws]);
     const issuesBefore = await count("select count(*) n from issues where workspace_id = $1", [ws]);
     await as(editor.claims, async (c) => {
-      const { rows } = await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source, n.node.id, n.ids.review))]);
+      const { rows } = await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source))]);
       const r = rows[0].r;
-      expect(r).toMatchObject({ sources: 1, suggestions: 2, proposals: 1, first_principles: true });
+      expect(r).toEqual({ processes: expect.any(Array), sources: 1, first_principles: true });
       expect(r.processes).toHaveLength(1);
       const rev = r.processes[0].revision_id;
 
@@ -133,47 +127,31 @@ describe("import_process_bundle", () => {
         { kind: "step", process_id: n.node.id, step_id: n.ids.review },
       ]);
       expect((await c.query("select job_who, job_done, statements, revision_id from first_principles where process_id = $1", [n.node.id])).rows[0]).toMatchObject({ job_who: "A founder", job_done: "Signed", revision_id: rev });
-      const sugg = (await c.query("select target_table, status, created_via, note, evidence from suggestions where workspace_id = $1 and (patch -> 'set' ->> 'name') in ('Bundle Person', 'Bundle Role') order by target_table", [ws])).rows;
-      expect(sugg.map((s) => [s.target_table, s.status, s.created_via])).toEqual([["people", "pending", "upload"], ["roles", "pending", "upload"]]);
-      expect(sugg[0].evidence[0]).toMatchObject({ source_id: sid, speaker: "Sam" });
-      expect((await c.query("select import_source from suggestions where workspace_id = $1 and created_via = 'upload'", [ws])).rows.every((r) => r.import_source === "talk.json")).toBe(true);
       // The cited source id was rewritten inside the step's provenance too.
       expect((await c.query("select provenance -> 'work_hours' -> 'evidence' -> 0 ->> 'source_id' s from steps where revision_id = $1 and name = 'Review'", [rev])).rows[0].s).toBe(sid);
-      const props = (await c.query("select kind, status, title, payload from suggestion_proposals where workspace_id = $1 and title = 'Review is slow'", [ws])).rows;
-      expect(props).toHaveLength(1);
-      expect(props[0]).toMatchObject({ kind: "issue", status: "pending" });
-      expect((await c.query("select created_via, import_source, proposer_name from suggestion_proposals where title = 'Review is slow'", [])).rows[0]).toEqual({ created_via: "upload", import_source: "talk.json", proposer_name: null });
-      // Anything else a signed-in user inserts is still recorded as MCP.
-      await c.query("insert into suggestion_proposals (workspace_id, kind, title, payload, created_via, import_source) values ($1, 'issue', 'By hand', '{}', 'upload', 'x')", [ws]);
-      expect((await c.query("select created_via, import_source from suggestion_proposals where title = 'By hand'")).rows[0]).toEqual({ created_via: "mcp", import_source: null });
-      expect(props[0].payload.links[0]).toEqual({ process_id: n.node.id, step_id: n.ids.review });
     });
-    // Nothing company-level was applied.
+    // Nothing company-level was touched.
     expect(await count("select count(*) n from people where workspace_id = $1", [ws])).toBe(peopleBefore);
     expect(await count("select count(*) n from roles where workspace_id = $1", [ws])).toBe(rolesBefore);
     expect(await count("select count(*) n from issues where workspace_id = $1", [ws])).toBe(issuesBefore);
   });
 
-  it("is all or nothing: a bad suggestion, proposal, first principles or a name already taken leaves no process, source, link or row behind", async () => {
+  it("is all or nothing: bad first principles, a bad source or a name already taken leaves no process, source, link or row behind", async () => {
     const taken = node("Bundle ok", randomUUID());
     const cases: [string, ReturnType<typeof node>, (e: ReturnType<typeof extras>) => void, RegExp][] = [
       ["a name already taken", taken, () => {}, /You already have a process called 'Bundle ok'/],
-      ["a suggestion table that doesn't exist", node("Bundle bad suggestion", ""), (e) => (e.suggestions[0]!.target_table = "pizza"), /suggestions_target_table/],
-      ["a proposal with a severity issues don't take", node("Bundle bad proposal", ""), (e) => ((e.proposals[0]!.payload as { severity: string }).severity = "dire"), /suggestion_proposals_payload/],
       ["a first principles list that isn't a list", node("Bundle bad fp", ""), (e) => ((e.first_principles as { statements: unknown }).statements = { not: "a list" }), /first_principles_statements_check/],
       ["a source with no title", node("Bundle bad source", ""), (e) => (e.sources[0]!.title = " "), /sources_title_length/],
     ];
     for (const [what, n, change, message] of cases) {
       const source = randomUUID();
       const bundle = n === taken ? n : { ids: n.ids, node: { ...n.node, steps: n.node.steps.map((s) => ({ ...s, provenance: s.name === "Review" ? { work_hours: { source: "estimated", evidence: [{ source_id: source, quote: "x" }] } } : s.provenance })) } };
-      const e = extras(source, bundle.node.id, bundle.ids.review);
+      const e = extras(source);
       change(e);
       const before = {
         processes: await count("select count(*) n from processes where workspace_id = $1", [ws]),
         sources: await count("select count(*) n from sources where workspace_id = $1", [ws]),
         links: await count("select count(*) n from source_links where workspace_id = $1", [ws]),
-        suggestions: await count("select count(*) n from suggestions where workspace_id = $1", [ws]),
-        proposals: await count("select count(*) n from suggestion_proposals where workspace_id = $1", [ws]),
         fp: await count("select count(*) n from first_principles where workspace_id = $1", [ws]),
       };
       await expect(
@@ -184,8 +162,6 @@ describe("import_process_bundle", () => {
         processes: await count("select count(*) n from processes where workspace_id = $1", [ws]),
         sources: await count("select count(*) n from sources where workspace_id = $1", [ws]),
         links: await count("select count(*) n from source_links where workspace_id = $1", [ws]),
-        suggestions: await count("select count(*) n from suggestions where workspace_id = $1", [ws]),
-        proposals: await count("select count(*) n from suggestion_proposals where workspace_id = $1", [ws]),
         fp: await count("select count(*) n from first_principles where workspace_id = $1", [ws]),
       }, what).toEqual(before);
     }
@@ -195,13 +171,11 @@ describe("import_process_bundle", () => {
     const n = node("Bundle bare", randomUUID());
     await as(editor.claims, async (c) => {
       const r = (await c.query("select public.import_process_bundle($1, $2) r", [ws, JSON.stringify([n.node])])).rows[0].r;
-      expect(r).toMatchObject({ sources: 0, suggestions: 0, proposals: 0, first_principles: false });
+      expect(r).toMatchObject({ sources: 0, first_principles: false });
     });
     for (const [bad, message] of [
-      [{ sources: Array.from({ length: 51 }, () => ({})) }, /at most 50 sources, 300 suggestions and 50 proposals/],
-      [{ suggestions: Array.from({ length: 301 }, () => ({})) }, /at most 50 sources/],
-      [{ proposals: Array.from({ length: 51 }, () => ({})) }, /at most 50 sources/],
-      [{ sources: "x" }, /must be arrays/],
+      [{ sources: Array.from({ length: 51 }, () => ({})) }, /at most 50 sources in one import/],
+      [{ sources: "x" }, /sources must be an array/],
       [[], /p_extras must be an object/],
     ] as const) {
       await expect(as(editor.claims, (c) => c.query("select public.import_process_bundle($1, $2, '[]', $3)", [ws, JSON.stringify([node(`Bundle bad ${Math.random()}`, "").node]), JSON.stringify(bad)]))).rejects.toThrow(message);
@@ -214,7 +188,7 @@ describe("import_process_bundle", () => {
       const source = randomUUID();
       const n = node(`Bundle refused ${who.id}`, source);
       const sources = await count("select count(*) n from sources where workspace_id = $1", [ws]);
-      await expect(as(who.claims, (c) => c.query("select public.import_process_bundle($1, $2, '[]', $3)", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source, n.node.id, n.ids.review))]))).rejects.toThrow(/row-level security|permission denied|42501/);
+      await expect(as(who.claims, (c) => c.query("select public.import_process_bundle($1, $2, '[]', $3)", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source))]))).rejects.toThrow(/row-level security|permission denied|42501/);
       expect(await count("select count(*) n from sources where workspace_id = $1", [ws])).toBe(sources);
     }
     await db.client.query("begin");
@@ -238,7 +212,7 @@ describe("the branch-odds marker", () => {
   async function made(name: string) {
     const source = randomUUID();
     const n = node(name, source);
-    const rev = await as(editor.claims, async (c) => (await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify({ sources: extras(source, n.node.id, n.ids.review).sources })])).rows[0].r.processes[0].revision_id as string);
+    const rev = await as(editor.claims, async (c) => (await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify({ sources: extras(source).sources })])).rows[0].r.processes[0].revision_id as string);
     return { n, rev };
   }
   const marker = async (rev: string, id: string) => (await db.client.query("select provenance -> 'branch_odds' m from steps where revision_id = $1 and id = $2", [rev, id])).rows[0].m;
@@ -279,8 +253,13 @@ describe("hardening", () => {
     as(editor.claims, async (c) => (await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify(ex)])).rows[0].r);
 
   it("a section that is JSON null is a section that is left out", async () => {
-    const r = await call(node("Bundle nulls", ""), { sources: null, suggestions: null, proposals: null, first_principles: null, import_source: null });
-    expect(r).toMatchObject({ sources: 0, suggestions: 0, proposals: 0, first_principles: false });
+    const r = await call(node("Bundle nulls", ""), { sources: null, first_principles: null });
+    expect(r).toMatchObject({ sources: 0, first_principles: false });
+  });
+
+  it("the extras an upload used to carry for Suggestions (suggestions, proposals) are ignored, not an error, and write nothing", async () => {
+    const r = await call(node("Bundle legacy extras", ""), { suggestions: Array.from({ length: 301 }, () => ({})), proposals: [{ kind: "issue" }], import_source: "old.json" });
+    expect(r).toEqual({ processes: expect.any(Array), sources: 0, first_principles: false });
   });
 
   it("refuses more than 2,000,000 characters of source text in all, in plain words", async () => {
@@ -345,24 +324,5 @@ describe("hardening", () => {
     });
     expect(await markerOf(draft, n.ids.decide)).toBe(false);
     expect(await markerOf(rev, n.ids.decide)).toBe(true);
-  });
-});
-
-describe("an upload's origin can't be forged", () => {
-  it("a direct insert into suggestions is recorded as MCP whatever it claims", async () => {
-    await as(editor.claims, async (c) => {
-      await c.query("insert into suggestions (workspace_id, target_table, patch, created_via, import_source) values ($1, 'roles', '{\"set\":{\"name\":\"Forged\"}}', 'upload', 'Payroll.xlsx')", [ws]);
-      expect((await c.query("select created_via, import_source from suggestions where patch -> 'set' ->> 'name' = 'Forged'")).rows[0]).toEqual({ created_via: "mcp", import_source: null });
-    });
-  });
-
-  it("nobody can change where an upload's suggestion came from", async () => {
-    const source = randomUUID();
-    const n = node("Bundle forge update", source);
-    await as(editor.claims, (c) => c.query("select public.import_process_bundle($1, $2, '[]', $3)", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source, n.node.id, n.ids.review))]));
-    for (const sql of ["update suggestions set import_source = 'Payroll.xlsx' where import_source = 'talk.json'", "update suggestions set created_via = 'upload' where created_via = 'mcp'"]) {
-      await expect(as(editor.claims, (c) => c.query(sql))).rejects.toThrow(/can't be changed/);
-    }
-    expect((await db.client.query("select count(*)::int n from suggestions where import_source = 'talk.json'")).rows[0].n).toBeGreaterThan(0);
   });
 });

@@ -101,10 +101,9 @@ describe("on a file", () => {
     expect(gaps(reason)).toEqual(["Client decides: branch odds missing"]);
   });
 
-  it("incoming volume: missing for a pipeline, for a servicing process, and says to accept the suggestion when the file carries one", () => {
+  it("incoming volume: missing for a pipeline and for a servicing process", () => {
     const f = file();
-    expect(gaps(f, { volume: "missing" })).toEqual(["No incoming volume: add lead volume in Settings or accept the suggestion"]);
-    expect(gaps(f, { volume: "missing", volumeSuggested: true })).toEqual(["No incoming volume yet: accept the lead volume suggestion, or add it in Settings"]);
+    expect(gaps(f, { volume: "missing" })).toEqual(["No incoming volume: add lead volume in Settings"]);
     const servicing = file((x) => (x.kind = "servicing"));
     expect(gaps(servicing, { volume: "missing" })).toEqual(["No recurrence: link this process to a service and set how often it repeats in Settings"]);
     expect(gaps(f, { volume: "unknown" })).toEqual([]);
@@ -149,7 +148,7 @@ describe("on a process's model", () => {
       "Write proposal has no hands-on time",
       "Wait for payment has no wait time",
       "Client decides: branch odds missing",
-      "No incoming volume: add lead volume in Settings or accept the suggestion",
+      "No incoming volume: add lead volume in Settings",
     ]);
   });
 
@@ -174,7 +173,7 @@ describe("on a process's model", () => {
   });
 
   it("volume: a pipeline needs a lead source with volume; a servicing process needs a link to a service; a bundle without demand says nothing", () => {
-    expect(texts(model([], { leadSources: [{ volume_week: 0 }] }))).toEqual(["No incoming volume: add lead volume in Settings or accept the suggestion"]);
+    expect(texts(model([], { leadSources: [{ volume_week: 0 }] }))).toEqual(["No incoming volume: add lead volume in Settings"]);
     expect(texts(model([], { leadSources: undefined }))).toEqual([]);
     expect(texts(model([], { process: { id: "p1", kind: "servicing" }, servicingLinks: [] }))).toEqual(["No recurrence: link this process to a service and set how often it repeats in Settings"]);
     expect(texts(model([], { process: { id: "p1", kind: "servicing" }, servicingLinks: [{ process_id: "p1" }] }))).toEqual([]);

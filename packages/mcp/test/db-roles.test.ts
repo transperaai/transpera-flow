@@ -185,7 +185,7 @@ describe("per-person privacy", () => {
       seen.bundle = JSON.stringify((await bundle(memberSession)).people);
       // MCP, as the member's own API token.
       const mcp = await connect(memberToken, options);
-      for (const tool of ["get_workspace_summary", "get_bottlenecks", "get_facts", "list_findings", "list_issues", "get_process"]) {
+      for (const tool of ["get_workspace_summary", "get_bottlenecks", "get_facts", "list_issues", "get_process"]) {
         const r = await mcp.callTool({ name: tool, arguments: {} });
         seen[`mcp ${tool}`] = JSON.stringify(r.content);
       }
@@ -252,9 +252,9 @@ describe("client health rules", () => {
     expect((await db.query("select settings -> 'health_recover' as v from workspaces where id = $1", [hws])).rows[0].v).toBe(7);
   });
 
-  it("an editor's API token is refused: the company model changes only by review", async () => {
+  it("an editor's API token is refused: the company model can't be changed through a token", async () => {
     const res = await errorOf(() => save(editorToken, 7, 9));
-    expect(res?.message).toMatch(/changes only by review/);
+    expect(res?.message).toMatch(/can't be changed through an API token/);
     expect((await db.query("select settings -> 'health_recover' as v from workspaces where id = $1", [hws])).rows[0].v).toBe(7);
   });
 });

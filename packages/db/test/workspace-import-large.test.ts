@@ -76,7 +76,7 @@ async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
       // As JSON, the way PostgREST answers (dates as text, numbers as numbers), not as pg's Date objects.
-      return (await c.query(`select to_jsonb(t) as j from (select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
+      return (await c.query(`select to_jsonb(t) as j from (select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit: true, now: new Date("2026-10-05T12:00:00Z") });
@@ -109,8 +109,8 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
   "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events", "suggestions",
-  "suggestion_proposals", "solutions", "audit_log",
+  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -192,8 +192,6 @@ async function mini(): Promise<Mini> {
   );
   await q("insert into issues (workspace_id, type, title, scenario_id, owner_person_id, status) values ($1, 'idea', 'Try the downturn', $2, $3, 'in_progress')", [ws, downturn, person!.id]);
   await q("insert into issues (workspace_id, type, title, source, status, resolution) values ($1, 'delay', 'Quotes are slow', 'manual', 'done', 'wont_fix')", [ws]);
-  await q("insert into suggestions (workspace_id, target_table, target_id, patch) values ($1, 'workspaces', $1, '{\"set\": {\"hours_per_week\": 35}}')", [ws]);
-  await q("insert into suggestion_proposals (workspace_id, kind, title, detail) values ($1, 'issue', 'Proposed issue', 'Looks slow')", [ws]);
   miniCache = { ws, ...ids, library: { downturn }, custom: custom!.id as string };
   return miniCache;
 }
@@ -204,7 +202,7 @@ const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, im
 const OLD_MIGRATION = "20261207000000_import_workspace_bundle.sql";
 const NEW_MIGRATION = "20261215000000_bigger_restores.sql";
 /** The latest migration that defines `import_workspace_bundle` (#228 replaced B21's body, which NEW_MIGRATION still holds). */
-const LATEST_MIGRATION = "20261226000000_restore_capacity_factors.sql";
+const LATEST_MIGRATION = "20270102000000_drop_suggestions.sql";
 const OLD_MD5 = "968cbd0034a0bb1479b8ee0c9eaf7962";
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */
@@ -212,12 +210,17 @@ const bodyOf = (sql: string) => {
   const fn = sql.slice(sql.search(/^create (?:or replace )?function /m));
   return fn.slice(fn.indexOf("$$") + 2, fn.lastIndexOf("$$"));
 };
+/** The body of one function in a migration that holds several (the text between its `$$` marks). */
+const bodyOfFunction = (sql: string, name: string) => {
+  const fn = sql.slice(sql.search(new RegExp(`^create (?:or replace )?function ${name.replace(".", "\\.")}\\(`, "mi")));
+  return fn.slice(fn.indexOf("$$") + 2, fn.indexOf("$$", fn.indexOf("$$") + 2));
+};
 /** Each limit divided by `k`, rounded down (a smaller synthetic plan for the tests that don't time anything). */
 const scaled = (k: number): Limits => Object.fromEntries(Object.entries(L).map(([key, v]) => [key, Math.floor(v / k)])) as Limits;
 
 /** Where a restored id comes from: the placeholder's rank under the restore's fresh prefix; rank 0 is the workspace. */
 const realId = (placeholder: string, prefix: string, ws: string) => (placeholder === `${PLACEHOLDER_PREFIX}000000000000` ? ws : prefix + placeholder.slice(PLACEHOLDER_PREFIX.length));
-const TABLE_OF: Record<string, string> = { proposals: "suggestion_proposals" };
+const TABLE_OF: Record<string, string> = {};
 
 /** The CPU time (user and system, ms) the database backend of the test connection has used, from /proc (Linux); null where it can't be read. The wall clock below is noisy on a shared machine, this isn't. */
 async function backendCpuMs(): Promise<number | null> {
@@ -288,8 +291,6 @@ describe("every limit at once", () => {
       // The four library scenarios every new workspace has come on top of the plan's.
       ["scenarios", L.scenarios + 4],
       ["blocks", L.blocks],
-      ["suggestions", L.suggestions],
-      ["suggestion_proposals", L.proposals],
       ["person_roles", L.personRoles],
       ["person_skills", L.personSkills],
       ["person_capacity_factors", L.capacityFactors],
@@ -342,7 +343,7 @@ describe("a workspace at the limits exports without the warning and checks clean
     // Equal where the synthetic plan can land exactly. Every list below comes back as it went in; the library scenarios the new workspace
     // has already are in its export (so the plan leaves four out: `forExport`), and the `issue` source links the database made from the
     // issue sources are the ones the plan already holds.
-    for (const key of ["processes", "steps", "edges", "issues", "people", "clients", "scenarios", "blocks", "suggestions", "proposals", "personRoles", "personSkills", "capacityFactors", "clientAssignments", "sourceLinks", "clientServices", "personLeave", "companyOther", "sources"] as const) {
+    for (const key of ["processes", "steps", "edges", "issues", "people", "clients", "scenarios", "blocks", "personRoles", "personSkills", "capacityFactors", "clientAssignments", "sourceLinks", "clientServices", "personLeave", "companyOther", "sources"] as const) {
       expect(m[key], key).toBe(L[key]);
     }
     for (const key of Object.keys(m) as (keyof typeof m)[]) expect(m[key], key).toBeLessThanOrEqual(L[key]);
@@ -416,7 +417,6 @@ describe("the id remap is the same as before", () => {
       // Every reference column points at the row the plan named.
       const refs = (IMPORT_REFS[section] ?? []).map((r) => r.col).filter((c) => planned.some((r) => r[c] != null));
       if (section === "market_schedule") refs.push("condition_id");
-      if (section === "suggestions") refs.push("target_id");
       for (const col of refs) {
         const dbRows = new Map((await q(`select id::text as id, ${col}::text as ref from public.${table} where workspace_id = $1`, [ws])).map((r) => [String(r.id), r.ref as string | null]));
         for (const r of planned) {
@@ -426,7 +426,7 @@ describe("the id remap is the same as before", () => {
         }
       }
     }
-    expect(checked, label).toBeGreaterThan(5);
+    expect(checked, label).toBeGreaterThan(4);
     // Processes, steps and edges.
     const procs = (copy.processes as unknown as { id: string; steps: Row[]; edges: Row[] }[]);
     expect(Number((await q("select count(*) from public.processes where workspace_id = $1 and id = any($2::uuid[])", [ws, procs.map((p) => realId(p.id, prefix, ws))]))[0]!.count), `${label}: processes`).toBe(procs.length);
@@ -453,17 +453,13 @@ describe("the id remap is the same as before", () => {
 
   it("for the synthetic plan", async () => {
     const plan = syntheticPlan(scaled(4)) as unknown as ImportPlan;
-    // A suggestion that targets the workspace itself (rank 0) points at the new workspace.
-    plan.suggestions.push({ id: `${PLACEHOLDER_PREFIX}ffffffffff01`, target_table: "workspaces", target_id: `${PLACEHOLDER_PREFIX}000000000000`, patch: { set: { hours_per_week: 35 } }, evidence: [], note: null, created_at: "2026-01-01T00:00:00Z" });
-    const { ws } = await check(plan, "synthetic");
-    expect(Number((await q("select count(*) from public.suggestions where workspace_id = $1 and target_table = 'workspaces' and target_id = $1", [ws]))[0]!.count)).toBe(1);
+    await check(plan, "synthetic");
   }, 120_000);
 
   it("for a small workspace with the awkward cases (the Mini plan)", async () => {
     const m = await mini();
     const { plan } = planWorkspaceImport(await exportOf(m.ws), { canManage: true });
-    const { ws } = await check(plan, "mini");
-    expect(Number((await q("select count(*) from public.suggestions where workspace_id = $1 and target_table = 'workspaces' and target_id = $1", [ws]))[0]!.count)).toBe(1);
+    await check(plan, "mini");
   }, 120_000);
 });
 
@@ -506,8 +502,7 @@ describe("the function and the migration", () => {
     expect(grants).toEqual([{ grantee: "authenticated", privilege_type: "EXECUTE" }]);
     // The live body is what the latest migration file says (and the md5 in its post-apply check).
     const live = String((await q("select md5(prosrc) as md5 from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure"))[0]!.md5);
-    expect(live).toBe(md5(bodyOf(sqlOf(LATEST_MIGRATION))));
-    expect(sqlOf(LATEST_MIGRATION)).toContain(`${live}:`);
+    expect(live).toBe(md5(bodyOfFunction(sqlOf(LATEST_MIGRATION), "public.import_workspace_bundle")));
   });
 
   it("has the index on audit_log (target_id)", async () => {

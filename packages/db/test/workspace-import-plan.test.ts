@@ -108,7 +108,7 @@ function recount(b: WorkspaceBundle): WorkspaceBundle {
   counts.process_versions = versions.length;
   counts.steps = versions.reduce((n, v) => n + (v.steps as Row[]).length, 0);
   counts.edges = versions.reduce((n, v) => n + (v.edges as Row[]).length, 0);
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) counts[k] = b[k].length;
+  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = b[k].length;
   return { ...b, counts };
 }
 
@@ -224,9 +224,9 @@ describe("checkWorkspaceBundle: what is refused, in order", () => {
     const c = checkWorkspaceBundle(b);
     expect(c.ok).toBe(true);
     expect(c.warnings).toContain(`This backup was made with engine 0.0.1; this is ${ENGINE_VERSION}. Numbers may differ slightly.`);
-    expect(c.warnings).toContain("This backup was made by a viewer: it has no drafts and no pending suggestions.");
+    expect(c.warnings).toContain("This backup was made by a viewer: it has no drafts.");
     expect(c.warnings).toContain("Stays in the file: 2 solutions and their links.");
-    expect(c.warnings).toContain("Stays in the file: 2 decided suggestions and proposals.");
+    expect(c.warnings).toContain("Stays in the file: 4 suggestions and visitor ideas (Suggestions were removed, so none is restored).");
     expect(c.warnings).toContain("Stays in the file: 1 detected insights (they show again until dismissed).");
     expect(c.warnings).toContain("Stays in the file: 1 unpublished drafts.");
     expect(c.warnings).toContain("Stays in the file: 1 source links to steps no longer in the process.");
@@ -273,15 +273,13 @@ describe("checkWorkspaceBundle: limits", () => {
     return checkWorkspaceBundle(recount(b));
   };
   const cases: { name: string; max: number; add: (b: WorkspaceBundle, n: number) => void; message: string }[] = [
-    // The fixture already holds 2 issues that restore (and 1 detection), 1 person, 1 client, 2 scenarios, 1 block, 2 sources, 1 pending suggestion and 1 pending proposal.
+    // The fixture already holds 2 issues that restore (and 1 detection), 1 person, 1 client, 2 scenarios, 1 block, 2 sources.
     { name: "issues", max: L.issues, add: (b, n) => b.issues.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, number: null, source: "manual", status: "open", links: [], owner_ids: [], source_ids: [], events: [] }))), message: `The backup has ${n(L.issues + 1)} issues; a restore takes at most ${n(L.issues)}.` },
     { name: "people", max: L.people, add: (b, n) => b.company_model.people!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.people + 1)} people; a restore takes at most ${n(L.people)}.` },
     { name: "clients", max: L.clients, add: (b, n) => b.company_model.clients!.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.clients + 1)} clients; a restore takes at most ${n(L.clients)}.` },
     { name: "scenarios", max: L.scenarios, add: (b, n) => b.scenarios.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, parent_scenario_id: null }))), message: `The backup has ${n(L.scenarios + 1)} scenarios; a restore takes at most ${n(L.scenarios)}.` },
     { name: "blocks", max: L.blocks, add: (b, n) => b.blocks.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id }))), message: `The backup has ${n(L.blocks + 1)} blocks; a restore takes at most ${n(L.blocks)}.` },
     { name: "sources", max: L.sources, add: (b, n) => b.sources.push(...filler(n - 2, () => ({ id: id(), workspace_id: b.workspace.id, body: "" }))), message: `The backup has ${n(L.sources + 1)} sources; a restore takes at most ${n(L.sources)}.` },
-    { name: "suggestions", max: L.suggestions, add: (b, n) => b.suggestions.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", target_id: null }))), message: `The backup has ${n(L.suggestions + 1)} pending suggestions; a restore takes at most ${n(L.suggestions)}.` },
-    { name: "proposals", max: L.proposals, add: (b, n) => b.suggestion_proposals.push(...filler(n - 1, () => ({ id: id(), workspace_id: b.workspace.id, status: "pending", issue_id: null }))), message: `The backup has ${n(L.proposals + 1)} pending proposals; a restore takes at most ${n(L.proposals)}.` },
     // The link tables. The fixture already restores 1 role assignment, 1 skill, 0 client assignments and 2 source links.
     { name: "personRoles", max: L.personRoles, add: (b, n) => b.company_model.person_roles!.push(...filler(n - 1, () => ({ person_id: b.company_model.people![0]!.id, role_id: b.company_model.roles![0]!.id }))), message: `The backup has ${n(L.personRoles + 1)} role assignments; a restore takes at most ${n(L.personRoles)}.` },
     { name: "personSkills", max: L.personSkills, add: (b, n) => b.company_model.person_skills!.push(...filler(n - 1, () => ({ person_id: b.company_model.people![0]!.id, step_id: b.company_model.person_skills![0]!.step_id }))), message: `The backup has ${n(L.personSkills + 1)} skills; a restore takes at most ${n(L.personSkills)}.` },
@@ -311,11 +309,11 @@ describe("checkWorkspaceBundle: limits", () => {
     });
   }
 
-  it("tells an editor the settings go to Suggestions, and an owner or agency admin that they are applied", () => {
+  it("tells someone who can't manage the workspace that its settings are left out, and an owner or agency admin that they are applied", () => {
     const b = makeBundle().bundle;
     expect(checkWorkspaceBundle(b).summary.settings).toBe("applied");
     expect(checkWorkspaceBundle(b, { canManage: true }).summary.settings).toBe("applied");
-    expect(checkWorkspaceBundle(b, { canManage: false }).summary.settings).toBe("suggested");
+    expect(checkWorkspaceBundle(b, { canManage: false }).summary.settings).toBe("skipped");
   });
 
   it("steps and edges in the restored versions", () => {
@@ -524,8 +522,6 @@ describe("planWorkspaceImport", () => {
     allowed(plan.market_schedule, "market_schedule", ["condition_preset"]);
     allowed(plan.processes.flatMap((p) => p.steps), "steps");
     allowed(plan.processes.flatMap((p) => p.edges), "edges");
-    allowed(plan.suggestions, "suggestions");
-    allowed(plan.proposals, "proposals");
   });
 
   it("restores the live version, the draft of a never-published process, the archived flag, and not the company map", () => {
@@ -573,16 +569,22 @@ describe("planWorkspaceImport", () => {
     expect(planOf(recount(b)).plan.scenarios.map((s) => s.name)).toContain("Seeded");
   });
 
-  it("leaves out a visitor's idea that isn't for an issue (a restored row would be an upload idea, which must have an issue), with a note (B4)", () => {
-    const { bundle, ids } = makeBundle();
-    bundle.suggestion_proposals.push(
-      { id: "00000000-0000-4000-8000-0000000000e1", workspace_id: bundle.workspace.id, status: "pending", kind: "solution_idea", title: "Visitor, no issue", issue_id: null, payload: { steps: [], levers: [] }, created_at: "2026-01-03", created_via: "play_link" } as never,
-    );
-    const { plan, placeholderOf, warnings } = planWorkspaceImport(recount(bundle), { canManage: true }) as ReturnType<typeof planWorkspaceImport> & { warnings: string[] };
-    expect(plan.proposals.map((s) => s.id)).toEqual([placeholderOf.get(ids.prop!)!]);
-    expect(warnings).toContain("Visitor ideas not tied to an issue aren't restored.");
-    // With none, no note.
-    expect(planOf(makeBundle().bundle).warnings).not.toContain("Visitor ideas not tied to an issue aren't restored.");
+  it("a backup made before Suggestions were removed still checks and plans: its suggestions and visitor ideas are counted as left out, never restored", () => {
+    const { bundle } = makeBundle();
+    expect(bundle.suggestions!.length + bundle.suggestion_proposals!.length).toBe(4);
+    const { plan, summary } = planOf(bundle);
+    expect(plan).not.toHaveProperty("suggestions");
+    expect(plan).not.toHaveProperty("proposals");
+    expect(summary.leftOut.find((l) => l.key === "suggestions_removed")!.count).toBe(4);
+    expect(summary.restored.map((l) => l.key)).not.toContain("suggestions");
+    // A backup made since has neither section, and nothing is said about them.
+    const fresh = clone(bundle);
+    delete fresh.suggestions;
+    delete fresh.suggestion_proposals;
+    const c = checkWorkspaceBundle(recount(fresh));
+    expect(c.ok).toBe(true);
+    expect(planOf(recount(fresh)).summary.leftOut.map((l) => l.key)).not.toContain("suggestions_removed");
+    expect(c.warnings.join(" ")).not.toMatch(/suggestion/);
   });
 
   it("applies the left-out rules", () => {
@@ -590,8 +592,6 @@ describe("planWorkspaceImport", () => {
     const { plan, placeholderOf } = planOf(bundle);
     const p = (k: string) => placeholderOf.get(ids[k]!)!;
     expect(plan.issues.map((i) => i.title)).not.toContain("Seen");
-    expect(plan.suggestions.map((s) => s.id)).toEqual([p("sugg")]);
-    expect(plan.proposals.map((s) => s.id)).toEqual([p("prop")]);
     expect(JSON.stringify(plan)).not.toContain(p("sol"));
     expect(plan.issues.every((i) => !("dismissed_revision_id" in i) && !("resolved_solution_id" in i) && !("events" in i))).toBe(true);
     expect(plan.source_links.map((l) => l.kind).sort()).toEqual(["insight", "step"]);
@@ -619,7 +619,7 @@ describe("planWorkspaceImport", () => {
     expect(owner.plan.settings).toEqual({ hours_per_week: 40, currency: "GBP" });
     expect(owner.summary.settings).toBe("applied");
     expect(owner.warnings.join(" ")).toContain("mystery_key");
-    expect(planOf(bundle, false).summary.settings).toBe("suggested");
+    expect(planOf(bundle, false).summary.settings).toBe("skipped");
   });
 
   it("market schedule: a preset row names the preset, a custom one its condition; presets are never inserted", () => {
@@ -633,12 +633,10 @@ describe("planWorkspaceImport", () => {
 
   it("gives the workspace's own id rank 0, so the restore can swap in the target workspace", () => {
     const { bundle, ids } = makeBundle();
-    bundle.suggestions.push({ id: id(), workspace_id: ids.ws, status: "pending", target_table: "workspaces", target_id: ids.ws, patch: { set: { currency: "EUR" } }, created_at: "2026-01-03" } as Row);
-    const { plan, placeholderOf } = planOf(recount(bundle));
+    const { placeholderOf } = planOf(recount(bundle));
     const zero = `${PLACEHOLDER_PREFIX}000000000000`;
     expect(placeholderOf.get(ids.ws!)).toBe(zero);
     expect([...placeholderOf.values()].filter((v) => v === zero)).toHaveLength(1);
-    expect(plan.suggestions.find((s) => s.target_table === "workspaces")!.target_id).toBe(zero);
     expect(placeholderOf.get([...placeholderOf.keys()].filter((k) => k !== ids.ws).sort()[0]!)).toBe(`${PLACEHOLDER_PREFIX}000000000001`);
   });
 
@@ -659,7 +657,7 @@ describe("planWorkspaceImport", () => {
     const { summary } = planOf(makeBundle().bundle);
     expect(summary.restored.find((l) => l.key === "processes")!.count).toBe(3);
     expect(summary.restored.find((l) => l.key === "issues")!.count).toBe(2);
-    expect(summary.leftOut.map((l) => l.key)).toEqual(expect.arrayContaining(["solutions", "detections", "decided_suggestions", "history", "file_originals", "step_links", "company_map"]));
+    expect(summary.leftOut.map((l) => l.key)).toEqual(expect.arrayContaining(["solutions", "detections", "suggestions_removed", "history", "file_originals", "step_links", "company_map"]));
   });
 });
 
@@ -824,7 +822,7 @@ describe("per-person times in a backup (#228): restored", () => {
     expect(Object.keys(rest)).toEqual([
       "format", "settings", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
       "lever_settings", "analysis_rules", "clients", "sources", "processes", "scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services",
-      "client_assignments", "person_skills", "source_links", "suggestions", "proposals",
+      "client_assignments", "person_skills", "source_links",
     ]);
     // The new key sits right after person_skills.
     const keys = Object.keys(plan);

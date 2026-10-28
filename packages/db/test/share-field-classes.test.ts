@@ -76,8 +76,6 @@ const TABLES: TableClasses = {
   source_links: "unused",
   sources: "unused",
   steps: { child_process_id: "not", created_at: "not", created_by: "not", entry_step_id: "not", id: "not", kind: "not", name: "text", notes: "text", outcome: "not", parent_step_id: "not", person_id: "not", process_id: "not", replaced_by: "not", revision_id: "not", rework_to_step_id: "not", role_id: "not", tool: "text", updated_at: "not", wait_dist: "not", work_dist: "not", workspace_id: "not" },
-  suggestion_proposals: "unused",
-  suggestions: "unused",
   workspace_access_emails: "unused",
   workspace_domains: "unused",
   workspace_headlines: "unused",

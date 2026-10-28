@@ -1,8 +1,7 @@
-// Analysis tools (docs/PRD.md §7.1; issue #26): save_scenario,
-// compare_scenarios, check_robustness, get_bottlenecks, log_issue and
-// list_issues. Like the v1 read tools they act as the token's user: every
+// Analysis tools (docs/PRD.md §7.1; issue #26): compare_scenarios, check_robustness, get_bottlenecks and list_issues, all
+// read-only (docs/plans/cut-list.md item 5: save_scenario and log_issue are gone). Like the other read tools they act as the token's user: every
 // query goes through the context's database handle, which runs as the token's user, so RLS decides what is
-// visible and who may write (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
+// visible (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 // Simulations use the live revision only (the PRD gives these tools no
 // `revision`), run on this thread, and are capped in time where they can run
 // long. Text comes from the engine's templates, never a language model.
@@ -11,8 +10,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   isVisibleIssue,
-  loadIssue,
-  saveIssue,
   listProcesses,
   loadFirstPrinciples,
   loadIssuesForReader,
@@ -20,12 +17,10 @@ import {
   loadScenarios,
   ModelError,
   toEngineModel,
-  type Json,
   type ProcessBundle,
   type ScenarioRow,
 } from "@transpera-flow/db";
-import { rpc } from "@transpera-flow/db/client";
-import { absenceTest, applyPatches, detectIssues, ENGINE_VERSION, isBlocking, ISSUE_TYPES, MAX_PATCHES, PATCH_OPS, RATINGS, STORED_SEVERITIES, ratingOfStored, resolveMoney, shadowPricesFor, simulate, successMeasureSource, storedOfRating, toRatingConfig, withoutDisabledRules, type EngineModel } from "@transpera-flow/engine";
+import { absenceTest, detectIssues, ENGINE_VERSION, ISSUE_TYPES, ratingOfStored, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig, withoutDisabledRules, type EngineModel } from "@transpera-flow/engine";
 import { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, type NamedScenario } from "./analysis";
 import { resolveProcess, resolveWorkspace, revisionIdFor, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool, ToolError } from "./result";
@@ -38,7 +33,7 @@ const touches = (i: { process_id: string | null; links: readonly { process_id: s
 const normaliseStatus = (s: (typeof ISSUE_STATUS_INPUT)[number] | undefined): "open" | "testing" | "resolved" | "wont_fix" =>
   s === "in_progress" ? "testing" : s === "done" ? "resolved" : (s ?? "open");
 
-export const ANALYSIS_TOOL_NAMES = ["save_scenario", "compare_scenarios", "check_robustness", "get_bottlenecks", "log_issue", "list_issues"] as const;
+export const ANALYSIS_TOOL_NAMES = ["compare_scenarios", "check_robustness", "get_bottlenecks", "list_issues"] as const;
 
 const DEFAULT_REPS = 30;
 const DEFAULT_SEED = 1;
@@ -49,8 +44,6 @@ const MAX_REPS = 200;
 export const DEFAULT_ROBUSTNESS_SECONDS = 20;
 export const MAX_ROBUSTNESS_SECONDS = 45;
 export const SHADOW_PRICE_BUDGET_MS = 15_000;
-const MAX_TITLE = 200;
-const MAX_EVIDENCE = 5000;
 
 const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
@@ -65,14 +58,6 @@ const startDateArg = z
   .optional()
   .describe("ISO date the run starts on; people's start/end dates and leave are measured from it (default today)");
 
-/** A write RLS or a check constraint refused, as a ToolError the caller can act on. */
-function writeError(error: { code?: string; message?: string }, what: string): ToolError {
-  if (error.code === "42501") return new ToolError("forbidden", `You don't have permission to ${what} in this workspace (editors and owners can).`);
-  if (error.code === "23514") return new ToolError("invalid_input", `Some of those values aren't allowed: ${error.message ?? ""}`.trim());
-  if (error.code === "23503") return new ToolError("not_found", "Something the issue links to no longer exists.");
-  return new ToolError("write_failed", `Couldn't ${what}: ${error.message ?? "unknown error"}`);
-}
-
 const refs = (v: string | string[] | undefined) => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
 
 interface Loaded {
@@ -83,15 +68,11 @@ interface Loaded {
   startDate: string;
 }
 
-/**
- * The live revision as an engine model, run from `start_date` (default today). With `payFree`, the model is built as a
- * member's browser builds it (the engine's `payHidden`: no pay, and nothing derived from it), whoever is asking (B20).
- */
+/** The live revision as an engine model, run from `start_date` (default today). */
 export async function loadLiveModel(
   ctx: ToolContext,
   args: { workspace?: string; process?: string; start_date?: string },
   assumptions: string[],
-  { payFree = false }: { payFree?: boolean } = {},
 ): Promise<Loaded> {
   const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
   const proc = await resolveProcess(ctx, ws, args.process, assumptions);
@@ -99,9 +80,7 @@ export async function loadLiveModel(
   if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
   const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, "live"));
   try {
-    // Same as `payFreeBundle` in apps/web/src/lib/ai/neutral.ts (this package doesn't import from the app).
-    const readAs = payFree ? { ...bundle, viewer: { seesEveryone: false, ownPersonId: null } } : bundle;
-    return { ws, proc, bundle, model: toEngineModel(readAs, { startDate }), startDate };
+    return { ws, proc, bundle, model: toEngineModel(bundle, { startDate }), startDate };
   } catch (err) {
     if (err instanceof ModelError) throw new ToolError("invalid_model", `This process can't be simulated yet: ${err.message}`);
     throw err;
@@ -143,70 +122,6 @@ export async function processSteps(ctx: ToolContext, proc: ProcessWithDraft): Pr
 }
 
 export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void {
-  server.registerTool(
-    "save_scenario",
-    {
-      title: "Save scenario",
-      description:
-        "Save a named scenario (a list of {path, op, value} patches) to the workspace's library, where the app and compare_scenarios can use it. " +
-        "The patches are checked against the process's live model first; one whose target doesn't exist is refused.",
-      inputSchema: {
-        name: z.string().trim().min(1).max(120).describe("Scenario name, unique in the workspace"),
-        description: z.string().max(2000).optional(),
-        overrides: z
-          .array(z.object({ path: z.string(), op: z.enum(PATCH_OPS), value: z.number() }).strict())
-          .min(1)
-          .max(MAX_PATCHES)
-          .describe("Patches in the run_scenario `overrides` grammar, applied in order."),
-        process: z.string().optional().describe("Process to check the patches against (default: the workspace's only process)."),
-        workspace: workspaceArg,
-      },
-    },
-    (args) =>
-      runTool(async (assumptions) => {
-        const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
-        const processes = await listProcesses(ctx.db, ws.id);
-        // One process, or one pipeline with its servicing processes (issue #19), is checked by default.
-        if (args.process || processes.length === 1 || processes.filter((p) => p.kind !== "servicing").length === 1) {
-          const proc = await resolveProcess(ctx, ws, args.process, assumptions);
-          if (proc.live_revision_id) {
-            const bundle = await loadProcessBundle(ctx.db, ws, proc, proc.live_revision_id);
-            let model: EngineModel | null = null;
-            try {
-              model = toEngineModel(bundle, { startDate: ctx.today });
-            } catch (err) {
-              if (!(err instanceof ModelError)) throw err;
-              assumptions.push(`Not checked against '${proc.name}': it can't be simulated yet (${err.message}).`);
-            }
-            if (model) {
-              const { issues } = applyPatches(model, args.overrides);
-              const blocking = issues.filter(isBlocking);
-              if (blocking.length) {
-                throw new ToolError("invalid_overrides", `These changes can't be applied to '${proc.name}': ${blocking.map((i) => i.message).join(" ")}`, blocking);
-              }
-              for (const i of issues) assumptions.push(`Override ${i.index + 1}: ${i.message}`);
-            }
-          }
-        } else {
-          assumptions.push("The workspace has several processes and none was given, so the patches were not checked against a model.");
-        }
-        const existing = await loadScenarios(ctx.db, ws.id);
-        const clash = existing.find((s) => s.name.trim().toLowerCase() === args.name.trim().toLowerCase());
-        if (clash) throw new ToolError("name_taken", `A scenario called '${clash.name}' already exists`, [{ id: clash.id, name: clash.name }]);
-        let row: ScenarioRow;
-        try {
-          row = (await ctx.db
-            .insertInto("scenarios")
-            .values({ workspace_id: ws.id, name: args.name.trim(), description: args.description?.trim() || null, patch: JSON.stringify(args.overrides) as unknown as Json })
-            .returning(["id", "workspace_id", "name", "description", "patch", "parent_scenario_id"])
-            .executeTakeFirstOrThrow()) as unknown as ScenarioRow;
-        } catch (error) {
-          throw writeError(error as { code?: string; message?: string }, "save scenarios");
-        }
-        return { workspace: { id: ws.id, name: ws.name }, scenario: { id: row.id, name: row.name, description: row.description, patch: row.patch } };
-      }),
-  );
-
   server.registerTool(
     "compare_scenarios",
     {
@@ -362,104 +277,6 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
   );
 
   server.registerTool(
-    "log_issue",
-    {
-      title: "Log issue",
-      description:
-        "Log a finding in the workspace's issues register (a manual issue), linked to a step, person, role, client, owner and/or the saved " +
-        "scenario that fixes it, each by id or name. Steps are looked up in the process (default: the workspace's only process); clients in " +
-        "the workspace's client roster.",
-      inputSchema: {
-        title: z.string().trim().min(1).max(MAX_TITLE),
-        type: z.enum(ISSUE_TYPES),
-        rating: z.enum(RATINGS).optional().describe("great, good (could improve), bad (not urgent) or risk (operational risk). Default good."),
-        severity: z
-          .enum(STORED_SEVERITIES)
-          .optional()
-          .describe("Deprecated: use rating. critical = risk, serious = bad, warning = good, info = great. Ignored when rating is given."),
-        evidence: z.string().max(MAX_EVIDENCE).optional().describe("What was seen or said, and where."),
-        process: z.string().optional().describe("Process the issue is about (id or name)."),
-        step: z.string().optional().describe("Step id or name."),
-        person: z.string().optional().describe("Person the issue is about (id or name)."),
-        role: z.string().optional().describe("Role the issue is about (id or name)."),
-        client: z.string().optional().describe("Client on the roster the issue is about (id or name)."),
-        owner: z.string().optional().describe("Person who owns the fix (id or name)."),
-        scenario: z.string().optional().describe("Saved scenario that tests the fix (id or name)."),
-        status: z.enum(ISSUE_STATUS_INPUT).optional().describe("open, testing (testing solutions), resolved or wont_fix. Default open. in_progress and done are deprecated spellings of testing and resolved."),
-        workspace: workspaceArg,
-      },
-    },
-    (args) =>
-      runTool(async (assumptions) => {
-        const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
-        // Refuse before any name lookup: a caller who can't edit may not read other people, so a lookup would answer not_found (B1 2/3).
-        let canEdit: boolean;
-        try {
-          canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: ws.id });
-        } catch (accessError) {
-          throw writeError(accessError as { code?: string; message?: string }, "log issues");
-        }
-        if (canEdit !== true) throw writeError({ code: "42501" }, "log issues");
-        const client = args.client
-          ? matchNamed(await ctx.db.selectFrom("clients").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute(), args.client, "client", ` in '${ws.name}'`)
-          : null;
-        let proc: ProcessWithDraft | null = null;
-        if (args.process || args.step) proc = await resolveProcess(ctx, ws, args.process, assumptions);
-        const step = args.step && proc ? matchNamed(await processSteps(ctx, proc), args.step, "step", ` in '${proc.name}'`) : null;
-        const needPeople = args.person || args.owner;
-        const people = needPeople
-          ? await ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute()
-          : [];
-        const person = args.person ? matchNamed(people, args.person, "person", ` in '${ws.name}'`) : null;
-        const owner = args.owner ? matchNamed(people, args.owner, "person", ` in '${ws.name}'`) : null;
-        const role = args.role
-          ? matchNamed(await ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", ws.id).orderBy("name").execute(), args.role, "role", ` in '${ws.name}'`)
-          : null;
-        const scenario = args.scenario ? matchNamed(await loadScenarios(ctx.db, ws.id), args.scenario, "saved scenario", ` in '${ws.name}'`) : null;
-        const rating = args.rating ?? (args.severity ? ratingOfStored(args.severity) : "good");
-        if (!args.rating && args.severity) assumptions.push(`severity '${args.severity}' is deprecated; read as rating '${rating}'.`);
-        else if (!args.rating) assumptions.push("rating defaulted to good (could improve).");
-        const status = normaliseStatus(args.status);
-        if (args.status && status !== args.status) assumptions.push(`status '${args.status}' is deprecated; read as '${status}'.`);
-        // One call writes the issue with what it touches and who owns it, so its history starts with one entry.
-        const saved = await saveIssue(ctx.db, {
-          workspaceId: ws.id,
-          fields: {
-            title: args.title.trim(),
-            type: args.type,
-            severity: storedOfRating(rating),
-            evidence: args.evidence?.trim() || null,
-            status,
-            source: "manual",
-            person_id: person?.id ?? null,
-            role_id: role?.id ?? null,
-            client_id: client?.id ?? null,
-            scenario_id: scenario?.id ?? null,
-          },
-          links: step ? [{ process_id: proc?.id ?? null, step_id: step.id }] : proc ? [{ process_id: proc.id, step_id: null }] : [],
-          owners: owner ? [owner.id] : [],
-        });
-        if ("error" in saved) throw writeError(saved.error, "log issues");
-        const row = await loadIssue(ctx.db, ws.id, saved.id);
-        if (!row) throw writeError({ code: "42501" }, "log issues");
-        return {
-          workspace: { id: ws.id, name: ws.name },
-          issue: {
-            ...row,
-            rating: ratingOfStored(row.severity),
-            process: proc ? { id: proc.id, name: proc.name } : null,
-            step: step ? { id: step.id, name: step.name } : null,
-            person: person ? { id: person.id, name: person.name } : null,
-            role: role ? { id: role.id, name: role.name } : null,
-            client: client ? { id: client.id, name: client.name } : null,
-            owner: owner ? { id: owner.id, name: owner.name } : null,
-            scenario: scenario ? { id: scenario.id, name: scenario.name } : null,
-          },
-        };
-      }),
-  );
-
-  server.registerTool(
     "list_issues",
     {
       title: "List issues",
@@ -540,7 +357,7 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
           const firstPrinciples = await loadFirstPrinciples(ctx.db, proc.id, loaded.bundle.revision.id).catch(() => null);
           const successMeasures = firstPrinciples?.doc ? successMeasureSource(firstPrinciples.doc, proc.id) : undefined;
           // The absence test (rule 8) is its own pass, a few more replications per person who is the only one for a step.
-          // Skip it when the filters would drop its findings anyway, and cap its time; say so when it didn't finish.
+          // Skip it when the filters would drop its facts anyway, and cap its time; say so when it didn't finish.
           const wantsAbsence = config.rules.spof.enabled && !client && (!args.type || args.type === "spof") && (!args.status || args.status === "open");
           let absence: ReturnType<typeof absenceTest> | null = null;
           if (wantsAbsence) {

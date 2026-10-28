@@ -2,15 +2,15 @@
 // each person gets 10 a minute. The count lives in Postgres (`take_link_fetch`, which can only touch the caller's own
 // counter), not in the server's memory, so it holds on serverless hosts where each request may run on a different instance.
 
-import { rpc } from "@transpera-flow/db/client";
-import type { ToolContext } from "./context";
+import { rpc } from "../client";
+import type { ImportContext } from "./context";
 
 export const LINK_FETCHES_PER_MINUTE = 10;
 
 export type LinkFetchTurn = { allowed: true } | { allowed: false; message: string };
 
 /** Count one link fetch for the signed-in user, or say how long to wait. Call it before fetching. */
-export async function takeLinkFetch(ctx: Pick<ToolContext, "db">): Promise<LinkFetchTurn> {
+export async function takeLinkFetch(ctx: Pick<ImportContext, "db">): Promise<LinkFetchTurn> {
   let data: unknown;
   try {
     data = await rpc(ctx.db, "take_link_fetch");

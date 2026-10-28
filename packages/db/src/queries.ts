@@ -50,8 +50,6 @@ import type {
   SourceListRow,
   SourceRow,
   StepRow,
-  SuggestionRow,
-  SuggestionStatus,
   WorkspaceRow,
   WorkspaceSettings,
 } from "./types";
@@ -1079,18 +1077,6 @@ export async function loadLiveRevisions(db: Db, workspaceId: string): Promise<Sn
     const r = revisions.find((x) => x.id === p.live_revision_id);
     return r ? [{ id: p.id, name: p.name, revision_id: r.id, revision: r.number }] : [];
   });
-}
-
-export const SUGGESTION_ROW_COLUMNS =
-  "id, workspace_id, target_table, target_id, patch, evidence, note, status, created_via, import_source, applied, review_note, reviewed_by, reviewed_at, created_at, created_by" as const;
-
-/** The workspace's suggestions, newest first; optionally only one status. */
-export async function loadSuggestions(db: Db, workspaceId: string, status?: SuggestionStatus): Promise<SuggestionRow[]> {
-  let q = db.selectFrom("suggestions").select(columns(SUGGESTION_ROW_COLUMNS)).where("workspace_id", "=", workspaceId);
-  if (status) q = q.where("status", "=", status);
-  const r = await q.orderBy("created_at", "desc").orderBy("id").limit(500).execute();
-  // Check constraints limit the text columns; patch, evidence and applied are jsonb.
-  return r as unknown as SuggestionRow[];
 }
 
 export const RUN_COLUMNS =

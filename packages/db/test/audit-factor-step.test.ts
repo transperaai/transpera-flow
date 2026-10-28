@@ -11,6 +11,8 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 // replaced function is the old one plus the two marked lines, with a header rollback that puts the old one back.
 
 const FILE = "20261225000000_audit_factor_step.sql";
+/** The database as production had it when this migration was written: 20270102000000_drop_suggestions.sql replaced the function again (drop-suggestions.test.ts covers it). */
+const AS_APPLIED = "20261231000000";
 const OLD_FILE = "20261015000000_suggestions.sql";
 const OLD_MD5 = "e936352b8a20cdd8fd374756e4fa4439";
 const ws = NORTHBEAM_WORKSPACE_ID;
@@ -34,7 +36,7 @@ let editor: { id: string; claims: Record<string, unknown> };
 let owner: { id: string; claims: Record<string, unknown> };
 
 beforeAll(async () => {
-  db = await createTestDb();
+  db = await createTestDb({ upTo: AS_APPLIED });
   editor = await createUser(db, "afs-editor@example.com");
   owner = await createUser(db, "afs-owner@example.com");
   await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'owner')", [ws, editor.id, owner.id]);

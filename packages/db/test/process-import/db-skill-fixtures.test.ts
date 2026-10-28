@@ -2,18 +2,18 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { checkProcessFile } from "@transpera-flow/db";
-import { importProcessFile, previewProcessFile } from "../src";
-import type { ToolContext } from "../src/context";
-import { startTestDb, userClaims, type McpTestDb } from "./helpers";
+import { checkProcessFile } from "../../src";
+import { importProcessFile, previewProcessFile } from "../../src/process-import";
+import type { ImportContext } from "../../src/process-import/context";
+import { startTestDb, userClaims, type ImportTestDb } from "./helpers";
 
 // The process-file skill's fixtures (issue #167, B14 part 2): the Tidewater and Copperleaf files in docs/import/examples/, as the
 // skill would write them, uploaded the way the web app does (checked file, shared import code, Kysely under RLS as the signed-in
-// user). Each lands as a draft with step evidence, sources and their links, pending suggestions and pending proposals; nothing
-// company-level is applied. The files themselves are checked in packages/db/test/process-file-skill-fixtures.test.ts. Runs on
+// user). Each lands as a draft with step evidence, sources and their links and first principles; nothing
+// company-level is touched. The files themselves are checked in packages/db/test/process-file-skill-fixtures.test.ts. Runs on
 // a throwaway database (test/helpers.ts).
 
-let env: McpTestDb;
+let env: ImportTestDb;
 let admin: pg.Client;
 /** The workspaces and users these tests make. */
 const madeWorkspaces: string[] = [];
@@ -22,19 +22,19 @@ const madeUsers: string[] = [];
 const q = async (sql: string, params: unknown[] = []) => (await admin.query(sql, params)).rows;
 const count = async (sql: string, params: unknown[] = []) => Number((await q(sql, params))[0].n);
 
-function contextFor(userId: string): ToolContext {
-  return { db: env.dbAs(userClaims(userId)), tokenHash: "", userId, activeWorkspaceId: null, today: "2026-10-05" };
+function contextFor(userId: string): ImportContext {
+  return { db: env.dbAs(userClaims(userId)), userId };
 }
 
 const fixture = (name: string) => {
-  const checked = checkProcessFile(JSON.parse(readFileSync(new URL(`../../../docs/import/examples/${name}.json`, import.meta.url), "utf8")));
+  const checked = checkProcessFile(JSON.parse(readFileSync(new URL(`../../../../docs/import/examples/${name}.json`, import.meta.url), "utf8")));
   expect(checked.errors).toEqual([]);
   return checked.file!;
 };
 
 interface World {
   workspaceId: string;
-  ctx: ToolContext;
+  ctx: ImportContext;
   roles: Record<string, string>;
 }
 
@@ -74,10 +74,8 @@ async function written(w: World, processName: string, revisionId: string) {
   const steps = Object.fromEntries((await q("select * from steps where revision_id = $1", [revisionId])).map((x) => [x.name, x]));
   const sources = await q("select s.id, s.title, s.kind, s.speakers, s.created_by from sources s where s.workspace_id = $1 order by s.title", [w.workspaceId]);
   const links = await q("select l.kind, l.source_id, l.step_id from source_links l where l.process_id = $1", [proc.id]);
-  const suggestions = await q("select target_table, target_id, status, patch, evidence, note, created_via from suggestions where workspace_id = $1 order by target_table, created_at", [w.workspaceId]);
-  const proposals = await q("select kind, status, title, payload, evidence, created_via from suggestion_proposals where workspace_id = $1 order by title", [w.workspaceId]);
   const issues = await q("select type, title from issues where workspace_id = $1 order by title", [w.workspaceId]);
-  return { proc, steps, sources, links, suggestions, proposals, issues };
+  return { proc, steps, sources, links, issues };
 }
 
 type Cite = { source_id: string; speaker: string; value: number };
@@ -93,7 +91,7 @@ describe("uploading the process-file skill's fixtures", () => {
     await env?.close();
   });
 
-  it("Tidewater: Monthly client report lands as a draft with pending suggestions and proposals", async () => {
+  it("Tidewater: Monthly client report lands as a draft with its sources, evidence and first principles", async () => {
     const w = await company(
       "Tidewater",
       ["Account manager", "SEO specialist", "Director"],
@@ -110,13 +108,12 @@ describe("uploading the process-file skill's fixtures", () => {
     expect(preview.unknownRoles).toEqual([]);
     expect(preview.unknownPeople).toEqual([]);
     expect(preview.extras!.sources.map((s) => s.title)).toEqual(["Tidewater interview: Hana Iqbal, account manager", "Tidewater interview: Owen Hart, SEO specialist"]);
-    expect(preview.extras!.suggestions.map((s) => s.subject)).toEqual(["Person Priti Rao", "New person Jonah Pike", "Person Owen Hart", "Client Marlow Physio", "New client Quayside Vets", "Lead source Referrals"]);
-    expect(preview.extras!.proposals).toHaveLength(3);
+    expect(preview.extras!.firstPrinciplesParts).toBeGreaterThan(0);
     expect(preview.gap.gaps.map((g) => g.text)).toEqual(["Director review has no hands-on time", "No recurrence: link this process to a service and set how often it repeats in Settings"]);
     expect(await companyCounts(w.workspaceId)).toEqual(before);
 
     const r = await importProcessFile(w.ctx, file, { workspaceId: w.workspaceId, source: "tidewater-monthly-client-report.json" });
-    expect(r).toMatchObject({ steps: 8, links: 8, bundle: { sources: 2, suggestions: 6, proposals: 3, first_principles: true } });
+    expect(r).toMatchObject({ steps: 8, links: 8, bundle: { sources: 2, first_principles: true } });
     const x = await written(w, "Monthly client report", r.revision_id);
     expect(x.proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import", kind: "servicing" });
 
@@ -139,23 +136,12 @@ describe("uploading the process-file skill's fixtures", () => {
     // Sources are linked to the process, so neither says "Not linked to anything yet".
     expect(x.links.filter((l) => l.kind === "process").map((l) => l.source_id).sort()).toEqual([hana.id, owen.id].sort());
 
-    // Company facts are pending suggestions and nothing was applied; the two disagreements of 2x or more are logged as perception gaps.
-    expect(x.suggestions.every((s) => s.status === "pending" && s.created_via === "upload")).toBe(true);
-    expect(x.suggestions.map((s) => s.target_table)).toEqual(["clients", "clients", "lead_sources", "people", "people", "people"]);
+    // Nothing company-level was touched; the two disagreements of 2x or more are logged as perception gaps.
     expect(await companyCounts(w.workspaceId)).toEqual({ ...before, issues: before.issues + 2 });
     expect(x.issues).toEqual([
       { type: "perception_gap", title: "Sources disagree on Director review: rework rate" },
       { type: "perception_gap", title: "Sources disagree on Pull ranking data: hands-on time" },
     ]);
-
-    // Issues from the interviews are pending proposals with their quotes; none became a real issue.
-    expect(x.proposals.map((p) => p.title)).toEqual([
-      "Every report goes through Callum",
-      "The rank tracker export times out and the client's pull is redone",
-      "The same commentary sentences are rewritten every month",
-    ]);
-    expect(x.proposals.every((p) => p.kind === "issue" && p.status === "pending" && p.created_via === "upload" && p.evidence.length > 0)).toBe(true);
-    expect(x.proposals[1]!.evidence.map((c: { source_id: string }) => c.source_id)).toEqual([hana.id, owen.id]);
 
     // First principles are on the draft: the requirement has an owner who is a person, and the measure is the stated promise.
     const fp = (await q("select * from first_principles where process_id = $1", [x.proc.id]))[0];
@@ -180,24 +166,11 @@ describe("uploading the process-file skill's fixtures", () => {
     expect(preview.unknownRoles).toEqual(["Designer"]);
     expect(preview.unknownPeople).toEqual([]);
     expect(preview.gap.gaps.map((g) => g.text)).toEqual(["Pitch deck has no role", "Send contract has no hands-on time"]);
-    expect(preview.extras!.suggestions.map((s) => s.subject)).toEqual([
-      "New role Designer",
-      "Person Ellie Marsh",
-      "Person Kofi Mensah",
-      "New person Ruby Chen",
-      "New person Maddie Kerr",
-      "Client Ashgrove Garden Centre",
-      "New client Harlow and Pike Opticians",
-      "Client Brambleway Farm Shop",
-      "Lead source Website enquiries",
-      "New lead source LinkedIn",
-      "Seasonality: December",
-    ]);
-    expect(preview.extras!.proposals).toHaveLength(4);
+    expect(preview.extras!.firstPrinciplesParts).toBeGreaterThan(0);
     expect(await companyCounts(w.workspaceId)).toEqual(before);
 
     const r = await importProcessFile(w.ctx, file, { workspaceId: w.workspaceId, source: "copperleaf-enquiry-to-signed-client.json" });
-    expect(r).toMatchObject({ steps: 15, links: 14, bundle: { sources: 2, suggestions: 11, proposals: 4, first_principles: true } });
+    expect(r).toMatchObject({ steps: 15, links: 14, bundle: { sources: 2, first_principles: true } });
     expect(r.warnings).toContain("One step has no role: the file's role isn't one of your roles and wasn't mapped to one.");
     const x = await written(w, "Enquiry to signed client", r.revision_id);
     expect(x.proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import", kind: "pipeline" });
@@ -244,43 +217,10 @@ describe("uploading the process-file skill's fixtures", () => {
     // The withdrawn audit-skip share left no decision in the draft.
     expect(s["Already spending on ads?"]).toBeUndefined();
 
-    // Sources linked to the process; company facts pending and unapplied; conflicts of 2x or more logged as perception gaps.
+    // Sources linked to the process; nothing company-level touched; conflicts of 2x or more logged as perception gaps.
     expect(x.links.filter((l) => l.kind === "process").map((l) => l.source_id).sort()).toEqual([grace.id, tom.id].sort());
-    expect(x.suggestions.every((g) => g.status === "pending" && g.created_via === "upload")).toBe(true);
-    const by = (t: string) => x.suggestions.filter((g) => g.target_table === t);
-    const people = by("people");
-    expect(people).toHaveLength(4);
-    const ruby = people.find((g) => g.patch.set.name === "Ruby Chen")!;
-    expect(ruby.patch.set).toEqual({ name: "Ruby Chen", start_date: "2026-11-09" });
-    expect(ruby.target_id).toBeNull();
-    expect(ruby.evidence.map((c: { source_id: string }) => c.source_id)).toEqual([tom.id, grace.id]);
-    expect(people.find((g) => g.patch.set.name === "Maddie Kerr")!.target_id).toBeNull();
-    const existing = people.filter((g) => g.target_id !== null);
-    expect(existing.map((g) => g.patch.set)).toEqual([{ fte: 0.8 }, { fte: 0.8 }]);
-    // Kofi's booked leave comes as leave on his suggestion.
-    expect(existing.flatMap((g) => g.patch.leave ?? [])).toEqual([{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family abroad; booked" }]);
-    const clients = by("clients");
-    expect(clients).toHaveLength(3);
-    expect(clients.find((g) => g.patch.set.mrr === 3600)!.target_id).not.toBeNull();
-    expect(clients.find((g) => g.patch.set.active === false)).toMatchObject({ target_id: expect.any(String), patch: { set: { active: false } } });
-    const harlow = clients.find((g) => g.patch.set.name === "Harlow and Pike Opticians")!;
-    expect(harlow.target_id).toBeNull();
-    expect(Object.keys(harlow.patch.assignments)).toEqual([w.roles["Account director"]]);
-    expect(Object.values(harlow.patch.assignments)[0]).not.toBeNull();
-    expect(by("lead_sources")).toHaveLength(2);
-    expect(by("lead_sources").map((g) => g.patch.set)).toEqual(expect.arrayContaining([{ volume_week: 9 }, { name: "LinkedIn" }]));
-    expect(by("roles").map((g) => g.patch.set)).toEqual([{ name: "Designer" }]);
-    expect(by("seasonality").map((g) => g.patch.set)).toEqual([{ month: 12, multiplier: 0.5 }]);
     expect(await companyCounts(w.workspaceId)).toEqual({ ...before, issues: before.issues + 4 });
     expect(x.issues.map((i) => i.type)).toEqual(["perception_gap", "perception_gap", "perception_gap", "perception_gap"]);
-
-    expect(x.proposals.map((p) => p.title)).toEqual([
-      "Chasing clients to sign takes a lot of Tom's time",
-      "Proposals need a second version because the budget comes up late",
-      "Proposals wait about a week on Grace's desk",
-      "The pitch deck is briefed the day before it is due",
-    ]);
-    expect(x.proposals.every((p) => p.status === "pending" && p.evidence.length > 0)).toBe(true);
 
     // First principles: only the two rules a speaker stated.
     const fp = (await q("select * from first_principles where process_id = $1", [x.proc.id]))[0];
