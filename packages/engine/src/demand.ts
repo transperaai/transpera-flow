@@ -7,6 +7,7 @@
 // multiplier changes how far each draw reaches, not the draws themselves, so
 // a seasonal scenario and a flat baseline share their random numbers.
 
+import { activeChannels, channelMonth, planChannels } from "./channels";
 import { activeMarket } from "./market";
 import type { EngineDemand, EngineModel } from "./model";
 import { expo, type Rng } from "./random";
@@ -28,6 +29,16 @@ interface Calendar {
   growth: number;
   /** Market months' multipliers on the rate (market.ts), counted from t = 0; null with no market effect on enquiries. */
   leads: number[] | null;
+  /**
+   * The `leads` channel (channels.ts) as its changes: the multiplier before the first (month 0's, which also covers the warm-up) and
+   * where it changes, month starts whose value equals the one before left out, so a stretch of equal months is one piece of the walk and
+   * the arrivals before a change are exactly those of a run without the channel. Null without the channel.
+   */
+  channel: { first: number; steps: { t: number; f: number }[]; months: number[]; starts: readonly number[] } | null;
+  /** Demand is flat, with no market leads: the rate is `base` (× the channel), walked with the very arithmetic of the constant-rate path. */
+  simple: boolean;
+  /** Mean hours between arrivals at the base rate. */
+  meanGap: number;
 }
 
 /** x^n for a whole n by repeated squaring (plain multiplication, so identical in every JS engine). */
@@ -63,8 +74,16 @@ function calendar(model: EngineModel): Calendar | null {
   checkDemand(demand);
   const market = activeMarket(model);
   const leads = market && market.months.some((m) => m.leads !== 1) ? market.months.map((m) => m.leads) : null;
-  if (isFlatDemand(demand) && !leads) return null;
+  const channels = activeChannels(model);
+  const chMonths = channels?.leads ? planChannels(model, channels).leads : null;
+  if (isFlatDemand(demand) && !leads && !chMonths) return null;
   const startMonth = demand?.startMonth ?? 0;
+  let channel: Calendar["channel"] = null;
+  if (chMonths) {
+    const steps: { t: number; f: number }[] = [];
+    for (let m = 1; m < chMonths.length; m++) if (chMonths[m] !== chMonths[m - 1]) steps.push({ t: channels!.starts[m - 1]!, f: chMonths[m]! });
+    channel = { first: chMonths[0]!, steps, months: chMonths, starts: channels!.starts };
+  }
   return {
     base: model.leadsPerWeek / model.hoursPerWeek,
     monthHours: WEEKS_PER_CALENDAR_MONTH * model.hoursPerWeek,
@@ -73,6 +92,9 @@ function calendar(model: EngineModel): Calendar | null {
     seasonality: demand?.seasonality ?? new Array<number>(MONTHS).fill(1),
     growth: demand?.growthMonthly ?? 0,
     leads,
+    channel,
+    simple: isFlatDemand(demand) && !leads,
+    meanGap: model.hoursPerWeek / model.leadsPerWeek,
   };
 }
 
@@ -94,7 +116,8 @@ export function demandFactor(model: EngineModel, t: number): number {
   const c = calendar(model);
   if (!c) return 1;
   const market = c.leads ? c.leads[t < 0 ? 0 : Math.min(Math.floor(t / c.monthHours), c.leads.length - 1)]! : 1;
-  return monthFactor(c, Math.floor(c.startMonth + t / c.monthHours)) * market;
+  const channel = c.channel ? c.channel.months[channelMonth(c.channel.starts, t)]! : 1;
+  return monthFactor(c, Math.floor(c.startMonth + t / c.monthHours)) * market * channel;
 }
 
 /**
@@ -139,14 +162,40 @@ function walk(c: Calendar, limit: number, dir: 1 | -1, rng: Rng): number[] {
   const leads = c.leads;
   let mk = 0;
   const marketEdge = () => (dir > 0 && leads && mk < leads.length - 1 ? (mk + 1) * c.monthHours : Infinity);
+  // The channel's multiplier in force and where it changes next (forwards only: before t = 0 it is month 0's).
+  const chan = c.channel;
+  const chSteps = dir > 0 && chan ? chan.steps : null;
+  let ck = 0;
+  let chF = chan ? chan.first : 1;
+  const chEdge = () => (chSteps && ck < chSteps.length ? chSteps[ck]!.t : Infinity);
   // Distance from t = 0 to the edge of month j in the walking direction.
   const edge = (m: number) => dir * ((dir > 0 ? m + 1 : m) - pos) * c.monthHours;
   let need = expo(rng, 1);
+  if (c.simple) {
+    // Flat demand: only the channel changes the rate. Each draw is spent as `need × mean gap` (the constant-rate path's own
+    // arithmetic), so with the channel at 1 the arrivals are bit for bit those of a model without it.
+    while (t < limit) {
+      const cE = chEdge();
+      const end = Math.min(limit, cE);
+      const next = t + need * (c.meanGap / chF);
+      if (next < end) {
+        t = next;
+        out.push(t);
+        need = expo(rng, 1);
+      } else {
+        need -= (end - t) * (chF / c.meanGap);
+        t = end;
+        if (end === cE) chF = chSteps![ck++]!.f;
+      }
+    }
+    return out;
+  }
   while (t < limit) {
-    const rate = c.base * monthFactor(c, j) * (leads ? leads[mk]! : 1);
+    const rate = c.base * monthFactor(c, j) * (leads ? leads[mk]! : 1) * (chan ? chF : 1);
     const calEdge = edge(j);
     const mEdge = marketEdge();
-    const end = Math.min(limit, calEdge, mEdge);
+    const cE = chEdge();
+    const end = Math.min(limit, calEdge, mEdge, cE);
     const room = (end - t) * rate;
     if (rate > 0 && need < room) {
       t += need / rate;
@@ -158,6 +207,7 @@ function walk(c: Calendar, limit: number, dir: 1 | -1, rng: Rng): number[] {
       t = end;
       if (end === calEdge) j += dir;
       if (end === mEdge) mk++;
+      if (end === cE) chF = chSteps![ck++]!.f;
     }
   }
   return out;

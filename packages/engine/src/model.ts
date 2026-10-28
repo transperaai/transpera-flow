@@ -2,7 +2,7 @@
 // far with named people, services, end-step outcomes, seasonal demand, a client
 // roster, overtime, and client servicing with health and churn (docs/PRD.md §6).
 
-import type { ChurnCauses, ChurnReplication, EngineChurnDriver } from "./churn-drivers";
+import type { ChurnCauses, ChurnReplication, DriverEvents, EngineChurnDriver } from "./churn-drivers";
 import type { EngineMarket } from "./market";
 import type { Loop } from "./loops";
 
@@ -98,6 +98,12 @@ export interface EngineService {
   pricingModel: PricingModel;
   /** Monthly fee for a retainer; the whole fee for a one-off; the rate for hourly. */
   price: number;
+  /**
+   * Fee range of a client won on this service (sandbox phase 3, A5): its fee is drawn from a triangular low – price – high, from
+   * its own random stream. Omitted, or low = high = price: the price, and no draw. The engine uses min(low, price) and max(high, price).
+   * Existing clients (a named client's `mrr`, a client group's `fee`) keep their entered fee.
+   */
+  priceRange?: { low: number; high: number };
   /** Gross margin as a share of price (0–1); recorded for reference, not used: profit comes from the hours people are paid for (see `labourCost`). */
   margin: number;
   /** Expected tenure of a retainer client, in months (LTV and lost revenue). */
@@ -326,6 +332,44 @@ export interface EngineDemand {
   startMonth?: number;
 }
 
+/**
+ * Monthly channels (sandbox phase 3, channels.ts): per-month values the engine reads while it runs, so a change from a month
+ * is one run and the months before it are exactly the run without it. Month 0 starts at t = 0 and also covers the warm-up;
+ * an array shorter than `starts.length + 1` holds its last value. Multipliers are 0 or more.
+ */
+export interface EngineChannels {
+  /** Hours inside the run where months 1, 2, … start (the run's `monthStarts`); ascending, in (0, H). */
+  starts: number[];
+  /** × arrival rate, on top of seasonality, growth and the market's leads. */
+  leads?: number[];
+  /** × the market's conv (the share of enquiries that sign). */
+  conv?: number[];
+  /** Service id → its mix weight that month (absolute; replaces `mixShare`). */
+  mix?: Record<string, number[]>;
+  /** Service id or "*" → × the price a client won that month pays (retainer fee, one-off price, hourly rate). */
+  newFee?: Record<string, number[]>;
+  /** Service id or "*" → × what every active client pays that month (existing and won). A rise carries churn through the price driver. */
+  fee?: Record<string, number[]>;
+  /** Service id → the fee range in force that month; null is the service's own. */
+  priceRange?: Record<string, ({ low: number; high: number } | null)[]>;
+  /** Service id or "*" → × base churn (a pooled model: "*" only). */
+  churn?: Record<string, number[]>;
+  /** Driver id → its chance-and-effect settings that month; null is as the model's `churnDrivers` say. */
+  drivers?: Record<string, (DriverEvents | null)[]>;
+  /** Step id → × hands-on time. */
+  work?: Record<string, number[]>;
+  /** Step id → mean external wait that month, in hours (absolute). */
+  wait?: Record<string, number[]>;
+  /** Step id → probability the step is repeated that month (absolute, at most 0.95). */
+  rework?: Record<string, number[]>;
+  /** Role id → × the role's cost an hour. */
+  roleCost?: Record<string, number[]>;
+  /** × `overheadMonthly`. */
+  overheads?: number[];
+  /** Person id or "*" → × contracted capacity. */
+  capacity?: Record<string, number[]>;
+}
+
 export interface EngineModel {
   /**
    * True when the caller may not see people's pay (members and viewers; B1 slice 2a): no person has a `cost`, and the
@@ -403,6 +447,11 @@ export interface EngineModel {
    * existed (health and the market's "clients leaving" factor, both at weight 1).
    */
   churnDrivers?: EngineChurnDriver[];
+  /**
+   * Per-month values the engine reads while it runs (sandbox phase 3, channels.ts). Omitted, or every array neutral: the run
+   * is exactly as before this field existed.
+   */
+  channels?: EngineChannels;
   /**
    * Servicing processes by id (see `EngineService.servicing`). Omitted or
    * empty: no servicing, and the model runs exactly as before it existed.
@@ -652,6 +701,8 @@ export interface MonthlyReplication {
   revenueOneOff: number[];
   revenueHourly: number[];
   revenueFromNew: number[];
+  /** Of the revenue above, the part a fee channel added to what clients pay (the `fee` channel's (factor - 1) share): "gained from clients who stay". */
+  revenueRise: number[];
   /** Monthly fees of the clients that left in the month (`weeklyBill` × 4.33; pooled: the fall in the pool's fees). */
   mrrLost: number[];
   /** Paid hours × rate in the month, overtime excluded (see `ReplicationResult.labourCost`); null when `model.payHidden`. */
@@ -704,7 +755,7 @@ export interface MonthlyResult {
   clientsWon: Stat[];
   clientsLost: Stat[];
   /** Billed revenue per month, split three ways, with what came from clients won in the run and the fees lost to churn. */
-  revenue: { total: Stat[]; recurring: Stat[]; oneOff: Stat[]; hourly: Stat[]; fromNew: Stat[]; lostToChurn: Stat[] };
+  revenue: { total: Stat[]; recurring: Stat[]; oneOff: Stat[]; hourly: Stat[]; fromNew: Stat[]; lostToChurn: Stat[]; rise: Stat[] };
   /** Overtime hours per month, everyone together. */
   overtimeHours: Stat[];
   /**
@@ -747,7 +798,7 @@ export interface ReplicationResult {
    * the interim clients, which `billed` leaves out), one-off prices, and hourly work for clients won in the run. `fromNew`
    * is the part from clients won in the run. Total = recurring + oneOff + hourly.
    */
-  revenue: { recurring: number; oneOff: number; hourly: number; fromNew: number };
+  revenue: { recurring: number; oneOff: number; hourly: number; fromNew: number; rise: number };
   /** Per hourly service id: hands-on hours billed and what they bill (present, 0, when none). */
   hourly: Record<string, { hours: number; revenue: number }>;
   /** Paid hours × rate (capacity × weeks on the team × `rateOf`), overtime excluded; leave is paid. Null when `model.payHidden`. */
@@ -955,6 +1006,8 @@ export interface ReplicationSamples {
   /** Total billed revenue and profit (null when `model.payHidden`) per replication. */
   revenue: number[];
   profit: number[] | null;
+  /** Revenue a fee channel added (the part of `revenue` above the fees without it), per replication. */
+  revenueRise: number[];
 }
 
 export interface SimulationResult {
@@ -1004,4 +1057,9 @@ export interface SimulationResult {
   churnCauses?: ChurnCauses;
   /** Month by month, only when the run was asked for it (`simulate(…, { monthly: true })`). */
   monthly?: MonthlyResult;
+  /**
+   * With `monthly`: each replication's own months (replication × month), for paired comparisons such as the price-rise
+   * trade-off (the same seed and warm-up give the same random numbers, so two runs' replications pair up).
+   */
+  monthlySamples?: { revenue: number[][]; rise: number[][]; clientsLost: number[][] };
 }

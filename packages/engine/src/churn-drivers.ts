@@ -27,11 +27,22 @@
 // of 10), tenure (the multiple in the first six months), price (a planned
 // rise) and any driver of your own (the extra churn it causes, in percent).
 //
+// Chances (sandbox phase 3, B4). A driver can instead run as events: each month a client is hit with a chance, and
+// while it lasts (`months`, from the hit) the hit raises that client's churn by `effect` (0.5 = +50%); a hit during a
+// hit extends it, effects never stack. The weekly chance of leaving is then
+//
+//   base × churn(t) × (1 + Σ weight-mode w × p + Σ chance-mode effect × hit) × market
+//
+// A driver switches to events only when an `effect` is set, so every stored driver stays in weight mode and nothing moves.
+// Entered chances draw from their own random streams (`hit:<driver>:<client>`); measured drivers are hit by the event itself
+// (a late task, a redone visit, a slow first delivery, a busy tick) and draw nothing. Tenure and market have no events.
+//
 // With the defaults (late and market on at weight 1, everything else off) the
 // formula is exactly the one the engine used before drivers existed, so a
 // model with no `churnDrivers` runs and rounds exactly as it did. Pure: no I/O.
 
 import { clientChurnMonthly, withClientGroups } from "./clients";
+import { exp, log } from "./det-math";
 import type { EngineModel } from "./model";
 
 export const BUILTIN_CHURN_DRIVER_IDS = ["late", "resp", "onb", "rework", "load", "handoff", "results", "tenure", "price", "market"] as const;
@@ -67,11 +78,13 @@ export interface ChurnDriverSpec {
   valueRange: { min: number; max: number } | null;
   /** What the entered value is, in a few words. */
   valueLabel: string | null;
+  /** How the driver can run as events (chances): measured by the engine at the event, entered by you, or not at all (tenure, market). */
+  events: "measured" | "entered" | "none";
 }
 
 export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> = {
-  late: { id: "late", name: "Late or missed servicing work", source: "measured", defaultEnabled: true, defaultValue: null, valueRange: null, valueLabel: null },
-  resp: { id: "resp", name: "Response time to ad-hoc requests", source: "measured", defaultEnabled: false, defaultValue: null, valueRange: null, valueLabel: null },
+  late: { id: "late", name: "Late or missed servicing work", source: "measured", defaultEnabled: true, defaultValue: null, valueRange: null, valueLabel: null, events: "measured" },
+  resp: { id: "resp", name: "Response time to ad-hoc requests", source: "measured", defaultEnabled: false, defaultValue: null, valueRange: null, valueLabel: null, events: "measured" },
   onb: {
     id: "onb",
     name: "Onboarding speed (won to first delivery)",
@@ -80,9 +93,10 @@ export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> =
     defaultValue: 10,
     valueRange: { min: 1, max: 120 },
     valueLabel: "Normal first delivery, in working days",
+    events: "measured",
   },
-  rework: { id: "rework", name: "Rework or errors on deliverables", source: "measured", defaultEnabled: false, defaultValue: null, valueRange: null, valueLabel: null },
-  load: { id: "load", name: "Account team overload (above 85% busy)", source: "measured", defaultEnabled: false, defaultValue: null, valueRange: null, valueLabel: null },
+  rework: { id: "rework", name: "Rework or errors on deliverables", source: "measured", defaultEnabled: false, defaultValue: null, valueRange: null, valueLabel: null, events: "measured" },
+  load: { id: "load", name: "Account team overload (above 85% busy)", source: "measured", defaultEnabled: false, defaultValue: null, valueRange: null, valueLabel: null, events: "measured" },
   handoff: {
     id: "handoff",
     name: "Account manager changes",
@@ -91,6 +105,7 @@ export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> =
     defaultValue: 0.3,
     valueRange: { min: 0, max: 1 },
     valueLabel: "Share of clients whose account manager changes in a year",
+    events: "entered",
   },
   results: {
     id: "results",
@@ -100,6 +115,7 @@ export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> =
     defaultValue: 7,
     valueRange: { min: 0, max: 10 },
     valueLabel: "Average rating out of 10",
+    events: "entered",
   },
   tenure: {
     id: "tenure",
@@ -109,6 +125,7 @@ export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> =
     defaultValue: 1.6,
     valueRange: { min: 1, max: 5 },
     valueLabel: "Times as likely to leave in months 1 to 6",
+    events: "none",
   },
   price: {
     id: "price",
@@ -118,9 +135,17 @@ export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> =
     defaultValue: 0,
     valueRange: { min: 0, max: 100 },
     valueLabel: "Planned price rise, %",
+    events: "entered",
   },
-  market: { id: "market", name: "Market conditions", source: "market", defaultEnabled: true, defaultValue: null, valueRange: null, valueLabel: null },
+  market: { id: "market", name: "Market conditions", source: "market", defaultEnabled: true, defaultValue: null, valueRange: null, valueLabel: null, events: "none" },
 };
+
+/** The most a chance-mode driver can raise a hit client's churn: +500%. */
+export const CHURN_EFFECT_MAX = 5;
+/** How long a hit lasts, in months. */
+export const EFFECT_MONTHS = { min: 1, max: 24, default: 3 } as const;
+/** A price driver's effect is per this much of rise: an effect of 1 is +100% churn for a 10% rise (the weight mode's "10% adds 20%" is effect 2). */
+export const PRICE_EFFECT_PER = 0.1;
 
 /** The limits of a custom driver's value: the extra churn it causes at weight 1, in percent. */
 export const CUSTOM_DRIVER_VALUE = { min: 0, max: 500, default: 20 } as const;
@@ -137,6 +162,22 @@ export interface EngineChurnDriver {
   month?: number | null;
   /** A custom driver's name. */
   name?: string;
+  /** Chance mode (B4): the monthly chance (0-1) a client is hit. Null or omitted: measured for late, resp, onb, rework and load; a default for the rest. */
+  chance?: number | null;
+  /** Chance mode: how much a hit raises that client's churn (0 to 5; 0.5 is +50%). A number switches the driver from its weight to events; null or omitted keeps the weight. Ignored for tenure and market. */
+  effect?: number | null;
+  /** Chance mode: months a hit lasts (1 to 24, default 3). */
+  effectMonths?: number | null;
+}
+
+/** A driver run as events (chance mode), as the engine resolves it (and as a monthly channel gives it). */
+export interface DriverEvents {
+  /** Monthly chance a client is hit, 0-1. Null: measured (late, resp, onb, rework, load). */
+  chance: number | null;
+  /** How much a hit raises that client's churn while it lasts: 0.5 = +50%. */
+  effect: number;
+  /** Months a hit lasts, 1-24. */
+  months: number;
 }
 
 /** A driver as the engine resolves it. */
@@ -151,7 +192,30 @@ export interface ResolvedChurnDriver {
   value: number | null;
   /** Price changes: the month the rise takes effect (1-based). */
   month: number;
+  /** Chance mode, or null for weight x pressure exactly as before. An entered driver's chance is never null here (its default is filled in). */
+  events: DriverEvents | null;
 }
+
+/** The chance an entered driver is hit with when none is given: handoff its yearly share a month, price 1 at each rise, the rest 1. */
+export function defaultEventChance(id: string, value: number | null): number {
+  return id === "handoff" ? clamp((value ?? 0) / 12, 0, 1) : 1;
+}
+
+/** A chance-and-effect setting made safe and complete for a driver (its chance defaulted when entered, its numbers brought into range). */
+export function normaliseEvents(id: string, value: number | null, raw: DriverEvents): DriverEvents | null {
+  const kind = id.startsWith(CUSTOM_DRIVER_PREFIX) ? "entered" : (CHURN_DRIVER_SPECS[id as BuiltinChurnDriverId]?.events ?? "none");
+  if (kind === "none" || !finite(raw.effect)) return null;
+  return {
+    chance: finite(raw.chance) ? clamp(raw.chance, 0, 1) : kind === "measured" ? null : defaultEventChance(id, value),
+    effect: clamp(raw.effect, 0, CHURN_EFFECT_MAX),
+    months: finite(raw.months) ? clamp(Math.round(raw.months), EFFECT_MONTHS.min, EFFECT_MONTHS.max) : EFFECT_MONTHS.default,
+  };
+}
+
+const eventsOf = (id: string, value: number | null, d: EngineChurnDriver | undefined): DriverEvents | null =>
+  d && finite(d.effect)
+    ? normaliseEvents(id, value, { chance: finite(d.chance) ? d.chance : null, effect: d.effect, months: finite(d.effectMonths) ? d.effectMonths : EFFECT_MONTHS.default })
+    : null;
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -181,6 +245,7 @@ function resolveUncached(model: Pick<EngineModel, "churnDrivers">): ResolvedChur
     const spec = CHURN_DRIVER_SPECS[id];
     const d = given.get(id);
     const range = spec.valueRange;
+    const value = range ? (d && finite(d.value) ? clamp(d.value, range.min, range.max) : spec.defaultValue) : null;
     out.push({
       id,
       name: spec.name,
@@ -188,12 +253,14 @@ function resolveUncached(model: Pick<EngineModel, "churnDrivers">): ResolvedChur
       custom: false,
       weight: d && finite(d.weight) ? clamp(d.weight, CHURN_WEIGHT_MIN, CHURN_WEIGHT_MAX) : 1,
       enabled: d ? d.enabled !== false : spec.defaultEnabled,
-      value: range ? (d && finite(d.value) ? clamp(d.value, range.min, range.max) : spec.defaultValue) : null,
+      value,
       month: id === "price" && d && finite(d.month) ? clamp(Math.round(d.month), 1, 24) : 1,
+      events: eventsOf(id, value, d),
     });
   }
   for (const [id, d] of given) {
     if (!id.startsWith(CUSTOM_DRIVER_PREFIX)) continue;
+    const value = finite(d.value) ? clamp(d.value, CUSTOM_DRIVER_VALUE.min, CUSTOM_DRIVER_VALUE.max) : CUSTOM_DRIVER_VALUE.default;
     out.push({
       id,
       name: d.name?.trim() || "Your own driver",
@@ -201,8 +268,9 @@ function resolveUncached(model: Pick<EngineModel, "churnDrivers">): ResolvedChur
       custom: true,
       weight: finite(d.weight) ? clamp(d.weight, CHURN_WEIGHT_MIN, CHURN_WEIGHT_MAX) : 1,
       enabled: d.enabled !== false,
-      value: finite(d.value) ? clamp(d.value, CUSTOM_DRIVER_VALUE.min, CUSTOM_DRIVER_VALUE.max) : CUSTOM_DRIVER_VALUE.default,
+      value,
       month: 1,
+      events: eventsOf(id, value, d),
     });
   }
   return out;
@@ -245,6 +313,22 @@ export const resultsPressure = (score: number): number => clamp((RESULTS_NORMAL_
 /** A price rise in percent. */
 export const pricePressure = (risePercent: number): number => Math.max(0, risePercent / 100) * PRICE_PRESSURE_PER_UNIT;
 
+/** The share of time a client is under a hit's effect when it is hit with `chance` each month and a hit lasts `months`: 1 - (1 - chance)^months. */
+export function eventExposure(chance: number, months: number): number {
+  if (!(chance > 0)) return 0;
+  if (chance >= 1) return 1;
+  let keep = 1;
+  for (let i = 0; i < months; i++) keep *= 1 - chance;
+  return 1 - keep;
+}
+
+/** Hits a week as a monthly chance: 1 - (1 - q)^(weeks in a month), for q hits per client-week (at most 1 a week). */
+export function weeklyHitsToMonthlyChance(q: number, weeksPerMonth: number): number {
+  if (!(q > 0)) return 0;
+  if (q >= 1) return 1;
+  return 1 - exp(weeksPerMonth * log(1 - q));
+}
+
 // ---------------------------------------------------------------------------
 // What a run reports
 // ---------------------------------------------------------------------------
@@ -274,6 +358,18 @@ export interface ChurnCause {
   value: number | null;
   /** A person's id when the value is theirs (load: the busiest). */
   valuePerson?: string;
+  /** How the driver was counted: `weight` (weight × pressure) or `chance` (events: hits and an effect). */
+  mode: "weight" | "chance";
+  /**
+   * Hits a month per active client in the run, as a chance (0-1): measured for late, resp, onb, rework and load (counted in
+   * both modes, so Settings can show it before anyone switches), drawn or counted for a chance-mode driver. Null for tenure,
+   * market, price, and an entered driver in weight mode.
+   */
+  chance: number | null;
+  /** Share of active client-weeks under the driver's effect (0 in weight mode). */
+  exposure: number;
+  /** The effect a hit had (chance mode; the last month's when it changed), or null in weight mode. */
+  effect: number | null;
 }
 
 /** One service's churn by cause (a service's clients, including those won in the run). */
@@ -313,6 +409,11 @@ export interface ChurnReplication {
   /** The measured value per driver slot (null: nothing to measure). */
   values: (number | null)[];
   valuePerson: (string | null)[];
+  /** Per driver slot: hits (the events, measured or drawn) and client-weeks under its effect, client-weeks it ran in chance mode, and its last effect. */
+  hits?: number[];
+  exposed?: number[];
+  chanceWeeks?: number[];
+  effect?: (number | null)[];
 }
 
 /** Average the replications' accounting into the run's causes. Pure. */
@@ -334,6 +435,17 @@ export function summariseChurn(model: EngineModel, drivers: readonly ResolvedChu
     const withPressure = reps.filter((r) => r.pressureN > 0);
     const values = reps.map((r) => r.values[s] ?? null).filter((v): v is number => v !== null);
     const of = reps.map((r) => r.valuePerson[s] ?? null).find((v) => v !== null);
+    // Chance mode, hits and exposure (engine 1.12.0). Replications from before them read as weight mode with nothing counted.
+    const spec = d.custom ? "entered" : (CHURN_DRIVER_SPECS[d.id as BuiltinChurnDriverId]?.events ?? "none");
+    const chanceWeeks = reps.reduce((a, r) => a + (r.chanceWeeks?.[s] ?? 0), 0);
+    const mode: "weight" | "chance" = chanceWeeks > 0 || d.events !== null ? "chance" : "weight";
+    const rates = withPressure.map((r) => {
+      const q = (r.hits?.[s] ?? 0) / r.pressureN;
+      return weeklyHitsToMonthlyChance(q, WEEKS_PER_MONTH);
+    });
+    const counted = spec === "measured" || (spec === "entered" && mode === "chance" && d.id !== "price");
+    const exposed = withPressure.length ? withPressure.reduce((a, r) => a + (r.exposed?.[s] ?? 0) / r.pressureN, 0) / withPressure.length : 0;
+    const effects = reps.map((r) => r.effect?.[s] ?? null).filter((v): v is number => v !== null);
     return {
       id: d.id,
       name: d.name,
@@ -347,6 +459,10 @@ export function summariseChurn(model: EngineModel, drivers: readonly ResolvedChu
       pressure: withPressure.length ? withPressure.reduce((a, r) => a + r.pressure[s]! / r.pressureN, 0) / withPressure.length : 0,
       value: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
       ...(of ? { valuePerson: of } : {}),
+      mode,
+      chance: counted && rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : null,
+      exposure: mode === "chance" ? exposed : 0,
+      effect: mode === "chance" ? (effects.length ? effects[effects.length - 1]! : (d.events?.effect ?? null)) : null,
     };
   });
   const byService: Record<string, ChurnCausesByService> = {};
@@ -375,6 +491,9 @@ export function summariseChurn(model: EngineModel, drivers: readonly ResolvedChu
   };
 }
 
+/** Weeks in a month as the churn tick uses them (4.33), the engine's conversion from a monthly rate to a weekly chance. */
+const WEEKS_PER_MONTH = 4.33;
+
 /** Clients a month the model's clients at the start lose to normal churn alone: Σ each client's base monthly churn. */
 export function baseClientsPerMonth(source: EngineModel): number {
   const model = withClientGroups(source);
@@ -391,6 +510,13 @@ export interface DriverWeightChoice {
   id: string;
   weight: number;
   enabled: boolean;
+  /**
+   * Chance mode: a choice with an `effect` is counted as events, adding `effect × exposure` instead of `weight × pressure`, where
+   * exposure comes from `chance` (null: the run's measured chance) and `months` (default 3).
+   */
+  effect?: number | null;
+  chance?: number | null;
+  months?: number | null;
 }
 
 /** The screen's projection: churn and each driver's share with weights as chosen, from a run's measured pressures. */
@@ -431,7 +557,16 @@ export function projectChurn(causes: ChurnCauses, choices: readonly DriverWeight
       parts.push([c.id, 0]);
       continue;
     }
-    const v = Math.max(0, choice.weight * c.pressure);
+    let v: number;
+    if (choice.effect !== undefined && choice.effect !== null && Number.isFinite(choice.effect)) {
+      // Chance mode: the chance of being under a hit's effect, times the effect. A run that was itself in chance mode with no new chance keeps its measured exposure.
+      const months = choice.months ?? EFFECT_MONTHS.default;
+      const chance = choice.chance ?? c.chance ?? 0;
+      const exposure = c.mode === "chance" && (choice.chance === undefined || choice.chance === null) && months === EFFECT_MONTHS.default ? c.exposure : eventExposure(chance, months);
+      v = Math.max(0, choice.effect * exposure);
+    } else {
+      v = Math.max(0, choice.weight * c.pressure);
+    }
     add += v;
     parts.push([c.id, v]);
   }
@@ -442,4 +577,23 @@ export function projectChurn(causes: ChurnCauses, choices: readonly DriverWeight
   const shares: Record<string, number> = {};
   for (const [id, v] of parts) shares[id] = id === "market" ? marketPart / total : v / total;
   return { clientsPerMonth: causes.baseClientsPerMonth * a * b, shares, normalShare: 1 / total };
+}
+
+/**
+ * The chance and effect that give a driver the churn its weight gave in the last run, to pre-fill when it is switched to
+ * chances: `chance` is null for a measured driver (the engine measures it; the run's `chance` is what to expect) and 1 for
+ * results and your own drivers (a hit every week with effect weight × pressure is exactly today's term), a twelfth of the yearly share
+ * for handoff; the effect is weight × the run's pressure ÷ the share of time under a hit (capped at 5). The expected churn
+ * matches in expectation, not draw for draw.
+ */
+export function equivalentEvents(cause: Pick<ChurnCause, "id" | "custom" | "pressure" | "chance" | "value">, weight: number, months: number = EFFECT_MONTHS.default): DriverEvents {
+  const spec = cause.custom ? "entered" : (CHURN_DRIVER_SPECS[cause.id as BuiltinChurnDriverId]?.events ?? "none");
+  const target = Math.max(0, weight * cause.pressure);
+  if (spec === "measured") {
+    const exposure = eventExposure(cause.chance ?? 0, months);
+    return { chance: null, effect: exposure > 0 ? Math.min(CHURN_EFFECT_MAX, target / exposure) : target > 0 ? CHURN_EFFECT_MAX : 0, months };
+  }
+  const chance = defaultEventChance(cause.id, cause.value);
+  const exposure = eventExposure(chance, months);
+  return { chance: cause.id === "handoff" ? chance : spec === "entered" ? 1 : null, effect: exposure > 0 ? Math.min(CHURN_EFFECT_MAX, target / exposure) : target > 0 ? CHURN_EFFECT_MAX : 0, months };
 }

@@ -28,7 +28,8 @@ const months = (n: number) => Math.round((n * 52) / 12);
 const busy = (mean: number, p90 = mean): MonthBusy => ({ mean, p10: mean, p90, capacity: 40, work: mean * 40 });
 
 /** A run's numbers without the month-by-month part, to compare with a run that wasn't asked for it. */
-const withoutMonthly = ({ monthly: _monthly, ...rest }: SimulationResult) => rest;
+// The month-by-month result and its per-replication samples (engine 1.12.0) only exist when asked for.
+const withoutMonthly = ({ monthly: _monthly, monthlySamples: _samples, ...rest }: SimulationResult) => rest;
 
 /** Northbeam with named people instead of head-counts, the pooled client load, and `extra` people or changes. */
 function named(extra: Record<string, Partial<EnginePerson> & { roles?: string[] }> = {}, weeks = months(12)): EngineModel {
