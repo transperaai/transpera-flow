@@ -190,6 +190,20 @@ describe("input checks", () => {
     expect(parseDriverPatch("late", { value: 5 })).toBeNull();
   });
 
+  it("accepts the chance mode's chance, effect and months for a driver with events, null to clear them, and refuses the rest", () => {
+    expect(parseDriverPatch("late", { chance: 5, effect: 40, effectMonths: 4 })).toEqual({ chance: 5, effect: 40, effectMonths: 4 });
+    expect(parseDriverPatch("late", { chance: null, effect: null, effectMonths: null })).toEqual({ chance: null, effect: null, effectMonths: null });
+    expect(parseDriverPatch(UUID, { effect: 500 })).toEqual({ effect: 500 });
+    expect(parseDriverPatch("late", { chance: 101 })).toBeNull();
+    expect(parseDriverPatch("late", { chance: -1 })).toBeNull();
+    expect(parseDriverPatch("late", { effect: 501 })).toBeNull();
+    expect(parseDriverPatch("late", { effectMonths: 0 })).toBeNull();
+    expect(parseDriverPatch("late", { effectMonths: 25 })).toBeNull();
+    expect(parseDriverPatch("late", { effectMonths: 2.5 })).toBeNull();
+    // Early tenure and the market have no events to hit.
+    for (const key of ["tenure", "market"]) expect(parseDriverPatch(key, { chance: 5 })).toBeNull();
+  });
+
   it("lets your own driver be named and described, within the limits", () => {
     expect(parseDriverPatch(UUID, { name: "  A rival  ", description: "  Cheaper.  ", example: "" })).toEqual({ name: "A rival", description: "Cheaper.", example: null });
     expect(parseDriverPatch(UUID, { name: "   " })).toBeNull();

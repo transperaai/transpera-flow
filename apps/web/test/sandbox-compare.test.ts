@@ -123,6 +123,12 @@ describe("compareSandbox", () => {
     expect(c.months).toHaveLength(4);
   });
 
+  it("has the price rises' net per column only when some column has a rise, null for the columns without one", () => {
+    expect(compareSandbox(model, [a, b, c3], { services }, START, cutoffs).totals.priceNet).toBeNull();
+    expect(compareSandbox(model, [a, b, c3], { services }, START, cutoffs, [null, 1200, null]).totals.priceNet).toEqual([null, 1200, null]);
+    expect(compareSandbox(model, [a, b], { services }, START, cutoffs, [null, -300]).totals.priceNet).toEqual([null, -300]);
+  });
+
   it("works with 'No changes' alone, and with a pooled model (no clients at risk)", () => {
     const alone = compareSandbox(model, [a], { services }, START, cutoffs);
     expect(alone.totals.mrr).toEqual({ values: [130], diff: [null] });

@@ -115,6 +115,24 @@ describe("sandbox scenarios", () => {
     expect(await deleteSandboxScenario(WS, made.scenario.id)).toMatchObject({ status: "error" });
   });
 
+  it("saves the phase 3 changes with their extras: a fee range (A5), a driver chance (B4) and a price rise (B5), and refuses extras on the wrong lever", async () => {
+    const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const svc = await one("select id from services where workspace_id = $1 limit 1", [WS]);
+    const changes = [
+      { id: "33333333-3333-4333-8333-000000000001", lever: "A5", target: svc.id, op: "set", value: 4000, params: { low: 3000, high: 6000 } },
+      { id: "33333333-3333-4333-8333-000000000002", lever: "B4", target: "late", op: "set", value: 0.5, params: { chance: 0.1, months: 4 } },
+      { id: "33333333-3333-4333-8333-000000000003", lever: "B5", target: null, op: "set", value: 0.1, from: "2027-03" },
+    ];
+    const made = await saveSandboxScenario(WS, null, input("Phase three", changes), null);
+    expect(made.status).toBe("ok");
+    expect((await one("select changes from sandbox_scenarios where name = 'Phase three'", [])).changes).toEqual(changes);
+    const wrong = [{ ...changes[1]!, params: { low: 1 } }];
+    expect(await saveSandboxScenario(WS, null, input("Wrong extras", wrong), null)).toMatchObject({ status: "error" });
+    const outside = [{ ...changes[0]!, params: { low: 5000, high: 6000 } }];
+    expect(await saveSandboxScenario(WS, null, input("Range misses fee", outside), null)).toMatchObject({ status: "error" });
+    expect((await q("select 1 from sandbox_scenarios where name in ('Wrong extras', 'Range misses fee')", [])).rowCount).toBe(0);
+  });
+
   it("refuses what is not valid before it reaches the database, with the reason", async () => {
     const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
     expect(await saveSandboxScenario("nope", null, input("x"), null)).toEqual({ status: "error", message: "That scenario isn't valid." });
@@ -392,6 +410,13 @@ describe("settings", () => {
     expect(builtin).toMatchObject({ status: "saved" });
     expect(await d.saveChurnDriver(WS, "price", { weight: 3 })).toEqual({ status: "saved", rowId: (builtin as { rowId: string }).rowId });
     expect(Number((await one("select weight from churn_drivers where workspace_id = $1 and driver = 'price'", [WS])).weight)).toBe(3);
+    // The chance mode: a chance, an effect and how long a hit lasts are saved, and null puts the driver back to its weight.
+    expect(await d.saveChurnDriver(WS, "late", { chance: 5, effect: 40, effectMonths: 4 })).toMatchObject({ status: "saved" });
+    expect(await one("select chance, effect, effect_months from churn_drivers where workspace_id = $1 and driver = 'late'", [WS])).toMatchObject({ effect_months: 4 });
+    expect(Number((await one("select effect from churn_drivers where workspace_id = $1 and driver = 'late'", [WS])).effect)).toBe(40);
+    expect(await d.saveChurnDriver(WS, "late", { chance: null, effect: null, effectMonths: null })).toMatchObject({ status: "saved" });
+    expect((await one("select effect from churn_drivers where workspace_id = $1 and driver = 'late'", [WS])).effect).toBeNull();
+    expect(await d.saveChurnDriver(WS, "market", { effect: 10 })).toMatchObject({ status: "error" });
   });
 
   it("adds a client, assigns people to it, and links servicing", async () => {
