@@ -163,7 +163,7 @@ describe("restore route", () => {
     state.hooks.push({ match: RESTORE, fn: () => undefined }, { match: "can_manage_workspace", fn: () => undefined });
     const r = await call(slug, backup());
     expect(r.status).toBe(403);
-    expect((await r.json()).message).toBe("Only owners, editors and agency admins can restore a backup.");
+    expect((await r.json()).message).toBe("Only Agency admins and the Owner can restore a backup.");
     expect(restoreCalls()).toBe(0);
     expect(state.seen).not.toContain("can_manage_workspace");
     expect(await processCount(id)).toBe(base);
@@ -212,9 +212,10 @@ describe("restore route", () => {
     expect(restoreCalls()).toBe(0);
   });
 
+  // Every Agency admin manages (there is no editor who only suggests any more: migration 20270103000000), so the settings are applied.
   it.each([
-    ["an editor (can't manage)", () => editor, "suggested"],
-    ["an owner (can manage)", () => owner, "applied"],
+    ["an Agency admin", () => editor, "applied"],
+    ["another Agency admin", () => owner, "applied"],
   ])("restores a real backup for %s, passing canManage on as the database says", async (_who, who, settings) => {
     const { id, slug, base } = await newWorkspace();
     as(who());
@@ -246,7 +247,7 @@ describe("restore route", () => {
   it("maps each database refusal to its message, and no SQL text reaches any body", async () => {
     const { slug } = await newWorkspace();
     const cases: [ReturnType<typeof dbError>, number, RegExp][] = [
-      [dbError("42501", "Only owners, editors and agency admins can restore a backup."), 403, /Only owners, editors and agency admins/],
+      [dbError("42501", "Only Agency admins and the Owner can restore a backup."), 403, /Only Agency admins and the Owner/],
       [dbError("23514", "This workspace isn't empty: it already has roles. Backups restore only into a new, empty workspace.", "not_empty"), 409, /Backups restore only into an empty workspace/],
       [dbError("23514", 'import_workspace_bundle: suggestions could not be restored: new row for relation "suggestions" violates check constraint "suggestions_target_table"', "section:suggestions"), 422, /Couldn't restore the pending suggestions: a row didn't fit this workspace's rules/],
       [dbError("55000", "import_workspace_bundle: archive could not be restored: A new process can't start archived", "section:archive"), 422, /Couldn't restore the archived processes: A new process can't start archived\./],

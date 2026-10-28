@@ -228,7 +228,7 @@ describe("the screen", () => {
 
   it("is read-only for someone who can't edit, and the sliders are disabled", () => {
     const readonly = renderToStaticMarkup(createElement(ChurnDriversSettings, { mode: "readonly", workspaceId: null, bundle: null, rows: [] }));
-    expect(readonly).toContain("Only owners and editors can change the churn drivers.");
+    expect(readonly).toContain("Only Agency admins can change the churn drivers.");
     expect(readonly).toMatch(/<input[^>]*type="range"[^>]*disabled/);
   });
 });

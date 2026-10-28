@@ -118,7 +118,7 @@ describe("the share link's sign-in", () => {
 
 describe("the sidebar item", () => {
   const nav = (over: { canEdit?: boolean; pathname?: string } = {}) => workspaceNav({ slug: "s", pathname: over.pathname ?? "/w/s", canManage: true, canEdit: over.canEdit, counts: {} });
-  it("Share links follows Access, for owners and editors only", () => {
+  it("Share links follows Access, for Agency admins only", () => {
     const keys = flatItems(nav({ canEdit: true })).map((i) => i.key);
     expect(keys.slice(-2)).toEqual(["access", "share"]);
     const share = flatItems(nav({ canEdit: true })).find((i) => i.key === "share")!;

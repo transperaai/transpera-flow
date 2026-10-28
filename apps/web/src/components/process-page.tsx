@@ -99,7 +99,7 @@ export function ProcessPage({
   ideaIssueIds = [],
   share,
 }: {
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
   share?: ReactNode;
   /** The workspace's findings (B17): this process's accepted ones are listed, its proposed ones wait for review. */
   findings?: FindingRow[];

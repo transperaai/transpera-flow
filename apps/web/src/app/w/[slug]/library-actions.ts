@@ -36,7 +36,7 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
     } catch (e) {
       if (e instanceof ToolError) {
         if (e.code === "name_taken") return { error: "There is already a process with that name. Give it another name." };
-        if (e.code === "forbidden") return { error: "Only editors and owners can add processes." };
+        if (e.code === "forbidden") return { error: "Only Agency admins can add processes." };
       }
       return { error: GENERIC };
     }
@@ -54,7 +54,7 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
     return { error: GENERIC };
   }
   if (r.status === "name_taken") return { error: `There is already a process called '${name}'. Give it another name.` };
-  if (r.status === "not_found") return { error: "Only editors and owners can add processes." };
+  if (r.status === "not_found") return { error: "Only Agency admins can add processes." };
   if (r.status !== "created" || !r.process_id) return { error: GENERIC };
 
   // A draft with a start and an end, joined, to build on (as a new servicing process gets).

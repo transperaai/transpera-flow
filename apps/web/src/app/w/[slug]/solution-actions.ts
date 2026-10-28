@@ -13,7 +13,7 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 const SOLUTION_ISSUE_COLS = ["solution_id", "issue_id", "workspace_id", "auto_verdict", "holds_pct", "auto_note", "user_verdict", "user_notes", "created_at", "updated_at", "created_by"] as const;
 
 // Saving a solution (issue #114, A49). `save_solution` creates the solution and its links in one transaction, as the
-// signed-in user through row-level security (owners and editors write; everyone in the workspace reads). It writes only
+// signed-in user through row-level security (Agency admins write; everyone in the workspace reads). It writes only
 // the solution's own rows: the process, its live version and its draft are never touched (D18). Linking an issue moves it to
 // Testing solutions and logs the event in the database (`solution_issue_tested`, through A47's history).
 //

@@ -7,7 +7,7 @@ import { CLIENT_FIELDS, isBase, isClientField, isId, parseNewClient, type Client
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
-// Clients by hand (issue #182, B19). Every write runs as the signed-in user through row-level security: owners and editors
+// Clients by hand (issue #182, B19). Every write runs as the signed-in user through row-level security: Agency admins
 // change clients, viewers can't. A client is never deleted (the database refuses it): they are made inactive. These checks
 // only reject malformed input early.
 

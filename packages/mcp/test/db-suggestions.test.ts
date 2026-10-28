@@ -207,9 +207,8 @@ describe("company-model suggestion tools", () => {
     const row = (await admin.query("select volume_week::float8 as v, provenance from lead_sources where id = $1", [ids.lead])).rows[0];
     expect(row.v).toBe(9);
     expect(row.provenance.volume_week).toMatchObject({ source: "estimated", by: ids.editor, suggestion_id: lead, evidence: [{ quote: "the website brings in nine a week now" }] });
-    // Company settings need an owner: the editor's accept fails and leaves it pending; rejecting is recorded.
-    expect(await review({ ids: [company], decision: "accept" })).toMatchObject([{ id: company, status: "failed" }]);
-    expect(await review({ ids: [company], decision: "reject", note: "Not yet" })).toMatchObject([{ id: company, status: "rejected" }]);
+    // Company settings need an Agency admin (editors and owners are one role since migration 20270103000000): this accept works.
+    expect(await review({ ids: [company], decision: "accept" })).toMatchObject([{ id: company, status: "accepted" }]);
     const audit = (
       await admin.query("select actor_kind, action, diff -> 'suggestion_id' as sid from audit_log where workspace_id = $1 and target_table = 'lead_sources'", [ids.ws])
     ).rows;

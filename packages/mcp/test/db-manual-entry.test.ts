@@ -86,11 +86,11 @@ describe("adding things by hand", () => {
     expect(await one("select active from clients where id = $1", [id])).toEqual({ active: true });
   });
 
-  it("an owner changes the workspace's name and currency; an editor and a viewer can't; a bad code is refused", async () => {
+  it("an owner changes the workspace's name and currency; a viewer can't; a bad code is refused", async () => {
     expect(await save(owner, "workspaces", { id: ids.ws }, { name: "Manual Co" }, { name: "Manual Company" })).toMatchObject({ status: "saved" });
     expect(await save(owner, "workspaces", { id: ids.ws }, { "settings.currency": "AUD" }, { "settings.currency": "GBP" })).toMatchObject({ status: "saved" });
     expect((await errorOf(() => save(owner, "workspaces", { id: ids.ws }, { "settings.currency": "GBP" }, { "settings.currency": "pounds" })))?.message).toMatch(/workspaces_currency_code/);
-    for (const who of [editor, viewer]) {
+    for (const who of [viewer]) {
       expect(await save(who, "workspaces", { id: ids.ws }, { name: "Manual Company" }, { name: "Theirs" })).toMatchObject({ status: "not_found" });
     }
     expect(await one("select name, settings ->> 'currency' as currency from workspaces where id = $1", [ids.ws])).toEqual({ name: "Manual Company", currency: "GBP" });
@@ -128,8 +128,8 @@ describe("adding things by hand", () => {
     // It was the issue's only solution, so the issue is back to Open: one entry says both.
     expect(last).toEqual({ kind: "edited", detail: { from: "testing", to: "open", solution_deleted: { solution_id: sol, solution: "Reply templates" } } });
     expect((await one("select status from issues where id = $1", [ids.issue])).status).toBe("open");
-    // The editor can't read the audit log (owners can) and can't write it.
-    expect(await editor.selectFrom("audit_log").select("id").where("target_id", "=", sol).execute()).toEqual([]);
+    // The viewer can't read the audit log (Agency admins can).
+    expect(await viewer.selectFrom("audit_log").select("id").where("target_id", "=", sol).execute()).toEqual([]);
     expect(await owner.selectFrom("audit_log").select("action").where("target_id", "=", sol).execute()).toEqual([{ action: "delete" }]);
   });
 });

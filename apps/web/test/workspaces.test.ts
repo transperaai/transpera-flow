@@ -108,15 +108,15 @@ describe("the createWorkspace action", () => {
     const made = (await world.tdb.client.query("select id, name, settings from workspaces where slug = 'acme-dental'")).rows[0];
     expect(made.name).toBe("Acme Dental");
     expect(made.settings).toMatchObject({ hours_per_week: 40, currency: "EUR", horizon_weeks: 13 });
-    // The creator becomes the workspace's agency admin.
+    // The Owner (the creator) needs no membership; everyone the sign-in list names gets theirs from the database.
     const members = (await world.tdb.client.query("select user_id, role from memberships where workspace_id = $1", [made.id])).rows;
-    expect(members).toEqual([{ user_id: world.users.admin.id, role: "agency_admin" }]);
+    expect(members).toEqual([]);
     expect(redirect).toHaveBeenCalledWith("/w/acme-dental");
   });
 
   it("says why it was refused", async () => {
     signInAs(world, "owner");
-    expect(await createWorkspace({}, form({ name: "Other" }))).toEqual({ error: "Only agency admins can create workspaces." });
+    expect(await createWorkspace({}, form({ name: "Other" }))).toEqual({ error: "Only the Owner can create workspaces." });
     signInAs(world, "admin");
     // The address "acme" belongs to the seeded workspace.
     expect(await createWorkspace({}, form({ name: "Acme" }))).toEqual({ error: "The address /w/acme is already taken. Choose another." });

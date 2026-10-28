@@ -365,12 +365,12 @@ function HowBusy({
       )}
       {onlyOwn && rows.length === 0 && notInRun && (
         <p className="px-4 pb-4 text-sm text-muted-foreground" data-not-in-run>
-          You aren&apos;t in this simulation: your record is inactive or starts later. Owners and editors can change that in Settings → People.
+          You aren&apos;t in this simulation: your record is inactive or starts later. Agency admins can change that in Settings → People.
         </p>
       )}
       {onlyOwn && rows.length === 0 && !notInRun && (
         <p className="px-4 pb-4 text-sm text-muted-foreground" data-no-own-row>
-          Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an owner to link you on Settings → Access.
+          Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an Agency admin to link you on Settings → Access.
         </p>
       )}
       {!onlyOwn && rows.length === 0 && (

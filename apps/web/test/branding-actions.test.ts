@@ -108,12 +108,12 @@ describe("saveBrandAccent", () => {
     expect((await branding()).accent ?? null).toBeNull();
   });
 
-  it("passes on a conflict, a refused (not owner) save and a session that has ended", async () => {
+  it("passes on a conflict, a refused (viewer) save and a session that has ended", async () => {
     await setBranding({ accent: "#123456" });
     expect(await saveBrandAccent(WS, "light", null, "#0b6e8a")).toEqual({ status: "conflict", theirs: "#123456" });
     expect(await branding()).toEqual({ accent: "#123456" });
-    // An editor may not change the branding.
-    signInAs(world, "editor");
+    // A viewer may not change the branding.
+    signInAs(world, "viewer");
     expect(await saveBrandAccent(WS, "light", "#123456", "#0b6e8a")).toEqual({ status: "not_found" });
     expect(await branding()).toEqual({ accent: "#123456" });
     signOut(world);
@@ -184,11 +184,11 @@ describe("attachWorkspaceLogo", () => {
     expect((await attachWorkspaceLogo(form(WS, null, edge))).status).toBe("ok");
   });
 
-  it("only owners and agency admins may change the logo", async () => {
-    signInAs(world, "editor");
-    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
+  it("only Agency admins and the Owner may change the logo", async () => {
     signInAs(world, "viewer");
-    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/Only Agency admins/) });
+    signInAs(world, "viewer");
+    expect(await attachWorkspaceLogo(form(WS, null, pngBytes()))).toMatchObject({ status: "error", message: expect.stringMatching(/Only Agency admins/) });
     expect(await logoRow()).toBeUndefined();
     signInAs(world, "admin");
     expect((await attachWorkspaceLogo(form(WS, null, pngBytes()))).status).toBe("ok");
@@ -213,11 +213,11 @@ describe("removeWorkspaceLogo", () => {
     expect(await logoRow()).toBeUndefined();
   });
 
-  it("leaves a logo someone else changed, and one an editor may not remove", async () => {
+  it("leaves a logo someone else changed, and one a viewer may not remove", async () => {
     const old = await keep(pngBytes());
     expect(await removeWorkspaceLogo(WS, "0".repeat(64))).toEqual({ status: "error", message: "Someone else changed the logo. Reload to see it." });
-    signInAs(world, "editor");
-    expect(await removeWorkspaceLogo(WS, old)).toMatchObject({ status: "error", message: expect.stringMatching(/Only workspace owners/) });
+    signInAs(world, "viewer");
+    expect(await removeWorkspaceLogo(WS, old)).toMatchObject({ status: "error", message: expect.stringMatching(/Only Agency admins/) });
     expect((await logoRow())?.sha256).toBe(old);
   });
 

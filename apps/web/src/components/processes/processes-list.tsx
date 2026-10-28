@@ -45,7 +45,7 @@ export function ProcessesList({
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
   /** The archived processes, for the Archived filter. */
   archived?: ArchivedProcess[];
-  /** Rename, change type, archive and restore (owners and editors); absent for viewers and the demo. */
+  /** Rename, change type, archive and restore (Agency admins); absent for viewers and the demo. */
   admin?: ProcessAdminOps;
   /** Shown in place of the table when there are no processes in use (issue #243). */
   empty?: ReactNode;

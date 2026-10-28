@@ -45,6 +45,8 @@ beforeAll(async () => {
   for (const role of ["owner", "editor", "viewer", "stranger"] as const) {
     const email = `${role}@loaders.example.com`;
     const u = await createUser(tdb, email);
+    // The sign-in list names them too (the members list only shows people it still lets in).
+    if (role !== "stranger") await tdb.client.query("insert into deployment_access (kind, value, role) values ('email', $1, $2)", [email, role === "editor" || role === "owner" ? "agency_admin" : "viewer"]);
     if (role !== "stranger") await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
     users[role] = { id: u.id, email, claims: { sub: u.id, role: "authenticated", email } };
   }

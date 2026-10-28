@@ -4,7 +4,7 @@ import { authEnv } from "@/lib/auth/env";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // GET /w/<slug>/export/bundle (issue #39, B10): the whole workspace as one JSON file (`transpera-workspace/1`), the backup
-// and migration format. Only agency admins, owners and editors may export it (`can_edit_workspace`; Austin's decision 4 on
+// and migration format. Only agency admins, Agency admins may export it (`can_edit_workspace`; Austin's decision 4 on
 // #39): a member or viewer gets 403 and nothing else is read. Read as the signed-in user, so row-level security decides what
 // can be read: a non-member gets a 404 (the same answer as for a workspace that doesn't exist). The tables are read one
 // after another, so a bundle taken during edits can mix moments (`exported_at` says when reading began). The file is sent
@@ -31,7 +31,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/w/[slug]/export
     return Response.json({ message: "The workspace could not be read." }, { status: 500 });
   }
   if (!workspace) return Response.json({ message: "No such workspace." }, { status: 404 });
-  if (canEdit !== true) return Response.json({ message: "Only owners, editors and agency admins can export the workspace." }, { status: 403 });
+  if (canEdit !== true) return Response.json({ message: "Only Agency admins and the Owner can export the workspace." }, { status: 403 });
 
   const now = new Date();
   try {

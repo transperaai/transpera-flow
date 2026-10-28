@@ -19,7 +19,7 @@ import { PhoneReadOnly } from "@/components/shell/phone-read-only";
  * Settings → Historical data (issue #41, C2; the import wizard is issue #40, C1): calibrate a process from a stage history, deals
  * or time logs (part 1), and the clients' normal churn from a clients file with checks against a servicing log or jobs (part 2);
  * leads and invoices are checks only. The Imports card lists every import. Everyone in the workspace can read a file here and see
- * what it measures; owners and editors apply the changes they tick and save imports.
+ * what it measures; Agency admins apply the changes they tick and save imports.
  */
 export default async function CalibrationPage(props: PageProps<"/w/[slug]/settings/calibration">) {
   const { slug } = await props.params;

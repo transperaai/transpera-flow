@@ -1,8 +1,11 @@
 // Deployment access at sign-in (docs/plans/supabase-exit-brief.md, step 2). The rules live in SQL (`private.deployment_role`,
-// `private.sync_deployment_access`, migration 20261228000000); this file only calls them. They run on Better Auth's owner pool,
-// never as a signed-in user.
+// `private.sync_deployment_access`, migrations 20261228000000 and 20270103000000); this file only calls them. They run on Better
+// Auth's owner pool, never as a signed-in user.
+//
+// Three roles (docs/plans/cut-list.md item 9): `owner` (Austin: the agency-admin flag in the JWT, `agencyAdmin` in code), `agency_admin`
+// (the client's founder and head of CS: an `owner` membership in every workspace) and `viewer`.
 
-export type DeploymentRole = "admin" | "editor" | "viewer";
+export type DeploymentRole = "owner" | "agency_admin" | "viewer";
 /** A deployment role, or `guest`: an outsider listed on a live restricted share link, with no role anywhere (B3). */
 export type SignInRole = DeploymentRole | "guest";
 
@@ -38,9 +41,9 @@ export async function signInRole(
 }
 
 /**
- * Once per sign-in: decides the role again, and in one transaction records the provider identities, sets the agency-admin flag,
- * and (not for a guest) runs the workspace lists and raises every workspace to at least editor/viewer. Returns null, changing
- * nothing, when the user may no longer sign in.
+ * Once per sign-in: decides the role again, and in one transaction records the provider identities, sets the Owner flag, and (not
+ * for a guest) makes the user's membership in every workspace match the list: an Agency admin's or a Viewer's, raised or lowered.
+ * Returns null, changing nothing, when the user may no longer sign in.
  */
 export async function syncSignIn(
   db: Queryable,
@@ -94,7 +97,7 @@ export async function loadIdentities(db: Queryable, userId: string): Promise<Ide
 /** Who a signed-in user is now, by the deployment's list: what the web session and an MCP token both act as. */
 export interface CurrentAccess {
   email: string;
-  /** Counts only while the list still says admin, so a demotion takes effect at the next request. */
+  /** The Owner. Counts only while the list still says owner, so a demotion takes effect at the next request. */
   agencyAdmin: boolean;
   /** Signed in only for a restricted share link (B3): no role anywhere. */
   guest: boolean;
@@ -103,8 +106,8 @@ export interface CurrentAccess {
 /**
  * The user's access as of now, or null when they may no longer sign in (taken off the list, or unknown). Checked on every web
  * request (`getSessionUser`) and every MCP request, so removing someone from the list ends their session and their API tokens
- * at the next request, and the agency-admin flag `auth.users` keeps from the last sign-in is honoured only while they are
- * still an admin. Runs on the owner pool: `private.may_sign_in` isn't executable by anon or authenticated.
+ * at the next request, and the Owner flag `auth.users` keeps from the last sign-in is honoured only while they are
+ * still an Owner. Runs on the owner pool: `private.may_sign_in` isn't executable by anon or authenticated.
  */
 export async function currentAccess(db: Queryable, userId: string, adminEmails: string[]): Promise<CurrentAccess | null> {
   const { rows } = await db.query(
@@ -116,5 +119,5 @@ export async function currentAccess(db: Queryable, userId: string, adminEmails: 
   );
   const row = rows[0];
   if (!row || !row.role) return null;
-  return { email: String(row.email), agencyAdmin: row.agency_admin === true && row.role === "admin", guest: row.role === "guest" };
+  return { email: String(row.email), agencyAdmin: row.agency_admin === true && row.role === "owner", guest: row.role === "guest" };
 }

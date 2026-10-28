@@ -173,7 +173,7 @@ export function ClientGroupsSettings({ data }: { data: WorkspaceSettingsData }) 
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          {canManage ? "The People page shows your client health against this range. Leave both blank for no benchmark." : "Only workspace owners can change this."}
+          {canManage ? "The People page shows your client health against this range. Leave both blank for no benchmark." : "Only Agency admins can change this."}
         </p>
       </fieldset>
     </SettingsSection>

@@ -1,6 +1,6 @@
 // Per-person times in calibration (issue #227): what the page needs to propose them, and who may see them. Framework-free.
 //
-// Privacy (PRD D20): only owners, editors and agency admins with Per-person times switched on get anything here. For everyone
+// Privacy (PRD D20): only Agency admins and the Owner with Per-person times switched on get anything here. For everyone
 // else the setup is `hidden`, so nothing per-person is computed or shown. Nothing here sorts people or times by value: people
 // stay in the roster's order and steps in the process's.
 
@@ -11,7 +11,7 @@ import { stepsPersonCanDo } from "@/lib/people";
 export type PersonTimesSetup =
   /** Members and viewers: nothing per-person is shown or computed. */
   | { state: "hidden" }
-  /** Owners, editors and agency admins with the switch off. */
+  /** Agency admins and the Owner with the switch off. */
   | { state: "off" }
   | { state: "on"; people: { id: string; name: string }[]; persons: PersonTimesPerson[] };
 

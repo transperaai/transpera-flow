@@ -35,7 +35,7 @@ export interface ClientsSettingsProps {
   roles: { id: string; name: string; active: boolean }[];
   people: { id: string; name: string; active: boolean }[];
   personRoles: { person_id: string; role_id: string }[];
-  /** Owners and editors. */
+  /** Agency admins. */
   canEdit: boolean;
   /** Which processes simulate client groups and which these clients (PRD D42). */
   sources: ClientSources;
@@ -72,7 +72,7 @@ export function ClientsSettings(props: ClientsSettingsProps) {
         </>
       }
     >
-      {canEdit ? <AddClient {...props} /> : <p className="text-fg-2">You can view clients here; owners and editors can change them.</p>}
+      {canEdit ? <AddClient {...props} /> : <p className="text-fg-2">You can view clients here; Agency admins can change them.</p>}
       {active.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2" data-empty="clients">
           No active clients yet.

@@ -1,28 +1,33 @@
 import "server-only";
+import { rpc } from "@transpera-flow/db/client";
 import { authEnv } from "@/lib/auth/env";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 import type { DeploymentRule } from "@/lib/deployment-rules";
 
-// The deployment's "Who can sign in" list (migration 20261228000000). Read and written as the signed-in user through getDb(), so
-// the database decides: only agency admins see or change rows. This is the first screen on the new data layer.
+// The deployment's "Who can sign in" list (migrations 20261228000000 and 20270103000000). Read and written as the signed-in user
+// through getDb(), so the database decides: Owners and Agency admins see the rows, Agency admins change everything but Owner rules.
 
 export interface DeploymentAccessView {
   rules: DeploymentRule[];
-  /** ACCESS_ADMIN_EMAILS: admin rules that live in the environment, so they can't be edited here. */
+  /** ACCESS_ADMIN_EMAILS: Owner rules that live in the environment, so they can't be edited here. */
   environmentAdmins: string[];
+  /** The signed-in person is an Owner, so they may add, change and remove Owner rules. */
+  isOwner: boolean;
 }
 
-/** The list for an agency admin, or null for anyone else (and in demo mode). */
+/** The list for an Owner or an Agency admin, or null for anyone else (and in demo mode). */
 export async function loadDeploymentAccess(): Promise<DeploymentAccessView | null> {
   const user = await getSessionUser();
-  if (!user?.agencyAdmin) return null;
-  const rules = await (await getDb())
+  if (!user) return null;
+  const db = await getDb();
+  if ((await rpc(db, "is_sign_in_admin")) !== true) return null;
+  const rules = await db
     .selectFrom("deployment_access")
     .select(["id", "kind", "value", "role"])
     .orderBy("kind", "desc")
     .orderBy("value")
     .execute();
-  return { rules: rules as DeploymentRule[], environmentAdmins: authEnv()?.adminEmails ?? [] };
+  return { rules: rules as DeploymentRule[], environmentAdmins: authEnv()?.adminEmails ?? [], isOwner: user.agencyAdmin };
 }
 
 export async function insertDeploymentRule(rule: Omit<DeploymentRule, "id">): Promise<void> {

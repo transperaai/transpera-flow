@@ -70,7 +70,7 @@ export interface IssuePageProps {
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
   memberNames?: Readonly<Record<string, string>>;
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
   share?: ReactNode;
 }
 

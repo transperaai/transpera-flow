@@ -177,7 +177,7 @@ export function HealthSettings({ data }: { data: WorkspaceSettingsData }) {
               step={1}
               placeholder={`${rule.fallback} (estimated)`}
               disabled={!canEdit}
-              hint={canEdit ? rule.hint : "You can view these; owners and editors can change them."}
+              hint={canEdit ? rule.hint : "You can view these; Agency admins can change them."}
               help={HEALTH_HELP[key]}
             />
           );

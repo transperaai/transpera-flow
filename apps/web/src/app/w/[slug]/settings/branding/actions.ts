@@ -20,7 +20,7 @@ import { pgError } from "@/app/action-db";
 
 const invalid = { status: "error", message: "That value isn't valid." } as const;
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
-const OWNERS_ONLY = "Only workspace owners can change the branding.";
+const OWNERS_ONLY = "Only Agency admins can change the branding.";
 const CHANGED = "Someone else changed the logo. Reload to see it.";
 
 async function signedInClient() {

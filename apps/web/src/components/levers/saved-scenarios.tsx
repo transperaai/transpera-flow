@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import type { RemoveScenarioResult } from "@/lib/scenarios/store";
 
 // Settings -> Levers, Saved scenarios (issue #182, B19): every saved set of lever changes in the workspace, and a way for
-// owners and editors to delete one, after a confirm. An issue that named it as its fix keeps everything else. The delete
+// Agency admins to delete one, after a confirm. An issue that named it as its fix keeps everything else. The delete
 // comes in as `remove` (the server action, or a stand-in in the browser tests).
 
 export function SavedScenarios({
@@ -16,7 +16,7 @@ export function SavedScenarios({
   remove,
 }: {
   scenarios: ScenarioRow[];
-  /** Owners and editors. */
+  /** Agency admins. */
   canEdit: boolean;
   remove: (id: string) => Promise<RemoveScenarioResult>;
 }) {
@@ -46,7 +46,7 @@ export function SavedScenarios({
         </h2>
         <CardDescription>
           Sets of lever changes saved under a name, so they can be tried again or linked to an issue as its fix.
-          {canEdit ? " Deleting one can't be undone; an issue that used it as its fix keeps everything else." : " Owners and editors can delete them."}
+          {canEdit ? " Deleting one can't be undone; an issue that used it as its fix keeps everything else." : " Agency admins can delete them."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">

@@ -25,7 +25,7 @@ export function LeverChangesBox({ levers, notes, bundle, onRemove }: { levers: r
       steps,
       roles: Object.fromEntries(bundle.roles.map((r) => [r.id, r.name])),
       services: Object.fromEntries(bundle.services.map((s) => [s.id, s.name])),
-      // The Editor is for owners and editors, who see everyone.
+      // The Editor is for Agency admins, who see everyone.
       people: Object.fromEntries(bundle.people.map((p) => [p.id, p.name])),
     };
   }, [bundle]);

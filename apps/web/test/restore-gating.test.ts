@@ -26,7 +26,7 @@ describe("the restore card and page", () => {
     expect(page).toContain("workspaceIsEmpty");
     expect(page.indexOf("canEditWorkspace(head.id)")).toBeLessThan(page.indexOf("workspaceIsEmpty("));
     const errors = read("lib/restore/errors.ts");
-    expect(errors).toContain("Only owners, editors and agency admins can restore a backup.");
+    expect(errors).toContain("Only Agency admins and the Owner can restore a backup.");
     expect(errors).toContain("Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there.");
   });
 

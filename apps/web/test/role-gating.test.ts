@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Members and viewers look, owners and editors change (issue #30, B1 part 1). The database refuses every write from the others
+// Members and viewers look, Agency admins change (issue #30, B1 part 1). The database refuses every write from the others
 // (packages/db/test/role-matrix.test.ts); these keep the app from offering what would be refused. Source text, in the style of
 // archived-process-page.test.ts: each page in the audit passes `canEdit` (`can_edit_workspace`) into its `mode`, `editHref` or
 // action props, so a page that lost its gate fails here rather than showing a button to a viewer.

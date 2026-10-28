@@ -19,7 +19,7 @@ type ShareError = { status: "error"; message: string };
 export type ShareResult = { status: "ok"; url?: string } | ShareError;
 
 const signedOut: ShareError = { status: "error", message: "Your session has ended. Sign in again." };
-const forbidden: ShareError = { status: "error", message: "Only owners and editors can share." };
+const forbidden: ShareError = { status: "error", message: "Only Agency admins can share." };
 const generic: ShareError = { status: "error", message: "Couldn't save. Try again." };
 const unsafe: ShareError = { status: "error", message: "Couldn't make a safe copy of this page. Nothing was shared." };
 

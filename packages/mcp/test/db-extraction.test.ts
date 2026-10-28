@@ -248,7 +248,7 @@ describe("extraction dry run (Tidewater Digital)", () => {
 
     await admin.query(sql("setup-workspace.sql"));
     const [ws] = await qa();
-    expect((await admin.query("select role from memberships where workspace_id = $1 and user_id = $2", [ws!.id, adminId])).rows).toEqual([{ role: "agency_admin" }]);
+    expect((await admin.query("select role from memberships where workspace_id = $1 and user_id = $2", [ws!.id, adminId])).rows).toEqual([{ role: "owner" }]);
     // The slug guard: a second run fails and changes nothing.
     await expect(admin.query(sql("setup-workspace.sql"))).rejects.toThrow(/already exists/);
     await admin.query("rollback"); // the script's own begin is still open on this connection, as in an editor tab

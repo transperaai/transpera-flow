@@ -93,7 +93,7 @@ const STEP_LOG_COLS: readonly ImportColumn[] = [
   col("finished", "Finished", false, "date", STEP_LOG_HEADERS.finished, "When it finished the step. Needed to measure waits.", "2026-03-02 10:30"),
   col("hours", "Hands-on hours", false, "duration", STEP_LOG_HEADERS.hours, "Hours of hands-on work in the step. Needed to measure hands-on time.", "1.5"),
   col("source", "Lead source", false, "name", STEP_LOG_HEADERS.source, "Where the item came from. Needed to measure leads a week for each source.", "Website enquiries"),
-  col("person", "Person", false, "person", ["person", "user", "team member", "employee", "staff", "done by", "worked by", "assignee", "assigned to", "owner"], "Who did the visit. Owners and editors can match it to your people to measure per-person times (with Per-person times switched on). Never kept.", "A team member"),
+  col("person", "Person", false, "person", ["person", "user", "team member", "employee", "staff", "done by", "worked by", "assignee", "assigned to", "owner"], "Who did the visit. Agency admins can match it to your people to measure per-person times (with Per-person times switched on). Never kept.", "A team member"),
 ];
 
 const DEALS_COLS: readonly ImportColumn[] = [
@@ -102,7 +102,7 @@ const DEALS_COLS: readonly ImportColumn[] = [
   col("entered", "Date entered", true, "date", ["entered", "date entered", "entered stage", "stage entered", "entered at", "changed at", "date changed", "moved at", "date"], "When the deal entered the stage.", "2026-03-02 09:30"),
   col("left", "Date left", false, "date", ["left", "date left", "exited", "exited at", "left stage", "stage left"], "When the deal left the stage. Needed to measure waits.", "2026-03-03 11:00"),
   col("source", "Lead source", false, "name", ["source", "lead source", "original source", "deal source", "channel"], "Where the deal came from. Needed to measure leads a week for each source.", "Website enquiries"),
-  col("amount", "Amount", false, "amount", ["amount", "value", "deal value", "deal amount"], "The deal's value. Shown to owners and editors only, and never kept.", "4500"),
+  col("amount", "Amount", false, "amount", ["amount", "value", "deal value", "deal amount"], "The deal's value. Shown to Agency admins only, and never kept.", "4500"),
   col("owner", "Owner", false, "person", ["owner", "deal owner", "sales rep", "rep", "assigned to", "user"], "Who owns the deal. Never shown, kept or matched to people.", "A sales rep"),
 ];
 
@@ -111,7 +111,7 @@ const TIME_LOG_COLS: readonly ImportColumn[] = [
   col("task", "Task", true, "name", ["task", "task name", "activity", "step", "service item", "description"], "What the time was spent on. Names are matched to your steps in the next step.", "Audit & proposal"),
   col("date", "Date", true, "date", ["date", "start date", "started", "day", "spent on", "logged on"], "The day the time was logged.", "2026-03-03"),
   col("hours", "Hours", true, "duration", ["hours", "duration", "time", "time spent", "logged hours", "quantity"], "How long the entry was. 1.5, 1:30 and 1h 30m all work.", "1.5"),
-  col("person", "Person", false, "person", ["person", "user", "member", "team member", "employee", "staff", "name"], "Who logged the time. Owners and editors can match it to your people to measure per-person times (with Per-person times switched on). Never kept.", "A team member"),
+  col("person", "Person", false, "person", ["person", "user", "member", "team member", "employee", "staff", "name"], "Who logged the time. Agency admins can match it to your people to measure per-person times (with Per-person times switched on). Never kept.", "A team member"),
   col("client", "Client", false, "client", ["client", "customer", "account", "company"], "The job's client. Never shown or kept; used only to count.", "C-001"),
 ];
 
@@ -152,7 +152,7 @@ const INVOICES_COLS: readonly ImportColumn[] = [
   col("issued", "Date issued", true, "date", ["issued", "issue date", "invoice date", "date", "created"], "When the invoice was issued.", "2026-03-02"),
   col("due", "Date due", false, "date", ["due", "due date", "payment due"], "When payment was due.", "2026-03-30"),
   col("paid", "Date paid", false, "date", ["paid", "paid on", "paid date", "date paid", "payment date"], "When it was paid. Blank means unpaid.", "2026-04-02"),
-  col("amount", "Amount", false, "amount", ["amount", "total", "total amount", "amount due", "gross", "net", "value"], "The invoice total. Shown to owners and editors only, and never kept.", "1200.00"),
+  col("amount", "Amount", false, "amount", ["amount", "total", "total amount", "amount due", "gross", "net", "value"], "The invoice total. Shown to Agency admins only, and never kept.", "1200.00"),
 ];
 
 /** The step log template with the optional Person column (#227); `STEP_LOG_TEMPLATE` is C2's and stays as it is. */
@@ -534,7 +534,7 @@ export interface DealRow {
   entered: number;
   left: number | null;
   source: string | null;
-  /** On screen only (owners and editors); never stored. */
+  /** On screen only (Agency admins); never stored. */
   amount: number | null;
   owner: string | null;
 }
@@ -624,7 +624,7 @@ function readNewRow(spec: ImportKindSpec, cell: (c: string) => string, order: Da
       }
       case "amount": {
         // Nothing is calibrated from an amount, so a row with one that can't be read (TBD, 4.5k) is kept and the amount left blank,
-        // and the read says how many. The value is never put in a message: amounts are shown to owners and editors only.
+        // and the read says how many. The value is never put in a message: amounts are shown to Agency admins only.
         const a = parseAmount(text);
         if (a === null) ctx.badAmounts++;
         out[c.id] = a;

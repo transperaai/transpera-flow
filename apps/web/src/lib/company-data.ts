@@ -56,7 +56,7 @@ export interface SuggestionsPageData {
   proposals: ProposalRow[];
   /** What the proposals point at, by name. */
   lookups: ProposalLookups;
-  /** A visitor's email and the text held from members and viewers, for each play-link idea. Owners, editors and agency admins only; empty for everyone else (B4). */
+  /** A visitor's email and the text held from members and viewers, for each play-link idea. Agency admins and the Owner only; empty for everyone else (B4). */
   contacts: Record<string, PlayContact>;
   model: CompanyModel;
   /** Titles of the sources suggestions cite. */
@@ -134,7 +134,7 @@ export async function loadSuggestionsPage(slug: string): Promise<SuggestionsPage
     loadCompanyModel(db, workspace),
     loadSources(db, ws),
   ]);
-  // A visitor's email and the wording held from members and viewers are for owners, editors and agency admins (B4); empty for the rest.
+  // A visitor's email and the wording held from members and viewers are for Agency admins and the Owner (B4); empty for the rest.
   const contacts = canEdit === true ? await loadPlayContacts(db, ws) : {};
   const currency = (workspace.settings as { currency?: string } | null)?.currency;
   let changes: AuditEntry[] | null = null;

@@ -1,6 +1,6 @@
 "use client";
 
-// The Share button and its dialog (issue #32, B3), on the Overview, a process, an issue and a solution, for owners and editors. A
+// The Share button and its dialog (issue #32, B3), on the Overview, a process, an issue and a solution, for Agency admins. A
 // link shows a frozen, read-only copy of the page. Two switches, both off: people's names, and costs and margins. Either on needs
 // the email addresses allowed to open it (they sign in with Google) and an end date. Pay is never shared. The link is shown once.
 
@@ -68,7 +68,7 @@ export interface ShareButtonProps {
   create?: (input: ShareInput) => Promise<ShareResult>;
 }
 
-/** "Share" with its dialog. Shown only to owners and editors (the page that renders it decides). */
+/** "Share" with its dialog. Shown only to Agency admins (the page that renders it decides). */
 export function ShareButton(props: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   return (

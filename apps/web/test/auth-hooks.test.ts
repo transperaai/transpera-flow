@@ -22,7 +22,7 @@ beforeAll(async () => {
   vi.stubEnv("ACCESS_ADMIN_EMAILS", "first@brand-new.io");
   vi.stubEnv("VERCEL_URL", "transpera-flow-abc123-team.vercel.app");
   vi.stubEnv("VERCEL_BRANCH_URL", "");
-  await db.client.query(`insert into deployment_access (kind, value, role) values ('domain', 'client.com', 'viewer'), ('email', 'lead@client.com', 'editor')`);
+  await db.client.query(`insert into deployment_access (kind, value, role) values ('domain', 'client.com', 'viewer'), ('email', 'lead@client.com', 'agency_admin')`);
   const { getAuth } = await import("@/lib/auth/server");
   ctx = await getAuth().$context;
 });
@@ -63,12 +63,12 @@ describe("Better Auth hooks", () => {
     expect(rows[0].f).toBe(true);
   });
 
-  it("applies the role when a session is created: an editor joins every workspace", async () => {
+  it("applies the role when a session is created: an Agency admin joins every workspace", async () => {
     const user = await newUser("lead@client.com");
     const session = await adapter().createSession(user.id);
     expect(session.userId).toBe(user.id);
     const roles = (await db.client.query("select distinct role from memberships where user_id = $1", [user.id])).rows;
-    expect(roles).toEqual([{ role: "editor" }]);
+    expect(roles).toEqual([{ role: "owner" }]);
   });
 
   it("refuses a session for someone whose access was removed, and keeps their memberships", async () => {

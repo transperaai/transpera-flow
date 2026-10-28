@@ -36,7 +36,7 @@ export function ProcessSolutions({
   /** `/w/<slug>` or `/demo`: where the Editor lives. */
   base: string;
   demo: boolean;
-  /** Who can build a solution: owners and editors. */
+  /** Who can build a solution: Agency admins. */
   canEdit: boolean;
   /** This process's solutions and their links, as loaded with the page (the demo keeps its own). */
   data: SolutionsData;

@@ -160,7 +160,7 @@ describe("a viewer", () => {
     expect(await page.getByRole("textbox", { name: "Accent colour", exact: true }).isDisabled()).toBe(true);
     expect(await page.getByLabel("Accent colour, colour picker").isDisabled()).toBe(true);
     for (const name of ["Upload logo", "Remove", "Reset to default"]) expect(await page.getByRole("button", { name }).isDisabled(), name).toBe(true);
-    expect(await page.getByText("Only workspace owners can change this.").count()).toBeGreaterThan(0);
+    expect(await page.getByText("Only Agency admins can change this.").count()).toBeGreaterThan(0);
     expect(errors).toEqual([]);
     await page.close();
   }, 60_000);

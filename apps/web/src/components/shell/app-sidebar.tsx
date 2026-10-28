@@ -73,7 +73,7 @@ export type ShellProps =
       logoUrl: string | null;
       workspaces: SwitcherWorkspace[];
       canManage: boolean;
-      /** Owners, editors and agency admins: they see Share links. */
+      /** Agency admins and the Owner: they see Share links. */
       canEdit?: boolean;
       counts: NavCounts;
       viewer: { name: string; email: string | null } | null;

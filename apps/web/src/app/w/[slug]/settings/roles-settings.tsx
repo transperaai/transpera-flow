@@ -31,7 +31,7 @@ export function RolesSettings({ data }: { data: WorkspaceSettingsData }) {
       {canEdit ? (
         <AddRole workspaceId={data.workspace.id} />
       ) : (
-        <p className="mb-3 text-fg-2">You can view roles here; owners and editors can change them.</p>
+        <p className="mb-3 text-fg-2">You can view roles here; Agency admins can change them.</p>
       )}
       {roles.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">No roles yet. Add the kinds of work your team does.</p>

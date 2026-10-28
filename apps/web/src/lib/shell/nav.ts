@@ -66,7 +66,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
   if (extra.levers) company.push(item({ key: "levers", label: "Levers", path: "/settings/levers", icon: "settings" }));
   if (extra.ai) company.push(item({ key: "ai", label: "AI analysis", path: "/settings/ai", icon: "settings" }));
   if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
-  // The read-only links to pages of this workspace (B3): for owners and editors, who make them.
+  // The read-only links to pages of this workspace (B3): for Agency admins, who make them.
   if (extra.share) company.push(item({ key: "share", label: "Share links", path: "/share", icon: "share" }));
   return [
     {
@@ -91,7 +91,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
   ];
 }
 
-export function workspaceNav({ slug, pathname, canManage, canEdit = false, counts }: { slug: string; pathname: string; canManage: boolean; /** Owners, editors and agency admins: they see Share links. */ canEdit?: boolean; counts: NavCounts }): NavGroup[] {
+export function workspaceNav({ slug, pathname, canManage, canEdit = false, counts }: { slug: string; pathname: string; canManage: boolean; /** Agency admins and the Owner: they see Share links. */ canEdit?: boolean; counts: NavCounts }): NavGroup[] {
   const base = `/w/${slug}`;
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : "\u0000";
   return groups(base, rest, counts, { settings: true, access: canManage, share: canEdit });

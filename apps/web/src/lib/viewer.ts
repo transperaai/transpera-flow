@@ -1,6 +1,6 @@
 // Who is looking, and what they may see of other people (B1 2b, issue #30).
 //
-// Owners, editors and agency admins see every person. A member or viewer sees their own person's row, and "A team
+// Agency admins and the Owner see every person. A member or viewer sees their own person's row, and "A team
 // member" wherever another person would be named. A bundle with no `viewer` (the demo, fixtures) sees everyone.
 import { A_TEAM_MEMBER, canSeePerson, type Viewer } from "@transpera-flow/db";
 

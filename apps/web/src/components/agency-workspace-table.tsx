@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { AgencyWorkspaceRow } from "@/lib/data";
 
 // The agency's workspace list (issue #30, B1 part 3): one row per company with the headline numbers its Overview last recorded.
-// The numbers come from `workspace_headlines`, written when an owner or editor opens the Overview, so a workspace nobody has
+// The numbers come from `workspace_headlines`, written when an Agency admin opens the Overview, so a workspace nobody has
 // opened yet shows a prompt instead of a number.
 
 const COLUMN_HELP = {

@@ -70,7 +70,7 @@ describe("the Processes page with nothing published", () => {
   it("gives a reader the sentence and no button", async () => {
     state.canEdit = false;
     const out = await render();
-    expect(out).toContain("No processes yet. An owner or editor adds them.");
+    expect(out).toContain("No processes yet. An Agency admin adds them.");
     expect(out).not.toContain("New process");
     expect(out).not.toContain("Upload process");
     expect(out).not.toContain("data-edit-entry");

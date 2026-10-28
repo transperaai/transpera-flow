@@ -2,7 +2,7 @@
 
 // The import wizard (issue #40, C1) on Settings → Historical data: choose a file, match its columns (suggested, correctable), check
 // the rows. Three steps inline in a card. The file is read in a Web Worker, so 50,000 rows don't freeze the page. Client and person
-// values are never shown (the mapper counts them, the preview labels them) and amounts are shown only to owners and editors; nothing
+// values are never shown (the mapper counts them, the preview labels them) and amounts are shown only to Agency admins; nothing
 // from the file is stored (D27, #30). The card around it decides what the rows are used for.
 
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
@@ -53,10 +53,10 @@ export interface ImportWizardProps {
   previous: Partial<Record<ImportKind, Record<string, string>>>;
   /** The demo's sample files. */
   sample?: Partial<Record<ImportKind, { name: string; text: string }>>;
-  /** Owners and editors see amounts; viewers and members don't. */
+  /** Agency admins see amounts; viewers and members don't. */
   mode: ImportMode;
   /**
-   * Owners, editors and agency admins with Per-person times on: the people a person column is matched to. Null or absent: no
+   * Agency admins and the Owner with Per-person times on: the people a person column is matched to. Null or absent: no
    * matching, and person values stay labelled "Person 1…" (#227).
    */
   people?: readonly { id: string; name: string }[] | null;
@@ -134,7 +134,7 @@ export function ImportWizard(props: ImportWizardProps) {
   const counted = useMemo(() => (read ? (nameMap ? applyNameMapCounted(read, nameMap) : { rows: read.rows, kept: read.rows.length, leftOut: 0 }) : null), [read, nameMap]);
   const kept = counted?.rows ?? null;
 
-  // The people in the file matched to the workspace's people (owners and editors only, #227), until the person changes one.
+  // The people in the file matched to the workspace's people (Agency admins only, #227), until the person changes one.
   const personList = useMemo(() => (read && people && PERSON_TIME_KINDS.includes(kind) ? personValues(read) : []), [read, people, kind]);
   const personTotal = useMemo(() => (read && personList.length >= MAX_IMPORT_NAMES ? personValues(read, Infinity).length : personList.length), [read, personList]);
   const suggestedPeople = useMemo(() => {
@@ -690,7 +690,7 @@ function RowsStep(props: {
               Match the people
               <Help
                 label="Match the people"
-                description="Each name in the file is matched to one of your people, to measure their time on each step. Only owners and editors see this. Names in the file are never kept."
+                description="Each name in the file is matched to one of your people, to measure their time on each step. Only Agency admins see this. Names in the file are never kept."
                 example="Sam P. → Sam Patel"
               />
             </h4>

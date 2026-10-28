@@ -35,6 +35,8 @@ const REV = NORTHBEAM_REVISION_ID;
 let tdb: TestDb;
 let owner: TestUser;
 let editor: TestUser;
+let admin: TestUser;
+let viewer: TestUser;
 const q = (sql: string, params: unknown[] = []) => tdb.client.query(sql, params);
 const one = async (sql: string, params: unknown[] = []) => (await q(sql, params)).rows[0];
 const form = (fields: Record<string, string>) => {
@@ -58,6 +60,8 @@ beforeAll(async () => {
   tdb = await createTestDb();
   owner = await addMember(tdb, WS, "owner");
   editor = await addMember(tdb, WS, "editor");
+  admin = await addMember(tdb, WS, "viewer", null, { agency_admin: true });
+  viewer = await addMember(tdb, WS, "viewer");
 }, 120_000);
 
 afterAll(async () => {
@@ -207,7 +211,7 @@ describe("processes", () => {
     expect(await changeProcessKind(servicing.process_id, "pipeline")).toMatchObject({ status: "error", message: expect.stringContaining(servicing.name) });
     // A viewer-like caller (not a member) changes nothing.
     signInAs({ tdb }, await addMember(tdb, WS, "viewer"));
-    expect(await archiveProcess(id)).toEqual({ status: "error", message: "Only owners and editors can change processes here." });
+    expect(await archiveProcess(id)).toEqual({ status: "error", message: "Only Agency admins can change processes here." });
   });
 
   it("opens, edits, publishes and discards a draft through the editor actions", async () => {
@@ -352,27 +356,43 @@ describe("history, first principles and calibration", () => {
 });
 
 describe("access settings", () => {
-  it("adds and removes a domain and an email, and links a member to a person", async () => {
+  const url = (u: string) => new URLSearchParams(u.split("?")[1]);
+
+  it("links a signed-in person to a person record, once per person", async () => {
     signInAs({ tdb }, owner);
     const a = await import("@/app/w/[slug]/settings/access/actions");
-    const url = (u: string) => new URLSearchParams(u.split("?")[1]);
-    expect(url(await redirected(() => a.addDomain(SLUG, WS, form({ domain: "Example.COM" }))) ).get("notice")).toBe("Added example.com.");
-    expect(url(await redirected(() => a.addDomain(SLUG, WS, form({ domain: "example.com" })))).get("error")).toBeTruthy();
-    const domain = await one("select id from workspace_domains where workspace_id = $1", [WS]);
-    expect(url(await redirected(() => a.removeDomain(SLUG, form({ id: domain.id })))).get("notice")).toMatch(/Removed the domain/);
-    expect(url(await redirected(() => a.removeDomain(SLUG, form({ id: domain.id })))).get("error")).toBeTruthy();
-    expect(url(await redirected(() => a.addEmail(SLUG, WS, form({ email: "new@person.example", role: "viewer", person_id: "" })))).get("notice")).toBe("Added new@person.example as viewer.");
-    const email = await one("select id from workspace_access_emails where workspace_id = $1 and email = 'new@person.example'", [WS]);
-    expect(url(await redirected(() => a.updateEmail(SLUG, form({ id: email.id, role: "editor", person_id: "" })))).get("notice")).toBe("Saved.");
-    expect((await one("select role from workspace_access_emails where id = $1", [email.id])).role).toBe("editor");
-    expect(url(await redirected(() => a.removeEmail(SLUG, form({ id: email.id })))).get("notice")).toMatch(/Removed from the list/);
     const member = await one("select id from memberships where user_id = $1", [editor.id]);
-    const person = (await one("select id from people p where workspace_id = $1 and not exists (select 1 from memberships m where m.person_id = p.id) and not exists (select 1 from workspace_access_emails e where e.person_id = p.id) limit 1", [WS])).id as string;
+    const person = (await one("select id from people p where workspace_id = $1 and not exists (select 1 from memberships m where m.person_id = p.id) limit 1", [WS])).id as string;
     const linked = await redirected(() => a.setMemberPerson(SLUG, form({ id: member.id, person_id: person })));
     expect(linked, linked).toContain("notice=Linked");
     const second = await one("select id from memberships where user_id = $1", [owner.id]);
     expect(url(await redirected(() => a.setMemberPerson(SLUG, form({ id: second.id, person_id: person })))).get("error")).toBeTruthy();
-    expect(url(await redirected(() => a.setMemberRole(SLUG, form({ id: member.id, role: "viewer" })))).get("notice")).toBe("Role updated.");
-    expect(url(await redirected(() => a.setMemberActive(SLUG, form({ id: member.id, active: "false" })))).get("notice")).toBe("Access removed.");
+    expect(await redirected(() => a.setMemberPerson(SLUG, form({ id: member.id, person_id: "" })))).toContain("notice=Unlinked");
+  });
+
+  it("lets an Agency admin add, change and remove a Viewer or Agency admin rule, but not an Owner rule", async () => {
+    signInAs({ tdb }, owner);
+    const a = await import("@/app/w/[slug]/settings/access/actions");
+    expect(url(await redirected(() => a.addDeploymentRule(SLUG, form({ kind: "email", value: " New@Person.example ", role: "viewer" })))).get("notice")).toBe("new@person.example can now sign in as a Viewer.");
+    expect(url(await redirected(() => a.addDeploymentRule(SLUG, form({ kind: "email", value: "new@person.example", role: "viewer" })))).get("error")).toMatch(/already on the list/);
+    const rule = await one("select id from deployment_access where value = 'new@person.example'", []);
+    expect(url(await redirected(() => a.setDeploymentRole(SLUG, form({ id: rule.id, role: "agency_admin" })))).get("notice")).toMatch(/^Saved/);
+    expect((await one("select role from deployment_access where id = $1", [rule.id])).role).toBe("agency_admin");
+    // Not an Owner rule: the database refuses, and the page says why.
+    const refused = url(await redirected(() => a.addDeploymentRule(SLUG, form({ kind: "email", value: "sneaky@person.example", role: "owner" }))));
+    expect(refused.get("error")).toMatch(/Only an Owner can add, change or remove an Owner/);
+    expect(url(await redirected(() => a.setDeploymentRole(SLUG, form({ id: rule.id, role: "owner" })))).get("error")).toMatch(/Only an Owner/);
+    expect(url(await redirected(() => a.addDeploymentRule(SLUG, form({ kind: "email", value: "x@y.example", role: "editor" })))).get("error")).toBeTruthy();
+    expect(url(await redirected(() => a.removeDeploymentRule(SLUG, form({ id: rule.id })))).get("notice")).toMatch(/^Removed/);
+  });
+
+  it("lets the Owner make an Owner rule, and stops a Viewer changing the list", async () => {
+    const a = await import("@/app/w/[slug]/settings/access/actions");
+    signInAs({ tdb }, admin);
+    expect(url(await redirected(() => a.addDeploymentRule(SLUG, form({ kind: "email", value: "second@owner.example", role: "owner" })))).get("notice")).toMatch(/an Owner/);
+    const rule = await one("select id from deployment_access where value = 'second@owner.example'", []);
+    signInAs({ tdb }, viewer);
+    expect(url(await redirected(() => a.removeDeploymentRule(SLUG, form({ id: rule.id })))).get("error")).toBeTruthy();
+    expect((await one("select role from deployment_access where id = $1", [rule.id])).role).toBe("owner");
   });
 });

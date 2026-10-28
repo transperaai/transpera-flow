@@ -5,7 +5,7 @@ import { bundleHarness } from "./build-harness";
 
 // The People page as a member sees it (B1 2b, issue #30), in a real browser with its simulation in a real Web Worker
 // (./people-harness/entry.tsx): the "How busy" table lists the member's own row only, the team card still counts the whole
-// team, no other person is named, and the page has no console errors on a desktop and a phone. An owner or editor sees
+// team, no other person is named, and the page has no console errors on a desktop and a phone. An Agency admin sees
 // everyone.
 
 let browser: Browser;
@@ -266,7 +266,7 @@ describe("Person detail", { timeout: 120_000 }, () => {
   for (const width of [1440, 400]) {
     it(`switch on, a member (own times only): their detail shows them, the note is visible, nobody else's value appears (${width}px)`, async () => {
       const { page, errors } = await mount({ viewer: "own", own: "jess", capacityFactorEnabled: true, factors: FACTORS }, width);
-      expect(await page.locator("[data-speeds-normalised]").innerText()).toContain("Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what owners and editors see.");
+      expect(await page.locator("[data-speeds-normalised]").innerText()).toContain("Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what Agency admins see.");
       await busyRows(page).getByRole("button", { name: "Jess Monroe" }).click();
       const text = await page.locator("[data-capacity-factors]").innerText();
       expect(text).toContain(`${JESS_STEP.name}: 1.2 × normal (20% slower)`);

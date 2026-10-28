@@ -51,14 +51,14 @@ describe("per-person screens use the viewer helpers", () => {
   });
 
   it("the People page says how to get linked when a member has no row", () => {
-    expect(read("components/people-page.tsx")).toContain("Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an owner to link you on Settings → Access.");
+    expect(read("components/people-page.tsx")).toContain("Your sign-in isn&apos;t linked to a person, so there&apos;s no row of yours to show. Ask an Agency admin to link you on Settings → Access.");
   });
 
   it("Settings counts a role's people from team_capacity, not from the member's own reads", () => {
     const data = read("lib/data.ts");
     expect(data).toContain("loadTeam(db, ws)");
     expect(data).toContain("roleUsage(roleSteps, team.personRoles, team.clientAssignments,");
-    expect(read("app/w/[slug]/settings/people-settings.tsx")).toContain("Your record. Owners and editors see the whole team.");
+    expect(read("app/w/[slug]/settings/people-settings.tsx")).toContain("Your record. Agency admins see the whole team.");
     expect(read("app/w/[slug]/settings/clients-settings.tsx")).toContain("A_TEAM_MEMBER");
   });
 });
@@ -136,7 +136,7 @@ describe("per-person times are never ranked or compared", () => {
     for (const f of walk("")) expect(read(f), f).not.toMatch(/(median|average|rank|mean)\w*\([^)]*capacityFactor|capacityFactor[^\n]*(median|average|\.reduce)/i);
   });
 
-  // Measured per-person proposals (#227): the same rules, and only owners and editors with the switch on see them.
+  // Measured per-person proposals (#227): the same rules, and only Agency admins with the switch on see them.
   it("no file sorts per-person proposals by value", () => {
     for (const f of walk("")) expect(read(f), f).not.toMatch(/sort\([^)]*\b(proposed|measured|factor)\b/i);
     expect(read("lib/calibration/person-times.ts")).not.toMatch(/\.sort\(|toSorted\(/);

@@ -147,11 +147,11 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
     expect(out).toContain("Publish a process and this page fills in.");
   });
 
-  it("tells a reader that an owner or editor publishes first", async () => {
+  it("tells a reader that an Agency admin publishes first", async () => {
     state.variant = variant;
     state.canEdit = false;
     const out = await html(await (await import("@/app/w/[slug]/forecast/page")).default as Page);
-    expect(out).toContain("An owner or editor publishes a process first, then this page fills in.");
+    expect(out).toContain("An Agency admin publishes a process first, then this page fills in.");
     expect(out).not.toContain("Open Processes");
   });
 });

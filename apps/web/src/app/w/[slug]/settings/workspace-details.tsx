@@ -45,7 +45,7 @@ export function WorkspaceDetails({
           value={name}
           save={(base, next) => saveName(workspaceId, base, next)}
           disabled={!canManage}
-          hint={canManage ? undefined : "Only workspace owners can change this."}
+          hint={canManage ? undefined : "Only Agency admins can change this."}
           help={{ description: "The company's name, as everyone in this workspace sees it.", example: "Northbeam Digital." }}
         />
         <SelectField
@@ -54,7 +54,7 @@ export function WorkspaceDetails({
           save={(base, next) => saveCurrency(workspaceId, base, next)}
           options={options}
           disabled={!canManage}
-          hint={canManage ? "Changes how amounts are shown. Amounts already entered are not converted." : "Only workspace owners can change this."}
+          hint={canManage ? "Changes how amounts are shown. Amounts already entered are not converted." : "Only Agency admins can change this."}
           help={{ description: "The money every fee, cost and MRR is shown in. Changing it relabels amounts; it doesn't convert them.", example: "AUD shows a fee of 3,600 as A$3,600." }}
         />
       </div>

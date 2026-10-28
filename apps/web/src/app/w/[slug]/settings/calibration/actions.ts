@@ -11,7 +11,7 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Calibration (issue #41): record the step log and the proposals as computed and apply the ones the person ticked, in
 // one call (`record_calibration`, one transaction: a refused or failed apply leaves no record, so retries don't pile
-// them up). Runs as the signed-in user: row-level security lets owners and editors write; step values go into the
+// them up). Runs as the signed-in user: row-level security lets Agency admins write; step values go into the
 // process's draft (never live) and lead volumes live, all marked measured, skipping any value changed since the log
 // was read.
 
@@ -31,7 +31,7 @@ export async function applyCalibration(input: unknown): Promise<ApplyOutcome> {
   if (!(await getSessionUser())) return { status: "error", message: "Your session has ended. Sign in again." };
   const db = await getDb();
 
-  const denied = "Only owners and editors can apply calibration here.";
+  const denied = "Only Agency admins can apply calibration here.";
   // `record_calibration_import` (C1, #40): the same transaction as `record_calibration`, recorded under the real kind with counts-only details.
   let data;
   try {
@@ -43,7 +43,7 @@ export async function applyCalibration(input: unknown): Promise<ApplyOutcome> {
       p_column_map: r.columnMap as Json,
       p_row_count: r.rowCount,
       p_details: (r.details ?? {}) as unknown as Json,
-      // Per-person times travel apart from the results (#227): the database keeps them where only owners and editors read them.
+      // Per-person times travel apart from the results (#227): the database keeps them where only Agency admins read them.
       p_results: (r.capacityFactors.length ? { ...r.results, capacity_factors: r.capacityFactors } : r.results) as unknown as Json,
       p_keys: r.keys,
     });
@@ -81,7 +81,7 @@ export async function recordClientCalibration(input: unknown): Promise<ClientApp
   const r = parsed.request;
   if (!(await getSessionUser())) return { status: "error", message: "Your session has ended. Sign in again." };
 
-  const denied = "Only owners and editors can apply calibration here.";
+  const denied = "Only Agency admins can apply calibration here.";
   const file = (f: typeof r.clients) =>
     f ? ({ ...(f.kind ? { kind: f.kind } : {}), file_name: f.fileName, column_map: f.columnMap, row_count: f.rowCount, details: f.details ?? {} } as unknown as Json) : null;
   let data;
@@ -105,7 +105,7 @@ export async function recordClientCalibration(input: unknown): Promise<ClientApp
 
 // An import that has no calibration (issue #40): a leads or an invoices file is recorded on its own, with its columns, row count
 // and counts-only details. Nothing from the file gets here: the page sends header names, counts and the model's lead source ids.
-// Owners and editors only (row-level security); API tokens are refused by the function.
+// Agency admins only (row-level security); API tokens are refused by the function.
 
 export type RecordDatasetOutcome = { status: "ok"; datasetId: string } | { status: "error"; message: string };
 
@@ -130,9 +130,9 @@ export async function recordDataset(input: unknown): Promise<RecordDatasetOutcom
     const error = pgError(e);
     // Row-level security refuses a viewer or a member (42501); the function refuses an API token the same way.
     const denied = error.code === "42501" || /row-level security/i.test(error.message ?? "");
-    return { status: "error", message: denied ? "Only owners and editors can save imports here." : "Couldn't save. Try again." };
+    return { status: "error", message: denied ? "Only Agency admins can save imports here." : "Couldn't save. Try again." };
   }
-  if (typeof data !== "string") return { status: "error", message: "Only owners and editors can save imports here." };
+  if (typeof data !== "string") return { status: "error", message: "Only Agency admins can save imports here." };
   // The Imports card lists it.
   refresh();
   return { status: "ok", datasetId: data };

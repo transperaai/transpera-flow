@@ -28,7 +28,7 @@ export interface ShareLinkRow {
 
 const COLUMNS = ["id", "kind", "mode", "target_id", "show_people", "show_financials", "allowed_emails", "expires_at", "label", "snapshot_at", "created_by", "created_at", "revoked_at", "opens", "last_opened_at"] as const;
 
-/** The workspace's share links, newest first, as an owner or editor sees them (RLS decides: nobody else reads any). */
+/** The workspace's share links, newest first, as an Agency admin sees them (RLS decides: nobody else reads any). */
 export async function loadShareLinks(workspaceId: string): Promise<ShareLinkRow[]> {
   const db = await getDb();
   const data = await db.selectFrom("share_links").select(COLUMNS).where("workspace_id", "=", workspaceId).orderBy("created_at", "desc").orderBy("id").execute();

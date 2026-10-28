@@ -6,7 +6,7 @@ import { rpc } from "@transpera-flow/db/client";
 import type { FpSaveResult } from "@/lib/first-principles/types";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
-// Saves a process's first principles (issue #119, A54). Runs as the signed-in user through RLS: owners and editors
+// Saves a process's first principles (issue #119, A54). Runs as the signed-in user through RLS: Agency admins
 // write, everyone else is refused. The answers go into the process's draft, which this opens if there isn't one
 // (like every edit, docs/adr/0004-drafts-as-revisions.md); the live version is never changed, and the database
 // refuses it too. The answers are cleaned first, so a hand-made request can't store anything the flow wouldn't.
@@ -34,7 +34,7 @@ export async function saveFirstPrinciplesAction(
   }
   const draft = opened as unknown as { status: string; revision_id?: string };
   // open_draft locks the process for update, so one the user may read but not edit is not found.
-  if (draft.status !== "ok" || !draft.revision_id) return { status: "error", message: "Only owners and editors can change first principles." };
+  if (draft.status !== "ok" || !draft.revision_id) return { status: "error", message: "Only Agency admins can change first principles." };
   const draftId = draft.revision_id;
   // The draft the flow was editing is gone (published or discarded) and this is a newer one: its version means nothing here.
   if (revisionId !== null && revisionId !== draftId) return { status: "stale" };
@@ -48,7 +48,7 @@ export async function saveFirstPrinciplesAction(
     case "conflict":
       return { status: "conflict", doc: outcome.doc, version: outcome.version, revisionId: draftId };
     case "forbidden":
-      return { status: "error", message: "Only owners and editors can change first principles." };
+      return { status: "error", message: "Only Agency admins can change first principles." };
     case "not_draft":
       return { status: "stale" };
     case "invalid":

@@ -233,7 +233,7 @@ export function SourcesPage({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-fg-2">
-          {canEdit ? "Owners and editors add sources and link them." : "You can read the sources here; owners and editors can add and change them."}
+          {canEdit ? "Agency admins add sources and link them." : "You can read the sources here; Agency admins can add and change them."}
           {unlinkedCount > 0 && (
             <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinkedCount}>
               {unlinkedCount === 1 ? "1 source isn't linked to anything yet." : `${unlinkedCount} sources aren't linked to anything yet.`}

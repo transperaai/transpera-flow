@@ -106,7 +106,7 @@ describe("the start page for a member or viewer", () => {
     const html = reader();
     expect(html).toContain("data-start-overview");
     expect(html).toContain("Acme has nothing published yet");
-    expect(html).toContain("The Overview shows the company map, headline numbers and trends once an owner or editor publishes a process.");
+    expect(html).toContain("The Overview shows the company map, headline numbers and trends once an Agency admin publishes a process.");
   });
 
   it("has no buttons, edit entries, checklist, drafts or restore card", () => {

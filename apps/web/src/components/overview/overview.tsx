@@ -127,7 +127,7 @@ export interface OverviewProps {
   ai?: AiPanelData;
   /** The workspace's findings (B17): the accepted ones are listed by process, the proposed ones wait for review. */
   findings?: FindingRow[];
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
+  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
   share?: ReactNode;
 }
 

@@ -61,7 +61,7 @@ export function MarketSettings({ data }: { data: WorkspaceSettingsData }) {
       title="Market conditions"
       description="How good or bad business conditions are. Pick one, or make your own, then plan how it changes over the next 2 years."
     >
-      {!canEdit && <p className="text-fg-2">You can view market conditions here; owners and editors can change them.</p>}
+      {!canEdit && <p className="text-fg-2">You can view market conditions here; Agency admins can change them.</p>}
 
       <div role="group" aria-label="Market conditions" className="flex flex-wrap gap-2">
         {conditions.map((c) => (

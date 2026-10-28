@@ -42,6 +42,11 @@ export interface World {
   users: Record<"owner" | "editor" | "member" | "viewer" | "admin" | "stranger", TestUser>;
 }
 
+/**
+ * The world's actors keep four labels from before the three roles (migration 20270103000000), and the memberships they get are
+ * the two that exist: `owner` and `editor` are Agency admins (an `owner` membership), `member` and `viewer` are Viewers.
+ * `admin` is the Owner (the agency-admin flag).
+ */
 const ROLES = ["owner", "editor", "member", "viewer"] as const;
 
 /** A database with one workspace (`slug`), a user in each role, an agency admin (a member as `agency_admin`) and a stranger. */

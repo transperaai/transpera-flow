@@ -11,7 +11,7 @@ import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
  * Restore a backup (issue #39, B10 2b): fill this new, empty workspace from a JSON backup another workspace exported. Only
- * agency admins, owners and editors can; creating the workspace is an agency admin's job (ADR 0012), so owners and editors
+ * agency admins, Agency admins can; creating the workspace is an agency admin's job (ADR 0012), so Agency admins
  * restore into a workspace one has set up for them. Not signed in: the proxy has already redirected.
  */
 export default async function RestorePage(props: PageProps<"/w/[slug]/restore">) {

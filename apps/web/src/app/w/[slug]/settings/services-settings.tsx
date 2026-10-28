@@ -46,7 +46,7 @@ export function ServicesSettings({ data }: { data: WorkspaceSettingsData }) {
       {canEdit ? (
         <AddService workspaceId={data.workspace.id} />
       ) : (
-        <p className="mb-3 text-fg-2">You can view services here; owners and editors can change them.</p>
+        <p className="mb-3 text-fg-2">You can view services here; Agency admins can change them.</p>
       )}
       {services.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">

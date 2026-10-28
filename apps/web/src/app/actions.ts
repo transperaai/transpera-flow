@@ -25,7 +25,7 @@ export async function createWorkspace(_prev: CreateWorkspaceState, form: FormDat
     await rpc(db, "create_workspace", { ws_name: parsed.name, ws_slug: parsed.slug, ws_settings: parsed.settings });
   } catch (e) {
     const code = pgCode(e);
-    if (code === "42501") return { error: "Only agency admins can create workspaces." };
+    if (code === "42501") return { error: "Only the Owner can create workspaces." };
     if (code === "23505") return { error: `The address /w/${parsed.slug} is already taken. Choose another.` };
     if (code === "23514" || code === "22023") return { error: "Some of those values aren't allowed." };
     return { error: "Couldn't create it. Try again." };
