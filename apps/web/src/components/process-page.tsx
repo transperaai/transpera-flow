@@ -362,7 +362,7 @@ export function ProcessPage({
         </Section>
 
         {play && model && (
-          <Section id="try-changes" title="Try your own changes" hint="Move the levers the team shows to see what would change. Nothing is saved unless you send it." help={PLAY_HELP.section}>
+          <Section id="try-changes" title="Try your own changes" hint="Move the levers the team shows to see what would change. Nothing is saved." help={PLAY_HELP.section}>
             <PlaySection model={model} baseline={sim.run} bundle={bundle} play={play} />
           </Section>
         )}
