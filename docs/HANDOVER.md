@@ -45,6 +45,18 @@ by Sonnet from an Opus brief and reviewed adversarially by Opus.
   3 workspaces under RLS. The branch was deleted afterwards. The same export was then loaded into Neon `main` (the
   Preview database) and verified, so QA runs on real data. Austin allowed `copy:export` with a project-local permission
   rule. The rehearsal found that migrations failed when `authenticator` already exists; that is fixed in 171bba53.
+- **The strip: built 28 Oct** (Austin: "make the changes then I'll QA"; `docs/plans/cut-list.md`, `docs/plans/strip-briefs.md`).
+  - What changed:
+    - in-app AI and findings removed;
+    - Suggestions removed;
+    - MCP read-only (a test proves no tool writes);
+    - play links without "send an idea";
+    - three roles: Owner, Agency admin, Viewer.
+  - Migrations `20270101000000` to `20270105000000`.
+  - Reviewed adversarially, and clicked through locally as Owner, Agency admin, Viewer, guest and unlisted.
+  - The copy tooling now imports at `COPY_BASE_VERSION` (`20261231000000`) and then runs `migrate`, so the strip runs on
+    the real data. Neon `main` (Preview) was rebuilt that way from a fresh export on 28 Oct, and verified.
+  - Not built yet: Viewers running saved scenarios. That comes with the sandbox (`docs/plans/sandbox-design.md`).
 - **Next:**
   - **Austin's QA** on the preview.
   - **7c, cutover:** a freeze, emptying Neon `main` (it now holds the QA copy), a fresh copy into it, Austin adds Production to the Neon connection, then merge to
