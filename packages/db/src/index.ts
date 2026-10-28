@@ -24,43 +24,6 @@ export {
   type ModelOptions,
 } from "./model";
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
-export {
-  AI_DAILY_RUN_LIMIT,
-  AI_RUN_COOLDOWN_SECONDS,
-  AI_SETTING_KEYS,
-  DEFAULT_AI_SETTINGS,
-  reserveAiRun,
-  type AiAnalysisWithRun,
-  type AiReservation,
-  loadAiAnalyses,
-  loadLatestAiAnalyses,
-  loadAiSettings,
-  saveAiAnalysis,
-  saveAiSetting,
-  type AiSettingKey,
-  type AiSettings,
-  type SaveAiAnalysisInput,
-  type SaveAiSettingOutcome,
-} from "./ai";
-export {
-  FINDING_COLUMNS,
-  FINDING_LIMITS,
-  createManualFinding,
-  findingDraftProblem,
-  findingIdOfKey,
-  findingKey,
-  loadFindings,
-  proposeConnectorFinding,
-  readCitations,
-  setFindingStatus,
-  storeProposedFindings,
-  updateFinding,
-  type ConnectorFindingInput,
-  type ConnectorFindingWrite,
-  type FindingDraft,
-  type FindingWrite,
-  type ProposedFinding,
-} from "./findings";
 export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
 export {
   FIRST_PRINCIPLES_COLUMNS,
@@ -352,16 +315,7 @@ export * from "./workspace-import";
 export {
   A_TEAM_MEMBER,
   canSeePerson,
-  labelNames,
-  labelsForPeople,
-  labelsUsed,
   hideAiIssueKey,
-  nameAnalysisRow,
-  nameFinding,
-  nameLabels,
-  readPersonLabels,
-  type NameSource,
-  type PersonLabels,
 } from "./person-labels";
 export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";
 export * from "./share";

@@ -445,116 +445,6 @@ export interface FirstPrinciplesRow {
   updated_at: string;
 }
 
-/** The five switches on Settings -> AI analysis (issue #111, A46). No row means the defaults. */
-export interface AiSettingsRow {
-  workspace_id: string;
-  review_on_publish: boolean;
-  review_on_market: boolean;
-  suggest_issues: boolean;
-  suggest_solutions: boolean;
-  read_sources: boolean;
-  /** A market change whose review hasn't started (debounces the market trigger); not a switch. */
-  market_pending_at: string | null;
-  updated_at: string;
-}
-
-/** A model run that was started (A46): the log the daily cap and the cooldown count. Written only by `reserve_ai_run`. */
-export interface AiRunRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  trigger: "publish" | "market" | "manual";
-  user_id: string | null;
-  user_name: string | null;
-  started_at: string;
-}
-
-export type AiAnalysisStatus = "ok" | "unavailable" | "failed";
-export type AiAnalysisTrigger = "publish" | "market" | "manual";
-
-/**
- * What AI wrote about one process version (issue #111, A46): the read, the insights and the first-principles review,
- * each as jsonb whose app-side shape lives in apps/web/src/lib/ai/types.ts.
- */
-export interface AiAnalysisRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  revision_id: string;
-  status: AiAnalysisStatus;
-  reason: string | null;
-  trigger: AiAnalysisTrigger;
-  summary: Json;
-  insights: Json;
-  review: Json;
-  checked: number;
-  dropped: number;
-  input_hash: string;
-  model: string | null;
-  /** A hash of the model it read (engine model, first principles, prompt version): a different hash now means it is out of date (B17). Null on rows from before. */
-  model_hash: string | null;
-  usage: Json;
-  /** The reserved run that wrote it, and so who ran it. */
-  run_id: string;
-  /** The labels its text uses ("Team member A") and the person each stands for: `{ label: person id }` (B1 2b). Names go back at render. */
-  person_labels: Json;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export type FindingOrigin = "ai" | "manual";
-export type FindingStatus = "proposed" | "accepted" | "dismissed" | "superseded";
-export type FindingRating = "risk" | "bad" | "good" | "great";
-export const FINDING_TYPES = ["bottleneck", "spof", "manual", "delay", "failure", "idea", "capacity", "sla", "churn_risk"] as const;
-export type FindingType = (typeof FINDING_TYPES)[number];
-
-/** A fact or quote a finding rests on, as it read when cited. */
-export interface FindingCitation {
-  kind: "fact" | "quote";
-  /** The fact's key (`<detector>:<subject>:<id>`), or the step a quote is cited on. */
-  key: string;
-  text: string;
-}
-
-/**
- * A finding (issue #175, B17; decision D40): what AI or a person concludes from the engine's facts. AI findings arrive
- * proposed and a person accepts, edits or dismisses them; findings by hand start accepted. Only accepted ones show on the
- * pages, and one can be acknowledged as an issue (`detected_key = 'finding:<origin>:<id>'`).
- */
-export interface FindingRow {
-  id: string;
-  workspace_id: string;
-  /** Null: across the company. */
-  process_id: string | null;
-  step_id: string | null;
-  origin: FindingOrigin;
-  status: FindingStatus;
-  rating: FindingRating;
-  type: FindingType;
-  title: string;
-  evidence: string;
-  why: string;
-  facts: Json;
-  /** The labels its title, evidence, why and facts use ("Team member A") and the person each stands for (B1 2b). `{}` for a finding by hand. */
-  person_labels: Json;
-  source_ids: string[];
-  ai_key: string | null;
-  analysis_id: string | null;
-  /** The run that last proposed it (analyses are kept one per version; each run has its own id). */
-  run_id: string | null;
-  /** 'connector' when Claude proposed it over the MCP connector (B20); null otherwise. Set by the database. */
-  proposed_via: "connector" | null;
-  /** An AI finding a person has changed (set by the database only): its words are no longer only AI's. */
-  edited: boolean;
-  created_by: string | null;
-  created_at: string;
-  updated_by: string | null;
-  updated_at: string;
-  decided_by: string | null;
-  decided_at: string | null;
-}
-
 export type SourceKind = "transcript" | "notes" | "sop" | "spreadsheet" | "data" | "screenshot" | "other";
 
 /**
@@ -1209,12 +1099,6 @@ export type _SchemaDriftChecks = [
   Assert<Matches<ClientAssignmentRow, "client_assignments">>,
   Assert<Matches<ClientGroupRow, "client_groups">>,
   Assert<Matches<FirstPrinciplesRow, "first_principles">>,
-  Assert<Matches<AiSettingsRow, "ai_settings">>,
-  Assert<Matches<AiAnalysisRow, "ai_analyses">>,
-  // origin, status, rating, type and proposed_via are check-constrained.
-  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type" | "proposed_via">, "findings">>,
-  // trigger is check-constrained to the three triggers.
-  Assert<Matches<Omit<AiRunRow, "trigger">, "ai_runs">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.
   Assert<Matches<Omit<ServiceServicingRow, "recurrence">, "service_servicing">>,
   Assert<Matches<LeadSourceRow, "lead_sources">>,

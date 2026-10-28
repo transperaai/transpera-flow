@@ -37,8 +37,6 @@ export interface Functions {
   record_calibration_import: { Args: { p_workspace: string; p_process: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json; p_results: Json; p_keys: string[] }; Returns: Json };
   record_client_calibration: { Args: { p_workspace: string; p_clients: Json; p_log: Json; p_results: Json; p_keys: string[] }; Returns: Json };
   record_dataset: { Args: { p_workspace: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json }; Returns: string };
-  report_download: { Args: { token: string }; Returns: { id: string; workspace_id: string; title: string; pdf: string | null; content: Json; expires_at: string }[] };
-  reserve_ai_run: { Args: { p_workspace: string; p_process: string; p_trigger: string }; Returns: Json };
   resolve_issue: { Args: { p_workspace: string; p_id: string; p_how: string; p_note?: string; p_status?: string }; Returns: Json }
     | { Args: { p_workspace: string; p_id: string; p_how: string; p_note: string; p_status: string; p_solution: string }; Returns: Json };
   resolve_my_access: { Args: never; Returns: { workspace_id: string; role: "agency_admin" | "owner" | "editor" | "member" | "viewer"; source: string }[] };

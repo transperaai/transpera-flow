@@ -4,7 +4,7 @@ import type { Selectable } from "kysely";
 import type { DB } from "../src";
 import type { Viewer } from "../src/queries";
 import { SHARE_NON_TEXT_KEYS, SHARE_NON_TEXT_REASONS, type IssueShare, type OverviewShare, type ProcessShare, type SolutionShare } from "../src/share";
-import type { BlockBundle, FindingCitation, FindingRow, IssueLinkRef, IssueRow, RecurrenceJson, SolutionsData, WorkspaceSettings } from "../src/types";
+import type { BlockBundle, IssueLinkRef, IssueRow, RecurrenceJson, SolutionsData, WorkspaceSettings } from "../src/types";
 
 // Every string column of every table, from the generated database types (db-types.ts), is classified here: free text, or not text (an id, a date,
 // an enum the engine reads), or the whole table is "unused" (its rows never reach a share link). The maps are exhaustive at the type
@@ -20,9 +20,6 @@ type Cols<K extends keyof Tables> = StrKeys<Tables[K]>;
 type TableClasses = { [K in keyof Tables]: "unused" | { [C in Cols<K>]: Class } };
 
 const TABLES: TableClasses = {
-  ai_analyses: "unused",
-  ai_runs: "unused",
-  ai_settings: "unused",
   analysis_rules: "unused",
   api_tokens: "unused",
   audit_log: "unused",
@@ -37,7 +34,6 @@ const TABLES: TableClasses = {
   datasets: "unused",
   demand_settings: { created_at: "not", created_by: "not", updated_at: "not", workspace_id: "not" },
   edges: { condition_tag: "text", created_at: "not", created_by: "not", from_step_id: "not", id: "not", label: "text", process_id: "not", revision_id: "not", to_step_id: "not", updated_at: "not", workspace_id: "not" },
-  findings: { ai_key: "not", analysis_id: "not", created_at: "not", created_by: "not", decided_at: "not", decided_by: "not", evidence: "text", id: "not", origin: "not", process_id: "not", proposed_via: "not", rating: "not", run_id: "not", source_ids: "not", status: "not", step_id: "not", title: "text", type: "not", updated_at: "not", updated_by: "not", why: "text", workspace_id: "not" },
   first_principles: { created_at: "not", created_by: "not", id: "not", job_done: "text", job_progress: "text", job_situation: "text", job_who: "text", process_id: "not", revision_id: "not", root_cause: "text", updated_at: "not", why_problem: "text", workspace_id: "not" },
   forecast_plans: "unused",
   issue_events: "unused",
@@ -50,7 +46,6 @@ const TABLES: TableClasses = {
   market_conditions: { created_at: "not", created_by: "not", id: "not", name: "text", preset: "not", updated_at: "not", workspace_id: "not" },
   market_schedule: { condition_id: "not", created_at: "not", created_by: "not", id: "not", updated_at: "not", workspace_id: "not" },
   memberships: "unused",
-  narrations: "unused",
   people: { created_at: "not", created_by: "not", email: "text", end_date: "not", id: "not", name: "text", notes: "text", start_date: "not", updated_at: "not", workspace_id: "not" },
   deployment_access: "unused",
   person_capacity_factors: "unused",
@@ -62,7 +57,6 @@ const TABLES: TableClasses = {
   person_skills: { created_at: "not", person_id: "not", step_id: "not", workspace_id: "not" },
   process_revisions: { created_at: "not", created_by: "not", id: "not", process_id: "not", published_at: "not", published_by: "not", status: "not", updated_at: "not", workspace_id: "not" },
   processes: { archived_at: "not", archived_by: "not", created_at: "not", created_by: "not", description: "text", draft_revision_id: "not", entity_name: "text", id: "not", kind: "not", live_revision_id: "not", name: "text", parent_process_id: "not", source: "text", updated_at: "not", workspace_id: "not" },
-  reports: "unused",
   robustness_results: "unused",
   roles: { color: "text", created_at: "not", created_by: "not", id: "not", name: "text", updated_at: "not", workspace_id: "not" },
   runs: "unused",
@@ -108,18 +102,14 @@ const FP_JOB_WHY_TEXT = ["who", "progress", "situation", "done", "problem", "cha
 // Not here: `provenance` (emptied in every snapshot; both checks refuse a non-empty one) and `person_labels` (label -> person id:
 // keys are never touched and the values are uuids).
 type IssueRowExtra = Exclude<StrKeys<IssueRow>, Cols<"issues">>;
-type FindingRowExtra = Exclude<StrKeys<FindingRow>, Cols<"findings">>;
 type ProcessListEntry = ProcessShare["processes"][number];
 const SHAPES = {
   /** scenarios.patch[], solutions.lever_changes[] (and a play link's levers). */
   patch: { path: "not", op: "not" },
-  /** findings.facts[]: a fact, or a quote (`kind` quote), which every snapshot drops. */
-  fact: { kind: "not", key: "not", text: "text" },
   /** issues.links[]. */
   issueLink: { process_id: "not", step_id: "not" },
   /** What IssueRow adds to the issues table: owners and cited sources. */
   issueExtra: { owner_ids: "not", source_ids: "not" },
-  findingExtra: {},
   /** service_servicing.recurrence (the weekly or monthly form; the other has no string). */
   recurrence: { every: "not" },
   /** workspaces.settings. */
@@ -138,10 +128,8 @@ const SHAPES = {
   processList: { id: "not", name: "text", parentId: "uuid", kind: "not" },
 } satisfies {
   patch: Record<StrKeys<ScenarioPatch>, Class>;
-  fact: Record<StrKeys<FindingCitation>, Class>;
   issueLink: Record<StrKeys<IssueLinkRef>, Class>;
   issueExtra: Record<IssueRowExtra, Class>;
-  findingExtra: Record<FindingRowExtra, Class>;
   recurrence: Record<StrKeys<Extract<RecurrenceJson, { every: unknown }>>, Class>;
   settings: Record<StrKeys<WorkspaceSettings>, Class>;
   blockBundle: Record<StrKeys<BlockBundle>, Class>;

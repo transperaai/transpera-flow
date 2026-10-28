@@ -25,53 +25,6 @@ export type MembershipRole = "agency_admin" | "editor" | "member" | "owner" | "v
 
 export type Numeric = ColumnType<number, number | string, number | string>;
 
-export interface AiAnalyses {
-  checked: Generated<number>;
-  created_at: Generated<string>;
-  created_by: Generated<string>;
-  dropped: Generated<number>;
-  id: Generated<string>;
-  input_hash: string;
-  insights: Generated<Json>;
-  model: string | null;
-  model_hash: string | null;
-  person_labels: Generated<Json>;
-  process_id: string;
-  reason: string | null;
-  review: Generated<Json>;
-  revision_id: string;
-  run_id: string;
-  status: string;
-  summary: Generated<Json>;
-  trigger: string;
-  updated_at: Generated<string>;
-  usage: Generated<Json>;
-  workspace_id: string;
-}
-
-export interface AiRuns {
-  id: Generated<string>;
-  process_id: string | null;
-  started_at: Generated<string>;
-  trigger: string;
-  user_id: string | null;
-  user_name: string | null;
-  workspace_id: string;
-}
-
-export interface AiSettings {
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  market_pending_at: string | null;
-  read_sources: Generated<boolean>;
-  review_on_market: Generated<boolean>;
-  review_on_publish: Generated<boolean>;
-  suggest_issues: Generated<boolean>;
-  suggest_solutions: Generated<boolean>;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
 export interface AnalysisRules {
   created_at: Generated<string>;
   created_by: Generated<string | null>;
@@ -256,34 +209,6 @@ export interface Edges {
   workspace_id: string;
 }
 
-export interface Findings {
-  ai_key: string | null;
-  analysis_id: string | null;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  decided_at: string | null;
-  decided_by: string | null;
-  edited: Generated<boolean>;
-  evidence: Generated<string>;
-  facts: Generated<Json>;
-  id: Generated<string>;
-  origin: string;
-  person_labels: Generated<Json>;
-  process_id: string | null;
-  proposed_via: string | null;
-  rating: string;
-  run_id: string | null;
-  source_ids: Generated<string[]>;
-  status: string;
-  step_id: string | null;
-  title: string;
-  type: string;
-  updated_at: Generated<string>;
-  updated_by: string | null;
-  why: Generated<string>;
-  workspace_id: string;
-}
-
 export interface FirstPrinciples {
   created_at: Generated<string>;
   created_by: Generated<string | null>;
@@ -446,30 +371,6 @@ export interface Memberships {
   workspace_id: string;
 }
 
-export interface Narrations {
-  checked: Generated<number>;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  edited_at: string | null;
-  edited_by: string | null;
-  edited_by_name: string | null;
-  fallback: boolean;
-  fallback_kind: string | null;
-  fallback_reason: string | null;
-  id: Generated<string>;
-  input_hash: string;
-  model: string | null;
-  purpose: string;
-  rejected: Generated<Json>;
-  target: string;
-  target_id: string;
-  text: string;
-  updated_at: Generated<string>;
-  usage: Generated<Json>;
-  validated: boolean;
-  workspace_id: string;
-}
-
 export interface People {
   active: Generated<boolean>;
   capacity_hours_week: Numeric | null;
@@ -568,24 +469,6 @@ export interface ProcessRevisions {
   published_at: string | null;
   published_by: string | null;
   status: Generated<string>;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
-export interface Reports {
-  content: Json;
-  content_version: Generated<number>;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  id: Generated<string>;
-  link_expires_at: string | null;
-  link_hash: string | null;
-  options: Generated<Json>;
-  pdf: Buffer | null;
-  pdf_generated_at: string | null;
-  process_id: string | null;
-  run_id: string | null;
-  title: string;
   updated_at: Generated<string>;
   workspace_id: string;
 }
@@ -921,9 +804,6 @@ export interface Workspaces {
 }
 
 export interface DB {
-  ai_analyses: AiAnalyses;
-  ai_runs: AiRuns;
-  ai_settings: AiSettings;
   analysis_rules: AnalysisRules;
   api_tokens: ApiTokens;
   audit_log: AuditLog;
@@ -939,7 +819,6 @@ export interface DB {
   demand_settings: DemandSettings;
   deployment_access: DeploymentAccess;
   edges: Edges;
-  findings: Findings;
   first_principles: FirstPrinciples;
   forecast_plans: ForecastPlans;
   issue_events: IssueEvents;
@@ -952,7 +831,6 @@ export interface DB {
   market_conditions: MarketConditions;
   market_schedule: MarketSchedule;
   memberships: Memberships;
-  narrations: Narrations;
   people: People;
   person_capacity_factors: PersonCapacityFactors;
   person_leave: PersonLeave;
@@ -961,7 +839,6 @@ export interface DB {
   process_placements: ProcessPlacements;
   process_revisions: ProcessRevisions;
   processes: Processes;
-  reports: Reports;
   robustness_results: RobustnessResults;
   roles: Roles;
   runs: Runs;

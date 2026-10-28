@@ -177,38 +177,12 @@ function filledFp(w: World): FirstPrinciples {
 function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
   const base = { v: SHARE_SNAPSHOT_VERSION, toggles, workspaceName: `${w.name} (${w.clientNames[0]})` } as const;
   const solutions = { solutions: [w.solution], links: [] };
-  const finding = {
-    id: "00000000-0000-4000-8000-0000000000cc",
-    workspace_id: w.bundle.workspace.id,
-    process_id: null,
-    step_id: null,
-    origin: "manual",
-    status: "accepted",
-    rating: "bad",
-    type: "manual",
-    title: `${w.personFull[0]} is the bottleneck`,
-    evidence: `Said so ${MONEY_TEXT}`,
-    why: "Because.",
-    facts: [{ kind: "quote", key: "q1", text: `"${w.personFull[0]} told ${w.clientNames[0]} to wait"` }],
-    person_labels: { "Team member A": w.secrets.people[0]!.id },
-    source_ids: ["00000000-0000-4000-8000-0000000000dd"],
-    ai_key: null,
-    analysis_id: null,
-    run_id: null,
-    edited: false,
-    created_by: "00000000-0000-4000-8000-0000000000bb",
-    created_at: "2026-10-01T00:00:00Z",
-    updated_by: null,
-    updated_at: "2026-10-01T00:00:00Z",
-    decided_by: null,
-    decided_at: null,
-  };
   const common = { issues: [w.issue] };
   switch (kind) {
     case "overview":
-      return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, findings: [finding as never], firstPrinciples: filledFp(w) };
+      return { ...base, kind, live: w.bundle, parts: [], company: null, issues: common.issues, solutions, solutionBases: {}, firstPrinciples: filledFp(w) };
     case "process":
-      return { ...base, kind, bundle: w.bundle, hiddenLevers: ["process.rework", "people.leave"], processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, findings: [finding as never], firstPrinciples: filledFp(w) };
+      return { ...base, kind, bundle: w.bundle, hiddenLevers: ["process.rework", "people.leave"], processes: [{ id: w.bundle.process.id, name: w.bundle.process.name, parentId: null, kind: "pipeline" as const }], scenarios: [], issues: common.issues, liveRevisions: {}, solutions, firstPrinciples: filledFp(w) };
     case "issue":
       return { ...base, kind, issueId: w.issue.id, bundle: w.bundle, issues: common.issues, processes: [], liveRevisions: {}, solutions };
     case "solution":
@@ -391,18 +365,6 @@ describe("names with unusual white space, surnames and case, quotes, and role-ra
   it("People on: names are left alone, clients are still replaced", () => {
     const on = TOGGLES[1]!;
     expect(redact(`Ask ${full} about ${w.clientNames[0]}`, on).title).toBe(`Ask ${full} about Client 1`);
-  });
-
-  it("quotes from sources are dropped from accepted findings, in every toggle combination; other facts stay", () => {
-    for (const toggles of TOGGLES) {
-      const snap = redactShareSnapshot(raw("process", w, toggles), toggles, w.secrets) as unknown as { findings: { facts: { kind: string }[] }[] };
-      expect(snap.findings[0]!.facts).toEqual([]);
-      const mixed = { ...raw("process", w, toggles), findings: [{ ...(raw("process", w, toggles) as { findings: object[] }).findings[0]!, facts: [{ kind: "fact", key: "k", text: "12 hours a week" }, { kind: "quote", key: "q", text: "word for word" }] }] } as unknown as ShareSnapshot;
-      const out = redactShareSnapshot(mixed, toggles, w.secrets) as unknown as { findings: { facts: { kind: string }[] }[] };
-      expect(out.findings[0]!.facts.map((f) => f.kind)).toEqual(["fact"]);
-      expect(shareSnapshotLeaks(mixed, w.secrets, toggles)).toContain("evidence");
-      expect(shareSnapshotLeaks(out, w.secrets, toggles)).toEqual([]);
-    }
   });
 
   it("evidence notes of any JSON type are flagged; only an empty object or null is clean", () => {
