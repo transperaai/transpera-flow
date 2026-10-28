@@ -16,6 +16,8 @@ export interface AuditEntry {
   diff: {
     old?: Record<string, unknown>;
     new?: Record<string, unknown>;
+    /** The suggestion an accepted change came from (history: Suggestions were removed 28 Oct 2026). */
+    suggestion_id?: string;
     role_id?: string;
     service_id?: string;
     /** The step of a skill or a per-person time (the row's step, also on an update). */
@@ -77,6 +79,8 @@ export const COMPANY_AUDIT_TABLES = [
   "lead_sources",
   "seasonality",
   "demand_settings",
+  // History only: the Suggestions page is gone (28 Oct 2026), but what was suggested, accepted and rejected before stays in the log.
+  "suggestions",
 ] as const;
 
 const NOUN: Record<string, string> = {
@@ -137,6 +141,13 @@ export function describeAuditEntry(e: AuditEntry, model: CompanyModel, stepNames
   };
 
   switch (e.target_table) {
+    case "suggestions": {
+      const target = String(row.target_table ?? "company model").replace(/_/g, " ");
+      if (e.action === "insert") return `Suggested a change to the ${target}`;
+      if (e.action === "accepted") return `Accepted a suggested change to the ${target}`;
+      if (e.action === "rejected") return `Rejected a suggested change to the ${target}${e.diff.new?.review_note ? `: “${String(e.diff.new.review_note)}”` : ""}`;
+      return `Updated a suggestion`;
+    }
     case "person_roles":
       return `${who("person_roles")}: role ${name(model.roles, e.diff.role_id ?? row.role_id)} ${e.action === "insert" ? "added" : "removed"}`;
     case "client_services":

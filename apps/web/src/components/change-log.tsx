@@ -21,6 +21,7 @@ export function ChangeLog({ entries, model, people, stepNames }: { entries: Audi
               <span className="w-36 shrink-0 text-xs text-fg-3 tabular-nums">{when(e.created_at)}</span>
               <span className="w-48 shrink-0 truncate text-xs text-fg-2">
                 {e.actor_kind === "mcp" ? `Claude (API token of ${people[e.actor_id ?? ""] ?? "a user"})` : (people[e.actor_id ?? ""] ?? "Someone")}
+                {e.diff.suggestion_id ? " · accepted suggestion" : ""}
               </span>
               <span className="min-w-0 grow">{describeAuditEntry(e, model, stepNames)}</span>
             </li>

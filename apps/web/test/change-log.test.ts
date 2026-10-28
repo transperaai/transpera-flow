@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { companyOf, northbeamBundle, northbeamPersonIds, northbeamRoleIds, northbeamStepIds } from "@transpera-flow/db";
-import { auditStepId, auditStepIds, describeAuditEntry, newestStepNames, type AuditEntry } from "@/lib/change-log/audit";
+import { auditStepId, auditStepIds, COMPANY_AUDIT_TABLES, describeAuditEntry, newestStepNames, type AuditEntry } from "@/lib/change-log/audit";
 import { defaultRunName, parseSaveRun } from "@/lib/runs/runs";
 
 // The change log's wording (Settings → Change log) and saving runs. Ported from the Suggestions page's test (removed 28 Oct 2026,
@@ -28,6 +28,17 @@ describe("the change log", () => {
     expect(
       describeAuditEntry(entry({ target_table: "person_roles", action: "delete", diff: { old: { person_id: northbeamPersonIds["Sam Patel"] }, role_id: northbeamRoleIds.seo } }), m),
     ).toBe("Sam Patel: role SEO specialist removed");
+  });
+
+  it("still tells what was suggested, accepted and rejected before Suggestions were removed (the history stays)", () => {
+    expect(
+      describeAuditEntry(entry({ target_table: "suggestions", action: "rejected", diff: { old: { status: "pending" }, new: { status: "rejected", review_note: "No" } } }), m),
+    ).toBe("Rejected a suggested change to the company model: “No”");
+    expect(describeAuditEntry(entry({ target_table: "suggestions", action: "accepted", diff: { new: { target_table: "client_services" } } }), m)).toBe(
+      "Accepted a suggested change to the client services",
+    );
+    expect(describeAuditEntry(entry({ target_table: "suggestions", action: "insert", diff: { new: { target_table: "people" } } }), m)).toBe("Suggested a change to the people");
+    expect(COMPANY_AUDIT_TABLES).toContain("suggestions");
   });
 
   it("tells a per-person time (C6, #230) in words, names its step, and never states the number", () => {
