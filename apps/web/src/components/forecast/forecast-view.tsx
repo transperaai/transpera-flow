@@ -183,7 +183,10 @@ export function ForecastView({ live, issues, sources = NO_SOURCES, mode, issuesH
   );
   const shownData = workingMarkers !== null && planData ? planData : data;
   // Sales and money (sandbox phase 2) for the run on screen: the open plan's spliced run, or the live one.
-  const shownRun = workingMarkers !== null && plan.run ? plan.run : built.model && result ? { model: built.model, result } : null;
+  const shownRun = useMemo(
+    () => (workingMarkers !== null && plan.run ? plan.run : built.model && result ? { model: built.model, result } : null),
+    [workingMarkers, plan.run, built.model, result],
+  );
   const serviceNames = useMemo(() => new Map(live.services.map((sv) => [sv.id, sv.name])), [live.services]);
   const moneyView = useMemo(
     () =>

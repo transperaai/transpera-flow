@@ -229,10 +229,13 @@ describe("a member's simulation equals an editor's", () => {
     }
     return JSON.parse(text) as T;
   };
-  /** A result without what may differ for a member: people's own cost rates (the engine's overtime cost is null for the member, checked apart). */
+  /** A result without what may differ for a member: people's own cost rates (the engine's overtime cost, labour cost and profit are null for the member, checked apart). */
   const strip = (r: Json) => {
     const copy = JSON.parse(JSON.stringify(r)) as Json;
     delete copy.kpi.overtimeCost;
+    delete copy.kpi.labourCost;
+    delete copy.kpi.profit;
+    delete copy.samples.profit;
     for (const p of Object.values(copy.resolvedPeople) as Record<string, unknown>[]) delete p.cost;
     return copy;
   };
@@ -252,6 +255,11 @@ describe("a member's simulation equals an editor's", () => {
     // Overtime cost: a number for the editor (it is real money), unavailable for the member: null, not 0.
     expect(viaTables.kpi.overtimeCost!.mean).toBeGreaterThan(0);
     expect(viaTeam.kpi.overtimeCost).toBeNull();
+    // Profit first (engine 1.11.0): paid labour and profit depend on pay too, so they are unavailable; revenue and overheads are not.
+    expect(viaTables.kpi.labourCost!.mean).toBeGreaterThan(0);
+    expect(viaTables.kpi.profit).not.toBeNull();
+    expect([viaTeam.kpi.labourCost, viaTeam.kpi.profit, viaTeam.samples.profit]).toEqual([null, null, null]);
+    expect(viaTeam.kpi.revenue).toEqual(viaTables.kpi.revenue);
     expect(strip(viaTeam as unknown as Json)).toEqual(strip(relabel(viaTables, viaTables, viaTeam) as unknown as Json));
 
     // Detected issues: the same issues, ratings, titles and evidence; the costs that need pay are unavailable.
@@ -286,6 +294,7 @@ describe("a member's simulation equals an editor's", () => {
     const viaTables = simulate(toEngineModel(await bundleFor(nbEditor, NORTHBEAM_WORKSPACE_ID, false), opts), 30, 1);
     const viaTeam = simulate(toEngineModel(await bundleFor(nbMember, NORTHBEAM_WORKSPACE_ID, true), opts), 30, 1);
     expect(viaTeam.kpi.overtimeCost).toBeNull();
+    expect([viaTeam.kpi.labourCost, viaTeam.kpi.profit]).toEqual([null, null]);
     expect(strip(viaTeam as unknown as Json)).toEqual(strip(relabel(viaTables, viaTables, viaTeam) as unknown as Json));
   });
 });

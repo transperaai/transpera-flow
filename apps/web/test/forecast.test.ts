@@ -231,7 +231,8 @@ describe("sales and money (sandbox phase 2)", () => {
   });
 
   it("gives nothing for a run saved before profit existed", () => {
-    const { revenue: _revenue, ...older } = rich.monthly!;
+    const older: Partial<NonNullable<typeof rich.monthly>> = { ...rich.monthly! };
+    delete older.revenue;
     expect(forecastMoney({ ...rich, monthly: older as typeof rich.monthly }, names)).toBeNull();
   });
 
