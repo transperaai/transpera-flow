@@ -99,6 +99,10 @@ function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] 
           setCurrency(next ?? "AUD");
           return { status: "saved", value: next };
         }}
+        saveOverhead={async (_ws, _base, next) => {
+          log("overheads", next);
+          return { status: "saved", value: next };
+        }}
       />
       <ClientsSettings
         workspaceId={WS}

@@ -56,6 +56,23 @@ describe("applyPatches: operations", () => {
     expect(model.activeClients).toBe(30);
   });
 
+  it("finances.overhead_monthly sets, multiplies and adds, never below 0; finances.retainer is unchanged", () => {
+    const base: EngineModel = { ...northbeamModel(), overheadMonthly: 18000 };
+    const run = (op: "set" | "multiply" | "add", value: number, m = base) => applyPatches(m, [{ path: "finances.overhead_monthly", op, value }]);
+    expect(run("set", 12000).model.overheadMonthly).toBe(12000);
+    expect(run("multiply", 1.5).model.overheadMonthly).toBe(27000);
+    expect(run("add", -3000).model.overheadMonthly).toBe(15000);
+    // From none: 0 is the starting point, and it is clamped at 0 with a report.
+    expect(run("add", 5000, northbeamModel()).model.overheadMonthly).toBe(5000);
+    const clamped = run("add", -99999);
+    expect(clamped.model.overheadMonthly).toBe(0);
+    expect(clamped.issues.map((i) => i.problem)).toEqual(["clamped"]);
+    const retainer = applyPatches(base, [{ path: "finances.retainer", op: "set", value: 5000 }]);
+    expect(retainer.model.retainer).toBe(5000);
+    expect(retainer.model.overheadMonthly).toBe(18000);
+    expect(applyPatches(northbeamModel(), [{ path: "finances.margin", op: "set", value: 1 }]).issues.map((i) => i.problem)).toEqual(["invalid"]);
+  });
+
   it("leaves the input model untouched", () => {
     const base = northbeamModel();
     const before = structuredClone(base);

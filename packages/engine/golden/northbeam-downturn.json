@@ -1,7 +1,7 @@
 {
   "model": "northbeam-downturn",
   "description": "Northbeam as seeded under the Downturn market for the whole run: fewer enquiries that sign less, slower decisions, lower prices, more churn (market.ts).",
-  "engineVersion": "1.10.0",
+  "engineVersion": "1.11.0",
   "seed": 1,
   "reps": 30,
   "outputs": {
@@ -20,6 +20,13 @@
       "lostRevenue": { "mean": 3014340, "p10": 2494800, "p90": 3591000 }
     },
     "labour": { "mean": 20581.148875572377, "p10": 15002.848917891966, "p90": 25739.5165823069 },
+    "money": {
+      "revenue": { "mean": 322072.7225988194, "p10": 298803.059803661, "p90": 344746.9199221556 },
+      "revenueHourly": { "mean": 0, "p10": 0, "p90": 0 },
+      "labourCost": { "mean": 291200, "p10": 291200, "p90": 291200 },
+      "overheads": 0,
+      "profit": { "mean": 30872.722598819368, "p10": 7603.059803661017, "p90": 53546.91992215562 }
+    },
     "overtime": {
       "hours": { "mean": 0, "p10": 0, "p90": 0 },
       "cost": { "mean": 0, "p10": 0, "p90": 0 }

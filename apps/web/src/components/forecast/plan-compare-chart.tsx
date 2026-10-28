@@ -1,7 +1,7 @@
 "use client";
 
 // One series of the compare view (B7, issue #36): plan A (solid, accent) and plan B (dashed, edit colour) month by month,
-// each with its 10-90% band, an optional reference line (the "Too busy" line), a tooltip with both values and the
+// each with its 10-90% band (with no plan B, one series alone: the Forecast page's profit per month), an optional reference line (the "Too busy" line), a tooltip with both values and the
 // difference, and the same numbers as a table for a screen reader. Drawn by hand in SVG from the theme's tokens, as the
 // timeline is, and sized from its container so it works at phone width.
 
@@ -30,20 +30,23 @@ export interface PlanCompareChartProps {
   title: string;
   months: TimelineMonth[];
   a: (Stat | null)[];
-  b: (Stat | null)[];
+  /** The second plan; omitted, the chart draws `a` alone (no plan B line, difference or column). */
+  b?: (Stat | null)[];
   nameA: string;
-  nameB: string;
+  nameB?: string;
   /** How a value reads: "£48.2K", "3.4", "92%". */
   format: (v: number) => string;
-  /** How a difference reads, signed: "+£1.2K". */
-  formatDiff: (v: number) => string;
+  /** How a difference reads, signed: "+£1.2K". Not needed for one series. */
+  formatDiff?: (v: number) => string;
   /** A dashed line at this value, named: the "Too busy" line. */
   reference?: { value: number; label: string };
   /** Smallest top of the scale (a busy share never draws flatter than the line). */
   minTop?: number;
 }
 
-export function PlanCompareChart({ title, months, a, b, nameA, nameB, format, formatDiff, reference, minTop = 0 }: PlanCompareChartProps) {
+export function PlanCompareChart({ title, months, a, b: second, nameA, nameB = "", format, formatDiff = (v) => format(v), reference, minTop = 0 }: PlanCompareChartProps) {
+  const single = second === undefined;
+  const b: (Stat | null)[] = second ?? [];
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const width = measured || 560;
@@ -91,7 +94,9 @@ export function PlanCompareChart({ title, months, a, b, nameA, nameB, format, fo
   const labelled = new Set(labelIndexes(n, Math.max(2, Math.floor((width - m.l - m.r) / 56) + 1)));
   const lastA = [...a].reverse().find((s) => s) ?? null;
   const lastB = [...b].reverse().find((s) => s) ?? null;
-  const summary = `${title}: ${nameA} ${lastA ? format(lastA.mean) : "no value"} and ${nameB} ${lastB ? format(lastB.mean) : "no value"} in ${months[n - 1]?.long ?? "the last month"}.`;
+  const summary = single
+    ? `${title}: ${lastA ? format(lastA.mean) : "no value"} in ${months[n - 1]?.long ?? "the last month"}.`
+    : `${title}: ${nameA} ${lastA ? format(lastA.mean) : "no value"} and ${nameB} ${lastB ? format(lastB.mean) : "no value"} in ${months[n - 1]?.long ?? "the last month"}.`;
   const pointerMove = (clientX: number, left: number) => {
     const px = clientX - left;
     let best = 0;
@@ -142,7 +147,7 @@ export function PlanCompareChart({ title, months, a, b, nameA, nameB, format, fo
           <g pointerEvents="none">
             <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={HEIGHT - m.b} stroke="var(--fg-3)" strokeDasharray="3 3" />
             {sa ? <circle cx={x(hover)} cy={y(sa.mean)} r={4} fill="var(--accent)" stroke="var(--panel)" strokeWidth={2} /> : null}
-            {sb ? <circle cx={x(hover)} cy={y(sb.mean)} r={4} fill="var(--edit)" stroke="var(--panel)" strokeWidth={2} /> : null}
+            {sb && !single ? <circle cx={x(hover)} cy={y(sb.mean)} r={4} fill="var(--edit)" stroke="var(--panel)" strokeWidth={2} /> : null}
           </g>
         ) : null}
       </svg>
@@ -153,23 +158,31 @@ export function PlanCompareChart({ title, months, a, b, nameA, nameB, format, fo
           style={{ left: Math.min(Math.max(x(hover) - 80, 0), Math.max(0, width - 200)) }}
         >
           <p className="font-medium">{shown.long}</p>
-          <p className="tabular-nums">
-            {nameA}: {sa ? format(sa.mean) : "—"}
-          </p>
-          <p className="tabular-nums">
-            {nameB}: {sb ? format(sb.mean) : "—"}
-          </p>
-          {sa && sb ? <p className="text-muted-foreground tabular-nums">Difference: {formatDiff(sb.mean - sa.mean)}</p> : null}
+          {single ? (
+            <p className="tabular-nums">
+              {sa ? `${format(sa.mean)} (${format(sa.p10)} to ${format(sa.p90)})` : "—"}
+            </p>
+          ) : (
+            <>
+              <p className="tabular-nums">
+                {nameA}: {sa ? format(sa.mean) : "—"}
+              </p>
+              <p className="tabular-nums">
+                {nameB}: {sb ? format(sb.mean) : "—"}
+              </p>
+              {sa && sb ? <p className="text-muted-foreground tabular-nums">Difference: {formatDiff(sb.mean - sa.mean)}</p> : null}
+            </>
+          )}
         </div>
       ) : null}
       <table className="sr-only">
-        <caption>{title}, average and 10 to 90 percent range, for each plan</caption>
+        <caption>{single ? `${title}, average and 10 to 90 percent range` : `${title}, average and 10 to 90 percent range, for each plan`}</caption>
         <thead>
           <tr>
             <th scope="col">Month</th>
-            <th scope="col">{nameA}</th>
-            <th scope="col">{nameB}</th>
-            <th scope="col">Difference</th>
+            <th scope="col">{single ? title : nameA}</th>
+            {single ? null : <th scope="col">{nameB}</th>}
+            {single ? null : <th scope="col">Difference</th>}
           </tr>
         </thead>
         <tbody>
@@ -177,8 +190,8 @@ export function PlanCompareChart({ title, months, a, b, nameA, nameB, format, fo
             <tr key={mo.index}>
               <th scope="row">{mo.long}</th>
               <td>{a[i] ? `${format(a[i]!.mean)} (${format(a[i]!.p10)} to ${format(a[i]!.p90)})` : "not there"}</td>
-              <td>{b[i] ? `${format(b[i]!.mean)} (${format(b[i]!.p10)} to ${format(b[i]!.p90)})` : "not there"}</td>
-              <td>{a[i] && b[i] ? formatDiff(b[i]!.mean - a[i]!.mean) : "—"}</td>
+              {single ? null : <td>{b[i] ? `${format(b[i]!.mean)} (${format(b[i]!.p10)} to ${format(b[i]!.p90)})` : "not there"}</td>}
+              {single ? null : <td>{a[i] && b[i] ? formatDiff(b[i]!.mean - a[i]!.mean) : "—"}</td>}
             </tr>
           ))}
         </tbody>

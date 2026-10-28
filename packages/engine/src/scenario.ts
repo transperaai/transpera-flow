@@ -59,7 +59,7 @@ export const MAX_PATCHES = 200;
 /** Fields a patch can address, per collection. */
 export const PATCH_FIELDS = {
   demand: ["leads_per_week", "active_clients", "churn_monthly"],
-  finances: ["retainer"],
+  finances: ["retainer", "overhead_monthly"],
   services: ["price", "mix_share", "churn_health_sensitivity"],
   roles: ["headcount", "cost_rate", "ongoing_hours"],
   people: ["fte"],
@@ -224,7 +224,9 @@ export function applyPatches(model: EngineModel, patches: readonly ScenarioPatch
         else m.churnMonthly = next(m.churnMonthly, 0, 1);
         return;
       case "finances":
-        m.retainer = next(m.retainer, 0);
+        // Overheads a month (sandbox lever C2, whole run); the retainer otherwise.
+        if (target.field === "overhead_monthly") m.overheadMonthly = next(m.overheadMonthly ?? 0, 0);
+        else m.retainer = next(m.retainer, 0);
         return;
       case "health": {
         // Acts on the rules in force: the workspace's, or the estimated defaults where it has none.

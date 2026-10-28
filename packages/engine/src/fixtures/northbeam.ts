@@ -207,3 +207,17 @@ export function northbeamWithChurnDrivers(): EngineModel {
     ],
   };
 }
+
+/**
+ * `northbeamWithClientGroups()` with an overhead and an hourly PPC service (sandbox phase 2, engine 1.11.0): 18,000 a
+ * month of fixed costs, and PPC clients won in the run billing 95 an hour for the work done for them (the 12 PPC
+ * clients already there still bill their entered fee). The golden model for profit and the monthly money series.
+ */
+export function northbeamWithMoney(): EngineModel {
+  const base = northbeamWithClientGroups();
+  return {
+    ...base,
+    overheadMonthly: 18000,
+    services: { ...base.services, ppc: { ...base.services!.ppc!, pricingModel: "hourly", price: 95 } },
+  };
+}

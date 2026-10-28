@@ -3,6 +3,7 @@ import { larkspurBundle, northbeamBundle, toEngineModel } from "@transpera-flow/
 import { MARKET_PRESETS, applyPatches, marketFromSchedule, simulate, type EngineModel } from "@transpera-flow/engine";
 import { buildLevers, leverPatches } from "@/lib/scenarios/levers";
 import { HORIZON_MONTHS, horizonWeeks } from "@/lib/horizon";
+import { calendarMonthStarts } from "@/lib/forecast/timeline";
 
 // A 24-month run against the PRD §6.7 targets (issue #123, A58). Those targets are for 13 weeks. A run costs about
 // as much per week as the one before it, so the targets are scaled by horizon: 104 weeks is 8 times 13, so the
@@ -43,6 +44,20 @@ describe("the horizon picker's options", () => {
   });
 });
 
+/** Best of 3 runs of the Forecast's own run: month by month over calendar months, as the page asks for it (sandbox phase 2 adds sales, revenue and money series to it). */
+function monthlyBest(base: () => EngineModel, months: number): number {
+  const model = withHorizon(base(), months);
+  const monthStarts = calendarMonthStarts(START.startDate, model.horizonWeeks, model.hoursPerWeek);
+  simulate(model, 30, 1, { monthly: true, monthStarts });
+  let best = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t = performance.now();
+    simulate({ ...model, leadsPerWeek: model.leadsPerWeek + i * 0.01 }, 30, 1, { monthly: true, monthStarts });
+    best = Math.min(best, performance.now() - t);
+  }
+  return best;
+}
+
 describe("a 24-month run stays within the PRD §6.7 targets, scaled by horizon (8 × the 13-week targets)", { tags: ["perf"] }, () => {
   it("pipeline-only Northbeam: < 8 × 150 ms", () => {
     const ms = rerunBest(northbeamPipeline, 24);
@@ -65,6 +80,18 @@ describe("a 24-month run stays within the PRD §6.7 targets, scaled by horizon (
   it("with a downturn in all 24 months: full Northbeam < 8 × 250 ms", () => {
     const ms = rerunBest(northbeamFull, 24, true);
     console.info(`24 months, full Northbeam with a downturn: ${ms.toFixed(0)} ms (limit ${250 * SCALE})`);
+    expect(ms).toBeLessThan(250 * SCALE);
+  });
+
+  it("24-month forecast with monthly output, full Northbeam: < 8 × 250 ms", () => {
+    const ms = monthlyBest(northbeamFull, 24);
+    console.info(`24 months, full Northbeam, monthly output: ${ms.toFixed(0)} ms (limit ${250 * SCALE})`);
+    expect(ms).toBeLessThan(250 * SCALE);
+  });
+
+  it("24-month forecast with monthly output, full Larkspur: < 8 × 250 ms", () => {
+    const ms = monthlyBest(larkspurFull, 24);
+    console.info(`24 months, full Larkspur, monthly output: ${ms.toFixed(0)} ms (limit ${250 * SCALE})`);
     expect(ms).toBeLessThan(250 * SCALE);
   });
 });

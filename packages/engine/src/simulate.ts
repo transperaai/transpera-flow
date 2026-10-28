@@ -113,6 +113,11 @@ interface SimEntity extends TraceEntity {
   /** Set for a servicing task. */
   task?: Task;
   /**
+   * Hourly rate (service price × the market's price factor when it was won) of an entity that won an hourly service at
+   * t >= 0: its hands-on work after the sale bills at it. 0 otherwise (kept on every entity so the shape is monomorphic).
+   */
+  rate: number;
+  /**
    * Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits; then, from `nLoops` on, for each
    * loop's steps how many times (up to 2) the item has visited it in its stay in the loop. Null until it first reaches a step in a loop.
    */
@@ -329,7 +334,7 @@ interface ServiceState {
   id: string | null;
   s: EngineService;
   entry: string;
-  /** Expected value of one client: price × tenure (retainer), price (one-off), nothing (hourly). */
+  /** Expected value of one client (LTV, lost revenue): price × tenure (retainer), price (one-off), nothing (hourly: its billing is the hours worked, see `startService`). */
   value: number;
   counts: ServiceCounts;
   /** Wins in the measured window, each weighted by the market's price factor in its month (market.ts); equals `counts.won` with no market. */
@@ -627,6 +632,15 @@ interface RosterClient {
   /** What it bills a week while active, and since when. */
   weeklyBill: number;
   since: number;
+  /**
+   * A client won on an hourly service: its rate (service price × the market's price factor when won), the hours a week
+   * of ongoing (fallback) client work its shape carries, since when they are billed, and its service's index. 0 for
+   * every other client (a named client or group member bills its entered fee).
+   */
+  hourlyRate: number;
+  hourlyWeekly: number;
+  hourlySince: number;
+  hourlySvc: number;
   /**
    * Its tasks that can still be missed within the run, by deadline (ties in
    * creation order). A task is marked missed when the run reaches its
@@ -962,6 +976,15 @@ export function runOnce(
   let lost = 0;
   let done = 0;
   let billed = 0;
+  // Revenue by kind (engine 1.11.0). They only ever add the in-window part of what is billed, so `startMeasuring` needn't reset them.
+  let recurring = 0;
+  let oneOff = 0;
+  let hourly = 0;
+  let fromNew = 0;
+  /** Hands-on hours billed and their revenue, by service index (only hourly services get any). */
+  const hourlyHours = new Float64Array(services.length);
+  const hourlyRev = new Float64Array(services.length);
+  const anyHourly = services.some((sv) => sv.s.pricingModel === "hourly");
 
   /** Handled events, reused by `schedule`. */
   const pool: SimEvent[] = [];
@@ -999,9 +1022,19 @@ export function runOnce(
   const nM = bounds ? bounds.length - 1 : 0;
   const nR = roleIds.length;
   const nP = people.length;
-  const pooledFee = sampleMonthly ? pooledMonthlyFee(model) : 0;
-  /** Pooled model, for the month-by-month MRR only: what the interim clients and the retainers won since pay a month. */
+  const pooledFee = roster ? 0 : pooledMonthlyFee(model);
+  /**
+   * Pooled model: what the interim clients and the retainers won since pay a month (`pooledNewMrr`: the won ones alone),
+   * less churn. It draws nothing, so it is kept whether or not months are asked for.
+   */
   let pooledMrr = roster ? 0 : model.activeClients * pooledFee;
+  let pooledNewMrr = 0;
+  /** Pooled model, hourly clients won: their rates and head-counts by service index, decayed with the pool. */
+  const pooledHrRate = new Float64Array(services.length);
+  const pooledHrN = new Float64Array(services.length);
+  let pooledHrAny = false;
+  /** Where the pooled revenue has been accrued to. */
+  let pooledLast = -W;
   const mon = sampleMonthly
     ? {
         roleWork: new Float64Array(nR * nM),
@@ -1022,6 +1055,17 @@ export function runOnce(
         mrr: new Float64Array(nM),
         atRisk: new Map<string, Float64Array>(),
         ticks: new Float64Array(nM),
+        // Sales, clients and revenue by month (totals); `arrivals` above is per step.
+        opps: new Float64Array(nM),
+        won: new Float64Array(nM),
+        lost: new Float64Array(nM),
+        clientsWon: new Float64Array(nM),
+        clientsLost: new Float64Array(nM),
+        revRecurring: new Float64Array(nM),
+        revOneOff: new Float64Array(nM),
+        revHourly: new Float64Array(nM),
+        revNew: new Float64Array(nM),
+        mrrLost: new Float64Array(nM),
       }
     : null;
   /** The month `t` falls in (0 to nM - 1). */
@@ -1054,6 +1098,66 @@ export function runOnce(
       arr[row * nM + m]! += rate * (end - t);
       t = end;
     }
+  };
+  /** Book revenue of one kind that accrued over [a, b] (clipped to the window by the caller) into the month sums. */
+  const spreadRevenue = (arr: Float64Array | undefined, a: number, b: number, amount: number, isNew: boolean) => {
+    if (!mon || !arr) return;
+    spread(arr, 0, a, b, amount);
+    if (isNew) spread(mon.revNew, 0, a, b, amount);
+  };
+  /**
+   * Pooled model: accrue the revenue of the pool from where it was last accrued to `t`, clipped to the window. Called
+   * before every change to the pool's fees, head-counts or the roles with people (a win, a churn tick, a planned start
+   * or end date) and once at the horizon. Interim clients pay `pooledFee`, so pooled `recurring` includes them (`billed` doesn't).
+   */
+  const accruePooled = (t: number) => {
+    const a = Math.min(Math.max(pooledLast, 0), H);
+    const b = Math.min(Math.max(t, 0), H);
+    pooledLast = t;
+    if (!(b > a)) return;
+    const weeks = (b - a) / hpw;
+    const rec = (pooledMrr / WEEKS_PER_MONTH) * weeks;
+    if (rec > 0) {
+      recurring += rec;
+      spreadRevenue(mon?.revRecurring, a, b, rec, false);
+      const fresh = (pooledNewMrr / WEEKS_PER_MONTH) * weeks;
+      if (fresh > 0) {
+        fromNew += fresh;
+        if (mon) spread(mon.revNew, 0, a, b, fresh);
+      }
+    }
+    if (pooledHrAny) {
+      // Each hourly client bills the ongoing hours of the roles that have people on the team now.
+      let perClient = 0;
+      for (const rid of roleIds) if (poolCapacity[rid]! > 0) perClient += model.roles[rid]!.ongoing || 0;
+      if (perClient > 0) {
+        for (let i = 0; i < services.length; i++) {
+          if (!(pooledHrN[i]! > 0)) continue;
+          const hours = pooledHrN[i]! * perClient * weeks;
+          const rev = pooledHrRate[i]! * perClient * weeks;
+          hourlyHours[i]! += hours;
+          hourlyRev[i]! += rev;
+          hourly += rev;
+          fromNew += rev;
+          spreadRevenue(mon?.revHourly, a, b, rev, true);
+        }
+      }
+    }
+  };
+  /** Bill a won hourly client's ongoing (fallback) hours since it was last billed or its shape changed, within the window. */
+  const billHourly = (rc: RosterClient, t: number) => {
+    if (!(rc.hourlyRate > 0)) return;
+    const from = Math.max(rc.hourlySince, 0);
+    const to = Math.min(t, H);
+    rc.hourlySince = t;
+    if (!(to > from) || !(rc.hourlyWeekly > 0)) return;
+    const hours = (rc.hourlyWeekly * (to - from)) / hpw;
+    const rev = hours * rc.hourlyRate;
+    hourlyHours[rc.hourlySvc]! += hours;
+    hourlyRev[rc.hourlySvc]! += rev;
+    hourly += rev;
+    fromNew += rev;
+    spreadRevenue(mon?.revHourly, from, to, rev, true);
   };
   /** Hours of [a, b] a person is away (leave, before a planned start, after an end date). */
   const awayHours = (p: PersonState, a: number, b: number) => {
@@ -1384,7 +1488,7 @@ export function runOnce(
     t: number,
     isRoster: boolean,
     weeklyBill: number,
-  ) => {
+  ): RosterClient => {
     const shape = shapeFor(client);
     const rc: RosterClient = {
       key,
@@ -1402,6 +1506,10 @@ export function runOnce(
       churned: false,
       weeklyBill,
       since: t,
+      hourlyRate: 0,
+      hourlyWeekly: 0,
+      hourlySince: t,
+      hourlySvc: 0,
       open: [],
       openHead: 0,
       svcKey: shape.svcKey,
@@ -1455,17 +1563,29 @@ export function runOnce(
     }
     rosterClients.push(rc);
     active = rosterClients.length;
+    return rc;
   };
   /** Bill a client's weeks active since it was last billed, within the measured window. */
   const bill = (rc: RosterClient, t: number) => {
     const from = Math.max(rc.since, 0);
     const to = Math.min(t, H);
-    if (to > from) billed += (rc.weeklyBill * (to - from)) / hpw;
+    if (to > from) {
+      const amount = (rc.weeklyBill * (to - from)) / hpw;
+      billed += amount;
+      // The same amount by kind (engine 1.11.0): a retainer's fee is recurring revenue.
+      recurring += amount;
+      if (!rc.roster) fromNew += amount;
+      if (mon) {
+        spread(mon.revRecurring, 0, from, to, amount);
+        if (!rc.roster) spread(mon.revNew, 0, from, to, amount);
+      }
+    }
     rc.since = t;
   };
   const removeClient = (rc: RosterClient, t: number) => {
     rc.active = false;
     bill(rc, t);
+    billHourly(rc, t);
     for (const p of rc.assigned) {
       advance(p, t);
       p.clients--;
@@ -1486,6 +1606,9 @@ export function runOnce(
    * shared work; a new starter takes their share of it from now on. Only models with planned starts or end dates.
    */
   const restaff = (t: number) => {
+    // Bill up to now at the old team before it changes: the pool's hourly hours depend on who is there, and a won hourly client's on its shape.
+    if (!roster) accruePooled(t);
+    else if (anyHourly) for (const rc of rosterClients) billHourly(rc, t);
     for (const p of people) p.present = presentAt(p.person, t);
     poolCapacity = presentCapacity();
     if (!roster) {
@@ -1502,6 +1625,7 @@ export function runOnce(
       rc.shape = shape;
       rc.carriers = shape.carriers;
       rc.team = shape.team;
+      if (rc.hourlyRate > 0) rc.hourlyWeekly = weeklyHoursOf(shape);
       for (let i = 0; i < shape.touched.length; i++) shape.touched[i]!.contrib.set(rc, shape.parts[i]!);
     }
     for (const p of people) setRosterLoad(p, t);
@@ -1513,6 +1637,12 @@ export function runOnce(
         for (let i = 0; i < u.length; i += 2) uncoveredRate[u[i]!]! += u[i + 1]!;
       }
     }
+  };
+  /** The hours a week of ongoing client work a shape carries (not `uncovered`: work nobody of the role is there for isn't worked). */
+  const weeklyHoursOf = (shape: ClientShape): number => {
+    let hours = 0;
+    for (const parts of shape.parts) for (let i = 1; i < parts.length; i += 2) hours += parts[i]!;
+    return hours;
   };
   /** A retainer won during the run: a synthetic client, assigned per role by round-robin among the role's members. */
   const addWonClient = (svc: ServiceState, t: number) => {
@@ -1531,7 +1661,14 @@ export function runOnce(
       nextAssignee[rid] = i + 1;
     }
     const weeklyBill = svc.s.pricingModel === "retainer" ? (svc.s.price * (market ? mkt(t).price : 1)) / WEEKS_PER_MONTH : 0;
-    addClient(`won:${++wonClients}`, { services, assignments }, t, false, weeklyBill);
+    const rc = addClient(`won:${++wonClients}`, { services, assignments }, t, false, weeklyBill);
+    // A client won on an hourly service bills the hours worked for it (ongoing here, servicing and onboarding in `startService`).
+    if (svc.s.pricingModel === "hourly") {
+      rc.hourlyRate = svc.s.price * (market ? mkt(t).price : 1);
+      rc.hourlyWeekly = weeklyHoursOf(rc.shape);
+      rc.hourlySince = t;
+      rc.hourlySvc = serviceIndex.get(svc.id)!;
+    }
   };
   /** The run of alike clients being added up (see `churnTick`): its pressure, chance of leaving and how many there are. */
   let runK = 0;
@@ -1637,10 +1774,28 @@ export function runOnce(
    * §6.3.5). Roster clients' health is recorded first, for the trajectory.
    */
   const churnTick = (t: number) => {
+    // The tick closes the week before it: a client leaving on a month's first hour belongs to the month before.
+    const tickMonth = mon ? monthOf(Math.max(0, t - 1e-6)) : 0;
     if (!roster) {
+      accruePooled(t);
       const before = active;
       active = Math.max(0, active - active * ((model.churnMonthly * churnMarket(t)) / WEEKS_PER_MONTH));
-      if (mon && before > 0) pooledMrr *= active / before;
+      if (before > 0) {
+        const keep = active / before;
+        const feesBefore = pooledMrr;
+        pooledMrr *= keep;
+        pooledNewMrr *= keep;
+        if (pooledHrAny) {
+          for (let i = 0; i < services.length; i++) {
+            pooledHrRate[i]! *= keep;
+            pooledHrN[i]! *= keep;
+          }
+        }
+        if (mon) {
+          mon.clientsLost[tickMonth]! += before - active;
+          mon.mrrLost[tickMonth]! += feesBefore - pooledMrr;
+        }
+      }
       setPooledLoads(t);
       return;
     }
@@ -1710,6 +1865,10 @@ export function runOnce(
         removeClient(rc, t);
         rc.churned = true;
         churned++;
+        if (mon) {
+          mon.clientsLost[tickMonth]!++;
+          mon.mrrLost[tickMonth]! += rc.weeklyBill * WEEKS_PER_MONTH;
+        }
       } else {
         staying.push(rc);
       }
@@ -1784,7 +1943,7 @@ export function runOnce(
     scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
     const sla = l.link.sla;
     const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.interval === null };
-    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, lp: null };
+    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, rate: 0, lp: null };
     if (keepTrace) {
       e.trace = [];
       e.servicing = { process: l.link.process, client: c.key };
@@ -1882,19 +2041,33 @@ export function runOnce(
     // The warm-up runs at the starting client count; its outcomes are discarded.
     if (t < 0) return;
     const sv = services[e.svc]!;
+    const month = mon ? monthOf(t) : 0;
     if (outcome === "won") {
       won++;
+      if (mon) mon.won[month]!++;
       sv.counts.won++;
       sv.wonUnits += market ? mkt(t).price : 1;
       cycle.push(t - e.t0);
+      // An hourly win bills the hands-on work done for it from now on (`startService`).
+      if (sv.s.pricingModel === "hourly") e.rate = sv.s.price * (market ? mkt(t).price : 1);
       // A one-off job doesn't become an ongoing client.
       if (sv.s.pricingModel !== "one_off") {
+        if (mon) mon.clientsWon[month]!++;
         if (roster) {
           addWonClient(sv, t);
         } else {
+          accruePooled(t);
           active += 1;
-          // Hourly clients are active (they load the team) but add no recurring revenue; a retainer pays its price at the market's.
-          if (mon && sv.s.pricingModel === "retainer") pooledMrr += sv.s.price * (market ? mkt(t).price : 1);
+          // A retainer pays its price at the market's; an hourly client is active (it loads the team) and bills the ongoing hours it takes.
+          if (sv.s.pricingModel === "retainer") {
+            const fee = sv.s.price * (market ? mkt(t).price : 1);
+            pooledMrr += fee;
+            pooledNewMrr += fee;
+          } else if (sv.s.pricingModel === "hourly") {
+            pooledHrRate[e.svc]! += e.rate;
+            pooledHrN[e.svc]! += 1;
+            pooledHrAny = true;
+          }
           setPooledLoads(t);
         }
       }
@@ -1902,10 +2075,18 @@ export function runOnce(
       if (sv.s.pricingModel === "retainer" && !roster) {
         billed += ((sv.s.price * (market ? mkt(t).price : 1)) / WEEKS_PER_MONTH) * weeksBilled(t, sv.s.churnMonthly * churnMarket(t));
       } else if (sv.s.pricingModel === "one_off") {
-        billed += sv.s.price * (market ? mkt(t).price : 1);
+        const price = sv.s.price * (market ? mkt(t).price : 1);
+        billed += price;
+        oneOff += price;
+        fromNew += price;
+        if (mon) {
+          mon.revOneOff[month]! += price;
+          mon.revNew[month]! += price;
+        }
       }
     } else if (outcome === "lost") {
       lost++;
+      if (mon) mon.lost[month]!++;
       sv.counts.lost++;
     } else {
       done++;
@@ -2075,6 +2256,22 @@ export function runOnce(
       if (acc) {
         if (svc) acc.svc += handsOn;
         else acc.busy += handsOn;
+      }
+      // Hands-on work for a client won on an hourly service bills at its rate: the post-sale steps of the win itself, and the
+      // client's servicing tasks while it is active. Only the part inside the window counts (a job straddling t = 0 or the horizon).
+      let rate = e.rate;
+      if (e.task) rate = e.task.client.active ? e.task.client.hourlyRate : 0;
+      if (rate > 0 && handsOn > 0) {
+        const share = t >= 0 && t + dur <= H ? 1 : dur > 0 ? Math.max(0, Math.min(t + dur, H) - Math.max(t, 0)) / dur : t >= 0 && t < H ? 1 : 0;
+        if (share > 0) {
+          const hours = handsOn * share;
+          const rev = hours * rate;
+          hourlyHours[e.svc]! += hours;
+          hourlyRev[e.svc]! += rev;
+          hourly += rev;
+          fromNew += rev;
+          spreadRevenue(mon?.revHourly, t, t + dur, handsOn * rate, true);
+        }
       }
       if (mon) {
         // Month by month, the hands-on time is spread over the time it is worked.
@@ -2320,7 +2517,7 @@ export function runOnce(
     }
     items.sort((a, b) => a.tQ - b.tQ);
     for (const { st, tQ } of items) {
-      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), lp: null };
+      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), rate: 0, lp: null };
       entities.push(e);
       queueAt(e, st, tQ, 0);
     }
@@ -2369,9 +2566,12 @@ export function runOnce(
     if (ev.type === "arrive") {
       scheduleArrival();
       const sv = drawService(ev.t < 0 ? mixWarmup : mix);
-      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, lp: null };
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null };
       if (keepTrace) entities.push(e);
-      if (ev.t >= 0) services[sv]!.counts.arrivals++;
+      if (ev.t >= 0) {
+        services[sv]!.counts.arrivals++;
+        if (mon && ev.t < H) mon.opps[monthOf(ev.t)]!++;
+      }
       enterTarget(e, entryTargets[sv]!, ev.t);
     } else if (ev.type === "end") {
       endService(ev.e!, ev.st!, ev.p, ev.t);
@@ -2431,10 +2631,20 @@ export function runOnce(
   for (const p of people) advance(p, H);
   advanceUncovered(H);
   // Clients still active bill to the horizon.
-  for (const rc of rosterClients) bill(rc, H);
+  for (const rc of rosterClients) {
+    bill(rc, H);
+    billHourly(rc, H);
+  }
+  if (!roster) accruePooled(H);
   // Deadlines up to the horizon, after its weekly tick.
   if (servicing) for (const rc of rosterClients) settleMisses(rc, H, true);
 
+  /** A person's cost a working hour: their own, or the mean of their roles' (what overtime and paid labour are costed at). */
+  const rateOf = (p: PersonState): number => {
+    if (p.person.cost !== undefined && p.person.cost !== null) return p.person.cost;
+    const own = p.person.roles.filter((rid) => rid in model.roles);
+    return own.length ? own.reduce((sum, rid) => sum + model.roles[rid]!.cost, 0) / own.length : 0;
+  };
   /**
    * The month-by-month sums as this replication's result: hours available less leave (and before a planned start or
    * after an end date), overtime month by month as the run works it out for the whole window, and the client hours of
@@ -2449,10 +2659,17 @@ export function runOnce(
     const roleWork: Record<string, number[]> = {};
     const roleCapacity: Record<string, number[]> = {};
     const roleOvertime: Record<string, number[]> = {};
+    // Money (null when pay is hidden): paid hours × rate, and overtime hours × rate, by month.
+    const paid = !model.payHidden;
+    const labour = paid ? new Array<number>(nM).fill(0) : null;
+    const overtimeCostM = paid ? new Array<number>(nM).fill(0) : null;
+    const labourByRole: Record<string, number[]> | null = paid ? {} : null;
+    const labourByPerson: Record<string, number[]> | null = paid ? {} : null;
     roleIds.forEach((rid, r) => {
       roleWork[rid] = row(sums.roleWork, r);
       roleCapacity[rid] = new Array<number>(nM).fill(0);
       roleOvertime[rid] = new Array<number>(nM).fill(0);
+      if (labourByRole) labourByRole[rid] = new Array<number>(nM).fill(0);
     });
     for (const p of people) {
       const c = p.person.capacity;
@@ -2466,6 +2683,21 @@ export function runOnce(
       personOvertime[p.id] = ot;
       personWork[p.id] = row(sums.personWork, p.idx);
       const own = p.person.roles.filter((rid) => rid in model.roles);
+      if (labour && overtimeCostM && labourByRole && labourByPerson) {
+        // Paid hours are contracted capacity while on the team (leave is paid): the overlap with [start, end), not `cap`, which takes leave off.
+        const rate = rateOf(p);
+        const own1 = startsAt(p.person);
+        const own2 = endsAt(p.person);
+        const mine = spans.map(([a, b], m) => {
+          const present = Math.max(0, Math.min(b, own2) - Math.max(a, own1));
+          overtimeCostM[m]! += ot[m]! * rate;
+          return (c * present * rate) / hpw;
+        });
+        labourByPerson[p.id] = mine;
+        for (let m = 0; m < nM; m++) labour[m]! += mine[m]!;
+        // Each person's cost is split evenly over their roles, as `roleCapacity` splits their hours.
+        for (const rid of own) for (let m = 0; m < nM; m++) labourByRole[rid]![m]! += mine[m]! / own.length;
+      }
       for (const rid of own) {
         for (let m = 0; m < nM; m++) {
           roleCapacity[rid]![m]! += cap[m]! / p.person.roles.length;
@@ -2527,6 +2759,21 @@ export function runOnce(
       clients,
       mrr: Array.from(sums.mrr, (v, m) => (sums.ticks[m]! > 0 ? v / sums.ticks[m]! : 0)),
       atRisk,
+      opportunities: Array.from(sums.opps),
+      won: Array.from(sums.won),
+      lost: Array.from(sums.lost),
+      clientsWon: Array.from(sums.clientsWon),
+      clientsLost: Array.from(sums.clientsLost),
+      revenueRecurring: Array.from(sums.revRecurring),
+      revenueOneOff: Array.from(sums.revOneOff),
+      revenueHourly: Array.from(sums.revHourly),
+      revenueFromNew: Array.from(sums.revNew),
+      mrrLost: Array.from(sums.mrrLost),
+      labour,
+      labourByRole,
+      labourByPerson,
+      overtimeCost: overtimeCostM,
+      overheads: spans.map(([a, b]) => ((model.overheadMonthly ?? 0) * ((b - a) / hpw) * 12) / 52),
     };
   }
 
@@ -2567,6 +2814,7 @@ export function runOnce(
   }
   let overtimeHours = 0;
   let overtimeCost = 0;
+  let labourCost = 0;
   /** Weeks of the measured window someone is on the team (all of it, unless they start or leave during the run). */
   const presentWeeks = (p: EnginePerson) => Math.max(0, Math.min(H, endsAt(p)) - Math.max(0, startsAt(p))) / hpw;
   for (const p of people) {
@@ -2593,11 +2841,13 @@ export function runOnce(
     for (const rid of ownRoles) roleOvertime[rid]! += ot / p.person.roles.length;
     if (ot > 0) {
       overtimeHours += ot;
-      const rate =
-        p.person.cost ?? (ownRoles.length ? ownRoles.reduce((sum, rid) => sum + model.roles[rid]!.cost, 0) / ownRoles.length : 0);
-      overtimeCost += ot * rate;
+      overtimeCost += ot * rateOf(p);
     }
+    // Paid hours: contracted capacity while on the team. Leave is paid (it only reduces the hours available).
+    if (!model.payHidden) labourCost += cap * rateOf(p);
   }
+  const revenueTotal = recurring + oneOff + hourly;
+  const overheads = ((model.overheadMonthly ?? 0) * weeks * 12) / 52;
   const roleOut: Record<string, RoleResult> = {};
   /** With planned starts or end dates: each role's capacity over the weeks its people are on the team. */
   const staffedCapacity: Record<string, number> = {};
@@ -2701,8 +2951,12 @@ export function runOnce(
     lostRevenue += l * sv.value;
     if (sv.id !== null) serviceOut[sv.id] = sv.counts;
   }
+  const hourlyOut: Record<string, { hours: number; revenue: number }> = {};
+  services.forEach((sv, i) => {
+    if (sv.id !== null && sv.s.pricingModel === "hourly") hourlyOut[sv.id] = { hours: hourlyHours[i]!, revenue: hourlyRev[i]! };
+  });
   const monthly = mon ? monthlyOut(mon) : null;
-  const toTrace = ({ seg: _seg, svc, task: _task, lp: _lp, ...entity }: SimEntity): TraceEntity => {
+  const toTrace = ({ seg: _seg, svc, task: _task, rate: _rate, lp: _lp, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
     return id !== null ? { ...entity, service: id } : entity;
   };
@@ -2717,6 +2971,11 @@ export function runOnce(
     services: serviceOut,
     overtimeHours,
     overtimeCost: model.payHidden ? null : overtimeCost,
+    revenue: { recurring, oneOff, hourly, fromNew },
+    hourly: hourlyOut,
+    labourCost: model.payHidden ? null : labourCost,
+    overheads,
+    profit: model.payHidden ? null : revenueTotal - labourCost - overtimeCost - overheads,
     ...(roster ? { clientsChurned: churned, clientsAtRisk: atRisk, touchpoints: allTouch, clients: clientsOut!, churn: churnOut() } : {}),
     cycle,
     steps: stepOut,
@@ -2758,6 +3017,9 @@ export function stat(values: number[]): Stat {
     p90: a[Math.min(n - 1, Math.floor(0.9 * n))]!,
   };
 }
+
+/** Total billed revenue of one replication (recurring + one-off + hourly). */
+const revenueOf = (r: ReplicationResult): number => r.revenue.recurring + r.revenue.oneOff + r.revenue.hourly;
 
 /** Pipeline labour cost of one replication. */
 function labourOf(model: EngineModel, r: ReplicationResult): number {
@@ -2804,6 +3066,10 @@ function kpis(model: EngineModel, runs: ReplicationResult[], cycle: number[]): K
       lost: stat(runs.map((r) => r.services[sid]!.lost)),
     };
   }
+  const hourly: Kpis["hourly"] = {};
+  for (const sid in runs[0]?.hourly ?? {}) {
+    hourly[sid] = { hours: stat(runs.map((r) => r.hourly[sid]!.hours)), revenue: stat(runs.map((r) => r.hourly[sid]!.revenue)) };
+  }
   return {
     won: stat(runs.map((r) => r.won)),
     lost: stat(runs.map((r) => r.lost)),
@@ -2817,6 +3083,12 @@ function kpis(model: EngineModel, runs: ReplicationResult[], cycle: number[]): K
     wipEnd: stat(runs.map((r) => pipelineWip(r, svcSteps))),
     overtimeHours: stat(runs.map((r) => r.overtimeHours)),
     overtimeCost: runs.some((r) => r.overtimeCost === null) ? null : stat(runs.map((r) => r.overtimeCost as number)),
+    revenue: stat(runs.map(revenueOf)),
+    revenueHourly: stat(runs.map((r) => r.revenue.hourly)),
+    hourly,
+    labourCost: runs.some((r) => r.labourCost === null) ? null : stat(runs.map((r) => r.labourCost as number)),
+    overheads: runs[0]?.overheads ?? 0,
+    profit: runs.some((r) => r.profit === null) ? null : stat(runs.map((r) => r.profit as number)),
     cycle: {
       mean: cycle.length ? cycle.reduce((a, b) => a + b, 0) / cycle.length : 0,
       p50: pct(cycle, 0.5),
@@ -3107,6 +3379,8 @@ export function simulate(model: EngineModel, reps = 30, seed = 1, options: Simul
     labour: runs.map((r) => labourOf(model, r)),
     wipEnd: runs.map((r) => pipelineWip(r, svcSteps)),
     cycleMean: runs.map((r) => (r.cycle.length ? r.cycle.reduce((a, b) => a + b, 0) / r.cycle.length : 0)),
+    revenue: runs.map(revenueOf),
+    profit: runs.some((r) => r.profit === null) ? null : runs.map((r) => r.profit as number),
   };
   return {
     engineVersion: ENGINE_VERSION,
@@ -3191,6 +3465,21 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
       return perWeek > 0.05 ? perWeek : null;
     });
   }
+  // Sales, clients and revenue: totals per month in each replication, as means with a 10-90% range.
+  const series = (f: (r: MonthlyReplication, m: number) => number): Stat[] => months.map((_, m) => stat(reps.map((r) => f(r, m))));
+  const rev = (r: MonthlyReplication, m: number) => r.revenueRecurring[m]! + r.revenueOneOff[m]! + r.revenueHourly[m]!;
+  const first = reps[0]!;
+  const money: MonthlyResult["money"] = first.labour && first.labourByRole && first.labourByPerson
+    ? {
+        // Paid hours × rate don't depend on the replication.
+        labour: first.labour,
+        labourByRole: first.labourByRole,
+        labourByPerson: first.labourByPerson,
+        overtimeCost: series((r, m) => r.overtimeCost![m]!),
+        overheads: first.overheads,
+        profit: series((r, m) => rev(r, m) - r.labour![m]! - r.overtimeCost![m]! - r.overheads[m]!),
+      }
+    : null;
   return {
     months,
     uncovered,
@@ -3201,5 +3490,27 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
     clients,
     mrr: months.map((_, m) => stat(reps.map((r) => r.mrr[m]!))),
     atRisk,
+    sales: {
+      opportunities: series((r, m) => r.opportunities[m]!),
+      won: series((r, m) => r.won[m]!),
+      lost: series((r, m) => r.lost[m]!),
+      conversion: months.map((_, m) => ratioStat(reps.map((r) => r.won[m]!), reps.map((r) => r.won[m]! + r.lost[m]!))),
+    },
+    clientsWon: series((r, m) => r.clientsWon[m]!),
+    clientsLost: series((r, m) => r.clientsLost[m]!),
+    revenue: {
+      total: series(rev),
+      recurring: series((r, m) => r.revenueRecurring[m]!),
+      oneOff: series((r, m) => r.revenueOneOff[m]!),
+      hourly: series((r, m) => r.revenueHourly[m]!),
+      fromNew: series((r, m) => r.revenueFromNew[m]!),
+      lostToChurn: series((r, m) => r.mrrLost[m]!),
+    },
+    overtimeHours: series((r, m) => {
+      let hours = 0;
+      for (const id in r.personOvertime) hours += r.personOvertime[id]![m]!;
+      return hours;
+    }),
+    money,
   };
 }

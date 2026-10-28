@@ -1,7 +1,7 @@
 "use client";
 
-// Compare two plans (B7, issue #36): monthly recurring revenue, clients at risk per client group and how busy each role
-// gets, for plan A and plan B side by side, with each plan's average and 10-90% range and the difference of the averages.
+// Compare two plans (B7, issue #36): profit and billed revenue (sandbox phase 2), monthly recurring revenue, clients at risk
+// per client group and how busy each role gets, for plan A and plan B side by side, with each plan's average and 10-90% range and the difference of the averages.
 // "No changes" is the live model and counts as a plan. Both plans run with the same seed, so a difference comes from the
 // plans, not from chance.
 
@@ -86,7 +86,7 @@ export function PlanCompare({ live, startDate, months, plans, solutions, ids, cu
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h2 className={SECTION_TITLE}>Compare plans</h2>
-          <p className="text-sm text-muted-foreground">Recurring revenue, clients at risk and how busy each role gets, plan A against plan B, with the 10–90% range from 30 runs.</p>
+          <p className="text-sm text-muted-foreground">Profit, revenue, clients at risk and how busy each role gets, plan A against plan B, with the 10–90% range from 30 runs.</p>
         </div>
         <Button variant="outline" onClick={onBack}>
           Back to the plan
@@ -127,7 +127,17 @@ export function PlanCompare({ live, startDate, months, plans, solutions, ids, cu
 
       {same ? null : comparison ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-3" data-compare-tiles>
+          <div className={comparison.totals.profit ? "grid gap-3 sm:grid-cols-2 lg:grid-cols-4" : "grid gap-3 sm:grid-cols-3"} data-compare-tiles>
+            {comparison.totals.profit ? (
+              <Tile
+                title="Profit over the run"
+                a={money(comparison.totals.profit[0])}
+                b={money(comparison.totals.profit[1])}
+                diff={signed(comparison.totals.profit[1] - comparison.totals.profit[0], money)}
+                nameA={nameA}
+                nameB={nameB}
+              />
+            ) : null}
             <Tile title={`Recurring revenue in ${last}`} a={money(comparison.totals.mrr[0])} b={money(comparison.totals.mrr[1])} diff={signed(comparison.totals.mrr[1] - comparison.totals.mrr[0], money)} nameA={nameA} nameB={nameB} />
             {comparison.totals.atRisk ? (
               <Tile
@@ -150,6 +160,28 @@ export function PlanCompare({ live, startDate, months, plans, solutions, ids, cu
               nameB={nameB}
             />
           </div>
+
+          {comparison.profit ? (
+            <Section title="Profit" help={PLAN_HELP.profit}>
+              <ChartAndNumbers row={comparison.profit} months={comparison.months} nameA={nameA} nameB={nameB} format={money} formatDiff={(v) => signed(v, money)} />
+            </Section>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-compare-costs-hidden>
+              Costs and profit are shown to Agency admins and the Owner.
+            </p>
+          )}
+
+          <Section title="Billed revenue" help={PLAN_HELP.billed}>
+            <ChartAndNumbers row={comparison.revenue} months={comparison.months} nameA={nameA} nameB={nameB} format={money} formatDiff={(v) => signed(v, money)} />
+          </Section>
+
+          <Section title="Wins and costs" help={PLAN_HELP.winsPerMonth}>
+            <ChartAndNumbers row={comparison.won} months={comparison.months} nameA={nameA} nameB={nameB} format={(v) => formatNumber(v, 1)} formatDiff={(v) => signed(v, (x) => formatNumber(x, 1))} />
+            <ChartAndNumbers row={comparison.conversion} months={comparison.months} nameA={nameA} nameB={nameB} format={formatPercent} formatDiff={(v) => signed(v, (x) => `${Math.round(x * 100)} points`)} />
+            {comparison.labour ? (
+              <ChartAndNumbers row={comparison.labour} months={comparison.months} nameA={nameA} nameB={nameB} format={money} formatDiff={(v) => signed(v, money)} />
+            ) : null}
+          </Section>
 
           <Section title="Monthly recurring revenue" help={PLAN_HELP.revenue}>
             <ChartAndNumbers row={comparison.mrr} months={comparison.months} nameA={nameA} nameB={nameB} format={money} formatDiff={(v) => signed(v, money)} />

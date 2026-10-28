@@ -251,7 +251,15 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         await page.getByLabel("Plan A", { exact: true }).selectOption({ label: "Hire in January" });
         await page.getByLabel("Plan B", { exact: true }).selectOption({ label: "Hire in March" });
         await page.waitForSelector('[data-forecast-compare][data-compare-status="done"]', { timeout: 90_000 });
-        expect(await page.locator("[data-compare-tile]").count()).toBe(3);
+        // Profit over the run first (sandbox phase 2), then recurring revenue, clients at risk and months too busy.
+        expect(await page.locator("[data-compare-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-compare-tile")))).toEqual([
+          "Profit over the run",
+          expect.stringMatching(/^Recurring revenue in /) as unknown as string,
+          expect.stringMatching(/^Clients at risk in /) as unknown as string,
+          "Months a role is too busy",
+        ]);
+        expect(await page.locator('[data-compare-section="Profit"] [data-compare-chart="Profit"]').count()).toBe(1);
+        expect(await page.locator('[data-compare-section="Billed revenue"] [data-compare-chart="Billed revenue"]').count()).toBe(1);
         expect(await page.locator('[data-compare-chart="Monthly recurring revenue"]').count()).toBe(1);
         expect(await page.locator('[data-compare-section="Clients at risk, by group"] [data-compare-chart]').count()).toBeGreaterThan(0);
         expect(await page.locator('[data-compare-section="How busy each role gets"] [data-compare-chart]').count()).toBeGreaterThan(2);
@@ -267,6 +275,39 @@ describe("planning on the Forecast", { timeout: 180_000 }, () => {
         expect(await page.locator("[data-compare-progress]").innerText()).toContain("Pick two different plans.");
         await page.getByRole("button", { name: "Back to the plan" }).click();
         expect(await page.locator(TIMELINE).count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows Sales and money under the timeline: revenue, labour, overheads and profit, with the profit chart and the table", async () => {
+        const { page, errors } = await mount(width);
+        await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
+        const money = page.locator("[data-forecast-money]");
+        expect(await money.locator("[data-money-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-money-tile")))).toEqual(["revenue", "labour", "overheads", "profit"]);
+        expect(await money.locator("[data-money-profit-chart] [data-compare-chart]").count()).toBe(1);
+        for (const row of ["opportunities", "won", "conversion", "revenue", "hourly", "labour", "overheads", "profit"]) expect(await money.locator(`[data-money-row="${row}"]`).count(), row).toBe(1);
+        // The demo has no overheads set, and says so.
+        expect(await money.locator('[data-money-note="no-overheads"]').count()).toBe(1);
+        expect(await money.locator("[data-money-hidden-note]").count()).toBe(0);
+        // (The wide table scrolls inside its card in the app, which has the stylesheet; this harness has only enough CSS to lay out.)
+        // It follows the plan on screen: the open plan's run replaces the live one.
+        const before = await money.locator('[data-money-row="profit"]').innerText();
+        expect(before.length).toBeGreaterThan(0);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("gives a member the revenue and sales, and a note instead of costs and profit", async () => {
+        const { page, errors } = await mount(width, "readonly");
+        await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
+        const money = page.locator("[data-forecast-money]");
+        expect(await money.locator("[data-money-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-money-tile")))).toEqual(["revenue"]);
+        expect(await money.locator("[data-money-hidden-note]").innerText()).toBe("Costs and profit are shown to Agency admins and the Owner.");
+        for (const gone of ["labour", "overtimeCost", "overheads", "profit"]) expect(await money.locator(`[data-money-row="${gone}"]`).count(), gone).toBe(0);
+        expect(await money.locator("[data-money-profit-chart]").count()).toBe(0);
+        expect(await money.locator('[data-money-row="revenue"]').count()).toBe(1);
+        expect(await money.locator('[data-money-row="opportunities"]').count()).toBe(1);
+        expect(await money.locator('[data-money-note="no-overheads"]').count()).toBe(0);
         expect(errors).toEqual([]);
         await page.close();
       });
