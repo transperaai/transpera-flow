@@ -411,6 +411,7 @@ export function ForecastTimeline({
               <line x1={x(i)} x2={x(i)} y1={TOP - 4} y2={height - AXIS} stroke="var(--line)" strokeWidth={1} />
               <text x={x(i)} y={height - 7} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
                 {mo.short}
+                {mo.partial ? "*" : ""}
               </text>
             </g>
           ) : null,
@@ -552,7 +553,8 @@ export function ForecastTimeline({
           className="pointer-events-none absolute top-0 z-10 w-max max-w-64 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
           style={{ left: x(hover) + 12 + 240 > width ? Math.max(0, x(hover) - 252) : x(hover) + 12 }}
         >
-          <p className="font-medium">{shown.long}</p>
+          <p className="font-medium">{shown.label}</p>
+          {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
           {data.market.filter((b) => hover >= b.from && hover <= b.to).map((b) => (
             <p key={b.name} className="text-muted-foreground">
               Market: {b.name}
@@ -640,7 +642,7 @@ function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy
       <tbody>
         {data.months.map((mo, i) => (
           <tr key={mo.index}>
-            <th scope="row">{mo.long}</th>
+            <th scope="row">{mo.label}</th>
             {busy.map((r) => (
               <td key={r.id}>{cell(r.series[i] ?? null, r.uncovered?.[i] ?? null)}</td>
             ))}

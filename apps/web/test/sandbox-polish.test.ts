@@ -6,6 +6,7 @@ import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
 import { describeChange } from "@/lib/sandbox/describe";
 import { patchOf } from "@transpera-flow/db";
+import { calendarMonthStarts, partMonthNote, timelineMonths } from "@/lib/forecast/timeline";
 import { explainFull } from "@/lib/sandbox/explain";
 import { othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 import { todayValue, trafficToday } from "@/lib/sandbox/today";
@@ -170,5 +171,41 @@ describe("3. explaining a result that looks worse because someone is full", () =
     const notes = explainFull({ ...input(scenario), roles: r, live: { ...live, roles: { strat: busy(0.5), sales: busy(0.5), ppc: busy(0.5) } } });
     expect(notes).toHaveLength(2);
     expect(explainFull({ ...input(scenario), roles: r, limit: 3, live: { ...live, roles: { strat: busy(0.5), sales: busy(0.5), ppc: busy(0.5) } } }).map((n) => n.text.split(" is full")[0])).toEqual(["The strategist role", "The sales role", "The PPC specialist role"]);
+  });
+});
+
+describe("6. part months are labelled", () => {
+  const monthsOf = (start: string, weeks: number) => {
+    const starts = calendarMonthStarts(start, weeks, 40);
+    const H = weeks * 40;
+    return [0, ...starts].map((s, i, all) => ({ start: s, end: all[i + 1] ?? H }));
+  };
+
+  it("marks the first column as starting today, and the last as stopping where the run does", () => {
+    const m = timelineMonths("2026-10-05", monthsOf("2026-10-05", 26), 40);
+    expect(m.map((x) => x.label)).toEqual(["October 2026 (from 5 Oct)", "November 2026", "December 2026", "January 2027", "February 2027", "March 2027 (to 2 Apr)"]);
+    expect(m[0]).toMatchObject({ partial: true, span: "from 5 Oct", from: "2026-10-05", to: "2026-10-30", long: "October 2026", short: "Oct 26" });
+    expect(m[1]).toMatchObject({ partial: false, span: null, label: "November 2026", from: "2026-11-02", to: "2026-11-30" });
+    expect(m[5]).toMatchObject({ partial: true, span: "to 2 Apr", to: "2027-04-02" });
+    expect(partMonthNote(m)).toBe("Part months: the first column covers from 5 Oct, the last column covers to 2 Apr; the others are whole months.");
+  });
+
+  it("names a first month that joined the next one by what it covers: 'Nov 26 (from 28 Oct)'", () => {
+    const m = timelineMonths("2026-10-28", monthsOf("2026-10-28", 13), 40);
+    expect(m[0]).toMatchObject({ long: "November 2026", short: "Nov 26", span: "from 28 Oct", label: "November 2026 (from 28 Oct)" });
+  });
+
+  it("marks nothing when the run starts on a month's first working day and stops on a last one", () => {
+    // Mon 2 Nov 2026 is the first working day of November; 26 weeks later the run ends on Fri 30 Apr 2027, the last of April.
+    const m = timelineMonths("2026-11-02", monthsOf("2026-11-02", 26), 40);
+    expect(m.map((x) => x.partial)).toEqual([false, false, false, false, false, false]);
+    expect(partMonthNote(m)).toBeNull();
+    expect(m.map((x) => x.label)).toEqual(m.map((x) => x.long));
+  });
+
+  it("says both in one column when the run is a single part month", () => {
+    const m = timelineMonths("2026-10-05", monthsOf("2026-10-05", 3), 40);
+    expect(m).toHaveLength(1);
+    expect(m[0]).toMatchObject({ span: "from 5 Oct to 23 Oct", label: "October 2026 (from 5 Oct to 23 Oct)" });
   });
 });

@@ -27,7 +27,7 @@ import { DEFAULT_FORECAST_MONTHS, forecastInsights, forecastModel, today } from 
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { dateAtPosition, hoursToDate, mondayOnOrBefore, monthBounds, addDays } from "@/lib/forecast/positions";
 import { runKey, sharedSimPool } from "@/lib/forecast/sim-pool";
-import { timelineData, timelineMonths } from "@/lib/forecast/timeline";
+import { partMonthNote, timelineData, timelineMonths } from "@/lib/forecast/timeline";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { horizonLabel, horizonWeeks } from "@/lib/horizon";
 import { issueFormOptions } from "@/lib/issues/draft";
@@ -803,6 +803,11 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
             ) : (
               <Skeleton className="h-[320px] w-full" aria-busy="true" />
             )}
+            {shownData && partMonthNote(shownData.months) ? (
+              <p className="text-xs text-muted-foreground" data-part-month-note>
+                * {partMonthNote(shownData.months)}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               {planned ? `${planned} planned change${planned === 1 ? "" : "s"} from Settings: ` : "No planned hires, end dates or leave from Settings in this span. "}
               {shownData?.markers.map((mk) => `${mk.label} ${mk.kind === "leave" ? `from ${mk.when}` : `on ${mk.when}`}`).join("; ")}

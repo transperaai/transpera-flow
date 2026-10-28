@@ -516,6 +516,45 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.close();
       });
 
+      it("labels the first and last columns as part months in the chart's table and tooltip, the money table and compare", async () => {
+        const { page, errors } = await mount(width);
+        // The run starts on Monday 5 October: the first column covers from then; the last stops where the 12 months do.
+        const first = "October 2026 (from 5 Oct)";
+        expect(await page.locator("[data-forecast-timeline] table tbody tr th").first().innerText()).toBe(first);
+        expect(await page.locator("[data-forecast-timeline] table tbody tr th").nth(1).innerText()).toBe("November 2026");
+        expect(await page.locator("[data-forecast-timeline] table tbody tr th").last().innerText()).toMatch(/^\w+ 2027 \(to \d+ \w+\)$/);
+        expect(await page.locator("[data-forecast-timeline-section] [data-part-month-note]").innerText()).toMatch(/^\* Part months: the first column covers from 5 Oct, the last column covers to \d+ \w+; the others are whole months\.$/);
+        // The tooltip over the first column says so.
+        await page.locator(`${TIMELINE} > svg`).scrollIntoViewIfNeeded();
+        const svg = (await page.locator(`${TIMELINE} > svg`).boundingBox())!;
+        const compact = svg.width < 520;
+        await page.mouse.move(svg.x + (compact ? 2 : 176) + 8, svg.y + 40);
+        await page.waitForFunction(() => document.querySelector("[data-forecast-timeline] [role=presentation]")?.textContent?.includes("Part month"));
+        expect(await page.locator("[data-forecast-timeline] [role=presentation]").innerText()).toContain(first);
+        await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
+        const heads = await page.locator("[data-money-table] thead th").allInnerTexts();
+        expect(heads[1]).toBe("Oct 26*");
+        expect(heads[2]).toBe("Nov");
+        expect(await page.locator("[data-money-table] thead th").nth(1).getAttribute("title")).toBe("Part month: covers from 5 Oct");
+        expect(await page.locator("[data-money-table-card] [data-part-month-note]").innerText()).toContain("Part months: the first column covers from 5 Oct");
+        // And in compare.
+        await pick(page, "Hire in January");
+        await page.locator("[data-scenario-compare]").click();
+        await compareDone(page, errors);
+        expect(await page.locator("[data-sandbox-compare] [data-part-month-note]").first().innerText()).toContain("Part months: the first column covers from 5 Oct");
+        const row = page.locator('[data-compare-table="revenue"] tbody tr th').first();
+        await page.locator('[data-compare-row="revenue"] summary').click();
+        expect(await row.innerText()).toBe(first);
+        const chart = page.locator('[data-compare-row="revenue"] [data-compare-chart]');
+        await chart.locator("svg").scrollIntoViewIfNeeded();
+        const box = (await chart.locator("svg").boundingBox())!;
+        await page.mouse.move(box.x + (box.width < 480 ? 50 : 60) + 2, box.y + 60);
+        await page.waitForFunction(() => document.querySelector('[data-compare-row="revenue"] [role=presentation]')?.textContent?.includes("Part month"));
+        expect(await chart.locator("[role=presentation]").innerText()).toContain(first);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
       it("opens the sample scenario that builds on another with the parent's changes read-only", async () => {
         const { page, errors } = await mount(width);
         await pick(page, "Hire in March, then more leads");
