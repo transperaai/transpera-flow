@@ -31,12 +31,12 @@ interface Caller {
 
 let db: TestDb;
 const callers: Record<string, Caller> = {};
-// The people the callers are linked to (B1 2a): the member, the viewer and the editor each look at a different person; `spare`
+// The people the callers are linked to (B1 2a): two viewers and an Agency admin each look at a different person; `spare`
 // is nobody's, and holds the rows the write cases use.
 const person = {
-  member: northbeamPersonIds["Leah Brooks"]!,
-  viewer: northbeamPersonIds["Dan Okafor"]!,
-  editor: northbeamPersonIds["Maya Collins"]!,
+  "viewer, Leah": northbeamPersonIds["Leah Brooks"]!,
+  "viewer, Dan": northbeamPersonIds["Dan Okafor"]!,
+  "admin, linked": northbeamPersonIds["Maya Collins"]!,
   spare: northbeamPersonIds["Rosa Diaz"]!,
 };
 /** Rows each table holds in the workspace, and each linked person's rows in it, counted as the superuser once seeded. */
@@ -60,7 +60,7 @@ interface TableCase {
   delete: Q | null;
   /**
    * Who reads which rows. "everyone": every reader (the default). "per-person": callers who see everyone read every row; a
-   * member or viewer reads only their own person's rows. "editors": only callers who see everyone.
+   * a viewer reads only their own person's rows. "editors": only callers who see everyone (the Owner and Agency admins).
    */
   reads?: "everyone" | "per-person" | "editors";
   /** The column that names the person a "per-person" row is about. */
@@ -82,7 +82,7 @@ const singleton = (table: string, deletable = true): TableCase => ({
   delete: deletable ? [`delete from ${table} where workspace_id = $1`, [ws]] : null,
 });
 
-/** Every table the audit lists as read by every member and written by editors and above, apart from the per-person ones (B1 part 2). */
+/** Every table the audit lists as read by every member and written by Agency admins and the Owner, apart from the per-person ones (B1 part 2). */
 const TABLES: TableCase[] = [
   { ...named("people"), reads: "per-person", personColumn: "id" },
   // The spare person (Rosa) holds no skills or leave and only her own role, so these rows are free to insert, change and delete.
@@ -291,7 +291,7 @@ const TABLES: TableCase[] = [
     update: null,
     delete: null,
   },
-  // The agency list's headline numbers (B1 3/3): every reader reads, owners and editors write, nobody deletes.
+  // The agency list's headline numbers (B1 3/3): every reader reads, Agency admins and the Owner write, nobody deletes.
   {
     table: "workspace_headlines",
     insert: () => [
@@ -301,7 +301,7 @@ const TABLES: TableCase[] = [
     update: ["update workspace_headlines set horizon_weeks = horizon_weeks where workspace_id = $1", [ws]],
     delete: null,
   },
-  // Share links (B3): owners, editors and agency admins only; links are revoked, never deleted (asserted below).
+  // Share links (B3): Agency admins and the Owner only; links are revoked, never deleted (asserted below).
   {
     table: "share_links",
     insert: (tag) => [
@@ -321,7 +321,7 @@ const TABLES: TableCase[] = [
     update: null,
     delete: null,
   },
-  // #227: per-person proposals measured from a log. Owners, editors and agency admins read and insert; nobody updates or deletes.
+  // #227: per-person proposals measured from a log. Agency admins and the Owner read and insert; nobody updates or deletes.
   // The spare person's proposal on one step is the seed row, on another the probe, both under the seed calibration.
   {
     table: "capacity_factor_proposals",
@@ -352,15 +352,19 @@ const resolve = ([sql, params]: Q): Q => [
   params.map((p) => (p === "seed" && /service_id = \$2/.test(sql) ? ids.svcSeed : p)),
 ];
 
-/** `sees`: every person ("all"), only the caller's linked person ("own"), or no person ("none"). */
+/**
+ * The callers, by the three roles (migration 20270103000000): "owner (flag)" is the Owner (the agency-admin flag, no membership);
+ * "admin" and "admin, linked" are Agency admins (an `owner` membership; the second is linked to a person); the "viewer" callers
+ * hold a `viewer` membership (two linked to different people, one to nobody).
+ * `sees`: every person ("all"), only the caller's linked person ("own"), or no person ("none").
+ */
 const ROLES = {
-  "agency admin (JWT flag)": { writes: true, reads: true, sees: "all" },
-  "agency_admin membership": { writes: true, reads: true, sees: "all" },
-  owner: { writes: true, reads: true, sees: "all" },
-  editor: { writes: true, reads: true, sees: "all" },
-  member: { writes: false, reads: true, sees: "own" },
-  viewer: { writes: false, reads: true, sees: "own" },
-  "member, no person": { writes: false, reads: true, sees: "none" },
+  "owner (flag)": { writes: true, reads: true, sees: "all" },
+  admin: { writes: true, reads: true, sees: "all" },
+  "admin, linked": { writes: true, reads: true, sees: "all" },
+  "viewer, Leah": { writes: false, reads: true, sees: "own" },
+  "viewer, Dan": { writes: false, reads: true, sees: "own" },
+  "viewer, no person": { writes: false, reads: true, sees: "none" },
   "signed in, no membership": { writes: false, reads: false, sees: "none" },
 } as const;
 type RoleName = keyof typeof ROLES;
@@ -378,16 +382,16 @@ beforeAll(async () => {
     await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, u.id, role]);
     return u;
   };
-  callers["agency admin (JWT flag)"] = flag;
-  callers["agency_admin membership"] = await member("agency-member@matrix.example", "agency_admin");
-  callers.owner = await member("owner@matrix.example", "owner");
-  callers.editor = await member("editor@matrix.example", "editor");
-  callers.member = await member("member@matrix.example", "member");
-  callers.viewer = await member("viewer@matrix.example", "viewer");
-  callers["member, no person"] = await member("member-unlinked@matrix.example", "member");
+  // The three roles (migration 20270103000000): the Owner is the JWT flag; an Agency admin holds an `owner` membership; a Viewer a `viewer` one.
+  callers["owner (flag)"] = flag;
+  callers.admin = await member("admin@matrix.example", "owner");
+  callers["admin, linked"] = await member("admin-linked@matrix.example", "owner");
+  callers["viewer, Leah"] = await member("viewer-leah@matrix.example", "viewer");
+  callers["viewer, Dan"] = await member("viewer-dan@matrix.example", "viewer");
+  callers["viewer, no person"] = await member("viewer-unlinked@matrix.example", "viewer");
   callers["signed in, no membership"] = await createUser(db, "stranger@matrix.example");
-  // Link the member, the viewer and the editor to three different people (B1 2a).
-  for (const role of ["member", "viewer", "editor"] as const) {
+  // Link two viewers and an Agency admin to three different people (B1 2a).
+  for (const role of ["viewer, Leah", "viewer, Dan", "admin, linked"] as const) {
     await db.client.query("update memberships set person_id = $1 where workspace_id = $2 and user_id = $3", [person[role], ws, callers[role]!.id]);
   }
 
@@ -411,20 +415,20 @@ beforeAll(async () => {
   }
   ids.seedCal = (await db.client.query("select id from calibrations where dataset_id = $1", [ids.seedDataset])).rows[0].id;
   // Each linked person holds a skill and a leave entry (the spare person's come from the table cases above).
-  for (const role of ["member", "viewer", "editor"] as const) {
+  for (const role of ["viewer, Leah", "viewer, Dan", "admin, linked"] as const) {
     await db.client.query("insert into person_skills (person_id, step_id, workspace_id) values ($1, $2, $3)", [person[role], northbeamStepIds.audit, ws]);
     await db.client.query("insert into person_leave (person_id, workspace_id, start_date, end_date) values ($1, $2, '2027-03-01', '2027-03-05')", [person[role], ws]);
     await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, null, 0.9)", [person[role], ws]);
   }
-  // A suggestion about the member's person, one about another person (the spare), and the non-people one the table case seeds.
-  for (const [who, tag] of [[person.member, "x person own"], [person.spare, "x person other"]] as const) {
+  // A suggestion about a viewer's person, one about another person (the spare), and the non-people one the table case seeds.
+  for (const [who, tag] of [[person["viewer, Leah"], "x person own"], [person.spare, "x person other"]] as const) {
     await db.client.query(
       "insert into suggestions (workspace_id, target_table, target_id, patch, evidence, note) values ($1, 'people', $2, $3::jsonb, '[]', $4)",
       [ws, who, JSON.stringify({ set: { fte: 0.8 } }), tag],
     );
   }
-  // Two analysis runs: one started by the editor, one by the member (ai_runs keeps the runner's name).
-  for (const [role, name] of [["editor", "Ed Itor"], ["member", "Mem Ber"]] as const) {
+  // Two analysis runs: one started by the Agency admin, one by a viewer (ai_runs keeps the runner's name).
+  for (const [role, name] of [["admin, linked", "Ed Itor"], ["viewer, Leah", "Mem Ber"]] as const) {
     await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, $3)", [ws, callers[role]!.id, name]);
   }
   // What each table holds now, and each linked person's share of it.
@@ -432,7 +436,7 @@ beforeAll(async () => {
     totals[t.table] = await rowsIn(db.client, t.table);
     if (t.reads === "per-person") {
       owns[t.table] = {};
-      for (const role of ["member", "viewer"] as const) {
+      for (const role of ["viewer, Leah", "viewer, Dan"] as const) {
         owns[t.table]![role] = Number(
           (await db.client.query(`select count(*) from ${t.table} where workspace_id = $1 and ${t.personColumn} = $2`, [ws, person[role]])).rows[0].count,
         );
@@ -490,58 +494,58 @@ describe("reads", () => {
     });
   }
 
-  it("suggestions: a member reads the suggestion about their own person and the non-people one, not the one about another person; an editor reads all three", async () => {
+  it("suggestions: a viewer reads the suggestion about their own person and the non-people one, not the one about another person; an Agency admin reads all three", async () => {
     const notes = async (role: RoleName) =>
       (await db.as(callers[role]!.claims, async (c) => (await c.query("select note from suggestions where workspace_id = $1 order by note", [ws])).rows)).map((r) => r.note as string);
-    expect(await notes("member")).toEqual(["x person own", "x seed"]);
-    expect(await notes("viewer")).toEqual(["x seed"]);
-    expect(await notes("member, no person")).toEqual(["x seed"]);
-    expect(await notes("editor")).toEqual(["x person other", "x person own", "x seed"]);
-    expect(await notes("owner")).toEqual(["x person other", "x person own", "x seed"]);
+    expect(await notes("viewer, Leah")).toEqual(["x person own", "x seed"]);
+    expect(await notes("viewer, Dan")).toEqual(["x seed"]);
+    expect(await notes("viewer, no person")).toEqual(["x seed"]);
+    expect(await notes("admin, linked")).toEqual(["x person other", "x person own", "x seed"]);
+    expect(await notes("admin")).toEqual(["x person other", "x person own", "x seed"]);
   });
 
-  it("memberships: owners, editors and agency admins read every row; a member or viewer only their own, so labels can't be tied to people (B1 2/3)", async () => {
+  it("memberships: the Owner and Agency admins read every row; a viewer only their own, so labels can't be tied to people (B1 2/3)", async () => {
     const total = Number((await db.client.query("select count(*) from memberships where workspace_id = $1", [ws])).rows[0].count);
-    expect(total).toBeGreaterThan(5);
+    expect(total).toBeGreaterThan(3);
     const own = async (role: RoleName) =>
       db.as(callers[role]!.claims, async (c) => (await c.query("select user_id, person_id from memberships where workspace_id = $1", [ws])).rows as { user_id: string; person_id: string | null }[]);
-    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) expect((await own(role)).length, role).toBe(total);
-    for (const role of ["member", "viewer", "member, no person"] as const) {
-      expect(await own(role), role).toEqual([{ user_id: callers[role]!.id, person_id: role === "member" ? person.member : role === "viewer" ? person.viewer : null }]);
+    for (const role of ["owner (flag)", "admin", "admin, linked"] as const) expect((await own(role)).length, role).toBe(total);
+    for (const role of ["viewer, Leah", "viewer, Dan", "viewer, no person"] as const) {
+      expect(await own(role), role).toEqual([{ user_id: callers[role]!.id, person_id: role === "viewer, Leah" ? person["viewer, Leah"] : role === "viewer, Dan" ? person["viewer, Dan"] : null }]);
     }
     expect(await own("signed in, no membership")).toEqual([]);
-    // A deactivated member reads nothing, as before.
+    // A deactivated viewer reads nothing, as before.
     await db.client.query("begin");
     try {
-      await db.client.query("update memberships set active = false where user_id = $1", [callers.member!.id]);
+      await db.client.query("update memberships set active = false where user_id = $1", [callers["viewer, Leah"]!.id]);
       await db.client.query("set local role authenticated");
-      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers.member!.claims)]);
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers["viewer, Leah"]!.claims)]);
       expect(Number((await db.client.query("select count(*) from memberships")).rows[0].count)).toBe(0);
     } finally {
       await db.client.query("rollback");
     }
   });
 
-  it("ai_runs: editors and owners read both runs, a member only their own, a viewer none", async () => {
+  it("ai_runs: the Owner and Agency admins read both runs, a viewer only their own, one with no person none", async () => {
     const names = async (role: RoleName) =>
       (await db.as(callers[role]!.claims, async (c) => (await c.query("select user_name from ai_runs where workspace_id = $1 order by user_name", [ws])).rows)).map((r) => r.user_name as string);
-    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) expect(await names(role), role).toEqual(["Ed Itor", "Mem Ber"]);
-    expect(await names("member")).toEqual(["Mem Ber"]);
-    expect(await names("viewer")).toEqual([]);
-    expect(await names("member, no person")).toEqual([]);
+    for (const role of ["owner (flag)", "admin", "admin, linked"] as const) expect(await names(role), role).toEqual(["Ed Itor", "Mem Ber"]);
+    expect(await names("viewer, Leah")).toEqual(["Mem Ber"]);
+    expect(await names("viewer, Dan")).toEqual([]);
+    expect(await names("viewer, no person")).toEqual([]);
     expect(await names("signed in, no membership")).toEqual([]);
   });
 
-  it("person_labels (B1 2b) reads like every other column of findings and ai_analyses: every member of the workspace reads it, only owners and editors write it", async () => {
-    const labels = { "Team member A": person.member };
+  it("person_labels (B1 2b) reads like every other column of findings and ai_analyses: every member of the workspace reads it, only Agency admins and the Owner write it", async () => {
+    const labels = { "Team member A": person["viewer, Leah"] };
     await db.client.query("update findings set person_labels = $2 where workspace_id = $1 and title = 'x seed'", [ws, JSON.stringify(labels)]);
     // An analysis, seeded as a restore would (triggers off).
     await db.client.query("begin");
     await db.client.query("set local session_replication_role = replica");
-    const run = (await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, 'Seeder') returning id", [ws, callers.editor!.id])).rows[0].id;
+    const run = (await db.client.query("insert into ai_runs (workspace_id, trigger, user_id, user_name) values ($1, 'manual', $2, 'Seeder') returning id", [ws, callers["admin, linked"]!.id])).rows[0].id;
     await db.client.query(
       "insert into ai_analyses (workspace_id, process_id, revision_id, status, trigger, input_hash, run_id, created_by, person_labels) values ($1, $2, $3, 'ok', 'manual', 'h', $4, $5, $6)",
-      [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, run, callers.editor!.id, JSON.stringify(labels)],
+      [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, run, callers["admin, linked"]!.id, JSON.stringify(labels)],
     );
     await db.client.query("commit");
     for (const [role, { reads, writes }] of Object.entries(ROLES) as [RoleName, (typeof ROLES)[RoleName]][]) {
@@ -565,7 +569,7 @@ describe("reads", () => {
   });
 
   it("scopes the readers to their own workspace: nothing of Larkspur's shows in Northbeam's view", async () => {
-    await db.as(callers.member!.claims, async (c) => {
+    await db.as(callers["viewer, Leah"]!.claims, async (c) => {
       expect(Number((await c.query("select count(*) from workspaces")).rows[0].count)).toBe(1);
       expect(Number((await c.query("select count(*) from people where workspace_id <> $1", [ws])).rows[0].count)).toBe(0);
     });
@@ -597,7 +601,7 @@ describe("writes", () => {
   }
 
   it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, findings, suggestions, clients and headlines are never deleted", async () => {
-    await db.as(callers.owner!.claims, async (c) => {
+    await db.as(callers.admin!.claims, async (c) => {
       for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["findings", "delete from findings"], ["suggestions", "delete from suggestions"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
@@ -610,7 +614,7 @@ describe("workspace name and currency", () => {
   const recurrency = (c: pg.Client) =>
     c.query("update workspaces set settings = jsonb_set(settings, '{currency}', '\"EUR\"') where id = $1", [ws]);
 
-  for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner"] as const) {
+  for (const role of ["owner (flag)", "admin", "admin, linked"] as const) {
     it(`${role} changes both`, async () => {
       await db.as(callers[role]!.claims, async (c) => {
         expect(await refused(c, () => rename(c))).toBe(1);
@@ -618,7 +622,7 @@ describe("workspace name and currency", () => {
       });
     });
   }
-  for (const role of ["editor", "member", "viewer", "signed in, no membership"] as const) {
+  for (const role of ["viewer, Leah", "viewer, Dan", "signed in, no membership"] as const) {
     it(`${role} changes neither`, async () => {
       await db.as(callers[role]!.claims, async (c) => {
         expect(await refused(c, () => rename(c))).toMatch(/refused|no rows/);
@@ -626,8 +630,8 @@ describe("workspace name and currency", () => {
       });
     });
   }
-  it("only an agency admin creates or deletes a workspace", async () => {
-    for (const role of ["owner", "editor"] as const) {
+  it("only the Owner creates or deletes a workspace: an Agency admin does neither", async () => {
+    for (const role of ["admin", "admin, linked"] as const) {
       await db.as(callers[role]!.claims, async (c) => {
         expect(await refused(c, () => c.query("insert into workspaces (name, slug) values ('Nope', 'nope')"))).toBe("refused");
         expect(await refused(c, () => c.query("delete from workspaces where id = $1", [ws]))).toMatch(/refused|no rows/);
@@ -640,14 +644,14 @@ describe("branding", () => {
   // Client branding (#34, B5): the same rule as the name and currency, in a jsonb column of its own.
   const rebrand = (c: pg.Client) => c.query("update workspaces set branding = jsonb_set(branding, '{accent}', '\"#0b6e8a\"') where id = $1", [ws]);
 
-  for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner"] as const) {
+  for (const role of ["owner (flag)", "admin", "admin, linked"] as const) {
     it(`${role} changes it`, async () => {
       await db.as(callers[role]!.claims, async (c) => {
         expect(await refused(c, () => rebrand(c))).toBe(1);
       });
     });
   }
-  for (const role of ["editor", "member", "viewer", "signed in, no membership"] as const) {
+  for (const role of ["viewer, Leah", "viewer, Dan", "signed in, no membership"] as const) {
     it(`${role} does not`, async () => {
       await db.as(callers[role]!.claims, async (c) => {
         expect(await refused(c, () => rebrand(c))).toMatch(/refused|no rows/);
@@ -695,7 +699,7 @@ describe("functions", () => {
       call: (c) => c.query("select public.save_health_rules($1, $2::jsonb, '{\"health_recover\": 7}') as r", [ws, `{"health_recover": ${healthRecover}}`]),
       refusal: { status: "not_found" },
     },
-    // C6: one factor of the spare person (her seeded default is 1.25), and the Per-person times switch (owners and editors).
+    // C6: one factor of the spare person (her seeded default is 1.25), and the Per-person times switch (Agency admins and the Owner).
     {
       name: "save_capacity_factor",
       call: (c) => c.query("select public.save_capacity_factor($1, null, 1.25, 1.5) as r", [person.spare]),
@@ -722,17 +726,17 @@ describe("functions", () => {
   };
 
   for (const rpc of RPCS) {
-    it(`${rpc.name}: refused to member and viewer and the no-membership user, allowed to editor`, async () => {
+    it(`${rpc.name}: refused to viewers and the no-membership user, allowed to an Agency admin`, async () => {
       const seen: Record<string, { status?: string; error?: string }> = {};
-      for (const role of ["owner", "editor", "member", "viewer", "signed in, no membership"] as const) {
+      for (const role of ["admin", "admin, linked", "viewer, Leah", "viewer, Dan", "signed in, no membership"] as const) {
         seen[role] = await db.as(callers[role]!.claims, (c) => outcome(c, rpc));
       }
-      for (const role of ["owner", "editor"]) {
+      for (const role of ["admin", "admin, linked"]) {
         // Allowed: no error at all, and not the refusal's status.
         expect(seen[role]!.error, `${rpc.name} as ${role}`).toBeUndefined();
         if ("status" in rpc.refusal) expect(seen[role]!.status, `${rpc.name} as ${role}`).not.toBe(rpc.refusal.status);
       }
-      for (const role of ["member", "viewer", "signed in, no membership"]) {
+      for (const role of ["viewer, Leah", "viewer, Dan", "signed in, no membership"]) {
         if ("status" in rpc.refusal) expect(seen[role], `${rpc.name} as ${role}`).toEqual({ status: rpc.refusal.status });
         else expect(seen[role]!.error, `${rpc.name} as ${role}`).toMatch(rpc.refusal.throws);
       }
@@ -770,8 +774,8 @@ describe("client health rules (B1 3/3)", () => {
     await c.query("rollback to savepoint s");
   };
 
-  it("an editor saves a rule: saved, stored, stamped as entered by them, and logged with them as the actor", async () => {
-    await db.as(callers.editor!.claims, async (c) => {
+  it("an Agency admin saves a rule: saved, stored, stamped as entered by them, and logged with them as the actor", async () => {
+    await db.as(callers["admin, linked"]!.claims, async (c) => {
       const r = (await save(c, baseNow, '{"health_recover": 7}')).rows[0].r;
       expect(r).toMatchObject({ status: "saved", row: { settings: { health_recover: 7 } }, conflicts: {} });
       await c.query("reset role");
@@ -781,19 +785,19 @@ describe("client health rules (B1 3/3)", () => {
           [ws],
         )
       ).rows[0];
-      expect(w).toEqual({ v: 7, source: "entered", by: callers.editor!.id });
-      const log = (await c.query("select actor_id, actor_kind, diff from audit_log where workspace_id = $1 and target_table = 'workspaces' and actor_id = $2", [ws, callers.editor!.id])).rows;
+      expect(w).toEqual({ v: 7, source: "entered", by: callers["admin, linked"]!.id });
+      const log = (await c.query("select actor_id, actor_kind, diff from audit_log where workspace_id = $1 and target_table = 'workspaces' and actor_id = $2", [ws, callers["admin, linked"]!.id])).rows;
       expect(log).toHaveLength(1);
       expect(log[0].actor_kind).toBe("user");
       expect(JSON.stringify(log[0].diff)).toContain("health_recover");
     });
   });
 
-  it("an owner and an agency admin save too; a member, a viewer and a stranger get not_found and change nothing", async () => {
-    for (const role of ["owner", "agency admin (JWT flag)", "agency_admin membership"] as const) {
+  it("the Owner and every Agency admin save; a viewer and a stranger get not_found and change nothing", async () => {
+    for (const role of ["admin", "admin, linked", "owner (flag)"] as const) {
       expect((await run(role, baseNow, '{"health_recover": 8}')).status, role).toBe("saved");
     }
-    for (const role of ["member", "viewer", "member, no person", "signed in, no membership"] as const) {
+    for (const role of ["viewer, Leah", "viewer, Dan", "viewer, no person", "signed in, no membership"] as const) {
       expect(await run(role, baseNow, '{"health_recover": 9}'), role).toEqual({ status: "not_found" });
     }
     const stored = (await db.client.query("select settings -> 'health_recover' as v from workspaces where id = $1", [ws])).rows[0].v ?? null;
@@ -801,12 +805,12 @@ describe("client health rules (B1 3/3)", () => {
   });
 
   it("an unknown workspace is not_found", async () => {
-    const r = (await db.as(callers.editor!.claims, (c) => save(c, baseNow, '{"health_recover": 7}', "00000000-0000-4000-8000-0000000000bb"))).rows[0].r;
+    const r = (await db.as(callers["admin, linked"]!.claims, (c) => save(c, baseNow, '{"health_recover": 7}', "00000000-0000-4000-8000-0000000000bb"))).rows[0].r;
     expect(r).toEqual({ status: "not_found" });
   });
 
   it("null restores the default: the stored value becomes JSON null", async () => {
-    await db.as(callers.editor!.claims, async (c) => {
+    await db.as(callers["admin, linked"]!.claims, async (c) => {
       expect((await save(c, baseNow, '{"health_recover": 7}')).rows[0].r.status).toBe("saved");
       const r = (await save(c, '{"health_recover": 7}', '{"health_recover": null}')).rows[0].r;
       expect(r).toMatchObject({ status: "saved", row: { settings: { health_recover: null } } });
@@ -817,7 +821,7 @@ describe("client health rules (B1 3/3)", () => {
   });
 
   it("a stale base gives a conflict with the stored value and writes nothing for that key; each key is checked against its own base", async () => {
-    await db.as(callers.editor!.claims, async (c) => {
+    await db.as(callers["admin, linked"]!.claims, async (c) => {
       await save(c, baseNow, '{"health_recover": 7}');
       const r = (await save(c, '{"health_recover": 3, "health_initial": null}', '{"health_recover": 9, "health_initial": 60}')).rows[0].r;
       expect(r).toMatchObject({ status: "conflict", conflicts: { health_recover: 7 }, row: { settings: { health_recover: 7, health_initial: 60 } } });
@@ -827,7 +831,7 @@ describe("client health rules (B1 3/3)", () => {
   });
 
   it("a value above 100, below 0 or not a number is refused (23514); a bad changes or base, or a key with no base, is 22023", async () => {
-    await db.as(callers.editor!.claims, async (c) => {
+    await db.as(callers["admin, linked"]!.claims, async (c) => {
       for (const changes of ['{"health_recover": 101}', '{"health_recover": -1}', '{"health_recover": "7"}', '{"health_recover": true}', '{"health_recover": [7]}']) {
         await raises(c, "23514", baseNow, changes);
       }
@@ -836,11 +840,11 @@ describe("client health rules (B1 3/3)", () => {
       }
     });
     // 0 and 100 are allowed.
-    for (const v of [0, 100]) expect((await run("editor", baseNow, `{"health_recover": ${v}}`)).status).toBe("saved");
+    for (const v of [0, 100]) expect((await run("admin, linked", baseNow, `{"health_recover": ${v}}`)).status).toBe("saved");
   });
 
-  it("no other key can be saved, by an editor or an owner (42501): name, currency, hours_per_week, availability_floor, and the rest", async () => {
-    for (const role of ["editor", "owner"] as const) {
+  it("no other key can be saved, by an Agency admin (42501): name, currency, hours_per_week, availability_floor, and the rest", async () => {
+    for (const role of ["admin, linked", "admin"] as const) {
       await db.as(callers[role]!.claims, async (c) => {
         for (const key of ["name", "currency", "hours_per_week", "availability_floor", "overtime_cap", "provenance"]) {
           await raises(c, "42501", `{"${key}": null}`, `{"${key}": 5}`);
@@ -848,22 +852,22 @@ describe("client health rules (B1 3/3)", () => {
       });
     }
     // Mixed with an allowed key, nothing is written.
-    await db.as(callers.editor!.claims, async (c) => {
+    await db.as(callers["admin, linked"]!.claims, async (c) => {
       await raises(c, "42501", `{"health_recover": ${healthRecover}, "currency": "GBP"}`, '{"health_recover": 7, "currency": "USD"}');
       await c.query("reset role");
       expect((await c.query("select settings ->> 'currency' as c from workspaces where id = $1", [ws])).rows[0].c).toBe("GBP");
     });
   });
 
-  it("the editor still can't rename the workspace or write its settings directly (the update policy is unchanged)", async () => {
-    await db.as(callers.editor!.claims, async (c) => {
+  it("a viewer can't rename the workspace or write its settings directly (the update policy is unchanged)", async () => {
+    await db.as(callers["viewer, Leah"]!.claims, async (c) => {
       expect(await refused(c, () => c.query("update workspaces set name = name || '!' where id = $1", [ws]))).toMatch(/refused|no rows/);
       expect(await refused(c, () => c.query("update workspaces set settings = jsonb_set(settings, '{health_recover}', '5') where id = $1", [ws]))).toMatch(/refused|no rows/);
     });
   });
 
   it("an API token (the claims carry api_token_id) is refused by needs_review, even inside the SECURITY DEFINER function", async () => {
-    const token = { ...callers.editor!.claims, api_token_id: "00000000-0000-4000-8000-0000000000cc" };
+    const token = { ...callers["admin, linked"]!.claims, api_token_id: "00000000-0000-4000-8000-0000000000cc" };
     await db.as(token, async (c) => {
       await c.query("savepoint s");
       await expect(save(c, baseNow, '{"health_recover": 7}')).rejects.toMatchObject({ code: "42501", message: expect.stringMatching(/changes only by review/) });
@@ -922,7 +926,7 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
       { ...good, pay: { rate: 99 } },
       Object.fromEntries(Object.entries(good).filter(([k]) => k !== "processes_total")),
     ];
-    await db.as(callers.editor!.claims, async (c) => {
+    await db.as(callers["admin, linked"]!.claims, async (c) => {
       for (const numbers of bad) {
         await c.query("savepoint s");
         await expect(upsert(c, JSON.stringify(numbers)), JSON.stringify(numbers)).rejects.toMatchObject({ code: "23514" });
@@ -933,35 +937,35 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
     });
   });
 
-  it("computed_by and computed_at are stamped by the database, whatever an editor sends (insert and update)", async () => {
+  it("computed_by and computed_at are stamped by the database, whatever an Agency admin sends (insert and update)", async () => {
     await db.client.query("begin");
     try {
       await db.client.query("delete from workspace_headlines where workspace_id = $1", [ws]);
       await db.client.query("set local role authenticated");
-      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers.editor!.claims)]);
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers["admin, linked"]!.claims)]);
       const forge = "insert into workspace_headlines (workspace_id, computed_by, computed_at, engine_version, revision_ids, horizon_weeks, numbers) values ($1, $2, '2099-01-01', '1.7.0', '{}', 52, $3::jsonb) returning computed_by, computed_at > now() as future";
-      const ins = (await db.client.query(forge, [ws, callers.owner!.id, headlineNumbers])).rows[0];
-      expect(ins).toEqual({ computed_by: callers.editor!.id, future: false });
+      const ins = (await db.client.query(forge, [ws, callers.admin!.id, headlineNumbers])).rows[0];
+      expect(ins).toEqual({ computed_by: callers["admin, linked"]!.id, future: false });
       const upd = (
         await db.client.query(
           "update workspace_headlines set computed_by = $2, computed_at = '2099-01-01' where workspace_id = $1 returning computed_by, computed_at > now() as future",
-          [ws, callers.owner!.id],
+          [ws, callers.admin!.id],
         )
       ).rows[0];
-      expect(upd).toEqual({ computed_by: callers.editor!.id, future: false });
+      expect(upd).toEqual({ computed_by: callers["admin, linked"]!.id, future: false });
     } finally {
       await db.client.query("rollback");
     }
   });
 
-  it("a member and a viewer can't insert or update; every reader reads", async () => {
-    for (const role of ["member", "viewer", "member, no person", "signed in, no membership"] as const) {
+  it("a viewer can't insert or update; every reader reads", async () => {
+    for (const role of ["viewer, Leah", "viewer, Dan", "viewer, no person", "signed in, no membership"] as const) {
       await db.as(callers[role]!.claims, async (c) => {
         expect(await refused(c, () => upsert(c, headlineNumbers)), role).toBe("refused");
         expect(await refused(c, () => c.query("update workspace_headlines set horizon_weeks = 1 where workspace_id = $1", [ws])), role).toMatch(/refused|no rows/);
       });
     }
-    for (const role of ["owner", "editor", "member", "viewer", "member, no person"] as const) {
+    for (const role of ["admin", "admin, linked", "viewer, Leah", "viewer, Dan", "viewer, no person"] as const) {
       await db.as(callers[role]!.claims, async (c) => expect(await rowsIn(c, "workspace_headlines"), role).toBe(1));
     }
     await db.as(callers["signed in, no membership"]!.claims, async (c) => expect(await rowsIn(c, "workspace_headlines")).toBe(0));
@@ -969,7 +973,7 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
 
   it("agency_workspace_list counts critical open and in-progress issues, last activity and the stored numbers, for each workspace the caller reads", async () => {
     const stats = async () =>
-      db.as(callers["agency admin (JWT flag)"]!.claims, async (c) => (await c.query("select id, name, slug, open_risk_issues::int as open_risk_issues, last_activity, numbers, computed_at from public.agency_workspace_list()")).rows);
+      db.as(callers["owner (flag)"]!.claims, async (c) => (await c.query("select id, name, slug, open_risk_issues::int as open_risk_issues, last_activity, numbers, computed_at from public.agency_workspace_list()")).rows);
     const before = (await stats()).find((r) => r.id === ws);
     expect(before).toMatchObject({ name: "Northbeam Digital", slug: "northbeam", open_risk_issues: 0 });
     expect(before.last_activity).toBeInstanceOf(Date);
@@ -987,7 +991,7 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
       }
       await upsert(db.client, headlineNumbers);
       await db.client.query("set local role authenticated");
-      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers["agency admin (JWT flag)"]!.claims)]);
+      await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers["owner (flag)"]!.claims)]);
       const rows = (await db.client.query("select id, open_risk_issues::int as open_risk_issues, last_activity, numbers, computed_at from public.agency_workspace_list()")).rows;
       const nb = rows.find((r) => r.id === ws);
       expect(nb.open_risk_issues).toBe(2);
@@ -1003,16 +1007,16 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
     }
   });
 
-  it("agency_workspace_list: a member of Northbeam sees only Northbeam, a stranger nothing; the audit log counts toward last activity only for those who manage", async () => {
-    for (const role of ["owner", "editor", "member", "viewer"] as const) {
+  it("agency_workspace_list: a viewer of Northbeam sees only Northbeam, a stranger nothing; the audit log counts toward last activity only for those who manage", async () => {
+    for (const role of ["admin", "admin, linked", "viewer, Leah", "viewer, Dan"] as const) {
       const rows = await db.as(callers[role]!.claims, async (c) => (await c.query("select id from public.agency_workspace_list()")).rows);
       expect(rows.map((r) => r.id), role).toEqual([ws]);
     }
     expect(await db.as(callers["signed in, no membership"]!.claims, async (c) => (await c.query("select id from public.agency_workspace_list()")).rows)).toEqual([]);
     await db.client.query("begin");
     try {
-      await db.client.query("insert into audit_log (workspace_id, actor_id, actor_kind, action, target_table) values ($1, $2, 'user', 'update', 'workspaces')", [ws, callers.owner!.id]);
-      await db.client.query("update audit_log set created_at = now() + interval '1 day' where workspace_id = $1 and actor_id = $2", [ws, callers.owner!.id]);
+      await db.client.query("insert into audit_log (workspace_id, actor_id, actor_kind, action, target_table) values ($1, $2, 'user', 'update', 'workspaces')", [ws, callers.admin!.id]);
+      await db.client.query("update audit_log set created_at = now() + interval '1 day' where workspace_id = $1 and actor_id = $2", [ws, callers.admin!.id]);
       const latest = async (role: RoleName) => {
         await db.client.query("set local role authenticated");
         await db.client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify(callers[role]!.claims)]);
@@ -1020,7 +1024,7 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
         await db.client.query("reset role");
         return t;
       };
-      expect((await latest("owner")).getTime()).toBeGreaterThan((await latest("editor")).getTime());
+      expect((await latest("admin")).getTime()).toBeGreaterThan((await latest("viewer, Leah")).getTime());
     } finally {
       await db.client.query("rollback");
     }
@@ -1064,7 +1068,7 @@ describe("play links (B4): submit_play_proposal and play_proposal_contacts", () 
     }
   });
 
-  it("play_proposal_contacts: anon holds no execute right; owners, editors and agency admins get {}; members, viewers and strangers are refused (42501)", async () => {
+  it("play_proposal_contacts: anon holds no execute right; Agency admins and the Owner get {}; viewers and strangers are refused (42501)", async () => {
     await db.client.query("begin");
     try {
       await db.client.query("set local role anon");
@@ -1106,7 +1110,7 @@ describe("play links (B4): submit_play_proposal and play_proposal_contacts", () 
       expect(fns).toContain("submit_play_proposal");
       expect(before).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
-        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "reconcile_after_access_change", "report_download", "set_updated_at",
+        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "report_download", "set_updated_at",
         "stamp_provenance", "use_api_token", "workspace_logo", "workspace_role",
       ]);
       // And none of the functions that act on visitors' ideas or build solutions.
@@ -1128,7 +1132,7 @@ describe("team_capacity (B1 2a)", () => {
     client_assignments: Record<string, unknown>[];
   };
   const team = async (c: pg.Client) => (await c.query("select public.team_capacity($1) as t", [ws])).rows[0].t as Team;
-  const READERS = ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor", "member", "viewer", "member, no person"] as const;
+  const READERS = ["owner (flag)", "admin", "admin, linked", "viewer, Leah", "viewer, Dan", "viewer, no person"] as const;
 
   /** Run `fn` as `role`, after `setup` ran as the superuser in the same rolled-back transaction. */
   async function after<T>(setup: string | null, role: RoleName, fn: (c: pg.Client) => Promise<T>): Promise<T> {
@@ -1170,33 +1174,33 @@ describe("team_capacity (B1 2a)", () => {
 
   it("callers who see everyone get the real names and rates", async () => {
     const real = (await db.client.query("select id, name, cost_rate::float8 as cost_rate from people where workspace_id = $1 order by name", [ws])).rows;
-    for (const role of ["agency admin (JWT flag)", "agency_admin membership", "owner", "editor"] as const) {
+    for (const role of ["owner (flag)", "admin", "admin, linked"] as const) {
       const t = await db.as(callers[role]!.claims, team);
       expect(t.sees_everyone, role).toBe(true);
       expect(t.people.map((p) => ({ id: p.id, name: p.name, cost_rate: p.cost_rate })), role).toEqual(real);
     }
-    expect((await db.as(callers.editor!.claims, team)).own_person_id).toBe(person.editor);
-    expect((await db.as(callers.owner!.claims, team)).own_person_id).toBeNull();
+    expect((await db.as(callers["admin, linked"]!.claims, team)).own_person_id).toBe(person["admin, linked"]);
+    expect((await db.as(callers.admin!.claims, team)).own_person_id).toBeNull();
   });
 
-  it("a member gets their own name and 'Team member N' for everyone else; no email, notes, note or efficiency; provenance {}", async () => {
+  it("a viewer gets their own name and 'Team member N' for everyone else; no email, notes, note or efficiency; provenance {}", async () => {
     await db.client.query("update people set provenance = '{\"fte\": {\"source\": \"entered\"}}', email = 'x@y.example', notes = 'private' where workspace_id = $1", [ws]);
     await db.client.query("update person_leave set note = 'private' where workspace_id = $1", [ws]);
     await db.client.query("update person_skills set efficiency = 1.5 where workspace_id = $1", [ws]);
     const rates = (await db.client.query("select id, cost_rate::float8 as cost_rate from people where workspace_id = $1", [ws])).rows as { id: string; cost_rate: number | null }[];
     await db.client.query("update people set cost_rate = 77.7 where workspace_id = $1", [ws]);
     try {
-      for (const role of ["member", "viewer", "member, no person"] as const) {
+      for (const role of ["viewer, Leah", "viewer, Dan", "viewer, no person"] as const) {
         const raw = await db.as(callers[role]!.claims, async (c) => (await c.query("select public.team_capacity($1)::text as t", [ws])).rows[0].t as string);
         const t = JSON.parse(raw) as Team;
         expect(t.sees_everyone, role).toBe(false);
-        const own = role === "member" ? person.member : role === "viewer" ? person.viewer : null;
+        const own = role === "viewer, Leah" ? person["viewer, Leah"] : role === "viewer, Dan" ? person["viewer, Dan"] : null;
         expect(t.own_person_id, role).toBe(own);
         for (const p of t.people) {
-          if (p.id === own) expect(p.name, role).toBe(role === "member" ? "Leah Brooks" : "Dan Okafor");
+          if (p.id === own) expect(p.name, role).toBe(role === "viewer, Leah" ? "Leah Brooks" : "Dan Okafor");
           else expect(p.name, role).toMatch(/^Team member \d+$/);
           expect(p.provenance, role).toEqual({});
-          // No pay for a member or viewer: null for everyone but themselves (Austin, 6 Oct).
+          // No pay for a viewer: null for everyone but themselves (Austin, 6 Oct).
           if (p.id === own) expect(p.cost_rate, role).toBe(77.7);
           else expect(p.cost_rate, role).toBeNull();
         }
@@ -1213,14 +1217,14 @@ describe("team_capacity (B1 2a)", () => {
 
   it("labels are stable: unchanged on a second call, after a person is added (who gets the highest number) and after someone is deactivated", async () => {
     const labels = (t: Team) => Object.fromEntries(t.people.map((p) => [p.id, p.name]));
-    const before = labels(await db.as(callers.member!.claims, team));
-    expect(labels(await db.as(callers.member!.claims, team))).toEqual(before);
+    const before = labels(await db.as(callers["viewer, Leah"]!.claims, team));
+    expect(labels(await db.as(callers["viewer, Leah"]!.claims, team))).toEqual(before);
     const newId = "00000000-0000-4000-8000-0000000000aa";
-    const added = await after(`insert into people (id, workspace_id, name) values ('${newId}', '${ws}', 'Newcomer')`, "member", async (c) => labels(await team(c)));
+    const added = await after(`insert into people (id, workspace_id, name) values ('${newId}', '${ws}', 'Newcomer')`, "viewer, Leah", async (c) => labels(await team(c)));
     for (const [id, name] of Object.entries(before)) expect(added[id], id).toBe(name);
     const highest = Math.max(...Object.values(before).flatMap((n) => (/^Team member (\d+)$/.test(n) ? [Number(/(\d+)$/.exec(n)![1])] : [])));
     expect(added[newId]).toBe(`Team member ${highest + 1}`);
-    const deactivated = await after(`update people set active = false where id = '${person.spare}'`, "member", async (c) => labels(await team(c)));
+    const deactivated = await after(`update people set active = false where id = '${person.spare}'`, "viewer, Leah", async (c) => labels(await team(c)));
     expect(deactivated).toEqual(before);
   });
 
@@ -1243,22 +1247,22 @@ describe("team_capacity (B1 2a)", () => {
     }
   });
 
-  it("can_see_person: callers who see everyone see anyone; a member only their own person; null only for those who see everyone", async () => {
+  it("can_see_person: callers who see everyone see anyone; a viewer only their own person; null only for those who see everyone", async () => {
     const see = async (role: RoleName, who: string | null) =>
       db.as(callers[role]!.claims, async (c) => (await c.query("select public.can_see_person($1, $2) as v", [ws, who])).rows[0].v as boolean);
-    expect(await see("editor", person.spare)).toBe(true);
-    expect(await see("agency admin (JWT flag)", person.spare)).toBe(true);
-    expect(await see("member", person.member)).toBe(true);
-    expect(await see("member", person.spare)).toBe(false);
-    expect(await see("member", null)).toBe(false);
-    // An unlinked member: my_person_id is null, so the comparison is null (not false). A policy treats null as no.
-    expect(await see("member, no person", person.member)).not.toBe(true);
-    expect(await see("editor", null)).toBe(true);
+    expect(await see("admin, linked", person.spare)).toBe(true);
+    expect(await see("owner (flag)", person.spare)).toBe(true);
+    expect(await see("viewer, Leah", person["viewer, Leah"])).toBe(true);
+    expect(await see("viewer, Leah", person.spare)).toBe(false);
+    expect(await see("viewer, Leah", null)).toBe(false);
+    // An unlinked viewer: my_person_id is null, so the comparison is null (not false). A policy treats null as no.
+    expect(await see("viewer, no person", person["viewer, Leah"])).not.toBe(true);
+    expect(await see("admin, linked", null)).toBe(true);
   });
 });
 
 describe("revision_history author names (B1 2a)", () => {
-  it("a member sees no name for another person's version and their own name for their own; editors see names", async () => {
+  it("a viewer sees no name for another person's version and their own name for their own; Agency admins see names", async () => {
     // Make the seeded version the work of one user, in a transaction that is rolled back.
     const names = async (role: RoleName, publisher: string) => {
       await db.client.query("begin");
@@ -1272,12 +1276,12 @@ describe("revision_history author names (B1 2a)", () => {
         await db.client.query("rollback");
       }
     };
-    const editor = callers.editor!.id;
-    expect(await names("member", editor)).toBeNull();
-    expect(await names("viewer", editor)).toBeNull();
-    expect(await names("editor", editor)).toBe("Maya Collins");
-    expect(await names("owner", editor)).toBe("Maya Collins");
-    // Their own version keeps the member's name.
-    expect(await names("member", callers.member!.id)).toBe("Leah Brooks");
+    const editor = callers["admin, linked"]!.id;
+    expect(await names("viewer, Leah", editor)).toBeNull();
+    expect(await names("viewer, Dan", editor)).toBeNull();
+    expect(await names("admin, linked", editor)).toBe("Maya Collins");
+    expect(await names("admin", editor)).toBe("Maya Collins");
+    // Their own version keeps the viewer's name.
+    expect(await names("viewer, Leah", callers["viewer, Leah"]!.id)).toBe("Leah Brooks");
   });
 });

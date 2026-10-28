@@ -126,6 +126,9 @@ as $$
          or exists (select 1 from public.memberships m where m.user_id = auth.uid() and m.role = 'owner' and m.active);
 $$;
 
+revoke execute on function public.is_sign_in_admin() from public, anon;
+grant execute on function public.is_sign_in_admin() to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 4. Who can sign in: three roles, and only the Owner makes an Owner
 -- ---------------------------------------------------------------------------
@@ -294,6 +297,9 @@ as $$
     and private.deployment_role(u.email, u.email_confirmed_at is not null) is not null
   order by u.email;
 $$;
+
+revoke execute on function public.workspace_members(uuid) from public, anon;
+grant execute on function public.workspace_members(uuid) to authenticated;
 
 -- No membership for the creator: they are the Owner (create_workspace refuses anyone else) and pass by the flag; everyone the list
 -- lets in got theirs from the trigger above. Otherwise unchanged (20261113000000).
