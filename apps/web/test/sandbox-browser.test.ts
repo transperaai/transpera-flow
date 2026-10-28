@@ -622,6 +622,9 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         // A new scenario, a horizon, and compare all work from the saved ones.
         await page.getByRole("group", { name: "Time horizon" }).getByRole("button", { name: "6 months" }).click();
         await page.waitForFunction(() => document.querySelectorAll("[data-forecast-timeline] table tbody tr").length === 6, undefined, { timeout: 90_000 });
+        await page.waitForFunction(() => !document.querySelector("[data-scenario-status-line]")?.textContent?.includes("Updating"), undefined, { timeout: 90_000 });
+        // Nothing for a Viewer to save: another horizon is not an unsaved change.
+        expect(await page.locator("[data-scenario-status-line]").innerText()).not.toContain("Unsaved");
         await page.locator("[data-scenario-compare]").click();
         await compareDone(page, errors);
         expect(await page.locator("[data-compare-tile]").count()).toBe(5);

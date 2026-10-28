@@ -15,6 +15,7 @@ import {
   loadIssuesForReader,
   loadProcessBundle,
   loadScenarios,
+  loadSandboxScenarios,
   ModelError,
   toEngineModel,
   type ProcessBundle,
@@ -93,10 +94,29 @@ function runSettings(args: { reps?: number; seed?: number }, assumptions: string
   return { reps: args.reps ?? DEFAULT_REPS, seed: args.seed ?? DEFAULT_SEED };
 }
 
+/**
+ * The saved scenarios named, as whole-run patches. A name is matched against EVERY saved scenario, the Sandbox's too, so a part of a
+ * name never quietly picks the one whole-run scenario it happens to match while it means a Sandbox scenario ("hire in" for "Hire in
+ * January"); a match that has a change from a month, a hire, leave, a solution or a parent is refused by name (`sandbox_only`).
+ */
 async function resolveScenarios(ctx: ToolContext, ws: WorkspaceRef, names: string[]): Promise<ScenarioRow[]> {
   if (!names.length) return [];
-  const all = await loadScenarios(ctx.db, ws.id);
-  return names.map((n) => matchNamed(all, n, "saved scenario", ` in '${ws.name}'`));
+  const [runnable, every] = await Promise.all([loadScenarios(ctx.db, ws.id), loadSandboxScenarios(ctx.db, ws.id)]);
+  const byId = new Map(runnable.map((s) => [s.id, s]));
+  // Every whole-run scenario is a Sandbox scenario; the union only guards a read of the Sandbox's that failed.
+  const named = [...every.map((s) => ({ id: s.id, name: s.name })), ...runnable.filter((s) => !every.some((e) => e.id === s.id)).map((s) => ({ id: s.id, name: s.name }))];
+  return names.map((n) => {
+    const hit = matchNamed(named, n, "saved scenario", ` in '${ws.name}'`);
+    const scenario = byId.get(hit.id);
+    if (!scenario) {
+      throw new ToolError(
+        "sandbox_only",
+        `'${hit.name}' runs only in the Sandbox: it has a change from a month, a hire, leave or a solution going live, or builds on another scenario. These tools take whole-run scenarios.`,
+        runnable.map((s) => ({ id: s.id, name: s.name })).slice(0, 50),
+      );
+    }
+    return scenario;
+  });
 }
 
 const scenarioSummary = (s: NamedScenario) => ({ id: s.id, name: s.name, patch: s.patch });
@@ -300,7 +320,8 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
         const proc = args.process || args.include_detected ? await resolveProcess(ctx, ws, args.process, assumptions) : null;
         const [issues, scenarios, people, roles, processes, clients] = await Promise.all([
           loadIssuesForReader(ctx.db, ws.id),
-          loadScenarios(ctx.db, ws.id),
+          // Every saved scenario by name: an issue may link to one that runs only in the Sandbox.
+          loadSandboxScenarios(ctx.db, ws.id),
           ctx.db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", ws.id).execute(),
           ctx.db.selectFrom("roles").select(["id", "name"]).where("workspace_id", "=", ws.id).execute(),
           listProcesses(ctx.db, ws.id),
