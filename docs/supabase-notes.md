@@ -544,3 +544,13 @@ and their two trigger functions, then replaces `audit_company_write`, `company_n
 - [ ] A backup exported before this migration (it carries `suggestions` / `suggestion_proposals` sections) still checks and restores, with
       those sections left out.
 - [ ] `anon` still has EXECUTE on `open_share_link` only (no `submit_play_proposal`).
+
+## Sandbox fix (`20270111000000_sandbox_fix.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/sandbox-scenarios.test.ts`). The speed-up rests on Postgres inlining
+`private.sandbox_levers()` (a SQL function with no `set` clause) and keeping PL/pgSQL plans for the session; check on Neon:
+
+- [ ] `select count(*) from public.sandbox_scenarios where not private.is_sandbox_changes(changes)` is 0 after applying.
+- [ ] A restore at its limit (900 scenarios) is not slower than before the migration (the restore screen's own timing, or
+      `explain analyze` of the check over 900 one-change lists: about 0.1 s locally, 0.8 s before).
+- [ ] `private.sandbox_scenario_count(<workspace>)` as a Viewer gives 0, as the Owner the real count.

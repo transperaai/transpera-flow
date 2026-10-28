@@ -271,6 +271,40 @@ describe("names, parents and the cap", () => {
     await expect(
       db.as(users.admin!.claims, (c) => c.query("insert into sandbox_scenarios (workspace_id, name) values ($1, 'One too many')", [w])),
     ).rejects.toThrow(/at most 1000 scenarios/);
+    // The Owner of the workspace: refused too (the count answers for everyone who may insert).
+    const owner = await createUser(db, "owner@capped.example");
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [w, owner.id]);
+    await expect(db.as(owner.claims, (c) => c.query("insert into sandbox_scenarios (workspace_id, name) values ($1, 'One too many')", [w]))).rejects.toThrow(/at most 1000 scenarios/);
+  });
+
+  it("the cap's count (SECURITY DEFINER) tells no one but the workspace's editors how many scenarios it has (20270111000000)", async () => {
+    const count = (who: string) => db.as(users[who]!.claims, async (c) => (await c.query("select private.sandbox_scenario_count($1) as n", [ws])).rows[0].n as number);
+    const real = Number((await db.client.query("select count(*) from sandbox_scenarios where workspace_id = $1", [ws])).rows[0].count);
+    expect(real).toBeGreaterThan(0);
+    expect(await count("owner")).toBe(real);
+    expect(await count("admin")).toBe(real);
+    expect(await count("viewer")).toBe(0);
+    expect(await count("guest")).toBe(0);
+    const fn = (await db.client.query("select prosecdef, proconfig from pg_proc where oid = 'private.sandbox_scenario_count(uuid)'::regprocedure")).rows[0];
+    expect(fn).toEqual({ prosecdef: true, proconfig: ['search_path=""'] });
+  });
+
+  it("the change check is quick: the lever table inlines, and the per-change check keeps its plan (20270111000000)", async () => {
+    const fns = (await db.client.query(
+      "select p.proname, l.lanname, p.proconfig from pg_proc p join pg_language l on l.oid = p.prolang where p.pronamespace = 'private'::regnamespace and p.proname in ('sandbox_levers', 'is_sandbox_change', 'is_sandbox_changes') order by 1",
+    )).rows;
+    expect(fns).toEqual([
+      { proname: "is_sandbox_change", lanname: "plpgsql", proconfig: ['search_path=""'] },
+      { proname: "is_sandbox_changes", lanname: "sql", proconfig: ['search_path=""'] },
+      { proname: "sandbox_levers", lanname: "sql", proconfig: null },
+    ]);
+    // 900 one-change lists, as a restore at its limit checks them: about 0.1 s here, 0.8 s before. A generous bound, for a busy machine.
+    const t = performance.now();
+    const ok = (await db.client.query(
+      "select bool_and(private.is_sandbox_changes(jsonb_build_array(jsonb_build_object('id', gen_random_uuid(), 'lever', 'A1', 'target', null, 'op', 'multiply', 'value', 1 + g / 1000.0)))) as ok from generate_series(1, 900) g",
+    )).rows[0].ok;
+    expect(ok).toBe(true);
+    expect(performance.now() - t).toBeLessThan(600);
   });
 
   it("keeps updated_at current (compared in SQL: the timestamps can share a millisecond)", async () => {
