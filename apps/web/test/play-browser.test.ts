@@ -107,7 +107,7 @@ describe("a play link's page, People off and Financials off", () => {
     await move(page, "demand.leads_per_week", 20);
     await page.waitForSelector('[data-testid="compare-headline"]', { timeout: 60_000 });
     expect(await page.locator("[data-play-send]").count()).toBe(0);
-    expect(await page.locator("body").innerText()).not.toMatch(/Send this idea|Suggestions/);
+    expect(await page.locator("body").innerText()).not.toMatch(/Send this idea|Suggestions|send it|send an idea/i);
     await page.close();
   }, 240_000);
 

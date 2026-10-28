@@ -15,7 +15,6 @@ import { ProcessLibrary } from "./process-library";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind, type ViewRef } from "@/lib/editor/groups";
-import { Badge } from "@/components/ui/badge";
 import type { BlockTools } from "./use-blocks";
 
 const PALETTE: { kind: PaletteKind; label: string }[] = [
@@ -198,7 +197,6 @@ export function Palette({
                 <li key={b.id} data-block={b.id} className="flex flex-col gap-1.5 rounded-token border border-line bg-bg px-2.5 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <b className="min-w-0 truncate text-xs">{b.name}</b>
-                    <Badge variant={b.type === "ai" ? "default" : "outline"}>{b.type === "ai" ? "AI" : "By hand"}</Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {steps} {steps === 1 ? "step" : "steps"}
