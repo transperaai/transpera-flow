@@ -64,10 +64,10 @@ beforeAll(async () => {
     [ws, users.editor!.id, "editor"],
     [ws, users.member!.id, "member"],
     [ws, users.viewer!.id, "viewer"],
-    [ws, users.agency_member!.id, "agency_admin"],
+    [ws, users.agency_member!.id, "owner"],
     [other, users.otherOwner!.id, "owner"],
   ];
-  for (const m of memberships) await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", m);
+  for (const m of memberships) await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", m);
 }, 120_000);
 
 afterAll(async () => {
@@ -115,7 +115,7 @@ describe("the table", () => {
 
 describe("who writes it: owners and agency admins, the rule the branding has always had", () => {
   it("lets an owner, an agency admin (by membership) and an agency admin (by JWT flag) add, replace and remove it", async () => {
-    for (const who of ["owner", "agency_member", "flag"]) {
+    for (const who of ["owner", "editor", "agency_member", "flag"]) {
       await clear();
       await as(users[who]!.claims, (c) => insert(c, ws));
       const next = Buffer.concat([PNG, Buffer.from([1])]);
@@ -127,11 +127,11 @@ describe("who writes it: owners and agency admins, the rule the branding has alw
     }
   });
 
-  it("refuses an editor, a member, a viewer, a stranger, another workspace's owner and anon a write, and changes nothing", async () => {
+  it("refuses a viewer, a stranger, another workspace's owner and anon a write, and changes nothing", async () => {
     await clear();
     await insert(db.client, ws);
     const before = await logos();
-    for (const who of ["editor", "member", "viewer", "stranger", "otherOwner", "anon"]) {
+    for (const who of ["member", "viewer", "stranger", "otherOwner", "anon"]) {
       const claims = who === "anon" ? null : users[who]!.claims;
       await refused(as(claims, (c) => insert(c, ws, Buffer.from("x"))), "42501", /row-level security|permission denied/);
       // An update or delete of a row they may see (or not) matches nothing.
@@ -191,7 +191,7 @@ describe("the audit entry (as save_fields wrote one when the logo was branding.l
     await as(users.flag!.claims, (c) => insert(c, ws));
     expect((await entries()).map((e) => e.actor_id)).toEqual([users.flag!.id]);
     await clearLog();
-    await refused(as(users.editor!.claims, (c) => c.query("insert into workspace_logos (workspace_id, mime, bytes, sha256) values ($1, 'image/png', $2, $3) on conflict (workspace_id) do update set bytes = excluded.bytes, sha256 = excluded.sha256", [ws, Buffer.from("y"), sha(Buffer.from("y"))])), "42501", /row-level security/);
+    await refused(as(users.viewer!.claims, (c) => c.query("insert into workspace_logos (workspace_id, mime, bytes, sha256) values ($1, 'image/png', $2, $3) on conflict (workspace_id) do update set bytes = excluded.bytes, sha256 = excluded.sha256", [ws, Buffer.from("y"), sha(Buffer.from("y"))])), "42501", /row-level security/);
     // The superuser (a restore, a script): no person to name, as with audit_company_write.
     await q("delete from workspace_logos where workspace_id = $1", [ws]);
     await insert(db.client, ws);

@@ -64,7 +64,7 @@ describe("share links", () => {
     }
     // The visitor signs in with Google: restricted links need that identity, not just a confirmed address.
     await admin.query("insert into auth.identities (user_id, provider, provider_id, identity_data) values ($1, 'google', $2, $3)", [users.visitor, users.visitor, { sub: users.visitor, email: visitorEmail }]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member'), ($4, $2, 'editor')", [ws, users.editor, users.member, NORTHBEAM_WORKSPACE_ID]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer'), ($4, $2, 'owner')", [ws, users.editor, users.member, NORTHBEAM_WORKSPACE_ID]);
     editorSession = env.dbAs(userClaims(users.editor));
     memberSession = env.dbAs(userClaims(users.member));
     visitorSession = env.dbAs(userClaims(users.visitor));

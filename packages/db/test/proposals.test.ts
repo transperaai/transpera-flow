@@ -21,7 +21,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@proposals.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.stranger = await createUser(db, "stranger@proposals.example.com");
 });
@@ -325,7 +325,7 @@ describe("the payload is checked when it is proposed", () => {
 describe("deleting a user", () => {
   it("works when they created or reviewed a proposal: the foreign key's null is let through, the proposal is untouched", async () => {
     const author = await createUser(db, "author@proposals.example.com");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, author.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, author.id]);
     const id = (await db.client.query("insert into suggestion_proposals (workspace_id, kind, title) values ($1, 'issue', 'Authored') returning id", [ws])).rows[0].id;
     // A proposal made by this author (the trigger sets created_by from the signed-in user, so write it as the owner of the table).
     await db.client.query("alter table suggestion_proposals disable trigger before_write");

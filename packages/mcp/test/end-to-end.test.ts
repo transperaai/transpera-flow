@@ -223,7 +223,7 @@ describe("MCP over the database (acts as the user under RLS)", () => {
 
   it("serves the draft RPCs to a signed-in editor, as the web app calls them (issue #9)", async () => {
     const editorId = await createUser(admin, "draft-editor@example.com");
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editorId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editorId]);
     const editorDb = env.dbAs(userClaims(editorId));
     // As the web app calls them: named arguments, the function's own JSON back.
     const call_ = async (fn: "open_draft" | "publish_process" | "discard_draft", body: Record<string, unknown>) =>
@@ -315,7 +315,7 @@ describe("MCP over the database (acts as the user under RLS)", () => {
 
   it("save_scenario and log_issue write as the user: an editor can, a viewer can't", async () => {
     const editorId = await createUser(admin, "analysis-editor@example.com");
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editorId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editorId]);
     const editor = await connect(await issueToken(editorId), options);
     const viewer = await connect(memberToken, options);
     const patch = [{ path: `roles.${northbeamRoleIds.strat}.headcount`, op: "add", value: 2 }];

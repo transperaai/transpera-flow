@@ -152,7 +152,7 @@ beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   const member = async (email: string, role: string) => {
     const u = await createUser(db, email);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, u.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
     return u;
   };
   who.owner = await member("owner@play.example", "owner");
@@ -161,7 +161,7 @@ beforeAll(async () => {
   who.viewer = await member("viewer@play.example", "viewer");
   who.admin = await createUser(db, "admin@play.example", { agency_admin: true });
   who.otherEditor = await createUser(db, "other-editor@play.example");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [other, who.otherEditor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [other, who.otherEditor.id]);
 
   const one = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows[0]?.id as string;
   ids.liveRevision = (await db.client.query("select live_revision_id from processes where id = $1", [NORTHBEAM_PROCESS_ID])).rows[0].live_revision_id;
@@ -960,7 +960,7 @@ describe("build_proposal for a visitor's idea", () => {
 describe("the suggestions delete-user bug (HANDOVER follow-up)", () => {
   it("deleting an auth user who created and reviewed a suggestion succeeds and nulls both columns; any other change at depth 1 is still refused", async () => {
     const maker = await createUser(db, "maker@play.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, maker.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, maker.id]);
     await db.client.query("begin");
     try {
       await db.client.query("set local role authenticated");

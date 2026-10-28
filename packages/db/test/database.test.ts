@@ -7,7 +7,6 @@ import {
   LARKSPUR_PROCESS_ID,
   LARKSPUR_WORKSPACE_ID,
   larkspurBundle,
-  northbeamAccess,
   northbeamBundle,
   northbeamIssues,
   northbeamScenarios,
@@ -82,7 +81,7 @@ async function loadSeeded(claims: Record<string, unknown>, wsId: string): Promis
 describe("seed", () => {
   it("seed.sql is up to date with the fixtures", () => {
     const onDisk = readFileSync(new URL("../seed.sql", import.meta.url), "utf8");
-    expect(onDisk).toBe(seedSql([northbeamBundle(), larkspurBundle()], [northbeamAccess()], northbeamScenarios(), northbeamIssues(), northbeamSources(), northbeamSourceLinks()));
+    expect(onDisk).toBe(seedSql([northbeamBundle(), larkspurBundle()], northbeamScenarios(), northbeamIssues(), northbeamSources(), northbeamSourceLinks()));
   });
 
   it("round-trips: rows loaded from the database resolve to the same engine model", async () => {
@@ -154,7 +153,7 @@ describe("row-level security", () => {
 
   it("lets a member with an agency_admin membership see the workspace", async () => {
     const user = await createUser(db, "member-admin@example.com");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'agency_admin')", [
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [
       NORTHBEAM_WORKSPACE_ID,
       user.id,
     ]);
@@ -195,7 +194,7 @@ describe("row-level security", () => {
     const editor = await createUser(db, "editor@example.com");
     const viewer = await createUser(db, "viewer@example.com");
     await db.client.query(
-      "insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')",
+      "insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')",
       [NORTHBEAM_WORKSPACE_ID, editor.id, viewer.id],
     );
     // Edits go into the process's draft (issue #9); the viewer can't open one, nor write to the editor's.
@@ -226,7 +225,7 @@ describe("row-level security", () => {
     const other = (await db.client.query("insert into workspaces (name, slug) values ('Other', 'other') returning id"))
       .rows[0].id as string;
     const editor = await createUser(db, "editor2@example.com");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [
       NORTHBEAM_WORKSPACE_ID,
       editor.id,
     ]);

@@ -69,7 +69,7 @@ describe("MCP process building (drafts only, as the user)", () => {
     editorId = await createUser("builder-editor@example.com");
     const viewerId = await createUser("builder-viewer@example.com");
     const strangerId = await createUser("builder-stranger@example.com");
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [workspaceId, editorId, viewerId]);
     const otherId = (await admin.query("insert into workspaces (name, slug) values ('Elsewhere', 'elsewhere') returning id")).rows[0].id;
     await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [otherId, strangerId]);
     editorToken = await issueToken(editorId);

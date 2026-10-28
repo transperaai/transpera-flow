@@ -20,7 +20,7 @@ const sample = demoProposals().find((p) => p.kind === "solution_idea")!;
 beforeAll(async () => {
   db = await createTestDb();
   editor = await createUser(db, "editor@ideas-web.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, editor.id]);
 });
 
 afterAll(async () => {

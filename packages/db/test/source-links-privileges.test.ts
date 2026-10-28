@@ -15,7 +15,7 @@ let linkId: string;
 beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   editor = await createUser(db, "editor@link-privileges.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, editor.id]);
   linkId = (await db.client.query("insert into source_links (workspace_id, source_id, kind, process_id) values ($1, $2, 'process', $3) returning id", [ws, interview, NORTHBEAM_PROCESS_ID])).rows[0].id;
 });
 

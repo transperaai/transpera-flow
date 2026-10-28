@@ -66,7 +66,7 @@ async function newWorkspace() {
   as(agency, true);
   const id = await rpc(tdb.dbAs(state.claims), "create_workspace", { ws_name: "Restored Co", ws_slug: slug });
   for (const [u, role] of [[editor, "editor"], [owner, "owner"], [member, "member"], [viewer, "viewer"]] as const) {
-    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [id, u.id, role]);
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [id, u.id, role]);
   }
   return { id, slug, base: await processCount(id) };
 }
@@ -89,7 +89,7 @@ beforeAll(async () => {
   viewer = await mk("viewer");
   stranger = await mk("stranger");
   agency = await mk("agency", { agency_admin: true });
-  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
+  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
   // A real backup: Northbeam as an editor exports it.
   as(editor);
   const db = tdb.dbAs(state.claims);

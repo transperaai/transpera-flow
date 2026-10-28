@@ -18,7 +18,7 @@ let viewerToken: string;
 async function member(email: string, role: string) {
   const id = randomUUID();
   await admin.query("insert into auth.users (id, email) values ($1, $2)", [id, email]);
-  await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [workspaceId, id, role]);
+  await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [workspaceId, id, role]);
   const { token, hash } = generateApiToken();
   await admin.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'e2e')", [id, hash]);
   return token;

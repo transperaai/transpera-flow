@@ -42,7 +42,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@suggestions.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.stranger = await createUser(db, "stranger@suggestions.example.com");
 });
@@ -287,15 +287,9 @@ describe("accepting", () => {
     });
   });
 
-  it("changes company settings only for owners; an editor's accept fails and the suggestion stays pending", async () => {
+  it("changes company settings for any Agency admin (editors and owners are one role since migration 20270103000000)", async () => {
     await db.as(users.editor!.claims, async (c) => {
       const s = await suggest(c, "workspaces", null, { set: { hours_per_week: 35, overhead_monthly: 12000 } });
-      const [r] = await review(c, [s.id], "accept");
-      expect(r).toMatchObject({ status: "failed" });
-      expect(r!.message).toMatch(/owners can/);
-      expect((await one(c, "select status from suggestions where id = $1", [s.id])).status).toBe("pending");
-
-      await claim(c, users.owner!.claims);
       const [ok] = await review(c, [s.id], "accept");
       expect(ok).toMatchObject({ status: "accepted", applied: { target_id: ws, before: { hours_per_week: 40, overhead_monthly: null } } });
       const w = await one(c, "select settings, provenance from workspaces where id = $1", [ws]);

@@ -63,7 +63,7 @@ beforeAll(async () => {
   tdb = await createTestDb();
   const mk = async (name: string, role?: string, meta: Record<string, unknown> = {}) => {
     const u = await createUser(tdb, `${name}-${randomUUID().slice(0, 6)}@export-route.example.com`, meta);
-    if (role) await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [NORTHBEAM_WORKSPACE_ID, u.id, role]);
+    if (role) await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [NORTHBEAM_WORKSPACE_ID, u.id, role]);
     return u;
   };
   owner = await mk("owner", "owner");

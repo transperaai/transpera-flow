@@ -180,7 +180,7 @@ describe("who may touch the company map", () => {
   const ws = northbeamBundle().workspace.id;
 
   async function asEditor<T>(fn: (c: pg.Client) => Promise<T>): Promise<T> {
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor') on conflict do nothing", [ws, editor.id]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner') on conflict do nothing", [ws, editor.id]);
     return db.as(editor.claims, fn);
   }
   const rejects = async (fn: (c: pg.Client) => Promise<unknown>, message: RegExp) => {

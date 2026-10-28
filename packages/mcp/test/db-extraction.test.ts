@@ -102,7 +102,7 @@ describe("extraction dry run (Tidewater Digital)", () => {
     // An editor with an API token, and no email address: the test needs none.
     const editorId = randomUUID();
     await admin.query("insert into auth.users (id) values ($1)", [editorId]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [workspaceId, editorId]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [workspaceId, editorId]);
     const { token, hash } = generateApiToken();
     await admin.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'e2e')", [editorId, hash]);
     editorToken = token;

@@ -15,7 +15,7 @@ let solutionId: string;
 beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   editor = await createUser(db, "editor@privileges.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, editor.id]);
   solutionId = (
     await db.client.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'S', '{\"steps\": [], \"edges\": []}') returning id", [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID])
   ).rows[0].id;

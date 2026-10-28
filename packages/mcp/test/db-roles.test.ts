@@ -52,7 +52,7 @@ describe("keeping an owner", () => {
         k === "agency" ? { agency_admin: true } : {},
       ]);
     }
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'editor')", [ws, users.owner, users.editor]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'owner')", [ws, users.owner, users.editor]);
     // Each as its API token reaches the database: the owner's claims, with the token's id.
     owner = (await tokenDbFor(env, users.owner)).db;
     editor = (await tokenDbFor(env, users.editor)).db;
@@ -116,7 +116,7 @@ describe("per-person privacy", () => {
       await db.query("insert into auth.users (id, email) values ($1, $2)", [pid[k], `priv-${k}-${tag}@example.com`]);
     }
     pid.memberPerson = NORTHBEAM_PERSON;
-    await db.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'member', $3), ($1, $4, 'editor', null)", [
+    await db.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'viewer', $3), ($1, $4, 'owner', null)", [
       NORTHBEAM_WORKSPACE_ID,
       pid.member,
       pid.memberPerson,
@@ -231,7 +231,7 @@ describe("client health rules", () => {
       hu[k] = randomUUID();
       await db.query("insert into auth.users (id, email) values ($1, $2)", [hu[k], `health-${k}-${tag}@example.com`]);
     }
-    await db.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [hws, hu.editor, hu.member]);
+    await db.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [hws, hu.editor, hu.member]);
     editorSession = env.dbAs(userClaims(hu.editor));
     memberSession = env.dbAs(userClaims(hu.member));
     editorToken = (await tokenDbFor(env, hu.editor)).db;

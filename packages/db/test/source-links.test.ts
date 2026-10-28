@@ -271,7 +271,7 @@ describe("source links", () => {
     await db.client.query("insert into source_links (workspace_id, source_id, kind, insight_key) values ($1, $2, 'insight', 'spof:step:abc')", [other, otherSource]);
     for (const role of ["owner", "editor", "member", "viewer"] as const) {
       users[role] = await createUser(db, `${role}@links.example.com`);
-      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
     }
     users.stranger = await createUser(db, "stranger@links.example.com");
   });

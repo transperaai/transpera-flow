@@ -45,7 +45,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@connector.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   otherWs = (await db.client.query("insert into workspaces (name, slug) values ('Other', 'other-connector') returning id")).rows[0].id;
   otherSource = (await db.client.query("insert into sources (workspace_id, title) values ($1, 'Their call') returning id", [otherWs])).rows[0].id;
@@ -223,7 +223,7 @@ describe("caps", () => {
     await seed(50, "2 days");
     const other = (await db.client.query("insert into workspaces (name, slug) values ('Third', $1) returning id", [`third-${randomUUID().slice(0, 8)}`])).rows[0].id as string;
     const otherProc = (await db.client.query("insert into processes (workspace_id, name) values ($1, 'P') returning id", [other])).rows[0].id as string;
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [other, users.editor!.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [other, users.editor!.id]);
     await expect(commitAs(token("editor"), (c) => insert(c, { workspace_id: other, process_id: otherProc, title: "Elsewhere" }))).resolves.toBeDefined();
   });
 });

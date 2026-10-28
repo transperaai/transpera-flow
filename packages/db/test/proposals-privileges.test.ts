@@ -14,7 +14,7 @@ let proposalId: string;
 beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   editor = await createUser(db, "editor@proposal-privileges.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, editor.id]);
   proposalId = (await db.client.query("insert into suggestion_proposals (workspace_id, kind, title) values ($1, 'issue', 'P') returning id", [ws])).rows[0].id;
 });
 

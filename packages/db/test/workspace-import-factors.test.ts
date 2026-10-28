@@ -74,7 +74,7 @@ async function newWorkspace(name = "Restored Co"): Promise<string> {
 
 async function member(ws: string, role: string): Promise<User> {
   const user = await createUser(db, `u${++seq}.${role}@import-factors.example.com`);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   return user;
 }
 
@@ -342,26 +342,6 @@ describe("a restore brings per-person times back (round trip)", () => {
     const modelBefore = toEngineModel(await loadPipeline(admin.claims, SOURCE), OPTS);
     const modelAfter = JSON.parse(backToOld(toEngineModel(await loadPipeline(admin.claims, ws), OPTS), restored, ws, planned.placeholderOf, SOURCE));
     expect(modelAfter).not.toEqual(JSON.parse(JSON.stringify(modelBefore)));
-  }, 120_000);
-
-  it("as an editor: the times are restored, and the switch arrives with the settings as one pending suggestion for an owner", async () => {
-    const bundle = await sourceBundle();
-    const planned = planWorkspaceImport(bundle, { canManage: false });
-    const ws = await newWorkspace();
-    const editor = await member(ws, "editor");
-    const result = await restoreAs(editor, ws, planned.plan, "northbeam.json");
-    expect(result.settings).toBe("suggested");
-    expect(result.counts.person_capacity_factors).toBe(sourceFactorCount);
-    expect(await count("person_capacity_factors", ws)).toBe(sourceFactorCount);
-    // The factors are stored; the switch is still off until an owner accepts the suggestion.
-    const [row] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(row!.settings).not.toHaveProperty("capacity_factor_enabled");
-    const pending = await q("select patch, status from suggestions where workspace_id = $1 and note = 'Workspace settings from a backup.'", [ws]);
-    expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({ status: "pending" });
-    expect((pending[0]!.patch as { set: Record<string, unknown> }).set.capacity_factor_enabled).toBe(true);
-    // Who entered each time is the editor of the source workspace; the restoring editor is the creator of the row (`created_by`).
-    expect(Number((await q("select count(*) from person_capacity_factors where workspace_id = $1 and created_by = $2", [ws, editor.id]))[0]!.count)).toBe(sourceFactorCount);
   }, 120_000);
 
   it("a numeric string and a number for a factor both restore, to the same stored value", async () => {

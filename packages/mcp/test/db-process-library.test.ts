@@ -50,7 +50,7 @@ describe("the process library", () => {
     const [ed, vw] = [randomUUID(), randomUUID()];
     ids.editor = ed;
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `lib-editor-${tag}@example.com`, vw, `lib-viewer-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
     for (const [key, name, kind, ws] of [["sales", "Sales", "pipeline", ids.ws], ["delivery", "Delivery", "servicing", ids.ws], ["support", "Support", "servicing", ids.ws], ["theirs", "Their process", "pipeline", ids.other]] as const) {
       ids[key] = (await one("insert into processes (workspace_id, name, kind) values ($1, $2, $3) returning id", [ws, name, kind])).id as string;
     }

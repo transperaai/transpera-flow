@@ -6,7 +6,7 @@ import { NORTHBEAM_WORKSPACE_ID } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // Creating a workspace from the app (issue #88; docs/adr/0012-*): agency
-// admins only, never over an API token, and the creator gets a membership.
+// admins only (the Owner), never over an API token, and everyone the sign-in list names gets a membership.
 
 let db: TestDb;
 const users: Record<string, { id: string; claims: Record<string, unknown> }> = {};
@@ -16,7 +16,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor"] as const) {
     users[role] = await createUser(db, `${role}@workspaces.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.agency = await createUser(db, "agency@workspaces.example.com", { agency_admin: true });
   users.stranger = await createUser(db, "stranger@workspaces.example.com");
@@ -32,7 +32,19 @@ const create = (c: pg.Client, name: string, slug: string, settings: object = {})
 const token = (claims: Record<string, unknown>) => ({ ...claims, api_token_id: randomUUID() });
 
 describe("create_workspace", () => {
-  it("an agency admin creates a workspace with default settings, a manual admin membership and the scenario library", async () => {
+  it("the Owner creates a workspace with default settings and the scenario library, open to everyone on the sign-in list", async () => {
+    // Who the list names: an Agency admin and a Viewer get a membership in the new workspace; the Owner (a rule too) needs none;
+    // an unconfirmed address and someone the list doesn't name get nothing.
+    const admin = await createUser(db, "listed.admin@workspaces.example.com");
+    const viewer = await createUser(db, "listed.viewer@listed-viewers.example");
+    const ownerRule = await createUser(db, "listed.owner@workspaces.example.com");
+    await createUser(db, "unconfirmed@listed-viewers.example", {}, { unconfirmed: true });
+    await createUser(db, "unlisted@elsewhere.example.com");
+    await db.client.query(
+      `insert into deployment_access (kind, value, role) values
+         ('email', 'listed.admin@workspaces.example.com', 'agency_admin'), ('email', 'listed.owner@workspaces.example.com', 'owner'),
+         ('domain', 'listed-viewers.example', 'viewer')`,
+    );
     await db.as(users.agency!.claims, async (c) => {
       const id = (await create(c, "  Acme Dental ", "acme-dental", { hours_per_week: 35, currency: "USD" })).rows[0].id as string;
       expect(id).toMatch(/^[0-9a-f-]{36}$/);
@@ -48,10 +60,18 @@ describe("create_workspace", () => {
         churn_monthly: 0,
         retainer: 0,
       });
-      const members = (await c.query("select user_id, role, source, active from memberships where workspace_id = $1", [id])).rows;
-      expect(members).toEqual([{ user_id: users.agency!.id, role: "agency_admin", source: "manual", active: true }]);
+      const members = (await c.query("select user_id, role, source, active from memberships where workspace_id = $1 order by role, user_id", [id])).rows;
+      const byRole = (role: string) => members.filter((m) => m.role === role).map((m) => m.user_id).sort();
+      expect(byRole("owner")).toEqual([admin.id]);
+      expect(byRole("viewer")).toEqual([viewer.id]);
+      expect(members.map((m) => m.user_id)).not.toContain(ownerRule.id);
+      expect(members.map((m) => m.user_id)).not.toContain(users.agency!.id);
+      expect(members.every((m) => m.source === "manual" && m.active)).toBe(true);
+      // The unconfirmed address (its email isn't verified) and the unlisted one got nothing.
+      expect(members).toHaveLength(2);
       expect((await c.query("select count(*)::int as n from scenarios where workspace_id = $1", [id])).rows[0].n).toBe(4);
     });
+    await db.client.query("delete from deployment_access");
   });
 
   it("a new workspace is in AUD unless it says otherwise (issue #108)", async () => {
@@ -85,7 +105,7 @@ describe("create_workspace", () => {
     await db.client.query("delete from workspaces where slug = 'visible'");
   });
 
-  it("owners, editors and strangers are refused, and a direct insert fails row-level security", async () => {
+  it("Agency admins and strangers are refused (only the Owner creates), and a direct insert fails row-level security", async () => {
     for (const who of ["owner", "editor", "stranger"]) {
       await expect(db.as(users[who]!.claims, (c) => create(c, "Nope", "nope")), who).rejects.toMatchObject({ code: "42501" });
       await expect(

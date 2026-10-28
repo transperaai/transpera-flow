@@ -46,7 +46,7 @@ describe("viewing an earlier company map (editor)", () => {
     ids.otherWs = (await one("insert into workspaces (name, slug) values ('Other Co', $1) returning id", [`other-${tag}`])).id as string;
     const editor = randomUUID();
     await admin.query("insert into auth.users (id, email) values ($1, $2)", [editor, `map-editor-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ids.ws, editor]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ids.ws, editor]);
     // A process of this workspace with a version number the company map does not have. (Made first: a new process adds a version of the map.)
     ids.process = (await one("insert into processes (workspace_id, name) values ($1, 'Onboarding') returning id", [ids.ws])).id as string;
     const rev = (await one("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 7, 'published') returning id", [ids.ws, ids.process])).id as string;

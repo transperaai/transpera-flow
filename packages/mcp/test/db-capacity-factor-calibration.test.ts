@@ -81,7 +81,7 @@ describe("per-person times from a time log", () => {
     const [ed, mb] = [randomUUID(), randomUUID()];
     accounts.push(ed, mb);
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `pt-editor-${tag}@example.com`, mb, `pt-member-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member')", [ids.ws, ed, mb]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ids.ws, ed, mb]);
     editor = env.dbAs(userClaims(ed));
     member = env.dbAs(userClaims(mb));
     anon = env.dbAs(null);

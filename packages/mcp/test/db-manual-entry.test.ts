@@ -33,7 +33,7 @@ describe("adding things by hand", () => {
     ids.ws = (await one("insert into workspaces (name, slug, settings) values ('Manual Co', $1, '{\"currency\": \"AUD\"}') returning id", [`manual-${tag}`])).id as string;
     const [ow, ed, vw] = [randomUUID(), randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6)", [ow, `man-owner-${tag}@example.com`, ed, `man-editor-${tag}@example.com`, vw, `man-viewer-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'editor'), ($1, $4, 'viewer')", [ids.ws, ow, ed, vw]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'owner'), ($1, $4, 'viewer')", [ids.ws, ow, ed, vw]);
     ids.service = (await one("insert into services (workspace_id, name) values ($1, 'SEO') returning id", [ids.ws])).id as string;
     ids.role = (await one("insert into roles (workspace_id, name) values ($1, 'Account director') returning id", [ids.ws])).id as string;
     ids.person = (await one("insert into people (workspace_id, name) values ($1, 'Maya Collins') returning id", [ids.ws])).id as string;

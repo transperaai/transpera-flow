@@ -65,7 +65,7 @@ describe("company-model suggestion tools", () => {
 
     ids.editor = await createUser(`suggest-editor-${slug}@example.com`);
     ids.viewer = await createUser(`suggest-viewer-${slug}@example.com`);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ids.editor, ids.viewer]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ids.ws, ids.editor, ids.viewer]);
     editorToken = await issueToken(ids.editor);
     viewerToken = await issueToken(ids.viewer);
     options = env.options;

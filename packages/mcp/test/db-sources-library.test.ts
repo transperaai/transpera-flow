@@ -64,7 +64,7 @@ describe("the sources library", () => {
     ids.other = (await one("insert into workspaces (name, slug) values ('Other Sources Co', $1) returning id", [`srclib-other-${tag}`])).id as string;
     [ids.editor, ids.outsider] = [randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ids.editor, `src-editor-${tag}@example.com`, ids.outsider, `src-out-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($3, $4, 'editor')", [ids.ws, ids.editor, ids.other, ids.outsider]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($3, $4, 'owner')", [ids.ws, ids.editor, ids.other, ids.outsider]);
     for (const [key, name] of [["sales", "Sales"], ["delivery", "Delivery"]] as const) {
       ids[key] = (await one("insert into processes (workspace_id, name, kind) values ($1, $2, 'pipeline') returning id", [ids.ws, name])).id as string;
     }

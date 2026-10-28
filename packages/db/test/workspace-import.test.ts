@@ -66,7 +66,7 @@ async function newWorkspace(name = "Restored Co"): Promise<string> {
 
 async function member(ws: string, role: string): Promise<User> {
   const user = await createUser(db, `u${++seq}.${role}@import-workspace.example.com`);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   return user;
 }
 
@@ -544,28 +544,9 @@ describe("what is left out stays out", () => {
 });
 
 describe("who may restore", () => {
-  it("lets an editor restore, with the workspace settings as one pending suggestion an owner accepts", async () => {
-    const m = await mini();
-    const bundle = await bundleOf(m.ws);
-    const { ws, result } = await restoreInto(bundle, "editor", { canManage: false, label: "mini.json" });
-    expect(result.settings).toBe("suggested");
-    const [row] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(row!.settings).not.toMatchObject({ hours_per_week: 37 });
-    const pending = await q("select id, patch, created_via, import_source, status from suggestions where workspace_id = $1 and note = 'Workspace settings from a backup.'", [ws]);
-    expect(pending.length).toBe(1);
-    expect(pending[0]).toMatchObject({ created_via: "upload", import_source: "mini.json", status: "pending" });
-    const owner = await member(ws, "owner");
-    const reply = await as(owner.claims, async (c) => (await c.query("select public.review_suggestions($1::uuid[], 'accept') as r", [[pending[0]!.id]])).rows[0].r);
-    expect(JSON.stringify(reply)).not.toContain("error");
-    const [after] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(after!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
-  });
-
   const ok: [string, (ws: string) => Promise<User>][] = [
-    ["an agency admin (JWT flag)", async () => admin],
-    ["an agency_admin membership", async (ws) => member(ws, "agency_admin")],
-    ["an owner", async (ws) => member(ws, "owner")],
-    ["an editor", async (ws) => member(ws, "editor")],
+    ["the Owner (JWT flag)", async () => admin],
+    ["an Agency admin (an owner membership)", async (ws) => member(ws, "owner")],
   ];
   it.each(ok)("lets %s restore", async (_who, make) => {
     const ws = await newWorkspace();
@@ -576,7 +557,6 @@ describe("who may restore", () => {
   });
 
   const refused: [string, (ws: string) => Promise<User>][] = [
-    ["a member", async (ws) => member(ws, "member")],
     ["a viewer", async (ws) => member(ws, "viewer")],
     ["a signed-in non-member", async () => createUser(db, `stranger${++seq}@elsewhere.example.com`)],
   ];

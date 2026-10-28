@@ -15,7 +15,7 @@ beforeAll(async () => {
   tdb = await createTestDb();
   const e = await createUser(tdb, "editor@rules-save.example.com");
   const v = await createUser(tdb, "viewer@rules-save.example.com");
-  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ws, e.id, v.id]);
+  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, e.id, v.id]);
   editor = tdb.dbAs(e.claims as never);
   viewer = tdb.dbAs(v.claims as never);
 });

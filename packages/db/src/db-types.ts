@@ -870,25 +870,6 @@ export interface UserTours {
   user_id: Generated<string>;
 }
 
-export interface WorkspaceAccessEmails {
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  email: string;
-  id: Generated<string>;
-  person_id: string | null;
-  role: Generated<MembershipRole>;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
-export interface WorkspaceDomains {
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  domain: string;
-  id: Generated<string>;
-  workspace_id: string;
-}
-
 export interface WorkspaceHeadlines {
   computed_at: Generated<string>;
   computed_by: Generated<string | null>;
@@ -979,8 +960,6 @@ export interface DB {
   suggestion_proposals: SuggestionProposals;
   suggestions: Suggestions;
   user_tours: UserTours;
-  workspace_access_emails: WorkspaceAccessEmails;
-  workspace_domains: WorkspaceDomains;
   workspace_headlines: WorkspaceHeadlines;
   workspace_logos: WorkspaceLogos;
   workspaces: Workspaces;

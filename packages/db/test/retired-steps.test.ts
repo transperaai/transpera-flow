@@ -68,7 +68,7 @@ const insertRows = async (c: pg.Client, table: "steps" | "edges", rows: object[]
 beforeAll(async () => {
   db = await createTestDb();
   editor = await createUser(db, "editor@retired.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, editor.id]);
 });
 
 afterAll(async () => {

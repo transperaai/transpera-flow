@@ -16,7 +16,7 @@ let editor: { id: string; claims: Record<string, unknown> };
 beforeAll(async () => {
   db = await createTestDb();
   editor = await createUser(db, "editor@proposals-web.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, editor.id]);
 });
 
 afterAll(async () => {

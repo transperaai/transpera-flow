@@ -39,7 +39,7 @@ beforeAll(async () => {
   db = await createTestDb();
   const link = async (email: string, role: string, person: string | null) => {
     const u = await createUser(db, email);
-    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, $3, $4)", [ws, u.id, role, person]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::public.membership_role, $4)", [ws, u.id, role, person]);
     return u;
   };
   editor = await link("cf-editor@example.com", "editor", P.editor);
@@ -383,8 +383,8 @@ describe("save_capacity_factor_switch", () => {
     });
   });
 
-  it("owner-only fields stay owner-only: an editor still can't save the workspace through save_fields", async () => {
-    await db.as(editor.claims, async (c) => {
+  it("workspace settings stay out of a viewer's reach: they still can't save the workspace through save_fields (an Agency admin can: migration 20270103000000 made editors and owners one role)", async () => {
+    await db.as(viewer.claims, async (c) => {
       const r = (await c.query("select public.save_fields('workspaces', $1::jsonb, $2::jsonb, $3::jsonb) as r", [JSON.stringify({ id: ws }), JSON.stringify({ capacity_factor_enabled: null }), JSON.stringify({ capacity_factor_enabled: true })])).rows[0].r;
       expect(r.status).toBe("not_found");
     });

@@ -108,7 +108,7 @@ beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   const member = async (email: string, role: string) => {
     const u = await createUser(db, email);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, u.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
     return u;
   };
   who.owner = await member("owner@share.example", "owner");
@@ -119,7 +119,7 @@ beforeAll(async () => {
   who.admin = await createUser(db, "admin@share.example", { agency_admin: true });
   // An editor of Larkspur only (a different workspace).
   who.otherEditor = await createUser(db, "other-editor@share.example");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [other, who.otherEditor.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [other, who.otherEditor.id]);
 
   personName = (await db.client.query("select name from people where workspace_id = $1 order by created_at, id limit 1", [ws])).rows[0].name;
   personFirst = personName.split(" ")[0]!;
@@ -356,7 +356,7 @@ describe("the write trigger", () => {
 
   it("deleting the user who made or turned off a link doesn't fail (the foreign key nulls created_by and revoked_by)", async () => {
     const u = await createUser(db, "leaver@share.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, u.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, u.id]);
     await db.as(u.claims, async (c) => {
       const id = (await insertLink(c, { tok: "leaver" })).rows[0].id;
       await c.query("update share_links set revoked_at = now() where id = $1", [id]);
@@ -915,7 +915,7 @@ describe("share_team_capacity on Larkspur", () => {
   beforeAll(async () => {
     const link = async (email: string, role: string, person: string | null) => {
       const u = await createUser(db, email);
-      await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, $3, $4)", [other, u.id, role, person]);
+      await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::public.membership_role, $4)", [other, u.id, role, person]);
       return u;
     };
     lEditor = await link("l-editor@share.example", "editor", null);
@@ -1035,7 +1035,7 @@ describe("share links never carry per-person times (C6)", () => {
     await db.client.query("insert into person_capacity_factors (person_id, workspace_id, step_id, factor) values ($1, $2, null, 0.8)", [larkspurPersonIds.jess!, other]);
     try {
       const lEditor = await createUser(db, "cf-l-editor@share.example");
-      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [other, lEditor.id]);
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [other, lEditor.id]);
       for (const show of [false, true]) {
         const t = await db.as(lEditor.claims, async (c) => (await c.query("select public.share_team_capacity($1, $2) as t", [other, show])).rows[0].t as Json);
         expect(t).not.toHaveProperty("person_capacity_factors");

@@ -51,7 +51,7 @@ beforeAll(async () => {
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     const email = `${role}@lib.example.com`;
     const u = await createUser(tdb, email);
-    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, u.id, role]);
+    await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, u.id, role]);
     users[role] = { id: u.id, email, claims: { sub: u.id, role: "authenticated", email } };
   }
   const agency = await createUser(tdb, "agency@lib.example.com", { agency_admin: true });

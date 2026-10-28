@@ -51,7 +51,7 @@ describe("the process library in every editor", () => {
     ids.other = (await one("insert into workspaces (name, slug) values ('Other Everywhere Co', $1) returning id", [`everywhere-other-${tag}`])).id as string;
     const [ed, vw] = [randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4)", [ed, `ev-editor-${tag}@example.com`, vw, `ev-viewer-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ids.ws, ed, vw]);
     ids.theirs = (await one("insert into processes (workspace_id, name, kind) values ($1, 'Their process', 'pipeline') returning id", [ids.other])).id as string;
     ids.company = (await one("select id from processes where workspace_id = $1 and is_company", [ids.ws])).id as string;
     editor = env.dbAs(userClaims(ed));

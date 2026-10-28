@@ -8,7 +8,13 @@ import type { Selectable } from "kysely";
 import type { DB, Json } from "./db-types";
 import type { Viewer } from "./queries";
 
-export type MembershipRole = "agency_admin" | "owner" | "editor" | "member" | "viewer";
+/**
+ * What `memberships.role` can hold (migration 20270103000000): `owner` is an Agency admin, `viewer` is a Viewer. The Owner needs
+ * no membership (the agency-admin flag). The database enum still has the legacy labels, which a check keeps out of the table.
+ */
+export type MembershipRole = "owner" | "viewer";
+/** The product's three roles, as the "Who can sign in" list stores them (`deployment_access.role`). */
+export type DeploymentRole = "owner" | "agency_admin" | "viewer";
 export type StepKind = "task" | "wait" | "decision" | "subprocess" | "group" | "start" | "end";
 export type StepOutcome = "won" | "lost" | "done";
 export type Distribution = "constant" | "triangular" | "lognormal";
@@ -1153,28 +1159,6 @@ export interface ProposalRow {
   created_by: string | null;
 }
 
-/** An allowed email domain: managed Google accounts on it join as `member`. */
-export interface WorkspaceDomainRow {
-  id: string;
-  workspace_id: string;
-  domain: string;
-}
-
-/** A pre-assigned email: whoever signs in with it gets exactly this role. */
-export interface AccessEmailRow {
-  id: string;
-  workspace_id: string;
-  email: string;
-  role: Exclude<MembershipRole, "agency_admin">;
-  person_id: string | null;
-}
-
-/** Who can get into a workspace without an invitation (issue #51). */
-export interface WorkspaceAccess {
-  domains: WorkspaceDomainRow[];
-  emails: AccessEmailRow[];
-}
-
 type TableRow<T extends keyof DB> = Selectable<DB[T]>;
 
 /** `true` when every field of `Row` is a column of table `T` with a compatible type. */
@@ -1225,8 +1209,6 @@ export type _SchemaDriftChecks = [
   Assert<Matches<MarketScheduleRow, "market_schedule">>,
   // driver is check-constrained to ChurnDriverKey; provenance is jsonb.
   Assert<Matches<Omit<ChurnDriverRow, "driver" | "provenance">, "churn_drivers">>,
-  Assert<Matches<WorkspaceDomainRow, "workspace_domains">>,
-  Assert<Matches<AccessEmailRow, "workspace_access_emails">>,
   // patch is jsonb; ScenarioPatch[] is its checked shape.
   Assert<Matches<Omit<ScenarioRow, "patch">, "scenarios">>,
   // evidence_metrics is jsonb; Record<string, number> is its app-side shape.

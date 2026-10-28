@@ -18,7 +18,7 @@ beforeAll(async () => {
   editor = await createUser(db, "editor@import-atomic.example.com");
   viewer = await createUser(db, "viewer@import-atomic.example.com");
   other = await createUser(db, "other@import-atomic.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
 });
 
 afterAll(async () => {

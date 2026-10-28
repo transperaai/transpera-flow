@@ -38,7 +38,7 @@ const stored = async (id: string) =>
 beforeAll(async () => {
   tdb = await createTestDb();
   const u = await createUser(tdb, "editor@northbeam.example");
-  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, u.id]);
+  await tdb.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, u.id]);
   editor = tdb.dbAs(u.claims as never);
   const steps = JSON.stringify({ steps: [], edges: [] });
   solution = (await tdb.client.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'Sales v8', $4::jsonb) returning id", [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, steps])).rows[0].id;

@@ -37,7 +37,7 @@ beforeAll(async () => {
   db = await createTestDb();
   editor = await createUser(db, "afs-editor@example.com");
   owner = await createUser(db, "afs-owner@example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'owner')", [ws, editor.id, owner.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'owner')", [ws, editor.id, owner.id]);
 }, 120_000);
 
 afterAll(async () => {

@@ -84,7 +84,7 @@ describe("importing a deals file", () => {
 
     const [ed, mb, vw] = [randomUUID(), randomUUID(), randomUUID()];
     await admin.query("insert into auth.users (id, email) values ($1, $2), ($3, $4), ($5, $6)", [ed, `imp-editor-${tag}@example.com`, mb, `imp-member-${tag}@example.com`, vw, `imp-viewer-${tag}@example.com`]);
-    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'member'), ($1, $4, 'viewer')", [ids.ws, ed, mb, vw]);
+    await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer'), ($1, $4, 'viewer')", [ids.ws, ed, mb, vw]);
     editor = env.dbAs(userClaims(ed));
     member = env.dbAs(userClaims(mb));
     viewer = env.dbAs(userClaims(vw));

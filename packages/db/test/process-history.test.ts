@@ -70,7 +70,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "other", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@history.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [
       ws,
       users[role]!.id,
       role === "other" ? "editor" : role,
@@ -86,7 +86,7 @@ afterAll(async () => {
 
 describe("revision_history", () => {
   it("lists published versions newest first with who published them and what changed", async () => {
-    // "other" is linked to a person, so their name shows; the editor is not.
+    // "other" is linked to a person, so an Agency admin sees their name; the editor (an Agency admin, not linked) shows as an email.
     const [person] = (await db.client.query("select id, name from people where workspace_id = $1 order by name limit 1", [ws])).rows;
     await db.client.query("update memberships set person_id = $1 where workspace_id = $2 and user_id = $3", [person.id, ws, users.other!.id]);
     v2 = await publishVersion(users.other!.claims, 12);
@@ -94,23 +94,28 @@ describe("revision_history", () => {
     const mcp = { ...users.editor!.claims, api_token_id: randomUUID() };
     v3 = await publishVersion(mcp, 15);
 
-    const rows = await db.as(users.editor!.claims, async (c) => (await c.query("select * from revision_history($1)", [proc])).rows);
+    const rows = await db.as(users.other!.claims, async (c) => (await c.query("select * from revision_history($1)", [proc])).rows);
     expect(rows.map((r) => [r.number, r.status])).toEqual([
       [3, "published"],
       [2, "superseded"],
       [1, "superseded"],
     ]);
     const [r3, r2, r1] = rows;
-    expect(r3).toMatchObject({ revision_id: v3, author_kind: "mcp", author_name: null });
+    expect(r3).toMatchObject({ revision_id: v3, author_kind: "mcp", author_name: "editor@history.example.com" });
     expect(r3.changes).toEqual({ steps: { added: 0, removed: 0, changed: 1 }, edges: { added: 0, removed: 0, changed: 0 } });
     expect(r2).toMatchObject({ revision_id: v2, author_kind: "user", author_name: person.name });
     // Version 1 came with the seed: no author, no recorded change.
     expect(r1).toMatchObject({ revision_id: v1, author_kind: null, author_name: null, changes: null });
+    // A viewer sees neither the person's name (they can't see that person) nor an email.
+    const asViewer = await db.as(users.viewer!.claims, async (c) => (await c.query("select number, author_name from revision_history($1) order by number", [proc])).rows);
+    expect(asViewer).toEqual([{ number: 1, author_name: null }, { number: 2, author_name: null }, { number: 3, author_name: null }]);
   });
 
   it("shows an email only to someone who manages the workspace", async () => {
     const asOwner = await db.as(users.owner!.claims, async (c) => (await c.query("select * from revision_history($1) where number = 3", [proc])).rows[0]);
     expect(asOwner.author_name).toBe("editor@history.example.com");
+    const asViewer = await db.as(users.viewer!.claims, async (c) => (await c.query("select * from revision_history($1) where number = 3", [proc])).rows[0]);
+    expect(asViewer.author_name).toBeNull();
   });
 
   it("returns nothing to someone who can't read the workspace, and never a draft", async () => {
