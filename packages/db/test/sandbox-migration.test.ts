@@ -4,7 +4,7 @@ import { NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID, SA
 import { applyMigrations } from "../src/migrations";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
-// Migration 20270106000000 on a database full of rows, the way the cutover runs it (the production copy is imported at row 76, then
+// Migration 20270109000000 on a database full of rows, the way the cutover runs it (the production copy is imported at row 76, then
 // the remaining migrations run on it): scenarios and forecast plans become sandbox scenarios with their ids kept, every patch path
 // and every marker kind maps to a lever, clashing names are renamed, the issue and run links follow, the old tables go, and the
 // rewritten restore still restores. The rows at the base are the seeded Northbeam plus the awkward ones below.

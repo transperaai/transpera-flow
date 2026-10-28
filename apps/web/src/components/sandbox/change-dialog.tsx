@@ -75,8 +75,10 @@ export function ChangeDialog(props: ChangeDialogProps) {
     return ops.length ? ops : [...l.ops];
   };
   const [op, setOp] = useState<PatchOp>(editing?.op ?? offeredOps(lever)[0]!);
-  const scale = lever.displayScale ?? 1;
-  const initialValue = editing && editing.lever === lever.id ? String(Math.round(editing.value * scale * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
+  // A multiplier is a plain number; only a set or an add is shown in the lever's display unit (a month, not a week).
+  const scaleOf = (o: PatchOp) => (o === "multiply" ? 1 : (lever.displayScale ?? 1));
+  const scale = scaleOf(op);
+  const initialValue = editing && editing.lever === lever.id ? String(Math.round(editing.value * scaleOf(editing.op) * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
   const [valueText, setValueText] = useState(initialValue);
   const [targetId, setTargetId] = useState<string>(editing?.target ?? "");
   const [hireName, setHireName] = useState(editing?.params?.name ?? "");

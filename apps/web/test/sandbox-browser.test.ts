@@ -1,0 +1,588 @@
+import { chromium, type Browser, type Locator, type Page } from "playwright-core";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { bundleHarness } from "./build-harness";
+
+// The Sandbox in a real browser, with the simulation in a real Web Worker (./sandbox-harness/entry.tsx), in the demo (scenarios kept
+// in the tab): create, rename, duplicate, build on (an inherited change is read-only) and delete (refused with a child); a whole-run
+// change and a timed one that is dragged along the months; leave on a Monday; a solution from a month; the horizon presets and the
+// custom field (1, 24 and 25, which is refused); comparing three scenarios with "No changes", one of them failing; a Viewer, who
+// can open, run and compare but not change anything; a phone, which is read only; and `?plan=` opening a scenario by the id the
+// migration kept. At 1440, 640 and 400 px. Every case checks for console errors.
+
+let browser: Browser;
+let script: string;
+let workers: Record<string, string>;
+
+const META = { "import.meta.url": JSON.stringify("http://harness.test/src/lib/x/") };
+// Just enough CSS for the page to lay out: the sr-only tables hidden, as in the app.
+const CSS = `body { margin: 0; font: 14px sans-serif } .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0) }`;
+const JANUARY = "50000000-0000-4000-8000-000000000005";
+const MARCH = "50000000-0000-4000-8000-000000000006";
+const THEN_LEADS = "50000000-0000-4000-8000-000000000007";
+
+beforeAll(async () => {
+  [script, workers] = await Promise.all([
+    bundleHarness(new URL("./sandbox-harness/entry.tsx", import.meta.url), META, { navigation: "navigation-url.ts" }),
+    Promise.all(["simulate.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
+  ]);
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+}, 120_000);
+
+afterAll(async () => {
+  await browser?.close();
+});
+
+interface Options {
+  mode?: "demo" | "readonly";
+  url?: string;
+  broken?: boolean;
+  many?: boolean;
+  dan?: boolean;
+}
+
+async function mount(width: number, o: Options = {}): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport: { width, height: 1000 } });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  await page.setContent(`<style>${CSS}</style><div id="root"></div>`);
+  await page.evaluate((w) => (window.workerScripts = w), workers);
+  await page.addScriptTag({ content: script });
+  await page.evaluate((opts) => window.mountSandbox({ mode: "demo", ...opts }), o);
+  try {
+    await page.waitForSelector("[data-forecast-timeline], [data-sandbox-compare]", { timeout: 90_000 });
+  } catch (e) {
+    // Say what the page showed and what it complained about, not just that it timed out.
+    throw new Error(`${(e as Error).message}\nErrors: ${errors.join(" | ")}\nPage: ${(await page.locator("#root").innerText()).slice(0, 600)}`);
+  }
+  return { page, errors };
+}
+
+const TIMELINE = "[data-forecast-timeline]";
+const runs = async (page: Page) => Number(await page.locator(TIMELINE).getAttribute("data-plan-run"));
+/** Waits until the scenario has been run `n` times in all and the run is finished. */
+const waitRuns = (page: Page, n: number) =>
+  page.waitForFunction(
+    (count) => {
+      const el = document.querySelector("[data-forecast-timeline]");
+      return Number(el?.getAttribute("data-plan-run")) >= count && el?.getAttribute("data-plan-status") === "done";
+    },
+    n,
+    { timeout: 90_000 },
+  );
+const pick = (page: Page, label: string) => page.locator("[data-scenario-select]").selectOption({ label });
+const marker = (page: Page, kind?: string) => page.locator(kind ? `[data-plan-marker][data-kind="${kind}"]` : "[data-plan-marker]").first();
+const valuetext = async (m: Locator) => (await m.getAttribute("aria-valuetext")) ?? "";
+const button = (page: Page, name: string) => page.locator("[data-scenario-bar]").getByRole("button", { name, exact: true });
+const status = (page: Page) => page.locator("[data-scenario-status-line]").innerText();
+const options = (page: Page) => page.locator("[data-scenario-select] option").allInnerTexts();
+const changes = (page: Page) => page.locator("[data-change-list] [data-change]");
+
+/** A role's cell for a month, from the chart's table for screen readers: "63% (60% to 70%)" as the average, 63. */
+const busyCell = (page: Page, role: string, month: string) =>
+  page.evaluate(
+    ([r, mo]) => {
+      const table = document.querySelector("[data-forecast-timeline] table")!;
+      const col = [...table.querySelectorAll("thead th")].findIndex((h) => h.textContent === r);
+      const row = [...table.querySelectorAll("tbody tr")].find((tr) => tr.querySelector("th")!.textContent === mo)!;
+      return Number(/^(\d+)%/.exec(row.children[col]!.textContent!)![1]);
+    },
+    [role, month] as const,
+  );
+
+async function openAdd(page: Page) {
+  await page.locator("[data-change-add]").click();
+  await page.waitForSelector("[data-change-dialog]");
+}
+async function addHire(page: Page, month = "January 2027") {
+  await openAdd(page);
+  await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Hire" });
+  await page.getByLabel("On", { exact: true }).selectOption({ label: "PPC specialist" });
+  await page.getByLabel("From a month").check();
+  await page.getByLabel("From month", { exact: true }).selectOption({ label: month });
+  await page.locator("[data-change-dialog] button[type=submit]").click();
+  await page.waitForSelector("[data-plan-marker]");
+}
+async function newScenario(page: Page) {
+  await page.locator("[data-scenario-new]").click();
+  await page.waitForSelector("[data-change-list]");
+}
+
+/** Drag a marker with the mouse to the middle of month column `toColumn` (0 is the first month). */
+async function dragTo(page: Page, m: Locator, toColumn: number, { release = true } = {}) {
+  await m.scrollIntoViewIfNeeded();
+  const b = (await m.boundingBox())!;
+  const cx = b.x + b.width / 2;
+  const cy = b.y + b.height / 2;
+  const svg = (await page.locator(`${TIMELINE} > svg`).boundingBox())!;
+  const compact = svg.width < 520;
+  const col = (svg.width - (compact ? 2 : 176) - (compact ? 40 : 48)) / 12;
+  const tx = svg.x + (compact ? 2 : 176) + (toColumn + 0.5) * col;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(cx + ((tx - cx) * i) / 12, cy);
+  if (release) await page.mouse.up();
+}
+
+describe("the Sandbox", { timeout: 180_000 }, () => {
+  for (const width of [1440, 640, 400]) {
+    describe(`at ${width}px`, () => {
+      // A phone (under 640px) is read only (issue #44): it opens, runs and compares, but cannot add, move, save or delete. The
+      // cases that change something run from 640px up; the phone's own cases are in "on a phone" below.
+      const onTablet = width >= 640 ? it : () => {};
+
+      onTablet("starts a scenario, adds a whole-run change and a timed one, and drags the timed one: dropping it runs again", async () => {
+        const { page, errors } = await mount(width);
+        expect(await page.locator("[data-plan-lane]").count()).toBe(0);
+        await newScenario(page);
+        expect(await page.locator("[data-changes-empty='scenario']").innerText()).toContain("No changes yet");
+        await waitRuns(page, 1);
+        // A whole-run change: opportunities x1.25.
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Opportunities coming in" });
+        await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
+        await page.getByLabel("Value", { exact: true }).fill("1.25");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-change-list] [data-change]");
+        expect(await changes(page).first().innerText()).toContain("Opportunities coming in ×1.25");
+        expect(await changes(page).first().innerText()).toContain("the whole run");
+        // The whole-run change is not a point on the lane.
+        expect(await page.locator("[data-plan-marker]").count()).toBe(0);
+        // A timed one: a hire from January.
+        await addHire(page);
+        await waitRuns(page, 2);
+        expect(await changes(page).count()).toBe(2);
+        const m = marker(page, "hire");
+        expect(await valuetext(m)).toContain("New PPC specialist starts, 1 January 2027");
+        expect(await m.getAttribute("aria-label")).toBe("Hire: New PPC specialist");
+        const before = await busyCell(page, "PPC specialist", "February 2027");
+        await dragTo(page, m, 6);
+        expect(await valuetext(m)).toContain("1 April 2027");
+        await waitRuns(page, 3);
+        expect(await busyCell(page, "PPC specialist", "February 2027")).toBeGreaterThan(before);
+        expect(await changes(page).first().innerText()).toContain("Opportunities coming in ×1.25");
+        expect(await changes(page).nth(1).innerText()).toContain("from Apr 2027");
+        expect(await status(page)).toContain("Unsaved changes");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("moves a change by keyboard: a month a key press, three months a page, Delete removes", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await addHire(page, "April 2027");
+        await waitRuns(page, 1);
+        const m = marker(page, "hire");
+        await m.focus();
+        await page.keyboard.press("ArrowLeft");
+        await page.keyboard.press("ArrowLeft");
+        expect(await valuetext(m)).toContain("1 February 2027");
+        expect(await page.locator("[data-plan-announce]").innerText()).toContain("New PPC specialist starts moved to 1 February 2027. Updating the forecast…");
+        await waitRuns(page, 2);
+        await page.keyboard.press("PageDown");
+        expect(await valuetext(m)).toContain("1 May 2027");
+        await page.keyboard.press("Home");
+        expect(await valuetext(m)).toContain("1 October 2026");
+        await page.keyboard.press("End");
+        expect(await valuetext(m)).toContain("1 September 2027");
+        expect(await page.evaluate(() => document.activeElement?.getAttribute("data-plan-marker") !== null)).toBe(true);
+        const done = await runs(page);
+        await page.keyboard.press("Delete");
+        expect(await page.locator("[data-plan-marker]").count()).toBe(0);
+        expect(await changes(page).count()).toBe(0);
+        await waitRuns(page, done + 1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("treats a short click as a click: it opens the change, Escape closes it, nothing moved; Escape cancels a drag", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await addHire(page);
+        await waitRuns(page, 1);
+        const m = marker(page, "hire");
+        const before = await valuetext(m);
+        await m.click();
+        await page.waitForSelector("[data-change-dialog]");
+        expect(await page.locator("[data-change-dialog]").innerText()).toContain("Change this change");
+        await page.keyboard.press("Escape");
+        await page.waitForSelector("[data-change-dialog]", { state: "detached" });
+        expect(await valuetext(m)).toBe(before);
+        expect(await runs(page)).toBe(1);
+        await dragTo(page, m, 8, { release: false });
+        expect(await page.locator("[data-plan-ghost]").count()).toBe(1);
+        await page.keyboard.press("Escape");
+        await page.mouse.up();
+        expect(await page.locator("[data-plan-ghost]").count()).toBe(0);
+        expect(await valuetext(m)).toBe(before);
+        await page.waitForTimeout(600);
+        expect(await runs(page)).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("adds leave as a bar on a Monday that moves by whole weeks", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Leave" });
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "Dan Okafor" });
+        await page.getByLabel("From", { exact: true }).fill("2027-02-10");
+        expect(await page.locator("[data-change-dialog]").innerText()).toContain("Monday 8 February 2027");
+        await page.getByLabel("For (weeks)", { exact: true }).fill("3");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector('[data-plan-marker][data-kind="leave"]');
+        await waitRuns(page, 1);
+        const m = marker(page, "leave");
+        expect(await valuetext(m)).toContain("Dan Okafor on leave for 3 weeks, 8 February 2027");
+        await dragTo(page, m, 7);
+        await waitRuns(page, 2);
+        const date = /, (\d+ \w+ \d{4})/.exec(await valuetext(m))![1]!;
+        expect(new Date(`${date} UTC`).getUTCDay()).toBe(1);
+        expect(new Date(`${date} UTC`).getTime()).toBeGreaterThan(Date.parse("2027-04-01"));
+        await m.focus();
+        await page.keyboard.press("ArrowRight");
+        const next = /, (\d+ \w+ \d{4})/.exec(await valuetext(m))![1]!;
+        expect((Date.parse(`${next} UTC`) - Date.parse(`${date} UTC`)) / 86_400_000).toBe(7);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("puts a solution live from a month, and a date that is not a Monday is moved back to one", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Solution goes live" });
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "Faster PPC campaign setup" });
+        await page.getByLabel("From a month").check();
+        await page.getByLabel("From month", { exact: true }).selectOption({ label: "April 2027" });
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector('[data-plan-marker][data-kind="solution"]');
+        await waitRuns(page, 1);
+        expect(await valuetext(marker(page, "solution"))).toContain("Faster PPC campaign setup goes live, 1 April 2027");
+        expect(await page.locator("[data-scenario-problems], [data-needs-attention]").count()).toBe(0);
+        expect(await page.locator("[data-with-this-scenario]").innerText()).toContain("With this scenario");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("opens a saved scenario with a solution, and shows its changes", async () => {
+        const { page, errors } = await mount(width);
+        await pick(page, "Hire in March");
+        await waitRuns(page, 1);
+        expect(await page.locator('[data-plan-marker][data-kind="solution"]').count()).toBe(1);
+        expect(await changes(page).count()).toBe(2);
+        expect(await page.locator("[data-with-this-scenario]").innerText()).toContain("With this scenario");
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain(`scenario=${MARCH}`);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("renames, saves, duplicates, builds on and deletes scenarios; a parent with a child can't be deleted", async () => {
+        const { page, errors } = await mount(width);
+        await pick(page, "Hire in January");
+        await waitRuns(page, 1);
+        // Rename and save.
+        await button(page, "Rename").click();
+        await page.getByLabel("Scenario name").fill("Hire early");
+        await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        expect(await status(page)).toContain("Unsaved changes");
+        // Switching away asks first.
+        await pick(page, "No changes");
+        expect(await page.getByRole("dialog").innerText()).toContain("Discard your changes to “Hire early”?");
+        await page.getByRole("button", { name: "Keep editing" }).click();
+        await page.locator("[data-scenario-save]").click();
+        await page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent?.includes("Saved"));
+        expect(await options(page)).toEqual(["No changes", "Hire early", "Hire in March", "Hire in March, then more leads"]);
+        // Duplicate: the same changes, a new name.
+        await button(page, "Duplicate").click();
+        expect(await page.locator("[data-sandbox-name-dialog] input").inputValue()).toBe("Hire early (copy)");
+        await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        await page.waitForFunction(() => document.querySelector("[data-scenario-select]")?.textContent?.includes("Hire early (copy)"));
+        expect(await changes(page).count()).toBe(1);
+        expect(await status(page)).toContain("Saved");
+        // A name already taken is refused in the dialog.
+        await button(page, "Duplicate").click();
+        await page.locator("[data-sandbox-name-dialog] input").fill("hire early");
+        await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-sandbox-name-dialog]").innerText()).toContain("A scenario with that name already exists.");
+        await page.getByRole("button", { name: "Cancel" }).click();
+        // Build on: a new scenario with the parent's change shown read-only, and none of its own.
+        await button(page, "Build on").click();
+        await page.locator("[data-sandbox-name-dialog] input").fill("Early, then more");
+        await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        await page.waitForFunction(() => document.querySelector("[data-scenario-parent]") !== null);
+        expect(await page.locator("[data-scenario-parent]").innerText()).toContain("Builds on “Hire early (copy)”");
+        const inherited = page.locator("[data-change-list] [data-change][data-inherited]");
+        expect(await inherited.count()).toBe(1);
+        expect(await inherited.innerText()).toContain("from Hire early (copy)");
+        expect(await inherited.getByRole("button").count()).toBe(0);
+        expect(await page.locator("[data-plan-marker]").count()).toBe(1);
+        // The inherited marker can't be moved.
+        const m = marker(page, "hire");
+        const at = await valuetext(m);
+        await dragTo(page, m, 8);
+        await m.focus();
+        await page.keyboard.press("ArrowRight");
+        expect(await valuetext(m)).toBe(at);
+        // Add its own change: it is editable.
+        await waitRuns(page, 1);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Base churn" }).catch(() => undefined);
+        await page.keyboard.press("Escape");
+        // Deleting the parent is refused, naming the child.
+        await pick(page, "Hire early (copy)");
+        await button(page, "Delete").click();
+        await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
+        await page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent?.includes("Other scenarios build on this one"));
+        expect(await status(page)).toContain("“Early, then more”");
+        expect(await options(page)).toContain("Hire early (copy)");
+        // Delete the child first, then the parent.
+        await pick(page, "Early, then more");
+        await button(page, "Delete").click();
+        expect(await page.getByRole("dialog").innerText()).toContain("Delete the scenario “Early, then more”? This can't be undone.");
+        await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
+        await page.waitForFunction(() => !document.querySelector("[data-scenario-select]")?.textContent?.includes("Early, then more"));
+        await pick(page, "Hire early (copy)");
+        await button(page, "Delete").click();
+        await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
+        await page.waitForFunction(() => !document.querySelector("[data-scenario-select]")?.textContent?.includes("Hire early (copy)"));
+        expect(await options(page)).toEqual(["No changes", "Hire early", "Hire in March", "Hire in March, then more leads"]);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("opens the sample scenario that builds on another with the parent's changes read-only", async () => {
+        const { page, errors } = await mount(width);
+        await pick(page, "Hire in March, then more leads");
+        await waitRuns(page, 1);
+        expect(await page.locator("[data-scenario-parent]").innerText()).toContain("Builds on “Hire in March”");
+        expect(await page.locator("[data-change-list] [data-change][data-inherited]").count()).toBe(2);
+        expect(await changes(page).count()).toBe(3);
+        expect(await page.locator("[data-plan-marker]").count()).toBe(3);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("picks the horizon: presets, a custom number from 1 to 24, and refuses 25", async () => {
+        const { page, errors } = await mount(width);
+        const group = page.getByRole("group", { name: "Time horizon" });
+        expect(await group.getByRole("button").allInnerTexts()).toEqual(["3m", "6m", "12m", "24m"]);
+        const months = () => page.locator(`${TIMELINE} table tbody tr`).count();
+        expect(await months()).toBe(12);
+        await group.getByRole("button", { name: "6 months" }).click();
+        await page.waitForFunction(() => document.querySelectorAll("[data-forecast-timeline] table tbody tr").length === 6, undefined, { timeout: 90_000 });
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain("horizon=6");
+        const custom = page.locator("[data-horizon-custom]");
+        await custom.fill("1");
+        await page.waitForFunction(() => document.querySelectorAll("[data-forecast-timeline] table tbody tr").length <= 2, undefined, { timeout: 90_000 });
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain("horizon=1");
+        await custom.fill("24");
+        await page.waitForFunction(() => document.querySelectorAll("[data-forecast-timeline] table tbody tr").length >= 24, undefined, { timeout: 90_000 });
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain("horizon=24");
+        // 25 is refused: said in words, and the horizon stays 24.
+        await custom.fill("25");
+        expect(await page.locator("[data-horizon-refused]").innerText()).toBe("1 to 24");
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain("horizon=24");
+        expect(await months()).toBeGreaterThanOrEqual(24);
+        await custom.fill("0");
+        expect(await page.locator("[data-horizon-refused]").count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("uses a scenario's own horizon, and the address's when it has one", async () => {
+        const { page, errors } = await mount(width, { url: `/demo/sandbox?scenario=${JANUARY}&horizon=6` });
+        await waitRuns(page, 1);
+        expect(await page.locator(`${TIMELINE} table tbody tr`).count()).toBe(6);
+        await page.close();
+        const second = await mount(width, { url: `/demo/sandbox?scenario=${JANUARY}` });
+        await waitRuns(second.page, 1);
+        expect(await second.page.locator(`${TIMELINE} table tbody tr`).count()).toBe(12);
+        expect(errors.concat(second.errors)).toEqual([]);
+        await second.page.close();
+      });
+
+      it("compares three scenarios with No changes, with their numbers and differences", async () => {
+        const { page, errors } = await mount(width);
+        await page.locator("[data-scenario-compare]").click();
+        await page.getByLabel("Scenario 1", { exact: true }).selectOption({ label: "Hire in January" });
+        await page.getByLabel("Scenario 2", { exact: true }).selectOption({ label: "Hire in March" });
+        await page.getByLabel("Scenario 3", { exact: true }).selectOption({ label: "Hire in March, then more leads" });
+        await page.waitForSelector('[data-sandbox-compare][data-compare-status="done"]', { timeout: 90_000 });
+        expect(await page.locator("[data-compare-tile]").count()).toBe(4);
+        const tile = await page.locator('[data-compare-tile^="Recurring revenue in"]').innerText();
+        for (const name of ["No changes", "Hire in January", "Hire in March", "Hire in March, then more leads"]) expect(tile).toContain(name);
+        expect(await page.locator('[data-compare-chart="Monthly recurring revenue"]').count()).toBe(1);
+        expect(await page.locator('[data-compare-chart="Monthly recurring revenue"] [data-line]').count()).toBe(4);
+        expect(await page.locator('[data-compare-section="Active clients, by type"] [data-compare-chart]').count()).toBeGreaterThan(0);
+        expect(await page.locator('[data-compare-section="Clients at risk, by group"] [data-compare-chart]').count()).toBeGreaterThan(0);
+        expect(await page.locator('[data-compare-section="How busy each role gets"] [data-compare-chart]').count()).toBeGreaterThan(2);
+        const details = page.locator('[data-compare-row="mrr"] details');
+        await details.locator("summary").click();
+        expect(await details.locator("tbody tr").count()).toBe(12);
+        expect(await details.locator("thead").innerText()).toContain("No changes (10–90%)");
+        expect(await page.evaluate(() => window.__harnessUrl)).toContain(`compare=${JANUARY},${MARCH},${THEN_LEADS}`);
+        await page.getByRole("button", { name: "Back to the scenario" }).click();
+        expect(await page.locator(TIMELINE).count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows a failing column's error and still draws the others", async () => {
+        const { page, errors } = await mount(width, { broken: true, url: `/demo/sandbox?compare=${JANUARY}` });
+        await page.getByLabel("Scenario 2", { exact: true }).selectOption({ label: "Broken scenario" });
+        await page.waitForSelector("[data-column-error]", { timeout: 90_000 });
+        expect(await page.locator("[data-column-error]").innerText()).toContain("Broken scenario");
+        expect(await page.locator("[data-column-error]").innerText()).toContain("can't be simulated");
+        await page.waitForSelector('[data-compare-chart="Monthly recurring revenue"]');
+        expect(await page.locator('[data-compare-chart="Monthly recurring revenue"] [data-line]').count()).toBe(2);
+        expect(await page.locator('[data-compare-tile^="Recurring revenue in"]').innerText()).not.toContain("Broken scenario");
+        // And the single view shows the failure, not the previous scenario's numbers.
+        await page.getByRole("button", { name: "Back to the scenario" }).click();
+        const live = await busyCell(page, "PPC specialist", "February 2027");
+        await pick(page, "Hire in January");
+        await waitRuns(page, 1);
+        expect(await busyCell(page, "PPC specialist", "February 2027")).toBeLessThan(live);
+        await pick(page, "Broken scenario");
+        await page.waitForFunction(() => document.querySelector("[data-forecast-timeline]")?.getAttribute("data-plan-status") === "error");
+        expect(await page.locator("[data-with-this-scenario]").innerText()).toContain("couldn't be worked out");
+        expect(await busyCell(page, "PPC specialist", "February 2027")).toBe(live);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("runs a scenario's segments once and reuses the ones a change leaves alone", async () => {
+        const { page, errors } = await mount(width, { many: true });
+        const simRuns = () => page.evaluate(() => window.__simRuns ?? 0);
+        const before = await simRuns();
+        await pick(page, "Many runs");
+        await waitRuns(page, 1);
+        // Four go-live months: five segments, but the first is the live model, which the page has already run.
+        expect((await simRuns()) - before).toBe(4);
+        const m = page.locator("[data-plan-marker]").last();
+        await m.focus();
+        await page.keyboard.press("ArrowRight");
+        await waitRuns(page, 2);
+        expect((await simRuns()) - before).toBe(4);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shares runs between the columns of the compare view: the same runs are computed once", async () => {
+        const { page, errors } = await mount(width, { url: `/demo/sandbox?compare=${MARCH},${MARCH}` });
+        await page.waitForSelector("[data-compare-progress]");
+        await page.waitForFunction(() => (window.__simRuns ?? 0) >= 3, undefined, { timeout: 90_000 });
+        await page.waitForTimeout(1000);
+        // The live forecast's run, and the two runs of "Hire in March" (the hire; the hire with the solution): once each, although
+        // two columns asked for both of them at the same moment, and "No changes" is the live run.
+        expect(await page.evaluate(() => window.__simRuns)).toBe(3);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("opens a scenario by the id the migration kept, in ?scenario= and in the old ?plan=", async () => {
+        const a = await mount(width, { url: `/demo/sandbox?plan=${MARCH}` });
+        await waitRuns(a.page, 1);
+        expect(await a.page.locator("[data-scenario-select]").inputValue()).toBe(MARCH);
+        expect(await a.page.locator('[data-plan-marker][data-kind="solution"]').count()).toBe(1);
+        const b = await mount(width, { url: `/demo/sandbox?scenario=${JANUARY}&plan=${MARCH}` });
+        await waitRuns(b.page, 1);
+        expect(await b.page.locator("[data-scenario-select]").inputValue()).toBe(JANUARY);
+        // Unknown or deleted ids are dropped silently.
+        const c = await mount(width, { url: "/demo/sandbox?scenario=ffffffff-0000-4000-8000-000000000000&compare=nope" });
+        expect(await c.page.locator("[data-scenario-select]").inputValue()).toBe("");
+        expect(await c.page.locator("[data-sandbox-compare]").count()).toBe(0);
+        expect(a.errors.concat(b.errors, c.errors)).toEqual([]);
+        await Promise.all([a.page.close(), b.page.close(), c.page.close()]);
+      });
+
+      it("shows a Viewer the saved scenarios to open, run and compare, and no way to change anything", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly" });
+        expect(await page.locator("[data-scenario-bar]").count()).toBe(1);
+        expect(await options(page)).toEqual(["No changes", "Hire in January", "Hire in March", "Hire in March, then more leads"]);
+        // Every editing control is an edit entry (the app hides those on a phone) or absent; a Viewer has none at all.
+        for (const name of ["New scenario", "Add change", "Save", "Save as new", "Rename", "Duplicate", "Build on", "Delete"]) {
+          expect(await page.locator("[data-scenario-bar]").getByRole("button", { name }).count(), name).toBe(0);
+        }
+        await pick(page, "Hire in March");
+        await waitRuns(page, 1);
+        expect(await changes(page).count()).toBe(2);
+        expect(await page.locator("[data-change-list]").getByRole("button").count()).toBe(0);
+        expect(await page.locator("[data-viewer-note]").innerText()).toContain("Your numbers can differ slightly");
+        // Markers are drawn but can't be moved, opened or removed.
+        const m = marker(page, "hire");
+        const at = await valuetext(m);
+        const done = await runs(page);
+        await dragTo(page, m, 8);
+        await m.click();
+        await m.focus();
+        for (const key of ["ArrowRight", "PageDown", "Enter", "Delete"]) await page.keyboard.press(key);
+        expect(await page.locator("[data-change-dialog]").count()).toBe(0);
+        expect(await valuetext(m)).toBe(at);
+        expect(await runs(page)).toBe(done);
+        // A new scenario, a horizon, and compare all work from the saved ones.
+        await page.getByRole("group", { name: "Time horizon" }).getByRole("button", { name: "6 months" }).click();
+        await page.waitForFunction(() => document.querySelectorAll("[data-forecast-timeline] table tbody tr").length === 6, undefined, { timeout: 90_000 });
+        await page.locator("[data-scenario-compare]").click();
+        await page.waitForSelector('[data-sandbox-compare][data-compare-status="done"]', { timeout: 90_000 });
+        expect(await page.locator("[data-compare-tile]").count()).toBe(4);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows a Viewer who sees only their own row other people as 'A team member'", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true, url: "/demo/sandbox?scenario=" + JANUARY });
+        await waitRuns(page, 1);
+        const text = await page.locator("[data-sandbox-scenario]").innerText();
+        expect(text).not.toContain("Leah Brooks");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+    });
+  }
+
+  describe("on a phone (400px, issue #44)", () => {
+    it("draws a saved scenario's markers but can't move, open or remove them", async () => {
+      const { page, errors } = await mount(400);
+      await pick(page, "Hire in January");
+      await waitRuns(page, 1);
+      const m = marker(page, "hire");
+      const at = await valuetext(m);
+      expect(at).toContain("1 January 2027");
+      const done = await runs(page);
+      await dragTo(page, m, 6);
+      expect(await valuetext(m)).toBe(at);
+      await m.click();
+      expect(await page.locator("[data-change-dialog]").count()).toBe(0);
+      await m.focus();
+      for (const key of ["ArrowRight", "PageDown", "Enter", "Delete"]) await page.keyboard.press(key);
+      expect(await page.locator("[data-change-dialog]").count()).toBe(0);
+      expect(await page.locator("[data-plan-marker]").count()).toBeGreaterThan(0);
+      expect(await valuetext(m)).toBe(at);
+      expect(await runs(page)).toBe(done);
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+
+    it("still lets a phone read the scenarios: pick one and compare", async () => {
+      const { page, errors } = await mount(400);
+      await pick(page, "Hire in March");
+      await waitRuns(page, 1);
+      expect(await page.locator("[data-with-this-scenario]").innerText()).toContain("With this scenario");
+      expect(await page.locator("[data-scenario-compare]").count()).toBe(1);
+      // New, Add, Save, Rename, Duplicate, Build on and Delete are edit entries, which the app's stylesheet hides on a phone (this
+      // harness loads none, so the check is that each one sits in a [data-edit-entry]); the picker and Compare are not.
+      const loose = await page.evaluate(() =>
+        [...document.querySelectorAll("[data-scenario-bar] button, [data-change-list] button")]
+          .filter((b) => /^(New|Add|Save|Rename|Duplicate|Build|Delete|Edit|Remove)/.test((b.textContent ?? "").trim()) && !b.closest("[data-edit-entry]"))
+          .map((b) => (b.textContent ?? "").trim()),
+      );
+      expect(loose).toEqual([]);
+      expect(await page.locator("[data-scenario-bar] [data-edit-entry] button", { hasText: "Rename" }).count()).toBe(1);
+      expect(await page.locator("[data-edit-entry] [data-scenario-select], [data-edit-entry] [data-scenario-compare]").count()).toBe(0);
+      expect(errors).toEqual([]);
+      await page.close();
+    });
+  });
+});

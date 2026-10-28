@@ -35,7 +35,7 @@
 --
 -- Preflight (psql on the owner's connection, `bash packages/db/scripts/db-sql.sh -c "..."`):
 --     -- 0. Nothing at or past this version. Expect 0:
---     select count(*) from public.schema_migrations where version >= '20270106000000';
+--     select count(*) from public.schema_migrations where version >= '20270109000000';
 --     -- 1. Counts to compare with the post-apply count (scenarios + plans), and the links:
 --     select (select count(*) from scenarios) as scenarios, (select count(*) from forecast_plans) as plans,
 --            (select count(*) from issues where scenario_id is not null) as issues_linked,

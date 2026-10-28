@@ -87,7 +87,7 @@ export function seedSql(
     const legacy = legacyScenarios.length
       ? [`delete from public.scenarios where workspace_id in (${[...new Set(legacyScenarios.map((s) => s.workspace_id))].map(literal).join(", ")});\n`, insert("scenarios", legacyScenarios.map((r) => ({ ...r })))].join("")
       : "";
-    // A schema older than the Sandbox migration (20270106000000) still has the `scenarios` table: the tests that build one and migrate
+    // A schema older than the Sandbox migration (20270109000000) still has the `scenarios` table: the tests that build one and migrate
     // it forward load this seed first. Statements in the branch not taken are never planned, so the missing table is no error.
     out.push(`do $seed$\nbegin\n  if to_regclass('public.sandbox_scenarios') is not null then\n${current}  else\n${legacy}  end if;\nend\n$seed$;\n`);
   }

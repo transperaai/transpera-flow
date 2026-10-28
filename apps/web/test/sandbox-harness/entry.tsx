@@ -1,14 +1,14 @@
-// The Forecast page on a bare page, for ../forecast-plan-browser.test.ts (B7, issue #36): the whole page component with its
-// simulation in a real Web Worker, in demo mode (plans kept in the tab) or as a member sees it. Next's modules are stood in for
+// The Sandbox on a bare page, for ../sandbox-browser.test.ts: the whole page component with its simulation in a real Web Worker,
+// in demo mode (scenarios kept in the tab) or as a Viewer sees it (saved scenarios passed in, nothing to save). Next's modules are stood in for
 // by ../build-harness.ts (with the URL-keeping navigation stub). Nothing here ships.
 //
 // `Worker` is replaced by one that starts the bundled script the test hands over as `window.workerScripts`.
 
 import { createRoot } from "react-dom/client";
 import { northbeamIssues, northbeamPersonIds, type SolutionRow } from "@transpera-flow/db";
-import { ForecastView } from "@/components/forecast/forecast-view";
+import { SandboxView } from "@/components/sandbox/sandbox-view";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
-import { saveDemoPlan } from "@/lib/forecast/plans-demo";
+import { DEMO_SCENARIOS, saveDemoScenario } from "@/lib/sandbox/demo";
 import { demoSources } from "@/lib/sources/demo";
 import { setHarnessUrl } from "../build-harness-stubs/navigation-url";
 
@@ -17,7 +17,7 @@ declare global {
     workerScripts: Record<string, string>;
     __harnessUrl?: string;
     __simRuns?: number;
-    mountForecast: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean }) => void;
+    mountSandbox: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean; dan?: boolean }) => void;
   }
 }
 
@@ -42,7 +42,7 @@ window.Worker = class extends NativeWorker {
   }
 } as typeof Worker;
 
-/** A solution whose map the engine can't simulate (a connection to a step that isn't there), and a plan that puts it live. */
+/** A solution whose map the engine can't simulate (a connection to a step that isn't there), and a scenario that puts it live. */
 const BROKEN_SOLUTION: SolutionRow = {
   ...DEMO_FORECAST_SOLUTION,
   id: "00000000-0000-4000-8000-0000000f0299",
@@ -61,29 +61,32 @@ const MANY_SOLUTIONS: SolutionRow[] = [3, 2.5, 2, 1.5].map((hours, i) => ({
   steps: { ...DEMO_FORECAST_SOLUTION.steps, steps: DEMO_FORECAST_SOLUTION.steps.steps.map((st) => (st.id === DEMO_FORECAST_SOLUTION.changed_step_ids[0] ? { ...st, work_hours: hours } : st)) },
 }));
 
-window.mountForecast = ({ mode, url, broken, many }) => {
+const change = (id: string, solutionId: string, from: string) => ({ id, lever: "E6" as const, target: solutionId, op: "set" as const, value: 1, from });
+const scenario = (name: string, changes: ReturnType<typeof change>[]) => saveDemoScenario({ id: null, name, description: null, parent_id: null, changes, horizon_months: 12 });
+
+window.mountSandbox = ({ mode, url, broken, many, dan }) => {
   if (many) {
     // Four go-live months, each for a different version of the solution (and so a different model): five runs.
-    saveDemoPlan({ id: null, name: "Many runs", markers: ["2026-12-01", "2027-02-01", "2027-04-01", "2027-06-01"].map((date, i) => ({ id: `00000000-0000-4000-8000-0000000f04${String(i).padStart(2, "0")}`, kind: "solution" as const, date, solution_id: MANY_SOLUTIONS[i]!.id })) });
+    scenario("Many runs", ["2026-12", "2027-02", "2027-04", "2027-06"].map((month, i) => change(`00000000-0000-4000-8000-0000000f04${String(i).padStart(2, "0")}`, MANY_SOLUTIONS[i]!.id, month)));
   }
-  if (broken) {
-    saveDemoPlan({ id: null, name: "Broken plan", markers: [{ id: "00000000-0000-4000-8000-0000000f0296", kind: "solution", date: "2027-01-01", solution_id: BROKEN_SOLUTION.id }] });
-  }
-  setHarnessUrl(url ?? "/demo/forecast");
+  if (broken) scenario("Broken scenario", [change("00000000-0000-4000-8000-0000000f0296", BROKEN_SOLUTION.id, "2027-01")]);
+  setHarnessUrl(url ?? "/demo/sandbox");
   const base = demoForecastBundle();
-  // A member sees their own row only (B1): the same bundle with a viewer who isn't everyone.
-  const live = mode === "readonly" ? { ...base, viewer: { seesEveryone: false, ownPersonId: northbeamPersonIds["Dan Okafor"]! } } : base;
+  // A Viewer who sees only their own row (B1): the same bundle with a viewer who isn't everyone.
+  const live = mode === "readonly" && dan ? { ...base, viewer: { seesEveryone: false, ownPersonId: northbeamPersonIds["Dan Okafor"]! } } : base;
+  const solutions = mode === "demo" ? (broken ? [DEMO_FORECAST_SOLUTION, BROKEN_SOLUTION] : many ? [DEMO_FORECAST_SOLUTION, ...MANY_SOLUTIONS] : [DEMO_FORECAST_SOLUTION]) : [DEMO_FORECAST_SOLUTION];
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
-      <ForecastView
+      <SandboxView
         live={live}
         issues={northbeamIssues()}
         sources={demoSources()}
         mode={mode}
         issuesHref="/demo/issues"
+        leversHref="/demo/settings/levers"
         startDate={DEMO_FORECAST_START}
-        demoPlans={mode === "demo"}
-        solutions={mode === "demo" ? (broken ? [DEMO_FORECAST_SOLUTION, BROKEN_SOLUTION] : many ? [DEMO_FORECAST_SOLUTION, ...MANY_SOLUTIONS] : [DEMO_FORECAST_SOLUTION]) : []}
+        scenarios={mode === "readonly" ? DEMO_SCENARIOS : undefined}
+        solutions={solutions}
       />
     </div>,
   );

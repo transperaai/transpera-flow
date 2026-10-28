@@ -449,7 +449,7 @@ const bodyOf = (sql: string) => {
 };
 const FN = "public.import_workspace_bundle(uuid, jsonb, text)";
 /** The migration that defines the function now (it applies the settings for every restorer: 20270104000000), and its body. */
-const LATEST_FILE = "20270106000000_sandbox_scenarios.sql";
+const LATEST_FILE = "20270109000000_sandbox_scenarios.sql";
 const bodyOfFunction = (sql: string, name: string) => {
   const fn = sql.slice(sql.search(new RegExp(`^create (?:or replace )?function ${name.replace(".", "\\.")}\\(`, "mi")));
   return fn.slice(fn.indexOf("$$") + 2, fn.indexOf("$$", fn.indexOf("$$") + 2));
@@ -536,7 +536,7 @@ describe("the function and the migration", () => {
       await db.client.query("create table public.suggestions (workspace_id uuid)");
       await db.client.query("create table public.suggestion_proposals (workspace_id uuid)");
       await db.client.query("grant select on public.suggestions, public.suggestion_proposals to authenticated");
-      // And the scenarios table and library that the Sandbox migration (20270106000000) replaced: B21's function still reads them.
+      // And the scenarios table and library that the Sandbox migration (20270109000000) replaced: B21's function still reads them.
       await db.client.query("create table public.scenarios (workspace_id uuid, id uuid, name text, patch jsonb, parent_scenario_id uuid, description text, created_at timestamptz)");
       await db.client.query("grant select, insert on public.scenarios to authenticated");
       await db.client.query("create function private.scenario_library() returns table (name text, description text, patch jsonb) language sql as $$ select null::text, null::text, null::jsonb where false $$");
