@@ -275,7 +275,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
               <p data-person-times-off className="text-sm text-muted-foreground">
                 This log names people.{" "}
                 {props.base ? (
-                  <Link href={`${props.base}/settings#simulation`} className="text-accent underline-offset-4 hover:underline">
+                  <Link href={`${props.base}/settings#simulation-heading`} className="text-accent underline-offset-4 hover:underline">
                     Switch Per-person times on in Settings → Simulation
                   </Link>
                 ) : (

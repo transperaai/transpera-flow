@@ -726,7 +726,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
         </section>
       )}
       {!compare && moneyView ? (
-        <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace` : null} span={span} />
+        <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
 
       {changeTarget && canEdit ? (
