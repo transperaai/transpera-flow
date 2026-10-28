@@ -5,7 +5,7 @@ import { Help } from "@/components/help";
 /** The (i) text wherever a figure depends on individual pay and the viewer is a member or viewer (B1 2a, issue #30). */
 export const PAY_HIDDEN_HELP = {
   label: "Costs that depend on pay",
-  description: "Only Agency admins see costs that depend on people's pay.",
+  description: "Only Agency admins and the Owner see costs that depend on people's pay.",
   example: "The cost of overtime, and the cost attached to an overtime or too-busy issue.",
 } as const;
 

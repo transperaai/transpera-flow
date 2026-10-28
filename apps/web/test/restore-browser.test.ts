@@ -149,7 +149,7 @@ describe("the restore component", () => {
   });
 
   it("shows the server's message when the restore is refused, and nothing is navigated", async () => {
-    const { page } = await mount({ status: 409, body: { message: "Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there." } });
+    const { page } = await mount({ status: 409, body: { message: "Backups restore only into an empty workspace. Ask an Owner to create a new workspace, then restore it there." } });
     await page.setInputFiles("input[type=file]", file("mini.json", backup()));
     await page.waitForSelector("[data-restore-summary]");
     await page.click("[data-restore-submit]");

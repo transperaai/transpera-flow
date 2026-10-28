@@ -27,7 +27,7 @@ describe("the restore card and page", () => {
     expect(page.indexOf("canEditWorkspace(head.id)")).toBeLessThan(page.indexOf("workspaceIsEmpty("));
     const errors = read("lib/restore/errors.ts");
     expect(errors).toContain("Only Agency admins and the Owner can restore a backup.");
-    expect(errors).toContain("Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there.");
+    expect(errors).toContain("Backups restore only into an empty workspace. Ask an Owner to create a new workspace, then restore it there.");
   });
 
   it("says 'backup' and 'restore' on the page and the card, never 'bundle' or 'import'", () => {
