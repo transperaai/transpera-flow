@@ -16,6 +16,11 @@ export interface MoneyTile {
   label: string;
   /** The mean over the run with its 10-90% range; a figure with no spread (overheads) has p10 = p90 = mean. */
   stat: Stat;
+  /**
+   * False for a plan's spliced run: the tile is the sum of the months' averages, and the run has no 10-90% range of its own
+   * (p10 = p90 = mean; the months keep theirs). A sum of the months' 10th percentiles is not the run's 10th percentile.
+   */
+  ranged: boolean;
 }
 
 export interface MoneyRow {
@@ -54,21 +59,43 @@ const sum = (cells: readonly Stat[]) => cells.reduce((a, s) => a + s.mean, 0);
 /**
  * The money view of a monthly run. `serviceName` names an hourly service for the note about one that earned nothing (its id
  * when omitted). A result saved before engine 1.11.0 has none of these numbers: the view is then empty rather than wrong.
+ *
+ * `spliced`: the run is a plan's, spliced month by month from several runs (`spliceMonthly`). Its `kpi` is then only the
+ * first segment's, a run without the plan's later changes, so the tiles are worked out from the spliced months instead.
  */
-export function forecastMoney(result: SimulationResult, months: readonly TimelineMonth[], serviceName: (id: string) => string = (id) => id): ForecastMoneyView | null {
+export function forecastMoney(
+  result: SimulationResult,
+  months: readonly TimelineMonth[],
+  serviceName: (id: string) => string = (id) => id,
+  { spliced = false }: { spliced?: boolean } = {},
+): ForecastMoneyView | null {
   const mo = result.monthly;
   const kpi = result.kpi;
   if (!mo || !mo.revenue || !kpi.revenue || months.length === 0) return null;
   const costsHidden = mo.money === null || kpi.labourCost === null || kpi.profit === null;
 
-  const tiles: MoneyTile[] = [{ id: "revenue", label: "Revenue", stat: kpi.revenue }];
-  if (!costsHidden) {
-    // Labour is the same in every run, so adding overtime's range gives labour with overtime's range.
-    const labour = kpi.labourCost!;
-    const overtime = kpi.overtimeCost ?? fixed(0);
-    tiles.push({ id: "labour", label: "Labour", stat: { mean: labour.mean + overtime.mean, p10: labour.p10 + overtime.p10, p90: labour.p90 + overtime.p90 } });
-    tiles.push({ id: "overheads", label: "Overheads", stat: fixed(kpi.overheads) });
-    tiles.push({ id: "profit", label: "Profit", stat: kpi.profit! });
+  const tiles: MoneyTile[] = [];
+  if (spliced) {
+    // Sums of the months' means (a mean of sums is the sum of the means); no run-wide range exists for a spliced run.
+    const ranged = false;
+    tiles.push({ id: "revenue", label: "Revenue", stat: fixed(sum(mo.revenue.total)), ranged });
+    if (!costsHidden) {
+      const money = mo.money!;
+      const labour = money.labour.reduce((a, v) => a + v, 0) + sum(money.overtimeCost);
+      tiles.push({ id: "labour", label: "Labour", stat: fixed(labour), ranged });
+      tiles.push({ id: "overheads", label: "Overheads", stat: fixed(money.overheads.reduce((a, v) => a + v, 0)), ranged: true });
+      tiles.push({ id: "profit", label: "Profit", stat: fixed(sum(money.profit)), ranged });
+    }
+  } else {
+    tiles.push({ id: "revenue", label: "Revenue", stat: kpi.revenue, ranged: true });
+    if (!costsHidden) {
+      // Labour is the same in every run, so adding overtime's range gives labour with overtime's range.
+      const labour = kpi.labourCost!;
+      const overtime = kpi.overtimeCost ?? fixed(0);
+      tiles.push({ id: "labour", label: "Labour", stat: { mean: labour.mean + overtime.mean, p10: labour.p10 + overtime.p10, p90: labour.p90 + overtime.p90 }, ranged: true });
+      tiles.push({ id: "overheads", label: "Overheads", stat: fixed(kpi.overheads), ranged: true });
+      tiles.push({ id: "profit", label: "Profit", stat: kpi.profit!, ranged: true });
+    }
   }
 
   const row = (id: string, label: string, unit: MoneyUnit, cells: Stat[], opts: { indent?: boolean; cost?: boolean; total?: boolean } = {}): MoneyRow => ({
@@ -104,7 +131,8 @@ export function forecastMoney(result: SimulationResult, months: readonly Timelin
     );
   }
 
-  // Hourly services that billed nothing because the clients they bring generate no work in the model.
+  // Hourly services that billed nothing because the clients they bring generate no work in the model (for a plan, as its first
+  // segment runs them: a plan's solutions change the work, not which services are hourly).
   const hourlyWithoutHours = Object.entries(kpi.hourly ?? {})
     .filter(([, h]) => h.hours.mean === 0)
     .map(([id]) => serviceName(id))

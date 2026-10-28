@@ -176,7 +176,9 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
 
 function Tile({ tile, format: fmt }: { tile: MoneyTile; format: (v: number) => string }) {
   const { stat } = tile;
-  const range = stat.p10 === stat.p90 ? null : `${fmt(stat.p10)} to ${fmt(stat.p90)}`;
+  const range = !tile.ranged || stat.p10 === stat.p90 ? null : `${fmt(stat.p10)} to ${fmt(stat.p90)}`;
+  // A plan's tile adds up its months (each month keeps its range in the table); otherwise a figure with no spread is the same in every run.
+  const below = range ? `Range ${range}` : !tile.ranged ? "The months added up; each month's range is in the table" : "The same in every run";
   return (
     <Card className="gap-1 px-4 py-3" data-money-tile={tile.id}>
       <h3 className="flex items-center text-xs font-medium text-fg-2">
@@ -186,7 +188,7 @@ function Tile({ tile, format: fmt }: { tile: MoneyTile; format: (v: number) => s
       <p className="font-heading text-2xl font-semibold tabular-nums" data-money-value>
         {fmt(stat.mean)}
       </p>
-      <p className="text-xs text-muted-foreground tabular-nums">{range ? `Range ${range}` : "Fixed each month"}</p>
+      <p className="text-xs text-muted-foreground tabular-nums">{below}</p>
     </Card>
   );
 }

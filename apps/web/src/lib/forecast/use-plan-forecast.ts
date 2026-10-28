@@ -27,6 +27,11 @@ export interface PlanRun {
   markersModel: EngineModel;
   /** Ids of the people the plan added (its hire markers' ids). */
   planPeople: Set<string>;
+  /**
+   * The run is spliced from more than one segment: `result.monthly` follows the plan, but `result.kpi` is the first
+   * segment's alone (a run without the plan's later solutions), so whole-run figures must come from the months.
+   */
+  spliced: boolean;
 }
 
 export interface PlanForecast {
@@ -133,7 +138,7 @@ export function usePlanForecast({
         const runs = prepared.segments.map((seg, i) => ({ from: seg.from, result: results[i]! }));
         const first = runs[0]!.result;
         const monthly = spliceMonthly(runs.map((r) => ({ from: r.from, monthly: r.result.monthly! })));
-        const run: PlanRun = { model: prepared.segments[0]!.model, result: { ...first, monthly }, markersModel: prepared.markersModel, planPeople: prepared.planPeople };
+        const run: PlanRun = { model: prepared.segments[0]!.model, result: { ...first, monthly }, markersModel: prepared.markersModel, planPeople: prepared.planPeople, spliced: runs.length > 1 };
         setState((s) => ({ status: "done", run, error: null, progress: [total, total], finished: s.finished + 1 }));
       } catch (err) {
         if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ ...s, status: "error", error: (err as Error).message }));
