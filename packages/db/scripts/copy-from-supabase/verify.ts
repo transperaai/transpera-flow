@@ -49,6 +49,8 @@ export async function runVerify(client: Queryable, dir: string): Promise<VerifyR
       ? `target is at the copy base ${COPY_BASE_VERSION}`
       : `target is not at the copy base ${COPY_BASE_VERSION} (${missing.length} missing, ${beyond.length} past it): verify before running migrate`,
   );
+  // Past the base, tables the export holds may be gone: nothing below can be compared.
+  if (missing.length > 0 || beyond.length > 0) return { ok: false, lines };
 
   // Row counts
   for (const [name, { rows }] of Object.entries(manifest.tables)) {
