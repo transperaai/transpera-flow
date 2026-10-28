@@ -194,7 +194,8 @@ export function applyModelChanges(model: EngineModel, changes: readonly SandboxC
           problems.push({ changeId: c.id, message: "A service in this scenario is no longer there" });
           break;
         }
-        const { priceRange: _old, ...rest } = sv;
+        const rest = { ...sv };
+        delete rest.priceRange;
         m = { ...m, services: { ...m.services, [c.target!]: { ...rest, price: c.value, ...(low < c.value || high > c.value ? { priceRange: { low, high } } : {}) } } };
         break;
       }

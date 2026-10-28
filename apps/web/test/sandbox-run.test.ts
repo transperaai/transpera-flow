@@ -32,6 +32,8 @@ const leave = (date: string, weeks: number, person = DAN): SandboxChange => ({ i
 const solution = (date: string, solutionId = DEMO_FORECAST_SOLUTION_ID): SandboxChange => ({ id: id(), lever: "E6", target: solutionId, op: "set", value: 1, from: date.slice(0, 7) });
 const leaver = (person: string, date?: string): SandboxChange => ({ id: id(), lever: "D2", target: person, op: "set", value: 0, ...(date ? { from: date.slice(0, 7) } : {}) });
 const fte = (person: string, value: number, date?: string, op: SandboxChange["op"] = "set"): SandboxChange => ({ id: id(), lever: "D4", target: person, op, value, ...(date ? { from: date.slice(0, 7) } : {}) });
+/** Headcount by role (D5): a capped lever, so each month it starts from costs a run. */
+const cut = (value: number, date?: string): SandboxChange => ({ id: id(), lever: "D5", target: PPC, op: "add", value, ...(date ? { from: date.slice(0, 7) } : {}) });
 const patch = (lever: SandboxChange["lever"], target: string | null, op: SandboxChange["op"], value: number, date?: string): SandboxChange => ({ id: id(), lever, target, op, value, ...(date ? { from: date.slice(0, 7) } : {}) });
 const eff = (changes: SandboxChange[], name = "S"): EffectiveChange[] => changes.map((change) => ({ change, scenarioId: "s", scenarioName: name, inherited: false }));
 
@@ -73,7 +75,7 @@ describe("parseSandboxInput", () => {
       ["weeks 1.5", [leave("2027-01-04", 1.5)]],
       ["5 solutions", Array.from({ length: 5 }, (_, i) => solution(i < 4 ? `2027-0${i + 1}-01` : "2027-01-01"))],
       ["201 changes", Array.from({ length: 201 }, () => patch("A1", null, "add", 0))],
-      ["7 months", ["01", "02", "03", "04", "05", "06", "07"].map((m) => patch("A1", null, "add", 0, `2027-${m}-01`))],
+      ["7 months", ["01", "02", "03", "04", "05", "06", "07"].map((m) => cut(-1, `2027-${m}-01`))],
       ["a name over 120", [hire("2027-01-01", { params: { name: "x".repeat(121) } })]],
     ];
     for (const [what, changes] of bad) expect(ok("S", changes).ok, what).toBe(false);
@@ -104,7 +106,7 @@ describe("parseSandboxInput", () => {
 
   it("checks the parent and the limits of the effective changes, and of the scenarios that build on this one", () => {
     const row = (n: string, parent: string | null, changes: SandboxChange[]) => ({ id: `${n}0000000-0000-4000-8000-000000000000`, name: `S${n}`, parent_id: parent ? `${parent}0000000-0000-4000-8000-000000000000` : null, changes });
-    const months = (...ms: string[]) => ms.map((m) => patch("A1", null, "add", 0, `2027-${m}-01`));
+    const months = (...ms: string[]) => ms.map((m) => cut(-1, `2027-${m}-01`));
     const parent = row("a", null, months("01", "02", "03", "04"));
     const child = row("b", "a", months("05"));
     const base = { solutions: [], processName: () => "p", scenarios: [parent, child] };
@@ -156,7 +158,9 @@ describe("effectiveChanges", () => {
     const rows = [row(1, null, []), row(2, 1, []), row(3, 2, []), row(4, null, [])];
     expect(descendantsOf(rows[0]!.id, rows).sort()).toEqual([rows[1]!.id, rows[2]!.id].sort());
     expect(descendantsOf(rows[3]!.id, rows)).toEqual([]);
-    const months = ["01", "02", "03", "04", "05", "06", "07"].map((m) => patch("A1", null, "add", 0, `2027-${m}-01`));
+    const months = ["01", "02", "03", "04", "05", "06", "07"].map((m) => cut(-1, `2027-${m}-01`));
+    // Only the capped levers (D5, E6) count a month: a timed price or lead change is a channel, not a run.
+    expect(effectiveLimitProblem(["01", "02", "03", "04", "05", "06", "07"].map((m) => patch("A1", null, "add", 0, `2027-${m}-01`)))).toBeNull();
     expect(effectiveLimitProblem(months.slice(0, 6))).toBeNull();
     expect(effectiveLimitProblem(months)).toMatch(/more than 6 different months/);
     expect(effectiveLimitProblem(Array.from({ length: 5 }, (_, i) => solution(`2027-0${i + 1}-01`)))).toMatch(/more than 4 solutions/);
@@ -295,29 +299,34 @@ describe("applyPeopleChanges", () => {
     expect(gone.people.some((p) => p.id === later.id)).toBe(false);
   });
 
-  it("an FTE change for someone pinned to a step, or assigned clients, is not split: it stays a (spliced) patch", () => {
+  it("an FTE change for someone pinned to a step, or assigned clients, is not split: the capacity channel does it", () => {
     const step = bundle.steps.find((s) => s.role_id)!;
     const pinned: ProcessBundle = { ...bundle, steps: bundle.steps.map((s) => (s.id === step.id ? { ...s, person_id: DAN } : s)) };
     const c = fte(DAN, 0.5, "2027-03-01");
     const r = applyPeopleChanges(pinned, [c], START);
     expect(r.handled.has(c.id)).toBe(false);
     expect(r.bundle.people).toEqual(pinned.people);
+    // The capacity channel does it (one run, no segment): the change is listed as unhandled for channelsOf.
     const seg = scenarioSegments(pinned, eff([c]), [], START, bounds, HPW);
-    expect(seg.segments.map((s) => s.from)).toEqual([0, 5]);
-    expect(seg.segments[1]!.patches).toEqual([{ path: `people.${DAN}.fte`, op: "set", value: 0.5 }]);
+    expect(seg.segments.map((s) => s.from)).toEqual([0]);
     expect(seg.segments[0]!.patches).toEqual([]);
+    expect([...seg.d4Unhandled]).toEqual([c.id]);
     // Assigned clients count only when clients are named (counted per service, the roster is hidden).
     const named: ProcessBundle = { ...bundle, clientGroups: [], clientAssignments: [{ client_id: randomUUID(), role_id: PPC, person_id: DAN, workspace_id: bundle.workspace.id }] };
     expect(applyPeopleChanges(named, [c], START).handled.has(c.id)).toBe(false);
     expect(applyPeopleChanges(bundle, [c], START).handled.has(c.id)).toBe(true);
   });
 
-  it("an FTE change with no month, or from a month on or before the start, is a whole-run patch", () => {
-    for (const c of [fte(DAN, 0.5), fte(DAN, 0.5, "2026-10-01")]) {
-      const r = scenarioSegments(bundle, eff([c]), [], START, bounds, HPW);
-      expect(r.segments).toHaveLength(1);
-      expect(r.segments[0]!.patches).toEqual([{ path: `people.${DAN}.fte`, op: "set", value: 0.5 }]);
-    }
+  it("an FTE change with no month, or from a month on or before the start, is a whole-run patch or month 0 of the capacity channel", () => {
+    const whole = fte(DAN, 0.5);
+    const r = scenarioSegments(bundle, eff([whole]), [], START, bounds, HPW);
+    expect(r.segments).toHaveLength(1);
+    expect(r.segments[0]!.patches).toEqual([{ path: `people.${DAN}.fte`, op: "set", value: 0.5 }]);
+    // From the start month it is month 0 of the capacity channel: still one run, nothing to splice.
+    const early = fte(DAN, 0.5, "2026-10-01");
+    const e = scenarioSegments(bundle, eff([early]), [], START, bounds, HPW);
+    expect(e.segments).toHaveLength(1);
+    expect(e.segments[0]!.patches).toEqual([]);
   });
 });
 
@@ -367,17 +376,19 @@ describe("scenarioSegments", () => {
 
   it("puts a whole-run patch in every segment and a timed patch in its month's segment and the ones after it", () => {
     const whole = patch("B3", null, "set", 0.02);
-    const july = patch("A1", null, "multiply", 1.5, "2027-04-01");
-    const jan = patch("B2", null, "multiply", 1.1, "2027-01-01");
+    const july = cut(-1, "2027-04-01");
+    const jan = cut(1, "2027-01-01");
     const r = segs([july, whole, jan]);
     expect(r.segments.map((s) => s.from)).toEqual([0, 3, 6]);
     expect(r.segments.map((s) => s.patchChangeIds)).toEqual([[whole.id], [whole.id, jan.id], [july.id, whole.id, jan.id]]);
-    expect(r.segments[2]!.patches.map((p) => p.path)).toEqual(["demand.leads_per_week", "demand.churn_monthly", "finances.retainer"]);
+    expect(r.segments[2]!.patches.map((p) => p.path)).toEqual([`roles.${PPC}.headcount`, "demand.churn_monthly", `roles.${PPC}.headcount`]);
+    // A timed lead or price change is a channel, not a segment.
+    expect(segs([patch("A1", null, "multiply", 1.5, "2027-04-01"), patch("B2", null, "multiply", 1.1, "2027-01-01")]).segments.map((s) => s.from)).toEqual([0]);
   });
 
   it("treats a month on or before the start as the whole run, and one at or after the horizon as 'later'", () => {
-    const early = patch("A1", null, "multiply", 2, "2026-10-01");
-    const late = patch("A1", null, "multiply", 3, "2027-11-01");
+    const early = cut(-1, "2026-10-01");
+    const late = cut(-2, "2027-11-01");
     const r = segs([early, late]);
     expect(r.segments).toHaveLength(1);
     expect(r.segments[0]!.patchChangeIds).toEqual([early.id]);
@@ -446,11 +457,13 @@ describe("scenarioSegments", () => {
 
   it("refuses more than six change months, running nothing", () => {
     const months = ["11", "12"].map((m) => `2026-${m}-01`).concat(["01", "02", "03", "04", "05"].map((m) => `2027-${m}-01`));
-    const r = segs(months.map((d) => patch("A1", null, "add", 0, d)));
+    const r = segs(months.map((d) => cut(-1, d)));
     expect(r.error).toMatch(/more than 6 different months/);
     expect(r.segments).toEqual([]);
     expect(MAX_SEGMENTS).toBe(7);
-    expect(segs(months.slice(0, 6).map((d) => patch("A1", null, "add", 0, d))).segments).toHaveLength(7);
+    expect(segs(months.slice(0, 6).map((d) => cut(-1, d))).segments).toHaveLength(7);
+    // Seven months of a timed lead change are fine: they are channels, not runs.
+    expect(segs(months.map((d) => patch("A1", null, "add", 0, d))).error).toBeNull();
   });
 });
 
@@ -809,7 +822,7 @@ describe("the demo's scenarios", () => {
     const eff = effectiveChanges(child, DEMO_SCENARIOS);
     expect(eff.ok && eff.changes.map((c) => [c.scenarioName, c.inherited])).toEqual([["Hire in March", true], ["Hire in March", true], ["Hire in March, then more leads", false]]);
     const r = scenarioSegments(bundle, (eff as { changes: EffectiveChange[] }).changes, [DEMO_FORECAST_SOLUTION], START, bounds, HPW);
-    expect(r.segments.map((s) => s.from)).toEqual([0, 6, 7]);
+    expect(r.segments.map((s) => s.from)).toEqual([0, 6]);
   });
 
   it("saves, renames and deletes in the tab's store, refusing to delete a parent while another builds on it", () => {

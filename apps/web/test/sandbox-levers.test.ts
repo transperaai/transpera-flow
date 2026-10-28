@@ -87,10 +87,10 @@ describe("the registry and the engine's patches", () => {
     for (const id of sandboxKinds) expect(SANDBOX_LEVERS.some((l) => l.kind === id), id).toBe(true);
   });
 
-  it("offers the levers a person may add: not the migrated-only ones, not role cost yet, and not a hidden kind; levers with no kind are always offered", () => {
+  it("offers the levers a person may add: not the migrated-only ones, role cost included from phase 3, and not a hidden kind; levers with no kind are always offered", () => {
     const all = offeredLevers().map((l) => l.id);
-    expect(all).toEqual(["A1", "A6", "B1", "B2", "B3", "C2", "D1", "D2", "D3", "D4", "D5", "E1", "E2", "E3", "E6"]);
-    expect(all).not.toContain("C1");
+    expect(all).toEqual(["A1", "A3", "A5", "A6", "B1", "B2", "B3", "B4", "B5", "C1", "C2", "D1", "D2", "D3", "D4", "D5", "D6", "D9", "E1", "E2", "E3", "E6"]);
+    expect(all).toContain("C1");
     for (const x of ["X1", "X2", "X3"]) expect(all).not.toContain(x);
     const hidden = offeredLevers(["people.starters", "process.time", "finances.prices"]).map((l) => l.id);
     expect(hidden).not.toContain("D1");
@@ -121,41 +121,47 @@ const countDuplicateTargets = (paths: string[]) => paths.length - new Set(paths.
 describe("what applies in this model (design suggestion 8)", () => {
   const [northbeam, larkspur] = models as [(typeof models)[0], (typeof models)[0]];
 
-  it("says why the active-clients and churn levers do nothing when clients are counted per service or by name", () => {
+  it("B1 and B3 apply to a roster now (they act on client groups and named clients), and B4 needs a roster", () => {
     for (const model of models) {
       const roster = model.clients !== undefined || Object.values(model.clientGroups ?? {}).some((g) => g.count > 0);
-      for (const id of ["B1", "B3"] as const) {
-        const reason = sandboxLever(id)!.applies!(model);
-        expect(reason === null, `${id} ${roster}`).toBe(!roster);
-        if (reason) expect(reason).toMatch(/Settings, Clients/);
-      }
+      for (const id of ["B1", "B3"] as const) expect(sandboxLever(id)!.applies, id).toBeUndefined();
+      expect(sandboxLever("B4")!.applies!(model) === null, `B4 ${roster}`).toBe(roster);
     }
-    // A model with neither: both apply.
     const pooled = { ...northbeam, clients: undefined, clientGroups: undefined };
-    expect(sandboxLever("B1")!.applies!(pooled)).toBeNull();
-    expect(sandboxLever("B3")!.applies!(pooled)).toBeNull();
-    expect(sandboxLever("B1")!.applies!({ ...pooled, clientGroups: { x: { count: 3 } } as never })).not.toBeNull();
-    expect(sandboxLever("B1")!.applies!({ ...pooled, clientGroups: { x: { count: 0 } } as never })).toBeNull();
+    expect(sandboxLever("B4")!.applies!(pooled)).toMatch(/Settings, Clients/);
   });
 
-  it("needs two services to split traffic between, and nothing else has a reason", () => {
+  it("a type on a model that keeps its clients as one pool says why, for B1, B5 and B2 for all clients", () => {
+    const pooled = { ...northbeam, clients: undefined, clientGroups: undefined };
+    const c = (lever: SandboxChange["lever"], extra: Partial<SandboxChange> = {}): SandboxChange => ({ id: "00000000-0000-4000-8000-000000000000", lever, target: "x", op: "set", value: 1, ...extra });
+    expect(sandboxLever("B1")!.changeApplies!(pooled, c("B1"))).toMatch(/one pool/);
+    expect(sandboxLever("B1")!.changeApplies!(pooled, c("B1", { target: null }))).toBeNull();
+    expect(sandboxLever("B1")!.changeApplies!(northbeam, c("B1"))).toBeNull();
+    expect(sandboxLever("B5")!.changeApplies!(pooled, c("B5"))).toMatch(/one pool/);
+    expect(sandboxLever("B2")!.changeApplies!(pooled, c("B2", { params: { who: "all" } }))).toMatch(/one pool/);
+    expect(sandboxLever("B2")!.changeApplies!(pooled, c("B2"))).toBeNull();
+  });
+
+  it("needs two services to split traffic between, and nothing else has a lever-wide reason but B4", () => {
     expect(sandboxLever("A6")!.applies!({ ...northbeam, services: { a: {} as never } })).toMatch(/two or more/);
     expect(sandboxLever("A6")!.applies!({ ...northbeam, services: { a: {} as never, b: {} as never } })).toBeNull();
     expect(sandboxLever("A6")!.applies!({ ...larkspur, services: undefined })).toMatch(/two or more/);
-    for (const l of SANDBOX_LEVERS.filter((x) => !["A6", "B1", "B3"].includes(x.id))) expect(l.applies, l.id).toBeUndefined();
+    for (const l of SANDBOX_LEVERS.filter((x) => !["A6", "B4"].includes(x.id))) expect(l.applies, l.id).toBeUndefined();
   });
 });
 
 describe("the change dialog says why a greyed lever does nothing, without it being picked", () => {
-  // A greyed <option> can't be chosen, so a reason shown only for the chosen lever was never seen (Northbeam greys Clients on the
-  // book and Base churn). And with no saved solution, "Solution goes live" was offered with nothing to pick.
+  // A greyed <option> can't be chosen, so a reason shown only for the chosen lever was never seen (a pooled model greys Churn driver as
+  // a chance). And with no saved solution, "Solution goes live" was offered with nothing to pick.
   const [northbeam] = models as [(typeof models)[0]];
   const reasonIn = (model: typeof northbeam) => (id: string) => sandboxLever(id)?.applies?.(model) ?? null;
 
-  it("groups the greyed levers of a model with a client roster under their one reason", () => {
-    const greyed = greyedLevers(offeredLevers([]), reasonIn(northbeam));
-    expect(greyed).toEqual([{ reason: sandboxLever("B1")!.applies!(northbeam), labels: ["Clients on the book", "Base churn"] }]);
-    expect(listWords(greyed[0]!.labels)).toBe("Clients on the book and Base churn");
+  it("groups the greyed levers of a pooled model under their one reason, and greys none for a roster", () => {
+    expect(greyedLevers(offeredLevers([]), reasonIn(northbeam))).toEqual([]);
+    const pooled = { ...northbeam, clients: undefined, clientGroups: undefined };
+    const greyed = greyedLevers(offeredLevers([]), reasonIn(pooled));
+    expect(greyed).toEqual([{ reason: sandboxLever("B4")!.applies!(pooled), labels: ["Churn driver as a chance"] }]);
+    expect(listWords(["Clients on the book", "Base churn"])).toBe("Clients on the book and Base churn");
     expect(listWords(["A", "B", "C"])).toBe("A, B and C");
     expect(greyedLevers(offeredLevers([]), () => null)).toEqual([]);
   });
