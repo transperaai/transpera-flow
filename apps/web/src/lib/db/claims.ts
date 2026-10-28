@@ -20,7 +20,7 @@ export function claimsFor(user: ClaimsUser | null, extra: { apiTokenId?: string 
     sub: user.id,
     role: "authenticated",
     email: user.email,
-    // `guest` stops resolve_my_access from joining a guest to workspaces (migration 20261228000000).
+    // `guest` makes workspace_role, my_person_id and is_sign_in_admin answer nothing, whatever memberships remain (20270105000000).
     app_metadata: { agency_admin: user.agencyAdmin && !user.guest, ...(user.guest ? { guest: true } : {}) },
     ...(extra.apiTokenId ? { api_token_id: extra.apiTokenId } : {}),
   };

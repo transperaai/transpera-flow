@@ -25,7 +25,7 @@ export interface SharedViewData {
   snapshotAt: string;
   /** When the link stops working (ISO), or null for no end date. */
   expiresAt: string | null;
-  /** `play`: a process page where the visitor can try levers and send an idea (B4). Absent: `view`. */
+  /** `play`: a process page where the visitor can try levers; nothing is saved (B4). Absent: `view`. */
   mode?: "view" | "play";
 }
 

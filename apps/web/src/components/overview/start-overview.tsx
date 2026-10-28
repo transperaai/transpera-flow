@@ -111,11 +111,12 @@ export function StartOverview({
       <section className="mx-auto mt-4 w-full max-w-3xl rounded-token border border-line p-4">
         <h2 className="text-sm font-bold">Other ways to start</h2>
         <p className="mt-2 text-sm text-fg-2">
-          Import with Claude: import a process with Claude (<code>set_active_workspace</code>, then <code>import_process</code>). Create a token under{" "}
+          With Claude: ask Claude to turn your interviews, notes or SOPs into a process file, then choose Upload process above. Claude
+          can read the workspace once it&apos;s connected (it can&apos;t change anything): create a token under{" "}
           <Link href="/settings/tokens" className="underline">
             API tokens
-          </Link>{" "}
-          to connect it.
+          </Link>
+          .
         </p>
         {canRestore && (
           <div data-restore-card className="mt-4 border-t border-line pt-4">

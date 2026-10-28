@@ -122,7 +122,7 @@ export function ProcessPage({
   firstPrinciples?: { doc: FirstPrinciples | null; href: string; draftChanged?: boolean; inheritedFrom?: number | null };
   processPicker?: ReactNode;
   notice?: ReactNode;
-  /** A play link's visitor (B4): shows "Try your own changes" after the map, with the levers the workspace shows and "Send this idea". Nowhere else renders levers on this page. */
+  /** A play link's visitor (B4): shows "Try your own changes" after the map, with the levers the workspace shows (nothing is saved). Nowhere else renders levers on this page. */
   play?: PlayConfig;
 }) {
   const searchParams = useSearchParams();

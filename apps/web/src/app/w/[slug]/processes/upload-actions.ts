@@ -11,8 +11,8 @@ import { rpc } from "@transpera-flow/db/client";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Upload a process (issue #166, B13). The file is checked here, not trusted from the browser, and written by the same code
-// the MCP `import_process` tool uses (packages/mcp/src/import-file.ts), acting as the signed-in user through RLS: only
-// editors can, nothing is published, and no role, person or client is created. The result opens in the editor as a draft.
+// the MCP `import_process` tool used before MCP became read-only (now packages/db/src/process-import), acting as the
+// signed-in user through RLS: only the Owner and Agency admins can, nothing is published, and no role, person or client is created. The result opens in the editor as a draft.
 // Who is asking is settled before the file is looked at: someone who isn't a signed-in editor of the workspace costs us
 // nothing but the answer.
 

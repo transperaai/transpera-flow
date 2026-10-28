@@ -55,7 +55,7 @@ Settings → Environment Variables. "Sensitive" variables cannot be read back af
 | `PREVIEW_ALIAS_URL` | The stable preview alias, if you made one (for example `https://acme-flow-next.vercel.app`). Only this deployment's own alias is trusted | Production, Preview | No | Claude via API |
 | `BETTER_AUTH_URL` | This deployment's own URL. Production: the production URL. Preview: the stable preview alias | Production, Preview (different values) | No | Claude via API (Austin may in the dashboard) |
 | `AUTH_PROVIDERS` | `google` (default), or `google,microsoft` | Production, Preview | No | Claude via API |
-| `ACCESS_ADMIN_EMAILS` | Comma-separated addresses that always sign in as Admin (first admin) | Production, Preview | No | Claude via API |
+| `ACCESS_ADMIN_EMAILS` | Comma-separated addresses that always sign in as Owner (Austin) | Production, Preview | No | Claude via API |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID | Production, Preview | No | Austin, dashboard |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Production, Preview | Yes | Austin, dashboard (paste from Google) |
 | `MICROSOFT_CLIENT_ID` | Entra app (client) ID. Only with Microsoft | Production, Preview | No | Austin, dashboard |
@@ -88,12 +88,12 @@ Other preview URLs sign in through the alias (Better Auth's OAuth proxy), so the
 
 ## 8. Access list
 
-1. `ACCESS_ADMIN_EMAILS` holds the first admin(s). They sign in as Admin whatever the rules say.
-2. Signed in as that admin: **Settings → Access → "Who can sign in"**. Add the client's **domains** (anyone with a verified address on them gets the default role) and **named emails** (a specific role, overriding the domain default). Roles: Admin, Editor, Viewer. Anyone unmatched is refused.
+1. `ACCESS_ADMIN_EMAILS` holds the Owner's address (Austin). It signs in as Owner whatever the rules say.
+2. Signed in as the Owner: **Settings → Access → "Who can sign in"**. Add the client's **domains** (anyone with a verified address on them gets the domain's role) and **named emails** (a specific role, overriding the domain's). Roles: **Owner** (everything), **Agency admin** (the client's founder and head of CS: edits, sees pay, manages who can sign in except Owners) and **Viewer** (reads everything but individual pay, edits nothing). Anyone unmatched is refused. Only the Owner can add or remove an Owner rule, or a named email in an Owner's domain.
 
 ## 9. First sign-in and smoke test
 
-1. Open the production URL, sign in with the `ACCESS_ADMIN_EMAILS` address. Expect the app, not an access-denied page or `/demo`.
+1. Open the production URL, sign in with the `ACCESS_ADMIN_EMAILS` address (the Owner). Expect the app, not an access-denied page or `/demo`.
 2. Settings → Access: add the client's domain and emails.
 3. Create or upload a process, run a simulation, reload: it persists (database and app login work).
 4. Sign in with an address not on the list: it is refused.

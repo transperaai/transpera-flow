@@ -83,11 +83,12 @@ describe("the start page for an editor", () => {
     expect(editor()).not.toContain("These haven&#x27;t been published yet:");
   });
 
-  it("offers importing with Claude, and the restore card only when it can restore", () => {
+  it("offers making a file with Claude to upload (MCP is read-only), and the restore card only when it can restore", () => {
     const without = editor();
     expect(without).toContain("Other ways to start");
-    expect(without).toContain("set_active_workspace");
-    expect(without).toContain("import_process");
+    expect(without).toContain("Upload process");
+    // MCP has no import tool any more (docs/plans/cut-list.md item 5): nothing tells the person to import through it.
+    expect(without).not.toContain("import_process");
     expect(without).toContain('href="/settings/tokens"');
     expect(without).not.toContain("data-restore-card");
     const withRestore = editor({ canRestore: true });
