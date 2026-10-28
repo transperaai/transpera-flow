@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { deleteDemoScenario, saveDemoScenario, useDemoScenarios } from "@/lib/sandbox/demo";
 import type { DescribeContext } from "@/lib/sandbox/describe";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
+import { solutionReason } from "@/lib/sandbox/greyed";
 import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
@@ -230,7 +231,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const lane = useMemo(() => (effectiveList ? laneMarkers(ctx, effectiveList, plan.problems, start, hpw) : []), [ctx, effectiveList, plan.problems, start, hpw]);
   const inSpan = useMemo(() => lane.filter((mk) => bounds !== null && hoursToDate(start, mk.date, hpw) < horizonHours), [lane, bounds, start, hpw, horizonHours]);
   const model = built.model;
-  const appliesReason = (leverId: string) => (model ? (sandboxLever(leverId)?.applies?.(model) ?? null) : null);
+  // A solution can go live only when one is saved for a process in the run (the solution options are worked out below).
+  const appliesReason = (leverId: string) => (leverId === "E6" ? solutionReason(solutionOptions) : model ? (sandboxLever(leverId)?.applies?.(model) ?? null) : null);
   const monthOptions = useMemo(() => {
     if (!built.model || !bounds) return [];
     const spans = bounds.slice(0, -1).map((s, i) => ({ start: s, end: bounds[i + 1]! }));

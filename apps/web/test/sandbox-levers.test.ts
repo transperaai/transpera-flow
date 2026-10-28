@@ -17,6 +17,7 @@ import {
 import { PATCH_FIELDS, SELECTORS, type ScenarioPatch } from "@transpera-flow/engine";
 import { LEVER_KINDS, leverKindId } from "@/lib/scenarios/lever-catalogue";
 import { buildLevers } from "@/lib/scenarios/levers";
+import { greyedLevers, listWords, NO_SOLUTION_REASON, solutionReason } from "@/lib/sandbox/greyed";
 
 // The Sandbox's lever registry (packages/db/src/sandbox-levers.ts) against the engine's patch grammar, the Settings -> Levers catalogue
 // and the process page's sliders. The SQL twin is in packages/db/test/sandbox-scenarios.test.ts.
@@ -142,6 +143,27 @@ describe("what applies in this model (design suggestion 8)", () => {
     expect(sandboxLever("A6")!.applies!({ ...northbeam, services: { a: {} as never, b: {} as never } })).toBeNull();
     expect(sandboxLever("A6")!.applies!({ ...larkspur, services: undefined })).toMatch(/two or more/);
     for (const l of SANDBOX_LEVERS.filter((x) => !["A6", "B1", "B3"].includes(x.id))) expect(l.applies, l.id).toBeUndefined();
+  });
+});
+
+describe("the change dialog says why a greyed lever does nothing, without it being picked", () => {
+  // A greyed <option> can't be chosen, so a reason shown only for the chosen lever was never seen (Northbeam greys Clients on the
+  // book and Base churn). And with no saved solution, "Solution goes live" was offered with nothing to pick.
+  const [northbeam] = models as [(typeof models)[0]];
+  const reasonIn = (model: typeof northbeam) => (id: string) => sandboxLever(id)?.applies?.(model) ?? null;
+
+  it("groups the greyed levers of a model with a client roster under their one reason", () => {
+    const greyed = greyedLevers(offeredLevers([]), reasonIn(northbeam));
+    expect(greyed).toEqual([{ reason: sandboxLever("B1")!.applies!(northbeam), labels: ["Clients on the book", "Base churn"] }]);
+    expect(listWords(greyed[0]!.labels)).toBe("Clients on the book and Base churn");
+    expect(listWords(["A", "B", "C"])).toBe("A, B and C");
+    expect(greyedLevers(offeredLevers([]), () => null)).toEqual([]);
+  });
+
+  it("greys a solution going live until a solution is saved for a process in the run", () => {
+    expect(solutionReason([])).toBe(NO_SOLUTION_REASON);
+    expect(solutionReason([{ inModel: false }])).toBe(NO_SOLUTION_REASON);
+    expect(solutionReason([{ inModel: false }, { inModel: true }])).toBeNull();
   });
 });
 

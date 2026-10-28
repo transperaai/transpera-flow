@@ -153,6 +153,12 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await waitRuns(page, 1);
         // A whole-run change: opportunities x1.25.
         await openAdd(page);
+        // Every greyed lever can't be picked, so its reason is listed under the list (the demo's clients are counted per service).
+        const disabled = await page.locator("[data-change-dialog] select[aria-label='What to change'] option:disabled").allInnerTexts();
+        expect(disabled.length).toBeGreaterThan(0);
+        const greyed = await page.locator("[data-greyed-levers]").innerText();
+        for (const label of disabled) expect(greyed).toContain(label.replace(" (does nothing here)", ""));
+        expect(greyed).toContain("Settings, Clients");
         await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Opportunities coming in" });
         await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
         await page.getByLabel("Value", { exact: true }).fill("1.25");

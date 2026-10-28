@@ -17,6 +17,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { formatNumber } from "@/lib/format";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { mondayOnOrBefore } from "@/lib/forecast/positions";
+import { greyedLevers, listWords } from "@/lib/sandbox/greyed";
 import { longDate, weekdayDate } from "@/lib/sandbox/lane";
 
 export type ChangeTarget = { mode: "add" } | { mode: "edit"; change: SandboxChange };
@@ -160,6 +161,11 @@ export function ChangeDialog(props: ChangeDialogProps) {
     onSubmit(built.change);
   };
 
+  // The greyed levers can't be picked, so their reasons are listed under the list (the chosen lever's own reason is above).
+  const greyed = greyedLevers(
+    levers.filter((l) => l.id !== lever.id),
+    appliesReason,
+  );
   const grouped = (Object.keys(GROUPS) as SandboxLever["group"][]).map((g) => ({ g, items: levers.filter((l) => l.group === g) })).filter((x) => x.items.length);
 
   return (
@@ -204,6 +210,15 @@ export function ChangeDialog(props: ChangeDialogProps) {
                 ))}
               </NativeSelect>
               {appliesReason(lever.id) ? <span className="text-xs text-muted-foreground">{appliesReason(lever.id)}</span> : null}
+              {greyed.length ? (
+                <span className="flex flex-col text-xs text-muted-foreground" data-greyed-levers>
+                  {greyed.map((g) => (
+                    <span key={g.reason}>
+                      {listWords(g.labels)} {g.labels.length === 1 ? "is" : "are"} greyed out: {g.reason}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
             </label>
 
             {needsTarget ? (
