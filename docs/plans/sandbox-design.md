@@ -48,96 +48,124 @@ today), and new monthly outputs (below). Every engine change bumps ENGINE and re
 Units and ranges are what the engine and database accept today unless marked **new**. "Timed" means it can be set from a
 month.
 
-### A. Leads and sales
+### A. Market: opportunities and sales (Austin, 28 Oct)
 
 | # | Lever | What it changes | Range | Timed | How |
 |---|---|---|---|---|---|
-| A1 | Lead volume, per lead source | Enquiries a week from that source | 0 – 10,000 /wk; or ×0–5 | Yes | Patch **new** `lead_sources.<id>.volume_week`; timed through the `leads` channel |
-| A2 | Lead quality, per source | Share of enquiries that become qualified leads | 0–100% | Yes | Patch **new** `lead_sources.<id>.conversion`; timed through the `leads` channel |
-| A3 | Win rate | How often a qualified lead is won (scales the win/lose split) | ×0–5 | Yes | `conv` channel (exists) |
-| A4 | Sales cycle | External waiting before the sale | ×0–5 | Yes | `cycle` channel (exists) |
-| A5 | Seasonality | 12 monthly demand multipliers | 0–5 each | Built in | Patch **new** `demand.seasonality.<month>` |
-| A6 | Growth | Compound monthly growth in leads | −99% to +1000% a month | Yes | Patch **new** `demand.growth_monthly`; from a month through the `leads` channel |
-| A7 | Service mix | Share of new clients choosing each service | ≥ 0 relative | Yes | Patch `services.<id>.mix_share` (exists); timed by splice |
+| A1 | **Opportunities coming in** | How many opportunities arrive a month, in total or per lead source. You set the number directly. | 0 – 50,000 a month | Yes | Patch **new** `lead_sources.<id>.volume_week` (entered a month, stored a week); timed through the `leads` channel |
+| A2 | Lead quality, per source | Share of opportunities that are real (qualified) | 0–100% | Yes | Patch **new** `lead_sources.<id>.conversion`; timed through the `leads` channel |
+| A3 | **Conversion rate** | Share of qualified opportunities won. It is **shown** as measured from the run (opportunities in, won, lost, rate) **and** can be changed. | ×0–5 of today's | Yes | `conv` channel (exists); **new** monthly outputs won, lost and arrivals |
+| A4 | Sales cycle | How long a sale takes (external waiting before the decision) | ×0–5 | Yes | `cycle` channel (exists) |
+| A5 | **Client value range, per type** **new** | The fee a new client of each service type pays, as a range (low – likely – high) instead of one number, so revenue shows the spread | ≥ 0 | Yes | **New** engine field `services.<id>.priceRange {low, mode, high}`: each won client's fee is drawn from a triangular distribution. A plain fee is the same with low = likely = high. |
+| A6 | **Traffic by type, as %** | How opportunities split across service types, shown and set as percentages that add up to 100% | 0–100% each | Yes | Patch `services.<id>.mix_share` (exists), normalised to %; timed by splice |
+| A7 | Seasonality | 12 monthly multipliers on opportunities | 0–500% each | Built in | Patch **new** `demand.seasonality.<month>` |
+| A8 | Growth | Compound monthly growth in opportunities | −99% to +1000% a month | Yes | Patch **new** `demand.growth_monthly`; from a month through the `leads` channel |
+| A9 | Market condition (shortcut) | A preset (Stable, Boom, Downturn, your own) that moves opportunities, conversion, sales cycle, price and churn together for a range of months | Up to 24 months | Yes | The scenario's own copy of the market schedule (exists) |
 
-### B. Market
-
-| # | Lever | What it changes | Range | Timed | How |
-|---|---|---|---|---|---|
-| B1 | Market condition, per month | Pick a preset (Stable, Boom, Downturn, your own) for a range of months | 24 months | Yes | The scenario's own copy of the market schedule |
-| B2 | Market factors by hand | Per month: leads, win rate, sales cycle, price, churn | 0–500% each | Yes | Writes the channels directly |
-| B3 | Hiring market **new** | How long a hire takes to start and ramp up | 0–6 months delay | Yes | Wire the ignored `hire` factor: it delays hire markers |
-| B4 | Pay market **new** | Pay inflation applied to role cost | ×0–5 | Yes | Wire the ignored `pay` factor: role cost channel |
-
-### C. Clients and retention
+### B. Clients (Austin, 28 Oct)
 
 | # | Lever | What it changes | Range | Timed | How |
 |---|---|---|---|---|---|
-| C1 | Clients on the book, per group or service | Starting number of clients | 0–2,000 a group | No (it's the start) | Patch **new** `client_groups.<service>.count` |
-| C2 | Fee, per group or service | Monthly fee | ≥ 0 | Yes | Patch `services.<id>.price` (exists) / **new** `client_groups.<id>.fee`; timed through the `price` channel |
-| C3 | Base churn, per service | Monthly chance a client leaves | 0–100% | Yes | Patch **new** `services.<id>.churn_monthly`; timed through the `churn` channel |
-| C4 | Churn drivers | Weight 0–3 and value of each driver: late delivery, response time, onboarding target, rework, workload, hand-offs, results score, tenure, price rise, market, your own | Per driver | Yes (price rise has a month) | Patch **new** `churn_drivers.<id>.{weight,value,month,enabled}` |
-| C5 | How health reacts | Starting health, recovery, penalty per late or missed task | As today | No | Patch `health.*` (exists) |
-| C6 | Win or lose a named client **new** | A client joins or leaves from a month | — | Yes | Client row with dates (like people over time) |
-| C7 | Service delivery load, per service | Hours per client a month by role; servicing frequency and SLA | ≥ 0; SLA 1–10,000 h | Yes | Patch **new** `services.<id>.{ongoing.<role>, servicing.<n>.{times, sla_hours}}`; timed by splice |
+| B1 | **Clients on the book**, per type | Number of clients at the start | 0–2,000 a type | No (it's the start) | Patch **new** `client_groups.<service>.count` |
+| B2 | **Fees**, per type | Monthly fee of existing clients | ≥ 0 | Yes | Patch `services.<id>.price` (exists) / **new** `client_groups.<id>.fee`; timed through the `price` channel |
+| B3 | **Base churn**, per type | Monthly chance a client leaves for no particular reason | 0–100% | Yes | Patch **new** `services.<id>.churn_monthly`; timed through the `churn` channel |
+| B4 | **Churn drivers, as chances** **new** | For each driver (late delivery, slow response, slow onboarding, rework, overload, hand-offs, poor results, tenure, price rise, market, your own): **the chance it happens** to a client in a month (%), and **how much it raises that client's chance of leaving** when it does (%) | 0–100% and 0–500% | Yes | **Engine change.** Today a driver is a weight times a pressure that every client feels equally. It becomes an event: each month each client has the driver's chance of being hit, and a hit raises that client's churn by the driver's effect for the following months. Drivers the engine measures (late delivery, response, rework, overload) keep using the measured chance by default, which you can override. |
+| B5 | **Price rise** | Raise (or cut) the fee of existing and new clients by a %, from a month, per type | −100% to +400% | Yes | `price` channel, plus the price-rise churn driver (B4), so the rise carries its churn risk |
 
-### D. Pricing and money
+**Price rise, what it shows.** Next to a price rise the sandbox shows the trade-off: revenue gained from clients who stay,
+revenue lost from the extra clients who leave, and the **net change in revenue**, month by month and over the run, with the
+10–90% range. It also shows the break-even churn: how many extra leavers the rise can absorb before it loses money.
 
-| # | Lever | What it changes | Range | Timed | How |
-|---|---|---|---|---|---|
-| D1 | Price change, per service | Raise or cut prices for new and existing clients | −100% to +400% | Yes | `price` channel. It also feeds the "price rise" churn driver automatically, so a rise has its churn cost. |
-| D2 | Role cost (pay) | Cost per hour by role | ≥ 0 or ×0–5 | Yes | Patch `roles.<id>.cost_rate` (exists); timed through the role cost channel |
-| D3 | Overheads **new** | Fixed costs a month (rent, tools) | ≥ 0 | Yes | New model field `overheadMonthly` and a channel. It's held in settings today but unused. |
-| D4 | Hourly billing **new** | Hourly services earn revenue for the hours worked | — | — | Engine fix: hourly pricing earns nothing today |
+**Not in the sandbox (Austin, 28 Oct):** client health, winning or losing a named client from a month, and delivery hours
+and service levels. They stay as they are in the live model but are not levers.
 
-### E. People
+### C. Money
 
 | # | Lever | What it changes | Range | Timed | How |
 |---|---|---|---|---|---|
-| E1 | Hire | A new person in a role, at an FTE, from a month, with an optional ramp-up (slower for the first N months) | FTE 0.1–1.5; ramp 0–6 months | Yes | People over time (exists); ramp through the person's capacity factor |
-| E2 | Someone leaves | A person stops from a month | — | Yes | People over time: `until` (**new** as a lever) |
-| E3 | Leave | A person away for some weeks | 1–52 weeks | Yes | Leave rows (exists) |
-| E4 | FTE change | A person's FTE from a month | 0.1–1.5 | Yes | Two person rows split at the month |
-| E5 | Headcount by role (quick) | Set the number in a role | 0 – count + 20 | Yes | Patch `roles.<id>.headcount` (exists); timed through hires and leavers |
-| E6 | Working week | Hours a week, overtime allowed, time kept free for pipeline work | 1–168 h; 0–100%; 0–99% | Yes | Patch **new** `settings.{hours_per_week, overtime_cap, availability_floor}`; timed through the hours channel |
-| E7 | Speed, per person | Capacity factor: how fast this person works, overall or on a step | 0.5–2 | Yes | Patch **new** `people.<id>.capacity_factor[.<step>]`; timed by splice |
-| E8 | Skills | Who can do which steps | Add or remove | Yes | Patch **new** `people.<id>.skills`; timed by splice |
-| E9 | Client assignments | Who looks after which client | — | No | Patch **new**; later |
+| C1 | Role cost (pay) | Cost per hour by role | ≥ 0 or ×0–5 | Yes | Patch `roles.<id>.cost_rate` (exists); timed through the role cost channel |
+| C2 | Overheads **new** | Fixed costs a month (rent, tools) | ≥ 0 | Yes | New model field `overheadMonthly` and a channel. It's held in settings today but unused. |
+| C3 | Hourly billing **new** | Hourly services earn revenue for the hours worked | — | — | Engine fix: hourly pricing earns nothing today |
 
-### F. Process
+### D. People
 
 | # | Lever | What it changes | Range | Timed | How |
 |---|---|---|---|---|---|
-| F1 | Step time | Hands-on hours, per step or by role | ×0.1–2 or set | Yes | Patch `steps.<id>.work_hours` (exists); timed through the step-work channel |
-| F2 | Waiting time | External wait, per step | ×0.1–2 or set | Yes | Patch `steps.<id>.wait_hours` (exists); step-wait channel |
-| F3 | Rework | Chance a step is done again | 0–95% | Yes | Patch `steps.<id>.rework_rate` (exists); rework channel |
-| F4 | Routing | Split of work between paths after a step | 0–100% per path | Yes | Patch **new** `edges.<id>.p`; timed by splice |
-| F5 | Who does a step | Move a step to another role or person | — | Yes | Patch **new** `steps.<id>.{role, person}`; timed by splice |
-| F6 | Solutions go live | A designed process change goes live from a month | Up to 4 a scenario | Yes | Splice (exists, D46/D48) |
-| F7 | Work in progress at the start | Queue at each step on day one | ≥ 0 | No | Patch **new** `steps.<id>.current_wip` |
-| F8 | Variability | How unpredictable step times are (spread) | Low, normal, high | No | Patch **new** on the work and wait distributions |
+| D1 | Hire | A new person in a role, at an FTE, from a month, with an optional ramp-up (slower for the first N months) | FTE 0.1–1.5; ramp 0–6 months | Yes | People over time (exists); ramp through the person's capacity factor |
+| D2 | Someone leaves | A person stops from a month | — | Yes | People over time: `until` (**new** as a lever) |
+| D3 | Leave | A person away for some weeks | 1–52 weeks | Yes | Leave rows (exists) |
+| D4 | FTE change | A person's FTE from a month | 0.1–1.5 | Yes | Two person rows split at the month |
+| D5 | Headcount by role (quick) | Set the number in a role | 0 – count + 20 | Yes | Patch `roles.<id>.headcount` (exists); timed through hires and leavers |
+| D6 | Working week | Hours a week, overtime allowed, time kept free for pipeline work | 1–168 h; 0–100%; 0–99% | Yes | Patch **new** `settings.{hours_per_week, overtime_cap, availability_floor}`; timed through the hours channel |
+| D7 | Speed, per person | Capacity factor: how fast this person works, overall or on a step | 0.5–2 | Yes | Patch **new** `people.<id>.capacity_factor[.<step>]`; timed by splice |
+| D8 | Skills | Who can do which steps | Add or remove | Yes | Patch **new** `people.<id>.skills`; timed by splice |
+| D9 | Hiring delay (later) | How long a hire takes to start | 0–6 months | Yes | Wire the market's ignored `hire` factor |
+| D10 | Pay inflation (later) | Role cost rises over time | ×0–5 | Yes | Wire the market's ignored `pay` factor: role cost channel |
 
-### G. The run itself
+### E. Process
+
+| # | Lever | What it changes | Range | Timed | How |
+|---|---|---|---|---|---|
+| E1 | Step time | Hands-on hours, per step or by role | ×0.1–2 or set | Yes | Patch `steps.<id>.work_hours` (exists); timed through the step-work channel |
+| E2 | Waiting time | External wait, per step | ×0.1–2 or set | Yes | Patch `steps.<id>.wait_hours` (exists); step-wait channel |
+| E3 | Rework | Chance a step is done again | 0–95% | Yes | Patch `steps.<id>.rework_rate` (exists); rework channel |
+| E4 | Routing | Split of work between paths after a step | 0–100% per path | Yes | Patch **new** `edges.<id>.p`; timed by splice |
+| E5 | Who does a step | Move a step to another role or person | — | Yes | Patch **new** `steps.<id>.{role, person}`; timed by splice |
+| E6 | Solutions go live | A designed process change goes live from a month | Up to 4 a scenario | Yes | Splice (exists, D46/D48) |
+| E7 | Work in progress at the start | Queue at each step on day one | ≥ 0 | No | Patch **new** `steps.<id>.current_wip` |
+| E8 | Variability | How unpredictable step times are (spread) | Low, normal, high | No | Patch **new** on the work and wait distributions |
+
+### F. The run itself
 
 | # | Setting | Range | How |
 |---|---|---|---|
-| G1 | Horizon | 1–24 months | `horizonWeeks` (exists) |
-| G2 | Start date | Today or the 1st of a coming month | `toEngineModel` start date (exists) |
-| G3 | Precision | Quick (30 runs) or precise (200 runs, slower) | Replications (fixed at 30 today) |
+| F1 | Horizon | 12 months by default; 3, 6 or 24 months; or **custom**, any number of months from 1 to 24 | `horizonWeeks` (exists) |
+| F2 | Start month | This month, or a custom future month | `toEngineModel` start date (exists) |
+| F3 | Precision | Quick (30 runs) or precise (200 runs, slower) | Replications (fixed at 30 today) |
 
 The lever list in Settings → Levers keeps its role: it chooses which levers this workspace shows. That keeps the sandbox
 simple for a client who only needs a few.
+
+### G. Time and what it achieves (Austin, 28 Oct)
+
+Austin wants to see where working time goes and what each piece of work achieves, as percentages, in the spirit of the
+first principles.
+
+- **Purpose categories.** Each step gets one category saying what it achieves. A workspace has its own list, in
+  Settings → Processes. The default list is:
+  - **Moves the client's job forward:** the work the client pays for.
+  - **Required:** compliance and admin that must be done.
+  - **Winning work:** sales and onboarding.
+  - **Coordination:** hand-offs, meetings and chasing.
+  - **Fixing:** rework and corrections.
+  - **Could be removed:** steps the first principles mark to delete.
+
+  A step marked "delete" in its process's first principles defaults to "Could be removed". The category is set in the
+  editor, and it is the same for every run.
+- **What it shows:**
+  - Hours of hands-on work, and the % of all working time, per category.
+  - Per month, per role and per person.
+  - Rework time counted under "Fixing" whatever the step's own category.
+  - Idle and uncovered time next to it, so 100% is the whole capacity.
+  - In compare, how each scenario shifts the split: removing a "Could be removed" step, cutting rework, or adding a
+    hire.
+- **Levers:** no new lever. Every process lever (E1–E8) and people lever moves these numbers.
+- **How it's built:** a **new** monthly engine output, hands-on hours per step (and per rework), summed by category in
+  the app. Plus a **new** column `steps.purpose` and a workspace list of categories, with a migration that fills in the
+  defaults.
 
 ## What it shows
 
 Every figure appears per month and over the whole run, as an average and a 10–90% range:
 
 - **Revenue:** recurring revenue (exists). **New:** billed revenue, revenue from new clients, revenue lost to churn.
-- **Clients:** active clients per service, at-risk clients (both exist). **New:** won, lost, average health.
-- **Sales:** **new** leads arriving, won, lost, time to win.
+- **Clients:** active clients per type (exists). **New:** clients won and lost per month, and why they left (base churn or which driver).
+- **Sales:** **new** opportunities arriving, won, lost, **conversion rate**, time to win.
+- **Price rise:** revenue gained, revenue lost to extra churn, net change, break-even churn (B5).
+- **Time and purpose:** hours and % of working time per purpose category (G).
 - **Capacity:** how busy each role and person is, uncovered hours, waits, late tasks (all exist). **New:** overtime
   hours.
-- **Money:** **new** labour cost, overtime cost, overheads, and **profit**, once D3 and D4 are in.
+- **Money:** **new** labour cost, overtime cost, overheads, and **profit**, once C2 and C3 are in.
 - **Alerts:** months too busy, uncovered work, clients at risk, with each alert linking to the lever that would help.
   The alerts use the workspace's own thresholds, not the defaults (a gap today).
 
@@ -153,8 +181,10 @@ each scenario's band.
 - Results are never stored. They are re-run from today's live model, as forecast plans are today, so a scenario can't
   go stale. A scenario that refers to something that no longer exists (a person who left, a deleted step) shows that
   change as broken and skips it, with a note (as `resolveScenario` does today).
-- Who sees it: owners, editors and agency admins, as for plans today, because leave and pay name people. Viewers see
-  shared scenarios with pay hidden (`payHidden`).
+- **Who uses it (Austin, 28 Oct):** Austin and the client's founder and head of CS. In each deployment, the sandbox is
+  open to **Admins and Editors** of "Who can sign in", so the founder and the head of CS need the Editor role at least.
+  Viewers can open and run saved scenarios but can't save. Levers and figures that show one person's pay follow the
+  existing pay privacy (B1).
 - **MCP (read-only, decision 1b):** `list_scenarios` and `run_scenario` let Claude or ChatGPT run a saved scenario and
   report on it. Running is a read; nothing is saved.
 
@@ -170,7 +200,7 @@ each scenario's band.
 5. **Export:** a scenario or a comparison as CSV and as a one-page PDF summary for a client.
 6. **Read-only share link to a scenario,** using the share-link machinery (people and pay hidden as today), so a client
    can see the plan without signing in.
-7. **Make the finance real first:** wire margin, overheads and hourly billing (D3, D4), so profit means something.
+7. **Make the finance real first:** wire margin, overheads and hourly billing (C2, C3), so profit means something.
    Otherwise the money levers move revenue but no costs.
 8. **Fix the silent levers:** today the "active clients" and "monthly churn" sliders do nothing in a workspace with
    client groups or a named roster. The sandbox should only offer a lever that will move the result for this workspace,
@@ -181,17 +211,27 @@ each scenario's band.
 1. **One scenario model.** The new table, migrating plans and scenarios; the sandbox page with saving, running and
    comparing; every lever that exists today as a patch or marker, whole-run or timed. Mechanisms: patches, people
    over time, splice.
-2. **Monthly channels in the engine:** step work, step wait, rework, role cost and hours; the `hire` and `pay`
-   factors; then every remaining timed lever from A–F. ENGINE minor bump; goldens refreshed.
+2. **Engine changes for Austin's levers:** churn drivers as chances (B4), client value ranges (A5), and the price-rise
+   trade-off (B5). Then monthly channels for step work, step wait, rework, role cost and hours, and every remaining timed
+   lever from A–E. ENGINE minor bump; goldens refreshed.
 3. **Finance and new outputs:** overheads, hourly billing, labour and overtime cost, profit, plus the new monthly
-   series (won, lost, billed revenue, health, overtime).
+   series (opportunities, won, lost, conversion, billed revenue, overtime), and time by purpose (G).
 4. **Extras:** goal seek, tornado chart, exports, the read-only share link, MCP `list_scenarios`/`run_scenario`.
+
+## Decided (Austin, 28 Oct)
+
+- Market: set opportunities directly, see the conversion rate, a value range for clients, traffic by type in %.
+- Clients: clients on the book, fees, base churn, churn drivers as chances, and price-rise simulation with its churn and
+  revenue effect. Client health, named clients joining or leaving, and delivery hours and service levels are not levers.
+- Users: Austin plus the client's founder and head of CS.
+- Horizon: 12 months by default, with a custom option.
+- Time spent working and the purpose of each task, as percentages (G).
+- Compare three scenarios side by side.
+- Changes can be whole-run or timed; scenarios are saved, run and compared.
 
 ## Questions for Austin
 
-1. **Who uses the sandbox:** only your team (owners, editors, agency admins), or should clients' viewers also play with
-   it?
-2. **Default horizon:** 12 months, or longer?
-3. **Which levers matter most to you:** this sets the order inside phase 1.
-4. **Comparison:** are three scenarios side by side enough?
-5. **Profit:** do you want profit (phase 3) early, even before the timed levers of phase 2?
+1. **Profit:** do you want profit early (overheads, staff cost and hourly billing, phase 3), before the timed levers of
+   phase 2?
+2. **Purpose categories (G):** is the default list right, or do you have your own categories?
+3. **Head of CS:** should they be able to save scenarios (Editor), or only run the ones you save (Viewer)?
