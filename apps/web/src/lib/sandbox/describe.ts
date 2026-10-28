@@ -3,7 +3,8 @@
 
 import { sandboxLever, type ProcessBundle, type SandboxChange, type SandboxLever, type SolutionRow } from "@transpera-flow/db";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
-import { canSeePerson, viewerOf } from "@/lib/viewer";
+import { A_TEAM_MEMBER } from "@transpera-flow/db";
+import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { hireNames, monthWord } from "./run";
 import { othersTotal, percentText, weightToShare } from "./traffic";
 
@@ -47,7 +48,8 @@ const LABELLED = /^Team member \d+$/;
 
 /** A person as the reader may see them: their name, or "Team member N" (the one the database labelled them with, else their place in the team). */
 export function viewerPersonName(b: Pick<DescribeContext["bundle"], "people" | "viewer">, person: { id: string; name: string }): string {
-  if (canSeePerson(viewerOf(b), person.id)) return person.name;
+  const [named] = namedForViewer(viewerOf(b), [person]);
+  if (named!.name !== A_TEAM_MEMBER) return named!.name;
   return LABELLED.test(person.name) ? person.name : `Team member ${b.people.findIndex((p) => p.id === person.id) + 1}`;
 }
 
