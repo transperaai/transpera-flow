@@ -1,7 +1,7 @@
 "use server";
 
 import type { SandboxScenarioRow } from "@transpera-flow/db";
-import { SANDBOX_CHANGED_ELSEWHERE, SANDBOX_SIGNED_OUT, sandboxFailure } from "@/lib/sandbox/save-errors";
+import { buildOnRefusal, SANDBOX_CHANGED_ELSEWHERE, SANDBOX_SIGNED_OUT, sandboxFailure } from "@/lib/sandbox/save-errors";
 import { isId, parseSandboxInput } from "@/lib/sandbox/validate";
 import { jsonb, pgError } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
@@ -89,8 +89,7 @@ export async function deleteSandboxScenario(workspaceId: unknown, scenarioId: un
     const err = pgError(e);
     if (err?.code === "23503") {
       const children = await db.selectFrom("sandbox_scenarios").select("name").where("parent_id", "=", scenarioId).where("workspace_id", "=", workspaceId).orderBy("name").execute().catch(() => []);
-      const list = children.map((c) => `“${c.name}”`).join(", ");
-      return { status: "error", message: `Other scenarios build on this one${list ? `: ${list}` : ""}. Delete them or change what they build on first.` };
+      return { status: "error", message: buildOnRefusal(children.map((c) => c.name)) };
     }
     return { status: "error", message: sandboxFailure(err) };
   }

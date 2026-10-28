@@ -88,6 +88,8 @@ const pick = (page: Page, label: string) => page.locator("[data-scenario-select]
 const marker = (page: Page, kind?: string) => page.locator(kind ? `[data-plan-marker][data-kind="${kind}"]` : "[data-plan-marker]").first();
 const valuetext = async (m: Locator) => (await m.getAttribute("aria-valuetext")) ?? "";
 const button = (page: Page, name: string) => page.locator("[data-scenario-bar]").getByRole("button", { name, exact: true });
+/** Waits for the status line to say just "Saved" (a rerun after a save says "Updating the forecast…" first). */
+const isSaved = (page: Page) => page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent === "Saved", undefined, { timeout: 90_000 });
 const status = (page: Page) => page.locator("[data-scenario-status-line]").innerText();
 const options = (page: Page) => page.locator("[data-scenario-select] option").allInnerTexts();
 const changes = (page: Page) => page.locator("[data-change-list] [data-change]");
@@ -383,12 +385,26 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         const { page, errors } = await mount(width);
         await pick(page, "Hire in January");
         await waitRuns(page, 1);
-        // Rename and save.
+        // Rename: saved at once, not left as an unsaved change.
         await button(page, "Rename").click();
         await page.getByLabel("Scenario name").fill("Hire early");
         await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-sandbox-name-dialog]", { state: "detached" });
+        expect(await status(page)).toBe("Saved");
+        expect(await options(page)).toEqual(["No changes", "Hire early", "Hire in March", "Hire in March, then more leads"]);
+        expect(await page.locator("[data-scenario-select] option:checked").innerText()).toBe("Hire early");
+        expect(await page.locator("[data-scenario-save]").count()).toBe(0);
+        // A rename to a name that is taken is refused in the dialog.
+        await button(page, "Rename").click();
+        await page.getByLabel("Scenario name").fill("hire in march");
+        await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-sandbox-name-dialog]").innerText()).toContain("A scenario with that name already exists.");
+        await page.getByRole("button", { name: "Cancel" }).click();
+        // An edit that is not saved yet: switching away asks first.
+        await waitRuns(page, 1);
+        await marker(page, "hire").focus();
+        await page.keyboard.press("ArrowRight");
         expect(await status(page)).toContain("Unsaved changes");
-        // Switching away asks first.
         await pick(page, "No changes");
         expect(await page.getByRole("dialog").innerText()).toContain("Discard your changes to “Hire early”?");
         await page.getByRole("button", { name: "Keep editing" }).click();
@@ -437,6 +453,8 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
         await page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent?.includes("Other scenarios build on this one"));
         expect(await status(page)).toContain("“Early, then more”");
+        // The refusal says how to free it, and the way is there.
+        expect(await status(page)).toContain("choose “Change what it builds on”");
         expect(await options(page)).toContain("Hire early (copy)");
         // Delete the child first, then the parent.
         await pick(page, "Early, then more");
@@ -449,6 +467,51 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
         await page.waitForFunction(() => !document.querySelector("[data-scenario-select]")?.textContent?.includes("Hire early (copy)"));
         expect(await options(page)).toEqual(["No changes", "Hire early", "Hire in March", "Hire in March, then more leads"]);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("changes or clears what a saved scenario builds on, and says why a choice is refused", async () => {
+        const { page, errors } = await mount(width);
+        const dialog = page.locator("[data-sandbox-parent-dialog]");
+        const parentPick = () => dialog.getByLabel("Builds on", { exact: true });
+        const submit = () => dialog.locator("button[type=submit]").click();
+        // A loop is refused, with the reason, and nothing changes: "Hire in March" can't build on the one that builds on it.
+        await pick(page, "Hire in March");
+        await button(page, "Change what it builds on").click();
+        expect(await parentPick().evaluate((el: HTMLSelectElement) => el.selectedOptions[0]!.textContent)).toBe("Nothing (start from the live model)");
+        await parentPick().selectOption({ label: "Hire in March, then more leads" });
+        await submit();
+        expect(await dialog.locator("[data-parent-dialog-error]").innerText()).toBe("A scenario can't build on itself or on one that builds on it.");
+        await page.getByRole("button", { name: "Cancel" }).click();
+        expect(await page.locator("[data-scenario-parent]").count()).toBe(0);
+        // Another parent for the one that builds on it: saved at once.
+        await pick(page, "Hire in March, then more leads");
+        await waitRuns(page, 1);
+        expect(await page.locator("[data-scenario-parent]").innerText()).toContain("Builds on “Hire in March”");
+        expect(await changes(page).count()).toBe(3);
+        await button(page, "Change what it builds on").click();
+        expect(await parentPick().evaluate((el: HTMLSelectElement) => el.selectedOptions[0]!.textContent)).toBe("Hire in March");
+        await parentPick().selectOption({ label: "Hire in January" });
+        await submit();
+        await page.waitForSelector("[data-sandbox-parent-dialog]", { state: "detached" });
+        await isSaved(page);
+        expect(await page.locator("[data-scenario-parent]").innerText()).toContain("Builds on “Hire in January”");
+        expect(await changes(page).count()).toBe(2);
+        // Clear it.
+        await button(page, "Change what it builds on").click();
+        await parentPick().selectOption({ label: "Nothing (start from the live model)" });
+        await submit();
+        await page.waitForSelector("[data-sandbox-parent-dialog]", { state: "detached" });
+        expect(await page.locator("[data-scenario-parent]").count()).toBe(0);
+        expect(await changes(page).count()).toBe(1);
+        await isSaved(page);
+        // And "Hire in March" is free to be deleted once nothing builds on it.
+        await pick(page, "Hire in March");
+        await button(page, "Delete").click();
+        await page.locator("[data-sandbox-confirm] button", { hasText: "Delete" }).click();
+        await page.waitForFunction(() => ![...document.querySelectorAll("[data-scenario-select] option")].some((o) => o.textContent === "Hire in March"));
+        expect(await options(page)).toEqual(["No changes", "Hire in January", "Hire in March, then more leads"]);
         expect(errors).toEqual([]);
         await page.close();
       });

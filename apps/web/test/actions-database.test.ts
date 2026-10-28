@@ -143,13 +143,55 @@ describe("sandbox scenarios", () => {
     const a = await saveSandboxScenario(WS, null, input("Child B", [], { parent_id: parent.scenario.id }), null);
     const b = await saveSandboxScenario(WS, null, input("Child A", [], { parent_id: parent.scenario.id }), null);
     expect(a.status === "ok" && b.status === "ok").toBe(true);
-    expect(await deleteSandboxScenario(WS, parent.scenario.id)).toEqual({ status: "error", message: "Other scenarios build on this one: “Child A”, “Child B”. Delete them or change what they build on first." });
+    expect(await deleteSandboxScenario(WS, parent.scenario.id)).toEqual({ status: "error", message: "Other scenarios build on this one: “Child A”, “Child B”. In the Sandbox, open each one and choose “Change what it builds on” (or delete them), then try again." });
     expect(Number((await one("select count(*) from sandbox_scenarios where id = $1", [parent.scenario.id])).count)).toBe(1);
     if (a.status === "ok" && b.status === "ok") {
       expect(await deleteSandboxScenario(WS, a.scenario.id)).toEqual({ status: "ok" });
       expect(await deleteSandboxScenario(WS, b.scenario.id)).toEqual({ status: "ok" });
     }
     expect(await deleteSandboxScenario(WS, parent.scenario.id)).toEqual({ status: "ok" });
+  });
+
+  it("changes and clears a saved scenario's parent with the same concurrency check, refusing a loop or more than 5 deep with the reason", async () => {
+    const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const make = async (name: string, parent_id: string | null = null) => {
+      const r = await saveSandboxScenario(WS, null, input(name, [], { parent_id }), null);
+      if (r.status !== "ok") throw new Error(JSON.stringify(r));
+      return r.scenario;
+    };
+    const a = await make("Parent A");
+    const b = await make("Parent B");
+    const child = await make("Moves about", a.id);
+    // Change it to B, then clear it.
+    const toB = await saveSandboxScenario(WS, child.id, input("Moves about", [], { parent_id: b.id }), child.updated_at);
+    expect(toB).toMatchObject({ status: "ok", scenario: { parent_id: b.id } });
+    // The page still holds the version before that: someone changed it since.
+    expect(await saveSandboxScenario(WS, child.id, input("Moves about", [], { parent_id: null }), child.updated_at)).toEqual({ status: "error", message: "Someone else changed or deleted this scenario. Reload to see it." });
+    expect((await one("select parent_id from sandbox_scenarios where id = $1", [child.id])).parent_id).toBe(b.id);
+    if (toB.status !== "ok") return;
+    const cleared = await saveSandboxScenario(WS, child.id, input("Moves about", [], { parent_id: null }), toB.scenario.updated_at);
+    expect(cleared).toMatchObject({ status: "ok", scenario: { parent_id: null } });
+    // A loop: A cannot build on the one that builds on A.
+    const under = await make("Under A", a.id);
+    expect(await saveSandboxScenario(WS, a.id, input("Parent A", [], { parent_id: under.id }), a.updated_at)).toEqual({ status: "error", message: "A scenario can't build on itself or on one that builds on it." });
+    expect(await saveSandboxScenario(WS, a.id, input("Parent A", [], { parent_id: a.id }), a.updated_at)).toEqual({ status: "error", message: "A scenario can't build on itself or on one that builds on it." });
+    // And the database says the same when the app's own check is out of the way.
+    await expect(tdb.client.query("update sandbox_scenarios set parent_id = $2 where id = $1", [a.id, under.id])).rejects.toThrow(/build on itself/);
+    // Six levels is too deep: a chain of five parents above is the most.
+    let top = await make("Level 0");
+    for (let i = 1; i <= 5; i++) top = await make(`Level ${i}`, top.id);
+    const deep = await saveSandboxScenario(WS, null, input("Level 6", [], { parent_id: top.id }), null);
+    expect(deep).toEqual({ status: "error", message: "Scenarios can build on each other up to 5 deep." });
+    const loose = await make("Loose");
+    expect(await saveSandboxScenario(WS, loose.id, input("Loose", [], { parent_id: top.id }), loose.updated_at)).toEqual({ status: "error", message: "Scenarios can build on each other up to 5 deep." });
+    // Raising one with scenarios under it past the limit is refused too, naming the limit.
+    const root = await make("Deep root");
+    const mid = await make("Deep mid", root.id);
+    let tip = mid;
+    for (let i = 0; i < 4; i++) tip = await make(`Deep tip ${i}`, tip.id);
+    const raised = await saveSandboxScenario(WS, root.id, input("Deep root", [], { parent_id: top.id }), root.updated_at);
+    expect(raised).toMatchObject({ status: "error", message: expect.stringMatching(/up to 5 deep/) });
+    await tdb.client.query("delete from sandbox_scenarios where name ~ '^(Level|Deep|Loose|Under A|Parent|Moves about)'");
   });
 
   it("refuses a Viewer, and a signed-out caller, writing nothing", async () => {
@@ -186,7 +228,7 @@ describe("sandbox scenarios", () => {
     expect((await one("select changes from sandbox_scenarios where id = $1", [timed.scenario.id])).changes).toEqual([hire]);
     // And it can't delete one that others build on.
     const child = await saveSandboxScenario(WS, null, input("Builds on it", [], { parent_id: made.scenario.id }), null);
-    expect(await deleteScenario(made.scenario.id)).toEqual({ status: "error", message: "Other scenarios build on this one: “Builds on it”. Delete them or change what they build on first." });
+    expect(await deleteScenario(made.scenario.id)).toEqual({ status: "error", message: "Other scenarios build on this one: “Builds on it”. In the Sandbox, open it and choose “Change what it builds on” (or delete it), then try again." });
     if (child.status === "ok") await tdb.client.query("delete from sandbox_scenarios where id = $1", [child.scenario.id]);
     expect(await deleteScenario(made.scenario.id)).toEqual({ status: "ok" });
     await tdb.client.query("delete from sandbox_scenarios where id = $1", [timed.scenario.id]);

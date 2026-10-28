@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { northbeamSandboxScenarios, NORTHBEAM_HIRE_JANUARY_ID, NORTHBEAM_HIRE_MARCH_ID, NORTHBEAM_WORKSPACE_ID, type SandboxScenarioRow } from "@transpera-flow/db";
 import { DEMO_FORECAST_SOLUTION_ID } from "@/lib/forecast/demo";
+import { buildOnRefusal } from "./save-errors";
 import type { SaveInput } from "./store-types";
 
 const SEEDED_AT = "2026-10-05T00:00:00.000Z";
@@ -68,7 +69,7 @@ export function saveDemoScenario(scenario: SaveInput & { id: string | null }): S
 /** Delete a scenario from the demo's list; refused (with the names) while others build on it. */
 export function deleteDemoScenario(id: string): { ok: true } | { ok: false; message: string } {
   const children = state.filter((s) => s.parent_id === id);
-  if (children.length) return { ok: false, message: `Other scenarios build on this one: ${children.map((c) => `“${c.name}”`).join(", ")}. Delete them or change what they build on first.` };
+  if (children.length) return { ok: false, message: buildOnRefusal(children.map((c) => c.name)) };
   state = state.filter((p) => p.id !== id);
   emit();
   return { ok: true };

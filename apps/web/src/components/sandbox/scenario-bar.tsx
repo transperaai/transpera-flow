@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { EDIT_ONLY } from "@/lib/phone";
+import { CHANGE_PARENT } from "@/lib/sandbox/save-errors";
 
 const MAX_NAME = MAX_SCENARIO_NAME;
 
@@ -50,6 +51,8 @@ export interface ScenarioBarProps {
   onRename: () => void;
   onDuplicate: () => void;
   onBuildOn: () => void;
+  /** Change or clear what the scenario on screen builds on. */
+  onChangeParent: () => void;
   onDelete: () => void;
   onCompare: () => void;
 }
@@ -103,6 +106,11 @@ export function ScenarioBar(p: ScenarioBarProps) {
                   <Button variant="outline" onClick={p.onRename} data-scenario-rename>
                     Rename
                   </Button>
+                  {p.parentName !== null || p.scenarios.length > (p.selectedId !== null ? 1 : 0) ? (
+                    <Button variant="outline" onClick={p.onChangeParent} data-scenario-change-parent>
+                      {CHANGE_PARENT}
+                    </Button>
+                  ) : null}
                   {p.selectedId !== null ? (
                     <>
                       <Button variant="outline" onClick={p.onDuplicate} disabled={atLimit} title={limit} data-scenario-duplicate>
@@ -205,17 +213,25 @@ export function NameDialog({
   confirm: string;
   /** Names already used by other scenarios, compared as the database does (ignoring case and spaces). */
   taken: string[];
-  onConfirm: (name: string) => void;
+  /** Return a message to keep the dialog open with it (a save that was refused). */
+  onConfirm: (name: string) => void | string | null | Promise<void | string | null>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initial);
   const [error, setError] = useState<string | null>(null);
-  const submit = () => {
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
     const clean = name.trim();
     if (!clean) return setError("Give the scenario a name.");
     if (clean.length > MAX_NAME) return setError(`A scenario's name can have up to ${MAX_NAME} characters.`);
     if (taken.some((t) => t.trim().toLowerCase() === clean.toLowerCase())) return setError("A scenario with that name already exists.");
-    onConfirm(clean);
+    setBusy(true);
+    try {
+      const refused = await onConfirm(clean);
+      if (typeof refused === "string") setError(refused);
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -243,7 +259,77 @@ export function NameDialog({
             <Button type="button" variant="outline" onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="submit">{confirm}</Button>
+            <Button type="submit" disabled={busy}>
+              {confirm}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** What a scenario builds on: another saved scenario, or nothing (it starts from the live model). Every other scenario is offered; a choice the database would refuse (a loop, more than 5 deep) comes back as its message. */
+export function ParentDialog({
+  title,
+  current,
+  options,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  current: string | null;
+  options: { id: string; name: string }[];
+  /** Return a message to keep the dialog open with it. */
+  onConfirm: (parentId: string | null) => void | string | null | Promise<void | string | null>;
+  onCancel: () => void;
+}) {
+  const [parent, setParent] = useState(current ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent data-sandbox-parent-dialog>
+        <form
+          className="contents"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              const refused = await onConfirm(parent || null);
+              if (typeof refused === "string") setError(refused);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>A scenario that builds on another runs that one&apos;s changes first, then its own. Changing the parent changes this scenario&apos;s results.</DialogDescription>
+          </DialogHeader>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-fg-2">Builds on</span>
+            <NativeSelect aria-label="Builds on" value={parent} onChange={(e) => (setParent(e.target.value), setError(null))}>
+              <option value="">Nothing (start from the live model)</option>
+              {options.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </label>
+          {error ? (
+            <p role="alert" className="text-sm text-destructive" data-parent-dialog-error>
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy}>
+              Save
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

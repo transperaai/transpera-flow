@@ -53,7 +53,7 @@ import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/fo
 import { ChangeDialog, type ChangeTarget } from "./change-dialog";
 import { ChangeList } from "./change-list";
 import { SandboxCompare, MAX_COMPARE } from "./sandbox-compare";
-import { ConfirmDialog, NameDialog, NO_CHANGES, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
+import { ConfirmDialog, NameDialog, NO_CHANGES, ParentDialog, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
 
 export interface SandboxViewProps {
   /** The company model's process (the first sales pipeline), with the servicing processes it runs beside. */
@@ -98,7 +98,7 @@ interface Draft {
 }
 
 type Confirm = { title: string; description?: string; confirm: string; cancel: string; destructive?: boolean; onConfirm: () => void } | null;
-type NameAsk = { title: string; initial: string; confirm: string; taken: string[]; onConfirm: (name: string) => void } | null;
+type NameAsk = { title: string; initial: string; confirm: string; taken: string[]; onConfirm: (name: string) => void | string | null | Promise<void | string | null> } | null;
 
 export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHref, peopleHref = null, leversHref = null, startDate, note, scenarios = NO_SCENARIOS, solutions = NO_SOLUTIONS, hiddenLevers = NO_HIDDEN }: SandboxViewProps) {
   const router = useRouter();
@@ -143,6 +143,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const [changeTarget, setChangeTarget] = useState<ChangeTarget | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [nameAsk, setNameAsk] = useState<NameAsk>(null);
+  const [parentAsk, setParentAsk] = useState(false);
   const [saveNote, setSaveNote] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
 
   const savedScenario = saved.find((p) => p.id === selected) ?? null;
@@ -166,6 +167,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     setChangeTarget(null);
     setConfirm(null);
     setNameAsk(null);
+    setParentAsk(false);
     setSaveNote(null);
     // Only an address change from outside resets the page; `saved` is read as it is then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -404,18 +406,65 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   };
   const onSaveAsNew = () =>
     setNameAsk({ title: "Save as a new scenario", initial: `${workingName} (copy)`, confirm: "Save", taken: namesTaken(null), onConfirm: (name) => (setNameAsk(null), startSave(name, true)) });
+  /**
+   * Change one field of the saved scenario on screen and save it at once (a rename, a new parent), as the saved scenario stands: any
+   * other edits not yet saved stay on screen, unsaved. Saved with the usual check that nobody else changed it since the page loaded it.
+   * Returns why it was refused, or null.
+   */
+  const saveField = async (fields: { name: string } | { parent_id: string | null }): Promise<string | null> => {
+    const base = savedScenario;
+    if (!base) return "Save the scenario first.";
+    const parsed = parseSandboxInput({ name: base.name, description: base.description, parent_id: base.parent_id, changes: base.changes, horizon_months: base.horizon_months, ...fields }, { ...parseContext, selfId: base.id });
+    if (!parsed.ok) return parsed.error;
+    let row: SandboxScenarioRow;
+    if (demo) row = saveDemoScenario({ id: base.id, ...parsed.value });
+    else {
+      try {
+        const r = await saveSandboxScenario(live.workspace.id, base.id, parsed.value, base.updated_at);
+        if (r.status === "error") return r.message;
+        row = r.scenario;
+      } catch {
+        return "Couldn't save the scenario. Try again.";
+      }
+      setLiveScenarios((prev) => [...prev.filter((p) => p.id !== row.id), row].sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    // What was being edited stays, with this change in it.
+    setEdit((prev) => (prev ? { ...prev, ...fields } : prev));
+    setSaveNote({ text: "Saved", tone: "ok" });
+    return null;
+  };
   const onRename = () =>
     setNameAsk({
       title: "Rename the scenario",
       initial: workingName,
       confirm: "Rename",
       taken: namesTaken(savedScenario?.id ?? null),
-      onConfirm: (name) => {
-        setNameAsk(null);
-        setSaveNote(null);
-        setEdit((prev) => ({ ...(prev ?? { description: savedScenario?.description ?? null, parent_id: savedScenario?.parent_id ?? null, changes: savedScenario?.changes ?? [] }), name }));
+      onConfirm: async (name) => {
+        // A scenario that isn't saved yet has no row to rename: the name is kept for when it is saved.
+        if (!savedScenario) {
+          setNameAsk(null);
+          setSaveNote(null);
+          setEdit((prev) => ({ ...(prev ?? { description: null, parent_id: null, changes: [] }), name }));
+          return null;
+        }
+        const refused = await saveField({ name });
+        if (refused === null) setNameAsk(null);
+        return refused;
       },
     });
+  /** Change or clear what the scenario on screen builds on. A saved one is saved at once; a new one keeps it for when it is saved. */
+  const applyParent = async (parentId: string | null): Promise<string | null> => {
+    if (!savedScenario) {
+      const parsed = parseSandboxInput({ name: workingName, description: null, parent_id: parentId, changes: working?.changes ?? [], horizon_months: months }, { ...parseContext, selfId: null });
+      if (!parsed.ok) return parsed.error;
+      setEdit((prev) => ({ ...(prev ?? { name: workingName, description: null, parent_id: null, changes: [] }), parent_id: parentId }));
+      setParentAsk(false);
+      return null;
+    }
+    const refused = await saveField({ parent_id: parentId });
+    if (refused === null) setParentAsk(false);
+    return refused;
+  };
   /** Duplicate: a new scenario with the same changes and the same parent. */
   const onDuplicate = () => {
     if (!savedScenario) return;
@@ -623,6 +672,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onRename={onRename}
           onDuplicate={onDuplicate}
           onBuildOn={onBuildOn}
+          onChangeParent={() => setParentAsk(true)}
           onDelete={onDelete}
           onCompare={openCompare}
         />
@@ -814,6 +864,15 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       ) : null}
       {confirm ? <ConfirmDialog {...confirm} onCancel={() => setConfirm(null)} /> : null}
       {nameAsk ? <NameDialog {...nameAsk} onCancel={() => setNameAsk(null)} /> : null}
+      {parentAsk && working ? (
+        <ParentDialog
+          title={`What “${workingName}” builds on`}
+          current={working.parent_id}
+          options={saved.filter((s) => s.id !== savedScenario?.id).map((s) => ({ id: s.id, name: s.name }))}
+          onConfirm={applyParent}
+          onCancel={() => setParentAsk(false)}
+        />
+      ) : null}
     </div>
   );
 }
