@@ -17,6 +17,8 @@ declare global {
     workerScripts: Record<string, string>;
     __harnessUrl?: string;
     __simRuns?: number;
+    /** The address changing from outside the page, as a link or the sidebar would change it. */
+    __setHarnessUrl: (url: string) => void;
     mountSandbox: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean; dan?: boolean }) => void;
   }
 }
@@ -63,6 +65,8 @@ const MANY_SOLUTIONS: SolutionRow[] = [3, 2.5, 2, 1.5].map((hours, i) => ({
 
 const change = (id: string, solutionId: string, from: string) => ({ id, lever: "E6" as const, target: solutionId, op: "set" as const, value: 1, from });
 const scenario = (name: string, changes: ReturnType<typeof change>[]) => saveDemoScenario({ id: null, name, description: null, parent_id: null, changes, horizon_months: 12 });
+
+window.__setHarnessUrl = setHarnessUrl;
 
 window.mountSandbox = ({ mode, url, broken, many, dan }) => {
   if (many) {
