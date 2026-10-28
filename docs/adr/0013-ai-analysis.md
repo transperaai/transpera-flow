@@ -1,5 +1,8 @@
 # 13. AI analysis: AI reads the run, a number check decides what is kept
 
+> **Superseded: removed 28 Oct 2026, docs/plans/cut-list.md item 1 and 6.** In-app AI and findings are gone (migration `20270101000000_drop_in_app_ai.sql` drops the AI analysis data). Kept as history.
+
+
 Date: 1 Oct 2026 · Status: accepted, amended by ADR 0015 (B17: AI runs only on demand and writes proposed findings citing facts; the publish and market triggers are gone) · Issue: #111 (A46) · Builds on ADR 0011 (narration), PRD §7.3 and §8, D15, docs/analysis-rules.md "What AI does", docs/research/first-principles.md Part B
 
 ## Context

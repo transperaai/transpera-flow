@@ -22,7 +22,6 @@ const { loadProcessCard, loadProcessesAndArchived, loadProcessesPage } = await i
 const { loadLibrary } = await import("@/lib/editor/library-data");
 const { loadCalibrationPage } = await import("@/lib/calibration/data");
 const { loadClientCalibration } = await import("@/lib/calibration/client-data");
-const { loadWorkspaceAiSettings } = await import("@/lib/ai/data");
 const { loadWorkspaceLeverSettings } = await import("@/lib/levers/data");
 const { loadProcessFirstPrinciples } = await import("@/lib/first-principles/data");
 const { loadLiveCompany, loadLiveParts } = await import("@/lib/overview/data");
@@ -178,7 +177,6 @@ describe("calibration pages", () => {
 describe("settings loaders that fall back", () => {
   it("reads the AI, lever and first-principles settings", async () => {
     actAs("viewer");
-    expect(await loadWorkspaceAiSettings(ws)).toHaveProperty("read_sources");
     expect(await loadWorkspaceLeverSettings(ws)).toHaveProperty("hidden");
     const fp = await loadProcessFirstPrinciples(processId, [randomUUID()]);
     expect(Object.values(fp)[0]).toMatchObject({ doc: null });

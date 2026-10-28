@@ -3,10 +3,6 @@ import { restoreProcess } from "@/app/w/[slug]/process-admin-actions";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { isUnpublished } from "@transpera-flow/db";
-import { isBlank } from "@transpera-flow/engine";
-import { aiConfigured, loadAiViews, loadLatestAiViews, loadWorkspaceAiSettings, loadWorkspaceFindings } from "@/lib/ai/data";
-import { analysisBaseHash, isStale } from "@/lib/ai/model-hash";
-import { NARRATION_MODEL } from "@/lib/narration/anthropic";
 import { ProcessNav } from "@/components/process-nav";
 import { ShareButton } from "@/components/share/share-dialog";
 import { ProcessPage } from "@/components/process-page";
@@ -34,7 +30,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const archivedAt = live.process.archived_at ?? null;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
-  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, findings, aiSettings] = await Promise.all([
+  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames] = await Promise.all([
     canEditWorkspace(live.workspace.id),
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceIssues(live.workspace.id),
@@ -44,10 +40,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     loadWorkspaceSolutions(live.workspace.id, live.process.id),
     currentUserId(),
     loadMemberNames(live.workspace.id),
-    loadWorkspaceFindings(live.workspace.id, { viewer: live.viewer, people: live.people }),
-    loadWorkspaceAiSettings(live.workspace.id),
   ]);
-  // Who last published the live version, and which of this process's issues an AI idea is waiting for.
+  // Who last published the live version, and which of this process's issues a solution idea is waiting for.
   const [lastChange, ideaIssueIds] = await Promise.all([
     isUnpublished(live) ? null : loadLastChange(live.revision.id, memberNames),
     loadIdeaIssueIds(
@@ -60,16 +54,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const fpIds = [shown.revision.id, ...(draft && draft !== shown ? [draft.revision.id] : [])];
   const fp = await loadProcessFirstPrinciples(live.process.id, fpIds);
   const fpShown = fp[shown.revision.id]!;
-  // What AI wrote (B17): on live, the latest analysis of the process, marked out of date once the model has changed since;
-  // on an earlier version, what AI wrote about that version. A draft that was never published has nothing.
-  const aiView = isUnpublished(live)
-    ? null
-    : earlier
-      ? ((await loadAiViews([shown.revision.id], { viewer: live.viewer, people: live.people }))[shown.revision.id] ?? null)
-      : ((await loadLatestAiViews([live.process.id], { viewer: live.viewer, people: live.people }))[live.process.id] ?? null);
-  // Out of date once what it read changed (model, first principles, Anthropic model, sources); the page adds the facts.
-  const baseHash = aiView && !earlier ? analysisBaseHash(live, fpShown.doc, "process", { readSources: aiSettings.read_sources, model: NARRATION_MODEL }) : null;
-  const stale = !earlier && isStale(aiView, { base: baseHash, revisionId: live.revision.id });
   const fpDraft = draft && draft !== shown && !earlier ? fp[draft.revision.id]! : null;
   const draftChanged = fpDraft !== null && JSON.stringify(fpDraft.doc) !== JSON.stringify(fpShown.doc);
   const base = `/w/${slug}`;
@@ -99,8 +83,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       solutions={{ data: solutions, base, viewerId, memberNames }}
       ideaIssueIds={ideaIssueIds}
       aboutInfo={{ trail: trailOf({ id: live.process.id, parentId: live.process.parent_process_id }, byId).map((t) => t.name), hasDraft: draft !== null && !isUnpublished(live), lastChange }}
-      ai={{ view: aiView, stale, configured: aiConfigured(), hasFirstPrinciples: fpShown.doc !== null && !isBlank(fpShown.doc), versionNumber: isUnpublished(live) ? null : shown.revision.number }}
-      findings={findings}
       // Owners and editors share the published version of an ordinary process (not an earlier version, an archived one or the company map).
       share={canEdit && !earlier && !archivedAt && !isUnpublished(live) && !live.process.is_company ? <ShareButton slug={slug} kind="process" targetId={live.process.id} what={live.process.name} /> : undefined}
       firstPrinciples={{ doc: fpShown.doc, href: `${base}/p/${live.process.id}/first-principles`, draftChanged, inheritedFrom: fpShown.inheritedFrom }}

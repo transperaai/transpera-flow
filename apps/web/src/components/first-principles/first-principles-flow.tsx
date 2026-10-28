@@ -2,20 +2,17 @@
 
 // The first-principles flow (issue #119, A54): seven steps, a stepper, back and next, progress, and a panel of rule
 // checks beside every answer. Answers are saved as they are typed, per process version: into the draft (the page says
-// so), never the live version. Beside them, the AI review panel (A46) shows what AI wrote about the live version.
+// so), never the live version. Beside them, the checks panel shows what the rules find in the answers.
 
 import { Fragment, useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Sparkles } from "lucide-react";
 import type { ProcessBundle } from "@transpera-flow/db";
 import { countFilled, countFlags, FP_STEPS, firstPrinciplesFlags, isAttention, measuresMetToday, stepsFilled, type FirstPrinciples, type FpFlag, type FpStepKey } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AiReviewPanel } from "@/components/ai/ai-review-panel";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { useIsPhone } from "@/hooks/use-mobile";
-import type { AiMode, AiPanelData } from "@/lib/ai/types";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -68,10 +65,7 @@ export function FirstPrinciplesFlow({
   processesHref,
   peopleHref,
   processPicker,
-  ai,
 }: {
-  /** What AI wrote about the live version (A46), for the AI review panel; omitted, the panel isn't shown. */
-  ai?: { mode: AiMode; data: AiPanelData; canRun: boolean };
   /** The version being edited (the draft if there is one, else live), for its steps, people and the run the checks read. */
   bundle: ProcessBundle;
   initial: FirstPrinciples;
@@ -259,12 +253,11 @@ export function FirstPrinciplesFlow({
             </div>
           </section>
 
-          <aside aria-label="AI checks" className="flex flex-col gap-3 rounded-token border border-line bg-card p-4 shadow-token md:col-span-2 xl:sticky xl:top-16 xl:col-span-1">
+          <aside aria-label="Checks" className="flex flex-col gap-3 rounded-token border border-line bg-card p-4 shadow-token md:col-span-2 xl:sticky xl:top-16 xl:col-span-1">
             <div className="flex items-center gap-1.5 text-sm font-semibold">
-              <Sparkles aria-hidden className="size-4 text-accent" />
-              AI checks
+              Checks
               <Help
-                label="AI checks"
+                label="Checks"
                 description="Rules that read your answers and compare them with the process and its latest simulation. They point things out; they never change your answers and they never make up numbers."
                 example="“Speeding up Enrich in CRM, which is still a delete candidate. Decide the deletion first.”"
               />
@@ -287,8 +280,6 @@ export function FirstPrinciplesFlow({
                 <li className="text-xs text-fg-2">Nothing to check yet.</li>
               )}
             </ul>
-
-            {ai && <AiReviewPanel mode={ai.mode} processId={bundle.process.id} step={step.key} ai={ai.data} canRun={ai.canRun} />}
 
             <div className="flex flex-col gap-0.5 border-t border-line pt-3">
               <span className="text-xs font-semibold tracking-wide text-fg-2 uppercase">All steps</span>

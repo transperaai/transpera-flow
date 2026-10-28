@@ -19,8 +19,6 @@ const { canEditWorkspace, canManageWorkspace, currentUserId, isAgencyAdmin, load
 const { listAgencyWorkspaces, listWorkspaces, loadMemberNames, loadWorkspaceHead } = await import("@/lib/data");
 const { shellCounts } = await import("@/lib/company-data");
 const { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveHealthRule, saveLinks } = await import("@/lib/fields/server");
-const { cachedNarration, findNarration } = await import("@/lib/narration/service");
-const { explainRun } = await import("@/lib/narration/explain");
 const { loadShareLinks } = await import("@/lib/share/list");
 const { workspaceIsEmpty } = await import("@/lib/restore/empty");
 const { loadImports, loadLeadSourceOptions } = await import("@/lib/calibration/import-data");
@@ -216,42 +214,6 @@ describe("fields/server", () => {
     expect(await saveCapacityFactor(priya, null, 1.25, null)).toEqual({ status: "saved", value: null });
     actAs("viewer");
     expect(await saveCapacityFactor(priya, null, null, 1.1)).toMatchObject({ status: expect.stringMatching(/error|not_found/) });
-  });
-});
-
-describe("narration cache", () => {
-  const input = { purpose: "explain" as const, payload: {}, check: {} as never, aliases: [], template: ["The run finished.", "Nothing else."], hash: "a".repeat(64) };
-
-  it("drafts, stores and re-reads a narration, and redrafts over the same row", async () => {
-    actAs("editor");
-    const targetId = randomUUID();
-    expect(await findNarration(current, ws, targetId, input)).toBeNull();
-    const first = await cachedNarration(current, { workspaceId: ws, targetId, input, model: null });
-    expect(first.cached).toBe(false);
-    expect(first.id).toEqual(expect.any(String));
-    expect(first.fallback).toBe(true);
-    const row = await findNarration(current, ws, targetId, input);
-    expect(row).toMatchObject({ id: first.id, text: "The run finished.\n\nNothing else.", fallback: true, fallback_kind: "unavailable" });
-    expect(row!.rejected).toEqual([]);
-    expect(row!.usage).toEqual([]);
-    const again = await cachedNarration(current, { workspaceId: ws, targetId, input, model: null, regenerate: true });
-    expect(again.id).toBe(first.id);
-    const n = (await tdb.client.query("select count(*)::int as n from narrations where target_id = $1", [targetId])).rows[0].n;
-    expect(n).toBe(1);
-  });
-
-  it("keeps going when the cache can't be written", async () => {
-    // A viewer may read narrations but not write one: the text is still returned, without an id.
-    actAs("viewer");
-    const out = await cachedNarration(current, { workspaceId: ws, targetId: randomUUID(), input, model: null });
-    expect(out.id).toBeNull();
-    expect(out.paragraphs).toEqual(input.template);
-  });
-
-  it("says a saved run isn't available when it is not there", async () => {
-    actAs("editor");
-    const out = await explainRun(current, randomUUID(), { model: null });
-    expect(out).toEqual({ status: "error", code: "not_found", message: "That saved run isn't available." });
   });
 });
 

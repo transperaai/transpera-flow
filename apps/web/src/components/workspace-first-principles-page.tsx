@@ -1,6 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { emptyFirstPrinciples, isBlank } from "@transpera-flow/engine";
-import { aiConfigured, loadAiViews } from "@/lib/ai/data";
+import { emptyFirstPrinciples } from "@transpera-flow/engine";
 import { isUnpublished } from "@transpera-flow/db";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { WorkspaceFirstPrinciplesFlow } from "@/components/first-principles/flow-clients";
@@ -31,9 +30,6 @@ export async function WorkspaceFirstPrinciplesPage({ slug, processId }: { slug: 
   const bundle = unpublished ? (draft ?? live) : canEdit && draft ? draft : live;
   const fps = await loadProcessFirstPrinciples(live.process.id, [...new Set([bundle.revision.id, live.revision.id])]);
   const stored = fps[bundle.revision.id]!;
-  // What AI wrote about the live version (A46): it reviews the published answers, not the draft being typed.
-  const aiViews = unpublished ? {} : await loadAiViews([live.revision.id], { viewer: live.viewer, people: live.people });
-  const liveFp = fps[live.revision.id]!.doc;
   const hasDraft = bundle === draft;
 
   const editing: FlowEditing = !canEdit
@@ -62,11 +58,6 @@ export async function WorkspaceFirstPrinciplesPage({ slug, processId }: { slug: 
       processHref={`${base}/p/${live.process.id}`}
       processesHref={`${base}/processes`}
       peopleHref={`${base}/people`}
-      ai={{
-        mode: canEdit ? "live" : "readonly",
-        data: { view: aiViews[live.revision.id] ?? null, configured: aiConfigured(), hasFirstPrinciples: liveFp !== null && !isBlank(liveFp), versionNumber: unpublished ? null : live.revision.number },
-        canRun: canEdit && !unpublished,
-      }}
       processPicker={
         <ProcessNav
           processes={processes}

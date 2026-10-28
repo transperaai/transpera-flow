@@ -21,7 +21,6 @@ describe("pages that pass canEdit into a read only mode", () => {
     ["the Block library", PAGE("blocks")],
     ["Sources", PAGE("sources")],
     ["the Forecast", PAGE("forecast")],
-    ["Settings → AI analysis", PAGE("settings/ai")],
     ["Settings → Levers", PAGE("settings/levers")],
     ["Settings → Historical data", PAGE("settings/calibration")],
   ])("%s", (_, file) => {
@@ -37,11 +36,9 @@ describe("pages that pass canEdit into a read only mode", () => {
     expect(page).toContain("create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}");
   });
 
-  it("the first-principles page: read only, no Run, no New process", () => {
+  it("the first-principles page: read only, no New process", () => {
     const page = read("components/workspace-first-principles-page.tsx");
     expect(page).toContain("const editing: FlowEditing = !canEdit");
-    expect(page).toContain('mode: canEdit ? "live" : "readonly"');
-    expect(page).toContain("canRun: canEdit && !unpublished");
     expect(page).toContain("create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}");
   });
 

@@ -10,7 +10,7 @@ const page = read("src/app/s/[token]/page.tsx");
 describe("the visitor's page", () => {
   it("imports no loader that reads a workspace's tables (the snapshot is its only data)", () => {
     const imports = [...page.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]!);
-    for (const banned of ["@/lib/data", "@/lib/overview/data", "@/lib/ai/data", "@/lib/company-data", "@/lib/access-data", "@/lib/first-principles/data", "@/lib/share/list"]) {
+    for (const banned of ["@/lib/data", "@/lib/overview/data", "@/lib/company-data", "@/lib/access-data", "@/lib/first-principles/data", "@/lib/share/list"]) {
       expect(imports, banned).not.toContain(banned);
     }
     // Only the client factory, the snapshot type and the screens: no other module of lib that talks to the database.

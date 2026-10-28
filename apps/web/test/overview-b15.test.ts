@@ -2,14 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { northbeamBundle, northbeamIssues, partOf, toEngineModel, type IssueRow, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
-import { RATING_LABELS, simulate, type DetectedIssue, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
-import { FindingsByProcess, countsLine } from "@/components/overview/findings-by-process";
+import { RATING_LABELS, ratingOfStored, ratingRank, simulate, type DetectedIssue, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
+import { ProcessGroups, countsLine } from "@/components/overview/process-groups";
 import { FlowEfficiencyCard, ImprovementCard, OpenIssuesCard, ProcessHealthCard } from "@/components/overview/health-cards";
 import { BeforeAfterChart, IssuesDonut, OpenedResolvedChart, TimeSplitChart } from "@/components/overview/trend-charts";
-import { buildInsights } from "@/lib/insights/insights";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { ratingOfRank } from "@/lib/map/rating";
-import { COMPANY_GROUP, findingsByProcess, groupOfFinding, groupOfIssue } from "@/lib/overview/by-process";
+import { COMPANY_GROUP, groupByProcess, groupOfFact, groupOfIssue } from "@/lib/overview/by-process";
 import { countByRating, flowEfficiencyWords, monthOf, openIssues, openedVersusResolved, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
 import { hoursAMonth, impactNumbers, impactPairs, improvementDelivered, measureImpact, solutionsToCompare, type SolutionImpact } from "@/lib/overview/impact";
 import { processRatings } from "@/lib/processes/rows";
@@ -173,21 +172,21 @@ describe("issues opened versus resolved", () => {
   });
 });
 
-describe("findings by process", () => {
+describe("groups by process", () => {
   const stepOf = new Map(parts.flatMap((p) => p.steps.map((s) => [s.id, p.process.id] as const)));
   const processOfStep = (id: string) => stepOf.get(id);
   const pipeline = live.process.id;
   const monthly = parts[1]!;
   const monthlyStep = monthly.steps.find((s) => s.kind === "task")!.id;
-  it("puts a step's finding in its process, and roles, people, clients and the forecast across the company", () => {
-    expect(groupOfFinding({ key: `wait:step:${monthlyStep}`, stepId: monthlyStep }, processOfStep, pipeline)).toBe(monthly.process.id);
-    expect(groupOfFinding({ key: "capacity:role:r1", stepId: monthlyStep }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
-    expect(groupOfFinding({ key: "churn_risk:group:svc", stepId: null }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
-    expect(groupOfFinding({ key: "forecast:role:r1", stepId: monthlyStep }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
-    expect(groupOfFinding({ key: "cycle:process:pipeline", stepId: null }, processOfStep, pipeline)).toBe(pipeline);
-    expect(groupOfFinding({ key: `cycle:process:${monthly.process.id}`, stepId: null }, processOfStep, pipeline)).toBe(monthly.process.id);
-    expect(groupOfFinding({ key: "success:measure:m1", stepId: null }, processOfStep, pipeline)).toBe(pipeline);
-    expect(groupOfFinding({ key: "ai:insight:abc", stepId: null }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
+  it("puts a step's fact in its process, and roles, people, clients and the forecast across the company", () => {
+    expect(groupOfFact({ key: `wait:step:${monthlyStep}`, stepId: monthlyStep }, processOfStep, pipeline)).toBe(monthly.process.id);
+    expect(groupOfFact({ key: "capacity:role:r1", stepId: monthlyStep }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
+    expect(groupOfFact({ key: "churn_risk:group:svc", stepId: null }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
+    expect(groupOfFact({ key: "forecast:role:r1", stepId: monthlyStep }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
+    expect(groupOfFact({ key: "cycle:process:pipeline", stepId: null }, processOfStep, pipeline)).toBe(pipeline);
+    expect(groupOfFact({ key: `cycle:process:${monthly.process.id}`, stepId: null }, processOfStep, pipeline)).toBe(monthly.process.id);
+    expect(groupOfFact({ key: "success:measure:m1", stepId: null }, processOfStep, pipeline)).toBe(pipeline);
+    expect(groupOfFact({ key: "ai:insight:abc", stepId: null }, processOfStep, pipeline)).toBe(COMPANY_GROUP);
   });
   it("puts an issue logged by hand in the process it names, else its step's", () => {
     const ids = new Set(parts.map((p) => p.process.id));
@@ -195,30 +194,33 @@ describe("findings by process", () => {
     expect(groupOfIssue(issue({ process_id: null, step_id: monthlyStep }), processOfStep, pipeline, ids)).toBe(monthly.process.id);
     expect(groupOfIssue(issue({ process_id: null, step_id: null }), processOfStep, pipeline, ids)).toBe(COMPANY_GROUP);
   });
-  it("rates each process by its confirmed open issues, as the map and Processes table do, with its top finding and counts", () => {
+  it("rates each process by its confirmed open issues, as the map and Processes table do, with its worst open issue and counts", () => {
     const detected = rerate(model, result, {}, pipeline);
     const tracked = northbeamIssues();
-    const insights = buildInsights(registerEntries(tracked, detected));
     const solutions = [{ id: "s1", process_id: pipeline }, { id: "s2", process_id: pipeline }];
     const resolvedBy = issue({ status: "resolved", resolved_solution_id: "s2", process_id: pipeline });
-    const groups = findingsByProcess({ parts, pipelineId: pipeline, insights, issues: [...tracked, resolvedBy], solutions });
+    const groups = groupByProcess({ parts, pipelineId: pipeline, facts: detected, issues: [...tracked, resolvedBy], solutions });
     expect(groups[0]!.id).toBe(COMPANY_GROUP);
     expect(groups.slice(1).map((g) => g.id)).toEqual(parts.map((p) => p.process.id));
-    // Every insight lands in exactly one group.
-    expect(groups.reduce((a, g) => a + g.insights.length, 0)).toBe(insights.length);
+    // Every fact lands in exactly one group.
+    expect(groups.reduce((a, g) => a + g.facts.length, 0)).toBe(detected.length);
     const lead = groups.find((g) => g.id === pipeline)!;
     expect(lead.openIssues).toBe(tracked.filter((i) => i.status === "open" || i.status === "testing").length);
     // s2 resolved an issue: only s1 is still in progress.
     expect(lead.solutionsInProgress).toBe(1);
-    expect(lead.top?.title).toBe(lead.insights.find((i) => !i.issue || i.issue.status === "open" || i.issue.status === "testing")?.title);
-    // The processes' ratings are the Processes table's; insights nobody has acknowledged don't rate them.
+    // Its worst open issue is what to read first.
+    const open = lead.issues.filter((i) => i.status === "open" || i.status === "testing");
+    expect(lead.top).not.toBeNull();
+    expect(lead.top!.rating).toBe(open.map((i) => ratingOfStored(i.severity)).reduce((a, b) => (ratingRank(b) > ratingRank(a) ? b : a)));
+    expect(open.map((i) => i.title)).toContain(lead.top!.title);
+    // The processes' ratings are the Processes table's; facts nobody has acknowledged don't rate them.
     const table = processRatings(
       parts.map((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, parentId: p.process.parent_process_id })),
       tracked,
       parts.flatMap((p) => p.steps),
     );
     for (const g of groups.slice(1)) expect(g.rating).toBe(table[g.id] ?? null);
-    const quiet = findingsByProcess({ parts, pipelineId: pipeline, insights, issues: [], solutions: [] });
+    const quiet = groupByProcess({ parts, pipelineId: pipeline, facts: detected, issues: [], solutions: [] });
     expect(quiet.map((g) => g.rating)).toEqual(quiet.map(() => null));
   });
   it("agrees with the map and the Process health card for the seeded Lead to live", () => {
@@ -228,7 +230,7 @@ describe("findings by process", () => {
     const issues = northbeamIssues();
     const detected = rerate(nbModel, simulate(nbModel, 4, 1), {}, nb.process.id);
     const entries = registerEntries(issues, detected);
-    const groups = findingsByProcess({ parts: nbParts, pipelineId: nb.process.id, insights: buildInsights(entries), issues, solutions: [] });
+    const groups = groupByProcess({ parts: nbParts, pipelineId: nb.process.id, facts: detected, issues, solutions: [] });
     const row = groups.find((g) => g.id === nb.process.id)!;
     // The map's closed card: the worst rating of the steps inside, from the confirmed issues (mapFeed).
     const stepRating = stepRatingOf(mapFeed(entries).ratings);
@@ -238,13 +240,13 @@ describe("findings by process", () => {
     expect(row.rating).toBe(card);
     const health = processHealth(groups.slice(1).map((g) => g.rating));
     expect(health.byRating.find((c) => c.rating === card)!.count).toBeGreaterThanOrEqual(1);
-    const out = html(createElement(FindingsByProcess, { groups, renderFindings: () => null }));
-    const at = out.indexOf(`data-findings-group="${nb.process.id}"`);
-    expect(out.slice(at, out.indexOf("data-top-finding", at))).toContain(RATING_LABELS[card!]);
+    const out = html(createElement(ProcessGroups, { groups, renderItems: () => null }));
+    const at = out.indexOf(`data-process-group="${nb.process.id}"`);
+    expect(out.slice(at, out.indexOf("data-top-issue", at))).toContain(RATING_LABELS[card!]);
   });
   it("says a group's counts in words, leaving out zeros", () => {
-    expect(countsLine({ openIssues: 2, newInsights: 1, solutionsInProgress: 1 })).toBe("2 open issues · 1 new finding · 1 solution in progress");
-    expect(countsLine({ openIssues: 0, newInsights: 0, solutionsInProgress: 0 })).toBe("Nothing open");
+    expect(countsLine({ openIssues: 2, solutionsInProgress: 1 })).toBe("2 open issues · 1 solution in progress");
+    expect(countsLine({ openIssues: 0, solutionsInProgress: 0 })).toBe("Nothing open");
   });
 });
 
@@ -444,32 +446,31 @@ describe("the trend charts", () => {
   });
 });
 
-describe("the findings tier", () => {
+describe("the by-process tier", () => {
   it("draws a collapsed row per group, Across the company first", () => {
     const detected: DetectedIssue[] = rerate(model, result, {}, live.process.id);
-    const groups = findingsByProcess({ parts, pipelineId: live.process.id, insights: buildInsights(registerEntries([], detected)), issues: [], solutions: [] });
-    const out = html(createElement(FindingsByProcess, { groups, renderFindings: () => "FINDINGS" }));
+    const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: detected, issues: [], solutions: [] });
+    const out = html(createElement(ProcessGroups, { groups, renderItems: () => "ITEMS" }));
     expect(out.indexOf("Across the company")).toBeLessThan(out.indexOf(parts[0]!.process.name));
     expect(out).toContain('aria-expanded="false"');
-    expect(out).not.toContain("FINDINGS");
+    expect(out).not.toContain("ITEMS");
     // A collapsed row points at no panel; an open one points at its panel.
     expect(out).not.toContain("aria-controls");
-    const open = html(createElement(FindingsByProcess, { groups, renderFindings: () => "FINDINGS", initiallyOpen: [live.process.id] }));
-    expect(open).toContain("FINDINGS");
-    expect(open).toContain(`aria-controls="findings-${live.process.id}"`);
-    expect(open).toContain(`id="findings-${live.process.id}"`);
+    const open = html(createElement(ProcessGroups, { groups, renderItems: () => "ITEMS", initiallyOpen: [live.process.id] }));
+    expect(open).toContain("ITEMS");
+    expect(open).toContain(`aria-controls="group-${live.process.id}"`);
+    expect(open).toContain(`id="group-${live.process.id}"`);
   });
-  it("gives the top finding its rating in words, and an open row with nothing open a short line", () => {
-    const detected: DetectedIssue[] = rerate(model, result, {}, live.process.id);
-    const groups = findingsByProcess({ parts, pipelineId: live.process.id, insights: buildInsights(registerEntries([], detected)), issues: [], solutions: [] });
+  it("gives the worst open issue its rating in words, and an open row with nothing open a short line", () => {
+    const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: [], issues: northbeamIssues(), solutions: [] });
     const withTop = groups.find((g) => g.top)!;
-    const out = html(createElement(FindingsByProcess, { groups: [withTop], renderFindings: () => "FINDINGS" }));
-    const top = out.slice(out.indexOf("data-top-finding"));
+    const out = html(createElement(ProcessGroups, { groups: [withTop], renderItems: () => "ITEMS" }));
+    const top = out.slice(out.indexOf("data-top-issue"));
     expect(top.slice(0, top.indexOf(withTop.top!.title))).toContain(RATING_LABELS[withTop.top!.rating]);
-    const empty = { ...withTop, insights: [], issues: [], top: null, newInsights: 0, openIssues: 0 };
-    const openEmpty = html(createElement(FindingsByProcess, { groups: [empty], renderFindings: () => "FINDINGS", initiallyOpen: [empty.id] }));
+    const empty = { ...withTop, facts: [], issues: [], top: null, openIssues: 0 };
+    const openEmpty = html(createElement(ProcessGroups, { groups: [empty], renderItems: () => "ITEMS", initiallyOpen: [empty.id] }));
     expect(openEmpty).toContain("Nothing open.");
-    expect(openEmpty).not.toContain("FINDINGS");
+    expect(openEmpty).not.toContain("ITEMS");
   });
 });
 

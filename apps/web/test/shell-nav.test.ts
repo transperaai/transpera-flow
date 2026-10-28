@@ -136,14 +136,14 @@ describe("demoNav", () => {
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
       ["issues", "solutions", "library", "suggestions"],
-      ["sources", "people", "forecast", "levers", "ai"],
+      ["sources", "people", "forecast", "levers"],
     ]);
   });
-  it("marks AI analysis active on its page", () => {
-    expect(active(d("/demo/settings/ai"))).toEqual(["ai"]);
-    expect(item(d("/demo"), "ai")?.href).toBe("/demo/settings/ai");
+  it("has no AI analysis item or page: in-app AI is gone (cut list item 1)", () => {
+    expect(item(d("/demo"), "ai")).toBeUndefined();
+    expect(item(nav("/w/s"), "ai")).toBeUndefined();
+    expect(active(nav("/w/s/settings/ai"))).toEqual([]);
   });
-  it("marks Settings active on a workspace's AI analysis page", () => expect(active(nav("/w/s/settings/ai"))).toEqual(["settings"]));
   it("has no Analysis rules item: the rules editor is gone (B17, D40)", () => {
     expect(item(d("/demo"), "rules")).toBeUndefined();
     expect(active(nav("/w/s/settings/rules"))).toEqual([]);

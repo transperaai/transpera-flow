@@ -31,7 +31,7 @@ const COLUMN_HELP = {
   },
   activity: {
     label: "Last activity",
-    description: "The latest change anyone made to the company's process versions, issues, findings, sources or solutions.",
+    description: "The latest change anyone made to the company's process versions, issues, sources or solutions.",
     example: "6 Oct 2026 means nothing has changed in the workspace since that day.",
   },
 } as const;

@@ -1,5 +1,8 @@
 # 15. Analysis: engine facts as evidence, AI findings on demand, findings by hand
 
+> **Superseded: removed 28 Oct 2026, docs/plans/cut-list.md item 3.** In-app AI and findings are gone (migration `20270101000000_drop_in_app_ai.sql` drops the findings data). Kept as history.
+
+
 Date: 5 Oct 2026 · Status: accepted · Issue: #175 (B17) · Decision D40 (replaces D35 and D36) · Amends ADR 0013 (when AI runs, what it writes)
 
 ## Context

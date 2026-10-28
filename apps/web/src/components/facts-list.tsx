@@ -1,8 +1,8 @@
 "use client";
 
-// Facts from the run (issue #175, B17; decision D40): what the engine measured, shown as evidence. A fact is not a
-// finding: nobody acknowledges or dismisses it, and it never reaches the map. AI reads these to propose findings, and
-// each finding cites the ones it rests on. Hovering a fact lights up its step on the page's map.
+// Facts from the run (issue #175, B17; decision D40): what the engine measured, shown as read-only evidence. A fact is not an
+// issue: nobody acknowledges or dismisses it, and it never reaches the map (log an issue by hand when one matters; findings
+// and AI were removed 28 Oct 2026). Hovering a fact lights up its step on the page's map.
 
 import { useState } from "react";
 import type { DetectedIssue } from "@transpera-flow/engine";

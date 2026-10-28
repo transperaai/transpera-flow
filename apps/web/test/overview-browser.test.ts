@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { demoBundle } from "@/lib/sources/demo";
 
 // The Overview in a real browser (issue #173, B15): Play on the company map moves the work and counts it on the process
-// cards, the horizon picker runs the model again for the length picked, and the findings rows open and close. React Flow
+// cards, the horizon picker runs the model again for the length picked, and the by-process rows open and close. React Flow
 // and the playback layer measure the DOM, so none of this can be seen in a unit test. The page is the harness in
 // ./overview-harness bundled by esbuild, with just enough CSS for its layout.
 
@@ -116,23 +116,23 @@ describe("the Overview's company map", () => {
   }, 90_000);
 });
 
-describe("the Overview's findings by process", () => {
-  it("opens a row to show all of its findings, and closes it again", async () => {
+describe("the Overview's groups by process", () => {
+  it("opens a row to show its facts, and closes it again", async () => {
     const { page, errors } = await mount();
-    const rows = page.locator("[data-findings-group]");
+    const rows = page.locator("[data-process-group]");
     await expect.poll(() => rows.count()).toBe(parts.length + 1);
-    expect(await rows.first().getAttribute("data-findings-group")).toBe("company");
-    expect(await page.locator("[data-findings-panel]").count()).toBe(0);
-    const lead = page.locator(`[data-findings-group="${parts[0]!.process.id}"]`);
+    expect(await rows.first().getAttribute("data-process-group")).toBe("company");
+    expect(await page.locator("[data-group-panel]").count()).toBe(0);
+    const lead = page.locator(`[data-process-group="${parts[0]!.process.id}"]`);
     const toggle = lead.locator("button[aria-expanded]");
     await toggle.click();
-    await lead.locator("[data-findings-panel]").waitFor();
+    await lead.locator("[data-group-panel]").waitFor();
     expect(await toggle.getAttribute("aria-expanded")).toBe("true");
     expect(await lead.locator("[data-rendered] li").count()).toBeGreaterThan(0);
     // Only that row opened.
-    expect(await page.locator("[data-findings-panel]").count()).toBe(1);
+    expect(await page.locator("[data-group-panel]").count()).toBe(1);
     await toggle.click();
-    await lead.locator("[data-findings-panel]").waitFor({ state: "detached" });
+    await lead.locator("[data-group-panel]").waitFor({ state: "detached" });
     expect(await toggle.getAttribute("aria-expanded")).toBe("false");
     expect(errors).toEqual([]);
     await page.close();

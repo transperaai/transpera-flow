@@ -19,9 +19,6 @@ import { HealthSettings } from "./servicing-settings";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import { WorkspaceDetails } from "./workspace-details";
 
-/** AI analysis runs here after a publish or a market change (A46): allow it time. */
-export const maxDuration = 300;
-
 export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/settings">) {
   const { slug } = await props.params;
   const [data, bundle] = await Promise.all([loadWorkspaceSettings(slug), loadLiveProcess(slug)]);
@@ -38,9 +35,6 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
           </Link>
           <Link href={`/w/${slug}/settings/levers`} className={buttonVariants({ variant: "outline", size: "sm" })}>
             Levers
-          </Link>
-          <Link href={`/w/${slug}/settings/ai`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            AI analysis
           </Link>
           <Link href={`/w/${slug}/settings/calibration`} className={buttonVariants({ variant: "outline", size: "sm" })}>
             Historical data

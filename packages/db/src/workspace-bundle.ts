@@ -10,8 +10,7 @@
 // `outcome` values and the edge `label` and `condition_tag` are the ones a `transpera-process/2` file uses.
 //
 // What it never holds: other workspaces' rows, people's emails, members and their user ids, API tokens, share links,
-// access lists, AI keys, who created a row (`created_by`), derived results (runs, AI analyses, narrations, robustness
-// checks, the old reports). Every read is as the signed-in user (RLS decides what a viewer may read) and filtered to the
+// access lists, who created a row (`created_by`), derived results (runs, robustness checks). Every read is as the signed-in user (RLS decides what a viewer may read) and filtered to the
 // one workspace as well, so a policy mistake could not leak another workspace's rows into the file.
 
 import { restoreSizeWarning } from "./workspace-import";

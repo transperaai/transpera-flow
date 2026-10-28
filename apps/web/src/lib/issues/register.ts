@@ -83,6 +83,16 @@ export function formatIssueCost(cost: IssueCost | null, currency: string): strin
 
 const isOpen = isActiveStatus;
 
+/**
+ * The facts that cost a tracked issue: the run's facts whose key an issue still visible to people carries (D38: an issue
+ * acknowledged from an insight is costed by the live fact while the run still finds it). Facts nobody acknowledged are left out,
+ * so passing the result to `registerEntries` adds no entry of its own.
+ */
+export function factsCostingIssues(issues: readonly IssueRow[], facts: readonly DetectedIssue[]): DetectedIssue[] {
+  const keys = new Set(issues.filter(isVisibleIssue).flatMap((i) => (i.detected_key ? [i.detected_key] : [])));
+  return facts.filter((f) => keys.has(f.key));
+}
+
 /** The process a dismissed row sits on: its process, else the first one it links. */
 export const dismissalProcess = (i: Pick<IssueRow, "process_id" | "links">): string | null => i.process_id ?? i.links.find((l) => l.process_id)?.process_id ?? null;
 
