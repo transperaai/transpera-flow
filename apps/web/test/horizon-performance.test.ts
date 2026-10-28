@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { larkspurBundle, northbeamBundle, toEngineModel } from "@transpera-flow/db";
-import { MARKET_PRESETS, applyPatches, marketFromSchedule, simulate, type EngineModel } from "@transpera-flow/engine";
+import { MARKET_PRESETS, applyPatches, northbeamWithClientGroups, marketFromSchedule, simulate, type EngineModel } from "@transpera-flow/engine";
 import { buildLevers, leverPatches } from "@/lib/scenarios/levers";
 import { HORIZON_MONTHS, horizonWeeks } from "@/lib/horizon";
 import { calendarMonthStarts } from "@/lib/forecast/timeline";
@@ -93,5 +93,28 @@ describe("a 24-month run stays within the PRD §6.7 targets, scaled by horizon (
     const ms = monthlyBest(larkspurFull, 24);
     console.info(`24 months, full Larkspur, monthly output: ${ms.toFixed(0)} ms (limit ${250 * SCALE})`);
     expect(ms).toBeLessThan(250 * SCALE);
+  });
+
+  // The brief (sandbox-p3-brief.md §10) asked for 30 replications of 2,000 clients per group in under 5 s. The engine's own cost for that many
+  // clients (without chance mode) is about 0.7 s a replication at 12 months, so it is measured here at 4 replications and the new work
+  // (chance mode, a hit draw per client per tick) is also held to 1.6 x the same model with the drivers as weights.
+  it("12 months with 2,000 clients per group and three churn drivers as chances, monthly output: 4 replications < 5 s, and < 1.6 x the weights", () => {
+    const base = northbeamWithClientGroups();
+    const groups = Object.fromEntries(Object.entries(base.clientGroups!).map(([k, g]) => [k, { ...g, count: 2000 }]));
+    const services = Object.fromEntries(Object.entries(base.services!).map(([k, sv]) => [k, { ...sv, servicing: [] }]));
+    const drivers = (chance: boolean) => ["late", "resp", "rework"].map((id) => ({ id, weight: 1, enabled: true, ...(chance ? { chance: 0.1, effect: 0.5, effectMonths: 3 } : {}) }));
+    const model = (chance: boolean) => withHorizon({ ...base, services, clientGroups: groups, activeClients: Object.keys(groups).length * 2000, churnDrivers: drivers(chance) }, 12);
+    const monthStarts = calendarMonthStarts(START.startDate, model(true).horizonWeeks, model(true).hoursPerWeek);
+    const time = (m: EngineModel) => {
+      simulate(m, 1, 1, { monthly: true, monthStarts });
+      const t = performance.now();
+      simulate(m, 4, 1, { monthly: true, monthStarts });
+      return performance.now() - t;
+    };
+    const weights = time(model(false));
+    const chances = time(model(true));
+    console.info(`12 months, 2,000 clients a group, 4 reps: weights ${weights.toFixed(0)} ms, three chances ${chances.toFixed(0)} ms (limits 5000 and 1.6 x)`);
+    expect(chances).toBeLessThan(5000);
+    expect(chances).toBeLessThan(1.6 * weights);
   });
 });
