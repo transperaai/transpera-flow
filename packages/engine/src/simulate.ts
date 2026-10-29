@@ -2795,16 +2795,33 @@ export function runOnce(
       if (mon) {
         // Month by month, the hands-on time is spread over the time it is worked.
         spreadParts(t, t + dur, handsOn);
-        addParts(mon.personWork, p.idx);
-        if (acc) addParts(mon.roleWork, acc.r);
-        if (rep) {
-          addParts(mon.reworkPerson, p.idx);
-          if (acc) addParts(mon.reworkRole, acc.r);
-        } else {
-          addParts(mon.purposePerson, st.pu * nP + p.idx);
-          if (acc) addParts(mon.purposeRole, st.pu * nR + acc.r);
+        if (partCount === 1) {
+          // Most work falls in one month: add to each row directly (the same values, in the same order, as addParts; 2% fewer
+          // instructions on the 40-step, 25-person monthly run).
+          const m = partMonth[0]!;
+          const v = partValue[0]!;
+          mon.personWork[p.idx * nM + m]! += v;
+          if (acc) mon.roleWork[acc.r * nM + m]! += v;
+          if (rep) {
+            mon.reworkPerson[p.idx * nM + m]! += v;
+            if (acc) mon.reworkRole[acc.r * nM + m]! += v;
+          } else {
+            mon.purposePerson[(st.pu * nP + p.idx) * nM + m]! += v;
+            if (acc) mon.purposeRole[(st.pu * nR + acc.r) * nM + m]! += v;
+          }
+          if (over) mon.overPipeline[p.idx * nM + m]! += v;
+        } else if (partCount) {
+          addParts(mon.personWork, p.idx);
+          if (acc) addParts(mon.roleWork, acc.r);
+          if (rep) {
+            addParts(mon.reworkPerson, p.idx);
+            if (acc) addParts(mon.reworkRole, acc.r);
+          } else {
+            addParts(mon.purposePerson, st.pu * nP + p.idx);
+            if (acc) addParts(mon.purposeRole, st.pu * nR + acc.r);
+          }
+          if (over) addParts(mon.overPipeline, p.idx);
         }
-        if (over) addParts(mon.overPipeline, p.idx);
       }
       const cur = p.cur;
       if (cur) {
