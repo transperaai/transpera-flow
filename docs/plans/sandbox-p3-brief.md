@@ -297,6 +297,9 @@ New constants in `churn-drivers.ts`: `CHURN_EFFECT_MAX = 5`, `EFFECT_MONTHS = { 
 - **D9 in scope, runner only** (no engine change): a D9 change (0–6 months, whole run) delays every **scenario** hire (D1)
   by `round(delay × the market's hire factor in the hire's month)` months (`engineMarket(bundle)`, month index from the start).
   Settings' own planned hires are dated already and not delayed. `hire` is then wired (only through D9).
+  *Note, 29 Oct 2026 (Opus):* the delay applies to **every** scenario hire, whole-run hires included: a whole-run hire with a
+  3-month delay starts on the 1st of month 3 of the run (delay × the market's `hire` factor for month 0, in whole months). A delay
+  of 0 changes nothing. (This replaces the earlier "whole-run hires are not delayed".)
 - **`pay` stays unwired**: it means late payments (cash flow), out of scope. D10 "pay inflation" is C1 from a month (the role
   cost channel); a compounding % a year is an open question (Q6). Fix design D10's text in `sandbox-design.md`'s next edit.
 
@@ -671,7 +674,7 @@ joining or leaving, delivery hours and service levels as levers (Austin, 28 Oct)
 4. **Named roster, B1:** add synthetic average clients; decreases refused. *Default: as §5.4.*
 5. **B3 on rosters moves saved scenarios** (the Downturn starter included). *Default: accept, PRD note* (coordinator item 6).
 6. **D10 pay inflation:** C1 from a month covers it; `pay` stays late payments. *Default: no compounding lever in phase 3.*
-7. **D9:** delays scenario hires only, whole months, by delay × the market's hire factor. *Default: in scope as §2.6.*
+7. **D9:** delays every scenario hire (whole-run ones too, 29 Oct 2026), whole months, by delay × the market's hire factor. *Default: in scope as §2.6.*
 8. **Price effect units:** a price driver's effect is per 10% rise. *Default: yes* (matches today's "10% → +20%").
 9. **The trade-off's "lost"** includes knock-on effects (work and fees the leavers would have brought). *Default: yes, labelled.*
 10. **Warm-up pinning** uses the whole-run-only model's warm-up. *Default: yes*; the Overview and People page keep their own.

@@ -450,7 +450,7 @@ export const SANDBOX_LEVERS: readonly SandboxLever[] = [
     id: "D9",
     group: "D",
     label: "Hiring delay",
-    description: "Months from deciding to hire to the person starting, for the hires in this scenario.",
+    description: "Months from deciding to hire to the person starting, for every hire in this scenario, including hires from the start of the run.",
     target: "none",
     ops: ["set"],
     range: { set: { min: 0, max: 6, step: 1 } },

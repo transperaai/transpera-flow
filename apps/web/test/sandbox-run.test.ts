@@ -9,6 +9,7 @@ import { spliceMonthly } from "@/lib/forecast/splice";
 import { timelineData } from "@/lib/forecast/timeline";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { DEMO_SCENARIOS, DEMO_THEN_LEADS_ID, deleteDemoScenario, demoScenariosNow, resetDemoScenarios, saveDemoScenario } from "@/lib/sandbox/demo";
+import { demoMarket } from "@/lib/market-demo";
 import { descendantsOf, effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { formatChangeValue } from "@/lib/sandbox/describe";
 import { laneMarkers } from "@/lib/sandbox/lane";
@@ -197,6 +198,32 @@ describe("applyPeopleChanges", () => {
     expect(applyPeopleChanges(bundle, [whole], START).bundle.people.at(-1)).toMatchObject({ start_date: null });
     const [x, y] = [hire("2027-02-01"), hire("2027-03-01")];
     expect(hireNames(bundle, [named, x, y])).toEqual(new Map([[named.id, "Jade"], [x.id, "New PPC specialist"], [y.id, "New PPC specialist 2"]]));
+  });
+
+  it("delays every scenario hire by the hiring delay, whole-run hires included, and a delay of 0 changes nothing", () => {
+    const delay = (months: number): SandboxChange => patch("D9", null, "set", months);
+    const whole = { ...hire("2027-01-01") } as SandboxChange;
+    delete whole.from;
+    const timed = hire("2027-03-01");
+    const starts = (changes: SandboxChange[], b: ProcessBundle = bundle) => {
+      const out = applyPeopleChanges(b, changes, START).bundle.people.slice(b.people.length);
+      return [out.find((p) => p.id === whole.id)?.start_date, out.find((p) => p.id === timed.id)?.start_date];
+    };
+    // No delay, or a delay of 0: the whole-run hire is there from the start, the timed hire is on its month.
+    expect(starts([whole, timed])).toEqual([null, "2027-03-01"]);
+    expect(starts([whole, timed, delay(0)])).toEqual([null, "2027-03-01"]);
+    // 3 months: the whole-run hire starts at the start of month 3 of the run (the run starts 5 Oct 2026), the timed one 3 months after its month.
+    expect(starts([whole, timed, delay(3)])).toEqual(["2027-01-01", "2027-06-01"]);
+    // The months before the start are unaffected: the model has the hire from the delayed date only.
+    const out = applyPeopleChanges(bundle, [whole, timed, delay(3)], START).bundle;
+    const model = forecastModel(out, 12, START).model!;
+    expect(model.people![whole.id]!.from).toBe(hoursToDate(START, "2027-01-01", HPW));
+    expect(model.people![timed.id]!.from).toBe(hoursToDate(START, "2027-06-01", HPW));
+    // The market's time to hire stretches it, in whole months: Boom is 130% from month 1, so 2 months become round(2.6) = 3, for both kinds.
+    const boom = demoMarket().marketConditions.find((c) => c.preset === "boom")!;
+    const stretched: ProcessBundle = { ...bundle, marketConditions: [boom], marketSchedule: [{ id: id(), workspace_id: bundle.workspace.id, from_month: 1, to_month: 24, condition_id: boom.id }] };
+    expect(starts([whole, timed, delay(2)], stretched)).toEqual(["2027-01-01", "2027-06-01"]);
+    expect(starts([whole, timed, delay(2)])).toEqual(["2026-12-01", "2027-05-01"]);
   });
 
   it("adds leave from the Monday to the Friday of its last week", () => {

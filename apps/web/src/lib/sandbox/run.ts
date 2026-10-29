@@ -90,7 +90,7 @@ interface Stretch {
 
 /**
  * The bundle with the scenario's people in it. Hires (D1) are person rows (id = the change's id, `start_date` the 1st of its month,
- * none when whole-run, `capacity_hours_week: null`, one `person_roles` row). Leaving (D2) sets the person's `end_date` to the day
+ * none when whole-run and undelayed, `capacity_hours_week: null`, one `person_roles` row). Leaving (D2) sets the person's `end_date` to the day
  * before the month (whole-run: the day before the start date, which drops them from the model; an earlier end date is kept). Leave
  * (D3) is a `person_leave` row from the Monday to `leaveEnd`, merged with any leave it overlaps or touches (the engine adds up a
  * person's leave windows). An FTE change from a month (D4) ends the person the day before and starts a copy row (id = the change's
@@ -136,7 +136,8 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
   };
 
   // The hiring delay (D9): every hire of the scenario from a month starts that many months later, stretched by the market's "time to hire" in
-  // the month the hire was planned for. Whole run hires are people who were always there: no delay. Settings' own planned hires are dated already.
+  // the month the hire was planned for. A whole run hire counts from the start of the run (month 0): with a delay it starts on the 1st of that
+  // month many months on, and with none it is there from the start. Settings' own planned hires are dated already.
   const delayChange = [...changes].reverse().find((c) => c.lever === "D9");
   const hireFactor = (() => {
     const market = engineMarket(bundle);
@@ -146,7 +147,12 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
       return market.months[Math.min(Math.max(0, idx), market.months.length - 1)]?.hire ?? 1;
     };
   })();
-  const startOf = (from: string): string => (delayChange && delayChange.value > 0 ? addMonths(`${from}-01`, Math.round(delayChange.value * hireFactor(from))) : `${from}-01`);
+  const delayMonths = (factor: number): number => (delayChange && delayChange.value > 0 ? Math.round(delayChange.value * factor) : 0);
+  const startOf = (from: string): string => addMonths(`${from}-01`, delayMonths(hireFactor(from)));
+  const wholeRunStart = (): string | null => {
+    const months = delayMonths(hireFactor(startDate.slice(0, 7)));
+    return months > 0 ? addMonths(startDate, months) : null;
+  };
 
   // 1. Hires.
   const hires: PersonRow[] = [];
@@ -156,7 +162,7 @@ export function applyPeopleChanges(bundle: ProcessBundle, changes: readonly Sand
       problems.push({ changeId: c.id, message: `The role of “${c.params?.name?.trim() || "a new hire"}” isn't there any more` });
       continue;
     }
-    hires.push({ id: c.id, workspace_id, name: names.get(c.id)!, fte: c.value, capacity_hours_week: null, cost_rate: null, active: true, start_date: c.from ? startOf(c.from) : null, end_date: null });
+    hires.push({ id: c.id, workspace_id, name: names.get(c.id)!, fte: c.value, capacity_hours_week: null, cost_rate: null, active: true, start_date: c.from ? startOf(c.from) : wholeRunStart(), end_date: null });
     personRoles.push({ person_id: c.id, role_id: c.target!, workspace_id });
     planPeople.add(c.id);
   }
