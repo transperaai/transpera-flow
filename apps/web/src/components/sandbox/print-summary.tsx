@@ -1,7 +1,7 @@
 "use client";
 
 // A one-page summary to print or save as a PDF (docs/plans/sandbox-p5-brief.md §6.2): the numbers already on screen, for "No changes" and
-// the scenario, or for the columns of a comparison. It is rendered into <body> beside the app, hidden on screen, and the print styles
+// the scenario, or for the columns of a comparison. The time split is the team's only (never a role's or a person's); costs only with `costs`. It is rendered into <body> beside the app, hidden on screen, and the print styles
 // (app/globals.css) show only it on one A4 page. No server PDF: the browser prints what it draws, and the chart stays vector.
 
 import { useMemo, useSyncExternalStore } from "react";
@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import type { ProcessBundle, PurposeCategory } from "@transpera-flow/db";
 import type { EffectiveChange, PriceRiseTradeoff } from "@transpera-flow/db/sandbox";
 import type { EngineModel, MonthlyResult } from "@transpera-flow/engine";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { compareSandbox } from "@/lib/sandbox/compare";
 import { describeChange, whenOf, type DescribeContext } from "@/lib/sandbox/describe";
 import { CompareChart, SERIES_STYLES } from "./compare-chart";
@@ -122,6 +122,22 @@ export function PrintSummary(p: PrintSummaryProps) {
           ))}
         </ul>
         <CompareChart title={chartRow.name} months={comparison.months} series={names.map((name, c) => ({ name, values: chartRow.values[c]! }))} format={(v) => (chartRow.id === "profit" || chartRow.id === "mrr" ? formatCurrency(Math.round(v), p.currency) : formatNumber(v, 1))} fixedWidth={680} />
+      </section>
+
+      <section className="mt-2" data-print-time>
+        <h2 className="text-xs font-semibold">Where the team&apos;s time goes over the run</h2>
+        <ul className="flex flex-col gap-0.5">
+          {names.map((name, c) => (
+            <li key={name + c}>
+              <span className="font-medium">{name}:</span>{" "}
+              {comparison.time.rows
+                .map((r, i) => ({ name: r.name, share: comparison.time.shares[c]?.[i] ?? 0 }))
+                .filter((r) => r.share >= 0.005)
+                .map((r) => `${r.name} ${formatPercent(r.share)}`)
+                .join(", ") || "No hours."}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="mt-2" data-print-changes>

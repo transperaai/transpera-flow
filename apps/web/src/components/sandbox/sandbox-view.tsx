@@ -925,7 +925,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           cutoffs={cutoffs}
           categories={purposeCategories}
           currency={live.workspace.settings.currency}
-          costs={includeCosts && exportColumns.every((c) => c.monthly.money)}
+          costs={canEdit && includeCosts && exportColumns.every((c) => c.monthly.money)}
           timingLine={timingLine}
           ctx={ctx}
         />

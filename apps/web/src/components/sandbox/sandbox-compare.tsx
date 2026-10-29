@@ -224,7 +224,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
               cutoffs={cutoffs}
               categories={workspacePurposes(live.workspace.settings)}
               currency={currency}
-              costs={includeCosts && exportColumns.every((c) => c.monthly.money)}
+              costs={canEdit && includeCosts && exportColumns.every((c) => c.monthly.money)}
               timingLine={ready[0].result.monthly ? capacityLine(capacityRunsOut(ready[0].result.monthly, roleNames, cutoffs), comparison.months, horizonLabel(months)) : null}
               ctx={{ bundle: live, solutions }}
             />

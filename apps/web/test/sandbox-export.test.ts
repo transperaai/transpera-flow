@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PURPOSES, northbeamRoleIds, type SandboxChange } from "@transpera-flow/db";
 import { prepareScenario, priceRiseTradeoff } from "@transpera-flow/db/sandbox";
@@ -5,6 +7,7 @@ import { simulate, type MonthlyResult } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { timelineMonths } from "@/lib/forecast/timeline";
 import { changesCsv, sandboxCsv, CHANGES_HEADER, NUMBERS_HEADER, type ExportColumn } from "@/lib/sandbox/export";
+import { PrintSummary } from "@/components/sandbox/print-summary";
 
 // The Sandbox's files (sandbox phase 5a, docs/plans/sandbox-p5-brief.md §6): the numbers CSV and the changes-and-notes CSV, made from
 // runs already made. Pure.
@@ -150,6 +153,63 @@ describe("the numbers CSV", () => {
     expect(raw).toContain("'=cmd|' /C calc'!A0,");
     expect(raw).toContain(`"'+1,""x"""`);
     expect(raw.split("\r\n").some((l) => /^[=+\-@]/.test(l))).toBe(false);
+  });
+});
+
+describe("formula-like names anywhere in the numbers CSV", () => {
+  it("writes role, service and category names that start like a formula as text", () => {
+    const roles = Object.fromEntries(Object.entries(model.roles).map(([id, r], i) => [id, { ...r, name: i === 0 ? "=1+1" : `@role ${i}` }]));
+    const services = Object.fromEntries(Object.entries(model.services ?? {}).map(([id, sv]) => [id, { ...sv, name: "-2+3" }]));
+    const categories = o.categories.map((c, i) => (i === 0 ? { ...c, name: "+SUM(A1)" } : c));
+    const raw = sandboxCsv(open, months, { roles, services }, { ...o, categories });
+    for (const line of raw.split("\r\n")) for (const cell of line.split(",")) if (!Number.isFinite(Number(cell)) || cell === "") expect(cell, line).not.toMatch(/^"?[=+\-@]/);
+    expect(raw).toContain(",'=1+1,");
+  });
+});
+
+describe("the printed summary", () => {
+  const ctx = { bundle: base, solutions: [] };
+  const render = (cols: typeof open, costs: boolean) =>
+    renderToStaticMarkup(
+      createElement(PrintSummary, {
+        workspaceName: "Northbeam Digital",
+        title: "Hire",
+        printedOn: "2026-10-29",
+        startDate: START,
+        horizonMonths: 6,
+        engineVersion: "x",
+        model,
+        bundle: base,
+        columns: cols.map((c, i) => ({ ...c, changes: i === 0 ? [] : eff([hire, rise]) })),
+        cutoffs: [0.7, 0.85, 0.95],
+        categories: DEFAULT_PURPOSES,
+        currency: "GBP",
+        costs,
+        timingLine: null,
+        ctx,
+        inline: true,
+      }),
+    );
+
+  it("shows profit only with costs on, and never labour or overheads", () => {
+    const on = render(open, true);
+    const off = render(open, false);
+    expect(on).toContain("Profit over the run");
+    expect(off).not.toContain("Profit");
+    for (const html of [on, off]) for (const word of ["Labour", "Overheads", "labour"]) expect(html, word).not.toContain(word);
+  });
+
+  it("shows where the team's time goes for each column, and nothing by person or role", () => {
+    const html = render(open, false);
+    const time = /data-print-time[^]*?<\/section>/.exec(html)![0];
+    expect(time).toContain("No changes:");
+    expect(time).toMatch(/Idle \d+%/);
+    for (const role of Object.values(model.roles)) expect(time).not.toContain(role.name);
+    for (const person of ["Dan Okafor", "Maya Collins", "Leah Brooks"]) expect(html).not.toContain(person);
+  });
+
+  it("shows a Viewer's run with no costs even when costs are asked for", () => {
+    expect(render(closed, true)).not.toContain("Profit");
   });
 });
 
