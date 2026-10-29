@@ -30,6 +30,28 @@ describe("the pooled client count and churn have levers only where the engine re
     const pooled = { ...model(), clients: undefined, clientGroups: {} };
     expect(paths(pooled)).toEqual(expect.arrayContaining(["demand.active_clients", "demand.churn_monthly"]));
   });
+
+  it("offers both when the only client groups are for services the model doesn't have (the engine keeps the pool)", () => {
+    const m = model();
+    const stray = { ...m, clients: undefined, clientGroups: { "no-such-service": { count: 5, churnMonthly: 0.02, stayMonths: 24, fee: 1000, health: 80 } } } as unknown as typeof m;
+    expect(paths(stray)).toEqual(expect.arrayContaining(["demand.active_clients", "demand.churn_monthly"]));
+    // Moving churn there changes the run: the slider does something.
+    const run = (x: typeof m) => simulate({ ...x, horizonWeeks: 26 }, 3, 1, { monthly: true }).monthly!.clientsLost.reduce((a, st) => a + st.mean, 0);
+    expect(run({ ...stray, churnMonthly: 0.3 })).not.toBe(run({ ...stray, churnMonthly: 0 }));
+  });
+
+  it("keeps churn for a named roster with a client of no known service (it churns at the pooled rate), not the count", () => {
+    const m = model();
+    const named = { ...m, clientGroups: undefined, clients: { c1: { name: "Acme", services: [], mrr: 2000, assignments: {} } } } as unknown as typeof m;
+    expect(paths(named)).toContain("demand.churn_monthly");
+    expect(paths(named)).not.toContain("demand.active_clients");
+    const run = (x: typeof m) => simulate({ ...x, horizonWeeks: 52 }, 5, 1, { monthly: true }).monthly!.clientsLost.reduce((a, st) => a + st.mean, 0);
+    expect(run({ ...named, churnMonthly: 0.5 })).not.toBe(run({ ...named, churnMonthly: 0 }));
+    // Every named client on a known service: churn is per service, so no pooled slider.
+    const sid = Object.keys(m.services ?? {})[0]!;
+    const served = { ...named, clients: { c1: { name: "Acme", services: [sid], mrr: 2000, assignments: {} } } } as typeof m;
+    expect(paths(served)).not.toContain("demand.churn_monthly");
+  });
 });
 
 describe("levers are generated from the model", () => {

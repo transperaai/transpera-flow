@@ -7,8 +7,7 @@
 // No React here: the panel renders these, and tests check them directly.
 
 import type { Viewer } from "@transpera-flow/db";
-import { hasClientRoster } from "@transpera-flow/db/sandbox";
-import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
+import { headcount, withClientGroups, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
 import { PLAY_CAPS } from "@/lib/share/play-input";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
@@ -46,10 +45,22 @@ const FACTOR = { min: 0.1, max: 2, step: 0.05 } as const;
 
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 
+/**
+ * Whether the engine reads the pooled client count and the pooled monthly churn, by its own rules: with clients counted per type
+ * (groups that count clients of a service the model has) or named, the count is not read; churn still is for a named client with no
+ * known service (`clientChurnMonthly` falls back to it). A slider for something not read would do nothing.
+ */
+export function pooledClientReads(model: EngineModel): { count: boolean; churn: boolean } {
+  const expanded = withClientGroups(model);
+  const roster = expanded.clients;
+  if (roster === undefined) return { count: true, churn: true };
+  // `clientChurnMonthly`'s rule: a client none of whose services the model knows churns at the pooled rate.
+  return { count: false, churn: Object.values(roster).some((c) => !c.services.some((sid) => expanded.services?.[sid] !== undefined)) };
+}
+
 export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const levers: Lever[] = [];
-  // Clients counted per type or named: the engine ignores the pooled count and churn there, so a slider for them would do nothing.
-  const pooledClients = !hasClientRoster(model);
+  const { count: pooledClients, churn: pooledChurn } = pooledClientReads(model);
   const add = (l: Lever) => levers.push(l);
 
   // Demand
@@ -77,7 +88,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     max: Math.min(PLAY_CAPS.clients, Math.max(20, ceilTo(model.activeClients * 2, 10))),
     step: 1,
   });
-  if (pooledClients) add({
+  if (pooledChurn) add({
     path: "demand.churn_monthly",
     group: "clients",
     section: "Clients",
