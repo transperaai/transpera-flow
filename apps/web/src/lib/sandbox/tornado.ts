@@ -44,6 +44,8 @@ export function tornadoVariants(model: EngineModel, hiddenKinds: readonly string
     const lever = sandboxLever(id);
     if (!lever || !offered.has(id) || lever.applies?.(model)) continue;
     if (MONEY_LEVERS.has(id) && measure !== "profit") continue;
+    // Overheads of nothing are nothing: ×0.9 and ×1.1 move no number.
+    if (id === "C2" && !((model.overheadMonthly ?? 0) > 0)) continue;
     const rel = (target: string | null = null): Pick<TornadoVariant, "low" | "high" | "lowLabel" | "highLabel" | "base"> => ({
       low: ch(id, "multiply", 0.9, target),
       high: ch(id, "multiply", 1.1, target),

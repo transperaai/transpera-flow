@@ -18,12 +18,15 @@ const sum = (xs: readonly number[]) => xs.reduce((a, v) => a + v, 0);
 export function peakBusy(monthly: MonthlyResult, o: { roleId: string | null; nines?: boolean } = { roleId: null }): number | null {
   const ids = o.roleId ? [o.roleId] : Object.keys(monthly.roles);
   let peak: number | null = null;
+  const see = (v: number) => {
+    if (peak === null || v > peak) peak = v;
+  };
   for (const id of ids) {
-    for (const m of (monthly.roles[id] ?? []) as (MonthBusy | null)[]) {
-      if (!m) continue;
-      const v = o.nines ? m.p90 : m.mean;
-      if (peak === null || v > peak) peak = v;
-    }
+    ((monthly.roles[id] ?? []) as (MonthBusy | null)[]).forEach((m, i) => {
+      // Work with nobody there to do it is as busy as a role can be: a headcount cut to nothing must not look like relief.
+      if ((monthly.uncovered[id]?.[i] ?? 0) > 0) see(1);
+      if (m) see(o.nines ? m.p90 : m.mean);
+    });
   }
   return peak;
 }
@@ -65,7 +68,8 @@ export function tooBusyMonths(monthly: MonthlyResult, cutoffs: readonly [number,
   const n = monthly.months.length;
   let count = 0;
   for (let i = 0; i < n; i++) {
-    if (Object.values(monthly.roles).some((r) => (r[i] ?? null) !== null && isTooBusy(r[i]!.mean, cutoffs))) count++;
+    const busy = Object.entries(monthly.roles).some(([id, r]) => ((monthly.uncovered[id]?.[i] ?? 0) > 0) || ((r[i] ?? null) !== null && isTooBusy(r[i]!.mean, cutoffs)));
+    if (busy) count++;
   }
   return count;
 }

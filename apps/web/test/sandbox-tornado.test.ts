@@ -9,7 +9,7 @@ const model = (): EngineModel => ({ ...toEngineModel(northbeamBundle(), { startD
 const ids = (v: TornadoVariant[]) => v.map((x) => x.leverId);
 
 describe("which levers, which steps", () => {
-  const m = model();
+  const m: EngineModel = { ...model(), overheadMonthly: 9000 };
   it("profit: the 12 levers a model offers, each moved down and up once, as valid changes", () => {
     const v = tornadoVariants(m, [], "profit");
     expect(ids(v)).toEqual(expect.arrayContaining(["A1", "A3", "B3", "D6", "B5", "B2", "E1", "D5", "C1", "C2"]));
@@ -35,6 +35,11 @@ describe("which levers, which steps", () => {
     expect(v.B5!.high).toMatchObject({ op: "set", value: 0.1 });
     expect(v.B5!.base).toMatchObject({ lever: "B5", op: "set", value: 0 });
     for (const x of Object.values(v)) if (x.leverId !== "B5") expect(x.base).toBeNull();
+  });
+
+  it("overheads of nothing are not tried: ×0.9 and ×1.1 of 0 move no number", () => {
+    expect(ids(tornadoVariants({ ...m, overheadMonthly: 0 }, [], "profit"))).not.toContain("C2");
+    expect(ids(tornadoVariants({ ...m, overheadMonthly: undefined }, [], "profit"))).not.toContain("C2");
   });
 
   it("money levers (role cost, overheads) only for profit, since they move nothing else", () => {

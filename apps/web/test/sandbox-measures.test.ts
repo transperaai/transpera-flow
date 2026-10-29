@@ -13,6 +13,7 @@ const fake = (over: Partial<MonthlyResult>): MonthlyResult =>
   ({
     months: months(3),
     roles: { a: [busy(0.5, 0.7), busy(0.8, 0.9), busy(0.6, 0.97)], b: [null, busy(0.9, 0.95), busy(0.4, 0.5)] },
+    uncovered: { a: [null, null, null], b: [null, null, null] },
     clients: { s1: [st(10), st(10), st(10)], "": [st(0), st(0), st(0)] },
     clientsLost: [st(0.3), st(0.3), st(0.3)],
     atRisk: { s1: [st(1), st(2), st(3)], s2: [st(0), st(1), st(2)] },
@@ -28,6 +29,11 @@ describe("the measures, on fabricated months", () => {
     expect(peakBusy(m, { roleId: null, nines: true })).toBeCloseTo(0.97);
     expect(peakBusy(m, { roleId: "b", nines: true })).toBeCloseTo(0.95);
     expect(peakBusy(m, { roleId: "gone" })).toBeNull();
+    // Work with nobody there to do it counts as 100%, in the month it happens (and as too busy).
+    const gap = fake({ uncovered: { a: [null, null, null], b: [4, null, null] } });
+    expect(peakBusy(gap, { roleId: "b" })).toBe(1);
+    expect(peakBusy(gap, { roleId: "a" })).toBeCloseTo(0.8);
+    expect(tooBusyMonths(gap, [0.7, 0.85, 0.95])).toBe(2);
   });
   it("churn: clients lost over client-months, a ratio of means", () => {
     expect(clientsLost(m)).toBeCloseTo(0.9);

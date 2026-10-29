@@ -22,8 +22,11 @@ import { greyedLevers, listWords } from "@/lib/sandbox/greyed";
 import { longDate, weekdayDate } from "@/lib/sandbox/lane";
 import { MAX_TRAFFIC_PERCENT, othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 
-/** `preset`: an add that starts on a lever, target and month (the "Try a hire" link under "With this scenario"). */
-export type ChangeTarget = { mode: "add"; preset?: { lever: string; target: string; month?: string } } | { mode: "edit"; change: SandboxChange };
+/**
+ * `preset`: an add that starts on a lever, target and month (the "Try a hire" link under "With this scenario"), and, from goal seek and
+ * "What matters most", also how (`op`), the value in stored units and a note.
+ */
+export type ChangeTarget = { mode: "add"; preset?: { lever: string; target: string; month?: string; op?: PatchOp; value?: number; note?: string } } | { mode: "edit"; change: SandboxChange };
 
 export interface NamedOption {
   id: string;
@@ -86,13 +89,14 @@ export function ChangeDialog(props: ChangeDialogProps) {
     const ops = (Object.keys(l.range) as PatchOp[]).filter((o) => l.ops.includes(o));
     return ops.length ? ops : [...l.ops];
   };
-  const [op, setOp] = useState<PatchOp>(editing?.op ?? offeredOps(lever)[0]!);
+  const [op, setOp] = useState<PatchOp>(editing?.op ?? (preset?.lever === lever.id ? preset.op : undefined) ?? offeredOps(lever)[0]!);
   // A multiplier is a plain number; only a set or an add is shown in the lever's display unit (a month, not a week).
   const scaleOf = (o: PatchOp) => (o === "multiply" ? 1 : (lever.displayScale ?? 1));
   const scale = scaleOf(op);
   // Traffic by type is typed as a percentage of all traffic; the stored weight is worked out against the other types (./traffic.ts).
   const trafficEdit = editing && editing.lever === "A6" && editing.op === "set" && editing.target ? Math.round(weightToShare(editing.value, othersTotal(mix, editing.target)) * 1000) / 10 : null;
-  const initialValue = editing && editing.lever === lever.id ? String(trafficEdit ?? Math.round(editing.value * scaleOf(editing.op) * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
+  const presetValue = preset && preset.lever === lever.id && preset.value !== undefined ? preset.value : null;
+  const initialValue = presetValue !== null ? String(Math.round(presetValue * scaleOf(op) * 1e6) / 1e6) : editing && editing.lever === lever.id ? String(trafficEdit ?? Math.round(editing.value * scaleOf(editing.op) * 1e6) / 1e6) : lever.id === "D1" ? "1" : lever.id === "E6" ? "1" : lever.id === "D3" ? "2" : lever.id === "D2" ? "0" : "";
   const [valueText, setValueText] = useState(initialValue);
   const [targetId, setTargetId] = useState<string>(editing?.target ?? preset?.target ?? "");
   const [hireName, setHireName] = useState(editing?.params?.name ?? "");
@@ -105,7 +109,7 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : preset?.month !== undefined);
   const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : (preset?.month ?? defaultMonth).slice(0, 7));
   const [monday, setMonday] = useState(editing?.from && editing.from.length === 10 ? editing.from : defaultMonday);
-  const [noteText, setNoteText] = useState(editing?.note ?? "");
+  const [noteText, setNoteText] = useState(editing?.note ?? preset?.note ?? "");
   const [error, setError] = useState<string | null>(null);
 
   const cls = sqlTargetClass(lever);
