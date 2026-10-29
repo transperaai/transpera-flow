@@ -1,7 +1,7 @@
 # Engine versioning and golden models
 
 The engine's numbers are the product, so none may move unnoticed (docs/PRD.md §6.9 layer 3, decision D16;
-issue #22; ADR 0009). Seven golden models are run at a fixed seed on every push, their key outputs are compared
+issue #22; ADR 0009). Nine golden models are run at a fixed seed on every push, their key outputs are compared
 exactly with approved baselines, and every change that moves one needs a new baseline and a new `ENGINE_VERSION`,
 which every run records.
 
@@ -14,6 +14,8 @@ which every run records.
 | `northbeam-groups` | `northbeamWithClientGroups()` | Northbeam with its clients counted per service (17 SEO clients at health 83, 12 PPC clients at health 52, from `NORTHBEAM_CLIENT_GROUPS`) and simulated as unnamed clients, with the same servicing (issue #120). |
 | `northbeam-drivers` | `northbeamWithChurnDrivers()` | `northbeam-groups` with all ten churn drivers switched on at the prototype's weights and one of the user's own (a competitor undercutting): who the churn is blamed on, and what each cause measured (A56, below). |
 | `northbeam-money` | `northbeamWithMoney()` | `northbeam-groups` with 18,000 a month of overheads and PPC priced hourly at 95, run month by month (engine 1.11.0): billed revenue by kind, hourly work, paid labour, overheads, profit, and the monthly sales, revenue and money series. |
+| `northbeam-chances` | `northbeamWithChances()` | `northbeam-drivers` with `late` measured as events (effect 0.6, 3 months), `handoff` entered (chance 0.05, effect 1, 2 months), the custom driver at chance 0.1 effect 0.5, a PPC fee range 3,000 to 6,000 and a `fee` channel of PPC +8% from month 4 with the price driver on, run month by month (engine 1.12.0). |
+| `northbeam-channels` | `northbeamWithChannels()` | `northbeam-money` with monthly channels from month 3: leads x1.2, conversion x0.9, hands-on time x0.7 on the heaviest step, a wait of 0 to 8 h, rework 0 to 0.1, role cost x1.1, overheads x1.25, one person's capacity x0.9 and base churn x1.3 (engine 1.12.0). |
 | `larkspur` | `larkspurModel()` | Larkspur Creative, the "second, messier sample agency" (§6.9): overloaded designers, a copywriter past her week on overtime, an 18-client named roster whose health drives churn, and the corners Northbeam leaves alone (below). |
 
 Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money` also asks for the monthly series). The outputs kept (`keyOutputs` in
@@ -108,8 +110,8 @@ true; the pooled month-by-month `mrr`, added in 1.9.0, decays with the pool's `c
 count, while a won retainer's `billed` uses that service's own `churnMonthly`, so the two can differ when the rates do).
 `withMarketCondition` replaces any schedule on the model. The
 `northbeam-downturn` golden model runs Northbeam as seeded under Downturn, so a change to this maths shows up in the
-golden test. Time to hire and late payments are stored but change
-nothing, as the engine has no hiring or cash-flow model yet. To run a model under one condition (the stress test
+golden test. Late payments are stored but change nothing, as the engine
+has no cash-flow model yet; Time to hire acts through the Sandbox's hiring delay only (below, engine 1.12.0). To run a model under one condition (the stress test
 on solution pages): `simulate(withMarketCondition(model, MARKET_PRESETS.downturn.factors), reps, seed)`.
 
 ## Churn drivers (engine 1.6.0)
@@ -154,6 +156,59 @@ factor (the chance it had at the last tick, with health as it ended). Not change
 today's price and tenure, and the pooled billing estimate still uses the won-month churn factor. Pressures are
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
+
+## Chances, fee ranges, price rises and channels (engine 1.12.0, sandbox phase 3)
+
+Added 28 Oct 2026 (`docs/plans/sandbox-p3-brief.md`). **No existing simulated number moved.** The approved diff of the seven existing golden models is `engineVersion` and added keys only (`mode`, `chance`, `exposure` on each churn cause, `rise` on the revenue series of `northbeam-money`); `northbeam-chances` and `northbeam-channels` are new. Approved with `golden:approve "Sandbox phase 3: ..."` (`golden/versions.json`). Nothing below changes a draw on a path a model without the new fields takes: new randomness has new stream labels, and every multiplier is applied after the draw.
+
+**Monthly channels** (`EngineModel.channels`, `channels.ts`): per-month values the engine reads while it runs, for leads, conversion, the service mix, the fee a new client pays (`newFee`), the fee every active client pays (`fee`), fee ranges, base churn, churn drivers, hands-on time, external waits, rework, role cost, overheads and capacity. `starts` are the run's month starts, so the Sandbox's months are calendar months (`simulate` throws if `monthly` and `monthStarts` disagree with them); the market keeps its 52/12-week months. `activeChannels` drops every neutral array, and a model whose channels are all neutral takes the old code path, bit for bit (a test runs every golden model with neutral channels). A wait channel on a step with no wait creates its sampler on the step's existing `wait:<id>` label, only when used; a rework channel on a step with no rework builds the redo loop from the largest rework in any month.
+
+**Churn drivers as chances (B4).** A driver with an `effect` runs as events instead of weight x pressure. For each roster client at each weekly tick:
+
+    weekly chance = base x churn(t) x (1 + sum over weight-mode w x p + sum over chance-mode effect x hit) x market(t) / (52/12)
+
+`hit` is 1 while the client is under a hit (a hit at time h lasts `months` x 52/12 weeks; a hit during a hit extends it, effects never stack). An **entered** chance c (handoff, results, custom, price) draws once per tick per active client from the client's own stream `hit:<driver>:<client>`, hit if u < 1 - exp(log(1 - c) / (52/12)); c >= 1 hits every tick with no draw, c <= 0 never. A **measured** driver (late, resp, onb, rework, load) is hit by the event itself (a task finished late or missed, an ad-hoc task late, a servicing visit redone, a first delivery later than normal, a tick above 85% busy) and draws nothing. Run merging is off in any tick where a driver is in chance mode. Tenure and market have no events. A stored driver has no chance or effect (new nullable columns), so every workspace stays in weight mode; Settings pre-fills `equivalentEvents` (the chance and effect that give the same expected churn, in expectation not draw for draw). Each cause reports `mode`, `chance` (hits per active client-month, measured in both modes so Settings can show it before anyone switches) and `exposure` (share of client-weeks under the effect).
+
+**Client value range (A5).** A service with a `priceRange` (low, high) draws each client won on it from a triangular low - price - high on the new stream `fee:<service>`, one draw per win; the engine uses min(low, price) and max(high, price). Lifetime value and lost revenue use the range's mean. Existing clients keep their entered fee; low = high = price draws nothing.
+
+**Price rise (B5) and fees for existing clients.** The `fee` channel multiplies what every active client of a service pays from its month, existing and won; `weeklyBill` stays the base fee so nothing is counted twice with `newFee`. The part above the base fee is booked as `riseRevenue` (`ReplicationResult.revenue.rise`, `MonthlyResult.revenue.rise`). The rise's churn comes through the Price changes driver: in weight mode a rise r adds `2 x r` pressure for 13 weeks from its month (to that service's clients), in chance mode each client is hit with the driver's chance (default 1; stream `hit:price:<client>`) and its churn rises by `effect x r / 0.1` (the effect is per 10% rise) for `months`. A cut has no churn effect. With `monthly`, `SimulationResult.monthlySamples` holds each replication's own months (revenue, rise, clients lost).
+
+**The trade-off is measured, not modelled.** The Sandbox runs the scenario (R) and the same scenario without its B5 changes and without the forced price driver (B), with the same seed, the same pinned warm-up and the same segments. Per replication i and month m: gained G = rise_R, net N = revenue_R - revenue_B, lost L = G - N, extra leavers X = lost_R - lost_B (L includes everything the rise changed besides the higher fees: the work and fees a lost client would have brought). Each is shown as a mean and 10 to 90% range, per month and over the run (summed per replication, then the stat). Break-even = mean G / (sum L / sum X); with fewer than 0.05 extra leavers the loss per leaver is estimated (fee after the rise x half the months left) and labelled. A difference under a millionth of a unit is float noise and reads 0. (`apps/web/src/lib/sandbox/price-rise.ts`.)
+
+**The warm-up finding, and the pinned start.** A scenario's months before a timed change used to move: the automatic warm-up (`autoWarmupHours`) runs a pilot of the whole model, the change included, and sizes the warm-up from its P90 cycle, so a hire from January shifted every arrival of October by a different warm-up (live 1002.81 h, with the hire 1007.05 h). `SimulateOptions.initialState` lets the caller hand `simulate` the start to use; the Sandbox pins one per scenario, `initialState(model with only the scenario's whole-run changes)`, for every segment, the price-rise pair and the compare columns. Goldens do not pass it (`simulate(m, ...)` deep-equals `simulate(m, ..., { initialState: initialState(m) })` for every golden model). Months before any kind of timed change equal the live run (money to the last bits: a stay's fee is spread over a month as amount / length x overlap, so a run with a fee channel adds the weeks in a different order; tolerance 1e-9 relative).
+
+**Hiring delay (D9).** Runner only, no engine change: a D9 change delays every scenario hire (D1) by round(delay x the market's Time to hire in the hire's month) months, so Time to hire is now used (only through D9). Late payments (`pay`) are still stored and unused; "pay inflation" is the role-cost channel (C1 from a month), not the market.
+
+**Random streams.**
+
+| Stream | Status |
+|---|---|
+| arrivals, mix, work, wait, rework, route, churn, servicing, wip (and their warm-up labels) | unchanged count and order on every path without the new fields; with channels the same draws, multiplied after |
+| `hit:<driver>:<client>` | new; chance mode with an entered chance < 1; one draw per tick per active client |
+| `hit:price:<client>` | new; at a rise with a price chance < 1 |
+| `fee:<service>` | new; a ranged service, one draw per win |
+| `wait:<step>` for a step with no wait | created only when a `wait` channel gives it a mean |
+| `churn:client:sandbox:<change>:<i>` | new; the average clients a Sandbox B1 adds to a named roster |
+
+**Timings** (30 replications, seed 1, one container, the parent commit `e4501cc4` against this branch, interleaved in separate processes, best of 20 per run, best of 4 to 7 runs; budget: no case more than 5% or 10 ms slower). A model without channels or chance mode takes the old paths:
+
+| Engine case | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 27 | 26 | -3.7% |
+| northbeam groups+servicing 13w | 67 | 70 | +3.9% |
+| northbeam named roster 13w | 39 | 41 | +4.6% |
+| larkspur 26w | 79 | 68 | -13.0% |
+| large 40 steps 25 people 26w | 551 | 563 | +2.1% |
+| northbeam groups 24m, no monthly | 401 | 415 | +3.4% |
+| northbeam groups 24m, monthly | 450 | 464 | +3.0% |
+| larkspur 24m, monthly | 291 | 299 | +2.7% |
+| northbeam pipeline 12m, monthly | 78 | 76 | -1.9% |
+| downturn groups 24m | 296 | 294 | -0.9% |
+| named roster 24m (client roster, 1.11 fixture) | 153 | 156 | +1.9% |
+
+The Sandbox's worst case (`apps/web/test/sandbox-performance.test.ts`, seven segments at 12 months, now built from six headcount cuts and a solution going live, the levers that still splice): 473, 574, 327, 325, 384, 319, 299 ms, total 2.7 s (limit 7 s), against about 0.7 s a segment and 4.9 s recorded for phase 1 (another day's load, so not strictly comparable; the engine cases above are the controlled comparison). The margin against the 1 s limit is now about 2x rather than 1.4x. A scenario of channel and people levers is **one** run at any number of months: a channel-heavy scenario (leads in five months, step time, waiting, rework, role cost, overheads, hours, a price rise and four drivers as chances) takes 381 ms; a price rise runs as a pair, 449 and 329 ms (limit 1 s each). Chance mode on 2,000 clients per group with three drivers (12 months, 4 replications): 2.2 to 2.6 s against 1.4 to 1.5 s as weights (1.45 to 1.75 x: chance mode turns run merging off). The brief's "30 replications in 5 s" is not reachable even as weights (about 0.35 s a replication), so the test holds 4 replications under 5 s and under 2 x the weights.
+
+Phase 4 (time by purpose) rebases on 1.12.0: its hands-on hours must be counted after the `work` channel.
 
 ## Profit (engine 1.11.0, sandbox phase 2)
 
@@ -226,6 +281,8 @@ is 5 s, and the numbers above leave plenty of room, but a 24-month run of it sho
 exists to test with. Timing tests can fail on a loaded machine; re-run them alone before concluding.
 
 ## Sandbox scenarios: seven segments (sandbox phase 1, no engine change)
+
+*Since engine 1.12.0 only a solution going live and a headcount cut splice; every other timed lever is a channel in one run (see above). The seven-segment case below is built from those two.*
 
 A scenario with changes from several months runs once per distinct change month, each a full 30-replication run, and the monthly
 numbers are spliced (`spliceMonthly`). The most the database allows is six capped change months, so seven runs
