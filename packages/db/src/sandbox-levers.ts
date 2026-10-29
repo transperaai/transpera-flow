@@ -663,6 +663,21 @@ export function changesFromPatch(patches: readonly ScenarioPatch[], newId: () =>
   });
 }
 
+/**
+ * `fresh` (from `changesFromPatch`, after a process-page edit) with the id and note of the old change that had the same patch path (the
+ * first one not yet used, in order), so editing a scenario's patches doesn't drop why a change was made.
+ */
+export function carryNotes(old: readonly SandboxChange[], fresh: readonly SandboxChange[]): SandboxChange[] {
+  const left = old.map((c) => ({ c, path: patchOf(c)?.path ?? null }));
+  return fresh.map((next) => {
+    const path = patchOf(next)?.path;
+    const at = path === undefined ? -1 : left.findIndex((x) => x.path === path);
+    if (at < 0) return next;
+    const { c } = left.splice(at, 1)[0]!;
+    return { ...next, id: c.id, ...(c.note !== undefined ? { note: c.note } : {}) };
+  });
+}
+
 /** Every change a patch can stand for: whole-run, a patch lever. The process page's saved scenarios are the ones that are all this. */
 export const isPatchChange = (c: SandboxChange): boolean => c.from === undefined && patchOf(c) !== null;
 
