@@ -184,7 +184,26 @@ Added 29 Oct 2026 (`docs/plans/sandbox-p4-brief.md`). **No existing simulated nu
 | large 40 steps 26w, monthly | 661 | 709 | +7.1% (+47 ms) |
 | larkspur 24m, monthly, a purpose on every step (new; before = without purposes) | 282 | 299 | +6.3% |
 
-The two cases above the budget in that table are noise, not cost: re-measured alone, interleaved the same way (6 runs of 20), the 40-step monthly case reads 590 and 585 ms (-0.9%), and Larkspur 24m monthly reads between +2.3% (+7 ms) and +9% (+25 ms) from one set of runs to the next. A copy of the engine with the new bookings taken out read between +0.8% and +9% against the parent in the same runs, and a CPU profile of Larkspur 24m monthly (30 runs) totals 390.8 ms a run against 389.8 ms, so the run-to-run spread on this container is as large as the change. Two things keep the cost down: hands-on time is spread to a person, a role, a purpose and an overtime row from one decomposition into months (`spreadParts` / `addParts`, the same values `spread` adds, bit for bit) instead of one per row, and the month-by-month `Stat`s of the split come from typed buffers (`splitFrom`) rather than a sorted copy per series (the first version cost 5 to 14% on the monthly cases). Only monthly runs pay anything; the web app's timing tests (`apps/web/test/horizon-performance.test.ts`, `sandbox-performance.test.ts`) are below their limits (see the ticket).
+The two cases above the budget in that table are noise, not cost: re-measured alone, interleaved the same way (6 runs of 20), the 40-step monthly case reads 590 and 585 ms (-0.9%), and Larkspur 24m monthly reads between +2.3% (+7 ms) and +9% (+25 ms) from one set of runs to the next. A copy of the engine with the new bookings taken out read between +0.8% and +9% against the parent in the same runs, and a CPU profile of Larkspur 24m monthly (30 runs) totals 390.8 ms a run against 389.8 ms, so the run-to-run spread on this container is as large as the change. Two things keep the cost down: hands-on time is spread to a person, a role, a purpose and an overtime row from one decomposition into months (`spreadParts` / `addParts`, the same values `spread` adds, bit for bit) instead of one per row, and the month-by-month `Stat`s of the split come from typed buffers (`splitFrom`) rather than a sorted copy per series (the first version cost 5 to 14% on the monthly cases). Only monthly runs pay anything.
+
+The web app's timing tests (`pnpm --filter @transpera-flow/web test:perf`: `horizon-performance`, `sandbox-performance`, `overview-performance`, `scenarios`; 16 tests) pass on the parent commit and on this branch, run alone, in separate processes, twice each. Their own best-of-3 figures (ms; parent run 1 / run 2, this branch run 1 / run 2; this branch's Sandbox and Overview runs use the model with purposes on):
+
+| Case (limit) | Parent | This branch |
+| --- | --- | --- |
+| 24 months, pipeline-only Northbeam (1,200) | 238 / 258 | 234 / 227 |
+| 24 months, full Northbeam (2,000) | 576 / 756 | 652 / 545 |
+| 24 months, full Larkspur (2,000) | 359 / 383 | 395 / 398 |
+| 24 months, full Northbeam in a downturn (2,000) | 489 / 442 | 432 / 484 |
+| 24 months, full Northbeam, monthly output (2,000) | 668 / 596 | 888 / 619 |
+| 24 months, full Larkspur, monthly output (2,000) | 378 / 372 | 498 / 425 |
+| 12 months, 2,000 clients a group, 4 reps, weights / three chances (5,000 and 2 x) | 2,276 / 2,516 and 1,741 / 2,722 | 2,051 / 2,802 and 1,521 / 2,366 |
+| Sandbox, seven segments at 12 months, total (7,000) | 2,787 / 3,506 | 3,256 / 3,502 |
+| Sandbox, channel-heavy, one run (1,000) | 507 / 392 | 373 / 365 |
+| Sandbox, price rise, two runs (1,000 each) | 448, 375 / 668, 561 | 700, 642 / 441, 375 |
+| Overview runs at 24 months, full Northbeam (2,250) | 647 / 662 | 738 / 646 |
+| Overview page work at 24 months (100) | 11.3 / 20.6 | 10.5 / 11.4 |
+
+The run-to-run spread between two runs of the same commit (up to 30%: full Northbeam 576 and 756 on the parent) is larger than any difference between the commits, so the engine table above, interleaved and best of many, is the controlled comparison; every web case is far inside its limit.
 
 ## Warm-up hits and three review fixes (engine 1.13.0, sandbox phase 3 review)
 
