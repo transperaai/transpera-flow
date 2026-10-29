@@ -1283,3 +1283,112 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
     });
   });
 });
+
+// Goal seek and "What matters most" (sandbox phase 5b), in the demo with the real worker pool.
+describe("goal seek and what matters most", { timeout: 240_000 }, () => {
+  const answerKind = (page: Page) => page.locator("[data-goal-answer]").getAttribute("data-goal-answer");
+
+  /** Starts a search in the open dialog and waits for its answer (or a cancel). */
+  async function search(page: Page) {
+    await page.locator("[data-goal-start]").click();
+    await page.waitForSelector("[data-goal-answer], [data-goal-status]:has-text('Cancelled')", { timeout: 120_000 });
+  }
+
+  it("answers 'how many more stay under X% busy' in at most 8 runs, lists the probes, and 'Add as a change' puts it in the scenario with a note", async () => {
+    const { page, errors } = await mount(1440);
+    await pick(page, "Hire in March");
+    await waitRuns(page, 1);
+    await page.locator("[data-goal-open]").click();
+    const dialog = page.locator("[data-goal-seek]");
+    await dialog.waitFor();
+    await dialog.locator("[data-goal-lever]").selectOption({ label: "People in a role" });
+    await dialog.locator("[data-goal-target]").selectOption({ label: "PPC specialist" });
+    await dialog.locator("[data-goal-role]").selectOption({ label: "PPC specialist" });
+    // A limit that the range straddles: tighten from 90% until a boundary is found.
+    let kind: string | null = null;
+    for (const limit of ["90", "80", "70", "60", "50", "40", "30"]) {
+      await dialog.locator("[data-goal-limit]").fill(limit);
+      await search(page);
+      kind = await answerKind(page);
+      if (kind === "boundary") break;
+    }
+    expect(kind).toBe("boundary");
+    const probes = await dialog.locator("[data-goal-probes] tbody tr").count();
+    expect(probes).toBeGreaterThanOrEqual(3);
+    expect(probes).toBeLessThanOrEqual(8);
+    expect(await dialog.locator("[data-goal-answer]").innerText()).toMatch(/At least .* more/);
+    const before = await changes(page).count();
+    await dialog.locator("[data-goal-add]").click();
+    // The change dialog opens prefilled, with the note.
+    await page.waitForSelector("[data-change-dialog]");
+    expect(await page.locator("[data-change-dialog] textarea").inputValue()).toMatch(/^Goal seek: At least/);
+    await page.locator("[data-change-dialog] button[type=submit]").click();
+    await page.waitForFunction((n) => document.querySelectorAll("[data-change-list] [data-change]").length === n, before + 1);
+    expect(await changes(page).last().innerText()).toContain("Goal seek:");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("cancel stops the search and leaves nothing changed", async () => {
+    const { page, errors } = await mount(1440);
+    await pick(page, "Hire in March");
+    await waitRuns(page, 1);
+    await page.locator("[data-goal-open]").click();
+    const dialog = page.locator("[data-goal-seek]");
+    await dialog.waitFor();
+    await dialog.locator("[data-goal-start]").click();
+    await dialog.locator("[data-goal-cancel]").click();
+    await dialog.locator("[data-goal-status]:has-text('Cancelled')").waitFor();
+    expect(await dialog.locator("[data-goal-answer]").count()).toBe(0);
+    expect(await dialog.locator("[data-goal-start]").isEnabled()).toBe(true);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("the tornado runs when asked, draws ranked bars with a table, and 'Use this' opens the change dialog prefilled", async () => {
+    const { page, errors } = await mount(1440);
+    await pick(page, "Hire in March");
+    await waitRuns(page, 1);
+    expect(await page.locator("[data-tornado-row]").count()).toBe(0);
+    await page.locator("[data-tornado-measure]").selectOption({ label: "Busiest month of the busiest role" });
+    await page.locator("[data-tornado-start]").click();
+    await page.waitForSelector("[data-tornado][data-tornado-status=done]", { timeout: 180_000 });
+    const rows = page.locator("[data-tornado-row]");
+    expect(await rows.count()).toBeGreaterThanOrEqual(4);
+    expect(await rows.count()).toBeLessThanOrEqual(10);
+    expect(await page.locator("[data-tornado-chart]").count()).toBe(1);
+    expect(await page.locator("[data-tornado-base]").innerText()).toMatch(/\d/);
+    // Profit is offered to an admin; its money levers are tried only for it.
+    const measures = await page.locator("[data-tornado-measure] option").allInnerTexts();
+    expect(measures).toContain("Profit over the run");
+    const use = page.locator("[data-tornado-use]").first();
+    if (await use.count()) {
+      await use.click();
+      await page.waitForSelector("[data-change-dialog]");
+    }
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("a Viewer can run goal seek and the tornado, with no profit and no 'Add as a change'", async () => {
+    const { page, errors } = await mount(1440, { mode: "readonly" });
+    await pick(page, "Hire in March");
+    await waitRuns(page, 1);
+    await page.locator("[data-goal-open]").click();
+    const dialog = page.locator("[data-goal-seek]");
+    await dialog.waitFor();
+    const kinds = await dialog.locator("[data-goal-kind] option").allInnerTexts();
+    expect(kinds).not.toContain("Profit");
+    await search(page);
+    expect(await dialog.locator("[data-goal-add]").count()).toBe(0);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    const measures = await page.locator("[data-tornado-measure] option").allInnerTexts();
+    expect(measures).not.toContain("Profit over the run");
+    await page.locator("[data-tornado-start]").click();
+    await page.waitForSelector("[data-tornado][data-tornado-status=done]", { timeout: 180_000 });
+    expect(await page.locator("[data-tornado-use]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+});

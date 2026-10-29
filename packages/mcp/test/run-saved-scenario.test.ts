@@ -266,6 +266,14 @@ describe("run_scenario with a saved scenario", () => {
     }
   }, 120_000);
 
+  it("runs a two-run scenario at 12 months in under 3 s on the server (timing: alone, not under load)", async () => {
+    const r = await run(ownerToken, { scenario: "Hire in March", months: 12, include_baseline: false });
+    expect(r.ok, JSON.stringify(r.error)).toBe(true);
+    const ms = (r.data as unknown as { duration_ms: number }).duration_ms;
+    console.info(`run_scenario saved mode, Hire in March at 12 months: ${ms} ms (limit 3000)`);
+    expect(ms).toBeLessThan(3000);
+  }, 120_000);
+
   it("stays a read: nothing it runs is stored", async () => {
     const before = (await admin.query("select count(*)::int as n from sandbox_scenarios")).rows[0].n;
     await run(ownerToken, { scenario: "Hire in March" });

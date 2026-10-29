@@ -76,7 +76,7 @@ export function Timing(p: TimingProps) {
     <section className="flex min-w-0 flex-col gap-2" data-when-section>
       <h2 className={`${SECTION_TITLE} flex items-center`}>
         When
-        <Help {...SANDBOX_HELP.whenSection} />
+        <Help {...(p.capacityOnly ? SANDBOX_HELP.whenCapacity : SANDBOX_HELP.whenSection)} />
       </h2>
       <Card className="gap-1 px-4 py-3 text-sm" data-capacity-line={out ? "runs-out" : "holds"}>
         <p>{capacityLine(out, p.months, label)}</p>

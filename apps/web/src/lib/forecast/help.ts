@@ -137,6 +137,11 @@ export const SANDBOX_HELP = {
       "When capacity runs out: the first month any role passes the “Too busy” line on average (or has work and nobody there to do it), in the run on screen, which already carries your demand growth, seasons and market. For a hire, how long until it pays for itself: the extra profit it brings, month by month, set against what it costs, with and without it.",
     example: "“Capacity runs out in March 2027: Designers are 88% busy on average.” “The PPC hire in January pays for itself by August 2027 (+£4,100 by the horizon).” Both are averages of 30 runs.",
   },
+  whenCapacity: {
+    label: "When",
+    description: "When capacity runs out: the first month any role passes the “Too busy” line on average (or has work and nobody there to do it), in the run on screen, which already carries the growth, seasons and market in this copy.",
+    example: "“Capacity runs out in March 2027: Designers are 88% busy on average.” An average of 30 runs.",
+  },
   goalSeek: {
     label: "Find a value",
     description:
