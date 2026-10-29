@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { SandboxChange } from "@transpera-flow/db";
-import { northbeamWithClientGroups, northbeamWithClients, northbeamWithServices } from "@transpera-flow/engine";
+import { SANDBOX_LIBRARY, northbeamBundle, type SandboxChange } from "@transpera-flow/db";
+import { northbeamWithClientGroups, northbeamWithClients, northbeamWithServices, simulate, type EngineModel } from "@transpera-flow/engine";
 import { applyModelChanges, hasClientRoster } from "@/lib/sandbox/edits";
+import { prepareScenario } from "@/lib/sandbox/run";
 
 // The whole-run levers that are edits of the model rather than patches (docs/plans/sandbox-p3-brief.md §5.4): clients on the book and base
 // churn for a roster (B1, B3), a fee range (A5), a churn driver as a chance (B4) and the price driver a price rise switches on (B5).
@@ -89,5 +90,23 @@ describe("a fee range (A5), a churn driver as a chance (B4) and the price driver
     expect(on.enabled).toBe(true);
     const own = { ...model, churnDrivers: [{ id: "price", weight: 1, enabled: false, chance: 0.2, effect: 30, effectMonths: 3 }] };
     expect(apply(own, ch("B5", "set", 0.1)).model.churnDrivers![0]).toMatchObject({ enabled: false, effect: 30 });
+  });
+});
+
+describe("the Downturn starter on Northbeam's client groups (B3 on a roster, coordinator item 6)", () => {
+  it("raises every group's base churn by half, through the runner, and the run loses more clients than the live one", () => {
+    const downturn = SANDBOX_LIBRARY.find((s) => s.name === "Downturn")!;
+    const start = "2026-10-05";
+    const eff = (list: readonly SandboxChange[]) => list.map((c) => ({ change: c as SandboxChange, scenarioId: "s", scenarioName: "Downturn", inherited: false }));
+    const live = prepareScenario(northbeamBundle(), [], [], 12, start);
+    const scenario = prepareScenario(northbeamBundle(), eff(downturn.changes), [], 12, start);
+    expect(scenario.error).toBeNull();
+    expect(scenario.problems).toEqual([]);
+    const liveGroups = live.segments[0]!.model.clientGroups!;
+    const groupsNow = scenario.segments[0]!.model.clientGroups!;
+    expect(Object.keys(groupsNow).length).toBeGreaterThan(0);
+    for (const [sid, g] of Object.entries(groupsNow)) expect(g.churnMonthly).toBeCloseTo(liveGroups[sid]!.churnMonthly * 1.5, 12);
+    const run = (m: EngineModel, s: typeof live) => simulate(m, 8, 1, { monthly: true, monthStarts: s.monthStarts, ...(s.start ? { initialState: s.start } : {}) }).kpi.clientsChurned!.mean;
+    expect(run(scenario.segments[0]!.model, scenario)).toBeGreaterThan(run(live.segments[0]!.model, live));
   });
 });
