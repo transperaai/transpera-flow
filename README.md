@@ -106,7 +106,7 @@ claude mcp add --transport http transpera-flow https://<host>/api/mcp \
 The server is **read-only**: Claude and ChatGPT query and report, and nothing they call writes company data, sources, issues,
 drafts or processes (docs/plans/cut-list.md item 5). Tools: `list_workspaces`, `set_active_workspace` (the only state it
 changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`, `get_first_principles`,
-`list_issues`, `list_solutions`, `list_sources`, `list_templates`, `run_scenario`, `compare_scenarios`, `check_robustness`
+`list_issues`, `list_scenarios`, `list_solutions`, `list_sources`, `list_templates`, `run_scenario` (with `scenario`: a saved Sandbox scenario run month by month), `compare_scenarios`, `check_robustness`
 (time-capped; a capped check is flagged `partial`) and `get_bottlenecks` (with the shadow price: extra completions per quarter
 from one more FTE in the top bottleneck role; see `packages/engine/src/shadow-price.ts`). `run_scenario` and
 `compare_scenarios` take their changes as arguments and save nothing. The database also refuses company-model writes made with a

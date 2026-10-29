@@ -44,3 +44,9 @@ Neither could hold the other's change, and nothing compared them.
 - B1 and B3 act on client groups and named rosters (a named roster can only gain average clients). Saved scenarios that hold them move on those workspaces.
 - Sandbox runs pin their warm-up to the live run's, so the months before a timed change equal the live run exactly.
 - The shared simulation pool keeps 48 finished runs (was 40).
+
+## Note, 29 Oct 2026 (sandbox phase 5a)
+
+- **A change can carry a note** (`note`, 1 to 280 characters, trimmed): stored in the change inside `sandbox_scenarios.changes`, not in a column, so it travels with the change through Duplicate, Build on, a restore and (phase 5b) a share snapshot with no new join. `private.is_sandbox_change` and `changeProblem` check it alike; `updateScenarioPatch` (the process page's edit of a whole-run scenario) keeps the id and note of each change it keeps.
+- **The runner lives in `@transpera-flow/db/sandbox`** (`packages/db/src/sandbox`), not in the web app: the web page and MCP run identical code, so `run_scenario` with `scenario` returns the months the page shows. The page spreads each segment over its worker pool and joins with `joinRun`; MCP calls `simulateScenario`, which runs the same segments with the same options in one thread. A parity test (`packages/db/test/sandbox-execute.test.ts`) holds the two to byte-identical results. The subpath is not re-exported from the package's main entry.
+

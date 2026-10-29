@@ -6,7 +6,7 @@
 //   * people over time: a hire (D1), a leaver (D2), leave (D3) and an FTE change from a month (D4) become person rows with start and
 //     end dates, as a planned hire from Settings is. One run, exact;
 //   * splicing: a patch from a month (and a solution going live, D46/D48) cannot switch mid-run, so `scenarioSegments` lists the runs
-//     it needs (one per distinct month, with everything in force by then) and `spliceMonthly` (lib/forecast/splice.ts) joins their
+//     it needs (one per distinct month, with everything in force by then) and `spliceMonthly` (./splice.ts) joins their
 //     month-by-month numbers;
 //   * a change whose target is gone is skipped and listed (`ChangeProblem`), never silent.
 // A scenario's effective changes are its parents' first, then its own (./effective.ts).
