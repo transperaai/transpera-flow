@@ -591,3 +591,15 @@ source of "Could be removed"; MCP `list_scenarios`/`run_scenario` monthly output
 11. **Work above hours** (overtime capped). *Default: idle 0, the categories may sum above 100%, flagged in the month.*
 12. **Requirements marked "drop"** with a `step_id`. *Default: not a source of "Could be removed"* (the design names the delete
     list only).
+
+## Decisions (Austin, 29 Oct: "defaults")
+
+These override the recommended defaults above where they differ. Every other open question takes its recommended
+default.
+
+1. **Pipeline steps after the sale** (the step where the sale is won, and every step after it on the won path) default
+   to **"Moves the client's job forward"**. Steps before the sale default to "Winning work". This is still subject to a
+   first-principles "delete", which gives "Could be removed".
+2. **Ongoing client hours not drawn as steps** get **their own row, "Client upkeep"**, as a fixed category: renameable,
+   not deletable. They are not counted under "Moves the client's job forward".
+3. **Viewers per person:** their own row by name plus **"Everyone else"** (today's rule).
