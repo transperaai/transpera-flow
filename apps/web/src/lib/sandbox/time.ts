@@ -52,6 +52,7 @@ function splitFor(time: MonthlyResult["time"], scope: TimeScope): TimeSplit | nu
   return {
     purpose: Object.fromEntries(Object.entries(t.purpose).map(([k, v]) => [k, minus(v, me.purpose[k] ?? [])])),
     rework: minus(t.rework, me.rework),
+    withRework: Object.fromEntries(Object.entries(t.withRework).map(([k, v]) => [k, minus(v, me.withRework[k] ?? [])])),
     ongoing: minus(t.ongoing, me.ongoing),
     idle: minus(t.idle, me.idle),
     hours: minus(t.hours, me.hours),
@@ -60,9 +61,10 @@ function splitFor(time: MonthlyResult["time"], scope: TimeScope): TimeSplit | nu
 }
 
 /**
- * The split of a scope as rows. `fixing` is its own hours plus every rework hour (rework on any step counts as Fixing); the client
- * hours that are not steps (`ongoing`) are the fixed "Client upkeep" row. A key that is not in the list goes to "Not set".
- * A row that combines two series adds their ranges, which is a little wider than the range of the sum.
+ * The split of a scope as rows. `fixing` is its own hours plus every rework hour (rework on any step counts as Fixing), with the
+ * engine's range of that sum (`withRework`); the client hours that are not steps (`ongoing`) are the fixed "Client upkeep" row. A key
+ * that is not in the list goes to "Not set", whose range is the ranges added (only an approximation; normally the row is empty, as every
+ * step resolves to a listed key). "Everyone else" takes a person's means off the team's, so its ranges are the team's shifted.
  */
 export function timeView(monthly: MonthlyResult, months: TimelineMonth[], categories: readonly PurposeCategory[], scope: TimeScope): TimeView {
   const n = months.length;
@@ -72,7 +74,8 @@ export function timeView(monthly: MonthlyResult, months: TimelineMonth[], catego
   const listed = new Set(categories.map((c) => c.key));
   const series = (key: string): Stat[] => {
     let out = split?.purpose[key] ? [...split.purpose[key]!] : zeros();
-    if (key === FIXING_PURPOSE && split) out = out.map((s, m) => add(s, split.rework[m] ?? ZERO));
+    // Fixing takes every rework hour: the range of the sum when the engine has it (a step that chose Fixing), else the rework itself.
+    if (key === FIXING_PURPOSE && split) out = split.withRework[key] ? [...split.withRework[key]!] : out.map((s, m) => add(s, split.rework[m] ?? ZERO));
     if (key === UPKEEP_PURPOSE && split) out = out.map((s, m) => add(s, split.ongoing[m] ?? ZERO));
     return out;
   };

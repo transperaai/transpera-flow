@@ -8,6 +8,7 @@ export function fakeSplit(n: number, level: number, uncovered = false): TimeSpli
   return {
     purpose: { client_job: series(() => level * 10), winning: series(() => level * 4), fixing: series(() => level * 2) },
     rework: series(() => level),
+    withRework: { client_job: series(() => level * 11), winning: series(() => level * 5), fixing: series(() => level * 3) },
     ongoing: series(() => level * 3),
     idle: series(() => 10),
     hours: series(() => level * 10 + level * 4 + level * 2 + level + level * 3 + 10),

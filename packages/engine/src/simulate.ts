@@ -3291,16 +3291,23 @@ export function runOnce(
         }
       }
     }
-    // Someone's client hours while they are away go to the others in the role who are there, by the hours each has.
+    // Someone's client hours while they are away go to the others in the role who are there, by the hours each has. With nobody
+    // else there that month they stay the role's work but no one's (`roleAwayUnshared`, which the time split shows as uncovered).
+    const roleAwayUnshared: Record<string, number[]> = {};
     roleIds.forEach((rid, r) => {
       const members = people.filter((p) => p.person.roles.includes(rid));
+      const unshared = new Array<number>(nM).fill(0);
+      roleAwayUnshared[rid] = unshared;
       for (const away of members) {
         for (let m = 0; m < nM; m++) {
           const hours = sums.personAway[(away.idx * nR + r) * nM + m]!;
           if (!(hours > 0)) continue;
           const others = members.filter((p) => p !== away);
           const total = others.reduce((sum, p) => sum + personCapacity[p.id]![m]! / p.person.roles.length, 0);
-          if (!(total > 0)) continue;
+          if (!(total > 0)) {
+            unshared[m]! += hours;
+            continue;
+          }
           for (const p of others) personWork[p.id]![m]! += (hours * (personCapacity[p.id]![m]! / p.person.roles.length)) / total;
         }
       }
@@ -3349,6 +3356,7 @@ export function runOnce(
       roleCapacity,
       roleOvertime,
       roleUncovered,
+      roleAwayUnshared,
       personWork,
       personCapacity,
       personOvertime,
@@ -4145,8 +4153,10 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
   const splitFrom = (work: PerRep, byPurpose: readonly PerRep[], rework: PerRep, hours: PerRep, uncovered: PerRep | null): TimeSplit => {
     const K = purposes.length;
     const bufP = purposes.map(() => new Float64Array(nRep));
+    const bufPR = purposes.map(() => new Float64Array(nRep));
     const [bufRework, bufOngoing, bufIdle, bufHours, bufUncovered] = [0, 1, 2, 3, 4].map(() => new Float64Array(nRep)) as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
     const outP = purposes.map(() => new Array<Stat>(nM));
+    const outPR = purposes.map(() => new Array<Stat>(nM));
     const out = { rework: new Array<Stat>(nM), ongoing: new Array<Stat>(nM), idle: new Array<Stat>(nM), hours: new Array<Stat>(nM), uncovered: uncovered ? new Array<Stat>(nM) : null };
     for (let m = 0; m < nM; m++) {
       for (let i = 0; i < nRep; i++) {
@@ -4155,6 +4165,7 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
         for (let k = 0; k < K; k++) {
           const v = byPurpose[k]![i]![m]!;
           bufP[k]![i] = v;
+          bufPR[k]![i] = v + rw;
           used += v;
         }
         const w = work[i]![m]!;
@@ -4165,19 +4176,23 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
         bufHours[i] = h;
         if (uncovered) bufUncovered[i] = uncovered[i]![m]!;
       }
-      for (let k = 0; k < K; k++) outP[k]![m] = statOf(bufP[k]!);
+      for (let k = 0; k < K; k++) {
+        outP[k]![m] = statOf(bufP[k]!);
+        outPR[k]![m] = statOf(bufPR[k]!);
+      }
       out.rework[m] = statOf(bufRework);
       out.ongoing[m] = statOf(bufOngoing);
       out.idle[m] = statOf(bufIdle);
       out.hours[m] = statOf(bufHours);
       if (out.uncovered) out.uncovered[m] = statOf(bufUncovered);
     }
-    return { purpose: Object.fromEntries(purposes.map((key, k) => [key, outP[k]!])), rework: out.rework, ongoing: out.ongoing, idle: out.idle, hours: out.hours, uncovered: out.uncovered };
+    return { purpose: Object.fromEntries(purposes.map((key, k) => [key, outP[k]!])), rework: out.rework, withRework: Object.fromEntries(purposes.map((key, k) => [key, outPR[k]!])), ongoing: out.ongoing, idle: out.idle, hours: out.hours, uncovered: out.uncovered };
   };
   const roleIdList = Object.keys(first.roleWork);
   const personIdList = Object.keys(first.personWork);
-  /** Hours available plus overtime, per replication and month. */
+  /** Two series added (hours available plus overtime; uncovered plus unshared leave hours), per replication and month. */
   const plus = (a: PerRep, b: PerRep): PerRep => a.map((row, i) => row.map((v, m) => v + b[i]![m]!));
+  const minus = (a: readonly number[], b: readonly number[]): number[] => a.map((v, m) => v - b[m]!);
   /** The sum over `ids` of a series, per replication and month, added in order from 0 (as the team's sums are). */
   const total = (ids: readonly string[], of: (r: MonthlyReplication, id: string) => readonly number[]): PerRep =>
     reps.map((r) => {
@@ -4193,12 +4208,13 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
     roles: Object.fromEntries(
       roleIdList.map((id) => [
         id,
+        // Client hours of someone on leave that no colleague was there to take are not the role's work here but uncovered.
         splitFrom(
-          reps.map((r) => r.roleWork[id]!),
+          reps.map((r) => minus(r.roleWork[id]!, r.roleAwayUnshared[id]!)),
           purposes.map((k) => reps.map((r) => r.purposeRoleWork[k]![id]!)),
           reps.map((r) => r.reworkRoleWork[id]!),
           plus(reps.map((r) => r.roleCapacity[id]!), reps.map((r) => r.roleOvertime[id]!)),
-          reps.map((r) => r.roleUncovered[id]!),
+          plus(reps.map((r) => r.roleUncovered[id]!), reps.map((r) => r.roleAwayUnshared[id]!)),
         ),
       ]),
     ),
@@ -4225,7 +4241,7 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
         for (const id of personIdList) for (let m = 0; m < nM; m++) out[m] = out[m]! + (r.personCapacity[id]![m]! + r.personOvertime[id]![m]!);
         return out;
       }),
-      total(roleIdList, (r, id) => r.roleUncovered[id]!),
+      total(roleIdList, (r, id) => r.roleUncovered[id]!.map((v, m) => v + r.roleAwayUnshared[id]![m]!)),
     ),
   };
   return {

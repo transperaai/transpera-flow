@@ -91,6 +91,7 @@ export function spliceMonthly(segments: readonly { from: number; monthly: Monthl
     return {
       purpose: Object.fromEntries(purposes.map((k) => [k, one((t) => t.purpose[k])])),
       rework: one((t) => t.rework),
+      withRework: Object.fromEntries(purposes.map((k) => [k, one((t) => t.withRework[k])])),
       ongoing: one((t) => t.ongoing),
       idle: one((t) => t.idle),
       hours: one((t) => t.hours),
