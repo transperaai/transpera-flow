@@ -6,7 +6,7 @@
 import { DEFAULT_PURPOSES, FIXING_PURPOSE, type ProcessBundle, type PurposeCategory } from "@transpera-flow/db";
 import { isTooBusy, type EngineModel, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { timelineMonths, type TimelineMonth } from "@/lib/forecast/timeline";
-import { timeView } from "./time";
+import { IDLE, UNCOVERED, timeView } from "./time";
 
 /** One series across the columns: `values[c][month]`, and `diff[c][month]` = column c's mean − column 0's (null when either is missing; column 0 is all null). */
 export interface CompareRow {
@@ -108,11 +108,19 @@ export function compareSandbox(
   const costsShown = columns.every((m) => m.money);
   const total = (stats: readonly Stat[]) => stats.reduce((sum, st) => sum + st.mean, 0);
   const views = columns.map((m) => timeView(m, months, categories, { kind: "team" }));
-  const timeRows = views[0]!.rows.map((r, i) => row(r.id, r.name, views.map((v) => v.rows[i]!.hours)));
-  const runHoursOf = (id: string) => views.map((v) => v.rows.find((r) => r.id === id)?.runHours ?? 0);
+  // Rows by id, not position: a column can have a "Not set" row the others lack. A row a column lacks is zero there.
+  const timeIds: { id: string; name: string }[] = [];
+  for (const v of views) for (const r of v.rows) if (!timeIds.some((x) => x.id === r.id)) timeIds.push({ id: r.id, name: r.name });
+  // Idle and uncovered stay last, in that order, whichever column brought a row.
+  const lastOrder = (id: string) => (id === IDLE ? 1 : id === UNCOVERED ? 2 : 0);
+  timeIds.sort((a, b) => lastOrder(a.id) - lastOrder(b.id));
+  const zeroRow = () => months.map(() => ({ mean: 0, p10: 0, p90: 0 }));
+  const rowIn = (v: (typeof views)[number], id: string) => v.rows.find((r) => r.id === id);
+  const timeRows = timeIds.map(({ id, name }) => row(id, name, views.map((v) => rowIn(v, id)?.hours ?? zeroRow())));
+  const runHoursOf = (id: string) => views.map((v) => rowIn(v, id)?.runHours ?? 0);
   return {
     months,
-    time: { rows: timeRows, shares: views.map((v) => v.rows.map((r) => r.runShare)), runHours: views.map((v) => v.rows.map((r) => r.runHours)) },
+    time: { rows: timeRows, shares: views.map((v) => timeIds.map(({ id }) => rowIn(v, id)?.runShare ?? 0)), runHours: views.map((v) => timeIds.map(({ id }) => rowIn(v, id)?.runHours ?? 0)) },
     profit: costsShown ? row("profit", "Profit", columns.map((m) => m.money!.profit)) : null,
     revenue: row("revenue", "Billed revenue", columns.map((m) => m.revenue.total)),
     labour: labour.every((l) => l) ? row("labour", "Labour and overtime", labour as Stat[][]) : null,
