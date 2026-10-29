@@ -3,7 +3,7 @@ import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
-import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
+import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources, withDeleteCandidates } from "@/lib/data";
 import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
 import { loadLiveParts } from "@/lib/overview/data";
 import { loadLibrary } from "@/lib/editor/library-data";
@@ -36,8 +36,9 @@ export async function WorkspaceEditorPage({
     const have = new Set([b.process.id, ...(b.otherProcesses ?? []).map((p) => p.process.id)]);
     return { ...b, otherProcesses: [...(b.otherProcesses ?? []), ...parts.filter((p) => !have.has(p.process.id))] };
   };
-  const live = withParts(process.live);
-  const draft = process.draft ? withParts(process.draft) : process.draft;
+  // Each version with the steps its first principles list to delete, for the purpose a step has when none is chosen (sandbox phase 4).
+  const live = await withDeleteCandidates(withParts(process.live));
+  const draft = process.draft ? await withDeleteCandidates(withParts(process.draft)) : process.draft;
   // The company map is read at the Overview, not at a process page of its own.
   const base = company ? `/w/${slug}` : `/w/${slug}/p/${processId}`;
   const canEdit = await canEditWorkspace(live.workspace.id);

@@ -94,6 +94,12 @@ export const SANDBOX_HELP = {
     description: "A Viewer's numbers can differ slightly from an Agency admin's: a Viewer's view carries no per-person times, so everyone works at the standard speed.",
     example: "If an admin has set Dan to work 20% faster, only the admin's run knows it.",
   },
+  time: {
+    label: "Where the time goes",
+    description:
+      "Every step says what its hands-on time achieves. This adds the working time up by that purpose, as hours and as a share of all the hours the team has (hours available, plus overtime worked). Rework always counts as Fixing, and the hours each role gives every client a week, which are not steps, are Client upkeep. What is left is Idle.",
+    example: "In March, 18% of the team's hours went on Fixing: 62 hours redoing proposals and designs.",
+  },
   // The change dialog.
   lever: {
     label: "What to change",

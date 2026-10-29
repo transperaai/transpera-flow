@@ -19,6 +19,7 @@ export {
   seasonalityCurve,
   speedsNormalisedFor,
   hidesPay,
+  resolveBundlePurposes,
   toEngineModel,
   usesCapacityFactors,
   triangularRange,

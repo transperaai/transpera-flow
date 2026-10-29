@@ -14,7 +14,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { partOf, speedsNormalisedFor, type IssueRow, type ProcessBundle, type SandboxChange, type SandboxScenarioRow, type SolutionRow, type SourceRow } from "@transpera-flow/db";
-import { offeredLevers, sandboxLever } from "@transpera-flow/db";
+import { offeredLevers, sandboxLever, workspacePurposes } from "@transpera-flow/db";
 import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, CUSTOM_DRIVER_PREFIX, firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
@@ -49,6 +49,7 @@ import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { canSeePerson, namedForViewer, viewerOf } from "@/lib/viewer";
 import { forecastMoney } from "@/lib/forecast/money";
 import { ForecastMoney } from "@/components/forecast/forecast-money";
+import { TimeByPurpose } from "@/components/sandbox/time-by-purpose";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/forecast/forecast-timeline";
 import { ChangeDialog, type ChangeTarget } from "./change-dialog";
 import { ChangeList } from "./change-list";
@@ -69,6 +70,8 @@ export interface SandboxViewProps {
   peopleHref?: string | null;
   /** Settings, Levers: where a kind of change is switched off. Null on the demo. */
   leversHref?: string | null;
+  /** Settings → Purposes, for someone who may change the categories. */
+  purposesHref?: string | null;
   /** The ISO date the forecast starts on; today when omitted. Fixed on the demo so its months don't move. */
   startDate?: string;
   /** A line under the title, e.g. the demo's note about its sample scenarios. */
@@ -101,7 +104,7 @@ interface Draft {
 type Confirm = { title: string; description?: string; confirm: string; cancel: string; destructive?: boolean; onConfirm: () => void } | null;
 type NameAsk = { title: string; initial: string; confirm: string; taken: string[]; onConfirm: (name: string) => void | string | null | Promise<void | string | null> } | null;
 
-export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHref, peopleHref = null, leversHref = null, startDate, note, scenarios = NO_SCENARIOS, solutions = NO_SOLUTIONS, hiddenLevers = NO_HIDDEN }: SandboxViewProps) {
+export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHref, peopleHref = null, leversHref = null, purposesHref = null, startDate, note, scenarios = NO_SCENARIOS, solutions = NO_SOLUTIONS, hiddenLevers = NO_HIDDEN }: SandboxViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -580,6 +583,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     leverChanges: s.lever_changes.length,
     older: liveRevisions[s.process_id] !== undefined && s.base_revision_id !== liveRevisions[s.process_id],
   }));
+  const purposeCategories = useMemo(() => workspacePurposes(live.workspace.settings), [live.workspace.settings]);
   const people = namedForViewer(viewerOf(live), live.people.filter((p) => p.active))
     .map((p) => ({ id: p.id, name: p.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -838,6 +842,18 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           </Card>
         </section>
       )}
+      {!compare && shownRun?.result.monthly ? (
+        <TimeByPurpose
+          monthly={shownRun.result.monthly}
+          months={timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek)}
+          categories={purposeCategories}
+          roles={Object.entries(shownRun.model.roles).map(([id, r]) => ({ id, name: r.name }))}
+          people={people}
+          viewer={viewerOf(live)}
+          span={span}
+          purposesHref={mode === "live" ? purposesHref : null}
+        />
+      ) : null}
       {!compare && moneyView ? (
         <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}

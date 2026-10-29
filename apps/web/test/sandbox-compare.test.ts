@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fakeTime } from "./fake-time";
 import type { ProcessBundle } from "@transpera-flow/db";
 import type { MonthBusy, MonthlyResult, Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
@@ -15,6 +16,7 @@ const busy = (mean: number): MonthBusy => ({ ...stat(mean), capacity: 40, work: 
 function fake(n: number, level: number, c: number, m: number, extra: Partial<MonthlyResult> = {}): MonthlyResult {
   return {
     months: Array.from({ length: n }, (_, i) => ({ start: i * 100, end: (i + 1) * 100 })),
+    time: fakeTime(n, level),
     roles: { r: Array.from({ length: n }, () => busy(level)) },
     uncovered: { r: Array.from({ length: n }, () => null) },
     people: { p: Array.from({ length: n }, () => busy(level)) },

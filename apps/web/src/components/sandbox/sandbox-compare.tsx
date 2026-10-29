@@ -7,7 +7,7 @@
 // not from chance. A column that fails shows its error and the others still show.
 
 import { useMemo } from "react";
-import type { ProcessBundle, SandboxScenarioRow, SolutionRow } from "@transpera-flow/db";
+import { workspacePurposes, type ProcessBundle, type SandboxScenarioRow, type SolutionRow } from "@transpera-flow/db";
 import type { Stat } from "@transpera-flow/engine";
 import { Help, type HelpProps } from "@/components/help";
 import { Button } from "@/components/ui/button";
@@ -16,12 +16,13 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
-import { compareSandbox, type CompareRow, type CompareTile } from "@/lib/sandbox/compare";
+import { compareSandbox, type CompareRow, type CompareTile, type SandboxComparison } from "@/lib/sandbox/compare";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { COSTS_HIDDEN_NOTE } from "@/components/forecast/forecast-money";
 import { partMonthNote, type TimelineMonth } from "@/lib/forecast/timeline";
 import { CompareChart, SERIES_STYLES } from "./compare-chart";
+import { TimeBar } from "./time-chart";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 const NO_CHANGES: EffectiveChange[] = [];
@@ -93,7 +94,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
   // Failed columns are left out of the charts; the others still show.
   const shown = columns.map((c, i) => ({ ...c, index: i, run: ready[i] })).filter((c) => c.run !== null);
   const comparison = useMemo(
-    () => (ready[0] ? compareSandbox(ready[0].model, shown.map((c) => c.run!.result.monthly!), live, startDate, cutoffs, shown.map((c) => c.priceNet)) : null),
+    () => (ready[0] ? compareSandbox(ready[0].model, shown.map((c) => c.run!.result.monthly!), live, startDate, cutoffs, shown.map((c) => c.priceNet), workspacePurposes(live.workspace.settings)) : null),
     // The columns are recomputed when a run (or its status or the ids and scenarios behind its error) changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [run0.run, run0.status, run1.run, run1.status, run2.run, run2.status, run3.run, run3.status, ids, scenarios, live, startDate, cutoffs],
@@ -200,6 +201,8 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
                 </dl>
               </Card>
             ) : null}
+ <Tile title="Hours fixing over the run" names={names} tile={comparison.totals.fixingHours} format={hoursText} diff={(v) => signed(v, hoursText)} />
+            <Tile title="Hours on steps that could be removed" names={names} tile={comparison.totals.removableHours} format={hoursText} diff={(v) => signed(v, hoursText)} />
             <Tile title="Months a role is too busy" names={names} tile={comparison.totals.tooBusyMonths} format={(v) => String(v)} diff={(v) => signed(v, (x) => String(x))} />
             <Tile title={`Late tasks in ${last}`} names={names} tile={comparison.totals.lateTasks} format={(v) => formatNumber(v, 1)} diff={(v) => signed(v, (x) => formatNumber(x, 1))} />
           </div>
@@ -244,6 +247,10 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             )}
           </Section>
 
+          <Section title="Where the time goes" help={SANDBOX_HELP.time}>
+            <TimeCompare comparison={comparison} names={names} />
+          </Section>
+
           <Section title="How busy each role gets" help={SANDBOX_HELP.busy}>
             {comparison.roles.map((row) => (
               <ChartAndNumbers
@@ -263,6 +270,70 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
         <Skeleton className="h-[320px] w-full" aria-busy="true" />
       )}
     </section>
+  );
+}
+
+const hoursText = (h: number) => `${formatNumber(h, Math.abs(h) < 10 ? 1 : 0)} h`;
+
+/** Where the time goes, one whole-run 100% bar per column ("No changes" first), then each row's hours a month and its difference from "No changes". */
+function TimeCompare({ comparison, names }: { comparison: SandboxComparison; names: string[] }) {
+  const n = Math.max(1, comparison.months.length);
+  const { rows, shares, runHours } = comparison.time;
+  const meta = rows.map((r) => (r.id === "idle" ? "idle" : r.id === "uncovered" ? "uncovered" : "category") as "category" | "idle" | "uncovered");
+  const points = (v: number) => signed(v, (x) => `${formatNumber(x * 100, 1)} pts`);
+  return (
+    <Card className="gap-3 px-4 py-4" data-compare-row="time">
+      <ul className="flex flex-col gap-2" data-compare-time-bars>
+        {names.map((name, c) => (
+          <li key={name + c} className="grid grid-cols-[minmax(6rem,12rem)_minmax(0,1fr)] items-center gap-3 text-xs">
+            <span className="truncate" title={name}>
+              {name}
+            </span>
+            <TimeBar label={`${name}: ${rows.map((r, i) => `${r.name} ${formatPercent(shares[c]![i]!)}`).join(", ")}`} rows={rows.map((r, i) => ({ id: r.id, name: r.name, share: shares[c]![i]!, kind: meta[i]! }))} />
+          </li>
+        ))}
+      </ul>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-max text-xs tabular-nums" data-compare-table="time">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th scope="col" className="py-1 pr-3 font-medium">
+                Hours a month
+              </th>
+              {names.map((name, c) => (
+                <th key={name + c} scope="col" className="py-1 pr-3 font-medium">
+                  {name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.id} className="border-t border-line" data-compare-time-row={r.id}>
+                <th scope="row" className="py-1 pr-3 text-left font-normal">
+                  {r.name}
+                </th>
+                {names.map((name, c) => {
+                  const perMonth = runHours[c]![i]! / n;
+                  const base = runHours[0]![i]! / n;
+                  return (
+                    <td key={name + c} className="py-1 pr-3">
+                      {hoursText(perMonth)}
+                      {meta[i] === "uncovered" ? null : <span className="ml-1 text-muted-foreground">{formatPercent(shares[c]![i]!)}</span>}
+                      {c > 0 ? (
+                        <span className="ml-1 text-muted-foreground">
+                          {signed(perMonth - base, hoursText)} a month{meta[i] === "uncovered" ? "" : `, ${points(shares[c]![i]! - shares[0]![i]!)}`}
+                        </span>
+                      ) : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 

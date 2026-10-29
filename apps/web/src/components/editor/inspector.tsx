@@ -4,14 +4,14 @@
 // group adds (first step, ungroup, save as a block), the loose ends the editor can see, and a first-principles reminder.
 
 import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { isGroup, type EvidenceStamp, type ProcessBundle, type SourceRow, type StepRow } from "@transpera-flow/db";
+import { isGroup, UPKEEP_PURPOSE, workspacePurposes, type EvidenceStamp, type ProcessBundle, type SourceRow, type StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { LinkedSources } from "@/components/sources/linking-context";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NO_SELECTION, type Selection } from "@/components/process-canvas";
 import { StepInspector, type DraftInfo } from "@/components/step-inspector";
-import { deleteSelection, stepWarnings } from "@/lib/editor/commands";
+import { deleteSelection, hasPurpose, setStepPurposes, stepWarnings } from "@/lib/editor/commands";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
 import type { EditorMode } from "@/lib/editor/modes";
@@ -90,6 +90,7 @@ export function Inspector({
               ? `${selected.steps.length} steps selected. Group them from the left, or press Delete to remove them.`
               : "Select a step or group on the canvas to edit it."}
           </p>
+          {selected.steps.length > 1 && !company && <ManyPurposes bundle={bundle} editor={editor} ids={selected.steps} />}
         </section>
       )}
 
@@ -135,6 +136,50 @@ export function Inspector({
         </section>
       )}
     </>
+  );
+}
+
+const MIXED = "__mixed";
+const AUTOMATIC = "__automatic";
+
+/** "What they achieve" for several steps at once: one undoable edit, holders and starts and ends skipped. */
+function ManyPurposes({ bundle, editor, ids }: { bundle: ProcessBundle; editor: ProcessEditor; ids: readonly string[] }) {
+  const categories = useMemo(() => workspacePurposes(bundle.workspace.settings).filter((c) => c.key !== UPKEEP_PURPOSE), [bundle.workspace.settings]);
+  const working = bundle.steps.filter((s) => ids.includes(s.id) && hasPurpose(s));
+  if (!working.length) return <p className="text-xs text-muted-foreground">None of these steps has hands-on time to say the purpose of.</p>;
+  const skipped = ids.length - working.length;
+  const first = working[0]!.purpose ?? null;
+  const same = working.every((s) => (s.purpose ?? null) === first);
+  const value = same ? (first ?? AUTOMATIC) : MIXED;
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-xs font-semibold">
+        <span className="flex items-center">
+          What they achieve
+          <Help
+            label="What they achieve"
+            description="Sets what the hands-on time of every selected step achieves, in one change you can undo. Automatic uses the first principles and the process."
+            example="Select the five chasing steps and choose Coordination."
+          />
+        </span>
+        <NativeSelect
+          value={value}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v !== MIXED) editor.run((b) => setStepPurposes(b, ids, v === AUTOMATIC ? null : v));
+          }}
+        >
+          {!same && <option value={MIXED}>Different</option>}
+          <option value={AUTOMATIC}>Automatic</option>
+          {categories.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.name}
+            </option>
+          ))}
+        </NativeSelect>
+      </label>
+      {skipped > 0 && <p className="text-xs text-muted-foreground">{skipped === 1 ? "1 selected item is" : `${skipped} selected items are`} a group, start or end, with no hands-on time, and is left out.</p>}
+    </div>
   );
 }
 

@@ -11,7 +11,7 @@ import { canEditWorkspace, currentUserId } from "@/lib/access-data";
 import { loadLastChange } from "@/lib/process-page/data";
 import { loadProcessFirstPrinciples } from "@/lib/first-principles/data";
 import { processRatings, trailOf } from "@/lib/processes/rows";
-import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources, withDeleteCandidates } from "@/lib/data";
 
 /**
  * A process of the workspace on the canvas, at `/w/[slug]/p/[processId]` (any process, never-published ones
@@ -59,7 +59,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     <ProcessPage
       key={live.process.id}
       // A process never published has only its draft to show.
-      bundle={shown}
+      bundle={await withDeleteCandidates(shown)}
       viewingVersion={earlier ? earlier.revision.number : null}
       liveVersion={isUnpublished(live) ? 0 : live.revision.number}
       // An earlier version is read only, so nothing on it can be logged or edited.

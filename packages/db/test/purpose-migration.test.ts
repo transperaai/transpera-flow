@@ -196,6 +196,15 @@ describe("settings.purposes on a workspace", () => {
     }
   });
 
+  it("a workspace with no list (the defaults) saves one against a null base, and a stale null is then a conflict", async () => {
+    const renamed = list().map((c) => (c.key === "winning" ? { ...c, name: "Selling" } : c));
+    const r = await as(admin.claims, (c) => rpc(c, "save_fields", "workspaces", JSON.stringify({ id: wsIds.absent }), JSON.stringify({ "settings.purposes": null }), JSON.stringify({ "settings.purposes": renamed })));
+    expect(r.status).toBe("saved");
+    const again = await as(admin.claims, (c) => rpc(c, "save_fields", "workspaces", JSON.stringify({ id: wsIds.absent }), JSON.stringify({ "settings.purposes": null }), JSON.stringify({ "settings.purposes": list() })));
+    expect(again.status).toBe("conflict");
+    expect(again.conflicts).toEqual({ "settings.purposes": renamed });
+  });
+
   it("is saved through save_fields with compare-and-set on the whole list", async () => {
     const renamed = list().map((c) => (c.key === "fixing" ? { ...c, name: "Putting right" } : c));
     const r = await as(admin.claims, (c) => rpc(c, "save_fields", "workspaces", JSON.stringify({ id: wsIds.renamed }), JSON.stringify({ "settings.purposes": SETTINGS[1]![1] }), JSON.stringify({ "settings.purposes": renamed })));

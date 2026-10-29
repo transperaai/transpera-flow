@@ -2,7 +2,7 @@
 // unit tested. They only reject malformed input early: every write still runs
 // as the signed-in user through RLS and the tables' check constraints.
 
-import type { EdgeRow, StepRow } from "@transpera-flow/db";
+import { STEP_PURPOSE_KEY, type EdgeRow, type StepRow } from "@transpera-flow/db";
 import type { Patch, Scalar, Table, Value } from "./ops";
 import { PROVENANCE_COLUMNS, isProvenanceField } from "./provenance";
 
@@ -70,6 +70,8 @@ export const STEP_FIELDS = {
   entry_step_id: optionalId,
   child_process_id: optionalId,
   tool: optionalText(200),
+  // What the step achieves (sandbox phase 4): null (Automatic) or a category key, as the database's steps_purpose_key allows.
+  purpose: (v) => v === null || (typeof v === "string" && STEP_PURPOSE_KEY.test(v)),
   notes: optionalText(4000),
   sla_hours: optionalAtLeast0,
   // The analysis rules' per-step settings (docs/analysis-rules.md rules 5, 12, 13).

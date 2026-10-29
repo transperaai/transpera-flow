@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { fakeTime } from "./fake-time";
 import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, sandboxLever, type ProcessBundle, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
 import { applyPatches, simulate, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
@@ -546,6 +547,7 @@ const busy = (mean: number): MonthBusy => ({ ...stat(mean), capacity: 40, work: 
 function fake(n: number, level: number, c: number, m: number, extra: Partial<MonthlyResult> = {}): MonthlyResult {
   return {
     months: Array.from({ length: n }, (_, i) => ({ start: i * 100, end: (i + 1) * 100 })),
+    time: fakeTime(n, level),
     roles: { r: Array.from({ length: n }, () => busy(level)) },
     uncovered: { r: Array.from({ length: n }, () => null) },
     people: { p: Array.from({ length: n }, () => busy(level)) },

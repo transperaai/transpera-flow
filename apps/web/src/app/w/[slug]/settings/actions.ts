@@ -3,7 +3,8 @@
 import { refresh } from "next/cache";
 import type { MarketFactorKey } from "@transpera-flow/engine";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
-import { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveLinks } from "@/lib/fields/server";
+import { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveLinks } from "@/lib/fields/server";
+import { parsePurposes, type PurposeCategory } from "@transpera-flow/db";
 import { isGrowth, isMonth, isMultiplier, parseLeadSourceField, parseNewLeadSource, type LeadSourceField } from "@/lib/demand";
 import { copyName, parseChange, parseConditionField } from "@/lib/market";
 import { parseNewRole, parseRoleField, type RoleField } from "@/lib/roles";
@@ -120,6 +121,32 @@ export async function saveOverheadMonthly(workspaceId: string, base: number | nu
   if (!(await signedIn())) return signedOut;
   const out = await saveField("workspaces", { id: workspaceId }, "settings.overhead_monthly", base, value);
   if (out.status === "saved") refresh();
+  return out;
+}
+
+export type PurposesOutcome =
+  | { status: "saved"; purposes: PurposeCategory[] }
+  /** Someone else saved the list since it was loaded; `theirs` is what is stored now (null: the defaults). */
+  | { status: "conflict"; theirs: PurposeCategory[] | null }
+  | { status: "not_found" }
+  | { status: "error"; message: string };
+
+/**
+ * The workspace's purpose categories (sandbox phase 4), saved whole with a compare-and-set on the list as it was loaded (`base`; null
+ * while the workspace has none and uses the defaults). The same check as the database's (`parsePurposes`, `private.is_purpose_list`).
+ * Agency admins and the Owner; anyone else gets the database's refusal as a message. Refreshes on a save: the Sandbox and Overview read it.
+ */
+export async function savePurposes(workspaceId: string, base: PurposeCategory[] | null, value: unknown): Promise<PurposesOutcome> {
+  const parsed = parsePurposes(value);
+  if (!isId(workspaceId) || !(base === null || parsePurposes(base).ok)) return invalid;
+  if (!parsed.ok) return { status: "error", message: parsed.error };
+  if (!(await signedIn())) return signedOut;
+  const out = await saveFields<PurposeCategory[] | null>("workspaces", { id: workspaceId }, { "settings.purposes": base }, { "settings.purposes": parsed.purposes });
+  if (out.status === "saved") {
+    refresh();
+    return { status: "saved", purposes: parsed.purposes };
+  }
+  if (out.status === "conflict") return { status: "conflict", theirs: out.theirs["settings.purposes"] ?? null };
   return out;
 }
 

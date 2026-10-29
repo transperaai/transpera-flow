@@ -307,15 +307,16 @@ describe("loadDeleteCandidates (sandbox phase 4)", () => {
       { step_id: audit, breaks_if_removed: "", agreed_by: null, added_back: false },
       { step_id: kickoff, breaks_if_removed: "", agreed_by: null, added_back: true },
     ];
-    await db.client.query("insert into first_principles (workspace_id, process_id, revision_id, deletes) values ($1, $2, $3, $4::jsonb)", [ws, proc, live, JSON.stringify(deletes)]);
-    const draft = (await db.client.query("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 2, 'draft') returning id", [ws, proc])).rows[0].id as string;
+    let draft: string | null = null;
     try {
+      await db.client.query("insert into first_principles (workspace_id, process_id, revision_id, deletes) values ($1, $2, $3, $4::jsonb)", [ws, proc, live, JSON.stringify(deletes)]);
+      draft = (await db.client.query("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, (select max(number) + 1 from process_revisions where process_id = $2), 'draft') returning id", [ws, proc])).rows[0].id as string;
       expect(await loadDeleteCandidates(editorDb, [{ processId: proc, revisionId: live }])).toEqual({ [proc]: [audit] });
       // The draft has no row of its own: it inherits live's answers.
       expect(await loadDeleteCandidates(editorDb, [{ processId: proc, revisionId: draft }])).toEqual({ [proc]: [audit] });
     } finally {
       await db.client.query("delete from first_principles where process_id = $1", [proc]);
-      await db.client.query("delete from process_revisions where id = $1", [draft]);
+      if (draft) await db.client.query("delete from process_revisions where id = $1", [draft]);
     }
   });
 });

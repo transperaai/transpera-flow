@@ -5,7 +5,7 @@ import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace } from "@/lib/access-data";
-import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources, withDeleteCandidates } from "@/lib/data";
 import { loadWorkspaceLeverSettings } from "@/lib/levers/data";
 
 /**
@@ -15,7 +15,8 @@ import { loadWorkspaceLeverSettings } from "@/lib/levers/data";
  */
 export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/sandbox">) {
   const { slug } = await props.params;
-  const live = await loadLiveProcess(slug);
+  const liveBare = await loadLiveProcess(slug);
+  const live = liveBare ? await withDeleteCandidates(liveBare) : null;
   if (!live) {
     // Nothing is published (a new client): there is nothing to run forward. No scenarios are loaded.
     const state = await loadPublishState(slug);
@@ -54,6 +55,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
           issuesHref={`${base}/issues`}
           peopleHref={`${base}/settings`}
           leversHref={`${base}/settings/levers`}
+          purposesHref={`${base}/settings/purposes`}
           scenarios={scenarios}
           solutions={solutions}
           hiddenLevers={levers.hidden}
