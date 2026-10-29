@@ -231,3 +231,6 @@ by the same check as a play link of an Overview). Migration `20270116000000_scen
 - **Review fix (29 Oct 2026, `20270117000000_sandbox_p5b_fix.sql`).** With Financials off an overheads change is dropped wherever a change is a patch, as
   a role rate is: a Sandbox scenario whose changes are all whole-run patches is listed on the process page, so a process link carried its C2 change as
   `{"path": "finances.overhead_monthly", "value": <amount>}` (`isCostPatch` in the app, step 7's `path` rule in the database).
+  With People off, a hire's candidate name is also scrubbed from the link's other free text (scenario names, descriptions, notes), read as "the new
+  hire": it is in no table, so neither check can look for it afterwards and the scrub is the only guard. The scrub's view of a string now keeps one
+  offset per UTF-16 unit, so an emoji before a name or an amount no longer shifts the replaced span (which left a name's first letters behind).

@@ -386,6 +386,17 @@ describe("names with unusual white space, surnames and case, quotes, and role-ra
     }
   });
 
+  it("emoji (two UTF-16 units each) before a name or an amount don't shift what is replaced: the whole name and the whole amount go", () => {
+    for (const k of [1, 3, 7]) {
+      const lead = "\u{1F600}".repeat(k);
+      const { title, snap } = redact(`${lead} Ask ${full} about £4,100 now`);
+      expect(title, `${k}`).toBe(`${lead} Ask Team member 1 about [amount hidden] now`);
+      expect(shareSnapshotLeaks(snap, w.secrets, off)).toEqual([]);
+    }
+    // A rare CJK character (outside the Basic Multilingual Plane) too.
+    expect(redact(`\u{20BB7}\u{20BB7} ${full} ok`).title).toBe("\u{20BB7}\u{20BB7} Team member 1 ok");
+  });
+
   it("any case: the full name, and the surname on its own, are replaced; a surname two people share becomes \"a team member\"", () => {
     expect(redact(`ask ${full.toUpperCase()} now`).title).toBe("ask Team member 1 now");
     expect(redact(`ask ${full.toLowerCase()} now`).title).toBe("ask Team member 1 now");
@@ -1225,6 +1236,26 @@ describe("scenario links: what the redaction does to the changes", () => {
     expect(s.scenarios[0]!.description).toContain("Team member");
   });
 
+  it("People off: a candidate's name (in no table) is scrubbed from the scenario names, descriptions and notes too, not only from the hire", () => {
+    const make = (toggles: ShareToggles) => {
+      const snap = { v: 1, kind: "scenario", toggles, workspaceName: w.name, ...parts() } as ScenarioShare;
+      const child = snap.scenarios[1]!;
+      child.name = "Hire Priya Ramaswamy";
+      child.description = "Ramaswamy's offer is out";
+      child.changes[0] = { ...child.changes[0]!, params: { name: "Priya Ramaswamy" }, note: "Priya starts in March" };
+      return snap;
+    };
+    const off = redactShareSnapshot(make(TOGGLES[0]!), TOGGLES[0]!, w.secrets) as unknown as ScenarioShare;
+    expect(JSON.stringify(off)).not.toMatch(/Priya|Ramaswamy/);
+    expect(off.scenarios[1]!.name).toBe("Hire the new hire");
+    // "Priya" alone may also be a team member's first name in this world, so the label is the generic one then.
+    expect(off.scenarios[1]!.changes[0]!.note).toMatch(/^(the new hire|a team member) starts in March$/);
+    expect(shareSnapshotLeaks(off, w.secrets, TOGGLES[0]!)).toEqual([]);
+    const on = redactShareSnapshot(make(TOGGLES[1]!), TOGGLES[1]!, w.secrets) as unknown as ScenarioShare;
+    expect(on.scenarios[1]!.name).toBe("Hire Priya Ramaswamy");
+    expect(on.scenarios[1]!.changes[0]!.params).toEqual({ name: "Priya Ramaswamy" });
+  });
+
   it("People on: the hire keeps the candidate's name", () => {
     const s = redact(TOGGLES[1]!);
     const hire = all(s).find((c) => c.lever === "D1")!;
@@ -1272,6 +1303,20 @@ describe("scenario links: what the redaction does to the changes", () => {
     expect(Array.from(note).length).toBeLessThanOrEqual(280);
     expect(note).toBe(note.trim());
     expect(shareSnapshotLeaks(s, w.secrets, TOGGLES[0]!)).toEqual([]);
+  });
+
+  it("a hire's name of emoji that grows past 120 UTF-16 units when an amount is hidden is cut whole characters at a time, so both checks pass", () => {
+    const name = `${"\u{1F600}".repeat(55)} £50 ok`;
+    expect(name.length).toBeLessThanOrEqual(120);
+    const on = TOGGLES[1]!;
+    const input = { v: 1, kind: "scenario", toggles: on, workspaceName: w.name, ...parts() } as ScenarioShare;
+    input.scenarios[1]!.changes[0] = { ...input.scenarios[1]!.changes[0]!, params: { name } };
+    const s = redactShareSnapshot(input, on, w.secrets) as unknown as ScenarioShare;
+    const cut = s.scenarios[1]!.changes[0]!.params!.name!;
+    expect(cut.length).toBeLessThanOrEqual(120);
+    expect(cut.endsWith("\u2026")).toBe(true);
+    expect(cut).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(shareSnapshotLeaks(s, w.secrets, on)).toEqual([]);
   });
 
   it("the redacted snapshot of every toggle combination is clean to the checker, and keeps the shared scenario last", () => {

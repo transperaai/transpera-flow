@@ -113,8 +113,12 @@ export function normaliseView(s: string): View {
         for (const lower of (QUOTES[c] ?? (HYPHENS.test(c) ? "-" : c)).toLowerCase()) {
           for (const folded of FOLD[lower] ?? lower) {
             n.push(folded);
-            starts.push(p.start);
-            ends.push(p.end);
+            // One entry per UTF-16 unit of `view.n` (an emoji or a rare CJK character is two), so a match's index in the joined string
+            // finds its own place in the original text, not one shifted by every such character before it.
+            for (let u = 0; u < folded.length; u++) {
+              starts.push(p.start);
+              ends.push(p.end);
+            }
           }
         }
       }

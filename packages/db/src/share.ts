@@ -455,7 +455,10 @@ const BLANKED: Record<string, unknown> = {
  */
 export function redactShareSnapshot(input: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
   const raw = input.kind === "scenario" ? withoutHiddenChanges(input, toggles) : input;
-  const scrub = scrubber(toggles, secrets);
+  // With People off, a hire's candidate name goes from the change and from every other free text too (a scenario called "Hire Priya", a
+  // note): it is in no table, so neither check can find it afterwards; the scrub is the only guard.
+  const hires = input.kind === "scenario" && !toggles.people ? hireSecrets(input) : [];
+  const scrub = scrubber(toggles, hires.length ? { ...secrets, people: [...secrets.people, ...hires] } : secrets);
   const walk = (value: unknown, key = ""): unknown => {
     if (typeof value === "string") return scrub.text(value, isFree(key, value));
     if (Array.isArray(value)) return value.map((x) => walk(x, key));
@@ -514,14 +517,33 @@ function withoutHiddenChanges(raw: ScenarioShare, toggles: ShareToggles): Scenar
   return { ...raw, scenarios, hiddenCostChanges: hidden };
 }
 
+/** The candidate names of a scenario link's hires (D1 `params.name`), as names to scrub, each read as "the new hire". */
+function hireSecrets(raw: ScenarioShare): SecretName[] {
+  const out: SecretName[] = [];
+  for (const row of raw.scenarios) {
+    for (const c of row.changes) {
+      const name = c.lever === "D1" ? c.params?.name : undefined;
+      if (typeof name === "string" && name.trim()) out.push({ id: `hire:${c.id}`, name, label: "the new hire" });
+    }
+  }
+  return out;
+}
+
 /**
  * Scrubbing swaps a name or an amount for a longer label ("[amount hidden]", "Team member 12"), which could push a note past the 280
  * characters the database allows (and a hire's name past 120). Cut to fit, so a link isn't refused over a long note. Mutates the redacted copy.
  */
 function fitScenarioText(snap: ScenarioShare): void {
-  const fit = (text: string, max: number) => {
+  // A note is counted in characters (`noteProblem`, the database's char_length); a hire's name in UTF-16 units as `paramsProblem` counts it
+  // (`units`), which is never fewer, so a name of emoji is cut whole characters at a time and passes both.
+  const fit = (text: string, max: number, units = false) => {
     const chars = Array.from(text);
-    return (chars.length > max ? `${chars.slice(0, max - 1).join("")}\u2026` : text).replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
+    const size = (cs: readonly string[]) => (units ? cs.join("").length : cs.length);
+    if (size(chars) > max) {
+      while (chars.length && size(chars) > max - 1) chars.pop();
+      chars.push("\u2026");
+    }
+    return chars.join("").replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
   };
   for (const row of snap.scenarios) {
     for (const c of row.changes) {
@@ -530,7 +552,7 @@ function fitScenarioText(snap: ScenarioShare): void {
         if (note) c.note = note;
         else delete c.note;
       }
-      if (c.params && typeof (c.params as { name?: unknown }).name === "string") (c.params as { name: string }).name = fit((c.params as { name: string }).name, 120) || "New hire";
+      if (c.params && typeof (c.params as { name?: unknown }).name === "string") (c.params as { name: string }).name = fit((c.params as { name: string }).name, 120, true) || "New hire";
     }
   }
 }
