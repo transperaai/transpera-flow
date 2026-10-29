@@ -20,6 +20,15 @@ describe("priceRiseTradeoff", () => {
     expect(t.firstRise).toBe(1);
   });
 
+  it("reads float noise between two runs as nothing: the months before the rise are exactly 0", () => {
+    const noisy = { revenue: [[10 + 1e-12, 12], [10 - 3e-12, 11]], rise: [[0, 3], [0, 2]], clientsLost: [[0, 0], [0, 0]] };
+    const flat = { revenue: [[10, 10], [10, 10]], rise: [[0, 0], [0, 0]], clientsLost: [[0, 0], [0, 0]] };
+    const t = priceRiseTradeoff(noisy, flat, [1])!;
+    expect(Object.is(t.net[0]!.mean, 0)).toBe(true);
+    expect(t.lost[0]!.mean).toBe(0);
+    expect(t.net[1]!.mean).toBe(1.5);
+  });
+
   it("works out the loss per leaver from the run and the break-even: how many extra leavers cancel the gain", () => {
     const t = priceRiseTradeoff(withRise, without, [1])!;
     expect(t).toMatchObject({ lossPerLeaver: 2, breakEven: 2.5, extraNow: 0.5, estimated: false });

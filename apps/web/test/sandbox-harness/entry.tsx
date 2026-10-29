@@ -19,7 +19,7 @@ declare global {
     __simRuns?: number;
     /** The address changing from outside the page, as a link or the sidebar would change it. */
     __setHarnessUrl: (url: string) => void;
-    mountSandbox: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean; dan?: boolean; nobody?: boolean; leah?: boolean }) => void;
+    mountSandbox: (options: { mode: "demo" | "readonly"; url?: string; broken?: boolean; many?: boolean; dan?: boolean; nobody?: boolean; leah?: boolean; rise?: boolean }) => void;
   }
 }
 
@@ -68,7 +68,7 @@ const scenario = (name: string, changes: ReturnType<typeof change>[]) => saveDem
 
 window.__setHarnessUrl = setHarnessUrl;
 
-window.mountSandbox = ({ mode, url, broken, many, dan, nobody, leah }) => {
+window.mountSandbox = ({ mode, url, broken, many, dan, nobody, leah, rise }) => {
   if (many) {
     // Four go-live months, each for a different version of the solution (and so a different model): five runs.
     scenario("Many runs", ["2026-12", "2027-02", "2027-04", "2027-06"].map((month, i) => change(`00000000-0000-4000-8000-0000000f04${String(i).padStart(2, "0")}`, MANY_SOLUTIONS[i]!.id, month)));
@@ -90,6 +90,14 @@ window.mountSandbox = ({ mode, url, broken, many, dan, nobody, leah }) => {
     name: "Leah away",
     changes: [{ id: "5b0000f4-0000-4000-8000-000000000001", lever: "D3" as const, target: northbeamPersonIds["Leah Brooks"]!, op: "set" as const, value: 2, from: "2027-02-08" }],
   };
+  // A saved scenario with a price rise (B5, +8% from March 2027), for what a Viewer reads of its trade-off.
+  const riseScenario = {
+    ...DEMO_SCENARIOS[0]!,
+    id: "50000000-0000-4000-8000-0000000000a2",
+    name: "Price rise in March",
+    changes: [{ id: "5b0000f4-0000-4000-8000-000000000002", lever: "B5" as const, target: null, op: "set" as const, value: 0.08, from: "2027-03" }],
+  };
+  const saved = [...DEMO_SCENARIOS, ...(leah ? [leaveScenario] : []), ...(rise ? [riseScenario] : [])];
   const solutions = mode === "demo" ? (broken ? [DEMO_FORECAST_SOLUTION, BROKEN_SOLUTION] : many ? [DEMO_FORECAST_SOLUTION, ...MANY_SOLUTIONS] : [DEMO_FORECAST_SOLUTION]) : [DEMO_FORECAST_SOLUTION];
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
@@ -101,7 +109,7 @@ window.mountSandbox = ({ mode, url, broken, many, dan, nobody, leah }) => {
         issuesHref="/demo/issues"
         leversHref="/demo/settings/levers"
         startDate={DEMO_FORECAST_START}
-        scenarios={mode === "readonly" ? (leah ? [...DEMO_SCENARIOS, leaveScenario] : DEMO_SCENARIOS) : undefined}
+        scenarios={mode === "readonly" ? saved : undefined}
         solutions={solutions}
       />
     </div>,

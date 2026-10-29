@@ -40,6 +40,7 @@ interface Options {
   dan?: boolean;
   nobody?: boolean;
   leah?: boolean;
+  rise?: boolean;
 }
 
 async function mount(width: number, o: Options = {}): Promise<{ page: Page; errors: string[] }> {
@@ -158,12 +159,17 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await waitRuns(page, 1);
         // A whole-run change: opportunities x1.25.
         await openAdd(page);
-        // Every greyed lever can't be picked, so its reason is listed under the list (the demo's clients are counted per service).
+        // Every greyed lever can't be picked, so its reason is listed under the list. The demo's clients are counted per service, and since
+        // sandbox phase 3 "Clients on the book" and "Base churn" act on them, and "Role cost" is offered: nothing is greyed here.
+        const levers = page.locator("[data-change-dialog] select[aria-label='What to change'] option");
         const disabled = await page.locator("[data-change-dialog] select[aria-label='What to change'] option:disabled").allInnerTexts();
-        expect(disabled.length).toBeGreaterThan(0);
-        const greyed = await page.locator("[data-greyed-levers]").innerText();
+        const greyed = (await page.locator("[data-greyed-levers]").count()) ? await page.locator("[data-greyed-levers]").innerText() : "";
         for (const label of disabled) expect(greyed).toContain(label.replace(" (does nothing here)", ""));
-        expect(greyed).toContain("Settings, Clients");
+        const offered = await levers.allInnerTexts();
+        for (const label of ["Clients on the book", "Base churn", "Role cost", "Price rise", "Churn driver as a chance", "Client value range", "Conversion rate", "Hours available", "Hiring delay"]) {
+          expect(offered.some((o) => o.startsWith(label)), label).toBe(true);
+          expect(disabled.some((o) => o.startsWith(label)), `${label} is greyed`).toBe(false);
+        }
         await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Opportunities coming in" });
         await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
         await page.getByLabel("Value", { exact: true }).fill("1.25");
@@ -188,6 +194,74 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await changes(page).first().innerText()).toContain("Opportunities coming in ×1.25");
         expect(await changes(page).nth(1).innerText()).toContain("from Apr 2027");
         expect(await status(page)).toContain("Unsaved changes");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("adds a price rise from a month: the trade-off shows its tiles, break-even, chart and table", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await waitRuns(page, 1);
+        expect(await page.locator("[data-price-rise]").count()).toBe(0);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Price rise" });
+        expect(await page.locator("[data-price-rise-note]").count()).toBe(1);
+        await page.getByLabel("Value", { exact: true }).fill("8");
+        await page.getByLabel("From a month").check();
+        await page.getByLabel("From month", { exact: true }).selectOption({ label: "March 2027" });
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-change-list] [data-change]");
+        expect(await changes(page).first().innerText()).toContain("Price rise of 8%");
+        await page.waitForSelector("[data-price-rise] [data-price-rise-tile]", { timeout: 90_000 });
+        const section = page.locator("[data-price-rise]");
+        expect(await section.locator("[data-price-rise-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-price-rise-tile")))).toHaveLength(4);
+        expect(await section.locator("[data-price-rise-break-even]").innerText()).toContain("pays for itself");
+        expect(await section.locator("[data-price-rise-chart]").count()).toBe(1);
+        expect(await section.locator("[data-price-rise-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-price-rise-row")))).toEqual(["gained", "lost", "net", "leavers"]);
+        // Months before the rise are exactly zero in the net row.
+        const net = await section.locator('[data-price-rise-row="net"] td').allInnerTexts();
+        expect(net.slice(0, 5)).toEqual(["+£0", "+£0", "+£0", "+£0", "+£0"]);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("adds a churn driver chance and a timed role cost: Today names each, and the timed change is one run", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await waitRuns(page, 1);
+        await openAdd(page);
+        const lever = (label: string) => page.getByLabel("What to change", { exact: true }).selectOption({ label });
+        const today = () => page.locator("[data-change-dialog] [data-today]").innerText();
+        await lever("Client value range");
+        await page.getByLabel("On", { exact: true }).selectOption({ index: 0 });
+        expect(await today()).toMatch(/^Today: £[\d,]+ a month, no range$/);
+        await lever("Role cost");
+        await page.getByLabel("On", { exact: true }).selectOption({ index: 0 });
+        expect(await today()).toMatch(/^Today: £[\d,]+ an hour/);
+        await lever("Hours available");
+        expect(await today()).toMatch(/^Today: [\d.]+ FTE across \d+ people/);
+        await lever("Hiring delay");
+        expect(await today()).toBe("Today: none: new hires start on their date");
+        await lever("Churn driver as a chance");
+        await page.getByLabel("On", { exact: true }).selectOption({ label: "Late or missed servicing work" });
+        expect(await today()).toMatch(/^Today: Late or missed servicing work: counted by its weight \(1\)/);
+        await page.getByLabel("Value", { exact: true }).fill("50");
+        await page.getByLabel("Chance a month (%)").fill("10");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-change-list] [data-change]");
+        expect(await changes(page).first().innerText()).toContain("raises churn 50%, 10% chance a month");
+        await waitRuns(page, 2);
+        // A timed role cost is a channel: one more run, however many months.
+        const before = await page.evaluate(() => window.__simRuns ?? 0);
+        await openAdd(page);
+        await lever("Role cost");
+        await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
+        await page.getByLabel("Value", { exact: true }).fill("1.1");
+        await page.getByLabel("From a month").check();
+        await page.getByLabel("From month", { exact: true }).selectOption({ label: "April 2027" });
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await waitRuns(page, 3);
+        expect((await page.evaluate(() => window.__simRuns ?? 0)) - before).toBeLessThanOrEqual(2);
         expect(errors).toEqual([]);
         await page.close();
       });
@@ -740,6 +814,24 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await page.locator('[data-compare-section="Profit"]').count()).toBe(0);
         expect(await page.locator('[data-compare-tile="Profit over the run"]').count()).toBe(0);
         expect(await page.locator('[data-compare-section="Billed revenue"]').count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows a Viewer a price rise's trade-off, and no costs or profit", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true, rise: true, url: "/demo/sandbox?scenario=50000000-0000-4000-8000-0000000000a2" });
+        await page.waitForSelector("[data-price-rise] [data-price-rise-tile]", { timeout: 90_000 });
+        const section = page.locator("[data-price-rise]");
+        expect(await section.locator("[data-price-rise-tile]").count()).toBe(4);
+        expect(await section.locator("[data-price-rise-break-even]").count()).toBe(1);
+        const text = (await section.innerText()).toLowerCase();
+        for (const word of ["profit", "labour", "overtime", "overheads"]) expect(text, word).not.toContain(word);
+        const money = page.locator("[data-forecast-money]");
+        expect(await money.locator("[data-money-hidden-note]").count()).toBe(1);
+        expect(await money.locator('[data-money-row="profit"]').count()).toBe(0);
+        // The saved change still lists, and a Viewer cannot change it.
+        expect(await changes(page).first().innerText()).toContain("Price rise of 8%");
+        expect(await page.locator("[data-change-add]").count()).toBe(0);
         expect(errors).toEqual([]);
         await page.close();
       });

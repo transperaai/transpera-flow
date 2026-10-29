@@ -33,6 +33,14 @@ export interface PriceRiseTradeoff {
 
 const MIN_LEAVERS = 0.05;
 
+/**
+ * Two runs that agree to the last bits can still differ by float noise in money (a stay's fee is spread over a month's weeks as
+ * amount / length x overlap, and a run with a fee channel adds the weeks in a different order). A difference under a millionth of a unit
+ * is nothing: months before the rise read exactly 0, not -0.00000000001.
+ */
+const NOISE = 1e-6;
+const clean = (v: number) => (Math.abs(v) < NOISE ? 0 : v);
+
 export function priceRiseTradeoff(
   withRise: RunSamples,
   withoutRise: RunSamples,
@@ -47,9 +55,9 @@ export function priceRiseTradeoff(
   const N: number[][] = [];
   const X: number[][] = [];
   for (let i = 0; i < reps; i++) {
-    G.push(withRise.rise[i]!.slice());
-    N.push(withRise.revenue[i]!.map((v, m) => v - withoutRise.revenue[i]![m]!));
-    L.push(G[i]!.map((g, m) => g - N[i]![m]!));
+    G.push(withRise.rise[i]!.map(clean));
+    N.push(withRise.revenue[i]!.map((v, m) => clean(v - withoutRise.revenue[i]![m]!)));
+    L.push(G[i]!.map((g, m) => clean(g - N[i]![m]!)));
     X.push(withRise.clientsLost[i]!.map((v, m) => v - withoutRise.clientsLost[i]![m]!));
   }
   const perMonth = (rows: number[][]) => Array.from({ length: months }, (_, m) => stat(rows.map((r) => r[m]!)));

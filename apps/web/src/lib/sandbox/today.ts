@@ -55,7 +55,9 @@ export function todayValue(lever: SandboxLever, targetId: string | null, model: 
       return trafficToday(model);
     case "B4": {
       if (!targetId) return null;
-      const d = model.churnDrivers?.find((x) => x.id === targetId);
+      // A driver the model has no row for runs as its default: late work and the market on at weight 1, the rest off.
+      const spec = CHURN_DRIVER_SPECS[targetId as BuiltinChurnDriverId];
+      const d = model.churnDrivers?.find((x) => x.id === targetId) ?? (spec ? { id: targetId, weight: 1, enabled: spec.defaultEnabled } : undefined);
       const name = targetId.startsWith(CUSTOM_DRIVER_PREFIX) ? d?.name : CHURN_DRIVER_SPECS[targetId as BuiltinChurnDriverId]?.name;
       if (!name) return null;
       if (d && d.enabled && d.effect != null) {
