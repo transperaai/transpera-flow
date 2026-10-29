@@ -516,15 +516,18 @@ export function Overview({
             <ChartCard id="time-split" title="Time split by process" note={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}>
               {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p> : chartLoading()}
             </ChartCard>
-            <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
-              {horizonResult?.monthly ? (
-                <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
-              ) : error ? (
-                <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
-              ) : (
-                chartLoading()
-              )}
-            </ChartCard>
+            {/* Not on a share link: share links show no time split (sandbox phase 4). */}
+            {mode !== "share" && (
+              <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
+                {horizonResult?.monthly ? (
+                  <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
+                ) : error ? (
+                  <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
+                ) : (
+                  chartLoading()
+                )}
+              </ChartCard>
+            )}
             <ChartCard
               id="team-load"
               title="Team load by role"
