@@ -32,7 +32,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-type Kind = "overview" | "process" | "issue" | "solution";
+type Kind = "overview" | "process" | "issue" | "solution" | "scenario";
 interface Mounted {
   page: Page;
   errors: string[];
@@ -64,6 +64,7 @@ async function settled(page: Page, kind: Kind) {
     process: "[data-cost]",
     issue: "h1",
     solution: "[data-measure=mrrAdded]",
+    scenario: "[data-when-section]",
   };
   await page.waitForSelector(ready[kind], { timeout: 90_000, state: "attached" });
   // Let the workers' answers land.
@@ -89,7 +90,7 @@ async function editButtons(page: Page): Promise<string[]> {
   }, EDIT_CONTROLS.source);
 }
 
-const KINDS: Kind[] = ["overview", "process", "issue", "solution"];
+const KINDS: Kind[] = ["overview", "process", "issue", "solution", "scenario"];
 
 describe("a shared view, People off and Financials off", () => {
   for (const kind of KINDS) {
@@ -130,6 +131,14 @@ describe("a shared view, People off and Financials off", () => {
         expect(await page.locator("[data-measure=labour] [data-money-hidden]").count()).toBe(1);
       }
       if (kind === "overview" || kind === "process" || kind === "issue") expect(text).toMatch(/Team member \d+/);
+      if (kind === "scenario") {
+        // Sandbox phase 5b: the changes and their notes, a hire named "New <role>" (People off), the cost change counted and hidden, no costs or goal seek.
+        expect(await page.locator("[data-share-change]").count()).toBeGreaterThan(0);
+        expect(text).toMatch(/New .* starts/);
+        expect(text).toContain("change about costs is hidden on this link.");
+        expect(text).toContain("Costs and profit aren't part of a shared view.");
+        expect(text).not.toMatch(/Find a value|What matters most|Add change|Work out when each hire pays/);
+      }
       // Share links show no time split (sandbox phase 4): no "What the time achieves" on a shared Overview.
       if (kind === "overview") {
         expect(await page.locator('[data-chart="issues"]').count()).toBeGreaterThan(0);

@@ -70,6 +70,10 @@ describe("parseShareInput", () => {
     expect(message({ play: true })).toBe("Only a process can be shared for trying changes.");
     expect(message({ kind: "issue", targetId: "00000000-0000-4000-8000-0000000000a2", play: true })).toBe("Only a process can be shared for trying changes.");
     expect(message({ kind: "solution", targetId: "00000000-0000-4000-8000-0000000000a1", play: true })).toBe("Only a process can be shared for trying changes.");
+    // A scenario link is view only too (sandbox phase 5b), and needs a scenario to point at.
+    expect(message({ kind: "scenario", targetId: "00000000-0000-4000-8000-0000000000a1", play: true })).toBe("Only a process can be shared for trying changes.");
+    expect(message({ kind: "scenario", targetId: null })).toBe("Choose a page to share.");
+    expect(parse({ kind: "scenario", targetId: "00000000-0000-4000-8000-0000000000a1" })).toMatchObject({ ok: true, value: { kind: "scenario", play: false } });
   });
 
   it("the name is trimmed, empty is none, and 120 characters is the most", () => {
