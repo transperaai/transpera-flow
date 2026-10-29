@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { SANDBOX_LIBRARY, northbeamBundle, sandboxLever, type SandboxChange } from "@transpera-flow/db";
-import { northbeamWithClientGroups, northbeamWithClients, northbeamWithServices, simulate, type EngineModel } from "@transpera-flow/engine";
+import { SANDBOX_LIBRARY, larkspurBundle, northbeamBundle, sandboxLever, toEngineModel, type SandboxChange } from "@transpera-flow/db";
+import {
+  northbeamModel,
+  northbeamWithChances,
+  northbeamWithChannels,
+  northbeamWithChurnDrivers,
+  northbeamWithClientGroups,
+  northbeamWithClients,
+  northbeamWithMoney,
+  northbeamWithServices,
+  northbeamWithServicing,
+  simulate,
+  type EngineModel,
+} from "@transpera-flow/engine";
+import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { applyModelChanges, hasClientRoster, prepareScenario } from "@transpera-flow/db/sandbox";
 
 // The whole-run levers that are edits of the model rather than patches (docs/plans/sandbox-p3-brief.md §5.4): clients on the book and base
@@ -144,5 +157,38 @@ describe("what the Sandbox greys as doing nothing follows the engine's own readi
     const r = applyModelChanges(stray, [ch("B1", "add", 3, sid)], { churnDrivers: [] });
     expect(r.problems[0]!.message).toMatch(/one pool/);
     expect(r.model.clientGroups).toBe(stray.clientGroups);
+  });
+});
+
+describe("the roster rule moved to the engine's own reading (5a leftover): no normal workspace changes", () => {
+  // The rule before (packages/db/src/sandbox/edits.ts at 50b6c21e): named clients, or any client group with clients counted.
+  const before = (m: EngineModel) => m.clients !== undefined || Object.values(m.clientGroups ?? {}).some((g) => g.count > 0);
+  const models: [string, EngineModel][] = [
+    ["seeded Northbeam (the Sandbox's live model)", toEngineModel(northbeamBundle(), { startDate: "2027-01-04", planned: true, purposes: true })],
+    ["Larkspur", toEngineModel(larkspurBundle(), { startDate: "2027-01-04", planned: true, purposes: true })],
+    ["the demo", toEngineModel(demoForecastBundle(), { startDate: DEMO_FORECAST_START, planned: true, purposes: true })],
+    ["a pool", northbeamModel()],
+    ["a pool with services", northbeamWithServices()],
+    ["named clients", northbeamWithClients()],
+    ["client groups", northbeamWithClientGroups()],
+    ["servicing", northbeamWithServicing()],
+    ["churn drivers", northbeamWithChurnDrivers()],
+    ["money", northbeamWithMoney()],
+    ["chances", northbeamWithChances()],
+    ["channels", northbeamWithChannels()],
+  ];
+
+  it("reads every one of them as before, so B1, B3 and their timed forms edit and run exactly as before", () => {
+    for (const [name, m] of models) expect(hasClientRoster(m), name).toBe(before(m));
+  });
+
+  it("differs only where the engine ignores the groups: groups only for services the model doesn't have", () => {
+    const base = northbeamWithServices();
+    const stray = { ...base, clientGroups: { "no-such-service": { count: 5, churnMonthly: 0.02, stayMonths: 24, fee: 1000, health: 80 } } } as unknown as EngineModel;
+    expect(before(stray)).toBe(true);
+    expect(hasClientRoster(stray)).toBe(false);
+    // The engine runs that model on its pool, exactly as the one without the stray groups.
+    const months = { monthly: true, monthStarts: [173.33, 346.67] } as const;
+    expect(simulate({ ...stray, horizonWeeks: 13 }, 3, 1, months).monthly!.clientsLost).toEqual(simulate({ ...base, horizonWeeks: 13 }, 3, 1, months).monthly!.clientsLost);
   });
 });
