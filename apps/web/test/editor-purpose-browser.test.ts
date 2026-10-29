@@ -37,12 +37,16 @@ async function open(width: number): Promise<{ page: Page; errors: string[] }> {
 }
 
 const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+// The page here has none of the app's stylesheet, so the canvas's toolbar and the inspector lie over the nodes: the click goes to the node itself.
 const select = async (page: Page, id: string) => {
-  await node(page, id).click();
+  // A click on a step that is already in a selection keeps the selection, so start from an empty one.
+  await page.locator(".react-flow__pane").dispatchEvent("click");
+  await node(page, id).dispatchEvent("click");
   await page.locator('aside[aria-label="Inspector"]').waitFor();
 };
 const picker = (page: Page) => page.getByLabel("What it achieves", { exact: true });
-const many = (page: Page) => page.getByLabel("What they achieve", { exact: true });
+// The label holds the (i) with its text, so the field is found by its label's start.
+const many = (page: Page) => page.locator("label", { hasText: /^What they achieve/ }).locator("select");
 
 describe("what a step achieves, in the Editor", { timeout: 120_000 }, () => {
   for (const width of [1440, 1024]) {
@@ -63,11 +67,13 @@ describe("what a step achieves, in the Editor", { timeout: 120_000 }, () => {
       await picker(page).selectOption({ label: "Coordination" });
       expect(await picker(page).inputValue()).toBe("coordination");
 
-      // Two at once from the multi-selection: Shift-click adds a step to the selection.
+      // Two at once from the multi-selection: Control-click adds a step to the selection.
       await select(page, DISCOVERY);
-      await page.keyboard.down("Shift");
-      await node(page, KICKOFF).click();
-      await page.keyboard.up("Shift");
+      // The canvas ignores a modifier key pressed while a form field has the focus.
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.down("Control");
+      await node(page, KICKOFF).dispatchEvent("click");
+      await page.keyboard.up("Control");
       await many(page).waitFor();
       expect(await many(page).inputValue()).toBe("__automatic");
       await many(page).selectOption({ label: "Fixing" });
