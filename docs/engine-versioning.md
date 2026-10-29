@@ -168,7 +168,23 @@ Added 29 Oct 2026 (`docs/plans/sandbox-p4-brief.md`). **No existing simulated nu
 - **The sale side** (`saleSideSteps(model)`, pure, exported): the step where the sale is decided (an edge only to a win and an edge only to a loss) and every step after it that can reach a win but no longer a loss; empty when no lost end is reachable. The app uses it for the Automatic purpose of a pipeline step (Austin, 29 Oct: from the sale on moves the client's job forward).
 - **Output size and cost.** `MonthlyResult` grows by keys x (roles + people + 1) x months x 3 numbers; only monthly runs pay.
 
-TIMINGS
+**Timings** (30 replications, seed 1, one container with noise of about 5%, the parent commit `93f67f9a` against this branch, interleaved in separate processes, best of 12 per run, best of 5 runs; budget: no case more than 5% or 10 ms slower). A model without purposes pays only the extra bookings and the larger monthly output:
+
+| Engine case | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 26 | 27 | +3.5% |
+| northbeam groups+servicing 13w | 68 | 74 | +8.9% (+6 ms) |
+| northbeam named roster 13w | 38 | 40 | +4.7% |
+| larkspur 26w | 63 | 64 | +1.7% |
+| large 40 steps 25 people 26w | 606 | 578 | -4.6% |
+| northbeam groups 24m, no monthly | 387 | 392 | +1.1% |
+| northbeam groups 24m, monthly | 492 | 516 | +4.9% |
+| larkspur 24m, monthly | 296 | 312 | +5.4% (+16 ms) |
+| northbeam pipeline 12m, monthly | 74 | 83 | +11.9% (+9 ms) |
+| large 40 steps 26w, monthly | 661 | 709 | +7.1% (+47 ms) |
+| larkspur 24m, monthly, a purpose on every step (new; before = without purposes) | 282 | 299 | +6.3% |
+
+The two cases above the budget in that table are noise, not cost: re-measured alone, interleaved the same way (6 runs of 20), the 40-step monthly case reads 590 and 585 ms (-0.9%), and Larkspur 24m monthly reads between +2.3% (+7 ms) and +9% (+25 ms) from one set of runs to the next. A copy of the engine with the new bookings taken out read between +0.8% and +9% against the parent in the same runs, and a CPU profile of Larkspur 24m monthly (30 runs) totals 390.8 ms a run against 389.8 ms, so the run-to-run spread on this container is as large as the change. Two things keep the cost down: hands-on time is spread to a person, a role, a purpose and an overtime row from one decomposition into months (`spreadParts` / `addParts`, the same values `spread` adds, bit for bit) instead of one per row, and the month-by-month `Stat`s of the split come from typed buffers (`splitFrom`) rather than a sorted copy per series (the first version cost 5 to 14% on the monthly cases). Only monthly runs pay anything; the web app's timing tests (`apps/web/test/horizon-performance.test.ts`, `sandbox-performance.test.ts`) are below their limits (see the ticket).
 
 ## Warm-up hits and three review fixes (engine 1.13.0, sandbox phase 3 review)
 

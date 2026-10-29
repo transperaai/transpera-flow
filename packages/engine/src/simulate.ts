@@ -1220,6 +1220,40 @@ export function runOnce(
       t = end;
     }
   };
+  /**
+   * `spread` split in two for work booked to several rows at once: `spreadParts` works out which months [a, b] falls in and how much
+   * of `amount` each gets (the same values `spread` adds, clipped to [0, H]), once; `addParts` adds them to a row. Hands-on time goes
+   * to a person, a role, a purpose and a possible overtime row, so the months are found once rather than once per row.
+   */
+  const partMonth = new Int32Array(nM + 1);
+  const partValue = new Float64Array(nM + 1);
+  let partCount = 0;
+  const spreadParts = (a: number, b: number, amount: number) => {
+    partCount = 0;
+    if (!amount) return;
+    if (!(b > a)) {
+      if (a >= 0 && a < H) {
+        partMonth[0] = monthOf(a);
+        partValue[0] = amount;
+        partCount = 1;
+      }
+      return;
+    }
+    const lo = Math.max(a, 0);
+    const hi = Math.min(b, H);
+    if (!(hi > lo)) return;
+    const rate = amount / (b - a);
+    for (let m = monthOf(lo), t = lo; t < hi && m < nM; m++) {
+      const end = monthEnd(m, hi);
+      partMonth[partCount] = m;
+      partValue[partCount++] = rate * (end - t);
+      t = end;
+    }
+  };
+  const addParts = (arr: Float64Array, row: number) => {
+    const at = row * nM;
+    for (let i = 0; i < partCount; i++) arr[at + partMonth[i]!]! += partValue[i]!;
+  };
   /** Book revenue of one kind that accrued over [a, b] (clipped to the window by the caller) into the month sums. */
   const spreadRevenue = (arr: Float64Array | undefined, a: number, b: number, amount: number, isNew: boolean) => {
     if (!mon || !arr) return;
@@ -2760,16 +2794,17 @@ export function runOnce(
       }
       if (mon) {
         // Month by month, the hands-on time is spread over the time it is worked.
-        spread(mon.personWork, p.idx, t, t + dur, handsOn);
-        if (acc) spread(mon.roleWork, acc.r, t, t + dur, handsOn);
+        spreadParts(t, t + dur, handsOn);
+        addParts(mon.personWork, p.idx);
+        if (acc) addParts(mon.roleWork, acc.r);
         if (rep) {
-          spread(mon.reworkPerson, p.idx, t, t + dur, handsOn);
-          if (acc) spread(mon.reworkRole, acc.r, t, t + dur, handsOn);
+          addParts(mon.reworkPerson, p.idx);
+          if (acc) addParts(mon.reworkRole, acc.r);
         } else {
-          spread(mon.purposePerson, st.pu * nP + p.idx, t, t + dur, handsOn);
-          if (acc) spread(mon.purposeRole, st.pu * nR + acc.r, t, t + dur, handsOn);
+          addParts(mon.purposePerson, st.pu * nP + p.idx);
+          if (acc) addParts(mon.purposeRole, st.pu * nR + acc.r);
         }
-        if (over) spread(mon.overPipeline, p.idx, t, t + dur, handsOn);
+        if (over) addParts(mon.overPipeline, p.idx);
       }
       const cur = p.cur;
       if (cur) {
@@ -4092,69 +4127,105 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
         profit: series((r, m) => rev(r, m) - r.labour![m]! - r.overtimeCost![m]! - r.overheads[m]!),
       }
     : null;
-  // Where the time goes (sandbox G): per role, per person and the team, in hours in the month.
+  // Where the time goes (sandbox G): per role, per person and the team, in hours in the month. Built from typed buffers, one per series, filled
+  // once per month over the replications, so a long run's thousands of `Stat`s cost a few ms. The sums are in the order the plain version took
+  // them (rework first, then each purpose in turn; the team over people in model order), so the numbers are the same bit for bit.
   const purposes = Object.keys(first.purposeRoleWork);
-  const splitOf = (
-    work: (r: MonthlyReplication, m: number) => number,
-    byPurpose: (r: MonthlyReplication, key: string, m: number) => number,
-    rework: (r: MonthlyReplication, m: number) => number,
-    hours: (r: MonthlyReplication, m: number) => number,
-    uncov: ((r: MonthlyReplication, m: number) => number) | null,
-  ): TimeSplit => {
-    const per = (f: (r: MonthlyReplication, m: number) => number): Stat[] => months.map((_, m) => stat(reps.map((r) => f(r, m))));
-    return {
-      purpose: Object.fromEntries(purposes.map((k) => [k, per((r, m) => byPurpose(r, k, m))])),
-      rework: per(rework),
-      ongoing: per((r, m) => {
-        let used = rework(r, m);
-        for (const k of purposes) used += byPurpose(r, k, m);
-        return Math.max(0, work(r, m) - used);
-      }),
-      idle: per((r, m) => Math.max(0, hours(r, m) - work(r, m))),
-      hours: per(hours),
-      uncovered: uncov ? per(uncov) : null,
-    };
+  const nRep = reps.length;
+  const sorted = new Float64Array(nRep);
+  const statOf = (buf: Float64Array): Stat => {
+    let sum = 0;
+    for (let i = 0; i < nRep; i++) sum += buf[i]!;
+    sorted.set(buf);
+    sorted.sort();
+    return { mean: sum / nRep, p10: sorted[Math.min(nRep - 1, Math.floor(0.1 * nRep))]!, p90: sorted[Math.min(nRep - 1, Math.floor(0.9 * nRep))]! };
   };
-  const sumOver = (ids: string[], f: (id: string) => number) => {
-    let a = 0;
-    for (const id of ids) a += f(id);
-    return a;
+  /** One series per replication (a month's value each). */
+  type PerRep = readonly (readonly number[])[];
+  const splitFrom = (work: PerRep, byPurpose: readonly PerRep[], rework: PerRep, hours: PerRep, uncovered: PerRep | null): TimeSplit => {
+    const K = purposes.length;
+    const bufP = purposes.map(() => new Float64Array(nRep));
+    const [bufRework, bufOngoing, bufIdle, bufHours, bufUncovered] = [0, 1, 2, 3, 4].map(() => new Float64Array(nRep)) as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
+    const outP = purposes.map(() => new Array<Stat>(nM));
+    const out = { rework: new Array<Stat>(nM), ongoing: new Array<Stat>(nM), idle: new Array<Stat>(nM), hours: new Array<Stat>(nM), uncovered: uncovered ? new Array<Stat>(nM) : null };
+    for (let m = 0; m < nM; m++) {
+      for (let i = 0; i < nRep; i++) {
+        const rw = rework[i]![m]!;
+        let used = rw;
+        for (let k = 0; k < K; k++) {
+          const v = byPurpose[k]![i]![m]!;
+          bufP[k]![i] = v;
+          used += v;
+        }
+        const w = work[i]![m]!;
+        const h = hours[i]![m]!;
+        bufRework[i] = rw;
+        bufOngoing[i] = Math.max(0, w - used);
+        bufIdle[i] = Math.max(0, h - w);
+        bufHours[i] = h;
+        if (uncovered) bufUncovered[i] = uncovered[i]![m]!;
+      }
+      for (let k = 0; k < K; k++) outP[k]![m] = statOf(bufP[k]!);
+      out.rework[m] = statOf(bufRework);
+      out.ongoing[m] = statOf(bufOngoing);
+      out.idle[m] = statOf(bufIdle);
+      out.hours[m] = statOf(bufHours);
+      if (out.uncovered) out.uncovered[m] = statOf(bufUncovered);
+    }
+    return { purpose: Object.fromEntries(purposes.map((key, k) => [key, outP[k]!])), rework: out.rework, ongoing: out.ongoing, idle: out.idle, hours: out.hours, uncovered: out.uncovered };
   };
   const roleIdList = Object.keys(first.roleWork);
   const personIdList = Object.keys(first.personWork);
+  /** Hours available plus overtime, per replication and month. */
+  const plus = (a: PerRep, b: PerRep): PerRep => a.map((row, i) => row.map((v, m) => v + b[i]![m]!));
+  /** The sum over `ids` of a series, per replication and month, added in order from 0 (as the team's sums are). */
+  const total = (ids: readonly string[], of: (r: MonthlyReplication, id: string) => readonly number[]): PerRep =>
+    reps.map((r) => {
+      const out = new Array<number>(nM).fill(0);
+      for (const id of ids) {
+        const row = of(r, id);
+        for (let m = 0; m < nM; m++) out[m] = out[m]! + row[m]!;
+      }
+      return out;
+    });
   const time: MonthlyResult["time"] = {
     purposes,
     roles: Object.fromEntries(
       roleIdList.map((id) => [
         id,
-        splitOf(
-          (r, m) => r.roleWork[id]![m]!,
-          (r, k, m) => r.purposeRoleWork[k]![id]![m]!,
-          (r, m) => r.reworkRoleWork[id]![m]!,
-          (r, m) => r.roleCapacity[id]![m]! + r.roleOvertime[id]![m]!,
-          (r, m) => r.roleUncovered[id]![m]!,
+        splitFrom(
+          reps.map((r) => r.roleWork[id]!),
+          purposes.map((k) => reps.map((r) => r.purposeRoleWork[k]![id]!)),
+          reps.map((r) => r.reworkRoleWork[id]!),
+          plus(reps.map((r) => r.roleCapacity[id]!), reps.map((r) => r.roleOvertime[id]!)),
+          reps.map((r) => r.roleUncovered[id]!),
         ),
       ]),
     ),
     people: Object.fromEntries(
       personIdList.map((id) => [
         id,
-        splitOf(
-          (r, m) => r.personWork[id]![m]!,
-          (r, k, m) => r.purposePersonWork[k]![id]![m]!,
-          (r, m) => r.reworkPersonWork[id]![m]!,
-          (r, m) => r.personCapacity[id]![m]! + r.personOvertime[id]![m]!,
+        splitFrom(
+          reps.map((r) => r.personWork[id]!),
+          purposes.map((k) => reps.map((r) => r.purposePersonWork[k]![id]!)),
+          reps.map((r) => r.reworkPersonWork[id]!),
+          plus(reps.map((r) => r.personCapacity[id]!), reps.map((r) => r.personOvertime[id]!)),
           null,
         ),
       ]),
     ),
     // The team is the sum over people, so a person in two roles is counted once; uncovered is work nobody was there for, summed over roles.
-    team: splitOf(
-      (r, m) => sumOver(personIdList, (id) => r.personWork[id]![m]!),
-      (r, k, m) => sumOver(personIdList, (id) => r.purposePersonWork[k]![id]![m]!),
-      (r, m) => sumOver(personIdList, (id) => r.reworkPersonWork[id]![m]!),
-      (r, m) => sumOver(personIdList, (id) => r.personCapacity[id]![m]! + r.personOvertime[id]![m]!),
-      (r, m) => sumOver(roleIdList, (id) => r.roleUncovered[id]![m]!),
+    team: splitFrom(
+      total(personIdList, (r, id) => r.personWork[id]!),
+      purposes.map((k) => total(personIdList, (r, id) => r.purposePersonWork[k]![id]!)),
+      total(personIdList, (r, id) => r.reworkPersonWork[id]!),
+      // Each person's hours available plus their overtime, added up (not the two totals added).
+      reps.map((r) => {
+        const out = new Array<number>(nM).fill(0);
+        for (const id of personIdList) for (let m = 0; m < nM; m++) out[m] = out[m]! + (r.personCapacity[id]![m]! + r.personOvertime[id]![m]!);
+        return out;
+      }),
+      total(roleIdList, (r, id) => r.roleUncovered[id]!),
     ),
   };
   return {
