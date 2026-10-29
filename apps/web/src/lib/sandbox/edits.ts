@@ -169,14 +169,19 @@ export function withPriceDriver(model: EngineModel): EngineModel {
  * The model with the whole-run changes that are edits of it, in change order (a parent's first). A change whose target is gone is
  * skipped and listed. `bundle` supplies what the model lacks (your own drivers).
  */
-export function applyModelChanges(model: EngineModel, changes: readonly SandboxChange[], bundle: Pick<ProcessBundle, "churnDrivers">): { model: EngineModel; problems: ChangeProblem[] } {
+export function applyModelChanges(
+  model: EngineModel,
+  changes: readonly SandboxChange[],
+  bundle: Pick<ProcessBundle, "churnDrivers">,
+  /** The price driver on although these changes hold no price rise: the without-rise run of a price rise's pair, which must differ from the scenario only by the rise. */
+  forcePriceDriver = false,
+): { model: EngineModel; problems: ChangeProblem[] } {
   const problems: ChangeProblem[] = [];
-  let m = model;
+  // A price rise (any time) switches the price driver on, so the rise carries its churn; first, so the driver is the same in a pair's two runs.
+  let m = forcePriceDriver || changes.some((c) => c.lever === "B5") ? withPriceDriver(model) : model;
   for (const c of changes) {
     const lever = sandboxLever(c.lever);
     if (!lever) continue;
-    // A price rise (any time) switches the price driver on, so the rise carries its churn.
-    if (c.lever === "B5") m = withPriceDriver(m);
     if (c.from !== undefined) continue;
     switch (c.lever) {
       case "B1":

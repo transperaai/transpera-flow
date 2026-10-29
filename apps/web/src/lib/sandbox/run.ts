@@ -472,7 +472,7 @@ export function scenarioModel(
   patchChangeIds: readonly string[] = [],
   retired: RetiredSteps = {},
   /** The scenario's effective changes, for the edits and channels that are not patches (sandbox phase 3). */
-  edits?: { changes: readonly SandboxChange[]; d4Unhandled: ReadonlySet<string> },
+  edits?: { changes: readonly SandboxChange[]; d4Unhandled: ReadonlySet<string>; forcePriceDriver?: boolean },
 ): ScenarioModelResult | { model: null; monthStarts: null; problems: ChangeProblem[]; error: string } {
   try {
     const base = toEngineModel(bundle, { startDate, planned: true });
@@ -487,7 +487,7 @@ export function scenarioModel(
       for (const issue of patched.issues) if (issue.problem === "clamped" && !brokenAt.has(issue.index)) problems.push({ changeId: patchChangeIds[issue.index]!, message: issue.message, note: true });
     }
     if (edits) {
-      const edited = applyModelChanges(model, edits.changes, bundle);
+      const edited = applyModelChanges(model, edits.changes, bundle, edits.forcePriceDriver);
       model = edited.model;
       problems.push(...edited.problems);
     }
@@ -562,7 +562,7 @@ export function prepareScenario(bundle: ProcessBundle, changes: readonly Effecti
   const bounds = monthBounds(live.monthStarts, live.model.horizonWeeks * hpw);
   const names = new Map(solutions.map((x) => [x.id, x.name]));
 
-  const build = (list: readonly EffectiveChange[]) => {
+  const build = (list: readonly EffectiveChange[], forcePriceDriver = false) => {
     const plan = scenarioSegments(bundle, list, solutions, startDate, bounds, hpw);
     if (plan.error !== null) return { error: plan.error, plan, segments: [] as PreparedSegment[], problems: plan.problems };
     const all = list.map((c) => c.change);
@@ -571,7 +571,7 @@ export function prepareScenario(bundle: ProcessBundle, changes: readonly Effecti
     const seen = new Set(problems.map((p) => p.changeId + p.message));
     let error: string | null = null;
     for (const seg of plan.segments) {
-      const built = scenarioModel(seg.bundle, months, startDate, seg.patches, seg.patchChangeIds, retired, { changes: all, d4Unhandled: plan.d4Unhandled });
+      const built = scenarioModel(seg.bundle, months, startDate, seg.patches, seg.patchChangeIds, retired, { changes: all, d4Unhandled: plan.d4Unhandled, forcePriceDriver });
       if (built.error !== null) {
         const solutionNames = seg.solutionIds.map((id) => names.get(id) ?? "A solution");
         error = seg.from === 0 && !solutionNames.length ? built.error : `“${solutionNames[solutionNames.length - 1] ?? "A solution"}” can't be simulated: ${built.error}`;
@@ -603,7 +603,8 @@ export function prepareScenario(bundle: ProcessBundle, changes: readonly Effecti
   let pair: PreparedSegment[] | null = null;
   const riseMonths: number[] = [];
   if (rises.length) {
-    const p = build(changes.filter((e) => e.change.lever !== "B5"));
+    // The price driver is on in this run too, as the scenario's rise turns it on: the pair differs only by the rise (Settings' own planned rise then counts in both).
+    const p = build(changes.filter((e) => e.change.lever !== "B5"), true);
     pair = p.error === null ? p.segments : null;
     for (const e of rises) {
       const from = e.change.from;

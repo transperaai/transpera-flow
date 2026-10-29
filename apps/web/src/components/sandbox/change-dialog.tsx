@@ -410,7 +410,7 @@ export function ChangeDialog(props: ChangeDialogProps) {
 
             {lever.id === "B5" ? (
               <p className="text-xs text-muted-foreground" data-price-rise-note>
-                A rise reaches existing and new clients, and counts the clients it loses (the Price changes driver is switched on for this run). The result shows what it gains, what it loses and what it nets.
+                A rise reaches existing and new clients, and counts the clients it loses (the Price changes driver is switched on in this run and in the run without the rise it is compared with). The result shows what it gains, what it loses and what it nets.
               </p>
             ) : null}
 
