@@ -572,7 +572,8 @@ function ChanceControls({ d, cause, canEdit, onChange }: { d: DriverState; cause
     if (cause) {
       const eq = equivalentEvents({ id: engineIdOf(d), custom: d.builtin === null, pressure: cause.pressure, chance: cause.chance, value: d.value }, d.weight);
       onChange({ chance: eq.chance === null ? null : Math.round(eq.chance * 1e4) / 100, effect: Math.round(eq.effect * 1e4) / 100, effectMonths: eq.months });
-      setNote(CHANCE_HELP.same);
+      // A measured cause with nothing measured can't carry the weight's churn as a chance: say so rather than pre-filling an effect that does nothing.
+      setNote(measured && !(cause.chance && cause.chance > 0) && cause.pressure > 0 ? CHANCE_HELP.noHits : CHANCE_HELP.same);
     } else onChange({ chance: null, effect: 50, effectMonths: 3 });
   };
   const measuredText = cause?.chance != null ? `Measured: ${(cause.chance * 100).toLocaleString("en-GB", { maximumFractionDigits: 1 })}% a month` : "Measured";

@@ -171,6 +171,9 @@ export function ChangeDialog(props: ChangeDialogProps) {
         if (stored < HIRE_FTE.accepted.min || stored > HIRE_FTE.accepted.max) return { error: "FTE must be between 0.1 and 2." };
       } else if (lever.id === "D3") {
         if (!Number.isInteger(stored) || stored < 1 || stored > 52) return { error: "Leave lasts 1 to 52 whole weeks." };
+      } else if (lever.id === "D9") {
+        // The database takes whole months only (is_sandbox_change), so say it here rather than at Save.
+        if (!Number.isInteger(stored) || stored < 0 || stored > 6) return { error: "A hiring delay is 0 to 6 whole months." };
       } else if (range && (stored < range.min - 1e-9 || stored > range.max + 1e-9)) {
         return { error: `Use a value between ${formatNumber(range.min * scale, 3)} and ${formatNumber(range.max * scale, 3)}.` };
       }
@@ -397,7 +400,11 @@ export function ChangeDialog(props: ChangeDialogProps) {
                   <HelpLabel label="For (months)" description="How long a hit lasts. A second hit while one lasts only extends it." example="3 months is the usual." />
                   <Input aria-label="For (months)" type="number" inputMode="numeric" min={1} max={24} placeholder="3" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
                 </label>
-                <span className="basis-full text-xs text-muted-foreground">The value above is how much a hit raises that client&apos;s chance of leaving, in percent. Turns the cause on.</span>
+                <span className="basis-full text-xs text-muted-foreground">
+                  {effectiveTarget === "price"
+                    ? "The value above is how much a 10% rise raises a hit client's chance of leaving, in percent (a 20% rise counts double). The chance is the share of clients who notice a rise. Turns the cause on."
+                    : "The value above is how much a hit raises that client's chance of leaving, in percent. Turns the cause on."}
+                </span>
               </div>
             ) : null}
 

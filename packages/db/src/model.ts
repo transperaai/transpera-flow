@@ -401,10 +401,9 @@ function engineServices(bundle: ProcessBundle, processId: string): Record<string
       mixShare: Number(sv.mix_share),
       pathTags: sv.path_tags.map((t) => t.trim()).filter(Boolean),
       ...(fallback ? { fallbackOngoing: fallback } : {}),
-      // A fee range (sandbox phase 3): only when both ends are set and they aren't both the price itself.
-      ...(num(sv.price_low) !== null && num(sv.price_high) !== null && !(num(sv.price_low) === Number(sv.price) && num(sv.price_high) === Number(sv.price))
-        ? { priceRange: { low: num(sv.price_low)!, high: num(sv.price_high)! } }
-        : {}),
+      // A fee range (sandbox phase 3): when either end is set (a blank end is the price itself: "up to 6,000" with no lowest is price to
+      // 6,000), and not when both are the price.
+      ...(feeRange(sv) ? { priceRange: feeRange(sv)! } : {}),
     };
   }
   return services;
@@ -734,6 +733,16 @@ const optional = <K extends string, V>(key: K, value: V | undefined) =>
 /** A finite number from a jsonb value, or null. */
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null;
+
+/** A service's fee range as the engine takes it: a blank end is the price; none when both ends are blank or both are the price. */
+function feeRange(sv: { price: number | string; price_low?: number | string | null; price_high?: number | string | null }): { low: number; high: number } | null {
+  const low = num(sv.price_low);
+  const high = num(sv.price_high);
+  if (low === null && high === null) return null;
+  const price = Number(sv.price);
+  const range = { low: low ?? price, high: high ?? price };
+  return range.low === price && range.high === price ? null : range;
+}
 
 /**
  * A triangular range in hours from a step's params. Missing or inconsistent

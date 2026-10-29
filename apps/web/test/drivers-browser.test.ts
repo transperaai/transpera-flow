@@ -64,7 +64,7 @@ describe("Settings: churn drivers as chances", { timeout: 180_000 }, () => {
         expect(events).toContain("Chance a month");
         expect(events).toContain("Raises that client's churn by");
         expect(events).toContain("months");
-        expect(events).toContain("Same expected churn as the weight gave in the last run");
+        expect(events).toContain("About the churn the weight gave in the last run");
         // The weight slider greys while the driver runs as events.
         expect(await page.locator("input[type=range]").first().isDisabled()).toBe(true);
         await late.getByRole("button", { name: "Weight" }).click();

@@ -365,14 +365,16 @@ describe("services", () => {
     return b;
   };
 
-  it("maps a fee range to priceRange when both ends are set, and not when they are unset or both the price (sandbox phase 3)", () => {
+  it("maps a fee range to priceRange when an end is set (a blank end is the price), and not when both are unset or both the price (sandbox phase 3)", () => {
     const withRange = (low: number | null, high: number | null) => toEngineModel(patch(pipelineOnly(), seo, { price_low: low, price_high: high }), { startDate: START }).services![seo]!;
     expect(withRange(3000, 6000).priceRange).toEqual({ low: 3000, high: 6000 });
     // A range that doesn't hold the price still maps (the engine uses the price as an end).
     expect(withRange(4000, 4500).priceRange).toEqual({ low: 4000, high: 4500 });
     expect(withRange(null, null).priceRange).toBeUndefined();
-    expect(withRange(3000, null).priceRange).toBeUndefined();
-    expect(withRange(null, 6000).priceRange).toBeUndefined();
+    // One end entered: the other is the price (3,500), as Settings says ("Leave both blank for one fee"); before the review it was ignored.
+    expect(withRange(3000, null).priceRange).toEqual({ low: 3000, high: 3500 });
+    expect(withRange(null, 6000).priceRange).toEqual({ low: 3500, high: 6000 });
+    expect(withRange(3500, null).priceRange).toBeUndefined();
     expect(withRange(3500, 3500).priceRange).toBeUndefined();
     // No range at all is the model as it was.
     expect(toEngineModel(patch(pipelineOnly(), seo, { price_low: null, price_high: null }), { startDate: START })).toEqual(toEngineModel(pipelineOnly(), { startDate: START }));

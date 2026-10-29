@@ -129,7 +129,8 @@ export const CHANCE_HELP = {
   months: { description: "How long a hit lasts, from the hit.", example: "3 months." },
   priceChance: { description: "The chance a client notices a rise and is hit. A rise hits each client once.", example: "50% means half the clients react to a rise." },
   priceEffect: { description: "How much a 10% rise raises a hit client's chance of leaving. A 20% rise counts double.", example: "100% means a 10% rise doubles that client's churn for the months it lasts." },
-  same: "Same expected churn as the weight gave in the last run. It matches in expectation, not draw for draw.",
+  same: "About the churn the weight gave in the last run. Over a long run it often comes out a little lower (up to about a fifth): a hit falls on fewer clients, and the clients it hits are the ones who leave.",
+  noHits: "The last run measured no hits for this cause, so as a chance it adds no churn. Set an effect and a chance of your own, or keep the weight.",
 } as const;
 
 export const PRICE_MONTH_HELP = {

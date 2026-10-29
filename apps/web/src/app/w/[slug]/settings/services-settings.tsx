@@ -176,7 +176,7 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
           step={50}
           disabled={disabled}
           hint={rangeWarning(sv)}
-          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs. Leave both blank for one fee.", example: "3,000 to 6,000 around a 4,200 fee." }} />
+          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs. A blank end is the fee itself; leave both blank for one fee.", example: "3,000 to 6,000 around a 4,200 fee." }} />
         <NumberField
           label="Fee range: highest"
           value={sv.price_high === null || sv.price_high === undefined ? null : Number(sv.price_high)}
@@ -186,7 +186,7 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
           step={50}
           disabled={disabled}
           hint={rangeWarning(sv)}
-          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs.", example: "6,000 for the occasional large client." }} />
+          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs. A blank end is the fee itself.", example: "6,000 for the occasional large client." }} />
         <NumberField
           label="Margin"
           value={Number(sv.margin)}

@@ -242,6 +242,10 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await today()).toMatch(/^Today: [\d.]+ FTE across \d+ people/);
         await lever("Hiring delay");
         expect(await today()).toBe("Today: none: new hires start on their date");
+        // Part months are refused in the dialog, as the database would at Save.
+        await page.getByLabel("Value", { exact: true }).fill("2.5");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-change-dialog] [role=alert]").innerText()).toBe("A hiring delay is 0 to 6 whole months.");
         await lever("Churn driver as a chance");
         await page.getByLabel("On", { exact: true }).selectOption({ label: "Late or missed servicing work" });
         expect(await today()).toMatch(/^Today: Late or missed servicing work: counted by its weight \(1\)/);
