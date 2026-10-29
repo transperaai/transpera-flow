@@ -5,7 +5,7 @@ import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, sandboxLever, t
 import { applyPatches, simulate, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
-import { addMonths, dateAtPosition, hoursToDate, monthBounds, positionOfDate, stepDate, spliceMonthly, descendantsOf, effectiveChanges, effectiveLimitProblem, type EffectiveChange, applyPeopleChanges, hireNames, leaveEnd, MAX_SEGMENTS, scenarioModel, scenarioSegments, withSolution } from "@transpera-flow/db/sandbox";
+import { addMonths, dateAtPosition, hoursToDate, monthBounds, positionOfDate, stepDate, spliceMonthly, descendantsOf, effectiveChanges, effectiveLimitProblem, type EffectiveChange, applyPeopleChanges, hireNames, leaveEnd, MAX_SEGMENTS, scenarioModel, scenarioSegments, withSolution, prepareScenario } from "@transpera-flow/db/sandbox";
 import { timelineData } from "@/lib/forecast/timeline";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { DEMO_SCENARIOS, DEMO_THEN_LEADS_ID, deleteDemoScenario, demoScenariosNow, resetDemoScenarios, saveDemoScenario } from "@/lib/sandbox/demo";
@@ -887,5 +887,18 @@ describe("a change's value in words", () => {
     expect(formatChangeValue(sandboxLever("C2")!, "set", 15000, "GBP")).toBe("→ £15,000");
     expect(formatChangeValue(sandboxLever("B2")!, "add", 1250000, "GBP")).toBe("+£1,250,000");
     expect(formatChangeValue(sandboxLever("B2")!, "multiply", 1.1, "GBP")).toBe("×1.1");
+  });
+});
+
+describe("the Sandbox's No changes is the forecast page's run", () => {
+  it("prepares the model, months and warm-up the forecast page runs", () => {
+    const bundle = demoForecastBundle();
+    const forecast = forecastModel(bundle, 12, START);
+    if (forecast.error !== null) throw new Error(forecast.error);
+    const p = prepareScenario(bundle, [], [], 12, START);
+    expect(p.error).toBeNull();
+    expect(p.segments).toHaveLength(1);
+    expect(p.segments[0]!.model).toEqual(forecast.model);
+    expect(p.monthStarts).toEqual(forecast.monthStarts);
   });
 });
