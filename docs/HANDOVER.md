@@ -65,9 +65,20 @@ by Sonnet from an Opus brief and reviewed adversarially by Opus.
   - **Phase 3:** churn drivers as chances, client value ranges, the price rise and its trade-off, clients and churn on
     rosters and groups, role cost, the hiring delay, monthly channels and a pinned warm-up. ENGINE is 1.13.0.
   - **Migrations:** up to `20270112000000`, all applied on Neon `main` (Preview).
-  - **Phase 4 (time by purpose):** the brief is written (`docs/plans/sandbox-p4-brief.md`). It is waiting on Austin's three
-    answers: pipeline steps after the sale, client upkeep as its own row, and what Viewers see per person.
-    Phase 5 (goal seek, tornado chart, exports, share link, MCP `list_scenarios`) is not briefed yet.
+  - **Phase 4 (time by purpose):** built and reviewed, ENGINE 1.14.0. Austin's defaults: sale-side steps count as
+    "Moves the client's job forward"; Client upkeep is its own row; Viewers see "You" plus "Everyone else".
+  - **Phases 5a and 5b:** built and reviewed.
+    - **5a:** the runner moved to `packages/db/src/sandbox`; MCP `list_scenarios` and saved-mode `run_scenario`;
+      change notes; CSV and print exports; the "When" timing; and the silent-sliders fix.
+    - **5b:** goal seek and the tornado chart (Viewers read-only, as Opus's default; Austin can say no), plus the
+      scenario share link, and the 5a review's leftovers. 5b's review fixed an overheads leak into Financials-off
+      links; production never had overheads.
+  - **Migrations:** up to `20270117000000`, all applied on Neon `main` (Preview).
+  - **The whole sandbox design is built.** Open for Austin:
+    - whether Viewers may run goal seek and the tornado;
+    - whether "Client decision" counts as winning work;
+    - the "Everyone else" row in two-person teams;
+    - his QA findings.
 - **Next:**
   - **Austin's QA** on the preview.
   - **7c, cutover:** a freeze, emptying Neon `main` (it now holds the QA copy), a fresh copy into it, Austin adds Production to the Neon connection, then merge to
