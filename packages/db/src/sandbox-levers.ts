@@ -44,6 +44,8 @@ export interface SandboxChange {
   from?: string;
   /** Extras of one lever (see `SandboxParams`). */
   params?: SandboxParams;
+  /** Why: what this change assumes, in a sentence (1 to 280 characters, trimmed). Shown with the change, in compare, in exports. */
+  note?: string;
 }
 
 export type SandboxTarget =
@@ -672,7 +674,16 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MONTH = /^(20[0-9]{2}|2100)-(0[1-9]|1[0-2])$/;
 const DATE_SHAPE = /^(20[0-9]{2}|2100)-[0-9]{2}-[0-9]{2}$/;
 const TARGET_ID = /^[^.\s]{1,100}$/;
-const KEYS = new Set(["id", "lever", "target", "op", "value", "from", "params"]);
+const KEYS = new Set(["id", "lever", "target", "op", "value", "from", "params", "note"]);
+/** The longest note a change can carry (characters, as Postgres counts them). */
+export const MAX_CHANGE_NOTE = 280;
+/** A note starts and ends with something other than a space, tab or line break (`btrim(note, E' \t\r\n')` in `private.is_sandbox_change`). */
+const NOTE_EDGE = /^[ \t\r\n]|[ \t\r\n]$/;
+/** Why a note is not valid, or null. */
+export function noteProblem(note: unknown): string | null {
+  if (typeof note !== "string" || note === "" || NOTE_EDGE.test(note) || Array.from(note).length > MAX_CHANGE_NOTE) return `A note can have up to ${MAX_CHANGE_NOTE} characters.`;
+  return null;
+}
 const HEALTH_RULES = new Set(["initial", "recover", "late_penalty", "missed_penalty"]);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -720,6 +731,7 @@ export function changeProblem(c: unknown): string | null {
   if (!isObject(c)) return bad;
   if (Object.keys(c).some((k) => !KEYS.has(k))) return bad;
   if (typeof c.id !== "string" || !UUID.test(c.id)) return bad;
+  if ("note" in c && noteProblem(c.note) !== null) return noteProblem(c.note);
   const lever = typeof c.lever === "string" ? LEVER_BY_ID.get(c.lever) : undefined;
   if (!lever) return "A change names a lever that doesn't exist.";
   if (typeof c.op !== "string" || !(lever.ops as readonly string[]).includes(c.op)) return `${lever.label} can't be changed that way.`;

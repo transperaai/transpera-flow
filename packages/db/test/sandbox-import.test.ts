@@ -16,6 +16,13 @@ describe("planSandboxScenarios", () => {
     expect(out.rows[1]!.parent_id).toBe(ID(1));
   });
 
+  it("keeps the notes on changes (including a build-on child's), and drops a scenario whose note is not valid", () => {
+    const out = planSandboxScenarios([row(1, { changes: [change(1, { note: "Assumes the Q3 campaign doubles leads." })] }), row(2, { parent_id: ID(1), changes: [change(2, { note: "x".repeat(281) })] })], []);
+    expect(out.rows.map((r) => r.name)).toEqual(["S1"]);
+    expect((out.rows[0]!.changes as SandboxChange[])[0]!.note).toBe("Assumes the Q3 campaign doubles leads.");
+    expect(out.dropped).toBe(1);
+  });
+
   it("converts an older backup's patches into whole-run changes with no parent, keeping the order", () => {
     const out = planSandboxScenarios([], [{ id: ID(1), name: "Old", description: "d", parent_scenario_id: ID(2), patch: [{ path: "demand.leads_per_week", op: "multiply", value: 1.25 }, { path: `steps.${ID(9)}.work_hours`, op: "set", value: 2 }], created_at: "2026-01-01" }]);
     const changes = out.rows[0]!.changes as SandboxChange[];
