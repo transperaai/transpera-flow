@@ -11,7 +11,9 @@
 import { compareRatingsDesc, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
 import { shareToggles } from "./share-reader";
 import { shareMoneyRegex } from "./money";
-import { loadFirstPrinciplesFor } from "./first-principles";
+import { loadDeleteCandidates, loadFirstPrinciplesFor } from "./first-principles";
+import { changesProblem, type SandboxChange } from "./sandbox-levers";
+import { effectiveChanges, effectiveLimitProblem } from "./sandbox/effective";
 import { loadLeverSettings } from "./lever-settings";
 import { EMAIL, MIN_TOKEN, clientNames, clientSpans, nameSpans, nameTokenIndex, normaliseView, pickSpans, replaceSpans, scriptParts, scriptSpans, spansOf, tokens, type Span, type View } from "./share-text";
 import {
@@ -23,6 +25,7 @@ import {
   loadLiveRevisionIds,
   loadProcessBySlug,
   loadProcessBundle,
+  loadSandboxScenarios,
   loadScenarios,
   loadSolutionIssues,
   loadSolutions,
@@ -35,6 +38,7 @@ import type {
   ProcessBundle,
   ProcessPart,
   ProcessRevisionRow,
+  SandboxScenarioRow,
   ScenarioRow,
   SolutionRow,
   SolutionsData,
@@ -69,8 +73,8 @@ export function validHiddenLevers(v: unknown): boolean {
   return v.every((x) => typeof x === "string" && LEVER_KIND_IDS.includes(x)) && new Set(v).size === v.length;
 }
 
-export type ShareKind = "overview" | "process" | "issue" | "solution";
-export const SHARE_KINDS: readonly ShareKind[] = ["overview", "process", "issue", "solution"];
+export type ShareKind = "overview" | "process" | "issue" | "solution" | "scenario";
+export const SHARE_KINDS: readonly ShareKind[] = ["overview", "process", "issue", "solution", "scenario"];
 
 export interface ShareToggles {
   /** Real names. Off: "Team member N". Never pay either way. */
@@ -137,7 +141,30 @@ export interface SolutionShare extends ShareSnapshotBase {
   movedOn: string | null;
 }
 
-export type ShareSnapshot = OverviewShare | ProcessShare | IssueShare | SolutionShare;
+/** The rows of a scenario link: the scenario and the chain it builds on. Only what a run and the page need. */
+export type ScenarioShareRow = Pick<SandboxScenarioRow, "id" | "name" | "description" | "parent_id" | "changes" | "horizon_months">;
+
+/**
+ * A saved Sandbox scenario (sandbox phase 5b, docs/plans/sandbox-p5-brief.md section 11): the live company model, the scenario and the
+ * scenarios it builds on, the solutions its changes put live, and the date and horizon the copy was made with. View mode only.
+ */
+export interface ScenarioShare extends ShareSnapshotBase {
+  kind: "scenario";
+  scenarioId: string;
+  /** The Sandbox's bundle: the first live process with the servicing processes beside it, and the delete candidates purposes need. */
+  bundle: ProcessBundle;
+  /** The shared scenario last, the scenarios it builds on before it, root first (1 to 6). */
+  scenarios: ScenarioShareRow[];
+  /** Only the solutions its E6 changes name (and whose process is in the bundle). */
+  solutions: SolutionRow[];
+  /** Frozen with the copy: the run starts here, so the visitor reads the numbers the copy was made with (today's engine aside). */
+  startDate: string;
+  months: number;
+  /** How many role-cost and overheads changes (C1, C2) the copy leaves out because Financials is off. */
+  hiddenCostChanges: number;
+}
+
+export type ShareSnapshot = OverviewShare | ProcessShare | IssueShare | SolutionShare | ScenarioShare;
 
 /** A person or client of the workspace, with the label a share link shows for them. Never put in a snapshot. */
 export interface SecretName {
@@ -237,6 +264,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   entry_step_id: "steps.entry_step_id and a solution's `steps.entry_step_id` (BlockBundle): a uuid",
   every: "service_servicing.recurrence.every: the enum week or month",
   file_url: "sources.file_url: not in a snapshot (sources are left out); a link, which is still checked for emails and money",
+  from: "a scenario link's `scenarios[].changes[].from`: YYYY-MM or YYYY-MM-DD, format-checked at every depth by both sides (SHARE_FORMAT_KEYS)",
   from_step_id: "edges.from_step_id: a uuid",
   hiddenLevers: "a play link's top-level `hiddenLevers`: known lever kind ids only, checked by both sides (and only at the top)",
   id: "every table and JSON shape with an id: a uuid, or a first principles measure's local id",
@@ -246,6 +274,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   issue_id: "issue_links, solution_issues: a uuid",
   kind: "steps, processes, first principles statements, the snapshot itself and its process list: an enum",
   kpi: "first principles `measures[].kpi`: an enum key of the engine's measures",
+  lever: "a scenario link's `scenarios[].changes[].lever`: a lever id such as A1 or D5, format-checked at every depth by both sides (SHARE_FORMAT_KEYS)",
   linked_parameter: "first principles `statements[].linked_parameter`: a parameter path the engine reads",
   live_revision_id: "processes.live_revision_id: a uuid",
   op: "scenarios `patch[].op` and solutions `lever_changes[].op`: the enum set, multiply or add",
@@ -253,6 +282,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   owner_ids: "issues.owner_ids: person ids",
   owner_person_id: "issues.owner_person_id and first principles `requirements[].owner_person_id`: a person id",
   parent_process_id: "processes.parent_process_id: a uuid",
+  parent_id: "a scenario link's `scenarios[].parent_id`: a uuid or null, format-checked at every depth by both sides (SHARE_FORMAT_KEYS)",
   parent_scenario_id: "a snapshot's scenarios[].parent_scenario_id (null: the Sandbox's build-on parents are not shared): a uuid",
   parent_step_id: "steps.parent_step_id: a uuid",
   path: "scenarios `patch[].path` and solutions `lever_changes[].path`: a selector the engine reads (steps.<id>.work_hours)",
@@ -275,6 +305,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   revision_id: "steps, edges, first_principles: a uuid",
   rework_to_step_id: "steps.rework_to_step_id: a uuid",
   role_id: "issues, person_roles, client_assignments, steps: a uuid",
+  scenarioId: "a scenario link's top-level `scenarioId`: a uuid, format-checked at every depth by both sides (SHARE_FORMAT_KEYS)",
   scenario_id: "issues.scenario_id and first principles `improvements[].scenario_id`: a uuid",
   service_id: "client_groups, client_services, service_servicing: a uuid",
   severity: "issues.severity: an enum",
@@ -285,9 +316,11 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   source_ids: "issues.source_ids: uuids",
   stage: "first principles `improvements[].stage`: an enum",
   start_date: "people, person_leave, clients, client_services: a date",
+  startDate: "a scenario link's top-level `startDate`: YYYY-MM-DD, format-checked at every depth by both sides (SHARE_FORMAT_KEYS)",
   status: "process_revisions, issues: an enum",
   step_id: "steps-linked tables, issues `links[]`, first principles shapes: a uuid",
   suggestion_id: "provenance `suggestion_id`: a uuid; provenance is emptied in every snapshot anyway",
+  target: "a scenario link's `scenarios[].changes[].target`: a uuid, a selector, a health rule or a churn driver id, format-checked at every depth by both sides (SHARE_FORMAT_KEYS); a first-principles measure's `target` is a number",
   timestamp: "provenance `evidence[].timestamp`: a time in a recording or a page; provenance is emptied in every snapshot anyway",
   to_step_id: "edges.to_step_id: a uuid",
   type: "issues.type: an enum",
@@ -303,6 +336,21 @@ export const SHARE_NON_TEXT_KEYS: readonly string[] = Object.keys(SHARE_NON_TEXT
 const NON_TEXT = new Set(SHARE_NON_TEXT_KEYS);
 /** A whole hex colour (`#rgb` to `#rrggbbaa`): no text, under `color` only. Anything else in `color` is free text. */
 export const SHARE_HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;
+/**
+ * The scenario link's keys that are checked by FORMAT wherever they sit (the database's step 1 has the same patterns): an object or an array
+ * under one, or a string that isn't its shape, makes the snapshot "not match the link". They are non-text keys, so nothing scrubs them; this
+ * is what stops free text hiding under one. A number, a boolean or null holds no words and passes (a first-principles measure has a numeric
+ * `target`). A test keeps these equal to the migration's patterns.
+ */
+const UUID_SHAPE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+export const SHARE_FORMAT_KEYS: Readonly<Record<string, RegExp>> = {
+  lever: /^[A-EX][0-9]$/,
+  target: new RegExp(`^(${UUID_SHAPE}|@busiest|@heaviest|initial|recover|late_penalty|missed_penalty|late|resp|onb|rework|load|handoff|results|tenure|price|market|custom:${UUID_SHAPE})$`),
+  from: /^(20[0-9]{2}|2100)-(0[1-9]|1[0-2])(-[0-9]{2})?$/,
+  parent_id: new RegExp(`^${UUID_SHAPE}$`),
+  scenarioId: new RegExp(`^${UUID_SHAPE}$`),
+  startDate: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
+};
 /** Free text unless the key says otherwise (default deny), or the value is a whole hex colour under `color` (the database's rule too). */
 const isFree = (key: string, value: string): boolean => !NON_TEXT.has(key) && !(key === "color" && SHARE_HEX_COLOR.test(value));
 
@@ -401,7 +449,8 @@ const BLANKED: Record<string, unknown> = {
  * settings), every `provenance`, and every string (emails, client names, and with People off people's names, with Financials off
  * money). `raw` is what `loadShareData` built; this is pure.
  */
-export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
+export function redactShareSnapshot(input: ShareSnapshot, toggles: ShareToggles, secrets: ShareSecrets): ShareSnapshot {
+  const raw = input.kind === "scenario" ? withoutHiddenChanges(input, toggles) : input;
   const scrub = scrubber(toggles, secrets);
   const walk = (value: unknown, key = ""): unknown => {
     if (typeof value === "string") return scrub.text(value, isFree(key, value));
@@ -423,7 +472,91 @@ export function redactShareSnapshot(raw: ShareSnapshot, toggles: ShareToggles, s
     return out;
   };
   const redacted = walk(raw) as Obj;
+  if (raw.kind === "scenario") fitScenarioText(redacted as unknown as ScenarioShare);
   return { ...redacted, v: SHARE_SNAPSHOT_VERSION, kind: raw.kind, toggles: { people: toggles.people, financials: toggles.financials }, workspaceName: scrub.text(raw.workspaceName, true) } as unknown as ShareSnapshot;
+}
+
+// ---------------------------------------------------------------------------
+// A scenario link's changes
+// ---------------------------------------------------------------------------
+
+/** The levers whose value is an amount of cost: a role's hourly cost and the overheads a month. */
+const COST_LEVER_IDS = new Set(["C1", "C2"]);
+
+/**
+ * The scenario snapshot with what its toggles hide taken out of the changes (before the text is scrubbed): with People off a hire keeps no
+ * `params.name` (a candidate's name; the visitor reads "New <role>"), and with Financials off the role-cost and overheads changes are dropped
+ * and counted in `hiddenCostChanges`. The same rules are the checks' (`shareSnapshotLeaks`, `private.share_snapshot_problem`).
+ */
+function withoutHiddenChanges(raw: ScenarioShare, toggles: ShareToggles): ScenarioShare {
+  let hidden = 0;
+  const scenarios = raw.scenarios.map((row) => {
+    const changes: SandboxChange[] = [];
+    for (const c of row.changes) {
+      if (!toggles.financials && COST_LEVER_IDS.has(c.lever)) {
+        hidden++;
+        continue;
+      }
+      if (!toggles.people && c.lever === "D1" && c.params && "name" in c.params) {
+        const { name: _name, ...rest } = c.params as Record<string, unknown>;
+        const { params: _params, ...bare } = c;
+        changes.push(Object.keys(rest).length ? ({ ...bare, params: rest } as SandboxChange) : (bare as SandboxChange));
+        continue;
+      }
+      changes.push(c);
+    }
+    return { ...row, changes };
+  });
+  return { ...raw, scenarios, hiddenCostChanges: hidden };
+}
+
+/**
+ * Scrubbing swaps a name or an amount for a longer label ("[amount hidden]", "Team member 12"), which could push a note past the 280
+ * characters the database allows (and a hire's name past 120). Cut to fit, so a link isn't refused over a long note. Mutates the redacted copy.
+ */
+function fitScenarioText(snap: ScenarioShare): void {
+  const fit = (text: string, max: number) => {
+    const chars = Array.from(text);
+    return (chars.length > max ? `${chars.slice(0, max - 1).join("")}\u2026` : text).replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
+  };
+  for (const row of snap.scenarios) {
+    for (const c of row.changes) {
+      if (typeof c.note === "string") {
+        const note = fit(c.note, 280);
+        if (note) c.note = note;
+        else delete c.note;
+      }
+      if (c.params && typeof (c.params as { name?: unknown }).name === "string") (c.params as { name: string }).name = fit((c.params as { name: string }).name, 120) || "New hire";
+    }
+  }
+}
+
+/** Whether a scenario snapshot's own shape is wrong (the twin of step 1b in `private.share_snapshot_problem`). */
+function scenarioShapeProblem(s: Obj): boolean {
+  const rows = s.scenarios;
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 6) return true;
+  const ids = new Set<string>();
+  for (const [i, row] of rows.entries()) {
+    if (!isObj(row) || typeof row.id !== "string" || !SHARE_FORMAT_KEYS.parent_id!.test(row.id) || typeof row.name !== "string" || !Array.isArray(row.changes) || changesProblem(row.changes) !== null) return true;
+    ids.add(row.id);
+    const parent = row.parent_id ?? null;
+    if (i === 0 ? parent !== null : parent !== (rows[i - 1] as Obj).id) return true;
+  }
+  if (ids.size !== rows.length || s.scenarioId !== (rows[rows.length - 1] as Obj).id) return true;
+  return (
+    !isObj(s.bundle) ||
+    !Array.isArray(s.solutions) ||
+    typeof s.startDate !== "string" ||
+    !SHARE_FORMAT_KEYS.startDate!.test(s.startDate) ||
+    typeof s.months !== "number" ||
+    !Number.isInteger(s.months) ||
+    s.months < 1 ||
+    s.months > 24 ||
+    typeof s.hiddenCostChanges !== "number" ||
+    !Number.isInteger(s.hiddenCostChanges) ||
+    s.hiddenCostChanges < 0 ||
+    s.hiddenCostChanges > 9999
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -466,9 +599,21 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     s.toggles.financials !== toggles.financials ||
     !SHARE_KINDS.includes(s.kind as ShareKind) ||
     // B4: the kinds a play link hides are known kind ids, so the key can't carry text.
-    !validHiddenLevers(s.hiddenLevers)
+    !validHiddenLevers(s.hiddenLevers) ||
+    (s.kind === "scenario" && scenarioShapeProblem(s))
   ) {
     found.add("mismatch");
+  }
+  if (isObj(s) && s.kind === "scenario" && Array.isArray(s.scenarios)) {
+    for (const row of s.scenarios) {
+      if (!isObj(row) || !Array.isArray(row.changes)) continue;
+      for (const c of row.changes) {
+        if (!isObj(c)) continue;
+        // A hire's name is a candidate's: gone with People off. A role cost or overheads change is an amount of cost: gone with Financials off.
+        if (!toggles.people && c.lever === "D1" && isObj(c.params) && "name" in c.params) found.add("person");
+        if (!toggles.financials && typeof c.lever === "string" && COST_LEVER_IDS.has(c.lever)) found.add("costs");
+      }
+    }
   }
   // Emails and money: every string value. Names: the free-text values only, token by token on the same normalised view the
   // scrub used, so any name token left (next to a label or not) is a leak. Keys are never looked at for text.
@@ -493,6 +638,9 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
     for (const [k, v] of Object.entries(value)) {
       // `hiddenLevers` is a non-text key wherever it sits, so it may appear only once, at the top: a copy nested elsewhere would skip the name checks.
       if (k === "hiddenLevers" && depth > 0) found.add("mismatch");
+      // A scenario link's keys are non-text keys, so each is checked by format wherever it sits: no object or array under one, no string that isn't its shape.
+      const shape = Object.hasOwn(SHARE_FORMAT_KEYS, k) ? SHARE_FORMAT_KEYS[k] : undefined;
+      if (shape && (Array.isArray(v) || isObj(v) || (typeof v === "string" && !shape.test(v)))) found.add("mismatch");
       if (k === "cost_rate" && v !== null && v !== undefined) found.add("pay");
       // Per-person times (C6): any capacityFactor key, or a non-empty list of them, anywhere.
       if (k === "capacityFactor") found.add("speeds");
@@ -566,6 +714,8 @@ export async function loadShareData(
   workspace: Workspace,
   target: { kind: ShareKind; id: string | null },
   toggles: ShareToggles,
+  /** `today`: the date a scenario link's run starts on (default: today, UTC); tests fix it. */
+  options: { today?: string } = {},
 ): Promise<ShareSnapshot> {
   const rdb = shareReaderDb(db, toggles);
   const ws = workspace.id;
@@ -645,7 +795,7 @@ export async function loadShareData(
       loadSolutionsData(rdb, ws),
     ]);
     raw = { ...base, kind: "issue", issueId: issue.id, bundle, issues, processes, liveRevisions, solutions };
-  } else {
+  } else if (target.kind === "solution") {
     const all = await loadSolutionsData(rdb, ws);
     const solution = all.solutions.find((s) => s.id === target.id);
     if (!solution) throw new ShareBuildError("That solution isn't here any more.");
@@ -672,6 +822,36 @@ export async function loadShareData(
     const mine: SolutionRow[] = [solution];
     const solutions: SolutionsData = { solutions: mine, links: all.links.filter((l) => l.solution_id === solution.id) };
     raw = { ...base, kind: "solution", solutionId: solution.id, bundle: live, solutions, issues, processes, compareBase, movedOn };
+  } else {
+    // A saved Sandbox scenario: the live company model (as the Sandbox page loads it), the scenario with the chain it builds on, and the
+    // solutions its changes put live. The run starts today, frozen with the copy.
+    const rows = await loadSandboxScenarios(rdb, ws);
+    const scenario = rows.find((r) => r.id === target.id);
+    if (!scenario) throw new ShareBuildError("That scenario isn't here any more.");
+    const eff = effectiveChanges(scenario, rows);
+    if (!eff.ok) throw new ShareBuildError(eff.error);
+    const limit = effectiveLimitProblem(eff.changes.map((c) => c.change));
+    if (limit) throw new ShareBuildError(limit);
+    const loaded = await loadProcessBySlug(rdb, workspace.slug, { draft: false });
+    if (!loaded || isUnpublished(loaded.live)) throw new ShareBuildError("Publish a process first: the Sandbox has nothing to run yet.");
+    const live = loaded.live;
+    const parts = [{ processId: live.process.id, revisionId: live.revision.id }, ...(live.otherProcesses ?? []).map((p) => ({ processId: p.process.id, revisionId: p.revision.id }))];
+    const [deleteCandidates, all] = await Promise.all([loadDeleteCandidates(rdb, parts), loadSolutionsData(rdb, ws)]);
+    const inModel = new Set(parts.map((p) => p.processId));
+    const named = new Set(eff.changes.filter((c) => c.change.lever === "E6").map((c) => c.change.target));
+    const solutions = all.solutions.filter((x) => named.has(x.id) && inModel.has(x.process_id));
+    const pick = (r: SandboxScenarioRow): ScenarioShareRow => ({ id: r.id, name: r.name, description: r.description, parent_id: r.parent_id, changes: r.changes, horizon_months: r.horizon_months });
+    raw = {
+      ...base,
+      kind: "scenario",
+      scenarioId: scenario.id,
+      bundle: { ...live, deleteCandidates },
+      scenarios: [...eff.parents, scenario].map((r) => pick(rows.find((x) => x.id === r.id) ?? scenario)),
+      solutions,
+      startDate: options.today ?? new Date().toISOString().slice(0, 10),
+      months: scenario.horizon_months,
+      hiddenCostChanges: 0,
+    };
   }
   return redactShareSnapshot(raw, toggles, secrets);
 }

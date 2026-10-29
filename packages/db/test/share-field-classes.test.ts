@@ -4,6 +4,8 @@ import type { Selectable } from "kysely";
 import type { DB } from "../src";
 import type { Viewer } from "../src/queries";
 import { SHARE_NON_TEXT_KEYS, SHARE_NON_TEXT_REASONS, type IssueShare, type OverviewShare, type ProcessShare, type SolutionShare } from "../src/share";
+import type { SandboxChange, SandboxParams } from "../src/sandbox-levers";
+import type { ScenarioShare, ScenarioShareRow } from "../src/share";
 import type { BlockBundle, IssueLinkRef, IssueRow, RecurrenceJson, ScenarioRow, SolutionsData, WorkspaceSettings } from "../src/types";
 
 // Every string column of every table, from the generated database types (db-types.ts), is classified here: free text, or not text (an id, a date,
@@ -124,6 +126,14 @@ const SHAPES = {
   solution: { kind: "not", workspaceName: "text", solutionId: "not", movedOn: "text" },
   /** A process snapshot's `processes[]`. */
   processList: { id: "not", name: "text", parentId: "uuid", kind: "not" },
+  /** A scenario snapshot's `scenarios[]`: the shared scenario and the scenarios it builds on (sandbox phase 5b). */
+  scenarioShareRow: { id: "not", name: "text", description: "text", parent_id: "not" },
+  /** A scenario snapshot's `scenarios[].changes[]` (SandboxChange): the lever, target and month are format-checked at every depth (SHARE_FORMAT_KEYS). */
+  scenarioChange: { id: "not", lever: "not", target: "not", op: "not", from: "not", note: "text" },
+  /** A change's `params`: a hire's name and B2's who are free text (`who` is text in first principles too, so it stays scrubbed; accepted, ADR 0016). */
+  changeParams: { name: "text", who: "text" },
+  /** The scenario snapshot itself (the other kinds' envelope keys are above). */
+  scenario: { kind: "not", workspaceName: "text", scenarioId: "not", startDate: "not" },
 } satisfies {
   scenarioRow: Record<StrKeys<ScenarioRow>, Class>;
   patch: Record<StrKeys<ScenarioPatch>, Class>;
@@ -139,6 +149,10 @@ const SHAPES = {
   issue: Record<StrKeys<IssueShare>, Class>;
   solution: Record<StrKeys<SolutionShare>, Class>;
   processList: Record<StrKeys<ProcessListEntry>, Class>;
+  scenarioShareRow: Record<StrKeys<ScenarioShareRow>, Class>;
+  scenarioChange: Record<StrKeys<SandboxChange>, Class>;
+  changeParams: Record<StrKeys<NonNullable<SandboxParams>>, Class>;
+  scenario: Record<StrKeys<ScenarioShare>, Class>;
 };
 
 /** Every classified shape: table columns, the first-principles document and the JSON shapes above, by name. */

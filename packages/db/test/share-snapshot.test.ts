@@ -7,6 +7,7 @@ import { JOIN_PLACE_WORDS, JOIN_STANDARD_WORDS, JOIN_VERSION_WORDS } from "../sr
 import { normaliseView } from "../src/share-text";
 import { rpc } from "../src/client";
 import { createTestDb, createUser, type TestDb } from "./harness";
+import { cleanScenario, scenarioCases, type Json as CaseJson } from "./scenario-share-cases";
 import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_OTHER, MONEY_YES, OLD_SHARE_MONEY_SOURCE } from "./money-cases";
 import {
   SHARE_SNAPSHOT_VERSION,
@@ -24,6 +25,8 @@ import {
   type Db,
   type IssueRow,
   type ProcessBundle,
+  type SandboxChange,
+  type ScenarioShare,
   type ShareKind,
   type ShareSecrets,
   type ShareSnapshot,
@@ -187,10 +190,52 @@ function raw(kind: ShareKind, w: World, toggles: ShareToggles): ShareSnapshot {
       return { ...base, kind, issueId: w.issue.id, bundle: w.bundle, issues: common.issues, processes: [], liveRevisions: {}, solutions };
     case "solution":
       return { ...base, kind, solutionId: w.solution.id, bundle: w.bundle, solutions, issues: common.issues, processes: [], compareBase: { revision: w.bundle.revision, steps: w.bundle.steps, edges: w.bundle.edges }, movedOn: null };
+    case "scenario":
+      return { ...base, kind, ...scenarioParts(w) };
   }
 }
 
-const KINDS: ShareKind[] = ["overview", "process", "issue", "solution"];
+const SC_PARENT = "5c000000-0000-4000-8000-0000000000a1";
+const SC_CHILD = "5c000000-0000-4000-8000-0000000000a2";
+/** The pieces of a scenario snapshot with something to hide in each: a candidate's name, a role cost, overheads, names and money in notes. */
+function scenarioParts(w: World) {
+  const role = w.bundle.roles[0]!.id;
+  const [p0, p1] = w.personFull;
+  const c0 = w.clientNames[0];
+  const ch = (n: number, lever: SandboxChange["lever"], over: Partial<SandboxChange> = {}): SandboxChange => ({ id: `5c000000-0000-4000-8000-0000000001${String(n).padStart(2, "0")}`, lever, target: null, op: "multiply", value: 1.1, ...over });
+  return {
+    scenarioId: SC_CHILD,
+    bundle: { ...w.bundle, deleteCandidates: {} },
+    scenarios: [
+      {
+        id: SC_PARENT,
+        name: `Plan for ${c0}`,
+        description: `${p0} wrote this; budget ${MONEY_TEXT}. Mail ${p1!.split(" ")[0]!.toLowerCase()}@${w.name}.example`,
+        parent_id: null,
+        horizon_months: 12,
+        changes: [ch(1, "C1", { target: role, note: `${p0} asked for a rise to £62 an hour` }), ch(2, "C2", { op: "set", value: 9000 })],
+      },
+      {
+        id: SC_CHILD,
+        name: "Hire in March",
+        description: null,
+        parent_id: SC_PARENT,
+        horizon_months: 12,
+        changes: [
+          ch(3, "D1", { target: role, op: "set", value: 1, from: "2027-03", params: { name: p1! }, note: `Replaces ${p0}, costing ${MONEY_TEXT}` }),
+          ch(4, "A1", { note: `Assumes ${c0} doubles leads` }),
+        ],
+      },
+    ],
+    solutions: [w.solution],
+    startDate: "2027-01-04",
+    months: 12,
+    hiddenCostChanges: 0,
+  } satisfies Omit<ScenarioShare, keyof ShareSnapshotBaseLike>;
+}
+type ShareSnapshotBaseLike = { v: unknown; kind: unknown; toggles: unknown; workspaceName: unknown };
+
+const KINDS: ShareKind[] = ["overview", "process", "issue", "solution", "scenario"];
 const TOGGLES: ShareToggles[] = [
   { people: false, financials: false },
   { people: true, financials: false },
@@ -1118,5 +1163,96 @@ describe("per-person times never reach a share link (C6)", () => {
     const w = worlds[0]!;
     const b = { ...w.bundle, payHidden: true as const, personCapacityFactors: [factorRow(w)], workspace: { ...w.bundle.workspace, settings: { ...w.bundle.workspace.settings, capacity_factor_enabled: true } } };
     expect(Object.values(toEngineModel(b, { startDate: "2026-10-05" }).people ?? {}).some((p) => p.capacityFactor)).toBe(false);
+  });
+});
+
+describe("scenario links: the checker, from the table both twins run (the database's twin is in share-links.test.ts)", () => {
+  const w = worlds[0]!;
+  const cases = scenarioCases({ person: w.personFull[0]!, client: w.clientNames[0]!, email: "sam@northbeam.example" });
+  for (const c of cases) {
+    it(c.name, () => {
+      const toggles = { people: c.people ?? false, financials: c.financials ?? false };
+      const snap = structuredClone(cleanScenario(toggles)) as CaseJson;
+      c.edit?.(snap);
+      const leaks = shareSnapshotLeaks(snap, w.secrets, toggles);
+      if (c.expect === null) expect(leaks).toEqual([]);
+      else if (c.expect === "costs") expect(leaks.some((l) => l === "costs" || l === "money")).toBe(true);
+      else expect(leaks).toContain(c.expect);
+    });
+  }
+});
+
+describe("scenario links: what the redaction does to the changes", () => {
+  const w = worlds[0]!;
+  const parts = () => ({ ...scenarioParts(w) });
+  const redact = (toggles: ShareToggles) => redactShareSnapshot({ v: 1, kind: "scenario", toggles, workspaceName: w.name, ...parts() } as ShareSnapshot, toggles, w.secrets) as unknown as ScenarioShare;
+  const all = (s: ScenarioShare) => s.scenarios.flatMap((r) => r.changes);
+
+  it("People off: a hire keeps no candidate's name (its other fields stay), and no person's name is in a note or description", () => {
+    const s = redact(TOGGLES[0]!);
+    const hire = all(s).find((c) => c.lever === "D1")!;
+    expect(hire).toMatchObject({ lever: "D1", op: "set", value: 1, from: "2027-03" });
+    expect("params" in hire).toBe(false);
+    const text = JSON.stringify(s);
+    for (const full of w.personFull) expect(text).not.toContain(full);
+    expect(s.scenarios[0]!.description).toContain("Team member");
+  });
+
+  it("People on: the hire keeps the candidate's name", () => {
+    const s = redact(TOGGLES[1]!);
+    const hire = all(s).find((c) => c.lever === "D1")!;
+    expect(hire.params).toEqual({ name: w.personFull[1] });
+  });
+
+  it("a hire's other params stay when only the name goes (none exist for D1 today; A5 and B4 keep theirs)", () => {
+    const withB4: ScenarioShare = { v: 1, kind: "scenario", toggles: TOGGLES[0]!, workspaceName: w.name, ...parts() } as ScenarioShare;
+    withB4.scenarios[1]!.changes.push({ id: "5c000000-0000-4000-8000-000000000199", lever: "B4", target: "late", op: "set", value: 0.5, params: { chance: 0.2, months: 3 } });
+    const s = redactShareSnapshot(withB4, TOGGLES[0]!, w.secrets) as unknown as ScenarioShare;
+    expect(all(s).find((c) => c.lever === "B4")!.params).toEqual({ chance: 0.2, months: 3 });
+  });
+
+  it("Financials off: role-cost and overheads changes are dropped and counted; every other change stays", () => {
+    const s = redact(TOGGLES[0]!);
+    expect(all(s).map((c) => c.lever)).toEqual(["D1", "A1"]);
+    expect(s.hiddenCostChanges).toBe(2);
+    expect(s.scenarios).toHaveLength(2);
+    expect(JSON.stringify(s.scenarios)).not.toMatch(/9000|62 an hour/);
+  });
+
+  it("Financials on: they stay, nothing is counted", () => {
+    const s = redact(TOGGLES[2]!);
+    expect(all(s).map((c) => c.lever)).toEqual(["C1", "C2", "D1", "A1"]);
+    expect(s.hiddenCostChanges).toBe(0);
+  });
+
+  it("notes and descriptions are scrubbed like every string: client names, emails and (Financials off) money", () => {
+    const off = JSON.stringify(redact(TOGGLES[0]!));
+    for (const c of w.clientNames) expect(off).not.toContain(c);
+    expect(off).not.toMatch(EMAIL_RE);
+    expect(off).toContain("[amount hidden]");
+    expect(off).toContain("[email hidden]");
+    const on = JSON.stringify(redact(TOGGLES[3]!));
+    expect(on).toContain("£4,100");
+  });
+
+  it("a note that grows past 280 characters when names and amounts are swapped for labels is cut to fit, so the link isn't refused", () => {
+    const longNote = `${"£5 ".repeat(90)}`.trim();
+    expect(longNote.length).toBeLessThanOrEqual(280);
+    const input = { v: 1, kind: "scenario", toggles: TOGGLES[0]!, workspaceName: w.name, ...parts() } as ScenarioShare;
+    input.scenarios[1]!.changes[1] = { ...input.scenarios[1]!.changes[1]!, note: longNote };
+    const s = redactShareSnapshot(input, TOGGLES[0]!, w.secrets) as unknown as ScenarioShare;
+    const note = s.scenarios[1]!.changes[1]!.note!;
+    expect(Array.from(note).length).toBeLessThanOrEqual(280);
+    expect(note).toBe(note.trim());
+    expect(shareSnapshotLeaks(s, w.secrets, TOGGLES[0]!)).toEqual([]);
+  });
+
+  it("the redacted snapshot of every toggle combination is clean to the checker, and keeps the shared scenario last", () => {
+    for (const t of TOGGLES) {
+      const s = redact(t);
+      expect(shareSnapshotLeaks(s, w.secrets, t), label(t)).toEqual([]);
+      expect(s.scenarioId).toBe(s.scenarios[s.scenarios.length - 1]!.id);
+      expect(s.scenarios.map((r) => r.parent_id)).toEqual([null, s.scenarios[0]!.id]);
+    }
   });
 });

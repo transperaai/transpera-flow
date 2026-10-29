@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, larkspurPersonIds, northbeamIssues } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 import { MONEY_NOT, MONEY_NOT_VARIANTS, MONEY_YES } from "./money-cases";
+import { A as SC_A, B as SC_B, cleanScenario, scenarioCases, type Expected, type Json as CaseJson } from "./scenario-share-cases";
 
 // Share links (issue #32, B3): the table, its write trigger, the leak check Postgres runs on every snapshot, the team-input
 // function and the one function a visitor reads through. Each test runs in a rolled-back transaction.
@@ -1061,5 +1062,126 @@ describe("share links never carry per-person times (C6)", () => {
     for (const role of ["anon", "authenticated"]) {
       expect((await db.client.query("select has_function_privilege($1, 'private.share_links_no_speeds()', 'execute') as h", [role])).rows[0].h, role).toBe(false);
     }
+  });
+});
+
+describe("scenario links (sandbox phase 5b): kind, target, and the leak check's scenario rules", () => {
+  const MESSAGE: Record<Exclude<Expected, null>, string> = {
+    mismatch: "The snapshot doesn't match the link.",
+    email: "The snapshot contains an email address.",
+    person: "The snapshot names a person.",
+    client: "The snapshot names a client.",
+    costs: "The snapshot contains costs or margins.",
+  };
+  const problem = async (snap: unknown, people: boolean, financials: boolean) =>
+    (await db.client.query("select private.share_snapshot_problem($1, 'scenario', $2::jsonb, $3, $4) as p", [ws, JSON.stringify(snap), people, financials])).rows[0].p as string | null;
+  let scenarioId = "";
+
+  beforeAll(async () => {
+    // The shared scenario of Northbeam (the link's target) and one of Larkspur.
+    scenarioId = SC_B;
+    await db.client.query("insert into sandbox_scenarios (id, workspace_id, name) values ($1, $2, 'Share me'), ('5c000000-0000-4000-8000-0000000000f1', $3, 'Not yours')", [scenarioId, ws, other]);
+  });
+
+  const cases = scenarioCases({ person: "", client: "", email: "sam@northbeam.example" });
+  // The names are the workspace's own, so build the table once they are known.
+  it("every case of the table the checker's TypeScript twin runs, through the database function: the same refusal, or none", async () => {
+    const table = scenarioCases({ person: personName, client: multiWordClient, email: "sam@northbeam.example" });
+    expect(table.length).toBe(cases.length);
+    expect(table.length).toBeGreaterThan(70);
+    for (const c of table) {
+      const toggles = { people: c.people ?? false, financials: c.financials ?? false };
+      const snap = structuredClone(cleanScenario(toggles)) as CaseJson;
+      c.edit?.(snap);
+      const got = await problem(snap, toggles.people, toggles.financials);
+      expect(got, c.name).toBe(c.expect === null ? null : MESSAGE[c.expect]);
+    }
+  });
+
+  const link = (snapshot: CaseJson, over: Made = {}): Made => ({ kind: "scenario", target: scenarioId, snapshot, ...over });
+
+  it("a clean scenario snapshot is stored, for every toggle combination, and an anonymous visitor opens it with kind 'scenario'", async () => {
+    for (const [people, financials] of [[false, false], [true, false], [false, true], [true, true]] as const) {
+      await asEditor(async (c) => {
+        const r = await make(c, link(cleanScenario({ people, financials }), { people, financials, tok: "scn" }));
+        expect(r, `${people} ${financials}`).toMatchObject({ ok: true });
+      });
+    }
+    const t = token("scn-open");
+    await asAnon(
+      async (c) => {
+        await insertLink(c, link(cleanScenario({ people: false, financials: false }), { tok: t }));
+      },
+      async (c) => {
+        const r = (await open(c, t))!;
+        expect(r).toMatchObject({ status: "ok", kind: "scenario", mode: "view" });
+        expect((r.snapshot as CaseJson).scenarioId).toBe(SC_B);
+        expect(Object.keys(r).sort()).toEqual(["expires_at", "kind", "mode", "show_financials", "show_people", "snapshot", "snapshot_at", "status"]);
+      },
+    );
+  });
+
+  it("a leaky snapshot is refused at the database (23514), naming what leaked and never the value", async () => {
+    const leaky: [string, (s: CaseJson) => void, Made, string][] = [
+      ["a candidate's name on a hire, People off", (s) => { ((s.scenarios as CaseJson[])[1]!.changes as CaseJson[])[0]!.params = { name: "Jade Quill" }; }, {}, MESSAGE.person!],
+      ["a person's name in a note, People off", (s) => { ((s.scenarios as CaseJson[])[1]!.changes as CaseJson[])[1]!.note = `Assumes ${personName} agrees`; }, {}, MESSAGE.person!],
+      ["a role-cost change, Financials off", (s) => { ((s.scenarios as CaseJson[])[1]!.changes as CaseJson[]).push({ id: "5c000000-0000-4000-8000-000000000199", lever: "C1", target: "5c000000-0000-4000-8000-0000000000b1", op: "multiply", value: 1.2 }); }, {}, MESSAGE.costs!],
+      ["an overheads change, Financials off", (s) => { ((s.scenarios as CaseJson[])[0]!.changes as CaseJson[]).push({ id: "5c000000-0000-4000-8000-000000000198", lever: "C2", target: null, op: "set", value: 7000 }); }, {}, MESSAGE.costs!],
+      ["money in a note, Financials off", (s) => { ((s.scenarios as CaseJson[])[1]!.changes as CaseJson[])[1]!.note = "About £4,100 a month"; }, {}, MESSAGE.costs!],
+      ["a client's name in a note, both on", (s) => { ((s.scenarios as CaseJson[])[1]!.changes as CaseJson[])[1]!.note = `${multiWordClient} renews`; }, { people: true, financials: true }, MESSAGE.client!],
+      ["an email in a description, both on", (s) => { (s.scenarios as CaseJson[])[0]!.description = "Mail sam@northbeam.example"; }, { people: true, financials: true }, MESSAGE.email!],
+      ["words under a change's target", (s) => { ((s.scenarios as CaseJson[])[1]!.changes as CaseJson[])[1]!.target = "Ask Jade about it"; }, {}, MESSAGE.mismatch!],
+      ["words under a nested from", (s) => { s.extra = { from: "next week" }; }, {}, MESSAGE.mismatch!],
+      ["a scenario that is not the link's", (s) => { s.scenarioId = SC_A; }, {}, MESSAGE.mismatch!],
+    ];
+    for (const [name, edit, over, message] of leaky) {
+      await asEditor(async (c) => {
+        const snap = structuredClone(cleanScenario({ people: over.people ?? false, financials: over.financials ?? false })) as CaseJson;
+        edit(snap);
+        const r = await make(c, link(snap, over));
+        expect(r, name).toMatchObject({ ok: false, code: "23514", message });
+        expect(r.message).not.toContain(personName);
+        expect(r.message).not.toContain(multiWordClient);
+      });
+    }
+  });
+
+  it("replacing a stored snapshot with a leaky one is refused too", async () => {
+    await asEditor(async (c) => {
+      const made = await make(c, link(cleanScenario({ people: false, financials: false }), { tok: "scn-upd" }));
+      expect(made).toMatchObject({ ok: true });
+      const leaky = structuredClone(cleanScenario({ people: false, financials: false })) as CaseJson;
+      ((leaky.scenarios as CaseJson[])[1]!.changes as CaseJson[])[1]!.note = `Assumes ${personName} agrees`;
+      const r = await attempt(c, () => c.query("update share_links set snapshot = $2::jsonb where id = $1", [made.rows![0].id, JSON.stringify(leaky)]));
+      expect(r).toMatchObject({ ok: false, code: "23514", message: MESSAGE.person });
+    });
+  });
+
+  it("the target must be a scenario of the workspace (22023)", async () => {
+    await asEditor(async (c) => {
+      const snap = cleanScenario({ people: false, financials: false });
+      expect(await make(c, link(snap, { target: "5c000000-0000-4000-8000-0000000000f1" }))).toMatchObject({ ok: false, code: "22023", message: "That isn't in this workspace." });
+      expect(await make(c, link(snap, { target: "5c000000-0000-4000-8000-0000000000f9" }))).toMatchObject({ ok: false, code: "22023" });
+      // A scenario link needs a target.
+      expect(await make(c, link(snap, { target: null }))).toMatchObject({ ok: false, code: "22023" });
+    });
+  });
+
+  it("a play link of a scenario is refused (22023): play links are for a process only", async () => {
+    await db.client.query("begin");
+    try {
+      const r = await attempt(db.client, () =>
+        db.client.query("insert into share_links (workspace_id, token_hash, kind, target_id, mode, snapshot, engine_version) values ($1, $2, 'scenario', $3, 'play', $4::jsonb, '1')", [ws, sha("play-scn"), scenarioId, JSON.stringify({ ...cleanScenario({ people: false, financials: false }), hiddenLevers: [] })]),
+      );
+      expect(r).toMatchObject({ ok: false, code: "22023", message: "Only a process can be shared for trying changes." });
+    } finally {
+      await db.client.query("rollback");
+    }
+  });
+
+  it("an API-token caller can't make one (42501), as for any kind", async () => {
+    await db.as({ ...who.editor!.claims, api_token_id: "11111111-1111-4111-8111-111111111111" }, async (c) => {
+      expect(await make(c, link(cleanScenario({ people: false, financials: false })))).toMatchObject({ ok: false, code: "42501" });
+    });
   });
 });
