@@ -10,3 +10,4 @@ export * from "./splice";
 export * from "./months";
 export * from "./solution";
 export * from "./execute";
+export * from "./time";
