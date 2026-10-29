@@ -47,6 +47,8 @@ export interface ScenarioBarProps {
   onNew: () => void;
   onAddChange: () => void;
   onSave: () => void;
+  /** Opens goal seek ("Find a value"); every role may run it, nothing it does is saved. */
+  onFindValue?: () => void;
   /** The Share button for the saved scenario on screen (Agency admins and the Owner); null when the scenario can't be shared yet. */
   share?: React.ReactNode;
   /** Why it can't be shared yet (unsaved changes), shown where the button would be. */
@@ -141,7 +143,12 @@ export function ScenarioBar(p: ScenarioBarProps) {
           </>
         ) : null}
 
-        <div className="flex items-center sm:ml-auto">
+        <div className="flex items-center gap-2 sm:ml-auto">
+          {p.onFindValue ? (
+            <Button variant="outline" onClick={p.onFindValue} data-goal-open>
+              Find a value
+            </Button>
+          ) : null}
           <Button variant="outline" onClick={p.onCompare} disabled={p.scenarios.length === 0} title={p.scenarios.length === 0 ? "Save a scenario to compare it" : undefined} data-scenario-compare>
             Compare
           </Button>

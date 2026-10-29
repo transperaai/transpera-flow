@@ -58,6 +58,8 @@ import { SandboxExportMenu, type ExportData } from "./export-menu";
 import { PrintSummary, type PrintColumn } from "./print-summary";
 import { Timing } from "./timing";
 import { PriceRise } from "./price-rise";
+import { GoalSeekDialog } from "./goal-seek-dialog";
+import { Tornado } from "./tornado";
 import { SandboxCompare, MAX_COMPARE } from "./sandbox-compare";
 import { ConfirmDialog, NameDialog, NO_CHANGES, ParentDialog, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
 
@@ -152,6 +154,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     return ids.length ? ids : null;
   });
   const [changeTarget, setChangeTarget] = useState<ChangeTarget | null>(null);
+  const [goalOpen, setGoalOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [nameAsk, setNameAsk] = useState<NameAsk>(null);
   const [parentAsk, setParentAsk] = useState(false);
@@ -624,6 +627,10 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   ];
   const parentName = working?.parent_id ? (saved.find((s) => s.id === working.parent_id)?.name ?? null) : null;
 
+  // Goal seek and "What matters most" run on the scenario on screen, or on No changes: the same bundle, solutions, horizon and start.
+  const analysisRun = useMemo(() => ({ bundle: live, solutions: planSolutions, months, startDate: start }), [live, planSolutions, months, start]);
+  const analysisBase = useMemo<EffectiveChange[]>(() => (working !== null && !scenarioError ? (effectiveList ?? NO_EFFECTIVE) : NO_EFFECTIVE), [working, scenarioError, effectiveList]);
+
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
@@ -715,6 +722,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onNew={newScenario}
           onAddChange={() => setChangeTarget({ mode: "add" })}
           onSave={onSave}
+          onFindValue={built.model && !scenarioError ? () => setGoalOpen(true) : undefined}
           share={mode === "live" && savedScenario && !dirty && !horizonChanged ? <ShareButton slug={sharePath(pathname)} kind="scenario" targetId={savedScenario.id} what={savedScenario.name} /> : null}
           shareHint={mode === "live" && savedScenario && (dirty || horizonChanged) ? "Save first to share it." : null}
           onSaveAsNew={onSaveAsNew}
@@ -914,6 +922,21 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       {!compare && moneyView ? (
         <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
+      {!compare && built.model && !scenarioError ? (
+        <Tornado
+          key={`${selected ?? "none"}|${months}|${JSON.stringify(analysisBase.map((e) => e.change))}`}
+          run={analysisRun}
+          base={analysisBase}
+          model={built.model}
+          hiddenLevers={hiddenLevers}
+          cutoffs={cutoffs}
+          categories={purposeCategories}
+          currency={live.workspace.settings.currency}
+          canSeeMoney={canEdit && Boolean(result?.monthly?.money)}
+          canAdd={canEdit}
+          onUse={(preset) => setChangeTarget({ mode: "add", preset })}
+        />
+      ) : null}
       {!compare && working !== null && plan.priceRise && !scenarioError ? <PriceRise tradeoff={plan.priceRise} months={timelineMonths(start, plan.run!.result.monthly!.months, plan.run!.model.hoursPerWeek)} currency={live.workspace.settings.currency} /> : null}
 
       {!comparing && built.model && exportColumns && exportMonths ? (
@@ -979,6 +1002,22 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
             setChangeTarget(null);
           }}
           onClose={() => setChangeTarget(null)}
+        />
+      ) : null}
+      {goalOpen && built.model ? (
+        <GoalSeekDialog
+          run={analysisRun}
+          base={analysisBase}
+          cutoffs={cutoffs}
+          roles={live.roles.filter((r) => r.active).map((r) => ({ id: r.id, name: r.name }))}
+          steps={parts.flatMap((p) => p.steps).filter((s) => s.role_id || s.person_id).map((s) => ({ id: s.id, name: s.name }))}
+          services={live.services.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name }))}
+          months={monthOptions}
+          currency={live.workspace.settings.currency}
+          canSeeMoney={canEdit && Boolean(result?.monthly?.money)}
+          canAdd={canEdit && working !== null}
+          onAdd={(preset) => setChangeTarget({ mode: "add", preset })}
+          onClose={() => setGoalOpen(false)}
         />
       ) : null}
       {confirm ? <ConfirmDialog {...confirm} onCancel={() => setConfirm(null)} /> : null}

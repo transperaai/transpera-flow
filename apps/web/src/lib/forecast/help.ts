@@ -137,6 +137,18 @@ export const SANDBOX_HELP = {
       "When capacity runs out: the first month any role passes the “Too busy” line on average (or has work and nobody there to do it), in the run on screen, which already carries your demand growth, seasons and market. For a hire, how long until it pays for itself: the extra profit it brings, month by month, set against what it costs, with and without it.",
     example: "“Capacity runs out in March 2027: Designers are 88% busy on average.” “The PPC hire in January pays for itself by August 2027 (+£4,100 by the horizon).” Both are averages of 30 runs.",
   },
+  goalSeek: {
+    label: "Find a value",
+    description:
+      "Pick one target and one lever with a range. It tries values in the range on top of the scenario on screen (or No changes) and finds the smallest change that meets the target, in at most 8 runs. It tells you when the target is already met, when it can't be met in the range, and when the measure doesn't move steadily so a smaller value may also work.",
+    example: "“At least 3 more Designers: every role stays under 85% busy in every month.”",
+  },
+  tornado: {
+    label: "What matters most",
+    description:
+      "Each lever moved a little each way, one at a time, on top of this scenario. The longest bars are where a change moves the measure most. Every bar is 30 runs with the same seed, so a difference comes from the change. A bar under 1% of the scenario's value is greyed: about no change.",
+    example: "“Opportunities ±10%” moving profit by £8,000 and “Headcount ±1 person” by £2,000 means winning more work matters more than one hire.",
+  },
   changeNote: {
     label: "Why (optional)",
     description: "What this change assumes, in a sentence. It's shown with the change, in compare, in exports and on share links.",
