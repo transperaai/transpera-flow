@@ -29,6 +29,12 @@ export interface PriceRiseTradeoff {
   estimated: boolean;
   /** The break-even as extra monthly churn (a share of client-months after the rise), when the client-months are known. */
   breakEvenRate: number | null;
+  /**
+   * What the break-even line can say: `breakEven` (the rise gains, and each extra leaver costs something), `cut` (the change gains nothing
+   * from the clients who stay: a cut, so there is nothing to break even), `free` (it gains, but no cost per leaver could be measured or
+   * estimated, so there is no number of leavers that cancels it). Only `breakEven` has a meaningful `breakEven` and `breakEvenRate`.
+   */
+  outcome: "breakEven" | "cut" | "free";
 }
 
 const MIN_LEAVERS = 0.05;
@@ -72,7 +78,8 @@ export function priceRiseTradeoff(
   const monthsAfter = months - firstRise;
   const estimated = meanX < MIN_LEAVERS;
   const lossPerLeaver = estimated ? (opts.monthlyFee ?? 0) * (monthsAfter / 2) : sum(tl) / sum(tx);
-  const breakEven = lossPerLeaver > 0 ? meanG / lossPerLeaver : 0;
+  const outcome: PriceRiseTradeoff["outcome"] = !(meanG > 0) ? "cut" : lossPerLeaver > 0 ? "breakEven" : "free";
+  const breakEven = outcome === "breakEven" ? meanG / lossPerLeaver : 0;
   return {
     gained: perMonth(G),
     lost: perMonth(L),
@@ -84,6 +91,7 @@ export function priceRiseTradeoff(
     breakEven,
     extraNow: meanX,
     estimated,
-    breakEvenRate: opts.clientMonthsAfter && opts.clientMonthsAfter > 0 ? breakEven / opts.clientMonthsAfter : null,
+    breakEvenRate: outcome === "breakEven" && opts.clientMonthsAfter && opts.clientMonthsAfter > 0 ? breakEven / opts.clientMonthsAfter : null,
+    outcome,
   };
 }

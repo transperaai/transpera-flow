@@ -46,8 +46,25 @@ describe("priceRiseTradeoff", () => {
   });
 
   it("has a loss per leaver of 0 and a break-even of 0 without a fee to estimate by, and is null with no rise or no run", () => {
-    expect(priceRiseTradeoff({ ...withRise, clientsLost: [[0, 0, 0], [0, 0, 0]] }, without, [1])).toMatchObject({ lossPerLeaver: 0, breakEven: 0 });
+    expect(priceRiseTradeoff({ ...withRise, clientsLost: [[0, 0, 0], [0, 0, 0]] }, without, [1])).toMatchObject({ lossPerLeaver: 0, breakEven: 0, outcome: "free", breakEvenRate: null });
     expect(priceRiseTradeoff(withRise, without, [])).toBeNull();
     expect(priceRiseTradeoff({ revenue: [], rise: [], clientsLost: [] }, without, [1])).toBeNull();
+  });
+
+  it("a cut gains nothing from the clients who stay: no break-even (not a negative number of leavers)", () => {
+    // A 10% cut: the stayers pay 1 less a month from month 1 and nobody leaves, so gained -2 and -2, net the same, lost 0.
+    const cut = { revenue: [[10, 9, 9], [10, 9, 9]], rise: [[0, -1, -1], [0, -1, -1]], clientsLost: [[0, 0, 0], [0, 0, 0]] };
+    const t = priceRiseTradeoff(cut, without, [1], { monthlyFee: 9, clientMonthsAfter: 40 })!;
+    expect(t.outcome).toBe("cut");
+    expect(t.breakEven).toBe(0);
+    expect(t.breakEvenRate).toBeNull();
+    expect([t.total.gained.mean, t.total.net.mean, t.total.lost.mean]).toEqual([-2, -2, 0]);
+  });
+
+  it("gained − lost = net in every replication and month, and so in the means shown", () => {
+    const t = priceRiseTradeoff(withRise, without, [1])!;
+    t.gained.forEach((g, m) => expect(g.mean - t.lost[m]!.mean).toBeCloseTo(t.net[m]!.mean, 12));
+    expect(t.total.gained.mean - t.total.lost.mean).toBeCloseTo(t.total.net.mean, 12);
+    expect(t.outcome).toBe("breakEven");
   });
 });

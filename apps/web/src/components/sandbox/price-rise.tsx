@@ -63,12 +63,20 @@ export function PriceRise({ tradeoff: t, months, currency }: { tradeoff: PriceRi
         ))}
       </div>
       <Card className="px-4 py-3 text-sm" data-price-rise-break-even>
-        <span className="flex items-center">
-          The rise pays for itself while it loses fewer than {formatNumber(t.breakEven, 1)} extra clients over the run (it loses {formatNumber(t.extraNow, 1)} now)
-          {t.breakEvenRate !== null ? `, or about ${formatNumber(t.breakEvenRate * 100, 1)} points of extra monthly churn` : ""}.
+        <span className="flex items-center" data-price-rise-outcome={t.outcome}>
+          {t.outcome === "cut" ? (
+            "This change lowers what the clients who stay pay, so there is no break-even: a cut doesn't change churn here."
+          ) : t.outcome === "free" ? (
+            <>No cost per extra leaver could be worked out (it loses {formatNumber(t.extraNow, 1)} extra clients now), so there is no break-even to show.</>
+          ) : (
+            <>
+              The rise pays for itself while it loses fewer than {formatNumber(t.breakEven, 1)} extra clients over the run (it loses {formatNumber(t.extraNow, 1)} now)
+              {t.breakEvenRate !== null ? `, or about ${formatNumber(t.breakEvenRate * 100, 1)} points of extra monthly churn` : ""}.
+            </>
+          )}
           <Help {...HELP.breakEven} />
         </span>
-        {t.estimated ? <span className="mt-1 block text-xs text-muted-foreground">Estimated: the rise lost almost nobody to measure it by, so each lost client is taken as half the months left at the fee after the rise.</span> : null}
+        {t.estimated && t.outcome === "breakEven" ? <span className="mt-1 block text-xs text-muted-foreground">Estimated: the rise lost almost nobody to measure it by, so each lost client is taken as half the months left at the fee after the rise.</span> : null}
       </Card>
       <Card className="gap-2 px-4 py-4" data-price-rise-chart>
         <h3 className="text-sm font-medium">Net change per month</h3>
