@@ -6,7 +6,7 @@ import { CHURN_DRIVER_SPECS, CUSTOM_DRIVER_PREFIX, type BuiltinChurnDriverId } f
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { A_TEAM_MEMBER } from "@transpera-flow/db";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
-import { hireNames, monthWord } from "./run";
+import { hireNames, monthWord } from "@transpera-flow/db/sandbox";
 import { othersTotal, percentText, weightToShare } from "./traffic";
 
 /** What names a change's target: the bundle's roles, people (as the viewer's bundle names them), steps, services; and the solutions. */

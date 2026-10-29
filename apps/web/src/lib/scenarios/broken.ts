@@ -3,7 +3,7 @@
 // break if published, and where a broken patch can be re-pointed. Pure; the
 // checks themselves are the engine's (packages/engine/src/broken.ts).
 
-import type { ProcessBundle, ScenarioRow, Viewer } from "@transpera-flow/db";
+import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import {
   BrokenScenarioError,
   checkScenario,
@@ -15,26 +15,6 @@ import {
   type ScenarioPatch,
 } from "@transpera-flow/engine";
 import { personName, viewerOf } from "@/lib/viewer";
-
-type Steps = Pick<ProcessBundle, "steps" | "retired">;
-
-/**
- * Steps `bundle` no longer has, by id: its retired rows (split or replaced,
- * with `replaced_by`), then the same from `others` (e.g. the live revision
- * while a draft is shown), then steps of `others` that `bundle` lacks, which
- * were deleted (no replacements). The first record of an id wins.
- */
-export function retiredSteps(bundle: Steps, ...others: (Steps | null | undefined)[]): RetiredSteps {
-  const out: RetiredSteps = {};
-  const present = new Set(bundle.steps.map((s) => s.id));
-  const add = (id: string, name: string, replacedBy: string[]) => {
-    if (!present.has(id) && !out[id]) out[id] = { name, replacedBy };
-  };
-  const all = [bundle, ...others.filter((o): o is Steps => Boolean(o))];
-  for (const b of all) for (const s of b.retired ?? []) add(s.id, s.name, [...(s.replaced_by ?? [])]);
-  for (const b of others) for (const s of b?.steps ?? []) add(s.id, s.name, []);
-  return out;
-}
 
 export interface BreakingScenario {
   scenario: ScenarioRow;

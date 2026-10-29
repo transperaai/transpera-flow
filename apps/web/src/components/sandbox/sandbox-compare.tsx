@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { compareSandbox, type CompareRow, type CompareTile, type SandboxComparison } from "@/lib/sandbox/compare";
-import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
+import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@transpera-flow/db/sandbox";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { COSTS_HIDDEN_NOTE } from "@/components/forecast/forecast-money";
 import { partMonthNote, type TimelineMonth } from "@/lib/forecast/timeline";

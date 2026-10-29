@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { formatNumber } from "@/lib/format";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
-import { mondayOnOrBefore } from "@/lib/forecast/positions";
+import { mondayOnOrBefore } from "@transpera-flow/db/sandbox";
 import { greyedLevers, listWords } from "@/lib/sandbox/greyed";
 import { longDate, weekdayDate } from "@/lib/sandbox/lane";
 import { MAX_TRAFFIC_PERCENT, othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";

@@ -7,7 +7,8 @@ import { forecastAlerts, toRatingConfig, type AnalysisSettings, type DetectedIss
 import { horizonWeeks } from "@/lib/horizon";
 import { withLeverChanges } from "@/lib/solutions/levers";
 import { visibleFindings } from "@/lib/rules/edit";
-import { calendarMonthStarts, timelineMonths } from "./timeline";
+import { timelineMonths } from "./timeline";
+import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
 
 /** The horizon the forecast opens on: a year ahead. */
 export const DEFAULT_FORECAST_MONTHS = 12;

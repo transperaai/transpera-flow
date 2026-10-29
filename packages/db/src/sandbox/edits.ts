@@ -6,7 +6,9 @@
 //     per service or by name (B1, B3: the pooled count and churn do nothing there), a client value range (A5), a churn driver as a chance
 //     (B4), and the price driver switched on for a price rise (B5, so the rise carries its churn).
 
-import { qualifiedLeadsPerWeek, sandboxLever, type ProcessBundle, type SandboxChange } from "@transpera-flow/db";
+import { qualifiedLeadsPerWeek } from "../model";
+import { sandboxLever, type SandboxChange } from "../sandbox-levers";
+import type { ProcessBundle } from "../types";
 import {
   CUSTOM_DRIVER_PREFIX,
   DEFAULT_HEALTH_RULES,

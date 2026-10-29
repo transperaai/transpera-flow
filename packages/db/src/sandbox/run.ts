@@ -11,13 +11,13 @@
 //   * a change whose target is gone is skipped and listed (`ChangeProblem`), never silent.
 // A scenario's effective changes are its parents' first, then its own (./effective.ts).
 
-import { workingDaysBetween, ModelError, engineMarket, toEngineModel, sandboxLever, patchOf, type PersonLeaveRow, type PersonRoleRow, type PersonRow, type PersonSkillRow, type PersonCapacityFactorRow, type ProcessBundle, type ProcessPart, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
+import { workingDaysBetween, ModelError, engineMarket, toEngineModel } from "../model";
+import { sandboxLever, patchOf, type SandboxChange } from "../sandbox-levers";
+import type { PersonLeaveRow, PersonRoleRow, PersonRow, PersonSkillRow, PersonCapacityFactorRow, ProcessBundle, ProcessPart, SolutionRow } from "../types";
 import { applyPatches, checkScenario, initialState, type EngineModel, type InitialState, type RetiredSteps, type ScenarioPatch } from "@transpera-flow/engine";
-import { calendarMonthStarts } from "@/lib/forecast/timeline";
-import { retiredSteps } from "@/lib/scenarios/broken";
-import { horizonWeeks } from "@/lib/horizon";
-import { bundleFromSolution } from "@/lib/solutions/bundle";
-import { addDays, addMonths, hoursToDate, monthBounds } from "@/lib/forecast/positions";
+import { retiredSteps } from "../retired";
+import { addDays, addMonths, calendarMonthStarts, horizonWeeks, hoursToDate, monthBounds } from "./months";
+import { bundleFromSolution } from "./solution";
 import { channelsOf, isChannelChange, overheadsCarried } from "./channels";
 import { applyBundleChanges, applyModelChanges } from "./edits";
 import type { EffectiveChange } from "./effective";
@@ -551,9 +551,9 @@ export function warmupOf(model: EngineModel): InitialState {
 
 /**
  * Everything a run of the scenario needs: its segments' models (channels in them), the pinned warm-up, and for a price rise the
- * paired run without it. Pure; the hook calls it in a memo.
+ * paired run without it. Pure; the hook calls it in a memo. `pair: false` skips the price rise's pair (goal seek and the tornado don't need it).
  */
-export function prepareScenario(bundle: ProcessBundle, changes: readonly EffectiveChange[], solutions: readonly SolutionRow[], months: number, startDate: string): PreparedScenario {
+export function prepareScenario(bundle: ProcessBundle, changes: readonly EffectiveChange[], solutions: readonly SolutionRow[], months: number, startDate: string, o: { pair?: boolean } = {}): PreparedScenario {
   const retired = retiredSteps(bundle);
   const live = scenarioModel(bundle, months, startDate);
   const fail = (error: string, extra: Partial<PreparedScenario> = {}): PreparedScenario => ({ segments: [], pair: null, riseMonths: [], start: null, monthStarts: [], markersModel: null as unknown as EngineModel, planPeople: new Set(), problems: [], later: [], error, ...extra });
@@ -602,7 +602,7 @@ export function prepareScenario(bundle: ProcessBundle, changes: readonly Effecti
   const rises = changes.filter((e) => e.change.lever === "B5");
   let pair: PreparedSegment[] | null = null;
   const riseMonths: number[] = [];
-  if (rises.length) {
+  if (rises.length && o.pair !== false) {
     // The price driver is on in this run too, as the scenario's rise turns it on: the pair differs only by the rise (Settings' own planned rise then counts in both).
     const p = build(changes.filter((e) => e.change.lever !== "B5"), true);
     pair = p.error === null ? p.segments : null;

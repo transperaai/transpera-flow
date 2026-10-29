@@ -6,7 +6,7 @@
 import { bundleForProcess, toEngineModel, type IssueRow, type SolutionRow } from "@transpera-flow/db";
 import { demoBundle } from "@/lib/sources/demo";
 import { solutionIssueOf, verdictArea } from "./area";
-import { bundleFromSolution } from "./bundle";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { withLeverChanges } from "./levers";
 import { verdictInWorker } from "./verdict-client";
 

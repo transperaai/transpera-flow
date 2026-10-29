@@ -6,13 +6,11 @@ import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
 import { describeChange } from "@/lib/sandbox/describe";
 import { patchOf } from "@transpera-flow/db";
-import { calendarMonthStarts, partMonthNote, timelineMonths } from "@/lib/forecast/timeline";
+import { partMonthNote, timelineMonths } from "@/lib/forecast/timeline";
+import { calendarMonthStarts, monthBounds, channelsOf, scenarioModel } from "@transpera-flow/db/sandbox";
 import { explainFull } from "@/lib/sandbox/explain";
 import { othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
 import { todayValue, trafficToday } from "@/lib/sandbox/today";
-import { monthBounds } from "@/lib/forecast/positions";
-import { channelsOf } from "@/lib/sandbox/channels";
-import { scenarioModel } from "@/lib/sandbox/run";
 
 // Polish from the Sandbox click-through (see the commits on branch sandbox-polish): pure logic, a case group per item. The page's own
 // behaviour is in sandbox-browser.test.ts.

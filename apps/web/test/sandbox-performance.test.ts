@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { northbeamPersonIds, northbeamRoleIds, type SandboxChange } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
-import { spliceMonthly } from "@/lib/forecast/splice";
-import { prepareScenario, MAX_SEGMENTS } from "@/lib/sandbox/run";
+import { spliceMonthly, prepareScenario, MAX_SEGMENTS } from "@transpera-flow/db/sandbox";
 
 // The worst scenarios the Sandbox will run (docs/plans/sandbox-p1-brief.md §6, sandbox-p3-brief.md §9). Only a headcount cut (D5) and a
 // solution going live (E6) still cost a run per month; every other timed change is a channel read inside one run. So the worst case is

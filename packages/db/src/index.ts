@@ -42,7 +42,7 @@ export {
   type ResolvedFirstPrinciples,
   type SaveFirstPrinciplesOutcome,
 } from "./first-principles";
-export { isRetiredStep, partitionSteps } from "./retired";
+export { isRetiredStep, partitionSteps, retiredSteps } from "./retired";
 export {
   absolutePositions,
   ancestorsOf,

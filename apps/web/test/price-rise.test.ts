@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { priceRiseTradeoff } from "@/lib/sandbox/price-rise";
+import { priceRiseTradeoff } from "@transpera-flow/db/sandbox";
 
 // The price rise's trade-off (docs/plans/sandbox-p3-brief.md §2.5), by hand: two replications of three months, a rise in month 1.
 //   with the rise:    revenue [10,12,12] and [10,11,13]; the rise's own part [0,3,3] and [0,2,2]; one client lost in month 1 of the first.

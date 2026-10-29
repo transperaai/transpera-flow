@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SANDBOX_LIBRARY, northbeamBundle, type SandboxChange } from "@transpera-flow/db";
 import { northbeamWithClientGroups, northbeamWithClients, northbeamWithServices, simulate, type EngineModel } from "@transpera-flow/engine";
-import { applyModelChanges, hasClientRoster } from "@/lib/sandbox/edits";
-import { prepareScenario } from "@/lib/sandbox/run";
+import { applyModelChanges, hasClientRoster, prepareScenario } from "@transpera-flow/db/sandbox";
 
 // The whole-run levers that are edits of the model rather than patches (docs/plans/sandbox-p3-brief.md §5.4): clients on the book and base
 // churn for a roster (B1, B3), a fee range (A5), a churn driver as a chance (B4) and the price driver a price rise switches on (B5).

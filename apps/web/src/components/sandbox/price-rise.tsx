@@ -8,7 +8,7 @@ import { Help } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
-import type { PriceRiseTradeoff } from "@/lib/sandbox/price-rise";
+import { type PriceRiseTradeoff } from "@transpera-flow/db/sandbox";
 import type { Stat } from "@transpera-flow/engine";
 import { CompareChart } from "./compare-chart";
 

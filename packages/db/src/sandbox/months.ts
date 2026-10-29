@@ -1,10 +1,9 @@
-// Where plan markers sit on the forecast timeline, and what a drop or a key press means (B7, issue #36). The timeline's
+// Months and positions on the forecast timeline, shared by the Sandbox runner (web and MCP). Where plan markers sit on the forecast timeline, and what a drop or a key press means (B7, issue #36). The timeline's
 // columns are equal width while months differ in length, so a position is "columns from the left" with the fraction of
 // the month, the same rule as `plannedMarkers`'s `at` (timeline.ts). Dates are ISO strings; time is working hours from
 // the start of the forecast's start date (weekdays only, as the model counts it). Pure: no React.
 
-import { workingDaysBetween } from "@transpera-flow/db";
-import { dateAtHour } from "./timeline";
+import { workingDaysBetween } from "../model";
 
 const DAY_MS = 86_400_000;
 
@@ -79,3 +78,45 @@ export function dateAtPosition(position: number, snap: "month" | "week", startDa
 export function stepDate(date: string, snap: "month" | "week", direction: 1 | -1): string {
   return snap === "month" ? addMonths(date, direction) : addDays(date, 7 * direction);
 }
+
+/** Working days a month has to have to stand alone: a first or last part of a month shorter than this joins its neighbour. */
+const MIN_PART_DAYS = 5;
+
+/**
+ * Where each calendar month after the first starts, in working hours from the start of `startDate` (weekdays only,
+ * as the model counts time), for `simulate(…, { monthly: true, monthStarts })`. A first or last part of a month
+ * shorter than a working week joins the month next to it, so no month is a few days long.
+ */
+export function calendarMonthStarts(startDate: string, horizonWeeks: number, hoursPerWeek: number): number[] {
+  const perDay = hoursPerWeek / 5;
+  const H = horizonWeeks * hoursPerWeek;
+  const [y, m] = startDate.split("-").map(Number) as [number, number];
+  const starts: number[] = [];
+  for (let k = 1; ; k++) {
+    const year = y + Math.floor((m - 1 + k) / 12);
+    const month = (m - 1 + k) % 12;
+    const first = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const hours = workingDaysBetween(startDate, first) * perDay;
+    if (hours >= H) break;
+    starts.push(hours);
+  }
+  if (starts.length && starts[0]! < MIN_PART_DAYS * perDay) starts.shift();
+  if (starts.length && H - starts[starts.length - 1]! < MIN_PART_DAYS * perDay) starts.pop();
+  return starts;
+}
+
+/** The calendar date `hours` working hours after the start of `startDate` (weekdays only, as the model counts them). */
+export function dateAtHour(startDate: string, hours: number, hoursPerWeek: number): Date {
+  const perDay = hoursPerWeek / 5;
+  let days = Math.floor(hours / perDay + 1e-9);
+  const d = new Date(`${startDate}T00:00:00Z`);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+  while (days > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) days--;
+  }
+  return d;
+}
+
+/** The horizon of a run for a number of months (4, 13, 26, 52, 104 weeks). */
+export const horizonWeeks = (months: number): number => Math.round((months * 52) / 12);

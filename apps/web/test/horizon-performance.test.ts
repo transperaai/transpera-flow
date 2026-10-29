@@ -3,7 +3,7 @@ import { larkspurBundle, northbeamBundle, toEngineModel } from "@transpera-flow/
 import { MARKET_PRESETS, applyPatches, northbeamWithClientGroups, marketFromSchedule, simulate, type EngineModel } from "@transpera-flow/engine";
 import { buildLevers, leverPatches } from "@/lib/scenarios/levers";
 import { HORIZON_MONTHS, horizonWeeks } from "@/lib/horizon";
-import { calendarMonthStarts } from "@/lib/forecast/timeline";
+import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
 
 // A 24-month run against the PRD §6.7 targets (issue #123, A58). Those targets are for 13 weeks. A run costs about
 // as much per week as the one before it, so the targets are scaled by horizon: 104 weeks is 8 times 13, so the

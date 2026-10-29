@@ -1,7 +1,8 @@
 // A scenario's effective changes (docs/plans/sandbox-p1-brief.md §3): its parents' changes first (root first), then its own. This is what
 // runs, and what the change list shows (inherited changes are read-only). Pure.
 
-import { cappedMonths, MAX_CHANGE_MONTHS, MAX_PARENT_DEPTH, MAX_SOLUTION_CHANGES, type SandboxChange, type SandboxScenarioRow } from "@transpera-flow/db";
+import { cappedMonths, MAX_CHANGE_MONTHS, MAX_PARENT_DEPTH, MAX_SOLUTION_CHANGES, type SandboxChange } from "../sandbox-levers";
+import type { SandboxScenarioRow } from "../types";
 
 /** A change and the scenario it came from. */
 export interface EffectiveChange {

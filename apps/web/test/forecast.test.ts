@@ -8,8 +8,8 @@ import { ForecastTimeline } from "@/components/forecast/forecast-timeline";
 import { DEMO_FORECAST_START, DEMO_HIRE_ID, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastInsights, forecastModel } from "@/lib/forecast/forecast";
 import { forecastMoney } from "@/lib/forecast/money";
-import { spliceMonthly } from "@/lib/forecast/splice";
-import { calendarMonthStarts, dateAtHour, marketBands, timelineData, timelineMonths } from "@/lib/forecast/timeline";
+import { spliceMonthly, calendarMonthStarts, dateAtHour } from "@transpera-flow/db/sandbox";
+import { marketBands, timelineData, timelineMonths } from "@/lib/forecast/timeline";
 import { demoBundle } from "@/lib/sources/demo";
 
 // The Forecast (issue #35, B6): the model it runs, its alerts as insights, and the timeline's data and chart.

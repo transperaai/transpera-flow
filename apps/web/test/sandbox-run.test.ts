@@ -5,16 +5,13 @@ import { northbeamPersonIds, northbeamRoleIds, northbeamStepIds, sandboxLever, t
 import { applyPatches, simulate, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
-import { addMonths, dateAtPosition, hoursToDate, monthBounds, positionOfDate, stepDate } from "@/lib/forecast/positions";
-import { spliceMonthly } from "@/lib/forecast/splice";
+import { addMonths, dateAtPosition, hoursToDate, monthBounds, positionOfDate, stepDate, spliceMonthly, descendantsOf, effectiveChanges, effectiveLimitProblem, type EffectiveChange, applyPeopleChanges, hireNames, leaveEnd, MAX_SEGMENTS, scenarioModel, scenarioSegments, withSolution } from "@transpera-flow/db/sandbox";
 import { timelineData } from "@/lib/forecast/timeline";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { DEMO_SCENARIOS, DEMO_THEN_LEADS_ID, deleteDemoScenario, demoScenariosNow, resetDemoScenarios, saveDemoScenario } from "@/lib/sandbox/demo";
 import { demoMarket } from "@/lib/market-demo";
-import { descendantsOf, effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@/lib/sandbox/effective";
 import { formatChangeValue } from "@/lib/sandbox/describe";
 import { laneMarkers } from "@/lib/sandbox/lane";
-import { applyPeopleChanges, hireNames, leaveEnd, MAX_SEGMENTS, scenarioModel, scenarioSegments, withSolution } from "@/lib/sandbox/run";
 import { SANDBOX_CHANGED_ELSEWHERE, sandboxFailure } from "@/lib/sandbox/save-errors";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 

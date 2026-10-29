@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SandboxChange } from "@transpera-flow/db";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
-import { monthBounds } from "@/lib/forecast/positions";
-import { channelsOf, isChannelChange, overheadsCarried } from "@/lib/sandbox/channels";
-import { scenarioModel } from "@/lib/sandbox/run";
+import { monthBounds, channelsOf, isChannelChange, overheadsCarried, scenarioModel } from "@transpera-flow/db/sandbox";
 
 // The levers that change from a month become the engine's monthly channels (docs/plans/sandbox-p3-brief.md §5.4): an array per target
 // that is exactly 1 (or the model's own value) before the first change, and each change applies on what is in force at its month.

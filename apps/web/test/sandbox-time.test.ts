@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PURPOSES, type PurposeCategory } from "@transpera-flow/db";
 import { larkspurWithPurposes, simulate, type MonthlyResult, type Stat, type TimeSplit } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
-import { spliceMonthly } from "@/lib/forecast/splice";
+import { spliceMonthly } from "@transpera-flow/db/sandbox";
 import { timelineMonths } from "@/lib/forecast/timeline";
 import { IDLE, NOT_SET, UNCOVERED, stackOf, timeView } from "@/lib/sandbox/time";
 import { fakeSplit, fakeTime } from "./fake-time";

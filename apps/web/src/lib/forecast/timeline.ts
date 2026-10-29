@@ -4,7 +4,8 @@
 // (`simulate(…, { monthly: true })`) can draw the same timeline from it (the Overview's team load chart, B15).
 
 import { monthOfHour, type EngineModel, type MonthBusy, type MonthlyResult, type SimulationResult, type Stat } from "@transpera-flow/engine";
-import { workingDaysBetween, type ProcessBundle } from "@transpera-flow/db";
+import type { ProcessBundle } from "@transpera-flow/db";
+import { dateAtHour } from "@transpera-flow/db/sandbox";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -27,32 +28,6 @@ export interface TimelineMonth {
   span: string | null;
   /** `long`, and for a part month what it covers: "November 2026 (from 28 Oct)". For tables and tooltips. */
   label: string;
-}
-
-/** Working days a month has to have to stand alone: a first or last part of a month shorter than this joins its neighbour. */
-const MIN_PART_DAYS = 5;
-
-/**
- * Where each calendar month after the first starts, in working hours from the start of `startDate` (weekdays only,
- * as the model counts time), for `simulate(…, { monthly: true, monthStarts })`. A first or last part of a month
- * shorter than a working week joins the month next to it, so no month is a few days long.
- */
-export function calendarMonthStarts(startDate: string, horizonWeeks: number, hoursPerWeek: number): number[] {
-  const perDay = hoursPerWeek / 5;
-  const H = horizonWeeks * hoursPerWeek;
-  const [y, m] = startDate.split("-").map(Number) as [number, number];
-  const starts: number[] = [];
-  for (let k = 1; ; k++) {
-    const year = y + Math.floor((m - 1 + k) / 12);
-    const month = (m - 1 + k) % 12;
-    const first = `${year}-${String(month + 1).padStart(2, "0")}-01`;
-    const hours = workingDaysBetween(startDate, first) * perDay;
-    if (hours >= H) break;
-    starts.push(hours);
-  }
-  if (starts.length && starts[0]! < MIN_PART_DAYS * perDay) starts.shift();
-  if (starts.length && H - starts[starts.length - 1]! < MIN_PART_DAYS * perDay) starts.pop();
-  return starts;
 }
 
 /**
@@ -117,19 +92,6 @@ export interface TimelineMarker {
   label: string;
   /** When, in words: "1 Feb 2027", "14 Dec 2026 to 8 Jan 2027". */
   when: string;
-}
-
-/** The calendar date `hours` working hours after the start of `startDate` (weekdays only, as the model counts them). */
-export function dateAtHour(startDate: string, hours: number, hoursPerWeek: number): Date {
-  const perDay = hoursPerWeek / 5;
-  let days = Math.floor(hours / perDay + 1e-9);
-  const d = new Date(`${startDate}T00:00:00Z`);
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
-  while (days > 0) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) days--;
-  }
-  return d;
 }
 
 const dayLabel = (d: Date) => `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]!.slice(0, 3)} ${d.getUTCFullYear()}`;

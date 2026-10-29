@@ -3,7 +3,7 @@
 // limits on the effective changes (a scenario with its parents'). Pure.
 
 import { changesProblem, MAX_HORIZON_MONTHS, MAX_SCENARIO_DESCRIPTION, MAX_SCENARIO_NAME, type SandboxChange, type SolutionRow } from "@transpera-flow/db";
-import { effectiveChanges, effectiveLimitProblem, descendantsOf } from "./effective";
+import { effectiveChanges, effectiveLimitProblem, descendantsOf } from "@transpera-flow/db/sandbox";
 
 export { isId } from "@/lib/sources/validate";
 

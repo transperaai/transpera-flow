@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PanelRight } from "lucide-react";
-import { isUnpublished, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
+import { retiredSteps, isUnpublished, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import type { EngineModel, FirstPrinciples, ScenarioPatch } from "@transpera-flow/engine";
 import { withLeverChanges } from "@/lib/solutions/levers";
 import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
@@ -18,7 +18,7 @@ import type { Conflict, ProcessEditor } from "@/lib/editor/editor";
 import type { Table, Value } from "@/lib/editor/ops";
 import { isProvenanceField } from "@/lib/editor/provenance";
 import { splitStep } from "@/lib/editor/split";
-import { newlyBroken, retiredSteps } from "@/lib/scenarios/broken";
+import { newlyBroken } from "@/lib/scenarios/broken";
 import { connect } from "@/lib/drafts/connect";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { horizonWeeks, isHorizonMonths } from "@/lib/horizon";

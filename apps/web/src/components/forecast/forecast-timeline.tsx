@@ -15,7 +15,7 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { labelIndexes } from "@/lib/overview/axis";
 import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/timeline";
 import { longDate, shortDate, type PlanLaneMarker } from "@/lib/sandbox/lane";
-import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@/lib/forecast/positions";
+import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@transpera-flow/db/sandbox";
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T>(null);

@@ -13,8 +13,7 @@ import { Card } from "@/components/ui/card";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { EDIT_ONLY } from "@/lib/phone";
 import { describeChange, whenOf, type DescribeContext } from "@/lib/sandbox/describe";
-import type { EffectiveChange } from "@/lib/sandbox/effective";
-import type { ChangeProblem } from "@/lib/sandbox/run";
+import { type EffectiveChange, type ChangeProblem } from "@transpera-flow/db/sandbox";
 
 export interface ChangeListProps {
   ctx: DescribeContext;
