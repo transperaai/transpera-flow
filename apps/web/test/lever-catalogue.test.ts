@@ -10,7 +10,9 @@ import { horizonLabel, horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/l
 // sliders on a process page map onto it, and the check that no lever, rule or market setting lacks an (i).
 
 const START = { startDate: "2026-10-05" };
-const models = [toEngineModel(northbeamBundle(), START), toEngineModel(larkspurBundle(), START)];
+// Both seeded workspaces count their clients per type, where the pooled client count and churn sliders are left out (the engine ignores
+// them there), so a pooled model is the third: the clients.count and clients.churn kinds still need a model that offers their sliders.
+const models = [toEngineModel(northbeamBundle(), START), toEngineModel(larkspurBundle(), START), { ...toEngineModel(northbeamBundle(), START), clients: undefined, clientGroups: {} }];
 
 describe("the lever catalogue", () => {
   it("has the prototype's six groups, in order, each with levers", () => {

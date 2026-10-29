@@ -7,6 +7,7 @@
 // No React here: the panel renders these, and tests check them directly.
 
 import type { Viewer } from "@transpera-flow/db";
+import { hasClientRoster } from "@transpera-flow/db/sandbox";
 import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
 import { PLAY_CAPS } from "@/lib/share/play-input";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
@@ -47,6 +48,8 @@ const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 
 export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const levers: Lever[] = [];
+  // Clients counted per type or named: the engine ignores the pooled count and churn there, so a slider for them would do nothing.
+  const pooledClients = !hasClientRoster(model);
   const add = (l: Lever) => levers.push(l);
 
   // Demand
@@ -62,7 +65,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     max: Math.min(PLAY_CAPS.leads, Math.max(20, ceilTo(model.leadsPerWeek * 3, 5))),
     step: 0.5,
   });
-  add({
+  if (pooledClients) add({
     path: "demand.active_clients",
     group: "clients",
     section: "Clients",
@@ -74,7 +77,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     max: Math.min(PLAY_CAPS.clients, Math.max(20, ceilTo(model.activeClients * 2, 10))),
     step: 1,
   });
-  add({
+  if (pooledClients) add({
     path: "demand.churn_monthly",
     group: "clients",
     section: "Clients",

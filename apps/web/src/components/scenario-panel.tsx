@@ -10,6 +10,7 @@ import { isReadOnly } from "@/lib/mode";
 import { useEffect, useMemo, useState } from "react";
 import type { ScenarioRow, Viewer } from "@transpera-flow/db";
 import { applyPatches, compareHeadline, compareRuns, repointPatch, type EngineModel, type EnginePerson, type ProvenanceRows, type RetiredSteps } from "@transpera-flow/engine";
+import { hasClientRoster } from "@transpera-flow/db/sandbox";
 import { buildLevers, leverPatches, type LeverValues } from "@/lib/scenarios/levers";
 import { leverKind, visibleLevers } from "@/lib/scenarios/lever-catalogue";
 import { liveScenarioStore } from "@/lib/scenarios/live-store";
@@ -158,6 +159,7 @@ export function ScenarioPanel({
         <LeverPanel
           levers={levers}
           hiddenCount={hiddenCount}
+          clientsPerType={hasClientRoster(stacked)}
           settingsHref={leversHref}
           values={values}
           currency={currency}
