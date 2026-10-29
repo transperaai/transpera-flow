@@ -8,7 +8,7 @@
 import { sandboxLever, type ProcessBundle, type SandboxChange } from "@transpera-flow/db";
 import { MAX_REWORK, busiestRole, heaviestStep, resolvePeople, type EngineChannels, type EngineModel } from "@transpera-flow/engine";
 import { hoursToDate } from "@/lib/forecast/positions";
-import { combine, driverExists, sourceLeads, totalLeads } from "./edits";
+import { combine, driverExists, hasClientRoster, sourceLeads, totalLeads } from "./edits";
 import type { ChangeProblem } from "./run";
 
 const EFFECT_MONTHS_DEFAULT = 3;
@@ -184,9 +184,11 @@ export function channelsOf(model: EngineModel, changes: readonly SandboxChange[]
         }
         if (all) {
           const t = track(`fee:${sid ?? "*"}`, 1);
-          // The ratio to the fee in force: set to, multiplied by, or plus.
-          const ratio = c.op === "set" ? c.value / price : c.op === "multiply" ? c.value : (price + c.value) / price;
-          t.apply(m, "multiply", Math.max(0, ratio));
+          // On the fee in force (as a factor of today's price): set to the value, multiplied by it, or plus it. A set after an earlier rise
+          // is the value itself, not the value times the rise.
+          if (c.op === "set") t.apply(m, "set", c.value / price);
+          else if (c.op === "multiply") t.apply(m, "multiply", c.value);
+          else t.apply(m, "add", c.value / price);
         } else if (sid !== null) {
           const st = priceOf(sid);
           for (let k = m; k < n; k++) {
@@ -207,7 +209,8 @@ export function channelsOf(model: EngineModel, changes: readonly SandboxChange[]
           break;
         }
         const clampChurn = (v: number) => Math.min(1, Math.max(0, v));
-        const ids = sid !== null ? [sid] : Object.keys(services);
+        // Clients in one pool churn at the model's own rate (the "*" factor; per-service churn doesn't reach them), as the whole-run patch does.
+        const ids = sid !== null ? [sid] : hasClientRoster(model) ? Object.keys(services) : [];
         if (!ids.length) {
           const t = track("churn:*", model.churnMonthly);
           t.apply(m, c.op, c.value, clampChurn);

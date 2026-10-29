@@ -82,3 +82,25 @@ describe("channelsOf", () => {
     expect(overheadsCarried(model, channels, [ch("C2", "add", 1000, "2027-04")])).toBe(1000);
   });
 });
+
+describe("channelsOf: review fixes", () => {
+  it("a fee for everyone set from a month after an earlier rise is the value itself, not the value times the rise; a plus adds to the fee in force", () => {
+    const price = model.services![SV]!.price;
+    const { channels } = channelsOf(model, [ch("B5", "set", 0.1, "2027-04", SV), ch("B2", "set", 5000, "2027-06", SV, { who: "all" })], options);
+    // Months 6 and 7 (April, May) at +10%; from June (month 8) the fee is 5,000 whatever came before.
+    expect(channels!.fee![SV]!.slice(0, 8)).toEqual([1, 1, 1, 1, 1, 1, 1.1, 1.1]);
+    for (const f of channels!.fee![SV]!.slice(8)) expect(f * price).toBeCloseTo(5000, 9);
+    const plus = channelsOf(model, [ch("B5", "set", 0.1, "2027-04", SV), ch("B2", "add", 100, "2027-06", SV, { who: "all" })], options).channels!;
+    for (const f of plus.fee![SV]!.slice(8)) expect(f * price).toBeCloseTo(price * 1.1 + 100, 9);
+  });
+
+  it("base churn from a month on clients in one pool is the '*' factor on the model's churn (per-service arrays never reach a pool)", () => {
+    const pooledBundle = { ...bundle, clientGroups: (bundle.clientGroups ?? []).map((g) => ({ ...g, client_count: 0 })), clients: [] };
+    const pooled = scenarioModel(pooledBundle, 12, START);
+    if (!pooled.model) throw new Error("the pooled demo should build");
+    expect(pooled.model.clients).toBeUndefined();
+    const { channels, problems } = channelsOf(pooled.model, [ch("B3", "multiply", 1.5, "2027-04")], { ...options, bundle: pooledBundle });
+    expect(problems).toEqual([]);
+    expect(channels!.churn).toEqual({ "*": [1, 1, 1, 1, 1, 1, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5] });
+  });
+});
