@@ -140,4 +140,18 @@ export function describeChange(c: SandboxChange, ctx: DescribeContext): string {
   }
 }
 
+/** The levers whose value is an amount of cost (a role's hourly cost, the overheads a month). */
+export const COST_LEVERS: ReadonlySet<string> = new Set(["C1", "C2"]);
+
+/**
+ * A change for a file or a page that leaves costs out (the export's "Include costs and profit" off): a role cost or overheads change keeps
+ * its place in the list but not its amount ("Role cost changed"), so the amounts are not in a file someone is sent. Every other change is
+ * worded as `describeChange` does.
+ */
+export function describeChangeFor(c: SandboxChange, ctx: DescribeContext, costs: boolean): string {
+  if (costs || !COST_LEVERS.has(c.lever)) return describeChange(c, ctx);
+  const name = targetName(c, ctx);
+  return c.lever === "C1" ? `Role cost changed${name ? `, ${name}` : ""}` : "Overheads changed";
+}
+
 export { formatPercent };

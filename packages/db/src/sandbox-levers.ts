@@ -9,7 +9,7 @@
 //
 // Pure: no database, no React. Both apps/web and packages/mcp may import it.
 
-import { parsePatchPath, type EngineModel, type PatchOp, type ScenarioPatch } from "@transpera-flow/engine";
+import { parsePatchPath, withClientGroups, type EngineModel, type PatchOp, type ScenarioPatch } from "@transpera-flow/engine";
 
 export type SandboxLeverId =
   | "A1" | "A3" | "A5" | "A6"
@@ -126,10 +126,22 @@ const SPLICE = { timed: "splice", timing: "month", capped: true } as const;
 /** A change from a month is read by the engine while it runs: one run for any number of months, and nothing counts toward the six-month cap. */
 const CHANNEL = { timed: "channel", timing: "month", capped: false } as const;
 
-/** A model with a client roster (named clients, or client groups with clients counted): the pooled client count and churn do nothing. */
-function hasClientRoster(model: EngineModel): boolean {
-  if (model.clients !== undefined) return true;
-  return Object.values(model.clientGroups ?? {}).some((g) => g.count > 0);
+/**
+ * Whether the engine reads the pooled client count and the pooled monthly churn, by its own rules: with clients counted per type (groups that
+ * count clients of a service the model has, `withClientGroups`) or named, the count is not read; churn still is for a named client none of
+ * whose services the model knows (`clientChurnMonthly` falls back to the pooled rate). A lever or slider for something not read does nothing.
+ * Groups for a service the model lacks, or groups with no count, don't switch the model over: the pool stays.
+ */
+export function pooledClientReads(model: EngineModel): { count: boolean; churn: boolean } {
+  const expanded = withClientGroups(model);
+  const roster = expanded.clients;
+  if (roster === undefined) return { count: true, churn: true };
+  return { count: false, churn: Object.values(roster).some((c) => !c.services.some((sid) => expanded.services?.[sid] !== undefined)) };
+}
+
+/** A model whose clients are kept per type or by name, by the engine's own rule: the pooled client count does nothing there and a type can be pointed at. */
+export function hasClientRoster(model: EngineModel): boolean {
+  return !pooledClientReads(model).count;
 }
 
 const POOL_REASON = "Your clients are counted as one pool, so there is no type to point at. Count your clients per service in Settings, Clients.";
@@ -694,9 +706,11 @@ const KEYS = new Set(["id", "lever", "target", "op", "value", "from", "params", 
 export const MAX_CHANGE_NOTE = 280;
 /** A note starts and ends with something other than a space, tab or line break (`btrim(note, E' \t\r\n')` in `private.is_sandbox_change`). */
 const NOTE_EDGE = /^[ \t\r\n]|[ \t\r\n]$/;
+/** Postgres text and jsonb cannot hold a NUL character: a note with one would pass here and fail at the database with a generic error. */
+const NUL = "\u0000";
 /** Why a note is not valid, or null. */
 export function noteProblem(note: unknown): string | null {
-  if (typeof note !== "string" || note === "" || NOTE_EDGE.test(note) || Array.from(note).length > MAX_CHANGE_NOTE) return `A note can have up to ${MAX_CHANGE_NOTE} characters.`;
+  if (typeof note !== "string" || note === "" || NOTE_EDGE.test(note) || note.includes(NUL) || Array.from(note).length > MAX_CHANGE_NOTE) return `A note can have up to ${MAX_CHANGE_NOTE} characters.`;
   return null;
 }
 const HEALTH_RULES = new Set(["initial", "recover", "late_penalty", "missed_penalty"]);
@@ -795,7 +809,7 @@ export function paramsProblem(lever: SandboxLever, params: unknown, value: numbe
   const p = params;
   switch (lever.id) {
     case "D1":
-      return typeof p.name === "string" && p.name.length >= 1 && p.name.length <= 120 ? null : "A name can have up to 120 characters.";
+      return typeof p.name === "string" && p.name.length >= 1 && p.name.length <= 120 && !p.name.includes(NUL) ? null : "A name can have up to 120 characters.";
     case "A5":
       return isNum(p.low) && isNum(p.high) && p.low >= 0 && p.low <= value && value <= p.high && p.high <= 1_000_000_000
         ? null

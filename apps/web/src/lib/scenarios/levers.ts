@@ -6,8 +6,8 @@
 // wait or rework rate that is 0 today gets an absolute lever instead.
 // No React here: the panel renders these, and tests check them directly.
 
-import type { Viewer } from "@transpera-flow/db";
-import { headcount, withClientGroups, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
+import { pooledClientReads, type Viewer } from "@transpera-flow/db";
+import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
 import { PLAY_CAPS } from "@/lib/share/play-input";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
@@ -45,18 +45,7 @@ const FACTOR = { min: 0.1, max: 2, step: 0.05 } as const;
 
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 
-/**
- * Whether the engine reads the pooled client count and the pooled monthly churn, by its own rules: with clients counted per type
- * (groups that count clients of a service the model has) or named, the count is not read; churn still is for a named client with no
- * known service (`clientChurnMonthly` falls back to it). A slider for something not read would do nothing.
- */
-export function pooledClientReads(model: EngineModel): { count: boolean; churn: boolean } {
-  const expanded = withClientGroups(model);
-  const roster = expanded.clients;
-  if (roster === undefined) return { count: true, churn: true };
-  // `clientChurnMonthly`'s rule: a client none of whose services the model knows churns at the pooled rate.
-  return { count: false, churn: Object.values(roster).some((c) => !c.services.some((sid) => expanded.services?.[sid] !== undefined)) };
-}
+export { pooledClientReads };
 
 export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const levers: Lever[] = [];

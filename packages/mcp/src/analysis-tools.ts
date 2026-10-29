@@ -25,7 +25,7 @@ import { absenceTest, detectIssues, ENGINE_VERSION, ISSUE_TYPES, ratingOfStored,
 import { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, type NamedScenario } from "./analysis";
 import { resolveProcess, resolveWorkspace, revisionIdFor, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool, ToolError } from "./result";
-import { listScenarios } from "./saved-scenarios";
+import { isRunDate, listScenarios } from "./saved-scenarios";
 
 /** The statuses a tool may give or filter an issue by: the four a person sees, and the two old spellings of testing and resolved. */
 const ISSUE_STATUS_INPUT = ["open", "testing", "resolved", "wont_fix", "in_progress", "done"] as const;
@@ -79,6 +79,7 @@ export async function loadLiveModel(
   const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
   const proc = await resolveProcess(ctx, ws, args.process, assumptions);
   const startDate = args.start_date ?? ctx.today;
+  if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
   if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
   const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, "live"));
   try {

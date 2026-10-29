@@ -7,7 +7,7 @@
 //     (B4), and the price driver switched on for a price rise (B5, so the rise carries its churn).
 
 import { qualifiedLeadsPerWeek } from "../model";
-import { sandboxLever, type SandboxChange } from "../sandbox-levers";
+import { hasClientRoster, sandboxLever, type SandboxChange } from "../sandbox-levers";
 import type { ProcessBundle } from "../types";
 import {
   CUSTOM_DRIVER_PREFIX,
@@ -25,11 +25,8 @@ import type { ChangeProblem } from "./run";
 /** `current` after an op: set to, multiplied by, or added to. */
 export const combine = (current: number, op: SandboxChange["op"], value: number): number => (op === "set" ? value : op === "multiply" ? current * value : current + value);
 
-/** A model with a client roster: clients named, or counted per service with any clients counted (the pooled count and churn do nothing there). */
-export function hasClientRoster(model: Pick<EngineModel, "clients" | "clientGroups">): boolean {
-  if (model.clients !== undefined) return true;
-  return Object.values(model.clientGroups ?? {}).some((g) => g.count > 0);
-}
+// `hasClientRoster` (a model with clients per type or by name, by the engine's own rule) lives with the lever registry, which greys levers by it.
+export { hasClientRoster } from "../sandbox-levers";
 
 /** Built-in drivers with no events: an effect on them does nothing. */
 const NO_EVENTS = new Set(["tenure", "market"]);

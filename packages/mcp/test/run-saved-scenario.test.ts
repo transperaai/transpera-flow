@@ -252,6 +252,20 @@ describe("run_scenario with a saved scenario", () => {
     expect(r.data.series).toBeUndefined();
   }, 120_000);
 
+  it("refuses a start_date that isn't a calendar date in the whole-run mode too (same check as saved mode)", async () => {
+    const client = await connect(ownerToken, env.options);
+    try {
+      for (const start_date of ["2026-13-01", "2026-02-30", "1999-12-31", "2101-01-01"]) {
+        const r = await call(client, "run_scenario", { workspace: "northbeam", reps: 3, start_date });
+        expect(r, start_date).toMatchObject({ ok: false, error: { code: "invalid_args", message: expect.stringContaining("calendar date") } });
+      }
+      const ok = await call(client, "run_scenario", { workspace: "northbeam", reps: 3, start_date: "2028-02-29" });
+      expect(ok.ok, JSON.stringify(ok.error)).toBe(true);
+    } finally {
+      await client.close();
+    }
+  }, 120_000);
+
   it("stays a read: nothing it runs is stored", async () => {
     const before = (await admin.query("select count(*)::int as n from sandbox_scenarios")).rows[0].n;
     await run(ownerToken, { scenario: "Hire in March" });

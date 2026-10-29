@@ -11,7 +11,7 @@ import type { EffectiveChange, PriceRiseTradeoff } from "@transpera-flow/db/sand
 import type { EngineModel, MonthlyResult } from "@transpera-flow/engine";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { compareSandbox } from "@/lib/sandbox/compare";
-import { describeChange, whenOf, type DescribeContext } from "@/lib/sandbox/describe";
+import { describeChangeFor, whenOf, type DescribeContext } from "@/lib/sandbox/describe";
 import { CompareChart, SERIES_STYLES } from "./compare-chart";
 
 export const PRINT_MAX_CHANGES = 10;
@@ -148,7 +148,7 @@ export function PrintSummary(p: PrintSummaryProps) {
           <ul className="flex flex-col gap-0.5">
             {shownChanges.map(({ column, e, all }) => (
               <li key={column + e.change.id}>
-                <span className="font-medium">{column}:</span> {describeChange(e.change, { ...p.ctx, changes: all })} <span className="text-fg-2">{whenOf(e.change) ?? "the whole run"}</span>
+                <span className="font-medium">{column}:</span> {describeChangeFor(e.change, { ...p.ctx, changes: all }, p.costs)} <span className="text-fg-2">{whenOf(e.change) ?? "the whole run"}</span>
                 {e.inherited ? <span className="text-fg-2"> (from {e.scenarioName})</span> : null}
                 {e.change.note ? <span className="text-fg-2">. {e.change.note}</span> : null}
               </li>

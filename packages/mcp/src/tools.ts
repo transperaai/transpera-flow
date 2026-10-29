@@ -288,6 +288,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         const seed = args.seed ?? DEFAULT_SEED;
         if (args.seed === undefined) assumptions.push(`seed defaulted to ${DEFAULT_SEED}.`);
         const startDate = args.start_date ?? ctx.today;
+        if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
         if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
 
         const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, revision));

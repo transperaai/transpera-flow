@@ -52,7 +52,7 @@ export function SandboxExportMenu({ fileName, disabledReason, data, hasCosts, in
       const text =
         kind === "numbers"
           ? sandboxCsv(data.columns, data.months, data.model, { currency: data.currency, costs: includeCosts && hasCosts, categories: data.categories })
-          : changesCsv(data.columns, data.ctx);
+          : changesCsv(data.columns, data.ctx, includeCosts && hasCosts);
       downloadBlob(new Blob([text], { type: "text/csv;charset=utf-8" }), exportFileName(`${fileName} ${kind === "numbers" ? "numbers" : "changes"}`, "csv", date));
     } catch (e) {
       setError(e instanceof Error ? e.message : "The export failed.");

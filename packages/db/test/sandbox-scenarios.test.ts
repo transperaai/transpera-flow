@@ -248,6 +248,20 @@ describe("the change checks: private.is_sandbox_changes and parseChanges agree",
   });
 });
 
+describe("a NUL character", () => {
+  // Postgres text and jsonb cannot hold U+0000, so the database can only refuse it with a generic error; parseChanges says why, as for any bad note.
+  it("in a note is refused by parseChanges with the note message, and by the database", async () => {
+    const bad = [change("A1", { note: "a\u0000b" })];
+    const parsed = parseChanges(bad);
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.error).toBe("A note can have up to 280 characters.");
+    await expect(db.client.query("select private.is_sandbox_changes($1::jsonb)", [JSON.stringify(bad)])).rejects.toThrow();
+  });
+  it("in a hire's name is refused by parseChanges", () => {
+    expect(parseChanges([change("D1", { target: role, from: "2027-03", params: { name: "Ja\u0000de" } })]).ok).toBe(false);
+  });
+});
+
 describe("the lever table", () => {
   it("private.sandbox_levers() equals SANDBOX_LEVERS", async () => {
     const rows = (await db.client.query("select id, target, selector, ops, whole_run, timed, timing, capped from private.sandbox_levers() order by id")).rows;

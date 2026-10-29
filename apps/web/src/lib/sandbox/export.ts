@@ -11,7 +11,7 @@ import { timeRows, type EffectiveChange, type PriceRiseTradeoff } from "@transpe
 import type { EngineModel, MonthlyResult, Stat } from "@transpera-flow/engine";
 import { csvText, type CsvCell } from "@/lib/export/csv";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
-import { describeChange, whenOf, type DescribeContext } from "./describe";
+import { describeChangeFor, whenOf, type DescribeContext } from "./describe";
 
 export interface ExportColumn {
   name: string;
@@ -117,13 +117,13 @@ const serviceName = (model: Pick<EngineModel, "services">, key: string): string 
 
 export const CHANGES_HEADER = ["Scenario", "Change", "When", "Note", "From scenario"] as const;
 
-/** One row per effective change of each column ("No changes" has none): the change in words, when, the note saying why, and the scenario it comes from when that is a parent. */
-export function changesCsv(columns: readonly { name: string; changes: readonly EffectiveChange[] }[], ctx: Omit<DescribeContext, "changes">): string {
+/** One row per effective change of each column (with `costs` off, a role cost or overheads change names no amount) ("No changes" has none): the change in words, when, the note saying why, and the scenario it comes from when that is a parent. */
+export function changesCsv(columns: readonly { name: string; changes: readonly EffectiveChange[] }[], ctx: Omit<DescribeContext, "changes">, costs = true): string {
   const rows: CsvCell[][] = [];
   for (const col of columns) {
     const all = col.changes.map((e) => e.change);
     for (const e of col.changes) {
-      rows.push([col.name, describeChange(e.change, { ...ctx, changes: all }), whenOf(e.change) ?? "the whole run", e.change.note ?? "", e.inherited ? e.scenarioName : ""]);
+      rows.push([col.name, describeChangeFor(e.change, { ...ctx, changes: all }, costs), whenOf(e.change) ?? "the whole run", e.change.note ?? "", e.inherited ? e.scenarioName : ""]);
     }
   }
   return csvText(CHANGES_HEADER, rows);

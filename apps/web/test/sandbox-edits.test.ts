@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SANDBOX_LIBRARY, northbeamBundle, type SandboxChange } from "@transpera-flow/db";
+import { SANDBOX_LIBRARY, northbeamBundle, sandboxLever, type SandboxChange } from "@transpera-flow/db";
 import { northbeamWithClientGroups, northbeamWithClients, northbeamWithServices, simulate, type EngineModel } from "@transpera-flow/engine";
 import { applyModelChanges, hasClientRoster, prepareScenario } from "@transpera-flow/db/sandbox";
 
@@ -107,5 +107,42 @@ describe("the Downturn starter on Northbeam's client groups (B3 on a roster, coo
     for (const [sid, g] of Object.entries(groupsNow)) expect(g.churnMonthly).toBeCloseTo(liveGroups[sid]!.churnMonthly * 1.5, 12);
     const run = (m: EngineModel, s: typeof live) => simulate(m, 8, 1, { monthly: true, monthStarts: s.monthStarts, ...(s.start ? { initialState: s.start } : {}) }).kpi.clientsChurned!.mean;
     expect(run(scenario.segments[0]!.model, scenario)).toBeGreaterThan(run(live.segments[0]!.model, live));
+  });
+});
+
+describe("what the Sandbox greys as doing nothing follows the engine's own reading of the client roster", () => {
+  // Groups for a service the model doesn't have, and groups with no count, don't switch the engine over: the pool stays.
+  const base = northbeamWithServices();
+  const stray = { ...base, clientGroups: { "no-such-service": { count: 5, churnMonthly: 0.02, stayMonths: 24, fee: 1000, health: 80 } } } as unknown as EngineModel;
+  const sid = Object.keys(base.services ?? {})[0]!;
+  const groups = northbeamWithClientGroups();
+  const named = { ...base, clients: { c1: { name: "Acme", services: [], mrr: 2000, assignments: {} } } } as unknown as EngineModel;
+
+  it("reads a roster as the engine does: stray or empty groups leave the pool", () => {
+    expect(hasClientRoster(stray)).toBe(false);
+    expect(hasClientRoster({ ...base, clientGroups: { [sid]: { count: 0, churnMonthly: 0.02, stayMonths: 24, fee: 1000, health: 80 } } } as unknown as EngineModel)).toBe(false);
+    expect(hasClientRoster(groups)).toBe(true);
+    expect(hasClientRoster(named)).toBe(true);
+  });
+
+  it("greys B1 for a type, B4 and B5 on a pool, including one with only stray groups; offers them with a roster", () => {
+    const b1 = (m: EngineModel) => sandboxLever("B1")!.changeApplies!(m, ch("B1", "add", 1, sid));
+    expect(b1(stray)).toMatch(/one pool/);
+    expect(b1(base)).toMatch(/one pool/);
+    expect(b1(groups)).toBeNull();
+    expect(b1(named)).toBeNull();
+    expect(sandboxLever("B4")!.applies!(stray)).toMatch(/per service or by name/);
+    expect(sandboxLever("B4")!.applies!(groups)).toBeNull();
+    expect(sandboxLever("B5")!.changeApplies!(stray, ch("B5", "set", 0.05, sid))).toMatch(/one pool/);
+    expect(sandboxLever("B5")!.changeApplies!(groups, ch("B5", "set", 0.05, sid))).toBeNull();
+    // Fees for new clients need no roster; for existing clients they do.
+    expect(sandboxLever("B2")!.changeApplies!(stray, ch("B2", "multiply", 1.1, sid, { who: "new" }))).toBeNull();
+    expect(sandboxLever("B2")!.changeApplies!(stray, ch("B2", "multiply", 1.1, sid, { who: "all" }))).toMatch(/one pool/);
+  });
+
+  it("does not turn a pooled model into a rostered one: B1 and B5 on a type are skipped with the pool message", () => {
+    const r = applyModelChanges(stray, [ch("B1", "add", 3, sid)], { churnDrivers: [] });
+    expect(r.problems[0]!.message).toMatch(/one pool/);
+    expect(r.model.clientGroups).toBe(stray.clientGroups);
   });
 });

@@ -236,3 +236,59 @@ describe("the changes and notes CSV", () => {
     expect(csv).toContain(`"'=HYPERLINK(""http://evil.example"",""x""), ""quoted"""`);
   });
 });
+
+describe("role cost and overheads changes with costs left out", () => {
+  const ctx = { bundle: base, solutions: [] };
+  const c1: SandboxChange = { id: "7e000000-0000-4000-8000-000000000011", lever: "C1", target: PPC, op: "multiply", value: 1.37, note: "Pay review." };
+  const c2: SandboxChange = { id: "7e000000-0000-4000-8000-000000000012", lever: "C2", target: null, op: "set", value: 8123 };
+  const columns = [{ name: "Costly", changes: eff([c1, c2, rise]) }];
+  const rows = (costs?: boolean) => parse(costs === undefined ? changesCsv(columns, ctx) : changesCsv(columns, ctx, costs));
+
+  it("keeps the change but not its amount in the changes CSV; every other change is worded as before", () => {
+    const r = rows(false);
+    expect(r).toHaveLength(4);
+    expect(r[1]![1]).toBe(`Role cost changed, ${base.roles.find((x) => x.id === PPC)!.name}`);
+    expect(r[2]![1]).toBe("Overheads changed");
+    expect(r[3]![1]).toMatch(/Price rise of 8/);
+    expect(r[1]![3]).toBe("Pay review.");
+    const text = changesCsv(columns, ctx, false);
+    for (const amount of ["1.37", "8,123", "8123"]) expect(text, amount).not.toContain(amount);
+  });
+
+  it("words the amounts with costs on (and by default)", () => {
+    for (const r of [rows(true), rows()]) {
+      expect(r[1]![1]).toMatch(/×1\.37/);
+      expect(r[2]![1]).toMatch(/8,123/);
+    }
+  });
+
+  it("leaves the amounts out of the print too, unless costs are on", () => {
+    const render = (costs: boolean) =>
+      renderToStaticMarkup(
+        createElement(PrintSummary, {
+          workspaceName: "Northbeam Digital",
+          title: "Costly",
+          printedOn: "2026-10-29",
+          startDate: START,
+          horizonMonths: 6,
+          engineVersion: "x",
+          model,
+          bundle: base,
+          columns: [{ ...open[0]!, changes: eff([c1, c2]) }],
+          cutoffs: [0.7, 0.85, 0.95],
+          categories: DEFAULT_PURPOSES,
+          currency: "GBP",
+          costs,
+          timingLine: null,
+          ctx,
+          inline: true,
+        }),
+      );
+    const off = render(false);
+    expect(off).toContain("Role cost changed");
+    expect(off).toContain("Overheads changed");
+    expect(off).not.toMatch(/1\.37|8,123/);
+    const on = render(true);
+    expect(on).toMatch(/8,123/);
+  });
+});
