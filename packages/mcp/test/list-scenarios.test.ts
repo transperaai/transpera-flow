@@ -109,6 +109,20 @@ describe("list_scenarios", () => {
     expect(JSON.stringify(viewer)).not.toContain("Dan Okafor");
   });
 
+  it("lists only the workspace's own scenarios, and nothing to a token outside it", async () => {
+    const other = (await admin.query("insert into workspaces (name, slug) values ('Elsewhere', 'elsewhere-list') returning id")).rows[0].id as string;
+    await admin.query("insert into sandbox_scenarios (workspace_id, name, changes) values ($1, 'Secret plan', '[]'::jsonb)", [other]);
+    expect(JSON.stringify((await list(ownerToken, { workspace: "northbeam" })).data)).not.toContain("Secret plan");
+    expect(await list(ownerToken, { workspace: other })).toMatchObject({ ok: false, error: { code: "not_found" } });
+    const outsiderToken = await issueToken(admin, await createUser(admin, "list-outsider@example.com"));
+    const guestToken = await issueToken(admin, await createUser(admin, "list-guest@example.com", { guest: true }));
+    for (const token of [outsiderToken, guestToken]) {
+      const r = await list(token, { workspace: NORTHBEAM_WORKSPACE_ID });
+      expect(r).toMatchObject({ ok: false, error: { code: "not_found" } });
+      expect(JSON.stringify(r)).not.toContain("Hire in March");
+    }
+  });
+
   it("says 'gone' for a target that is no longer in the model", async () => {
     await admin.query("update sandbox_scenarios set changes = $2::jsonb where id = $1", [
       LEAVE,

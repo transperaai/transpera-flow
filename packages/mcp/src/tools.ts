@@ -6,7 +6,7 @@ import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type Engine
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
 import { ANALYSIS_TOOL_NAMES, registerAnalysisTools } from "./analysis-tools";
-import { runSaved } from "./saved-scenarios";
+import { isRunDate, runSaved } from "./saved-scenarios";
 import { FIRST_PRINCIPLES_TOOL_NAMES, registerFirstPrinciplesTools } from "./first-principles-tools";
 import { FACT_TOOL_NAMES, registerFactTools } from "./facts-tools";
 
@@ -253,7 +253,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         scenario: z.string().min(1).optional().describe("A saved Sandbox scenario's id or name, or \"No changes\": runs the Sandbox's month-by-month run (see list_scenarios). Not with process, revision, overrides or horizon_weeks."),
         months: z.number().int().min(1).max(24).optional().describe("With scenario: months to run (default the scenario's horizon, else 12)."),
         include_baseline: z.boolean().optional().describe("With scenario: also run \"No changes\" and return the difference (default true)."),
-        include_people: z.boolean().optional().describe("With scenario: also return each person's busy share by month, named as the token's user may see them (default false)."),
+        include_people: z.boolean().optional().describe("With scenario: also return each person's busy share by month, as the Sandbox shows them: everyone to an Agency admin or the Owner, only their own person to anyone else (default false)."),
         start_date: z
           .string()
           .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -273,6 +273,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           if (clash.length) throw new ToolError("invalid_args", `With a saved scenario, the run is the Sandbox's: the live company model, month by month, 30 replications with seed 1. Leave out ${clash.join(", ")}.`);
           const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
           const startDate = args.start_date ?? ctx.today;
+          // The month-by-month run walks calendar months from the start: a date that isn't one (2026-13-01) would never reach the horizon.
+          if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
           if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
           if (args.include_baseline === undefined) assumptions.push("include_baseline defaulted to true.");
           return await runSaved(ctx, ws, { scenario: args.scenario!, months: args.months, include_baseline: args.include_baseline ?? true, include_people: args.include_people ?? false, startDate }, assumptions);

@@ -176,8 +176,8 @@ describe("run_scenario with a saved scenario", () => {
     expect(r.data.diff!.totals.profit).toBeNull();
     expect(r.data.series.revenue).not.toBeNull();
     expect(JSON.stringify(r.data.people)).not.toContain("Dan Okafor");
-    // Everyone on the team by label; the scenario's own hire by the name the Sandbox gives it.
-    expect(Object.values(r.data.people!).every((p) => /^(team member \d+|new ppc specialist)$/i.test(p.name))).toBe(true);
+    // As the Sandbox shows a Viewer: their own person's row only (this Viewer has none), never another person's busy share by label.
+    expect(r.data.people).toEqual({});
     // The revenue side is the owner's, to the digit: only what depends on pay is hidden.
     const owner = await run(ownerToken, { scenario: "Hire in March" });
     expect(r.data.series.revenue).toEqual(owner.data.series.revenue);
@@ -194,6 +194,53 @@ describe("run_scenario with a saved scenario", () => {
     }
     const orphan = await run(ownerToken, { months: 3 });
     expect(orphan).toMatchObject({ ok: false, error: { code: "invalid_args" } });
+  }, 120_000);
+
+  it("refuses a start_date that isn't a calendar date, at once (the months are walked from it)", async () => {
+    for (const start_date of ["2026-13-01", "2026-99-99", "2026-02-30", "2026-00-10", "1999-12-31", "2101-01-01"]) {
+      const started = Date.now();
+      const r = await run(ownerToken, { scenario: "Hire in March", start_date });
+      expect(r, start_date).toMatchObject({ ok: false, error: { code: "invalid_args", message: expect.stringContaining("calendar date") } });
+      expect(Date.now() - started, start_date).toBeLessThan(10_000);
+    }
+    const leap = await run(ownerToken, { scenario: "No changes", start_date: "2028-02-29", months: 1 });
+    expect(leap.ok, JSON.stringify(leap.error)).toBe(true);
+  }, 120_000);
+
+  it("finds no scenario of another workspace, by id or by name, and gives an outsider's token nothing", async () => {
+    const other = await admin.query("insert into workspaces (name, slug) values ('Elsewhere', 'elsewhere-run') returning id");
+    const otherWs = other.rows[0].id as string;
+    const SECRET = "5c000000-0000-4000-8000-0000000000e1";
+    await admin.query("insert into sandbox_scenarios (id, workspace_id, name, changes) values ($1, $2, 'Secret plan', '[]'::jsonb)", [SECRET, otherWs]);
+    for (const scenario of [SECRET, "Secret plan"]) {
+      const r = await run(ownerToken, { scenario });
+      expect(r, scenario).toMatchObject({ ok: false, error: { code: "not_found" } });
+      // The message echoes what was asked; nothing else about the other workspace's scenario comes back.
+      const rest = JSON.stringify(r).replaceAll(scenario, "");
+      expect(rest).not.toContain("Secret plan");
+      expect(rest).not.toContain(SECRET);
+    }
+    // Named by the other workspace itself: the Owner of Northbeam isn't a member there.
+    const there = await run(ownerToken, { workspace: otherWs, scenario: SECRET });
+    expect(there).toMatchObject({ ok: false, error: { code: "not_found" } });
+    const outsider = await createUser(admin, "run-outsider@example.com");
+    const outsiderToken = await issueToken(admin, outsider);
+    for (const args of [{ scenario: "Hire in March" }, { workspace: NORTHBEAM_WORKSPACE_ID, scenario: NORTHBEAM_HIRE_MARCH_ID }]) {
+      const r = await run(outsiderToken, args);
+      expect(r, JSON.stringify(args)).toMatchObject({ ok: false, error: { code: "not_found" } });
+      expect(JSON.stringify(r)).not.toContain("Hire in March");
+    }
+    const guest = await createUser(admin, "run-guest@example.com", { guest: true });
+    const guestToken = await issueToken(admin, guest);
+    expect(await run(guestToken, { workspace: NORTHBEAM_WORKSPACE_ID, scenario: NORTHBEAM_HIRE_MARCH_ID })).toMatchObject({ ok: false, error: { code: "not_found" } });
+  }, 120_000);
+
+  it("keeps a 24-month answer bounded: no per-person rows unless asked, and under 1 MB with them", async () => {
+    const r = await run(ownerToken, { scenario: "Hire in March", months: 24 });
+    expect(r.ok, JSON.stringify(r.error)).toBe(true);
+    expect(r.data.people).toBeUndefined();
+    const withPeople = await run(ownerToken, { scenario: "Hire in March", months: 24, include_people: true });
+    expect(JSON.stringify(withPeople).length).toBeLessThan(1_000_000);
   }, 120_000);
 
   it("leaves run_scenario without `scenario` as it was: a whole-run overrides run", async () => {

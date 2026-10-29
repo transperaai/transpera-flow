@@ -250,6 +250,16 @@ function totalsOut(monthly: MonthlyResult, cutoffs: readonly [number, number, nu
   };
 }
 
+/** A real calendar date from 2000 to 2100 as YYYY-MM-DD: what a saved scenario's run can start on (its months are walked from it). */
+export function isRunDate(iso: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (y < 2000 || y > 2100) return false;
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
+
 /** A saved scenario (by id or name), or null for "No changes". */
 export function pickScenario(scenarios: readonly SandboxScenarioRow[], ref: string, ws: WorkspaceRef): SandboxScenarioRow | null {
   if (ref.trim().toLowerCase() === NO_CHANGES.toLowerCase() && !scenarios.some((s) => s.name.trim().toLowerCase() === NO_CHANGES.toLowerCase())) return null;
@@ -333,8 +343,9 @@ export async function runSaved(ctx: ToolContext, ws: WorkspaceRef, args: SavedRu
     roles: main.roles,
     ...(args.include_people
       ? {
+          // As the Sandbox shows them: everyone to those who see everyone, else only the reader's own person (B1 2b), never others' rows by label.
           people: Object.fromEntries(
-            Object.keys(monthly.people).map((id) => [id, { name: run.result.resolvedPeople[id]?.name ?? id, busy: busyOut(monthly.people[id], monthly.months.length) }]),
+            Object.keys(monthly.people).filter((id) => canSeePerson(viewerOf(bundle), id)).map((id) => [id, { name: run.result.resolvedPeople[id]?.name ?? id, busy: busyOut(monthly.people[id], monthly.months.length) }]),
           ),
         }
       : {}),
