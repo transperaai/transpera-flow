@@ -54,15 +54,15 @@ export function Timing(p: TimingProps) {
   const hires = useMemo(() => hireChanges(p.changes), [p.changes]);
   const [asked, setAsked] = useState(false);
   // The scenario without each hire, one list per slot; a fixed number of hook calls below, and a slot with no hire (or before the button
-  // is pressed) stays idle. The lists are kept while the changes are the same, so a re-render doesn't start a run again.
+  // is pressed) stays idle. Only profit is read, so a price rise's paired run is skipped: one scenario run per hire. The lists are kept while the changes are the same, so a re-render doesn't start a run again.
   const lists = useMemo(
     () => Array.from({ length: MAX_PAYBACKS }, (_, i) => (asked && hires[i] ? p.changes.filter((e) => e.change.id !== hires[i]!.change.id) : null)),
     [asked, hires, p.changes],
   );
-  const r0 = useScenarioRun({ bundle: p.live, changes: lists[0] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate });
-  const r1 = useScenarioRun({ bundle: p.live, changes: lists[1] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate });
-  const r2 = useScenarioRun({ bundle: p.live, changes: lists[2] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate });
-  const r3 = useScenarioRun({ bundle: p.live, changes: lists[3] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate });
+  const r0 = useScenarioRun({ bundle: p.live, changes: lists[0] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate, pair: false });
+  const r1 = useScenarioRun({ bundle: p.live, changes: lists[1] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate, pair: false });
+  const r2 = useScenarioRun({ bundle: p.live, changes: lists[2] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate, pair: false });
+  const r3 = useScenarioRun({ bundle: p.live, changes: lists[3] ?? null, solutions: p.solutions, months: p.horizonMonths, startDate: p.startDate, pair: false });
   const runs = [r0, r1, r2, r3];
   const profit = p.monthly.money?.profit ?? null;
   const bounds = useMemo(() => monthBounds(p.monthly.months.slice(1).map((m) => m.start), p.monthly.months[p.monthly.months.length - 1]!.end), [p.monthly]);

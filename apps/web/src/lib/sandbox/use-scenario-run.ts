@@ -42,6 +42,7 @@ export function useScenarioRun({
   solutions,
   months,
   startDate,
+  pair = true,
 }: {
   bundle: ProcessBundle;
   /** The effective changes (parents first); null: nothing to run (the hook stays idle). */
@@ -49,9 +50,11 @@ export function useScenarioRun({
   solutions: readonly SolutionRow[];
   months: number;
   startDate: string;
+  /** false: skip a price rise's paired run (no `priceRise`), for a caller that only reads the run itself (the hire payback). */
+  pair?: boolean;
 }): ScenarioForecast {
   // The models, by the inputs' identity, so a re-render with the same inputs doesn't run anything again.
-  const prepared = useMemo((): PreparedScenario | null => (changes === null ? null : prepareScenario(bundle, changes, solutions, months, startDate)), [bundle, changes, solutions, months, startDate]);
+  const prepared = useMemo((): PreparedScenario | null => (changes === null ? null : prepareScenario(bundle, changes, solutions, months, startDate, { pair })), [bundle, changes, solutions, months, startDate, pair]);
 
   const [state, setState] = useState<{ status: ScenarioForecast["status"]; run: ScenarioRun | null; priceRise: PriceRiseTradeoff | null; error: string | null; progress: [number, number]; finished: number }>({
     status: "idle",
