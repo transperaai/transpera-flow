@@ -36,6 +36,9 @@ export const MAX_PURPOSE_NAME = 60;
 export const MAX_PURPOSE_DESCRIPTION = 200;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+/** As the database measures and trims (`char_length`, `btrim`): characters (code points, so an emoji is one), and spaces only. */
+const chars = (s: string) => [...s].length;
+const trimSpaces = (s: string) => s.replace(/^ +| +$/g, "");
 
 /** The save's check, mirroring `private.is_purpose_list` exactly (one table of cases runs through both). */
 export function parsePurposes(input: unknown): { ok: true; purposes: PurposeCategory[] } | { ok: false; error: string } {
@@ -48,10 +51,10 @@ export function parsePurposes(input: unknown): { ok: true; purposes: PurposeCate
     if (!isObj(e) || Object.keys(e).some((k) => k !== "key" && k !== "name" && k !== "description")) return { ok: false, error: "Each category has a key, a name and a description." };
     if (typeof e.key !== "string" || typeof e.name !== "string" || (e.description !== undefined && typeof e.description !== "string")) return { ok: false, error: "Each category has a key, a name and a description." };
     if (!PURPOSE_KEY.test(e.key)) return { ok: false, error: "A category has a key that is not allowed." };
-    const name = e.name.trim();
-    if (name.length < 1 || name.length > MAX_PURPOSE_NAME) return { ok: false, error: `A category name is 1 to ${MAX_PURPOSE_NAME} characters.` };
-    const description = (e.description ?? "").trim();
-    if (description.length > MAX_PURPOSE_DESCRIPTION) return { ok: false, error: `A description is at most ${MAX_PURPOSE_DESCRIPTION} characters.` };
+    const name = trimSpaces(e.name);
+    if (chars(name) < 1 || chars(name) > MAX_PURPOSE_NAME) return { ok: false, error: `A category name is 1 to ${MAX_PURPOSE_NAME} characters.` };
+    const description = trimSpaces(e.description ?? "");
+    if (chars(description) > MAX_PURPOSE_DESCRIPTION) return { ok: false, error: `A description is at most ${MAX_PURPOSE_DESCRIPTION} characters.` };
     if (keys.has(e.key)) return { ok: false, error: "Two categories have the same key." };
     if (names.has(name.toLowerCase())) return { ok: false, error: `Two categories are called "${name}".` };
     keys.add(e.key);
