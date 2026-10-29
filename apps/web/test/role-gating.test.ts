@@ -22,6 +22,7 @@ describe("pages that pass canEdit into a read only mode", () => {
     ["Sources", PAGE("sources")],
     ["the Sandbox", PAGE("sandbox")],
     ["Settings → Levers", PAGE("settings/levers")],
+    ["Settings → Purposes", PAGE("settings/purposes")],
     ["Settings → Historical data", PAGE("settings/calibration")],
   ])("%s", (_, file) => {
     const source = read(file);

@@ -1,7 +1,7 @@
 # Engine versioning and golden models
 
 The engine's numbers are the product, so none may move unnoticed (docs/PRD.md §6.9 layer 3, decision D16;
-issue #22; ADR 0009). Nine golden models are run at a fixed seed on every push, their key outputs are compared
+issue #22; ADR 0009). Ten golden models are run at a fixed seed on every push, their key outputs are compared
 exactly with approved baselines, and every change that moves one needs a new baseline and a new `ENGINE_VERSION`,
 which every run records.
 
@@ -16,9 +16,10 @@ which every run records.
 | `northbeam-money` | `northbeamWithMoney()` | `northbeam-groups` with 18,000 a month of overheads and PPC priced hourly at 95, run month by month (engine 1.11.0): billed revenue by kind, hourly work, paid labour, overheads, profit, and the monthly sales, revenue and money series. |
 | `northbeam-chances` | `northbeamWithChances()` | `northbeam-drivers` with `late` measured as events (effect 0.6, 3 months), `handoff` entered (chance 0.05, effect 1, 2 months), the custom driver at chance 0.1 effect 0.5, a PPC fee range 3,000 to 6,000 and a `fee` channel of PPC +8% from month 4 with the price driver on, run month by month (engine 1.12.0). |
 | `northbeam-channels` | `northbeamWithChannels()` | `northbeam-money` with monthly channels from month 3: leads x1.2, conversion x0.9, hands-on time x0.7 on the heaviest step, a wait of 0 to 8 h, rework 0 to 0.1, role cost x1.1, overheads x1.25, one person's capacity x0.9 and base churn x1.3 (engine 1.12.0). |
+| `larkspur-time` | `larkspurWithPurposes()` | Larkspur with a purpose on every step (a mapping by step id: `LARKSPUR_PURPOSES`), run month by month for six months of its week-26 horizon: where working time goes (engine 1.14.0), first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is `larkspur`'s. |
 | `larkspur` | `larkspurModel()` | Larkspur Creative, the "second, messier sample agency" (§6.9): overloaded designers, a copywriter past her week on overtime, an 18-client named roster whose health drives churn, and the corners Northbeam leaves alone (below). |
 
-Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money` also asks for the monthly series). The outputs kept (`keyOutputs` in
+Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money`, `northbeam-chances`, `northbeam-channels` and `larkspur-time` also ask for the monthly series). The outputs kept (`keyOutputs` in
 `packages/engine/test/golden.ts`) are throughput (won, lost, done, wins a week), cycle time (mean, P50, P90), new
 MRR, billed, LTV added and lost revenue, labour, overtime hours and cost, clients at risk and churned, servicing
 touchpoints, the bottleneck role, step and person, utilisation per role (total with its 10–90% range, and its
@@ -157,6 +158,18 @@ today's price and tenure, and the pooled billing estimate still uses the won-mon
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
 
+## Time by purpose (engine 1.14.0, sandbox phase 4)
+
+Added 29 Oct 2026 (`docs/plans/sandbox-p4-brief.md`). **No existing simulated number moved.** The approved diff of the nine existing golden models is `engineVersion` and nothing else; `larkspur-time` is new. Approved with `golden:approve "Time and what it achieves (sandbox phase 4): ..."`. Beyond the goldens, the full `simulate` output of nine fixture models at two seeds, monthly on and off (8 replications), is byte-identical to the parent commit's once `monthly.time` is taken out (hashed with sha256), and Larkspur with a purpose on every step equals Larkspur without one.
+
+- **`EngineStep.purpose`** is an opaque key (omitted: `""`). The engine never reads it for a decision: nothing draws a random number, reorders a sum or changes an event. The app maps keys to the workspace's categories (names, order and the two mappings below live outside the engine, so a rename or a reorder needs no run).
+- **`MonthlyResult.time`** (`purposes`, `roles`, `people`, `team`; each a `TimeSplit` of `Stat`s over replications, hours in the month): `purpose[key]` first-pass hands-on hours; `rework` hands-on hours on repeat passes (a back-edge or a same-step redo, by `repeatLoop`, whatever the step's purpose, never in `purpose`); `ongoing` = max(0, work - sum of purposes - rework): the client hours that are not steps; `idle` = max(0, hours - work); `hours` = hours available + overtime worked, the 100%; `uncovered` (roles and team) = work nobody was there to do. Per replication, purposes + rework + ongoing + idle = max(hours, work). The team is the sum over people (so a person in two roles is counted once); a role is attributed by the step's role, the same as `roleWork`, so a role's split adds up to its busy share's work. A step with no model role counts for the person only.
+- **Where it is booked** (`startService`, in the existing `if (mon)` block): from the *final* `handsOn`, after the per-person factor and the step-work channel (`chWork`). `repeatLoop` is pure, so it is now called whether or not `t >= 0` (the run's own `rework` totals keep their `t >= 0` guard). The warm-up and a job straddling the horizon count only their in-window part (`spread` clips). A month's rework therefore differs a little from `rework.roleHours`, which counts a pass whole at its start: documented, not reconciled.
+- **The sale side** (`saleSideSteps(model)`, pure, exported): the step where the sale is decided (an edge only to a win and an edge only to a loss) and every step after it that can reach a win but no longer a loss; empty when no lost end is reachable. The app uses it for the Automatic purpose of a pipeline step (Austin, 29 Oct: from the sale on moves the client's job forward).
+- **Output size and cost.** `MonthlyResult` grows by keys x (roles + people + 1) x months x 3 numbers; only monthly runs pay.
+
+TIMINGS
+
 ## Warm-up hits and three review fixes (engine 1.13.0, sandbox phase 3 review)
 
 Added 29 Oct 2026, from the adversarial review of phase 3. **Only `northbeam-chances` moved** (its two entered chances: account manager
@@ -236,7 +249,7 @@ Added 28 Oct 2026 (`docs/plans/sandbox-p3-brief.md`). **No existing simulated nu
 
 The Sandbox's worst case (`apps/web/test/sandbox-performance.test.ts`, seven segments at 12 months, now built from six headcount cuts and a solution going live, the levers that still splice): 473, 574, 327, 325, 384, 319, 299 ms, total 2.7 s (limit 7 s), against about 0.7 s a segment and 4.9 s recorded for phase 1 (another day's load, so not strictly comparable; the engine cases above are the controlled comparison). The margin against the 1 s limit is now about 2x rather than 1.4x. A scenario of channel and people levers is **one** run at any number of months: a channel-heavy scenario (leads in five months, step time, waiting, rework, role cost, overheads, hours, a price rise and four drivers as chances) takes 381 ms; a price rise runs as a pair, 449 and 329 ms (limit 1 s each). Chance mode on 2,000 clients per group with three drivers (12 months, 4 replications): 2.2 to 2.6 s against 1.4 to 1.5 s as weights (1.45 to 1.75 x: chance mode turns run merging off). The brief's "30 replications in 5 s" is not reachable even as weights (about 0.35 s a replication), so the test holds 4 replications under 5 s and under 2 x the weights.
 
-Phase 4 (time by purpose) rebases on 1.12.0: its hands-on hours must be counted after the `work` channel.
+Phase 4 (time by purpose, engine 1.14.0, above) counts its hands-on hours after the `work` channel.
 
 ## Profit (engine 1.11.0, sandbox phase 2)
 

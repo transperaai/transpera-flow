@@ -81,6 +81,8 @@ export function TimeByPurpose({ monthly, months, categories, roles, people, view
                 key={k}
                 type="button"
                 aria-pressed={kind === k}
+                // The Month by month section has its own "By role" and "By person": this one says which it is.
+                aria-label={k === "team" ? "Where the time goes, team" : `Where the time goes, ${k === "role" ? "by role" : "by person"}`}
                 onClick={() => setKind(k)}
                 className={cn("rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring", kind === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
               >

@@ -12,16 +12,16 @@ import { IDLE, NOT_SET, UNCOVERED, type TimeRow, type TimeView } from "@/lib/san
 /** A fixed colour per default category, so a rename or a reorder never recolours it; categories the workspace added take the spare ones by their key. */
 const FIXED: Record<string, string> = {
   client_job: "var(--accent)",
-  client_upkeep: "oklch(0.78 0.08 205)",
-  winning: "oklch(0.68 0.15 305)",
-  required: "oklch(0.62 0.05 250)",
-  coordination: "oklch(0.72 0.13 345)",
+  client_upkeep: "var(--purpose-upkeep)",
+  winning: "var(--purpose-winning)",
+  required: "var(--purpose-required)",
+  coordination: "var(--purpose-coordination)",
   fixing: "var(--rate-bad)",
-  removable: "oklch(0.55 0.02 250)",
-  [NOT_SET]: "oklch(0.8 0.02 250)",
+  removable: "var(--purpose-removable)",
+  [NOT_SET]: "var(--purpose-unset)",
   [IDLE]: "var(--panel-2)",
 };
-const SPARE = ["oklch(0.7 0.13 40)", "oklch(0.68 0.12 170)", "oklch(0.62 0.12 270)", "oklch(0.74 0.1 110)", "oklch(0.66 0.13 15)", "oklch(0.7 0.1 235)"];
+const SPARE = [1, 2, 3, 4, 5, 6].map((n) => `var(--purpose-spare-${n})`);
 const HATCH = "repeating-linear-gradient(135deg, var(--fg-3) 0 1.5px, transparent 1.5px 4px)";
 
 export function purposeColor(key: string): string {

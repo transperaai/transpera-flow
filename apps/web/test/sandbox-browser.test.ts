@@ -694,11 +694,13 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.getByLabel("Scenario 2", { exact: true }).selectOption({ label: "Hire in March" });
         await page.getByLabel("Scenario 3", { exact: true }).selectOption({ label: "Hire in March, then more leads" });
         await compareDone(page, errors);
-        // Profit over the run first (sandbox phase 2), then recurring revenue, clients at risk, months too busy and late tasks.
+        // Profit over the run first (sandbox phase 2), then recurring revenue, clients at risk, the two time tiles (sandbox phase 4), months too busy and late tasks.
         expect(await page.locator("[data-compare-tile]").evaluateAll((els) => els.map((e) => e.getAttribute("data-compare-tile")))).toEqual([
           "Profit over the run",
           expect.stringMatching(/^Recurring revenue in /) as unknown as string,
           expect.stringMatching(/^Clients at risk in /) as unknown as string,
+          "Hours fixing over the run",
+          "Hours on steps that could be removed",
           "Months a role is too busy",
           expect.stringMatching(/^Late tasks in /) as unknown as string,
         ]);
@@ -907,7 +909,8 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await page.locator("[data-scenario-status-line]").innerText()).not.toContain("Unsaved");
         await page.locator("[data-scenario-compare]").click();
         await compareDone(page, errors);
-        expect(await page.locator("[data-compare-tile]").count()).toBe(5);
+        // Profit and costs are hidden from a Viewer; the two time tiles (hours, not pay) are not.
+        expect(await page.locator("[data-compare-tile]").count()).toBe(7);
         expect(errors).toEqual([]);
         await page.close();
       });
@@ -936,6 +939,79 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect((await admin.page.locator('[data-compare-section="Wins and costs"] h2').innerText()).split("\n")[0]).toBe("Wins and costs");
         expect(viewer.errors.concat(admin.errors)).toEqual([]);
         await Promise.all([viewer.page.close(), admin.page.close()]);
+      });
+
+      it("shows where the time goes (sandbox phase 4): the team, a role and a person, in hours and shares that add up", async () => {
+        const { page, errors } = await mount(width);
+        const section = page.locator("[data-time-section]");
+        await section.waitFor();
+        expect(await section.locator("h2").innerText()).toContain("Where the time goes");
+        expect(await section.locator("[data-time-chart]").count()).toBe(1);
+        const rowNames = () => section.locator("[data-time-table] tbody tr th").allInnerTexts();
+        const names = await rowNames();
+        for (const name of ["Moves the client's job forward", "Client upkeep", "Winning work", "Fixing", "Idle", "Hours available"]) expect(names, name).toContain(name);
+        /** The whole-run share column (the last cell of a row): "18%". */
+        const share = async (row: string) => {
+          const cell = await section.locator(`[data-time-row="${row}"] td`).last().innerText();
+          return Number(/(\d+(?:\.\d+)?)%/.exec(cell)?.[1] ?? Number.NaN);
+        };
+        const categories = ["client_job", "client_upkeep", "required", "winning", "coordination", "fixing", "removable", "idle"];
+        const sum = (await Promise.all(categories.map(share))).reduce((a, v) => a + (Number.isNaN(v) ? 0 : v), 0);
+        // Rounded shares: the stack is the whole capacity, so it adds up to 100% (more when someone works overtime that the cap holds back).
+        expect(sum).toBeGreaterThan(96);
+        expect(sum).toBeLessThan(112);
+        const team = await section.locator('[data-time-row="hours"] td').last().innerText();
+        // By role: a picker of roles with hours; the hours available change with it.
+        await section.getByRole("button", { name: "Where the time goes, by role", exact: true }).click();
+        const rolePick = section.locator('[data-time-pick="role"]');
+        const roles = await rolePick.locator("option").allInnerTexts();
+        expect(roles.length).toBeGreaterThan(1);
+        await rolePick.selectOption({ index: 1 });
+        expect(await section.locator('[data-time-row="hours"] td').last().innerText()).not.toBe(team);
+        // By person: each person by name, for someone who sees everyone.
+        await section.getByRole("button", { name: "Where the time goes, by person", exact: true }).click();
+        const people = await section.locator('[data-time-pick="person"] option').allInnerTexts();
+        expect(people).toContain("Dan Okafor");
+        expect(people).not.toContain("Everyone else");
+        await section.locator('[data-time-pick="person"]').selectOption({ label: "Dan Okafor" });
+        expect(await section.locator('[data-time-row="uncovered"]').count()).toBe(0);
+        expect(await section.locator("[data-time-notes]").innerText()).toContain("Rework on any step counts as Fixing.");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("gives a Viewer their own row and everyone else together, and no other individual", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true });
+        const section = page.locator("[data-time-section]");
+        await section.waitFor();
+        await section.getByRole("button", { name: "Where the time goes, by person", exact: true }).click();
+        const pick = section.locator('[data-time-pick="person"]');
+        expect(await pick.locator("option").allInnerTexts()).toEqual(["You", "Everyone else"]);
+        const own = await section.locator('[data-time-row="hours"] td').last().innerText();
+        await pick.selectOption({ label: "Everyone else" });
+        expect(await section.locator('[data-time-row="hours"] td').last().innerText()).not.toBe(own);
+        const body = await section.innerText();
+        for (const name of ["Priya Shah", "Tom Reed", "Leah Brooks", "Maya Collins"]) expect(body, name).not.toContain(name);
+        expect(await section.locator("[data-time-notes]").innerText()).toContain("you don't see other people one by one");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("compares where the time goes: a whole-run bar per column and a row per category with its difference", async () => {
+        const { page, errors } = await mount(width, { url: `/demo/sandbox?compare=${JANUARY}` });
+        await compareDone(page, errors);
+        const section = page.locator('[data-compare-section="Where the time goes"]');
+        await section.waitFor();
+        expect(await section.locator("[data-time-bar]").count()).toBe(2);
+        const table = section.locator('[data-compare-table="time"]');
+        expect(await table.locator('[data-compare-time-row="fixing"]').count()).toBe(1);
+        expect(await table.locator('[data-compare-time-row="idle"]').count()).toBe(1);
+        // The second column carries its difference from "No changes" in hours a month and points.
+        expect(await table.locator('[data-compare-time-row="client_job"] td').last().innerText()).toMatch(/a month, [+−]?[\d.]+ pts/);
+        expect(await page.locator('[data-compare-tile="Hours fixing over the run"]').count()).toBe(1);
+        expect(await page.locator('[data-compare-tile="Hours on steps that could be removed"]').count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
       });
 
       it("tells a Viewer with no row of their own why 'By person' is empty", async () => {

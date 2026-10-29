@@ -1,7 +1,7 @@
 // Shared, memoised fixture data for the stories: Northbeam (the demo company) and one run of it. Everything is fixed: the seed,
 // the number of runs and the start date, so a story renders the same pixels every time. Never `new Date()` here.
 
-import { simulate, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { larkspurWithPurposes, simulate, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import {
   defaultCompanyPart,
   northbeamBundle,
@@ -19,7 +19,7 @@ import {
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
-import { timelineData, type TimelineData } from "@/lib/forecast/timeline";
+import { timelineData, timelineMonths, type TimelineData } from "@/lib/forecast/timeline";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import type { SolutionsData } from "@/lib/solutions/cards";
 import { demoBundle } from "@/lib/sources/demo";
@@ -120,4 +120,16 @@ export function solutionsFixture(): { data: SolutionsData; issues: ReturnType<ty
       links: [link("s1", a!.id), link("s1", b!.id, { auto_verdict: "fail", holds_pct: 40, user_verdict: "fail" })],
     },
   };
+}
+
+let timeRun: { monthly: NonNullable<SimulationResult["monthly"]>; months: ReturnType<typeof timelineMonths>; hoursPerWeek: number } | undefined;
+/** Larkspur with a purpose on every step, six months, 10 runs (seed 1): what "Where the time goes" draws. */
+export function larkspurTime() {
+  if (!timeRun) {
+    const model = { ...larkspurWithPurposes(), horizonWeeks: 26 };
+    const result = simulate(model, 10, 1, { monthly: true });
+    const monthly = result.monthly!;
+    timeRun = { monthly, months: timelineMonths(DEMO_FORECAST_START, monthly.months, model.hoursPerWeek), hoursPerWeek: model.hoursPerWeek };
+  }
+  return timeRun;
 }
