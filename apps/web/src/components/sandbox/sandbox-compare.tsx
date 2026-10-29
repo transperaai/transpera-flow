@@ -16,6 +16,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import { describeChange, whenOf } from "@/lib/sandbox/describe";
 import { compareSandbox, type CompareRow, type CompareTile, type SandboxComparison } from "@/lib/sandbox/compare";
 import { effectiveChanges, effectiveLimitProblem, type EffectiveChange } from "@transpera-flow/db/sandbox";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
@@ -207,6 +208,10 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             <Tile title={`Late tasks in ${last}`} names={names} tile={comparison.totals.lateTasks} format={(v) => formatNumber(v, 1)} diff={(v) => signed(v, (x) => formatNumber(x, 1))} />
           </div>
 
+          <Section title="Changes and notes">
+            <CompareChanges live={live} solutions={solutions} columns={[{ name: "No changes", changes: [] }, ...resolved.map((r) => ({ name: r.scenario?.name ?? "A scenario", changes: r.changes ?? [] }))]} />
+          </Section>
+
           {comparison.profit ? (
             <Section title="Profit" help={SANDBOX_HELP.profit}>
               <ChartAndNumbers row={comparison.profit} months={comparison.months} names={names} format={money} formatDiff={(v) => signed(v, money)} />
@@ -270,6 +275,35 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
         <Skeleton className="h-[320px] w-full" aria-busy="true" />
       )}
     </section>
+  );
+}
+
+/** Each column's effective changes in words with the note saying why; "No changes" is the live model as it is. */
+function CompareChanges({ live, solutions, columns }: { live: ProcessBundle; solutions: SolutionRow[]; columns: { name: string; changes: readonly EffectiveChange[] }[] }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-compare-changes>
+      {columns.map((col, c) => {
+        const ctx = { bundle: live, solutions, changes: col.changes.map((e) => e.change) };
+        return (
+          <Card key={col.name + c} className="gap-1.5 px-4 py-3" data-compare-changes-column={col.name}>
+            <h3 className="text-sm font-medium">{col.name}</h3>
+            {col.changes.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{c === 0 ? "The live model as it is." : "No changes."}</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5 text-xs">
+                {col.changes.map((e) => (
+                  <li key={e.change.id} data-compare-change={e.change.id}>
+                    <span>{describeChange(e.change, ctx)}</span> <span className="text-muted-foreground">{whenOf(e.change) ?? "the whole run"}</span>
+                    {e.inherited ? <span className="ml-1 text-muted-foreground">(from {e.scenarioName})</span> : null}
+                    {e.change.note ? <span className="block text-muted-foreground">{e.change.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        );
+      })}
+    </div>
   );
 }
 
@@ -354,12 +388,12 @@ function Tile({ title, names: cols, tile, format, diff }: { title: string; names
   );
 }
 
-function Section({ title, help, children }: { title: string; help: HelpProps; children: React.ReactNode }) {
+function Section({ title, help, children }: { title: string; help?: HelpProps; children: React.ReactNode }) {
   return (
     <section className="flex min-w-0 flex-col gap-3" data-compare-section={title}>
       <h2 className={`${SECTION_TITLE} flex items-center`}>
         {title}
-        <Help {...help} />
+        {help ? <Help {...help} /> : null}
       </h2>
       <div className="flex flex-col gap-4">{children}</div>
     </section>

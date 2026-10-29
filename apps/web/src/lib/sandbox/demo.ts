@@ -28,7 +28,7 @@ export const DEMO_SCENARIOS: SandboxScenarioRow[] = ([
     name: "Hire in March, then more leads",
     description: "Builds on “Hire in March”: 25% more leads from May.",
     parent_id: NORTHBEAM_HIRE_MARCH_ID,
-    changes: [{ id: "5b0000f3-0000-4000-8000-000000000001", lever: "A1", target: null, op: "multiply", value: 1.25, from: "2027-05" }],
+    changes: [{ id: "5b0000f3-0000-4000-8000-000000000001", lever: "A1", target: null, op: "multiply", value: 1.25, from: "2027-05", note: "Assumes the spring campaign lifts leads by a quarter." }],
     horizon_months: 12,
     start_date: null,
     created_at: SEEDED_AT,

@@ -131,6 +131,11 @@ export const SANDBOX_HELP = {
     description: "How much of a full working week they work. 1 is full time, 0.5 is half time.",
     example: "0.6 is three days a week.",
   },
+  changeNote: {
+    label: "Why (optional)",
+    description: "What this change assumes, in a sentence. It's shown with the change, in compare, in exports and on share links.",
+    example: "Assumes the Q3 campaign doubles leads.",
+  },
   hireName: {
     label: "Name",
     description: "What to call them. Leave it empty and the scenario says “New” and the role.",
