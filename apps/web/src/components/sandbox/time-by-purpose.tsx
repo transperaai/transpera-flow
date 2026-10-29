@@ -33,11 +33,13 @@ export interface TimeByPurposeProps {
   span: string;
   /** Settings → Purposes, for someone who may change the categories (null: they may not). */
   purposesHref?: string | null;
+  /** A share link's visitor: the team and each role, never a person (what a person spends their time on is theirs). */
+  noPeople?: boolean;
 }
 
 const hoursText = (h: number) => `${formatNumber(h, h < 10 ? 1 : 0)} h`;
 
-export function TimeByPurpose({ monthly, months, categories, roles, people, viewer, span, purposesHref = null }: TimeByPurposeProps) {
+export function TimeByPurpose({ monthly, months, categories, roles, people, viewer, span, purposesHref = null, noPeople = false }: TimeByPurposeProps) {
   const [kind, setKind] = useState<Kind>("team");
   const withWork = useMemo(() => roles.filter((r) => monthly.time.roles[r.id]?.hours.some((h) => h.mean > 0)), [roles, monthly]);
   const [roleId, setRoleId] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export function TimeByPurpose({ monthly, months, categories, roles, people, view
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div role="group" aria-label="Show" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
-            {(["team", "role", "person"] as const).map((k) => (
+            {(noPeople ? (["team", "role"] as const) : (["team", "role", "person"] as const)).map((k) => (
               <button
                 key={k}
                 type="button"

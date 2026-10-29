@@ -39,9 +39,11 @@ export interface SandboxExportMenuProps {
   includeCosts: boolean;
   onIncludeCosts: (v: boolean) => void;
   onPrint: () => void;
+  /** A share link's visitor: the numbers and the printed page only (the changes are on the page). */
+  numbersOnly?: boolean;
 }
 
-export function SandboxExportMenu({ fileName, disabledReason, data, hasCosts, includeCosts, onIncludeCosts, onPrint }: SandboxExportMenuProps) {
+export function SandboxExportMenu({ fileName, disabledReason, data, hasCosts, includeCosts, onIncludeCosts, onPrint, numbersOnly = false }: SandboxExportMenuProps) {
   const [error, setError] = useState<string | null>(null);
   const off = disabledReason !== null || data === null;
   const download = (kind: "numbers" | "changes") => {
@@ -77,9 +79,11 @@ export function SandboxExportMenu({ fileName, disabledReason, data, hasCosts, in
           <DropdownMenuItem data-export="numbers" onSelect={() => download("numbers")}>
             Numbers (CSV)
           </DropdownMenuItem>
-          <DropdownMenuItem data-export="changes" onSelect={() => download("changes")}>
-            Changes and notes (CSV)
-          </DropdownMenuItem>
+          {numbersOnly ? null : (
+            <DropdownMenuItem data-export="changes" onSelect={() => download("changes")}>
+              Changes and notes (CSV)
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem data-export="print" className={EDIT_ONLY} onSelect={onPrint}>
             Print or save as PDF
           </DropdownMenuItem>

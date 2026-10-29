@@ -46,6 +46,8 @@ export interface TimingProps {
   currency: string;
   /** Agency admins and the Owner: a payback needs profit, which a Viewer's runs don't have. */
   canSeeMoney: boolean;
+  /** A share link's visitor: only the capacity line (no payback, and no sentence about who sees one). */
+  capacityOnly?: boolean;
 }
 
 export function Timing(p: TimingProps) {
@@ -87,7 +89,7 @@ export function Timing(p: TimingProps) {
         ) : null}
         <p className="text-xs text-muted-foreground">On average, with the growth, seasons and market you have set; the alerts above also say when in a bad month.</p>
       </Card>
-      {hires.length ? (
+      {hires.length && !p.capacityOnly ? (
         p.canSeeMoney && profit ? (
           <Card className="gap-2 px-4 py-3 text-sm" data-payback>
             {!asked ? (

@@ -50,6 +50,8 @@ export interface SandboxCompareProps {
   canEdit?: boolean;
   onChange: (ids: string[]) => void;
   onBack: () => void;
+  /** A share link's visitor: the scenario is fixed (no pickers), and the files are the numbers only. */
+  share?: boolean;
 }
 
 interface Resolved {
@@ -62,7 +64,7 @@ interface Resolved {
 /** A column's changes by the saved scenarios they were worked out from (a module cache: the same scenarios give the same lists). */
 const RESOLVED = new WeakMap<SandboxScenarioRow[], Map<string, Resolved>>();
 
-export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, canEdit = false, onChange, onBack }: SandboxCompareProps) {
+export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, canEdit = false, onChange, onBack, share = false }: SandboxCompareProps) {
   const [includeCosts, setIncludeCosts] = useState(true);
   // One column's changes are worked out once per scenario and kept while the saved scenarios are the same, so a render, or a change to
   // the other columns' ids, hands a running column the same changes (a new list would restart its run).
@@ -178,9 +180,10 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             includeCosts={includeCosts}
             onIncludeCosts={setIncludeCosts}
             onPrint={() => window.print()}
+            numbersOnly={share}
           />
           <Button variant="outline" onClick={onBack}>
-            Back to the scenario
+            {share ? "Hide the comparison" : "Back to the scenario"}
           </Button>
         </div>
       </div>
@@ -194,7 +197,17 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             </span>
             <span className="rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-sm">No changes</span>
           </div>
-          {Array.from({ length: Math.min(MAX_COMPARE, Math.max(1, ids.length + 1)) }, (_, slot) => picker(slot))}
+          {share ? (
+            <div className="flex min-w-[8rem] flex-col gap-0.5" data-compare-fixed>
+              <span className="text-xs font-medium text-fg-2">
+                <i aria-hidden className={`mr-1.5 inline-block h-0.5 w-5 rounded ${SERIES_STYLES[1]!.swatch}`} />
+                This scenario
+              </span>
+              <span className="rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-sm">{resolved[0]?.scenario?.name ?? "A scenario"}</span>
+            </div>
+          ) : (
+            Array.from({ length: Math.min(MAX_COMPARE, Math.max(1, ids.length + 1)) }, (_, slot) => picker(slot))
+          )}
         </div>
         <ul className="flex flex-col gap-0.5 text-xs" aria-live="polite" data-compare-progress>
           {failed.map((c) => (

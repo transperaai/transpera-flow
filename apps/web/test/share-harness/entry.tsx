@@ -143,6 +143,27 @@ function snapshotOf(kind: ShareKind, toggles: ShareToggles, hidden: string[] = [
         movedOn: null,
       };
       break;
+    case "scenario": {
+      const parent = "5c000000-0000-4000-8000-0000000000a1";
+      const own = "5c000000-0000-4000-8000-0000000000a2";
+      const role = live.roles[0]!.id;
+      const ch = (n: number, lever: "A1" | "C1" | "D1", over: Record<string, unknown> = {}) => ({ id: `5c000000-0000-4000-8000-0000000001${String(n).padStart(2, "0")}`, lever, target: null, op: "multiply" as const, value: 1.1, ...over });
+      raw = {
+        ...base,
+        kind,
+        scenarioId: own,
+        bundle: live,
+        scenarios: [
+          { id: parent, name: "Base plan", description: `${person.name} wrote this for ${client.name}`, parent_id: null, horizon_months: 6, changes: [ch(1, "A1", { value: 1.2, note: `Assumes ${client.name} refers two more` }), ch(2, "C1", { target: role, value: 1.1 })] },
+          { id: own, name: "Hire in March", description: null, parent_id: parent, horizon_months: 6, changes: [ch(3, "D1", { target: role, op: "set", value: 1, from: "2027-03", params: { name: person.name }, note: "Costs about £4,100 a month" })] },
+        ],
+        solutions: [],
+        startDate: "2027-01-04",
+        months: 6,
+        hiddenCostChanges: 0,
+      };
+      break;
+    }
   }
   return { snapshot: redactShareSnapshot(raw, toggles, secrets), secrets };
 }

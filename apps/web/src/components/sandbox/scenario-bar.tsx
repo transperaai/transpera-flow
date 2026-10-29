@@ -47,6 +47,10 @@ export interface ScenarioBarProps {
   onNew: () => void;
   onAddChange: () => void;
   onSave: () => void;
+  /** The Share button for the saved scenario on screen (Agency admins and the Owner); null when the scenario can't be shared yet. */
+  share?: React.ReactNode;
+  /** Why it can't be shared yet (unsaved changes), shown where the button would be. */
+  shareHint?: string | null;
   onSaveAsNew: () => void;
   onRename: () => void;
   onDuplicate: () => void;
@@ -122,6 +126,12 @@ export function ScenarioBar(p: ScenarioBarProps) {
                       <Button variant="outline" onClick={p.onDelete} data-scenario-delete>
                         Delete
                       </Button>
+                      {p.share ?? null}
+                      {p.shareHint ? (
+                        <span className="text-xs text-muted-foreground" data-scenario-share-hint>
+                          {p.shareHint}
+                        </span>
+                      ) : null}
                     </>
                   ) : null}
                 </>

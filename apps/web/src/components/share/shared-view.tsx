@@ -15,6 +15,7 @@ import { ShareContext } from "@/components/share/share-context";
 import { ShareLinkingScope } from "@/components/share/share-linking-scope";
 import { useInertLinks } from "@/components/share/inert-links";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
+import { ScenarioShareView } from "@/components/sandbox/scenario-share-view";
 import { SolutionPage } from "@/components/solutions/solution-page";
 import { processRatings, trailOf } from "@/lib/processes/rows";
 import { shareDate } from "@/lib/share/format";
@@ -133,6 +134,8 @@ function Screen({ snapshot, play }: { snapshot: ShareSnapshot; play?: PlayConfig
       );
     case "process":
       return <ProcessScreen snapshot={snapshot} play={play} />;
+    case "scenario":
+      return <ScenarioShareView snapshot={snapshot} />;
     case "issue": {
       const issue = snapshot.issues.find((i) => i.id === snapshot.issueId);
       if (!issue) return <Gone />;

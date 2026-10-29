@@ -20,6 +20,7 @@ import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { InsightsSection } from "@/components/insights";
 import { PageHeader } from "@/components/shell/page";
+import { ShareButton } from "@/components/share/share-dialog";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deleteSandboxScenario, saveSandboxScenario } from "@/app/w/[slug]/sandbox-actions";
@@ -87,6 +88,8 @@ export interface SandboxViewProps {
   hiddenLevers?: readonly string[];
 }
 
+/** The workspace slug from the Sandbox's address, /w/<slug>/sandbox. */
+const sharePath = (pathname: string): string => pathname.split("/")[2] ?? "";
 const NO_SOURCES: SourceRow[] = [];
 const NO_SCENARIOS: SandboxScenarioRow[] = [];
 const NO_SOLUTIONS: SolutionRow[] = [];
@@ -712,6 +715,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onNew={newScenario}
           onAddChange={() => setChangeTarget({ mode: "add" })}
           onSave={onSave}
+          share={mode === "live" && savedScenario && !dirty && !horizonChanged ? <ShareButton slug={sharePath(pathname)} kind="scenario" targetId={savedScenario.id} what={savedScenario.name} /> : null}
+          shareHint={mode === "live" && savedScenario && (dirty || horizonChanged) ? "Save first to share it." : null}
           onSaveAsNew={onSaveAsNew}
           onRename={onRename}
           onDuplicate={onDuplicate}

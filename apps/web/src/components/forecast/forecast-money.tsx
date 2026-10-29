@@ -85,9 +85,11 @@ export interface ForecastMoneyProps {
   overheadsHref?: string | null;
   /** The span in words, "12 months". */
   span: string;
+  /** What stands where the costs would be, when the run has none (default: the Viewer's sentence). */
+  costsNote?: string;
 }
 
-export function ForecastMoney({ view, currency, overheadsHref = null, span }: ForecastMoneyProps) {
+export function ForecastMoney({ view, currency, overheadsHref = null, span, costsNote = COSTS_HIDDEN_NOTE }: ForecastMoneyProps) {
   const fmt = (v: number) => money(v, currency);
   return (
     <section className="flex min-w-0 flex-col gap-3" data-forecast-money data-costs-hidden={view.costsHidden ? "" : undefined}>
@@ -109,7 +111,7 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span }: Fo
         ))}
         {view.costsHidden ? (
           <Card className="justify-center gap-1 px-4 py-3 text-sm text-muted-foreground sm:col-span-1 lg:col-span-3" data-money-hidden-note>
-            {COSTS_HIDDEN_NOTE}
+            {costsNote}
           </Card>
         ) : null}
       </div>
