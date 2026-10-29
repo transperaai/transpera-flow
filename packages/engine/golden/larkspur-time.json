@@ -1,0 +1,378 @@
+{
+  "model": "larkspur-time",
+  "description": "Larkspur Creative run month by month with a purpose on every step (engine 1.14.0): where working time goes, as first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is larkspur's.",
+  "engineVersion": "1.14.0",
+  "seed": 1,
+  "reps": 30,
+  "outputs": {
+    "initialState": { "kind": "wip", "items": 8 },
+    "throughput": {
+      "won": { "mean": 21.666666666666668, "p10": 17, "p90": 27 },
+      "lost": { "mean": 117.63333333333334, "p10": 107, "p90": 134 },
+      "done": { "mean": 0, "p10": 0, "p90": 0 },
+      "wonPerWeek": 0.8333333333333334
+    },
+    "cycleHours": { "mean": 253.35467620745322, "p50": 201.56473310160177, "p90": 444.93196082672347 },
+    "revenue": {
+      "newMrr": { "mean": 46736.666666666664, "p10": 36400, "p90": 61800 },
+      "billed": { "mean": 391500.57055296807, "p10": 354807.35911662085, "p90": 436001.8044924174 },
+      "ltvAdded": { "mean": 566583.3333333334, "p10": 427600, "p90": 720900 },
+      "lostRevenue": { "mean": 3103813.3333333335, "p10": 2777200, "p90": 3490600 }
+    },
+    "labour": { "mean": 81112.80521321713, "p10": 64448.000703718426, "p90": 98699.5061064244 },
+    "money": {
+      "revenue": { "mean": 391500.57055296807, "p10": 354807.3591166208, "p90": 436001.80449241743 },
+      "revenueHourly": { "mean": 0, "p10": 0, "p90": 0 },
+      "labourCost": { "mean": 432412.5, "p10": 432412.5, "p90": 432412.5 },
+      "overheads": 0,
+      "profit": { "mean": -45651.318684701975, "p10": -84186.39088337921, "p90": -1390.5267527093715 }
+    },
+    "monthly": {
+      "opportunities": [ 25.333333333333332, 23.033333333333335, 17.6, 28.866666666666667, 28.533333333333335, 27.666666666666668 ],
+      "won": [ 2.8, 3.7666666666666666, 3.6333333333333333, 3.3, 4, 4.166666666666667 ],
+      "lost": [ 18, 19.866666666666667, 14.433333333333334, 20.966666666666665, 22.666666666666668, 21.7 ],
+      "conversion": [ 0.1346153846153846, 0.15937940761636107, 0.2011070110701107, 0.13598901098901098, 0.15, 0.16108247422680413 ],
+      "revenue": [ 54495.523652641496, 59040.298021144736, 65892.76065876476, 68253.87985721257, 68665.36464841872, 75152.7437147858 ],
+      "recurring": [ 50695.523652641496, 55556.9646878114, 59242.76065876475, 60653.87985721257, 63282.03131508538, 66919.41038145247 ],
+      "hourly": [ 0, 0, 0, 0, 0, 0 ],
+      "lostToChurn": [ 4633.333333333333, 3601.6666666666665, 5483.333333333333, 5095, 4600, 6313.333333333333 ],
+      "rise": [ 0, 0, 0, 0, 0, 0 ],
+      "overtimeHours": [ 10.467786859828148, 14.190622055160786, 17.121176846690464, 15.736367771047924, 16.721065858603204, 20.56599212052002 ],
+      "labour": [ 72068.75, 72068.75, 72068.75, 72068.75, 72068.75, 72068.75 ],
+      "overtimeCost": [ 471.0504086922667, 638.5779924822353, 770.4529581010709, 708.1365496971567, 752.4479636371441, 925.469645423401 ],
+      "profit": [ -18044.27675605077, -13667.029971337506, -6946.4422993363105, -4523.006692484597, -4155.833315218424, 2158.524069362398 ]
+    },
+    "time": {
+      "purposes": [ "winning", "client_job", "coordination", "removable", "required" ],
+      "team": {
+        "purpose": {
+          "winning": [ 78.62049743714378, 100.3676303574245, 67.96650654422086, 112.94589587631529, 110.61427271716431, 113.46714788935257 ],
+          "client_job": [ 322.46288135716264, 332.4350450868911, 348.56137514514216, 360.54787681089437, 382.55150265301756, 405.1432713514192 ],
+          "coordination": [ 5.711760785687678, 7.720369489251604, 7.411804607703081, 6.532700009162355, 8.40930258160378, 8.449387628957139 ],
+          "removable": [ 18.574636423629876, 20.055681236965444, 21.606585687251847, 22.439328302754276, 23.285193600517577, 24.089900453158137 ],
+          "required": [ 7.102697379615665, 14.322080147665762, 13.891364236976305, 14.354833644381811, 14.233654982303854, 15.35302744891359 ]
+        },
+        "rework": [ 21.96464663121533, 52.127670363486956, 50.9084599646378, 59.27801389872655, 59.89318905690367, 55.48854615118868 ],
+        "ongoing": [ 239.90605376364093, 250.68098288315815, 258.9791817219766, 264.44168526621155, 276.5171175739011, 298.0369326048201 ],
+        "idle": [ 687.3746130817323, 682.7311624903175, 619.0458989387819, 621.4460339626017, 587.4668326931913, 546.7877785927107 ],
+        "hours": [ 1381.717786859828, 1460.4406220551605, 1388.3711768466903, 1461.986367771048, 1462.9710658586032, 1466.8159921205201 ],
+        "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+      },
+      "roles": {
+        "strat": {
+          "purpose": {
+            "winning": [ 22.070077782834197, 21.04196912683128, 14.36743773123287, 27.025048939977818, 25.330428768900692, 25.503096763830403 ],
+            "client_job": [ 15.321896925112428, 16.09198393475641, 16.35536442142595, 14.661726976843482, 19.487867407942325, 21.485904948710914 ],
+            "coordination": [ 0, 0, 0, 0, 0, 0 ],
+            "removable": [ 0, 0, 0, 0, 0, 0 ],
+            "required": [ 0, 0, 0, 0, 0, 0 ]
+          },
+          "rework": [ 0, 0, 0, 0, 0, 0 ],
+          "ongoing": [ 2.3684757858670005e-15, 2.0132044179869505e-15, 2.6645352591003757e-15, 2.3684757858670005e-15, 1.6579330501069005e-15, 2.0132044179869505e-15 ],
+          "idle": [ 43.85802529205338, 44.116046938412325, 50.52719784734119, 39.563224083178696, 36.43170382315699, 34.2609982874587 ],
+          "hours": [ 81.25, 81.25, 81.25, 81.25, 81.25, 81.25 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        },
+        "am": {
+          "purpose": {
+            "winning": [ 12.69578449125273, 11.301146861594114, 8.628173731454291, 14.323269779419563, 14.39844193612484, 13.750108244308917 ],
+            "client_job": [ 0, 0, 0, 0, 0, 0 ],
+            "coordination": [ 5.711760785687678, 7.720369489251604, 7.411804607703081, 6.532700009162355, 8.40930258160378, 8.44938762895714 ],
+            "removable": [ 18.574636423629876, 20.055681236965444, 21.606585687251844, 22.439328302754276, 23.28519360051758, 24.089900453158148 ],
+            "required": [ 7.102697379615666, 14.322080147665762, 13.891364236976305, 14.354833644381811, 14.233654982303856, 15.35302744891359 ]
+          },
+          "rework": [ 0, 0, 0, 0, 0, 0 ],
+          "ongoing": [ 31.48171322545896, 32.80067328379739, 33.81581572910389, 34.4870813280224, 35.9753402356137, 38.647033819636384 ],
+          "idle": [ 265.683407694355, 255.05004898072568, 255.89625600751054, 249.11278693625962, 244.9480666638363, 240.96054240502588 ],
+          "hours": [ 341.25, 341.25, 341.25, 341.25, 341.25, 341.25 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        },
+        "design": {
+          "purpose": {
+            "winning": [ 35.47689682761583, 58.97298193407714, 37.37579541453347, 63.30105255874741, 61.09954678920215, 63.26661437733082 ],
+            "client_job": [ 82.68429968368689, 136.81871832713037, 142.39511949967226, 129.75065270363126, 146.49371410091064, 150.6486113808126 ],
+            "coordination": [ 0, 0, 0, 0, 0, 0 ],
+            "removable": [ 0, 0, 0, 0, 0, 0 ],
+            "required": [ 0, 0, 0, 0, 0, 0 ]
+          },
+          "rework": [ 16.793050910885402, 45.572415858339745, 38.62615275444901, 51.90206545084905, 46.186193691191185, 42.73866546133052 ],
+          "ongoing": [ 20.624371909086527, 21.669404116042777, 22.475025769114314, 23.001569656524886, 24.160104098958172, 26.20044087665952 ],
+          "idle": [ 61.92138066872539, 29.484525039708696, 51.679671634658476, 24.629335349937215, 14.620195073062995, 9.742630626441064 ],
+          "hours": [ 217.5, 292.5, 292.5, 292.5, 292.5, 292.5 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        },
+        "copy": {
+          "purpose": {
+            "winning": [ 0, 0, 0, 0, 0, 0 ],
+            "client_job": [ 5.448818256320336, 10.616765165207616, 11.289453307921058, 12.87250885579405, 14.685023774264241, 12.637274093696375 ],
+            "coordination": [ 0, 0, 0, 0, 0, 0 ],
+            "removable": [ 0, 0, 0, 0, 0, 0 ],
+            "required": [ 0, 0, 0, 0, 0, 0 ]
+          },
+          "rework": [ 0, 0.5765700060720592, 0.9728378673724577, 0.857245049813724, 2.7870371274773307, 3.3704223953340384 ],
+          "ongoing": [ 164.99497527269222, 173.35523292834242, 179.80020615291428, 184.0125572521991, 193.28083279166518, 209.60352701327636 ],
+          "idle": [ 2.6258395557063587, 3.8337453559619052, 3.8439159846530657, 4.252214462914064, 0.9684775224536746, 1.1368279097525678 ],
+          "hours": [ 172.96778685982812, 176.69062205516082, 179.62117684669047, 178.2363677710479, 179.2210658586032, 183.06599212052 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        },
+        "social": {
+          "purpose": {
+            "winning": [ 0, 0, 0, 0, 0, 0 ],
+            "client_job": [ 121.94522261211826, 143.90648023402144, 142.4943031885338, 176.85248970345936, 169.38608069171752, 175.43476954453135 ],
+            "coordination": [ 0, 0, 0, 0, 0, 0 ],
+            "removable": [ 0, 0, 0, 0, 0, 0 ],
+            "required": [ 0, 0, 0, 0, 0, 0 ]
+          },
+          "rework": [ 0.9657622950553046, 1.1227528127484205, 1.5077478929036465, 0.8368442596096192, 1.2182673941956026, 0.7497145604194161 ],
+          "ongoing": [ 0, 9.473903143468002e-16, 1.8947806286936005e-15, 0, 0, 0 ],
+          "idle": [ 202.08901509282643, 179.97076695323014, 105.99794891856256, 147.31066603693105, 154.39565191408687, 148.81551589504923 ],
+          "hours": [ 325, 325, 250, 325, 325, 325 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        },
+        "dev": {
+          "purpose": {
+            "winning": [ 0, 0, 0, 0, 0, 0 ],
+            "client_job": [ 97.06264387992466, 25.001097425775136, 36.02713472758907, 26.41049857116631, 32.49881667818275, 44.936711383667934 ],
+            "coordination": [ 0, 0, 0, 0, 0, 0 ],
+            "removable": [ 0, 0, 0, 0, 0, 0 ],
+            "required": [ 0, 0, 0, 0, 0, 0 ]
+          },
+          "rework": [ 4.205833425274624, 4.855931686326728, 9.801721449912678, 5.681859138454148, 9.701690844039558, 8.629743734104695 ],
+          "ongoing": [ 15.930202720041068, 15.632537849627928, 15.396458814472677, 15.2732871439569, 15.047472414677962, 14.852450603027979 ],
+          "idle": [ 45.301319974759686, 117.01043303827024, 101.27468500802556, 115.13435514642264, 105.25202006309972, 94.08109427919938 ],
+          "hours": [ 162.5, 162.5, 162.5, 162.5, 162.5, 162.5 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        },
+        "ops": {
+          "purpose": {
+            "winning": [ 8.377738335441002, 9.051532434921958, 7.595099667000237, 8.296524598170507, 9.785855222936611, 10.947328503882428 ],
+            "client_job": [ 0, 0, 0, 0, 0, 0 ],
+            "coordination": [ 0, 0, 0, 0, 0, 0 ],
+            "removable": [ 0, 0, 0, 0, 0, 0 ],
+            "required": [ 0, 0, 0, 0, 0, 0 ]
+          },
+          "rework": [ 0, 0, 0, 0, 0, 0 ],
+          "ongoing": [ 6.874790636362177, 7.223134705347602, 7.491675256371431, 7.667189885508296, 8.053368032986052, 8.733480292219848 ],
+          "idle": [ 65.99747102819681, 64.97533285973046, 66.16322507662834, 65.28628551632119, 63.41077674407733, 61.56919120389771 ],
+          "hours": [ 81.25, 81.25, 81.25, 81.25, 81.25, 81.25 ],
+          "uncovered": [ 0, 0, 0, 0, 0, 0 ]
+        }
+      }
+    },
+    "overtime": {
+      "hours": { "mean": 105.31976083711189, "p10": 35.834140182251076, "p90": 146.25 },
+      "cost": { "mean": 4739.389237670034, "p10": 1612.5363082012984, "p90": 6581.25 }
+    },
+    "clients": {
+      "atRisk": { "mean": 8.8, "p10": 1, "p90": 15 },
+      "churned": { "mean": 10.3, "p10": 7, "p90": 15 }
+    },
+    "touchpoints": {
+      "onTime": { "mean": 90.83333333333333, "p10": 19, "p90": 167 },
+      "late": { "mean": 56.166666666666664, "p10": 33, "p90": 91 },
+      "missed": { "mean": 55.1, "p10": 8, "p90": 145 }
+    },
+    "bottleneck": { "role": "copy", "step": "adhoc_design", "person": "imogen" },
+    "roles": {
+      "strat": {
+        "util": { "mean": 0.4908020728128259, "p10": 0.41706280019139563, "p90": 0.5650048312058978 },
+        "pipeline": 0.4908020728128259,
+        "ongoing": 0,
+        "servicing": 0,
+        "overtime": 0
+      },
+      "am": {
+        "util": { "mean": 0.26185327627716853, "p10": 0.24550934854919337, "p90": 0.2842082532347909 },
+        "pipeline": 0.058300002682755904,
+        "ongoing": 0.10120032118272658,
+        "servicing": 0.10235295241168602,
+        "overtime": 0
+      },
+      "design": {
+        "util": { "mean": 0.8525421190852249, "p10": 0.7775159018196363, "p90": 0.93357708611689 },
+        "pipeline": 0.3494811973754314,
+        "ongoing": 0.07870707488682976,
+        "servicing": 0.4243538468229639,
+        "overtime": 0
+      },
+      "copy": {
+        "util": { "mean": 1.095167572966157, "p10": 0.9774674847468927, "p90": 1.2519442075359584 },
+        "pipeline": 0.08471371184547243,
+        "ongoing": 1.1333818783703482,
+        "servicing": 0,
+        "overtime": 0.10802026752524292
+      },
+      "social": {
+        "util": { "mean": 0.4833108962196067, "p10": 0.3955093488358216, "p90": 0.5740937575122482 },
+        "pipeline": 0.04113597854106092,
+        "ongoing": 0,
+        "servicing": 0.44217491767854583,
+        "overtime": 0
+      },
+      "dev": {
+        "util": { "mean": 0.41625506381014754, "p10": 0.2737643046347663, "p90": 0.5612198147506428 },
+        "pipeline": 0.32176028478880947,
+        "ongoing": 0.09449477902133796,
+        "servicing": 0,
+        "overtime": 0
+      },
+      "ops": {
+        "util": { "mean": 0.20578842869428027, "p10": 0.1684119023057591, "p90": 0.24185542249484274 },
+        "pipeline": 0.11133993883008461,
+        "ongoing": 0.09444848986419568,
+        "servicing": 0,
+        "overtime": 0
+      }
+    },
+    "people": {
+      "hana": { "util": 0.3855421693172011, "overtime": 0 },
+      "jess": { "util": 0.22133552814057517, "overtime": 0 },
+      "callum": { "util": 0.31402536521781776, "overtime": 0 },
+      "ruby": { "util": 0.8176604601446846, "overtime": 0 },
+      "theo": { "util": 0.8961441927609006, "overtime": 0 },
+      "imogen": { "util": 1.095167572966157, "overtime": 0.10802026752524292 },
+      "kai": { "util": 0.5010150215198079, "overtime": 0 },
+      "freya": { "util": 0.4656067709194057, "overtime": 0 },
+      "marek": { "util": 0.41625506381014754, "overtime": 0 },
+      "priti": { "util": 0.20578842869428027, "overtime": 0 }
+    },
+    "steps": {
+      "triage": { "arrivals": 151.03333333333333, "departures": 149.4, "avgQueue": 0.0011751604672335931, "avgWait": 0.007594263447958057, "wip": 0, "slaBreaches": 0, "lostHere": 59.233333333333334 },
+      "pitch": { "arrivals": 90.16666666666667, "departures": 87.66666666666667, "avgQueue": 0.0680180863285069, "avgWait": 0.7312002470579538, "wip": 0.16666666666666666, "slaBreaches": 0, "lostHere": 21.6 },
+      "concepts": { "arrivals": 86.2, "departures": 81.63333333333334, "avgQueue": 2.184819359396819, "avgWait": 23.203029562042165, "wip": 3.966666666666667, "slaBreaches": 3.7, "lostHere": 0 },
+      "decision": { "arrivals": 61.5, "departures": 63.3, "avgQueue": 0, "avgWait": 0, "wip": 0, "slaBreaches": 0, "lostHere": 36.8 },
+      "onboard": { "arrivals": 26.5, "departures": 25.533333333333335, "avgQueue": 0.01130376488213461, "avgWait": 0.3981645002050077, "wip": 0, "slaBreaches": 0, "lostHere": 0 },
+      "workshop": { "arrivals": 25.533333333333335, "departures": 25.033333333333335, "avgQueue": 0.015392874775445391, "avgWait": 0.5569672339552862, "wip": 0.03333333333333333, "slaBreaches": 0, "lostHere": 0 },
+      "social_setup": { "arrivals": 13.2, "departures": 12.9, "avgQueue": 0.03212123502355465, "avgWait": 2.3320717501627213, "wip": 0, "slaBreaches": 0, "lostHere": 0 },
+      "content_plan": { "arrivals": 9.2, "departures": 5.833333333333333, "avgQueue": 1.0747351228803994, "avgWait": 97.01802191107184, "wip": 2.4, "slaBreaches": 0, "lostHere": 0 },
+      "web_design": { "arrivals": 6.5, "departures": 5.566666666666666, "avgQueue": 0.1977281652104382, "avgWait": 23.047443964753278, "wip": 0.5333333333333333, "slaBreaches": 0, "lostHere": 0 },
+      "web_build": { "arrivals": 5.033333333333333, "departures": 6.266666666666667, "avgQueue": 0.09514090823830969, "avgWait": 19.29765465931255, "wip": 0.1, "slaBreaches": 0.13333333333333333, "lostHere": 0 },
+      "launch": { "arrivals": 21.666666666666668, "departures": 21.666666666666668, "avgQueue": 0.00022689648947936723, "avgWait": 0.009514933360783986, "wip": 0, "slaBreaches": 0, "lostHere": 0 },
+      "cal_plan": { "arrivals": 86.6, "departures": 86.33333333333333, "avgQueue": 0.023084062266956838, "avgWait": 0.25757995252931093, "wip": 0.03333333333333333, "slaBreaches": 0, "lostHere": 0 },
+      "cal_social": { "arrivals": 86.33333333333333, "departures": 84.93333333333334, "avgQueue": 0.4378934482352825, "avgWait": 4.835260157943449, "wip": 0.5, "slaBreaches": 0, "lostHere": 0 },
+      "cal_design": { "arrivals": 104.63333333333334, "departures": 98.33333333333333, "avgQueue": 2.7680463957549053, "avgWait": 25.344241723137362, "wip": 5.5, "slaBreaches": 0, "lostHere": 0 },
+      "cal_approve": { "arrivals": 78.63333333333334, "departures": 76.76666666666667, "avgQueue": 0.020389529668643547, "avgWait": 0.2513157358815977, "wip": 0.03333333333333333, "slaBreaches": 0, "lostHere": 0 },
+      "adhoc_design": { "arrivals": 133.03333333333333, "departures": 124.2, "avgQueue": 3.669429469233001, "avgWait": 25.654362358020983, "wip": 8.566666666666666, "slaBreaches": 0, "lostHere": 0 }
+    },
+    "absence": {
+      "hana": {
+        "steps": [ "pitch", "workshop" ],
+        "workLost": 0,
+        "itemsLost": 0,
+        "recoveryWeeks": 1,
+        "recovered": true,
+        "extraMissed": 0
+      },
+      "imogen": {
+        "steps": [ "content_plan" ],
+        "workLost": 0,
+        "itemsLost": 0,
+        "recoveryWeeks": 0,
+        "recovered": true,
+        "extraMissed": 0
+      },
+      "marek": {
+        "steps": [ "web_build" ],
+        "workLost": 0.0006574621959237344,
+        "itemsLost": 0.1,
+        "recoveryWeeks": 0,
+        "recovered": true,
+        "extraMissed": 0.4000000000000057
+      },
+      "priti": {
+        "steps": [ "onboard" ],
+        "workLost": 0,
+        "itemsLost": 0,
+        "recoveryWeeks": 1,
+        "recovered": true,
+        "extraMissed": 0.20000000000000284
+      }
+    },
+    "ratings": {
+      "churn_risk:driver:social:late": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 17585.74595842957, "hoursPerMonth": null },
+      "churn_risk:client:l09": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 2636.48, "hoursPerMonth": null },
+      "churn_risk:client:l03": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 2451.6800000000007, "hoursPerMonth": null },
+      "churn_risk:client:l06": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 2310.186666666667, "hoursPerMonth": null },
+      "churn_risk:client:l14": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 2153.06, "hoursPerMonth": null },
+      "rework:step:concepts": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 805.3333333333333, "hoursPerMonth": 16.777777777777775 },
+      "overtime:person:imogen": { "rating": "risk", "base": "bad", "badMonth": true, "bottleneck": false, "costPerMonth": 789.8982062783392, "hoursPerMonth": 17.55329347285198 },
+      "rework:step:cal_design": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 787.9999999999999, "hoursPerMonth": 16.416666666666664 },
+      "rework:step:web_build": { "rating": "risk", "base": "bad", "badMonth": true, "bottleneck": false, "costPerMonth": 450, "hoursPerMonth": 7.5 },
+      "rework:step:web_design": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": 368, "hoursPerMonth": 7.666666666666666 },
+      "rework:step:content_plan": { "rating": "risk", "base": "bad", "badMonth": true, "bottleneck": false, "costPerMonth": 102, "hoursPerMonth": 2.2666666666666666 },
+      "wait:step:adhoc_design": { "rating": "risk", "base": "bad", "badMonth": true, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": 568.8142231714539 },
+      "wait:step:cal_design": { "rating": "risk", "base": "bad", "badMonth": true, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": 441.9754153829343 },
+      "wait:step:concepts": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": 333.3501913746724 },
+      "wait:step:content_plan": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": 148.76096693031013 },
+      "wait:step:web_design": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": 24.968064295149382 },
+      "wait:step:web_build": { "rating": "risk", "base": "bad", "badMonth": true, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": 16.188588075312193 },
+      "capacity:role:copy": { "rating": "risk", "base": "risk", "badMonth": false, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": null },
+      "churn_risk:driver:content:late": { "rating": "bad", "base": "bad", "badMonth": false, "bottleneck": false, "costPerMonth": 15559.296766743651, "hoursPerMonth": null },
+      "churn_risk:client:l10": { "rating": "bad", "base": "bad", "badMonth": false, "bottleneck": false, "costPerMonth": 5064.9299999999985, "hoursPerMonth": null },
+      "churn_risk:client:l13": { "rating": "bad", "base": "bad", "badMonth": false, "bottleneck": false, "costPerMonth": 687.463, "hoursPerMonth": null },
+      "rework:step:social_setup": { "rating": "bad", "base": "good", "badMonth": true, "bottleneck": false, "costPerMonth": 45.59999999999999, "hoursPerMonth": 1.1999999999999997 },
+      "capacity:role:design": { "rating": "bad", "base": "bad", "badMonth": false, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": null },
+      "spare:person:jess": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 6326.648833857827, "hoursPerMonth": 126.53297667715654 },
+      "spare:person:hana": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 6240.587342872177, "hoursPerMonth": 99.84939748595484 },
+      "churn_risk:client:l17": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 4632.663750000001, "hoursPerMonth": null },
+      "churn_risk:client:l02": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 4271.231250000001, "hoursPerMonth": null },
+      "spare:person:callum": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 3344.1263445631384, "hoursPerMonth": 66.88252689126277 },
+      "spare:person:priti": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 2581.1876067435887, "hoursPerMonth": 64.52969016858972 },
+      "churn_risk:client:l18": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 1893.5, "hoursPerMonth": null },
+      "churn_risk:client:l01": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 1845.7600000000002, "hoursPerMonth": null },
+      "churn_risk:client:l05": { "rating": "good", "base": "good", "badMonth": false, "bottleneck": false, "costPerMonth": 605.472, "hoursPerMonth": null },
+      "sla:step:concepts": { "rating": "good", "base": "great", "badMonth": true, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": null },
+      "sla:step:web_build": { "rating": "good", "base": "great", "badMonth": true, "bottleneck": false, "costPerMonth": null, "hoursPerMonth": null }
+    },
+    "churnCauses": {
+      "clients": 10.28507120862202,
+      "normalShare": 0.43501431385467726,
+      "causes": {
+        "late": { "share": 0.5649856861453227, "mrr": 16559.3899153195, "pressure": 1.126495736536827, "value": 0.540200634688021, "mode": "weight", "chance": 0.5584091936476179, "exposure": 0 },
+        "resp": { "share": 0, "mrr": 0, "pressure": 0.33635918289915057, "value": 28.029065666628988, "mode": "weight", "chance": 0.40869091263583546, "exposure": 0 },
+        "onb": { "share": 0, "mrr": 0, "pressure": 0.06943945898609044, "value": 12.970090104098906, "mode": "weight", "chance": 0.05144043445030242, "exposure": 0 },
+        "rework": { "share": 0, "mrr": 0, "pressure": 0.08800697983294005, "value": 0.04173900530110827, "mode": "weight", "chance": 0.13791040340212193, "exposure": 0 },
+        "load": { "share": 0, "mrr": 0, "pressure": 0.47602009651960897, "value": 1.2114474741644747, "mode": "weight", "chance": 0.9492582935335789, "exposure": 0 },
+        "handoff": { "share": 0, "mrr": 0, "pressure": 0.3533256151080308, "value": 0.3, "mode": "weight", "chance": null, "exposure": 0 },
+        "results": { "share": 0, "mrr": 0, "pressure": 0.25, "value": 7, "mode": "weight", "chance": null, "exposure": 0 },
+        "tenure": { "share": 0, "mrr": 0, "pressure": 0.2033295262475544, "value": 1.6000000000000008, "mode": "weight", "chance": null, "exposure": 0 },
+        "price": { "share": 0, "mrr": 0, "pressure": 0, "value": 0, "mode": "weight", "chance": null, "exposure": 0 },
+        "market": { "share": 0, "mrr": 0, "pressure": 0, "value": 1, "mode": "weight", "chance": null, "exposure": 0 }
+      },
+      "byService": {
+        "content": {
+          "clients": 3.0800127020785197,
+          "shares": { "normal": 0.5407546458185474, "late": 0.4592453541814527, "resp": 0, "onb": 0, "rework": 0, "load": 0, "handoff": 0, "results": 0, "tenure": 0, "price": 0, "market": 0 }
+        },
+        "social": {
+          "clients": 7.2050585065434944,
+          "shares": { "normal": 0.38981252052087667, "late": 0.6101874794791233, "resp": 0, "onb": 0, "rework": 0, "load": 0, "handoff": 0, "results": 0, "tenure": 0, "price": 0, "market": 0 }
+        },
+        "web": {
+          "clients": 0,
+          "shares": { "normal": 0, "late": 0, "resp": 0, "onb": 0, "rework": 0, "load": 0, "handoff": 0, "results": 0, "tenure": 0, "price": 0, "market": 0 }
+        }
+      }
+    },
+    "rosterClients": {
+      "l01": { "health": 45.06666666666667, "churned": 0.43333333333333335, "atRisk": 0.5 },
+      "l02": { "health": 46.9, "churned": 0.4, "atRisk": 0.4666666666666667 },
+      "l03": { "health": 20.4, "churned": 0.5333333333333333, "atRisk": 0.9333333333333333 },
+      "l04": { "health": 88, "churned": 0.23333333333333334, "atRisk": 0 },
+      "l05": { "health": 45.6, "churned": 0.26666666666666666, "atRisk": 0.4666666666666667 },
+      "l06": { "health": 36.53333333333333, "churned": 0.6666666666666666, "atRisk": 0.5333333333333333 },
+      "l07": { "health": 91, "churned": 0.2, "atRisk": 0 },
+      "l08": { "health": 85, "churned": 0, "atRisk": 0 },
+      "l09": { "health": 21.533333333333335, "churned": 0.5, "atRisk": 0.9333333333333333 },
+      "l10": { "health": 33.4, "churned": 0.43333333333333335, "atRisk": 0.6666666666666666 },
+      "l11": { "health": 79, "churned": 0.23333333333333334, "atRisk": 0 },
+      "l12": { "health": 51.13333333333333, "churned": 0.5333333333333333, "atRisk": 0.43333333333333335 },
+      "l13": { "health": 38.233333333333334, "churned": 0.06666666666666667, "atRisk": 0.5333333333333333 },
+      "l14": { "health": 26.766666666666666, "churned": 0.6666666666666666, "atRisk": 0.8333333333333334 },
+      "l15": { "health": 84, "churned": 0.3333333333333333, "atRisk": 0 },
+      "l16": { "health": 90, "churned": 0, "atRisk": 0 },
+      "l17": { "health": 40.233333333333334, "churned": 0.4666666666666667, "atRisk": 0.5 },
+      "l18": { "health": 45.9, "churned": 0.36666666666666664, "atRisk": 0.5333333333333333 }
+    }
+  }
+}
