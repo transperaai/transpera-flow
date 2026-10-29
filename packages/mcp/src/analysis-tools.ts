@@ -25,6 +25,7 @@ import { absenceTest, detectIssues, ENGINE_VERSION, ISSUE_TYPES, ratingOfStored,
 import { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, type NamedScenario } from "./analysis";
 import { resolveProcess, resolveWorkspace, revisionIdFor, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool, ToolError } from "./result";
+import { listScenarios } from "./saved-scenarios";
 
 /** The statuses a tool may give or filter an issue by: the four a person sees, and the two old spellings of testing and resolved. */
 const ISSUE_STATUS_INPUT = ["open", "testing", "resolved", "wont_fix", "in_progress", "done"] as const;
@@ -34,7 +35,7 @@ const touches = (i: { process_id: string | null; links: readonly { process_id: s
 const normaliseStatus = (s: (typeof ISSUE_STATUS_INPUT)[number] | undefined): "open" | "testing" | "resolved" | "wont_fix" =>
   s === "in_progress" ? "testing" : s === "done" ? "resolved" : (s ?? "open");
 
-export const ANALYSIS_TOOL_NAMES = ["compare_scenarios", "check_robustness", "get_bottlenecks", "list_issues"] as const;
+export const ANALYSIS_TOOL_NAMES = ["compare_scenarios", "check_robustness", "get_bottlenecks", "list_issues", "list_scenarios"] as const;
 
 const DEFAULT_REPS = 30;
 const DEFAULT_SEED = 1;
@@ -50,7 +51,7 @@ const workspaceArg = z.string().optional().describe("Workspace id, slug or name.
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 const scenarioRefs = z
   .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(10)])
-  .describe("A saved scenario's id or name, or several to stack in order (as applying them in the app does). Only whole-run scenarios (one that has changes from a month, a hire or a parent runs only in the Sandbox).");
+  .describe("A saved scenario's id or name, or several to stack in order (as applying them in the app does). Only whole-run scenarios (one that has changes from a month, a hire or a parent runs only in the Sandbox: run_scenario with `scenario` runs it month by month).");
 const repsArg = z.number().int().min(1).max(MAX_REPS).optional().describe(`Replications (default ${DEFAULT_REPS}, as in the app)`);
 const seedArg = z.number().int().min(0).optional().describe(`Random seed (default ${DEFAULT_SEED}, as in the app)`);
 const startDateArg = z
@@ -111,7 +112,7 @@ async function resolveScenarios(ctx: ToolContext, ws: WorkspaceRef, names: strin
     if (!scenario) {
       throw new ToolError(
         "sandbox_only",
-        `'${hit.name}' runs only in the Sandbox: it has a change from a month, a hire, leave or a solution going live, or builds on another scenario. These tools take whole-run scenarios.`,
+        `'${hit.name}' runs only in the Sandbox: it has a change from a month, a hire, leave or a solution going live, or builds on another scenario. These tools take whole-run scenarios; run_scenario with \`scenario\` runs it month by month.`,
         runnable.map((s) => ({ id: s.id, name: s.name })).slice(0, 50),
       );
     }
@@ -251,6 +252,22 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
             : {}),
           duration_ms: Math.round(performance.now() - started),
         };
+      }),
+  );
+
+  server.registerTool(
+    "list_scenarios",
+    {
+      title: "List scenarios",
+      description:
+        "Saved Sandbox scenarios: each one's changes (lever, target, value, from which month, and the note saying why), what it builds on, and whether compare_scenarios can take it. Read-only; run one with run_scenario.",
+      inputSchema: { workspace: workspaceArg },
+      annotations: { readOnlyHint: true },
+    },
+    (args) =>
+      runTool(async (assumptions) => {
+        const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
+        return await listScenarios(ctx, ws);
       }),
   );
 
