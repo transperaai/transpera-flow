@@ -9,30 +9,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ProcessBundle, SolutionRow } from "@transpera-flow/db";
-import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
 import { SimulationCancelled } from "@/lib/sim/client";
 import { runSegments, sharedSimPool } from "@/lib/forecast/sim-pool";
-import { spliceMonthly, spliceSamples } from "@/lib/forecast/splice";
-import type { EffectiveChange } from "./effective";
-import { priceRiseTradeoff, type PriceRiseTradeoff } from "./price-rise";
-import { prepareScenario, type ChangeProblem, type PreparedScenario } from "./run";
+import { joinRun, prepareScenario, priceRiseOf, type ChangeProblem, type EffectiveChange, type PreparedScenario, type PriceRiseTradeoff, type ScenarioRun } from "@transpera-flow/db/sandbox";
+
+export type { ScenarioRun };
 
 /** Re-runs wait this long after the last change, so a key held down or changes moved one after another run once. */
 const DEBOUNCE_MS = 150;
-
-export interface ScenarioRun {
-  model: EngineModel;
-  result: SimulationResult;
-  /** The model without the scenario: what Settings' own hires and leave are drawn from. */
-  markersModel: EngineModel;
-  /** Ids of the people the scenario added (its hires, and the second row of an FTE change). */
-  planPeople: Set<string>;
-  /**
-   * The run is spliced from more than one segment: `result.monthly` follows the scenario, but `result.kpi` is the first segment's
-   * alone, so whole-run figures must come from the months.
-   */
-  spliced: boolean;
-}
 
 export interface ScenarioForecast {
   status: "idle" | "running" | "done" | "error";
@@ -110,20 +94,7 @@ export function useScenarioRun({
         const [results, pairResults] = await Promise.all([job.results, pairJob?.results ?? Promise.resolve(null)]);
         if (!active) return;
         const run = joinRun(prepared, prepared.segments, results);
-        let priceRise: PriceRiseTradeoff | null = null;
-        if (pairResults) {
-          const other = joinRun(prepared, pairSegments, pairResults);
-          const a = run.result.monthlySamples;
-          const b = other.result.monthlySamples;
-          if (a && b) {
-            const clients = other.result.monthly!.clients;
-            const first = prepared.riseMonths[0] ?? 0;
-            const clientMonthsAfter = Object.values(clients).reduce((sum, row) => sum + row.slice(first).reduce((x, st) => x + st.mean, 0), 0);
-            const mrr = run.result.monthly!.mrr;
-            const live = Object.values(run.result.monthly!.clients).reduce((x, row) => x + (row[row.length - 1]?.mean ?? 0), 0);
-            priceRise = priceRiseTradeoff(a, b, prepared.riseMonths, { clientMonthsAfter, monthlyFee: live > 0 ? (mrr[mrr.length - 1]?.mean ?? 0) / live : 0 });
-          }
-        }
+        const priceRise = pairResults ? priceRiseOf(prepared, run, joinRun(prepared, pairSegments, pairResults)) : null;
         setState((s) => ({ status: "done", run, priceRise, error: null, progress: [total, total], finished: s.finished + 1 }));
       } catch (err) {
         if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ ...s, status: "error", error: (err as Error).message }));
@@ -141,12 +112,4 @@ export function useScenarioRun({
   // A scenario that fails has no numbers: the page shows the failure, never the previous scenario's numbers under this one's name.
   const status = prepared.error !== null ? "error" : state.status === "idle" ? "running" : state.status;
   return { status, run: status === "error" ? null : state.run, priceRise: status === "error" ? null : state.priceRise, problems: prepared.problems, later: prepared.later, error: prepared.error ?? state.error, progress: state.progress, finished: state.finished };
-}
-
-/** The runs of a prepared scenario's segments as one: months spliced, and the first segment's other figures. */
-function joinRun(prepared: PreparedScenario, segments: { from: number; model: EngineModel }[], results: SimulationResult[]): ScenarioRun {
-  const first = results[0]!;
-  const monthly = spliceMonthly(segments.map((seg, i) => ({ from: seg.from, monthly: results[i]!.monthly! })));
-  const samples = results.every((r) => r.monthlySamples) ? spliceSamples(segments.map((seg, i) => ({ from: seg.from, samples: results[i]!.monthlySamples! }))) : undefined;
-  return { model: segments[0]!.model, result: { ...first, monthly, ...(samples ? { monthlySamples: samples } : {}) }, markersModel: prepared.markersModel, planPeople: prepared.planPeople, spliced: segments.length > 1 };
 }

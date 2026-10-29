@@ -7,8 +7,8 @@
 import type { EngineModel, InitialState, SimulationResult } from "@transpera-flow/engine";
 import { SimulationCancelled, SimulationClient, type WorkerLike } from "@/lib/sim/client";
 
-export const REPS = 30;
-export const SEED = 1;
+export { SANDBOX_REPS as REPS, SANDBOX_SEED as SEED } from "@transpera-flow/db/sandbox";
+import { SANDBOX_REPS as REPS, SANDBOX_SEED as SEED } from "@transpera-flow/db/sandbox";
 /** The most workers a page runs at once. */
 export const POOL_SIZE = 3;
 /** Finished runs kept, most recently used last. */

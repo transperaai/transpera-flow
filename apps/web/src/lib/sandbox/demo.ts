@@ -20,7 +20,7 @@ export const DEMO_SCENARIOS: SandboxScenarioRow[] = ([
   january,
   {
     ...march,
-    changes: [...march.changes, { id: "5b0000f2-0000-4000-8000-000000000002", lever: "E6", target: DEMO_FORECAST_SOLUTION_ID, op: "set", value: 1, from: "2027-04" }],
+    changes: [...march.changes.map((c) => (c.lever === "D1" ? { ...c, note: "Assumes a PPC specialist can be found and start on the 1st." } : c)), { id: "5b0000f2-0000-4000-8000-000000000002", lever: "E6", target: DEMO_FORECAST_SOLUTION_ID, op: "set", value: 1, from: "2027-04" }],
   },
   {
     id: DEMO_THEN_LEADS_ID,
@@ -28,7 +28,7 @@ export const DEMO_SCENARIOS: SandboxScenarioRow[] = ([
     name: "Hire in March, then more leads",
     description: "Builds on “Hire in March”: 25% more leads from May.",
     parent_id: NORTHBEAM_HIRE_MARCH_ID,
-    changes: [{ id: "5b0000f3-0000-4000-8000-000000000001", lever: "A1", target: null, op: "multiply", value: 1.25, from: "2027-05" }],
+    changes: [{ id: "5b0000f3-0000-4000-8000-000000000001", lever: "A1", target: null, op: "multiply", value: 1.25, from: "2027-05", note: "Assumes the spring campaign lifts leads by a quarter." }],
     horizon_months: 12,
     start_date: null,
     created_at: SEEDED_AT,

@@ -6,17 +6,18 @@
 // for leave). Months are the run's own; no earlier month is offered.
 
 import { useState } from "react";
-import { HIRE_FTE, sandboxLever, sqlTargetClass, type SandboxChange, type SandboxLever } from "@transpera-flow/db";
+import { HIRE_FTE, MAX_CHANGE_NOTE, sandboxLever, sqlTargetClass, type SandboxChange, type SandboxLever } from "@transpera-flow/db";
 
 type PatchOp = SandboxChange["op"];
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import { formatNumber } from "@/lib/format";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
-import { mondayOnOrBefore } from "@/lib/forecast/positions";
+import { mondayOnOrBefore } from "@transpera-flow/db/sandbox";
 import { greyedLevers, listWords } from "@/lib/sandbox/greyed";
 import { longDate, weekdayDate } from "@/lib/sandbox/lane";
 import { MAX_TRAFFIC_PERCENT, othersTotal, shareToWeight, weightToShare } from "@/lib/sandbox/traffic";
@@ -104,6 +105,7 @@ export function ChangeDialog(props: ChangeDialogProps) {
   const [timed, setTimed] = useState<boolean>(editing ? editing.from !== undefined : preset?.month !== undefined);
   const [month, setMonth] = useState(editing?.from && editing.from.length === 7 ? editing.from : (preset?.month ?? defaultMonth).slice(0, 7));
   const [monday, setMonday] = useState(editing?.from && editing.from.length === 10 ? editing.from : defaultMonday);
+  const [noteText, setNoteText] = useState(editing?.note ?? "");
   const [error, setError] = useState<string | null>(null);
 
   const cls = sqlTargetClass(lever);
@@ -211,6 +213,8 @@ export function ChangeDialog(props: ChangeDialogProps) {
       }
       if (Object.keys(p).length) params = p;
     }
+    const note = noteText.trim();
+    if (Array.from(note).length > MAX_CHANGE_NOTE) return { error: `A note can have up to ${MAX_CHANGE_NOTE} characters.` };
     const change: SandboxChange = {
       id,
       lever: lever.id,
@@ -219,6 +223,7 @@ export function ChangeDialog(props: ChangeDialogProps) {
       value: stored,
       ...(from ? { from } : {}),
       ...(params ? { params } : {}),
+      ...(note ? { note } : {}),
     };
     return { change };
   };
@@ -450,6 +455,14 @@ export function ChangeDialog(props: ChangeDialogProps) {
               <p className="text-xs text-muted-foreground">This change applies to the whole run: it is where the run starts.</p>
             )}
           </div>
+
+          <label className="flex flex-col gap-0.5" data-change-note>
+            <HelpLabel {...SANDBOX_HELP.changeNote} />
+            <Textarea aria-label="Why (optional)" rows={2} value={noteText} placeholder="Assumes the Q3 campaign doubles leads." onChange={(e) => setNoteText(e.target.value)} />
+            <span className={`text-xs ${Array.from(noteText.trim()).length > MAX_CHANGE_NOTE ? "text-destructive" : "text-muted-foreground"}`} data-note-count>
+              {Array.from(noteText.trim()).length} / {MAX_CHANGE_NOTE}
+            </span>
+          </label>
 
           {error ? (
             <p role="alert" className="text-sm text-destructive" data-change-dialog-error>

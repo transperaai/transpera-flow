@@ -245,3 +245,20 @@
   text-decoration: none;
   cursor: default;
 }
+
+/* Printing a Sandbox summary (sandbox phase 5a): the summary is rendered into <body> beside the app (components/sandbox/print-summary.tsx),
+   hidden on screen. Printing shows only it, on one A4 page, whatever the theme: the rest of the page is not laid out at all (display: none), so
+   there is no run of blank pages after it. Its light colours are tokens (styles/tokens.css). Only on a page that has a summary to print: any
+   other page prints as it always did. */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+  body:has(> [data-print-root]) {
+    background: var(--paper) !important;
+  }
+  body:has(> [data-print-root]) > *:not([data-print-root]) {
+    display: none !important;
+  }
+}

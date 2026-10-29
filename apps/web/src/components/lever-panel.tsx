@@ -98,6 +98,7 @@ export function LeverPanel({
   status,
   hiddenCount = 0,
   settingsHref,
+  clientsPerType = false,
 }: {
   levers: Lever[];
   values: LeverValues;
@@ -109,6 +110,8 @@ export function LeverPanel({
   hiddenCount?: number;
   /** The Levers settings page, to switch them back on. */
   settingsHref?: string;
+  /** Clients are counted per type or named, so the pooled client count and churn have no sliders. */
+  clientsPerType?: boolean;
 }) {
   const moved = levers.filter((l) => values[l.path] !== undefined && Math.abs(values[l.path]! - neutral(l)) > 1e-9).length;
   return (
@@ -137,6 +140,12 @@ export function LeverPanel({
         </p>
       )}
       <div className="flex max-h-[40rem] flex-col gap-2 overflow-y-auto pr-1">
+        {clientsPerType && !levers.some((l) => l.group === "clients") && (
+          <div className="rounded-token border border-line px-2 py-1.5" data-clients-per-type>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-2">{GROUP_LABELS.clients}</h3>
+            <p className="mt-1 text-xs text-fg-3">Clients and churn are set per client type here: change them in the Sandbox or Settings, Clients.</p>
+          </div>
+        )}
         {GROUPS.map((group) => {
           const inGroup = levers.filter((l) => l.group === group);
           if (!inGroup.length) return null;

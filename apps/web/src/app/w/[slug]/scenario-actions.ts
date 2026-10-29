@@ -1,6 +1,6 @@
 "use server";
 
-import { changesFromPatch, wholeRunPatches, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
+import { carryNotes, changesFromPatch, wholeRunPatches, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { parsePatches } from "@transpera-flow/engine";
 import { sql } from "kysely";
 import { isId, parseScenarioInput } from "@/lib/scenarios/validate";
@@ -107,7 +107,7 @@ export async function updateScenarioPatch(id: unknown, patch: unknown): Promise<
     if (!current || wholeRunPatches(current.changes as unknown as SandboxChange[]) === null) return forbidden;
     data = await db
       .updateTable("sandbox_scenarios")
-      .set({ changes: jsonb(changesFromPatch(parsed.patches)) })
+      .set({ changes: jsonb(carryNotes(current.changes as unknown as SandboxChange[], changesFromPatch(parsed.patches))) })
       .where("id", "=", id)
       .where("parent_id", "is", null)
       // Only if the Sandbox hasn't changed it since it was read (a change from a month added there would otherwise be overwritten).

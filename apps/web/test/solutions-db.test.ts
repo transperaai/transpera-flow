@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID, northbeamIssues, northbeamStepIds as ids, toEngineModel, type SolutionRow } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { diffBundles } from "@/lib/drafts/diff";
-import { bundleFromSolution, changedStepIds, solutionCopy } from "@/lib/solutions/bundle";
+import { changedStepIds, solutionCopy } from "@/lib/solutions/bundle";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { demoBundle } from "@/lib/sources/demo";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
 

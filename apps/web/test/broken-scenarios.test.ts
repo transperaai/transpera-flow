@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { northbeamBundle, northbeamScenarios, northbeamStepIds, patchOf, toEngineModel, type ProcessBundle, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
+import { retiredSteps, northbeamBundle, northbeamScenarios, northbeamStepIds, patchOf, toEngineModel, type ProcessBundle, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { brokenScenarioKey, checkScenario, detectBrokenScenarios, repointPatch } from "@transpera-flow/engine";
 import { discardChange } from "@/lib/drafts/discard";
 import { diffBundles } from "@/lib/drafts/diff";
@@ -9,7 +9,7 @@ import { applyEdit, invertEdit } from "@/lib/editor/ops";
 import { splitProblem, splitStep } from "@/lib/editor/split";
 import { parseNewEdge, parseNewStep } from "@/lib/editor/validate";
 import { promoteInput, registerEntries } from "@/lib/issues/register";
-import { newlyBroken, repointTargets, resolveRun, retiredSteps } from "@/lib/scenarios/broken";
+import { newlyBroken, repointTargets, resolveRun } from "@/lib/scenarios/broken";
 import { describePatch, scenarioProblems } from "@/lib/scenarios/scenarios";
 import { MemoryScenarioStore } from "@/lib/scenarios/store";
 import { createTestDb, type TestDb } from "../../../packages/db/test/harness";

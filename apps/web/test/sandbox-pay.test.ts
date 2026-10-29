@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { northbeamRoleIds, type SandboxChange } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
-import { prepareScenario } from "@/lib/sandbox/run";
-import { priceRiseTradeoff } from "@/lib/sandbox/price-rise";
+import { prepareScenario, priceRiseTradeoff } from "@transpera-flow/db/sandbox";
 
 // Viewers and pay (brief section 7, B1): no phase 3 lever stores one person's pay, and a reader who may not see pay (a Viewer who is
 // not everyone, a share link) still gets revenue, clients, churn and the price rise's trade-off, with labour, overtime and profit null.

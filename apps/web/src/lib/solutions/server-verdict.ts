@@ -5,7 +5,7 @@
 import { isActiveStatus, listProcesses, loadIssue, loadProcessBundle, ModelError, toEngineModel, type BlockBundle, type Db, type IssueRow, type ProcessBundle } from "@transpera-flow/db";
 import { simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { currentArea, issueAboutProcess, leafIds, solutionIssueOf } from "./area";
-import { bundleFromSolution } from "./bundle";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { withLeverChanges } from "./levers";
 import { checkTarget, type TargetVerdict } from "./verdict";
 

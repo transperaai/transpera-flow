@@ -426,6 +426,8 @@ describe("MCP over the database (acts as the user under RLS)", () => {
       ["list_issues", { workspace: "northbeam" }],
       ["get_facts", { workspace: "northbeam" }],
       ["list_solutions", { workspace: "northbeam" }],
+      ["list_scenarios", { workspace: "northbeam" }],
+      ["run_scenario", { workspace: "northbeam", scenario: "Hire in March" }],
     ] as const) {
       expect(await call(client, tool, args), tool).toMatchObject({ ok: false, error: { code: "not_found" } });
     }

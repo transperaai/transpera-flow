@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SandboxChange } from "@transpera-flow/db";
 import { simulate, type EngineModel } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
-import { prepareScenario } from "@/lib/sandbox/run";
-import { priceRiseTradeoff } from "@/lib/sandbox/price-rise";
+import { prepareScenario, priceRiseTradeoff } from "@transpera-flow/db/sandbox";
 
 // The price rise's trade-off on real paired runs (the demo, as the Sandbox runs it: same seed, the pinned warm-up, the pair without the
 // rise): the months before the rise are exactly 0, gained - lost = net in every replication and month, and a cut has no break-even.

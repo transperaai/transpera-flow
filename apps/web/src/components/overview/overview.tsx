@@ -52,7 +52,8 @@ import { openIssues, openedVersusResolved, processHealth, timeSplitByProcess, ti
 import { improvementDelivered, impactPairs, solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { useImpacts } from "@/lib/overview/use-impacts";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
-import { calendarMonthStarts, timelineData } from "@/lib/forecast/timeline";
+import { timelineData } from "@/lib/forecast/timeline";
+import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
 import { rerate, visibleFindings } from "@/lib/rules/edit";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { useAbsenceTest } from "@/lib/sim/absence";

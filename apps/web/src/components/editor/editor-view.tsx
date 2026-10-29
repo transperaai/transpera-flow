@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isUnpublished, type BlockRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
+import { retiredSteps, isUnpublished, type BlockRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
@@ -27,7 +27,7 @@ import { namesOf } from "@/lib/editor/describe";
 import type { Table } from "@/lib/editor/ops";
 import { MODE_INFO, editorHorizonWeeks, type EditorMode } from "@/lib/editor/modes";
 import { connect, connectScratch } from "@/lib/drafts/connect";
-import { newlyBroken, retiredSteps } from "@/lib/scenarios/broken";
+import { newlyBroken } from "@/lib/scenarios/broken";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import type { EngineModel } from "@transpera-flow/engine";
 import { currentArea, verdictArea, type SolutionIssue } from "@/lib/solutions/area";

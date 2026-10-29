@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { northbeamPersonIds, northbeamRoleIds, type SandboxChange } from "@transpera-flow/db";
 import { simulate, type MonthlyResult } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
-import { spliceMonthly } from "@/lib/forecast/splice";
-import { prepareScenario } from "@/lib/sandbox/run";
+import { spliceMonthly, prepareScenario } from "@transpera-flow/db/sandbox";
 
 // Sandbox phase 3, §1: a change from a month leaves the months before it exactly as the run without it. Each kind of timed change, run
 // through the Sandbox's own preparation (pinned warm-up, channels, segments), is compared with the scenario that has no changes.

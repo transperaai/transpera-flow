@@ -24,6 +24,7 @@ const argsFor: Record<string, Record<string, unknown>> = {
   check_robustness: { scenario, time_budget_seconds: 1, start_date: "2026-10-05" },
   get_bottlenecks: { process: NORTHBEAM_PROCESS_ID, reps: 3, start_date: "2026-10-05" },
   list_issues: { include_detected: true },
+  list_scenarios: {},
   get_facts: { process: NORTHBEAM_PROCESS_ID },
   list_sources: {},
   list_solutions: {},
@@ -75,6 +76,9 @@ describe("every MCP tool is read-only", () => {
         const r = await call(client, name, argsFor[name]);
         expect(r.ok, `${name}: ${JSON.stringify(r.error)}`).toBe(true);
       }
+      // The saved-scenario mode of run_scenario (a timed hire: spliced runs) reads the Sandbox's inputs and writes nothing either.
+      const saved = await call(client, "run_scenario", { scenario: "Hire in March", months: 3, start_date: "2026-10-05" });
+      expect(saved.ok, `run_scenario (saved): ${JSON.stringify(saved.error)}`).toBe(true);
       await client.close();
       const writes = (await admin.query("select distinct tbl from private.test_writes order by tbl")).rows.map((r) => r.tbl as string);
       // The recorder works: the token lookup's own stamp is seen.

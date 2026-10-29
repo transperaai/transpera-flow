@@ -16,6 +16,22 @@ const model = () => toEngineModel(northbeamBundle(), START);
 const WS = northbeamBundle().workspace.id;
 const valid = { name: " Automate proposals ", description: "  ", patch: [{ path: "steps.x.work_hours", op: "multiply", value: 0.4 }] };
 
+describe("the pooled client count and churn have levers only where the engine reads them", () => {
+  const paths = (m: ReturnType<typeof model>) => buildLevers(m).map((l) => l.path);
+
+  it("leaves both out when clients are counted per type or named (the engine ignores the pool there)", () => {
+    const grouped = model();
+    expect(Object.values(grouped.clientGroups ?? {}).some((g) => g.count > 0) || grouped.clients !== undefined).toBe(true);
+    expect(paths(grouped)).not.toContain("demand.active_clients");
+    expect(paths(grouped)).not.toContain("demand.churn_monthly");
+  });
+
+  it("offers both for a pooled model", () => {
+    const pooled = { ...model(), clients: undefined, clientGroups: {} };
+    expect(paths(pooled)).toEqual(expect.arrayContaining(["demand.active_clients", "demand.churn_monthly"]));
+  });
+});
+
 describe("levers are generated from the model", () => {
   const levers = buildLevers(model());
   const byPath = (p: string) => levers.find((l) => l.path === p)!;

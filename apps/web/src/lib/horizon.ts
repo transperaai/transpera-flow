@@ -5,8 +5,9 @@
 export const HORIZON_MONTHS = [1, 3, 6, 12, 24] as const;
 export type HorizonMonths = (typeof HORIZON_MONTHS)[number];
 
-/** The horizon of a run for a number of months (4, 13, 26, 52, 104 weeks). */
-export const horizonWeeks = (months: number): number => Math.round((months * 52) / 12);
+/** The horizon of a run for a number of months (4, 13, 26, 52, 104 weeks): one source, in the Sandbox runner's months module. */
+export { horizonWeeks } from "@transpera-flow/db/sandbox";
+import { horizonWeeks } from "@transpera-flow/db/sandbox";
 
 export const isHorizonMonths = (n: number): n is HorizonMonths => (HORIZON_MONTHS as readonly number[]).includes(n);
 

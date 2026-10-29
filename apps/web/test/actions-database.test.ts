@@ -114,6 +114,39 @@ describe("sandbox scenarios", () => {
     expect(await deleteSandboxScenario(WS, made.scenario.id)).toMatchObject({ status: "error" });
   });
 
+  it("saves a note on each change and refuses a bad one; updateScenarioPatch keeps the ids and notes of the changes it keeps", async () => {
+    const { saveSandboxScenario, deleteSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
+    const { createScenario, deleteScenario, updateScenarioPatch } = await import("@/app/w/[slug]/scenario-actions");
+    const noted = { ...hire, note: "Assumes the Q3 campaign doubles leads." };
+    const made = await saveSandboxScenario(WS, null, input("Noted hire", [noted]), null);
+    if (made.status !== "ok") throw new Error(JSON.stringify(made));
+    expect((await one("select changes from sandbox_scenarios where id = $1", [made.scenario.id])).changes).toEqual([noted]);
+    expect(await saveSandboxScenario(WS, null, input("Long note", [{ ...hire, note: "x".repeat(281) }]), null)).toEqual({ status: "error", message: "A note can have up to 280 characters." });
+    expect(await saveSandboxScenario(WS, null, input("Padded note", [{ ...hire, note: " x" }]), null)).toMatchObject({ status: "error" });
+    expect(await deleteSandboxScenario(WS, made.scenario.id)).toEqual({ status: "ok" });
+    // A process-page edit of a standalone whole-run scenario keeps the note (and id) of the change at the same patch path.
+    const patch = [
+      { path: "demand.leads_per_week", op: "multiply", value: 1.3 },
+      { path: "demand.churn_monthly", op: "set", value: 0.03 },
+    ];
+    const page = await createScenario(WS, { name: "Noted page scenario", description: "", patch, parent_scenario_id: null });
+    if (page.status !== "ok") throw new Error(JSON.stringify(page));
+    const before = (await one("select changes from sandbox_scenarios where id = $1", [page.scenario.id])).changes as { id: string; lever: string; note?: string }[];
+    const withNotes = before.map((c, i) => ({ ...c, note: `Why ${i}` }));
+    await tdb.client.query("update sandbox_scenarios set changes = $2::jsonb where id = $1", [page.scenario.id, JSON.stringify(withNotes)]);
+    const edited = await updateScenarioPatch(page.scenario.id, [
+      { path: "demand.churn_monthly", op: "set", value: 0.05 },
+      { path: "demand.leads_per_week", op: "multiply", value: 1.5 },
+    ]);
+    expect(edited.status).toBe("ok");
+    const after = (await one("select changes from sandbox_scenarios where id = $1", [page.scenario.id])).changes as { id: string; lever: string; note?: string; value: number }[];
+    expect(after.map((c) => [c.lever, c.id, c.note, c.value])).toEqual([
+      ["B3", withNotes[1]!.id, "Why 1", 0.05],
+      ["A1", withNotes[0]!.id, "Why 0", 1.5],
+    ]);
+    expect(await deleteScenario(page.scenario.id)).toEqual({ status: "ok" });
+  });
+
   it("saves the phase 3 changes with their extras: a fee range (A5), a driver chance (B4) and a price rise (B5), and refuses extras on the wrong lever", async () => {
     const { saveSandboxScenario } = await import("@/app/w/[slug]/sandbox-actions");
     const svc = await one("select id from services where workspace_id = $1 limit 1", [WS]);

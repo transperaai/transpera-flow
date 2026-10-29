@@ -4,7 +4,7 @@
 // numbers aren't stored, so they are simulated on the page, in a worker; this is the pure part.
 
 import { bundleForProcess, toEngineModel, type EdgeRow, type IssueRow, type ProcessBundle, type SolutionRow, type StepRow } from "@transpera-flow/db";
-import { bundleFromSolution } from "@/lib/solutions/bundle";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { withLeverChanges } from "@/lib/solutions/levers";
 import { effectiveVerdict, type SolutionsData } from "@/lib/solutions/cards";
 import { hoursAMonth, type ImpactPair, type SolutionImpact } from "./impact-run";

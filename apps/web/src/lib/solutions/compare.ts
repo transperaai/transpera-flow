@@ -6,7 +6,7 @@ import { MARKET_PRESETS, factorsFromPercents, type MarketFactors, type MarketPre
 import { diffBundles, type DraftDiff } from "@/lib/drafts/diff";
 import { orderConditions } from "@/lib/market";
 import { solutionIssueOf, verdictArea } from "./area";
-import { bundleFromSolution } from "./bundle";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import type { StressCondition, StressResult, StressTarget } from "./stress";
 
 /**

@@ -13,8 +13,7 @@ import { Card } from "@/components/ui/card";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { EDIT_ONLY } from "@/lib/phone";
 import { describeChange, whenOf, type DescribeContext } from "@/lib/sandbox/describe";
-import type { EffectiveChange } from "@/lib/sandbox/effective";
-import type { ChangeProblem } from "@/lib/sandbox/run";
+import { type EffectiveChange, type ChangeProblem } from "@transpera-flow/db/sandbox";
 
 export interface ChangeListProps {
   ctx: DescribeContext;
@@ -114,6 +113,11 @@ export function ChangeList(p: ChangeListProps) {
                     ) : null}
                     {problem ? <span className={problem.note ? "ml-2 block text-xs text-muted-foreground" : "ml-2 block text-xs text-destructive"}>{problem.message}</span> : null}
                     {reason && !problem ? <span className="ml-2 block text-xs text-muted-foreground">Does nothing in this model: {reason}</span> : null}
+                    {c.note ? (
+                      <span className="mt-0.5 block text-xs text-muted-foreground" data-change-note>
+                        {c.note}
+                      </span>
+                    ) : null}
                   </span>
                   {p.canEdit && !e.inherited ? (
                     <span className={`flex gap-1 ${EDIT_ONLY}`} data-edit-entry>
