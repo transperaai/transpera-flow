@@ -2,7 +2,7 @@
 // Pure: no React. Both read runs already made (the payback needs one more run per hire, made by the component).
 
 import { firstCrossing, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { formatPercent, formatWholeCurrency } from "@/lib/format";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
 
 export interface CapacityRunsOut {
@@ -76,7 +76,7 @@ export function paybackMonth(withChange: readonly Stat[], without: readonly Stat
 /** "pays for itself by August 2027 (+£4,100 by the horizon, on average)" or "doesn't pay for itself within these 12 months (-£9,800 by September 2027, on average)". */
 export function paybackLine(p: Payback, months: readonly Pick<TimelineMonth, "long">[], currency: string, horizonLabel: string): string {
   const last = months[months.length - 1]?.long ?? "the horizon";
-  const money = (v: number) => `${v >= 0 ? "+" : "−"}${formatCurrency(Math.abs(Math.round(v)), currency)}`;
+  const money = (v: number) => `${v >= 0 ? "+" : "−"}${formatWholeCurrency(Math.abs(Math.round(v)), currency)}`;
   if (p.month === null) return `doesn't pay for itself within these ${horizonLabel} (${money(p.atHorizon)} by ${last}, on average)`;
   return `pays for itself by ${months[p.month]?.long ?? `month ${p.month + 1}`} (${money(p.atHorizon)} by ${last}, on average)`;
 }

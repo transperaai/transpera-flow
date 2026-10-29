@@ -1,7 +1,8 @@
 // Shared, memoised fixture data for the stories: Northbeam (the demo company) and one run of it. Everything is fixed: the seed,
 // the number of runs and the start date, so a story renders the same pixels every time. Never `new Date()` here.
 
-import { larkspurWithPurposes, simulate, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { larkspurWithPurposes, simulate, toRatingConfig, type EngineModel, type MonthlyResult, type SimulationResult } from "@transpera-flow/engine";
+import { prepareScenario, spliceMonthly } from "@transpera-flow/db/sandbox";
 import {
   defaultCompanyPart,
   northbeamBundle,
@@ -9,10 +10,12 @@ import {
   northbeamStepIds,
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_WORKSPACE_ID,
+  northbeamRoleIds,
   partOf,
   toEngineModel,
   type ProcessBundle,
   type ProcessPart,
+  type SandboxChange,
   type SolutionIssueRow,
   type SolutionRow,
 } from "@transpera-flow/db";
@@ -132,4 +135,18 @@ export function larkspurTime() {
     timeRun = { monthly, months: timelineMonths(DEMO_FORECAST_START, monthly.months, model.hoursPerWeek), hoursPerWeek: model.hoursPerWeek };
   }
   return timeRun;
+}
+
+let sandboxPair: { bundle: ProcessBundle; model: EngineModel; live: MonthlyResult; hire: MonthlyResult; hireChange: SandboxChange } | undefined;
+/** The demo forecast with and without a PPC hire from January: the two columns of a Sandbox export or printed summary (12 months, seed 1). */
+export function northbeamSandboxPair() {
+  if (!sandboxPair) {
+    const { bundle, model, result } = northbeamForecast();
+    const hireChange: SandboxChange = { id: "5b000000-0000-4000-8000-0000000000f1", lever: "D1", target: northbeamRoleIds.ppc, op: "set", value: 1, from: "2027-01", note: "Assumes a PPC specialist can start on the 1st." };
+    const prepared = prepareScenario(bundle, [{ change: hireChange, scenarioId: "s", scenarioName: "Hire in January", inherited: false }], [], 12, DEMO_FORECAST_START);
+    if (prepared.error !== null) throw new Error(prepared.error);
+    const runs = prepared.segments.map((s) => ({ from: s.from, monthly: simulate(s.model, 30, 1, { monthly: true, monthStarts: prepared.monthStarts, ...(prepared.start ? { initialState: prepared.start } : {}) }).monthly! }));
+    sandboxPair = { bundle, model, live: result.monthly!, hire: spliceMonthly(runs), hireChange };
+  }
+  return sandboxPair;
 }

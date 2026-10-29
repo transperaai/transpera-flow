@@ -44,6 +44,8 @@ export interface PrintSummaryProps {
   /** The "When" headline: the month capacity runs out, or that it doesn't. */
   timingLine: string | null;
   ctx: Omit<DescribeContext, "changes">;
+  /** Draw it in place and visible (Storybook): the page itself renders it into <body>, hidden until it is printed. */
+  inline?: boolean;
 }
 
 const dayText = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
@@ -59,7 +61,7 @@ export function PrintSummary(p: PrintSummaryProps) {
     () => compareSandbox(p.model, p.columns.map((c) => c.monthly), p.bundle, p.startDate, p.cutoffs, p.columns.map((c) => c.priceRise?.total.net.mean ?? null), p.categories),
     [p.model, p.columns, p.bundle, p.startDate, p.cutoffs, p.categories],
   );
-  if (!host) return null;
+  if (!host && !p.inline) return null;
   const names = p.columns.map((c) => c.name);
   const last = comparison.months[comparison.months.length - 1]!.long;
   const money = (v: number) => formatCurrency(Math.round(v), p.currency);
@@ -76,8 +78,8 @@ export function PrintSummary(p: PrintSummaryProps) {
   const changes = p.columns.flatMap((c) => c.changes.map((e) => ({ column: c.name, e, all: c.changes.map((x) => x.change) })));
   const shownChanges = changes.slice(0, PRINT_MAX_CHANGES);
 
-  return createPortal(
-    <div data-print-root className="hidden bg-white p-0 text-[11px] leading-snug text-fg print:block" aria-hidden="true">
+  const page = (
+    <div {...(p.inline ? {} : { "data-print-root": "" })} className={`${p.inline ? "block w-[186mm] border border-line" : "hidden print:block"} bg-white p-0 text-[11px] leading-snug text-fg`} aria-hidden={p.inline ? undefined : true}>
       <header className="border-b border-line pb-2">
         <h1 className="text-lg font-semibold leading-tight">
           {p.workspaceName}: {p.title}
@@ -89,7 +91,7 @@ export function PrintSummary(p: PrintSummaryProps) {
 
       <div className="mt-2 grid grid-cols-3 gap-2" data-print-tiles>
         {shownTiles.map((t) => (
-          <div key={t.title} className="rounded border border-line px-2 py-1.5">
+          <div key={t.title} className="min-w-0 rounded border border-line px-2 py-1.5">
             <p className="text-[10px] font-medium text-fg-2">{t.title}</p>
             <dl className="mt-0.5 grid grid-cols-[1fr_auto] gap-x-2 tabular-nums">
               {t.values.map((v, c) => (
@@ -102,7 +104,7 @@ export function PrintSummary(p: PrintSummaryProps) {
           </div>
         ))}
         {p.timingLine ? (
-          <div className="rounded border border-line px-2 py-1.5" data-print-timing>
+          <div className="min-w-0 rounded border border-line px-2 py-1.5" data-print-timing>
             <p className="text-[10px] font-medium text-fg-2">When</p>
             <p className="mt-0.5">{p.timingLine}</p>
           </div>
@@ -143,7 +145,7 @@ export function PrintSummary(p: PrintSummaryProps) {
       <footer className="mt-2 border-t border-line pt-1 text-[9px] text-fg-3">
         Every figure is an average of 30 simulated runs; the shaded band is the 10th to 90th percentile, so one run in ten is below it and one in ten above. All columns use the same random runs, so a difference comes from the changes. A simulation, not a forecast.
       </footer>
-    </div>,
-    host,
+    </div>
   );
+  return p.inline || !host ? page : createPortal(page, host);
 }

@@ -111,7 +111,7 @@ export function Timing(p: TimingProps) {
                         </span>
                       ) : other ? (
                         <span>
-                          {name} {paybackLine(paybackMonth(profit, other, fromMonthOf(e.change)), p.months, p.currency, label)}.
+                          {name}: {paybackLine(paybackMonth(profit, other, fromMonthOf(e.change)), p.months, p.currency, label)}.
                         </span>
                       ) : (
                         <span className="text-muted-foreground">{name}: working it out…</span>

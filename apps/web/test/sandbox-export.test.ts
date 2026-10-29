@@ -37,13 +37,22 @@ function parse(csv: string): string[][] {
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!;
     if (quoted) {
-      if (ch === '"' && text[i + 1] === '"') (cell += '"'), i++;
-      else if (ch === '"') quoted = false;
+      if (ch === '"' && text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
       else cell += ch;
     } else if (ch === '"') quoted = true;
-    else if (ch === ",") (row.push(cell), (cell = ""));
-    else if (ch === "\r" && text[i + 1] === "\n") (row.push(cell), out.push(row), (row = []), (cell = ""), i++);
-    else cell += ch;
+    else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\r" && text[i + 1] === "\n") {
+      row.push(cell);
+      out.push(row);
+      row = [];
+      cell = "";
+      i++;
+    } else cell += ch;
   }
   return out;
 }

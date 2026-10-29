@@ -594,7 +594,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const exportMonths = useMemo(() => (shownRun?.result.monthly ? timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek) : null), [shownRun, start]);
   const exportColumns: PrintColumn[] | null = useMemo(() => {
     if (!built.model || !result?.monthly) return null;
-    const columns: PrintColumn[] = [{ name: NO_CHANGES, monthly: result.monthly, priceRise: null, changes: [] }];
+    const columns: PrintColumn[] = [{ name: "No changes", monthly: result.monthly, priceRise: null, changes: [] }];
     if (working !== null && !scenarioError) {
       if (plan.status !== "done" || !plan.run?.result.monthly) return null;
       columns.push({ name: workingName, monthly: plan.run.result.monthly, priceRise: plan.priceRise, changes: effectiveList ?? [] });
@@ -630,7 +630,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
         actions={
           <div className="flex flex-wrap items-center justify-end gap-3">
             {!comparing ? (
-              <SandboxExportMenu fileName={`${live.workspace.name} ${working !== null ? workingName : NO_CHANGES}`} disabledReason={exportReason} data={exportData} hasCosts={canEdit && (exportData?.columns.every((c) => c.monthly.money) ?? false)} includeCosts={includeCosts} onIncludeCosts={setIncludeCosts} onPrint={() => window.print()} />
+              <SandboxExportMenu fileName={`${live.workspace.name} ${working !== null ? workingName : "live model"}`} disabledReason={exportReason} data={exportData} hasCosts={canEdit && (exportData?.columns.every((c) => c.monthly.money) ?? false)} includeCosts={includeCosts} onIncludeCosts={setIncludeCosts} onPrint={() => window.print()} />
             ) : null}
             <HorizonPicker weeks={horizonWeeks(months)} onChange={pickHorizon} options={HORIZONS} custom={CUSTOM} />
           </div>

@@ -1,5 +1,9 @@
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { bundleHarness } from "./build-harness";
 
 // The Sandbox in a real browser, with the simulation in a real Web Worker (./sandbox-harness/entry.tsx), in the demo (scenarios kept
@@ -43,12 +47,28 @@ interface Options {
   rise?: boolean;
 }
 
-async function mount(width: number, o: Options = {}): Promise<{ page: Page; errors: string[] }> {
+/** The app's real stylesheet (Tailwind compiled from globals.css), for the cases that need print styles and utility classes. Test only: postcss is
+ * Tailwind's own dependency, so it is found beside @tailwindcss/postcss. */
+let compiled: string | undefined;
+async function appCss(): Promise<string> {
+  if (compiled === undefined) {
+    const require = createRequire(import.meta.url);
+    const here = dirname(require.resolve("@tailwindcss/postcss"));
+    type Process = { process(css: string, o: { from: string }): Promise<{ css: string }> };
+    const postcss = require(require.resolve("postcss", { paths: [here] })) as (plugins: unknown[]) => Process;
+    const tailwind = require("@tailwindcss/postcss") as (o: { base: string }) => unknown;
+    const file = fileURLToPath(new URL("../src/app/globals.css", import.meta.url));
+    compiled = (await postcss([tailwind({ base: fileURLToPath(new URL("..", import.meta.url)) })]).process(readFileSync(file, "utf8"), { from: file })).css;
+  }
+  return compiled;
+}
+
+async function mount(width: number, o: Options = {}, css = ""): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 1000 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-  await page.setContent(`<style>${CSS}</style><div id="root"></div>`);
+  await page.setContent(`<style>${CSS}</style>${css ? `<style>${css}</style>` : ""}<div id="root"></div>`);
   await page.evaluate((w) => (window.workerScripts = w), workers);
   await page.addScriptTag({ content: script });
   await page.evaluate((opts) => window.mountSandbox({ mode: "demo", ...opts }), o);
@@ -1010,6 +1030,163 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         expect(await table.locator('[data-compare-time-row="client_job"] td').last().innerText()).toMatch(/a month, [+−]?[\d.]+ pts/);
         expect(await page.locator('[data-compare-tile="Hours fixing over the run"]').count()).toBe(1);
         expect(await page.locator('[data-compare-tile="Hours on steps that could be removed"]').count()).toBe(1);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("shows the note on a change in the list and in compare (sandbox phase 5a)", async () => {
+        const { page, errors } = await mount(width);
+        await pick(page, "Hire in March");
+        await waitRuns(page, 1);
+        expect(await page.locator("[data-change-list] [data-change-note]").innerText()).toContain("Assumes a PPC specialist can be found");
+        await page.locator("[data-scenario-compare]").click();
+        await compareDone(page, errors);
+        const notes = await page.locator("[data-compare-changes]").innerText();
+        expect(notes).toContain("No changes");
+        expect(notes).toContain("The live model as it is.");
+        expect(notes).toContain("Assumes a PPC specialist can be found");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      onTablet("adds a note to a change in the dialog, counts its characters, and shows it in the list", async () => {
+        const { page, errors } = await mount(width);
+        await newScenario(page);
+        await waitRuns(page, 1);
+        await openAdd(page);
+        await page.getByLabel("What to change", { exact: true }).selectOption({ label: "Opportunities coming in" });
+        await page.getByLabel("How", { exact: true }).selectOption({ label: "Multiply by" });
+        await page.getByLabel("Value", { exact: true }).fill("1.25");
+        const note = page.getByLabel("Why (optional)", { exact: true });
+        await note.fill("  Assumes the Q3 campaign doubles leads.  ");
+        expect(await page.locator("[data-note-count]").innerText()).toBe("38 / 280");
+        await note.fill("x".repeat(281));
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        expect(await page.locator("[data-change-dialog-error]").innerText()).toContain("up to 280 characters");
+        await note.fill("  Assumes the Q3 campaign doubles leads.  ");
+        await page.locator("[data-change-dialog] button[type=submit]").click();
+        await page.waitForSelector("[data-change-list] [data-change]");
+        expect(await page.locator("[data-change-list] [data-change-note]").innerText()).toBe("Assumes the Q3 campaign doubles leads.");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("downloads the numbers and the changes and notes as CSV: No changes and the scenario, with no row by person", async () => {
+        const { page, errors } = await mount(width);
+        // Nothing to export while a scenario's run is running; the live run alone can be exported.
+        await pick(page, "Hire in March");
+        await waitRuns(page, 1);
+        await page.locator("[data-export-menu]:not([disabled])").waitFor();
+        const download = async (kind: string) => {
+          await page.locator("[data-export-menu]").click();
+          const [file] = await Promise.all([page.waitForEvent("download"), page.locator(`[data-export=${kind}]`).click()]);
+          return { name: file.suggestedFilename(), text: readFileSync((await file.path())!, "utf8") };
+        };
+        const numbers = await download("numbers");
+        expect(numbers.name).toMatch(/^northbeam-digital-hire-in-march-numbers-\d{4}-\d{2}-\d{2}\.csv$/);
+        expect(numbers.text.startsWith("\ufeffScenario,Measure,Group,Month,Average,Low (10%),High (90%),Unit\r\n")).toBe(true);
+        const scenarios = new Set(numbers.text.split("\r\n").slice(1).map((l) => l.split(",")[0]));
+        expect(scenarios.has("No changes")).toBe(true);
+        expect(scenarios.has("Hire in March")).toBe(true);
+        expect(numbers.text).toContain(",Whole run,");
+        expect(numbers.text).toContain("Time: Fixing");
+        expect(numbers.text).toContain(",Profit,");
+        for (const person of ["Dan Okafor", "Maya Collins", "Leah Brooks"]) expect(numbers.text).not.toContain(person);
+        const changesFile = await download("changes");
+        expect(changesFile.name).toMatch(/hire-in-march-changes-/);
+        expect(changesFile.text).toContain("Scenario,Change,When,Note,From scenario");
+        expect(changesFile.text).toContain("Hire in March,New PPC specialist starts,from Mar 2027,Assumes a PPC specialist can be found");
+        // Without costs when the box is unticked.
+        await page.locator("[data-export-menu]").click();
+        await page.locator("[data-export=costs]").click();
+        await page.keyboard.press("Escape");
+        const noCosts = await download("numbers");
+        expect(noCosts.text).not.toContain(",Profit,");
+        expect(noCosts.text).toContain(",Billed revenue,");
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("exports a comparison's columns, and a Viewer's export has no cost rows and no box to include them", async () => {
+        const { page, errors } = await mount(width);
+        await pick(page, "Hire in January");
+        await waitRuns(page, 1);
+        await page.locator("[data-scenario-compare]").click();
+        await compareDone(page, errors);
+        await page.locator("[data-export-menu]:not([disabled])").waitFor();
+        await page.locator("[data-export-menu]").click();
+        const [file] = await Promise.all([page.waitForEvent("download"), page.locator("[data-export=numbers]").click()]);
+        const text = readFileSync((await file.path())!, "utf8");
+        expect(file.suggestedFilename()).toMatch(/^northbeam-digital-comparison-numbers-/);
+        expect(new Set(text.split("\r\n").slice(1).map((l) => l.split(",")[0])).has("Hire in January")).toBe(true);
+        await page.close();
+
+        const viewer = await mount(width, { mode: "readonly", dan: true, url: `/demo/sandbox?scenario=${JANUARY}` });
+        await viewer.page.locator("[data-export-menu]:not([disabled])").waitFor();
+        await viewer.page.locator("[data-export-menu]").click();
+        expect(await viewer.page.locator("[data-export=costs]").count()).toBe(0);
+        const [vFile] = await Promise.all([viewer.page.waitForEvent("download"), viewer.page.locator("[data-export=numbers]").click()]);
+        const vText = readFileSync((await vFile.path())!, "utf8");
+        expect(vText).toContain(",Billed revenue,");
+        for (const m of [",Profit,", "Labour and overtime", ",Overheads,"]) expect(vText, m).not.toContain(m);
+        expect(errors).toEqual([]);
+        expect(viewer.errors).toEqual([]);
+        await viewer.page.close();
+      });
+
+      it("prints one A4 page: with print styles only the summary is shown, and the PDF has one page", async () => {
+        const css = await appCss();
+        const { page, errors } = await mount(width, {}, css);
+        await pick(page, "Hire in March");
+        await waitRuns(page, 1);
+        await page.locator("[data-export-menu]:not([disabled])").waitFor();
+        // On screen the summary is there but hidden.
+        expect(await page.locator("[data-print-root]").count()).toBe(1);
+        expect(await page.locator("[data-print-root]").isVisible()).toBe(false);
+        await page.emulateMedia({ media: "print" });
+        expect(await page.locator("[data-print-root]").isVisible()).toBe(true);
+        // Everything else in the body is gone from the layout.
+        const others = await page.evaluate(() => [...document.body.children].filter((el) => !el.hasAttribute("data-print-root") && getComputedStyle(el).display !== "none").map((el) => el.tagName + (el.id ? "#" + el.id : "")));
+        expect(others.filter((t) => !t.startsWith("SCRIPT") && !t.startsWith("STYLE"))).toEqual([]);
+        const text = await page.locator("[data-print-root]").innerText();
+        expect(text).toContain("Northbeam Digital: Hire in March");
+        expect(text).toContain("30 runs, seed 1, engine");
+        expect(text).toContain("Assumes a PPC specialist can be found");
+        expect(text).toMatch(/Capacity (runs out|has already run out|doesn't run out)/);
+        expect(await page.locator("[data-print-root] svg").count()).toBeGreaterThan(0);
+        const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
+        const pages = (pdf.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+        expect(pages).toBe(1);
+        // A4 portrait: 595 x 842 points.
+        expect(pdf.toString("latin1")).toMatch(/\/MediaBox\s*\[\s*0\s+0\s+59[45](\.\d+)?\s+84[12](\.\d+)?\s*\]/);
+        await page.emulateMedia({ media: "screen" });
+        expect(await page.locator("[data-print-root]").isVisible()).toBe(false);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("says in 'When' when capacity runs out, and (to an admin) works out when a hire pays for itself", async () => {
+        const { page, errors } = await mount(width);
+        await page.waitForSelector("[data-when-section]");
+        expect(await page.locator("[data-capacity-line]").innerText()).toMatch(/Capacity (runs out in|has already run out \()|doesn't run out within these 12 months/);
+        // No hire in "No changes": nothing to work out.
+        expect(await page.locator("[data-payback]").count()).toBe(0);
+        await pick(page, "Hire in January");
+        await waitRuns(page, 1);
+        await page.locator("[data-payback-ask]").click();
+        const line = page.locator("[data-payback-change]").first();
+        await page.waitForFunction(() => !/working it out/.test(document.querySelector("[data-payback-change]")?.textContent ?? "working it out"), undefined, { timeout: 90_000 });
+        expect(await line.innerText()).toMatch(/New PPC specialist starts from Jan 2027: (pays for itself by [A-Z][a-z]+ 20\d\d|doesn't pay for itself within these 12 months) \([+−]£[\d,]+ by [A-Z][a-z]+ 20\d\d, on average\)\./);
+        expect(errors).toEqual([]);
+        await page.close();
+      });
+
+      it("gives a Viewer the capacity line, and a note that a hire's payback is for admins", async () => {
+        const { page, errors } = await mount(width, { mode: "readonly", dan: true, url: `/demo/sandbox?scenario=${JANUARY}` });
+        await page.waitForSelector("[data-when-section]");
+        expect(await page.locator("[data-capacity-line]").count()).toBe(1);
+        expect(await page.locator("[data-payback-ask]").count()).toBe(0);
+        expect(await page.locator("[data-payback-viewer]").innerText()).toContain("Agency admins and the Owner");
         expect(errors).toEqual([]);
         await page.close();
       });
