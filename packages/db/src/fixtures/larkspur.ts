@@ -102,6 +102,7 @@ function part(process: ProcessRow, revisionId: string, steps: LarkspurStep[], ed
         rework_rate: s.rework,
         rework_to_step_id: null,
         tool: s.tool,
+        purpose: null,
         notes: null,
         sla_hours: s.sla ?? null,
         expected_wait_hours: null,

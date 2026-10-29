@@ -69,7 +69,7 @@ const TABLES: TableClasses = {
   solutions: { base_revision_id: "not", created_at: "not", created_by: "not", id: "not", name: "text", notes: "text", process_id: "not", updated_at: "not", workspace_id: "not" },
   source_links: "unused",
   sources: "unused",
-  steps: { child_process_id: "not", created_at: "not", created_by: "not", entry_step_id: "not", id: "not", kind: "not", name: "text", notes: "text", outcome: "not", parent_step_id: "not", person_id: "not", process_id: "not", replaced_by: "not", revision_id: "not", rework_to_step_id: "not", role_id: "not", tool: "text", updated_at: "not", wait_dist: "not", work_dist: "not", workspace_id: "not" },
+  steps: { child_process_id: "not", created_at: "not", created_by: "not", entry_step_id: "not", id: "not", kind: "not", name: "text", notes: "text", outcome: "not", parent_step_id: "not", person_id: "not", process_id: "not", purpose: "not", replaced_by: "not", revision_id: "not", rework_to_step_id: "not", role_id: "not", tool: "text", updated_at: "not", wait_dist: "not", work_dist: "not", workspace_id: "not" },
   workspace_headlines: "unused",
   user_tours: "unused",
   workspaces: { created_at: "not", created_by: "not", id: "not", name: "text", plan: "text", slug: "not", updated_at: "not" },

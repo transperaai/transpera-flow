@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID, resolveFirstPrinciples, firstPrinciplesDiffer, firstPrinciplesFromRow, firstPrinciplesToColumns, type FirstPrinciplesRow } from "../src";
+import { type Claims, loadDeleteCandidates, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID, resolveFirstPrinciples, firstPrinciplesDiffer, firstPrinciplesFromRow, firstPrinciplesToColumns, type FirstPrinciplesRow } from "../src";
 import { emptyFirstPrinciples } from "@transpera-flow/engine";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -293,5 +293,29 @@ describe("resolving a revision's first principles", () => {
     const doc = { ...emptyFirstPrinciples(), why: { problem: "p", chain: ["a", "b"], root: "r" } };
     expect(firstPrinciplesFromRow(row("r1", "x", "t") as FirstPrinciplesRow).why.chain).toEqual([""]);
     expect(firstPrinciplesFromRow({ ...row("r1", "x", "t"), ...firstPrinciplesToColumns(doc) }).why).toEqual(doc.why);
+  });
+});
+
+describe("loadDeleteCandidates (sandbox phase 4)", () => {
+  it("reads an inherited row, leaves out a step put back, and gives an empty list for a process with no answers", async () => {
+    const audit = "e0000000-0000-4000-8000-000000000003";
+    const kickoff = "e0000000-0000-4000-8000-000000000006";
+    const editorDb = db.dbAs(users.editor!.claims as unknown as Claims);
+    expect(await loadDeleteCandidates(editorDb, [{ processId: proc, revisionId: live }])).toEqual({ [proc]: [] });
+    expect(await loadDeleteCandidates(editorDb, [])).toEqual({});
+    const deletes = [
+      { step_id: audit, breaks_if_removed: "", agreed_by: null, added_back: false },
+      { step_id: kickoff, breaks_if_removed: "", agreed_by: null, added_back: true },
+    ];
+    await db.client.query("insert into first_principles (workspace_id, process_id, revision_id, deletes) values ($1, $2, $3, $4::jsonb)", [ws, proc, live, JSON.stringify(deletes)]);
+    const draft = (await db.client.query("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 2, 'draft') returning id", [ws, proc])).rows[0].id as string;
+    try {
+      expect(await loadDeleteCandidates(editorDb, [{ processId: proc, revisionId: live }])).toEqual({ [proc]: [audit] });
+      // The draft has no row of its own: it inherits live's answers.
+      expect(await loadDeleteCandidates(editorDb, [{ processId: proc, revisionId: draft }])).toEqual({ [proc]: [audit] });
+    } finally {
+      await db.client.query("delete from first_principles where process_id = $1", [proc]);
+      await db.client.query("delete from process_revisions where id = $1", [draft]);
+    }
   });
 });

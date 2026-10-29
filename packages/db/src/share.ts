@@ -262,6 +262,7 @@ export const SHARE_NON_TEXT_REASONS: Readonly<Record<string, string>> = {
   process_id: "every per-process table and issues `links[]`: a uuid",
   published_at: "process_revisions.published_at: a timestamp",
   published_by: "process_revisions.published_by: a user id",
+  purpose: "steps.purpose: one of six fixed keys or c + 8 hex, enforced by steps_purpose_key (never words)",
   recorded_at: "sources.recorded_at: not in a snapshot; a date",
   replaced_by: "steps.replaced_by: a uuid",
   replaces_step_ids: "a solution idea's payload: not in a snapshot; step ids",

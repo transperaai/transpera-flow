@@ -11,6 +11,8 @@ import {
   northbeamServicingStepIds,
   northbeamStepIds,
   toEngineModel,
+  NORTHBEAM_PROCESS_ID,
+  DEFAULT_PURPOSES,
   speedsNormalisedFor,
   usesCapacityFactors,
   workingDaysBetween,
@@ -646,5 +648,68 @@ describe("per-person times (C6)", () => {
     expect(JSON.stringify(off)).toBe(JSON.stringify(base));
     const on = simulate(toEngineModel(withFactors(true), { startDate: START }), 10, 1);
     expect(JSON.stringify(on)).not.toBe(JSON.stringify(base));
+  });
+});
+
+
+describe("step purposes (sandbox phase 4)", () => {
+  const purposeOf = (m: EngineModel, id: string) => m.steps.find((s) => s.id === id)?.purpose;
+  const bundleWith = (extra: Partial<ProcessBundle> = {}, step: Partial<StepRow> & { id: string } = { id: "" }): ProcessBundle => {
+    const b = northbeamBundle();
+    return { ...b, ...extra, steps: b.steps.map((s) => (s.id === step.id ? { ...s, ...step } : s)) };
+  };
+
+  it("without the option the model is exactly today's: no step has a purpose", () => {
+    const b = northbeamBundle();
+    expect(toEngineModel(b, { startDate: START })).toEqual(toEngineModel({ ...b, deleteCandidates: { [NORTHBEAM_PROCESS_ID]: [northbeamStepIds.audit] } }, { startDate: START }));
+    expect(toEngineModel(b, { startDate: START }).steps.every((s) => s.purpose === undefined)).toBe(true);
+  });
+
+  it("the option changes only the purpose: every other field of the model is the same", () => {
+    const b = northbeamBundle();
+    const plain = toEngineModel(b, { startDate: START });
+    const withPurposes = toEngineModel(b, { startDate: START, purposes: true });
+    expect({ ...withPurposes, steps: withPurposes.steps.map(({ purpose: _p, ...s }) => s) }).toEqual(plain);
+  });
+
+  it("pipeline steps before the sale are winning work; the sale and what follows, and servicing steps, move the client's job forward", () => {
+    const m = toEngineModel(northbeamBundle(), { startDate: START, purposes: true });
+    for (const k of ["qualify", "discovery", "audit"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("winning");
+    for (const k of ["decision", "onboard", "kickoff"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("client_job");
+    const servicing = m.steps.filter((s) => Object.values(northbeamServicingStepIds).includes(s.id));
+    expect(servicing.length).toBeGreaterThan(0);
+    for (const s of servicing) expect(s.purpose, s.name).toBe("client_job");
+  });
+
+  it("a chosen purpose wins; a step listed to delete is removable; a deleted category reads as Automatic", () => {
+    const audit = northbeamStepIds.audit;
+    const decision = northbeamStepIds.decision;
+    const b = bundleWith({ deleteCandidates: { [NORTHBEAM_PROCESS_ID]: [audit, decision] } }, { id: decision, purpose: "coordination" });
+    const m = toEngineModel(b, { startDate: START, purposes: true });
+    expect(purposeOf(m, audit)).toBe("removable");
+    expect(purposeOf(m, decision)).toBe("coordination");
+    const gone = toEngineModel(bundleWith({}, { id: audit, purpose: "c12345678" }), { startDate: START, purposes: true });
+    expect(purposeOf(gone, audit)).toBe("winning");
+  });
+
+  it("deleteCandidates absent skips the delete rule", () => {
+    const m = toEngineModel(northbeamBundle(), { startDate: START, purposes: true });
+    expect(purposeOf(m, northbeamStepIds.audit)).toBe("winning");
+  });
+
+  it("a renamed category keeps its key; a workspace list without 'required' reads a step that chose it as Automatic", () => {
+    const b = northbeamBundle();
+    const list = DEFAULT_PURPOSES.filter((c) => c.key !== "required");
+    const ws = { ...b.workspace, settings: { ...b.workspace.settings, purposes: list } };
+    const m = toEngineModel(bundleWith({ workspace: ws }, { id: northbeamStepIds.audit, purpose: "required" }), { startDate: START, purposes: true });
+    expect(purposeOf(m, northbeamStepIds.audit)).toBe("winning");
+  });
+
+  it("a purpose never changes a simulated number", () => {
+    const b = northbeamBundle();
+    const a = simulate(toEngineModel(b, { startDate: START }), 4, 1, { monthly: true });
+    const c = simulate(toEngineModel(b, { startDate: START, purposes: true }), 4, 1, { monthly: true });
+    const strip = (r: typeof a) => ({ ...r, monthly: { ...r.monthly!, time: undefined } });
+    expect(strip(c)).toEqual(strip(a));
   });
 });

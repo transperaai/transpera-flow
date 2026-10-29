@@ -678,6 +678,10 @@ export interface Steps {
   person_id: string | null;
   process_id: string;
   provenance: Generated<Json>;
+  /**
+   * What the step achieves: a key of the workspace's settings.purposes (null: Automatic). Sandbox phase 4.
+   */
+  purpose: string | null;
   replaced_by: Generated<string[]>;
   revision_id: string;
   rework_rate: Generated<Numeric>;

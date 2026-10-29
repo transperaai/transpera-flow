@@ -1,6 +1,6 @@
 import { storedStatus } from "@transpera-flow/db/issue-status";
 import type { NewSourceLink } from "./source-links";
-import type { IssueRow, ProcessBundle, SandboxScenarioRow, ScenarioRow, SourceRow } from "./types";
+import type { IssueRow, ProcessBundle, SandboxScenarioRow, ScenarioRow, SourceRow, StepRow } from "./types";
 
 type Value = string | number | boolean | null | object;
 
@@ -20,6 +20,9 @@ function insert(table: string, rows: Record<string, Value>[]): string {
   const values = rows.map((r) => `  (${cols.map((c) => literal(r[c] ?? null)).join(", ")})`).join(",\n");
   return `insert into public.${table} (${cols.join(", ")}) values\n${values};\n`;
 }
+
+/** A step's row; `purpose` is left out while null (Automatic), like the fee range, so the seed loads into an older database too. */
+const seedStep = ({ purpose, ...s }: StepRow): Record<string, Value> => ({ ...s, ...(purpose !== null ? { purpose } : {}) });
 
 /**
  * SQL that inserts process bundles, scenarios, issues and sources. The
@@ -53,11 +56,11 @@ export function seedSql(
     out.push(insert("seasonality", (b.seasonality ?? []).map((r) => ({ ...r }))));
     out.push(insert("demand_settings", b.demand ? [{ ...b.demand }] : []));
     out.push(insert("process_revisions", [{ ...b.revision, published_at: b.revision.status === "published" ? "2026-09-29T00:00:00Z" : null }]));
-    out.push(insert("steps", b.steps.map((s) => ({ ...s }))));
+    out.push(insert("steps", b.steps.map(seedStep)));
     out.push(insert("edges", b.edges.map((e) => ({ ...e }))));
     for (const part of others) {
       out.push(insert("process_revisions", [{ ...part.revision, published_at: part.revision.status === "published" ? "2026-09-29T00:00:00Z" : null }]));
-      out.push(insert("steps", part.steps.map((s) => ({ ...s }))));
+      out.push(insert("steps", part.steps.map(seedStep)));
       out.push(insert("edges", part.edges.map((e) => ({ ...e }))));
     }
     out.push(insert("service_servicing", (b.servicingLinks ?? []).map((r) => ({ ...r }))));

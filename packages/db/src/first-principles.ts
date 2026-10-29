@@ -172,3 +172,23 @@ export async function saveFirstPrinciples(db: Db, owner: FirstPrinciplesOwner, d
   if (!row) return conflict();
   return { status: "saved", version: row.updated_at };
 }
+
+/**
+ * The steps each process's first principles list to delete, for the given revisions (own or inherited rows), `added_back` ones
+ * left out: process id -> step ids. One read of `first_principles` and `process_revisions` for those processes.
+ */
+export async function loadDeleteCandidates(db: Db, parts: readonly { processId: string; revisionId: string }[]): Promise<Record<string, string[]>> {
+  if (!parts.length) return {};
+  const processIds = [...new Set(parts.map((p) => p.processId))];
+  const [revisions, rows] = await Promise.all([
+    db.selectFrom("process_revisions").select(["id", "number", "process_id"]).where("process_id", "in", processIds).execute(),
+    db.selectFrom("first_principles").select([...columns(FIRST_PRINCIPLES_COLUMNS), "process_id"]).where("process_id", "in", processIds).execute(),
+  ]);
+  const out: Record<string, string[]> = {};
+  for (const { processId, revisionId } of parts) {
+    const of = revisions.filter((r) => r.process_id === processId);
+    const resolved = resolveFirstPrinciples(of, rows.filter((r) => r.process_id === processId) as unknown as FirstPrinciplesRow[], revisionId);
+    out[processId] = (resolved.doc?.deletes ?? []).filter((d) => !d.added_back && d.step_id).map((d) => d.step_id);
+  }
+  return out;
+}

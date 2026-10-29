@@ -68,6 +68,11 @@ export interface WorkspaceSettings {
    * `workspaces_overhead_monthly`.
    */
   overhead_monthly?: number | null;
+  /**
+   * The categories a step's purpose is chosen from (sandbox phase 4): 5 to 12, in display order. Absent or null: the defaults
+   * (`DEFAULT_PURPOSES`). Shape-checked by `workspaces_purposes`; read through `workspacePurposes`.
+   */
+  purposes?: { key: string; name: string; description: string }[] | null;
   /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
   capacity_factor_enabled?: boolean;
 }
@@ -194,6 +199,8 @@ export interface StepRow {
   /** Step a rework goes back to; null means the same step. Not simulated yet. */
   rework_to_step_id: string | null;
   tool: string | null;
+  /** What the step achieves: a key of the workspace's `settings.purposes`; null is Automatic (`resolvePurpose`). Sandbox phase 4. */
+  purpose: string | null;
   notes: string | null;
   /** Target hours for one visit to the step (queue + hands-on + wait); visits over it are SLA breaches. */
   sla_hours: number | null;
@@ -719,6 +726,12 @@ export interface ProcessBundle {
    */
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
+  /**
+   * Steps each process's first principles list to delete (`added_back` left out), by process id, for the revisions this bundle
+   * shows (`loadDeleteCandidates`). Optional and not loaded by `loadProcessBundle`: only callers that show purposes add it.
+   * Without it a step's purpose skips the "Could be removed" rule.
+   */
+  deleteCandidates?: Record<string, string[]>;
 }
 
 /**

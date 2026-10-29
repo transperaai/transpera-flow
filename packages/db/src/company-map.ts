@@ -38,6 +38,7 @@ function holder(workspaceId: string, revisionId: string, part: ProcessPart, x: n
     rework_rate: 0,
     rework_to_step_id: null,
     tool: null,
+    purpose: null,
     notes: null,
     sla_hours: null,
     expected_wait_hours: null,
