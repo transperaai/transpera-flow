@@ -1018,6 +1018,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           canAdd={canEdit && working !== null}
           onAdd={(preset) => setChangeTarget({ mode: "add", preset })}
           onClose={() => setGoalOpen(false)}
+          hiddenLevers={hiddenLevers}
         />
       ) : null}
       {confirm ? <ConfirmDialog {...confirm} onCancel={() => setConfirm(null)} /> : null}

@@ -4,7 +4,7 @@
 // (average only: a ratio of means has no range); profit over the run, or in one month, at least Y (admins and the Owner: a run without costs has
 // none). Levers: headcount by role, hours available, step time, opportunities, a price rise and fees, each over a range within the registry's.
 
-import { sandboxLever, type SandboxChange } from "@transpera-flow/db";
+import { MAX_CHANGE_NOTE, offeredLevers, sandboxLever, type SandboxChange } from "@transpera-flow/db";
 import type { MonthlyResult } from "@transpera-flow/engine";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { churnRate, monthProfit, peakBusy, totalProfit } from "./measures";
@@ -90,6 +90,18 @@ export const GOAL_LEVERS: readonly GoalLever[] = [
 ];
 
 export const goalLever = (id: string): GoalLever | undefined => GOAL_LEVERS.find((l) => l.id === id);
+
+/** The goal levers this workspace offers (Settings, Levers hides a kind from the change dialog, so goal seek doesn't search it either). */
+export function goalLevers(hiddenKinds: readonly string[] = []): GoalLever[] {
+  const offered = new Set(offeredLevers(hiddenKinds).map((l) => l.id));
+  return GOAL_LEVERS.filter((l) => offered.has(l.id));
+}
+
+/** The note "Add as a change" fills in: the answer and the day, cut whole characters at a time to the note's limit (a role's name may hold an emoji). */
+export function goalNote(sentence: string, isoDay: string): string {
+  const chars = Array.from(`Goal seek: ${sentence} (${isoDay})`);
+  return chars.length > MAX_CHANGE_NOTE ? `${chars.slice(0, MAX_CHANGE_NOTE - 1).join("").trimEnd()}\u2026` : chars.join("");
+}
 
 /** A range clamped to the registry's, with `lo` below `hi` and both on the lever's grid. */
 export function clampRange(l: GoalLever, lo: number, hi: number): { lo: number; hi: number } {

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { northbeamRoleIds, DEFAULT_PURPOSES } from "@transpera-flow/db";
-import { toRatingConfig } from "@transpera-flow/engine";
+import { northbeamRoleIds, DEFAULT_PURPOSES, parseChanges } from "@transpera-flow/db";
+import type { ScenarioRun } from "@transpera-flow/db/sandbox";
+import { simulate, toRatingConfig, type EngineModel } from "@transpera-flow/engine";
 import { forecastModel } from "@/lib/forecast/forecast";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { Cancel, runGoalSeek, runTornado, syncRunner, type Job, type Runner } from "@/lib/sandbox/analysis-run";
-import { GOAL_LEVERS, answerSentence, clampRange, goalChange, monotoneWarning, seekSpecFor, targetSpec, type GoalChoice } from "@/lib/sandbox/goal-targets";
+import { GOAL_LEVERS, answerSentence, clampRange, goalChange, goalLevers, goalNote, monotoneWarning, seekSpecFor, targetSpec, type GoalChoice } from "@/lib/sandbox/goal-targets";
 import { MAX_RUNS } from "@/lib/sandbox/goal-seek";
-import { tornadoValue } from "@/lib/sandbox/measures";
+import { peakBusy, tornadoValue } from "@/lib/sandbox/measures";
 import { tornadoVariants } from "@/lib/sandbox/tornado";
 
 // Goal seek and the tornado end to end on the demo workspace (sandbox phase 5b): the real runner and engine on the calling thread, a short horizon.
@@ -133,5 +134,102 @@ describe("the tornado", { timeout: 180_000 }, () => {
     };
     const out = await runTornado(variants, cancelling, [], (r) => tornadoValue("lost", r.result.monthly!, o), cancel);
     expect(out.finished).toBe(false);
+  });
+});
+
+describe("goal seek, hand-checked on a model whose answer is arithmetic", () => {
+  // One role "r" of 1 person (40 h a week), 30 pooled clients each needing 4 h a week of it, constant times, no leads, no churn: the work is
+  // exactly 120 h a week in every month and every run, so busy = 120 / (40 × people) = 3 / people. "At most 85% busy" needs 3 / n <= 0.85,
+  // n >= 3.53, so 4 people: 3 more. The bisection over 0 to 10 more: the ends (1 person: 300%, fails; 11: 27%, meets), then 5 (6 people: 50%,
+  // meets), then 3 (4 people: 75%, meets; the middle of 0 and 5 is 2.5, which rounds up), then 2 (3 people: 100%, fails). 3 and 2 are one
+  // apart: the answer is "at least 3 more", failing at 2, in 5 runs.
+  const model = (people: number): EngineModel =>
+    ({
+      horizonWeeks: 13,
+      hoursPerWeek: 40,
+      leadsPerWeek: 0,
+      activeClients: 30,
+      churnMonthly: 0,
+      retainer: 1000,
+      warmupWeeks: 0,
+      roles: { r: { name: "R", count: people, cost: 50, ongoing: 4 } },
+      people: {},
+      entry: "s1",
+      sinks: { won: "won", lost: "lost" },
+      steps: [{ id: "s1", name: "s1", role: "r", work: 2, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "won", p: 1 }] }],
+    }) as unknown as EngineModel;
+  /** A runner for this model: the probe's D5 "add x" is x more people (the scenario's own changes are none). */
+  const asked: number[] = [];
+  const handRun: Runner = (changes) => {
+    const x = changes.at(-1)!.change.value;
+    asked.push(x);
+    const result = simulate(model(1 + x), 30, 1, { monthly: true, monthStarts: [200, 400] });
+    return { promise: Promise.resolve({ result } as unknown as ScenarioRun), cancel: () => {} };
+  };
+  const d5 = GOAL_LEVERS.find((l) => l.id === "D5")!;
+  const choice: GoalChoice = { lever: d5, targetId: "r", from: null, lo: 0, hi: 10 };
+  const busy = (limit: number) => targetSpec({ kind: "busy", roleId: "r", roleName: "R", limit, nines: false }, "GBP");
+
+  it("the measured busy share is the arithmetic one at every headcount", () => {
+    for (const n of [1, 2, 3, 4, 6]) expect(peakBusy(simulate(model(n), 30, 1, { monthly: true, monthStarts: [200, 400] }).monthly!, { roleId: "r" })).toBeCloseTo(3 / n, 9);
+  });
+
+  it("finds 3 more people for 85%, failing at 2, in the 5 runs worked out above, in that order", async () => {
+    asked.length = 0;
+    const t = busy(0.85);
+    const out = await runGoalSeek(seekSpecFor(choice, t), handRun, [], (x) => goalChange(choice, x), (r) => t.measure(r.result.monthly!), new Cancel());
+    expect(asked).toEqual([0, 10, 5, 3, 2]);
+    expect(out.answer).toEqual({ kind: "boundary", x: 3, failsAt: 2, side: "high", monotone: { ok: true } });
+    expect(answerSentence(out.answer, choice, t, "R")).toBe("At least 3 more R: R stays under 85% busy in every month.");
+    // 9 in 10 runs is the same here: every run is the same.
+    const t9 = targetSpec({ kind: "busy", roleId: "r", roleName: "R", limit: 0.85, nines: true }, "GBP");
+    expect((await runGoalSeek(seekSpecFor(choice, t9), handRun, [], (x) => goalChange(choice, x), (r) => t9.measure(r.result.monthly!), new Cancel())).answer).toMatchObject({ kind: "boundary", x: 3 });
+  });
+
+  it("other limits land where the arithmetic says: 3 / n <= limit", async () => {
+    for (const [limit, want] of [[0.5, 5], [0.6, 4], [0.75, 3], [1, 2], [0.3, 9]] as const) {
+      const t = busy(limit);
+      const out = await runGoalSeek(seekSpecFor(choice, t), handRun, [], (x) => goalChange(choice, x), (r) => t.measure(r.result.monthly!), new Cancel());
+      expect(out.answer, `${limit}`).toMatchObject({ kind: "boundary", x: want, failsAt: want - 1 });
+    }
+  });
+
+  it("already met across the range names the end nearest today; not reachable names the closest probe", async () => {
+    const t = busy(0.85);
+    const met = await runGoalSeek(seekSpecFor({ ...choice, lo: 4, hi: 10 }, t), handRun, [], (x) => goalChange({ ...choice, lo: 4, hi: 10 }, x), (r) => t.measure(r.result.monthly!), new Cancel());
+    expect(met.answer).toMatchObject({ kind: "already", x: 4 });
+    expect(met.state.probes).toHaveLength(2);
+    const far = await runGoalSeek(seekSpecFor({ ...choice, lo: 0, hi: 1 }, t), handRun, [], (x) => goalChange({ ...choice, lo: 0, hi: 1 }, x), (r) => t.measure(r.result.monthly!), new Cancel());
+    expect(far.answer).toMatchObject({ kind: "unreachable", closest: { x: 1, value: 1.5 } });
+  });
+
+  it("a measure that doesn't move one way is flagged, and the probes are all kept", async () => {
+    // A made-up model in which 3 more people are as quiet as 10 more (busy 27%), then 5 more busier again (50%): it rises between 3 and 5.
+    const t = busy(0.85);
+    const bumpy: Runner = (changes) => {
+      const x = changes.at(-1)!.change.value;
+      const result = simulate(model(x === 3 ? 11 : 1 + x), 30, 1, { monthly: true, monthStarts: [200, 400] });
+      return { promise: Promise.resolve({ result } as unknown as ScenarioRun), cancel: () => {} };
+    };
+    const out = await runGoalSeek(seekSpecFor(choice, t), bumpy, [], (x) => goalChange(choice, x), (r) => t.measure(r.result.monthly!), new Cancel());
+    expect(out.answer).toMatchObject({ kind: "boundary", x: 3, failsAt: 2, monotone: { ok: false, between: [3, 5], direction: "rose" } });
+    expect(out.state.probes.map((p) => p.x).sort((a, b) => a - b)).toEqual([0, 2, 3, 5, 10]);
+  });
+});
+
+describe("goal seek's levers and its note", () => {
+  it("leaves out a lever whose kind Settings, Levers hides (as the change dialog does)", () => {
+    expect(goalLevers([]).map((l) => l.id)).toEqual(["D5", "D6", "E1", "A1", "B5", "B2"]);
+    expect(goalLevers(["people.headcount", "finances.prices"]).map((l) => l.id)).toEqual(["D6", "E1", "A1"]);
+  });
+
+  it("the note is cut whole characters at a time to 280, so an emoji in a name can't be split", () => {
+    const long = `At least 3 more ${"\u{1F600}".repeat(300)}: every role stays under 85% busy in every month.`;
+    const note = goalNote(long, "2026-10-29");
+    expect(Array.from(note)).toHaveLength(280);
+    expect(note.endsWith("…")).toBe(true);
+    expect(note).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(parseChanges([{ id: "5e000000-0000-4000-8000-0000000000f0", lever: "D5", target: "@busiest", op: "add", value: 3, note }]).ok).toBe(true);
+    expect(goalNote("Short.", "2026-10-29")).toBe("Goal seek: Short. (2026-10-29)");
   });
 });

@@ -145,13 +145,13 @@ export const SANDBOX_HELP = {
   goalSeek: {
     label: "Find a value",
     description:
-      "Pick one target and one lever with a range. It tries values in the range on top of the scenario on screen (or No changes) and finds the smallest change that meets the target, in at most 8 runs. It tells you when the target is already met, when it can't be met in the range, and when the measure doesn't move steadily so a smaller value may also work.",
+      "Pick one target and one lever with a range. It tries values in the range on top of the scenario on screen (or No changes) and finds the smallest change that meets the target, in at most 8 runs. It tells you when the target is already met, when it can't be met in the range, and when the measure doesn't move steadily so a smaller value may also work. Work with nobody there to do it counts as 100% busy.",
     example: "“At least 3 more Designers: every role stays under 85% busy in every month.”",
   },
   tornado: {
     label: "What matters most",
     description:
-      "Each lever moved a little each way, one at a time, on top of this scenario. The longest bars are where a change moves the measure most. Every bar is 30 runs with the same seed, so a difference comes from the change. A bar under 1% of the scenario's value is greyed: about no change.",
+      "Each lever moved a little each way, one at a time, on top of this scenario. The longest bars are where a change moves the measure most. Every bar is 30 runs with the same seed, so a difference comes from the change. A bar under 1% of the scenario's value is greyed: about no change. For how busy a role gets, work with nobody there to do it counts as 100% busy and too busy, so cutting a role to nobody never looks like relief.",
     example: "“Opportunities ±10%” moving profit by £8,000 and “Headcount ±1 person” by £2,000 means winning more work matters more than one hire.",
   },
   changeNote: {

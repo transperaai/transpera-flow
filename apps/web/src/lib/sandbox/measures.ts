@@ -100,7 +100,8 @@ export const TORNADO_MEASURE_INFO: Readonly<Record<TornadoMeasureId, TornadoMeas
   profit: { id: "profit", label: "Profit over the run", unit: "money", needsMoney: true, better: "higher" },
   atRisk: { id: "atRisk", label: "Clients at risk in the last month", unit: "count", needsMoney: false, better: "lower" },
   peakBusy: { id: "peakBusy", label: "Busiest month of the busiest role", unit: "share", needsMoney: false, better: "lower" },
-  tooBusy: { id: "tooBusy", label: "Months a role is too busy", unit: "count", needsMoney: false, better: "lower" },
+  // Calendar months in which any role is too busy: not the compare tile's "Months a role is too busy", which adds up role-months.
+  tooBusy: { id: "tooBusy", label: "Months any role is too busy", unit: "count", needsMoney: false, better: "lower" },
   lost: { id: "lost", label: "Clients lost over the run", unit: "count", needsMoney: false, better: "lower" },
   purpose: { id: "purpose", label: "Share of hours on one purpose", unit: "share", needsMoney: false, better: "lower" },
 };

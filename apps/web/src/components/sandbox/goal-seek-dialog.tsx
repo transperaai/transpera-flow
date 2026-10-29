@@ -17,8 +17,7 @@ import { sharedSimPool } from "@/lib/forecast/sim-pool";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { Cancel, poolRunner, runGoalSeek, type RunContext, type SeekOutcome } from "@/lib/sandbox/analysis-run";
 import { maxRunsFor, type Probe } from "@/lib/sandbox/goal-seek";
-import { GOAL_LEVERS, answerSentence, clampRange, goalChange, goalLever, monotoneWarning, seekSpecFor, targetSpec, valueWords, type GoalChoice, type GoalTarget } from "@/lib/sandbox/goal-targets";
-import { MAX_CHANGE_NOTE } from "@transpera-flow/db";
+import { answerSentence, clampRange, goalChange, goalLever, goalLevers, goalNote, monotoneWarning, seekSpecFor, targetSpec, valueWords, type GoalChoice, type GoalTarget } from "@/lib/sandbox/goal-targets";
 
 interface Option {
   id: string;
@@ -44,6 +43,8 @@ export interface GoalSeekDialogProps {
   /** The change as a prefilled add (lever, target, month, how, value, note). */
   onAdd: (preset: { lever: string; target: string; month?: string; op: SandboxChange["op"]; value: number; note: string }) => void;
   onClose: () => void;
+  /** Settings, Levers: kinds hidden from the change dialog are not searched either. */
+  hiddenLevers?: readonly string[];
 }
 
 const num = (text: string, fallback: number) => {
@@ -60,7 +61,8 @@ export function GoalSeekDialog(p: GoalSeekDialogProps) {
   const [churnText, setChurnText] = useState("3");
   const [profitText, setProfitText] = useState("0");
   const [profitMonth, setProfitMonth] = useState("");
-  const [leverId, setLeverId] = useState<GoalChoice["lever"]["id"]>("D5");
+  const levers = useMemo(() => goalLevers(p.hiddenLevers), [p.hiddenLevers]);
+  const [leverId, setLeverId] = useState<GoalChoice["lever"]["id"]>(levers[0]?.id ?? "D5");
   const [targetId, setTargetId] = useState("");
   const [from, setFrom] = useState("");
   const lever = goalLever(leverId)!;
@@ -152,8 +154,7 @@ export function GoalSeekDialog(p: GoalSeekDialogProps) {
   const add = () => {
     if (!outcome || !used || outcome.answer.kind !== "boundary" || !sentence) return;
     const change = goalChange(used.choice, outcome.answer.x);
-    const note = `Goal seek: ${sentence} (${new Date().toISOString().slice(0, 10)})`;
-    p.onAdd({ lever: change.lever, target: change.target ?? "", ...(change.from ? { month: change.from } : {}), op: change.op, value: change.value, note: note.length > MAX_CHANGE_NOTE ? `${note.slice(0, MAX_CHANGE_NOTE - 1)}…` : note });
+    p.onAdd({ lever: change.lever, target: change.target ?? "", ...(change.from ? { month: change.from } : {}), op: change.op, value: change.value, note: goalNote(sentence, new Date().toISOString().slice(0, 10)) });
     p.onClose();
   };
   const { options, none } = optionsFor();
@@ -233,7 +234,7 @@ export function GoalSeekDialog(p: GoalSeekDialogProps) {
           <label className="flex flex-col gap-1 text-sm font-medium">
             Lever
             <NativeSelect value={leverId} onChange={(e) => pickLever(e.target.value)} disabled={running} data-goal-lever>
-              {GOAL_LEVERS.map((l) => (
+              {levers.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.label}
                 </option>
@@ -343,7 +344,7 @@ export function GoalSeekDialog(p: GoalSeekDialogProps) {
               Add as a change
             </Button>
           ) : null}
-          <Button onClick={start} disabled={running} data-goal-start>
+          <Button onClick={start} disabled={running || levers.length === 0} title={levers.length === 0 ? "Settings, Levers hides every lever goal seek can move." : undefined} data-goal-start>
             {status === "idle" ? "Start" : "Search again"}
           </Button>
         </DialogFooter>
