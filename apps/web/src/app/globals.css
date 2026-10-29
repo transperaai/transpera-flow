@@ -248,34 +248,17 @@
 
 /* Printing a Sandbox summary (sandbox phase 5a): the summary is rendered into <body> beside the app (components/sandbox/print-summary.tsx),
    hidden on screen. Printing shows only it, on one A4 page, whatever the theme: the rest of the page is not laid out at all (display: none), so
-   there is no run of blank pages after it, and the summary carries the light tokens itself. */
+   there is no run of blank pages after it. Its light colours are tokens (styles/tokens.css). Only on a page that has a summary to print: any
+   other page prints as it always did. */
 @media print {
   @page {
     size: A4 portrait;
     margin: 12mm;
   }
-  html,
-  body {
-    background: #fff !important;
+  body:has(> [data-print-root]) {
+    background: var(--paper) !important;
   }
-  body > *:not([data-print-root]) {
+  body:has(> [data-print-root]) > *:not([data-print-root]) {
     display: none !important;
-  }
-  [data-print-root] {
-    color-scheme: light;
-    color: oklch(0.145 0 0);
-    --panel: #fff;
-    --panel-2: oklch(0.97 0 0);
-    --line: oklch(0.922 0 0);
-    --line-2: oklch(0.87 0 0);
-    --fg: oklch(0.145 0 0);
-    --fg-2: oklch(0.36 0 0);
-    --fg-3: oklch(0.44 0 0);
-    --accent: oklch(0.52 0.105 223.128);
-    --edit: #6d3fc4;
-    --chart-3: oklch(0.609 0.126 221.723);
-    --chart-4: oklch(0.52 0.105 223.128);
-    print-color-adjust: exact;
-    -webkit-print-color-adjust: exact;
   }
 }

@@ -49,6 +49,8 @@ beforeAll(async () => {
   await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [NORTHBEAM_WORKSPACE_ID, owner, viewer]);
   ownerToken = await issueToken(admin, owner);
   viewerToken = await issueToken(admin, viewer);
+  const march = northbeamSandboxScenarios().find((s) => s.id === NORTHBEAM_HIRE_MARCH_ID)!;
+  await admin.query("update sandbox_scenarios set changes = $2::jsonb where id = $1", [NORTHBEAM_HIRE_MARCH_ID, JSON.stringify(march.changes.map((c) => ({ ...c, note: "Assumes a PPC specialist can start on the 1st." })))]);
   // A price rise from March: a pair (the same scenario without the rise) and a trade-off.
   await admin.query("insert into sandbox_scenarios (id, workspace_id, name, changes) values ($1, $2, 'Raise prices', $3::jsonb)", [
     RISE,

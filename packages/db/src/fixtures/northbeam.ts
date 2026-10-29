@@ -690,7 +690,7 @@ export function northbeamSandboxScenarios(): SandboxScenarioRow[] {
     ]),
   ];
   const hire = (scenarioId: string, name: string, n: number, from: string) =>
-    row(scenarioId, name, null, [{ id: changeId(0xf0 + n, 1), lever: "D1", target: northbeamRoleIds.ppc, op: "set", value: 1, from, note: "Assumes a PPC specialist can be found and start on the 1st." }]);
+    row(scenarioId, name, null, [{ id: changeId(0xf0 + n, 1), lever: "D1", target: northbeamRoleIds.ppc, op: "set", value: 1, from }]);
   return [...converted, hire(NORTHBEAM_HIRE_JANUARY_ID, "Hire in January", 1, "2027-01"), hire(NORTHBEAM_HIRE_MARCH_ID, "Hire in March", 2, "2027-03")];
 }
 

@@ -20,7 +20,7 @@ export const DEMO_SCENARIOS: SandboxScenarioRow[] = ([
   january,
   {
     ...march,
-    changes: [...march.changes, { id: "5b0000f2-0000-4000-8000-000000000002", lever: "E6", target: DEMO_FORECAST_SOLUTION_ID, op: "set", value: 1, from: "2027-04" }],
+    changes: [...march.changes.map((c) => (c.lever === "D1" ? { ...c, note: "Assumes a PPC specialist can be found and start on the 1st." } : c)), { id: "5b0000f2-0000-4000-8000-000000000002", lever: "E6", target: DEMO_FORECAST_SOLUTION_ID, op: "set", value: 1, from: "2027-04" }],
   },
   {
     id: DEMO_THEN_LEADS_ID,

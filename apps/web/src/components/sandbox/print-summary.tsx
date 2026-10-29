@@ -79,7 +79,7 @@ export function PrintSummary(p: PrintSummaryProps) {
   const shownChanges = changes.slice(0, PRINT_MAX_CHANGES);
 
   const page = (
-    <div {...(p.inline ? {} : { "data-print-root": "" })} className={`${p.inline ? "block w-[186mm] border border-line" : "hidden print:block"} bg-white p-0 text-[11px] leading-snug text-fg`} aria-hidden={p.inline ? undefined : true}>
+    <div {...(p.inline ? {} : { "data-print-root": "" })} className={`${p.inline ? "block w-[186mm] border border-line" : "hidden print:block"} bg-panel p-0 text-[11px] leading-snug text-fg`} aria-hidden={p.inline ? undefined : true}>
       <header className="border-b border-line pb-2">
         <h1 className="text-lg font-semibold leading-tight">
           {p.workspaceName}: {p.title}

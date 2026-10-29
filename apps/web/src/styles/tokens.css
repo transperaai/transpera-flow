@@ -1,6 +1,7 @@
 /* Design tokens (docs/PRD.md §8.1), starting from the prototype. Components use
    these via Tailwind theme names; no raw hex in components. */
 :root {
+  --paper: #ffffff;
   --bg: oklch(0.985 0 0);
   --panel: oklch(1 0 0);
   --panel-2: oklch(0.97 0 0);
@@ -173,4 +174,25 @@
   --destructive: #e66767;
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
   color-scheme: dark;
+}
+
+/* The printed Sandbox summary is always light, on white paper, whatever theme the screen is in (components/sandbox/print-summary.tsx). */
+@media print {
+  [data-print-root] {
+    color-scheme: light;
+    color: oklch(0.145 0 0);
+    --panel: #ffffff;
+    --panel-2: oklch(0.97 0 0);
+    --line: oklch(0.922 0 0);
+    --line-2: oklch(0.87 0 0);
+    --fg: oklch(0.145 0 0);
+    --fg-2: oklch(0.36 0 0);
+    --fg-3: oklch(0.44 0 0);
+    --accent: oklch(0.52 0.105 223.128);
+    --edit: #6d3fc4;
+    --chart-3: oklch(0.609 0.126 221.723);
+    --chart-4: oklch(0.52 0.105 223.128);
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }

@@ -16,6 +16,7 @@ let ownerToken: string;
 let viewerToken: string;
 const CHILD = "5c000000-0000-4000-8000-0000000000a1";
 const LEAVE = "5c000000-0000-4000-8000-0000000000a2";
+const MARCH_NOTE = "Assumes a PPC specialist can be found and start on the 1st.";
 
 beforeAll(async () => {
   env = await startTestDb();
@@ -25,6 +26,9 @@ beforeAll(async () => {
   await admin.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [NORTHBEAM_WORKSPACE_ID, owner, viewer]);
   ownerToken = await issueToken(admin, owner);
   viewerToken = await issueToken(admin, viewer);
+  // The seeded "Hire in March" gets a note, as a person would write one.
+  const seededMarch = northbeamSandboxScenarios().find((s) => s.id === NORTHBEAM_HIRE_MARCH_ID)!;
+  await admin.query("update sandbox_scenarios set changes = $2::jsonb where id = $1", [NORTHBEAM_HIRE_MARCH_ID, JSON.stringify(seededMarch.changes.map((c) => ({ ...c, note: MARCH_NOTE })))]);
   // Builds on "Hire in March" (a timed lead change with a note), and one with leave for a named person.
   await admin.query("insert into sandbox_scenarios (id, workspace_id, name, description, parent_id, changes) values ($1, $2, 'Then more leads', 'Builds on March', $3, $4::jsonb)", [
     CHILD,
@@ -71,7 +75,7 @@ describe("list_scenarios", () => {
         value: 1,
         from: "2027-03",
         params: null,
-        note: seeded.changes[0]!.note,
+        note: MARCH_NOTE,
         inherited_from: null,
       },
     ]);
