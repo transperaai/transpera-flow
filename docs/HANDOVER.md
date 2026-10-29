@@ -57,6 +57,17 @@ by Sonnet from an Opus brief and reviewed adversarially by Opus.
   - The copy tooling now imports at `COPY_BASE_VERSION` (`20261231000000`) and then runs `migrate`, so the strip runs on
     the real data. Neon `main` (Preview) was rebuilt that way from a fresh export on 28 Oct, and verified.
   - Not built yet: Viewers running saved scenarios. That comes with the sandbox (`docs/plans/sandbox-design.md`).
+- **The Sandbox: phases 1–3 built 28–29 Oct, plus polish** (`docs/plans/sandbox-design.md`, `sandbox-p1-brief.md`,
+  `sandbox-p2-brief.md`, `sandbox-p3-brief.md`). Each phase was reviewed adversarially.
+  - **Phase 1:** one scenario model (`sandbox_scenarios`, migration `20270109000000`), the Sandbox page replacing Forecast,
+    and save, run and compare.
+  - **Phase 2:** profit, overheads, hourly billing, and the sales and money series.
+  - **Phase 3:** churn drivers as chances, client value ranges, the price rise and its trade-off, clients and churn on
+    rosters and groups, role cost, the hiring delay, monthly channels and a pinned warm-up. ENGINE is 1.13.0.
+  - **Migrations:** up to `20270112000000`, all applied on Neon `main` (Preview).
+  - **Phase 4 (time by purpose):** the brief is written (`docs/plans/sandbox-p4-brief.md`). It is waiting on Austin's three
+    answers: pipeline steps after the sale, client upkeep as its own row, and what Viewers see per person.
+    Phase 5 (goal seek, tornado chart, exports, share link, MCP `list_scenarios`) is not briefed yet.
 - **Next:**
   - **Austin's QA** on the preview.
   - **7c, cutover:** a freeze, emptying Neon `main` (it now holds the QA copy), a fresh copy into it, Austin adds Production to the Neon connection, then merge to
