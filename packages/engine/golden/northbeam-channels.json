@@ -1,7 +1,7 @@
 {
   "model": "northbeam-channels",
   "description": "northbeam-money run for six months with a change in every monthly channel from the third month: enquiries, enquiries that sign, a step's time, a wait, rework, a role's cost, overheads, a person's hours and base churn (engine 1.12.0).",
-  "engineVersion": "1.13.0",
+  "engineVersion": "1.14.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

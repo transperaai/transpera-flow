@@ -31,7 +31,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
-import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
+import { ModelError, toEngineModel, workspacePurposes, type IssueRow, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
 import { ratingOfStored, resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
@@ -72,6 +72,7 @@ import { EDIT_ONLY } from "@/lib/phone";
 const chartLoading = () => <Skeleton className="h-[180px] w-full" aria-busy="true" />;
 const IssuesDonut = dynamic(() => import("./trend-charts").then((m) => m.IssuesDonut), { ssr: false, loading: chartLoading });
 const TimeSplitChart = dynamic(() => import("./trend-charts").then((m) => m.TimeSplitChart), { ssr: false, loading: chartLoading });
+const TimeAchieves = dynamic(() => import("./time-achieves").then((m) => m.TimeAchieves), { ssr: false, loading: chartLoading });
 const OpenedResolvedChart = dynamic(() => import("./trend-charts").then((m) => m.OpenedResolvedChart), { ssr: false, loading: chartLoading });
 const BeforeAfterChart = dynamic(() => import("./trend-charts").then((m) => m.BeforeAfterChart), { ssr: false, loading: chartLoading });
 const ForecastTimeline = dynamic(() => import("@/components/forecast/forecast-timeline").then((m) => m.ForecastTimeline), { ssr: false, loading: chartLoading });
@@ -120,7 +121,7 @@ const NO_BASES: SolutionBases = {};
 function useCompanyModel(bundle: ProcessBundle): { model: EngineModel | null; error: string | null } {
   const resolved = useMemo(() => {
     try {
-      return { model: toEngineModel(bundle), error: null };
+      return { model: toEngineModel(bundle, { purposes: true }), error: null };
     } catch (err) {
       if (err instanceof ModelError) return { model: null, error: err.message };
       throw err;
@@ -206,6 +207,7 @@ export function Overview({
   const searchParams = useSearchParams();
   const { model: base, error } = useCompanyModel(live);
   const hoursPerWeek = live.workspace.settings.hours_per_week;
+  const purposeCategories = useMemo(() => workspacePurposes(live.workspace.settings), [live.workspace.settings]);
 
   // The horizon: the workspace's own length until one is picked (or ?horizon= says), as on the process pages.
   const horizonParam = Number(searchParams.get("horizon"));
@@ -513,6 +515,15 @@ export function Overview({
             </ChartCard>
             <ChartCard id="time-split" title="Time split by process" note={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}>
               {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p> : chartLoading()}
+            </ChartCard>
+            <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
+              {horizonResult?.monthly ? (
+                <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
+              ) : error ? (
+                <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
+              ) : (
+                chartLoading()
+              )}
             </ChartCard>
             <ChartCard
               id="team-load"

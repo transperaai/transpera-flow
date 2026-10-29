@@ -11,6 +11,7 @@ import {
   setDistribution,
   setRangePoint,
   setStepKind,
+  setStepPurposes,
   stepWarnings,
   updateEdge,
   updateStep,
@@ -18,6 +19,7 @@ import {
 import { GONE, ProcessEditor } from "@/lib/editor/editor";
 import { applyEdit, invertEdit, type Edit } from "@/lib/editor/ops";
 import { MemoryStore, type ProcessStore } from "@/lib/editor/store";
+import { describeValue, fieldLabel, namesOf } from "@/lib/editor/describe";
 
 const ids = northbeamStepIds;
 const ids_ = (b: ProcessBundle) => ({ steps: b.steps.map((s) => s.id).sort(), edges: b.edges.map((e) => e.id).sort() });
@@ -320,5 +322,65 @@ describe("MemoryStore", () => {
     await store.remove([ids.kickoff], []);
     expect(store.snapshot().edges.filter((e) => e.from_step_id === ids.kickoff || e.to_step_id === ids.kickoff)).toEqual([]);
     expect(await store.update("steps", ids.kickoff, { name: "x" }, { name: "y" })).toEqual({ status: "not_found" });
+  });
+});
+
+
+describe("what a step achieves (sandbox phase 4)", () => {
+  it("setStepPurposes is one edit with one change per working step whose value differs, labelled by how many", () => {
+    const b = northbeamBundle();
+    const edit = setStepPurposes(b, [ids.audit, ids.kickoff, ids.qualify], "coordination")!;
+    expect(edit.ops).toHaveLength(1);
+    expect(edit.ops[0]).toMatchObject({ kind: "update" });
+    const changes = (edit.ops[0] as { changes: { id: string; before: object; after: object }[] }).changes;
+    expect(changes.map((c) => c.id).sort()).toEqual([ids.audit, ids.kickoff, ids.qualify].sort());
+    expect(changes[0]!.before).toEqual({ purpose: null });
+    expect(edit.label).toBe("Changed what 3 steps achieve");
+    expect(setStepPurposes(b, [ids.audit], "fixing")!.label).toBe("Changed what Audit & proposal achieves");
+  });
+
+  it("skips starts, ends and holders, and steps already at the value, and is null when nothing changes", () => {
+    const b = applyEdit(northbeamBundle(), setStepPurposes(northbeamBundle(), [ids.audit], "fixing")!);
+    expect(setStepPurposes(b, [ids.audit], "fixing")).toBeNull();
+    expect(setStepPurposes(b, [ids.start, ids.won, ids.lost], "fixing")).toBeNull();
+    const holder = { ...b, steps: b.steps.map((s) => (s.id === ids.kickoff ? { ...s, child_process_id: "11111111-1111-4111-8111-111111111111" } : s)) };
+    const edit = setStepPurposes(holder, [ids.audit, ids.kickoff, ids.start, ids.qualify], "fixing")!;
+    expect((edit.ops[0] as { changes: { id: string }[] }).changes.map((c) => c.id)).toEqual([ids.qualify]);
+    expect(setStepPurposes(b, [ids.qualify], null)).toBeNull();
+  });
+
+  it("one undo restores each step's own value", () => {
+    const first = northbeamBundle();
+    const withOne = applyEdit(first, setStepPurposes(first, [ids.audit], "required")!);
+    const edit = setStepPurposes(withOne, [ids.audit, ids.kickoff, ids.qualify], "fixing")!;
+    const after = applyEdit(withOne, edit);
+    expect([ids.audit, ids.kickoff, ids.qualify].map((id) => step(after, id).purpose)).toEqual(["fixing", "fixing", "fixing"]);
+    const back = applyEdit(after, invertEdit(edit));
+    expect(step(back, ids.audit).purpose).toBe("required");
+    expect(step(back, ids.kickoff).purpose).toBeNull();
+    expect(sorted(back)).toEqual(sorted(withOne));
+  });
+
+  it("goes through the editor as one undoable step", async () => {
+    const { editor, now } = setup();
+    editor.run((b) => setStepPurposes(b, [ids.audit, ids.kickoff], "winning"));
+    expect([ids.audit, ids.kickoff].map((id) => step(now(), id).purpose)).toEqual(["winning", "winning"]);
+    editor.run((b) => updateStep(b, ids.audit, { purpose: "fixing" }));
+    expect(step(now(), ids.audit).purpose).toBe("fixing");
+    await editor.undo();
+    expect(step(now(), ids.audit).purpose).toBe("winning");
+    await editor.undo();
+    expect([ids.audit, ids.kickoff].map((id) => step(now(), id).purpose)).toEqual([null, null]);
+  });
+
+  it("describeValue shows the category's name, Automatic for none, and a removed category plainly", () => {
+    const names = namesOf(northbeamBundle());
+    expect(fieldLabel("purpose")).toBe("what it achieves");
+    expect(describeValue("purpose", "winning", names)).toBe("Winning work");
+    expect(describeValue("purpose", null, names)).toBe("Automatic");
+    expect(describeValue("purpose", "c12345678", names)).toBe("a removed category");
+    const renamed = northbeamBundle();
+    renamed.workspace = { ...renamed.workspace, settings: { ...renamed.workspace.settings, purposes: [{ key: "client_job", name: "The job", description: "" }, { key: "client_upkeep", name: "Upkeep", description: "" }, { key: "winning", name: "Selling", description: "" }, { key: "fixing", name: "Fixing", description: "" }, { key: "removable", name: "Could go", description: "" }] } };
+    expect(describeValue("purpose", "winning", namesOf(renamed))).toBe("Selling");
   });
 });

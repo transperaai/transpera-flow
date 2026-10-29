@@ -241,6 +241,8 @@ export interface EngineStep {
   person?: string | null;
   /** Mean hands-on hours. */
   work: number;
+  /** What the step achieves (sandbox G): an opaque key the app maps to a category. Omitted: "". Reporting only: never changes the run. */
+  purpose?: string;
   /** Mean external wait after service, in hours. */
   wait: number;
   /** Probability of repeating the step. */
@@ -675,6 +677,12 @@ export interface MonthlyReplication {
   personWork: Record<string, number[]>;
   personCapacity: Record<string, number[]>;
   personOvertime: Record<string, number[]>;
+  /** First-pass hands-on hours by purpose key, then role id / person id (the hours `roleWork` / `personWork` count for steps). Repeat passes are in `rework…`, never here. */
+  purposeRoleWork: Record<string, Record<string, number[]>>;
+  purposePersonWork: Record<string, Record<string, number[]>>;
+  /** Hands-on hours on repeat passes (the redo loops' second and later passes), whatever the step's purpose. */
+  reworkRoleWork: Record<string, number[]>;
+  reworkPersonWork: Record<string, number[]>;
   /** Hours waited for a person, and the waits, per step id (by when the work was picked up). */
   waitSum: Record<string, number[]>;
   waitN: Record<string, number[]>;
@@ -720,6 +728,25 @@ export interface MonthlyReplication {
   atRisk: Record<string, number[]>;
 }
 
+/**
+ * Where working time goes in a month (sandbox G), hours in the month (not a week), each a `Stat` over replications.
+ * purpose + rework + ongoing + idle = max(hours, work) in every replication.
+ */
+export interface TimeSplit {
+  /** First-pass hands-on hours per purpose key. */
+  purpose: Record<string, Stat[]>;
+  /** Repeat-pass hands-on hours. */
+  rework: Stat[];
+  /** Client hours not drawn as steps: max(0, work - sum of purpose - rework). */
+  ongoing: Stat[];
+  /** max(0, hours - work). */
+  idle: Stat[];
+  /** Hours available plus overtime worked: the 100%. */
+  hours: Stat[];
+  /** Work nobody was there to do (roles and the team); null for people. */
+  uncovered: Stat[] | null;
+}
+
 /** One month of a role's or person's busy share across replications. */
 export interface MonthBusy extends Stat {
   /** Hours a week they have that month (capacity less leave, and before a start or after an end date). */
@@ -744,6 +771,15 @@ export interface MonthlyResult {
   people: Record<string, (MonthBusy | null)[]>;
   /** Mean hours waited for a person per step id and month (all replications together); null with no waits that month. */
   waits: Record<string, (number | null)[]>;
+  /** Where working time goes by what the steps achieve (sandbox G, engine 1.14.0). */
+  time: {
+    /** Purpose keys on the model's steps, in first-seen step order; "" when a step has none. */
+    purposes: string[];
+    roles: Record<string, TimeSplit>;
+    people: Record<string, TimeSplit>;
+    /** Everyone together: the sum over people (so nobody in two roles is counted twice), uncovered summed over roles. */
+    team: TimeSplit;
+  };
   /** Servicing tasks done late or missed, per month. */
   lateTasks: Stat[];
   /** Active clients per service id per month ("" for none, and for the pooled count). */

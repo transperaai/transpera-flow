@@ -5,7 +5,7 @@
 // around fresh copies of its steps, so inserted steps never share an id with anything (and show as added against the live
 // map), and a block can be put in as many times as you like.
 
-import { ancestorsOf, isGroup, type BlockBundle, type BlockEdge, type BlockStep, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
+import { ancestorsOf, isGroup, STEP_PURPOSE_KEY, type BlockBundle, type BlockEdge, type BlockStep, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { GROUP_PADDING, openGroupSize } from "@/lib/map/groups";
 import { deleteSteps, newId } from "@/lib/editor/commands";
 import { edgeRow, groupRow } from "@/lib/editor/groups";
@@ -17,7 +17,7 @@ const NAME_MAX = 200;
 /** The columns of a step a block keeps; anything else in a stored document is ignored. */
 const STEP_KEYS = [
   "id", "name", "kind", "outcome", "role_id", "person_id", "work_hours", "work_dist", "work_params", "wait_hours", "wait_dist", "wait_params",
-  "rework_rate", "rework_to_step_id", "tool", "notes", "sla_hours", "expected_wait_hours", "lost_per_day_waiting", "dropoff_benchmark",
+  "rework_rate", "rework_to_step_id", "tool", "purpose", "notes", "sla_hours", "expected_wait_hours", "lost_per_day_waiting", "dropoff_benchmark",
   "target_cycle_hours", "current_wip", "x", "y", "parent_step_id", "entry_step_id", "child_process_id", "assumption", "conflict", "provenance",
 ] as const;
 const EDGE_KEYS = ["id", "from_step_id", "to_step_id", "probability", "condition_tag", "label"] as const;
@@ -172,6 +172,8 @@ function materialize(
       // Fresh copies: nothing is sitting at them, and none holds a child process.
       current_wip: null,
       child_process_id: null,
+      // A purpose from another workspace's list that this one lacks reads as Automatic; an older block has none.
+      purpose: typeof s.purpose === "string" && STEP_PURPOSE_KEY.test(s.purpose) ? s.purpose : null,
       // A role or person deleted since the block was saved would fail the foreign key.
       role_id: s.role_id && roles.has(s.role_id) ? s.role_id : null,
       person_id: s.person_id && people.has(s.person_id) ? s.person_id : null,

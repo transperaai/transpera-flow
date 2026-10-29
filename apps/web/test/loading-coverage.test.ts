@@ -15,6 +15,7 @@ const INHERITS: Record<string, string> = {
   "settings/branding": "inherit settings/loading.tsx",
   "settings/calibration": "inherit settings/loading.tsx",
   "settings/levers": "inherit settings/loading.tsx",
+  "settings/purposes": "inherit settings/loading.tsx",
 };
 
 /** Every folder under `dir` (and `dir` itself) that has a `page.tsx`, as a path under the workspace root ("" is the root). */

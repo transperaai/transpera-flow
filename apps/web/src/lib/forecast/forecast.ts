@@ -28,7 +28,7 @@ export function forecastModel(
   levers: readonly ScenarioPatch[] = [],
 ): { model: EngineModel; monthStarts: number[]; error: null } | { model: null; monthStarts: null; error: string } {
   try {
-    const model = { ...withLeverChanges(toEngineModel(bundle, { startDate, planned: true }), levers).model, horizonWeeks: horizonWeeks(months) };
+    const model = { ...withLeverChanges(toEngineModel(bundle, { startDate, planned: true, purposes: true }), levers).model, horizonWeeks: horizonWeeks(months) };
     // The run's months are the calendar's, so "February" in an alert is February.
     return { model, monthStarts: calendarMonthStarts(startDate, model.horizonWeeks, model.hoursPerWeek), error: null };
   } catch (err) {

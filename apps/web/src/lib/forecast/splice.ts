@@ -4,7 +4,7 @@
 // month on from the run with it. Busy shares, waits and late tasks (flows) switch at once; clients, revenue and clients at
 // risk (stocks) carry on from where they were and change only as the later run changes. Pure.
 
-import type { MonthBusy, MonthlyResult, SimulationResult, Stat } from "@transpera-flow/engine";
+import type { MonthBusy, MonthlyResult, SimulationResult, Stat, TimeSplit } from "@transpera-flow/engine";
 
 const ZERO: Stat = { mean: 0, p10: 0, p90: 0 };
 
@@ -13,7 +13,8 @@ const ZERO: Stat = { mean: 0, p10: 0, p90: 0 };
  *
  * Flows (`roles`, `people`, `uncovered`, `waits`, `lateTasks`): month `m` takes the value of the segment whose range holds
  * `m`; a key missing in that segment gives null (a zero `Stat` for `lateTasks`). The sales, client-movement, revenue,
- * overtime-hour and money series (sandbox phase 2) are flows too: what happens in a month is that month's, so month `m`
+ * overtime-hour and money series (sandbox phase 2) are flows too, and so is `time` (sandbox phase 4: hours in a month by purpose, per role,
+ * person and the team; keys and ids are the union over the segments, a missing one a zero series): what happens in a month is that month's, so month `m`
  * is the segment holding `m`'s own number; `money` is null if any segment's is (pay hidden). Stocks (`clients`, `mrr`, `atRisk`): the
  * first segment as is; a later segment starting at `k` is shifted by the gap it leaves at `k − 1` (the spliced value there
  * less its own), and floored at 0, so only the change from month `k` follows its run. A key missing on either side counts as 0.
@@ -79,8 +80,34 @@ export function spliceMonthly(segments: readonly { from: number; monthly: Monthl
         profit: series((r, m) => r.money!.profit[m]),
       };
 
+  // Where the time goes: flows, month by month from the segment holding the month.
+  const purposes = [...new Set(segments.flatMap((s) => s.monthly.time.purposes))];
+  const splitOf = (pick: (r: MonthlyResult) => TimeSplit | undefined): TimeSplit => {
+    const one = (get: (t: TimeSplit) => Stat[] | undefined): Stat[] => Array.from({ length: n }, (_, m) => {
+      const t = pick(at(m));
+      return (t && get(t)?.[m]) || ZERO;
+    });
+    const anyUncovered = segments.some((s) => pick(s.monthly)?.uncovered);
+    return {
+      purpose: Object.fromEntries(purposes.map((k) => [k, one((t) => t.purpose[k])])),
+      rework: one((t) => t.rework),
+      ongoing: one((t) => t.ongoing),
+      idle: one((t) => t.idle),
+      hours: one((t) => t.hours),
+      uncovered: anyUncovered ? one((t) => t.uncovered ?? undefined) : null,
+    };
+  };
+  const timeIds = (pick: (r: MonthlyResult) => Record<string, TimeSplit>) => [...new Set(segments.flatMap((s) => Object.keys(pick(s.monthly))))].sort();
+  const time: MonthlyResult["time"] = {
+    purposes,
+    roles: Object.fromEntries(timeIds((r) => r.time.roles).map((id) => [id, splitOf((r) => r.time.roles[id])])),
+    people: Object.fromEntries(timeIds((r) => r.time.people).map((id) => [id, splitOf((r) => r.time.people[id])])),
+    team: splitOf((r) => r.time.team),
+  };
+
   return {
     months: first.months,
+    time,
     sales: {
       opportunities: series((r, m) => r.sales.opportunities[m]),
       won: series((r, m) => r.sales.won[m]),

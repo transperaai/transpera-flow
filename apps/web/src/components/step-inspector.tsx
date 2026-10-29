@@ -4,11 +4,14 @@
 // on its own through the process editor, so each change is undoable and
 // re-runs the simulation.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   EVIDENCE_COLUMNS,
   isOpenAssumption,
+  resolveBundlePurposes,
   triangularRange,
+  UPKEEP_PURPOSE,
+  workspacePurposes,
   type Distribution,
   type EvidenceStamp,
   type ProcessBundle,
@@ -49,6 +52,43 @@ const DIST_OPTIONS: SelectOption[] = [
 
 /** Engine defaults for a lognormal duration's spread (packages/engine simulate.ts). */
 const DEFAULT_CV: Record<Phase, number> = { work: 0.35, wait: 0.3 };
+
+/** "What it achieves" (sandbox phase 4): the workspace's categories, or Automatic with the name it resolves to and why. */
+function PurposeField({ bundle, step, save }: { bundle: ProcessBundle; step: StepRow; save: Saver<string | null> }) {
+  const categories = useMemo(() => workspacePurposes(bundle.workspace.settings), [bundle.workspace.settings]);
+  const resolved = useMemo(() => resolveBundlePurposes(bundle).get(step.id), [bundle, step.id]);
+  const nameOf = new Map(categories.map((c) => [c.key, c.name]));
+  const automatic = resolved ? (nameOf.get(resolved.key) ?? resolved.key) : "";
+  const hint =
+    step.purpose !== null && step.purpose !== undefined
+      ? resolved?.source === "deleted_category"
+        ? "Its category was deleted: Automatic is used. Pick another."
+        : null
+      : resolved?.source === "first_principles"
+        ? "Listed to delete in First principles"
+        : resolved?.source === "process_kind"
+          ? bundle.process.kind === "servicing"
+            ? "Client work process"
+            : resolved.key === "client_job"
+              ? "From the sale on in a sales pipeline"
+              : "Sales pipeline process, before the sale"
+          : null;
+  return (
+    <SelectField
+      label="What it achieves"
+      help={{
+        description:
+          "What this step's hands-on time achieves. The Sandbox adds up working time by these, so you can see how much goes on the client's job, on winning work, on fixing, and on steps that could go. Rework on any step always counts as Fixing.",
+        example: "“Send weekly status email” is Coordination; “Write the monthly report” moves the client's job forward.",
+      }}
+      value={step.purpose ?? null}
+      options={categories.filter((c) => c.key !== UPKEEP_PURPOSE).map((c) => ({ value: c.key, label: c.name }))}
+      noneLabel={`Automatic: ${automatic}`}
+      save={save}
+      hint={hint}
+    />
+  );
+}
 
 const sectionClass = "flex flex-col gap-3 border-t border-line pt-3";
 
@@ -274,6 +314,7 @@ export function StepInspector({
               optional
               save={field("tool")}
             />
+            <PurposeField bundle={bundle} step={step} save={field("purpose")} />
           </div>
           <div className={sectionClass}>
             <p className="text-xs font-semibold text-fg-2">Analysis rules</p>

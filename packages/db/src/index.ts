@@ -19,6 +19,7 @@ export {
   seasonalityCurve,
   speedsNormalisedFor,
   hidesPay,
+  resolveBundlePurposes,
   toEngineModel,
   usesCapacityFactors,
   triangularRange,
@@ -32,6 +33,7 @@ export {
   firstPrinciplesDiffer,
   firstPrinciplesFromRow,
   firstPrinciplesToColumns,
+  loadDeleteCandidates,
   loadFirstPrinciples,
   loadFirstPrinciplesFor,
   resolveFirstPrinciples,
@@ -290,6 +292,7 @@ export {
   type GapStep,
   type SimulationGap,
 } from "./simulation-gaps";
+export * from "./purposes";
 export * from "./workspace-bundle";
 export * from "./workspace-import";
 export {

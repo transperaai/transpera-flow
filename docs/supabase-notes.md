@@ -554,3 +554,11 @@ Verified only against plain Postgres 16 (`packages/db/test/sandbox-scenarios.tes
 - [ ] A restore at its limit (900 scenarios) is not slower than before the migration (the restore screen's own timing, or
       `explain analyze` of the check over 900 one-change lists: about 0.1 s locally, 0.8 s before).
 - [ ] `private.sandbox_scenario_count(<workspace>)` as a Viewer gives 0, as the Owner the real count.
+
+## Step purposes (`20270114000000_step_purpose.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/purpose-migration.test.ts`, `purposes.test.ts`, and the real-shaped import in `copy-from-supabase.test.ts`). Check on Neon, on a throwaway branch of Preview:
+
+- [ ] `select count(*), max(updated_at), count(purpose) from public.steps` gives the same count and timestamp as before applying, and 0 for `count(purpose)` (the migration writes no step row).
+- [ ] `select conname, convalidated from pg_constraint where conname in ('steps_purpose_key', 'workspaces_purposes')` shows both validated. `workspaces_purposes` calls `private.is_purpose_list` (an immutable SQL function with `set search_path = ''`) from a table check; plain Postgres allows it, and the constraint is validated in the same transaction after the clean-up `update`.
+- [ ] As an Agency admin, `save_fields('workspaces', ..., 'settings.purposes')` saves a valid list against a null base and refuses a list of 4 (23514).

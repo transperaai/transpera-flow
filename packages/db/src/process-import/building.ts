@@ -408,6 +408,7 @@ export function buildNewStep(
     rework_rate: defaults.rework_rate,
     rework_to_step_id: f.rework_to_step_id ?? null,
     tool: f.tool?.trim() || null,
+    purpose: null,
     notes: f.notes?.trim() || null,
     sla_hours: f.sla_hours ?? null,
     // The analysis rules' step settings are set in the editor, not by the building tools.

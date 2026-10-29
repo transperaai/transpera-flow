@@ -21,7 +21,7 @@ export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app).
   "access", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "changes", "churn-drivers", "demo", "edit",
   "export", "first-principles", "forecast", "history", "issues", "levers", "library", "login", "logo", "market", "mcp", "monitoring-check",
-  "overview", "p", "people", "privacy", "processes", "restore", "s", "settings", "share", "signout", "solutions",
+  "overview", "p", "people", "privacy", "processes", "purposes", "restore", "s", "settings", "share", "signout", "solutions",
   "sources", "tokens", "w",
   // Next's build files.
   "_next", "chunks", "css", "media", "static",

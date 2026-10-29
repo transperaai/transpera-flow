@@ -1,7 +1,7 @@
 {
   "model": "northbeam-chances",
   "description": "northbeam-drivers run for six months with churn drivers as chances (late work measured, account manager changes and a competitor at a monthly chance), PPC clients won paying 3,000 to 6,000 around their price, and a +8% rise in PPC fees from the fourth month with the price driver on (engine 1.12.0): the chance, exposure and effect of each driver, the rise in revenue, and the months.",
-  "engineVersion": "1.13.0",
+  "engineVersion": "1.14.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

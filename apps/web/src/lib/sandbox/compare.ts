@@ -3,9 +3,10 @@
 // range and its difference from column 0 ("No changes"). Every column runs with the same seed, so a difference comes from the
 // scenarios, not from chance. Pure: no React.
 
-import type { ProcessBundle } from "@transpera-flow/db";
+import { DEFAULT_PURPOSES, FIXING_PURPOSE, type ProcessBundle, type PurposeCategory } from "@transpera-flow/db";
 import { isTooBusy, type EngineModel, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
 import { timelineMonths, type TimelineMonth } from "@/lib/forecast/timeline";
+import { timeView } from "./time";
 
 /** One series across the columns: `values[c][month]`, and `diff[c][month]` = column c's mean − column 0's (null when either is missing; column 0 is all null). */
 export interface CompareRow {
@@ -39,6 +40,12 @@ export interface SandboxComparison {
   atRisk: CompareRow[];
   /** One per role with work in any column (as the timeline filters), in the model's role order. Values are `MonthBusy`. */
   roles: CompareRow[];
+  /**
+   * Where the time goes (sandbox phase 4), the team: one row per category in the workspace's list, then Idle and "Nobody there to do it"
+   * (hours a month, and each month's difference from column 0), and `shares[c][r]` = column c's whole-run share of row r (Idle included,
+   * uncovered outside the 100%). `runHours[c][r]` is the run's hours (the sum of the months' means).
+   */
+  time: { rows: CompareRow[]; shares: number[][]; runHours: number[][] };
   /** Last month's MRR, last month's clients at risk (all groups; null when pooled), months too busy (all roles), late tasks in the last month. */
   totals: {
     mrr: CompareTile;
@@ -47,6 +54,9 @@ export interface SandboxComparison {
     lateTasks: CompareTile;
     /** Profit over the run, the sum of the months' means; null with `profit`. */
     profit: CompareTile | null;
+    /** Hours spent on Fixing (its steps and all rework) and on steps that could be removed, over the run: the sum of the months' means. */
+    fixingHours: CompareTile;
+    removableHours: CompareTile;
     /** Net change from price rises over the run, per column (null: the column has no price rise); null when no column has one. */
     priceNet: (number | null)[] | null;
   };
@@ -73,6 +83,8 @@ export function compareSandbox(
   cutoffs: readonly [number, number, number],
   /** Per column, the net change from its price rises over the run (null: none). */
   priceNet: readonly (number | null)[] = [],
+  /** The workspace's purpose categories, in order. */
+  categories: readonly PurposeCategory[] = DEFAULT_PURPOSES,
 ): SandboxComparison {
   const first = columns[0]!;
   const months = timelineMonths(startDate, first.months, model.hoursPerWeek);
@@ -95,8 +107,12 @@ export function compareSandbox(
   const labour = columns.map(labourWithOvertime);
   const costsShown = columns.every((m) => m.money);
   const total = (stats: readonly Stat[]) => stats.reduce((sum, st) => sum + st.mean, 0);
+  const views = columns.map((m) => timeView(m, months, categories, { kind: "team" }));
+  const timeRows = views[0]!.rows.map((r, i) => row(r.id, r.name, views.map((v) => v.rows[i]!.hours)));
+  const runHoursOf = (id: string) => views.map((v) => v.rows.find((r) => r.id === id)?.runHours ?? 0);
   return {
     months,
+    time: { rows: timeRows, shares: views.map((v) => v.rows.map((r) => r.runShare)), runHours: views.map((v) => v.rows.map((r) => r.runHours)) },
     profit: costsShown ? row("profit", "Profit", columns.map((m) => m.money!.profit)) : null,
     revenue: row("revenue", "Billed revenue", columns.map((m) => m.revenue.total)),
     labour: labour.every((l) => l) ? row("labour", "Labour and overtime", labour as Stat[][]) : null,
@@ -112,6 +128,8 @@ export function compareSandbox(
       tooBusyMonths: tile(idx.map((c) => roles.reduce((n, r) => n + tooBusy(r, c), 0))),
       lateTasks: tile(columns.map((m) => m.lateTasks[last]?.mean ?? 0)),
       profit: costsShown ? tile(columns.map((m) => total(m.money!.profit))) : null,
+      fixingHours: tile(runHoursOf(FIXING_PURPOSE)),
+      removableHours: tile(runHoursOf("removable")),
       priceNet: priceNet.some((v) => v !== null) ? columns.map((_, c) => priceNet[c] ?? null) : null,
     },
   };

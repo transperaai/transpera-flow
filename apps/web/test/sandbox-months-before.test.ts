@@ -27,6 +27,14 @@ function runOf(changes: SandboxChange[]): MonthlyResult {
   return runs.length === 1 ? runs[0]!.monthly : spliceMonthly(runs);
 }
 
+/** Null or 0 all through, in a number, a list or an object of them (a `Stat` of zeros, or a split of hours by purpose, is nobody's too). */
+function isNobody(value: unknown): boolean {
+  if (value === null || value === 0) return true;
+  if (Array.isArray(value)) return value.every(isNobody);
+  if (typeof value === "object" && value !== undefined) return Object.values(value as object).every(isNobody);
+  return false;
+}
+
 /** Equal, except a money figure may differ in its last bits (a stay's fee is spread over its months by amount / length x overlap). */
 function expectSame(received: unknown, expected: unknown, path = "monthly"): void {
   if (typeof received === "number" && typeof expected === "number") {
@@ -42,7 +50,7 @@ function expectSame(received: unknown, expected: unknown, path = "monthly"): voi
   if (received && expected && typeof received === "object" && typeof expected === "object") {
     // A person added by the scenario is not in the run without it: before the change they are nobody (null or 0 all through).
     const extra = Object.keys(received).filter((k) => !(k in expected));
-    for (const k of extra) expect(JSON.stringify((received as Record<string, unknown>)[k]).replace(/null|0|[\[\],]/g, ""), `${path}.${k}`).toBe("");
+    for (const k of extra) expect(isNobody((received as Record<string, unknown>)[k]), `${path}.${k}`).toBe(true);
     expect(Object.keys(received).filter((k) => k in expected).sort(), path).toEqual(Object.keys(expected).sort());
     for (const key of Object.keys(expected)) expectSame((received as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key], `${path}.${key}`);
     return;

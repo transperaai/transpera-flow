@@ -449,7 +449,7 @@ const bodyOf = (sql: string) => {
 };
 const FN = "public.import_workspace_bundle(uuid, jsonb, text)";
 /** The migration that defines the function now (it applies the settings for every restorer: 20270104000000), and its body. */
-const LATEST_FILE = "20270112000000_churn_chances_and_fee_ranges.sql";
+const LATEST_FILE = "20270114000000_step_purpose.sql";
 const bodyOfFunction = (sql: string, name: string) => {
   const fn = sql.slice(sql.search(new RegExp(`^create (?:or replace )?function ${name.replace(".", "\\.")}\\(`, "mi")));
   return fn.slice(fn.indexOf("$$") + 2, fn.indexOf("$$", fn.indexOf("$$") + 2));

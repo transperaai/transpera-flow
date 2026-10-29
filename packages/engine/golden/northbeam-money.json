@@ -1,7 +1,7 @@
 {
   "model": "northbeam-money",
   "description": "Northbeam with its clients counted per service, 18,000 a month of overheads and PPC priced hourly at 95 (clients won in the run bill the hours worked for them): billed revenue by kind, paid labour, overheads, profit, and the monthly sales, revenue and money series.",
-  "engineVersion": "1.13.0",
+  "engineVersion": "1.14.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

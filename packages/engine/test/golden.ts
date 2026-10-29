@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, northbeamModel, northbeamWithChances, northbeamWithChannels, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat } from "../src";
+import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, larkspurWithPurposes, northbeamModel, northbeamWithChances, northbeamWithChannels, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat, type TimeSplit } from "../src";
 
 export const GOLDEN_DIR = new URL("../golden/", import.meta.url);
 export const VERSION_FILE = new URL("../src/version.ts", import.meta.url);
@@ -93,6 +93,14 @@ export const GOLDEN_MODELS: GoldenModel[] = [
     seed: 1,
     reps: 30,
   },
+  {
+    name: "larkspur-time",
+    description: "Larkspur Creative run month by month with a purpose on every step (engine 1.14.0): where working time goes, as first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is larkspur's.",
+    model: larkspurWithPurposes,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
 ];
 
 const stat = (s: Stat) => ({ mean: s.mean, p10: s.p10, p90: s.p90 });
@@ -118,6 +126,8 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
     money: { revenue: stat(k.revenue), revenueHourly: stat(k.revenueHourly), labourCost: stat(k.labourCost!), overheads: k.overheads, profit: stat(k.profit!) },
     // Models run month by month: the means of the monthly sales, revenue and money series.
     ...(r.monthly ? { monthly: monthlyMeans(r.monthly) } : {}),
+    // Where the time goes (engine 1.14.0), only for a model whose steps say what they achieve.
+    ...(r.monthly && model.steps.some((s) => s.purpose !== undefined) ? { time: timeMeans(r.monthly.time) } : {}),
     overtime: { hours: stat(k.overtimeHours), cost: stat(k.overtimeCost!) },
     clients: k.clientsAtRisk && k.clientsChurned ? { atRisk: stat(k.clientsAtRisk), churned: stat(k.clientsChurned) } : null,
     touchpoints: k.touchpoints ? { onTime: stat(k.touchpoints.onTime), late: stat(k.touchpoints.late), missed: stat(k.touchpoints.missed) } : null,
@@ -187,6 +197,18 @@ function monthlyMeans(m: NonNullable<SimulationResult["monthly"]>) {
     overtimeCost: m.money ? means(m.money.overtimeCost) : null,
     profit: m.money ? means(m.money.profit) : null,
   };
+}
+
+function timeMeans(t: NonNullable<SimulationResult["monthly"]>["time"]) {
+  const split = (x: TimeSplit) => ({
+    purpose: Object.fromEntries(Object.entries(x.purpose).map(([k, v]) => [k, means(v)])),
+    rework: means(x.rework),
+    ongoing: means(x.ongoing),
+    idle: means(x.idle),
+    hours: means(x.hours),
+    uncovered: x.uncovered ? means(x.uncovered) : null,
+  });
+  return { purposes: t.purposes, team: split(t.team), roles: Object.fromEntries(Object.entries(t.roles).map(([id, v]) => [id, split(v)])) };
 }
 
 export type KeyOutputs = ReturnType<typeof keyOutputs>;

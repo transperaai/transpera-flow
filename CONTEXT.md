@@ -34,6 +34,14 @@ _Avoid_: Deleted process, hidden process (nothing deletes a process)
 A saved group of steps that can be inserted into a process. Example: a "Send proposal and chase" block used in three processes. A block marked AI was made by the AI.
 _Avoid_: Template, snippet, module
 
+**Purpose (of a step)**:
+What a step's hands-on time achieves, one of the workspace's categories (Settings, Purposes): Moves the client's job forward, Client upkeep, Required, Winning work, Coordination, Fixing, Could be removed, or ones the workspace added. The Sandbox adds working time up by purpose. Rework on any step always counts as Fixing, and the hours a role gives each client every week (not steps) are Client upkeep. Example: "Send weekly status email" is Coordination.
+_Avoid_: Category (that is the list a purpose is chosen from), tag, type (a step's kind is task, wait, decision)
+
+**Automatic (purpose)**:
+A step with no purpose chosen. It is worked out each time: a step the first principles list to delete is Could be removed; otherwise client work and a pipeline from the sale on move the client's job forward, and a pipeline before the sale is Winning work. Nothing is stored for it, so a step added to the delete list changes at once.
+_Avoid_: Default (a chosen purpose is never overwritten by it), unset
+
 **Lever**:
 A "what if" dial on a number, such as 25% more leads a week. It changes numbers, never steps.
 _Avoid_: Slider, parameter, scenario

@@ -23,6 +23,7 @@ export const FIELD_LABELS: Record<string, string> = {
   entry_step_id: "first step",
   child_process_id: "child process",
   tool: "tool",
+  purpose: "what it achieves",
   notes: "notes",
   sla_hours: "SLA",
   expected_wait_hours: "expected wait",

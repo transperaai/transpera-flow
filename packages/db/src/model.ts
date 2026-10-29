@@ -5,6 +5,7 @@ import {
   isNeutralMarket,
   marketFromSchedule,
   NestingError,
+  saleSideSteps,
   type EngineMarket,
   type EngineDemand,
   type Distribution as EngineDistribution,
@@ -20,6 +21,7 @@ import {
   type EngineServicingProcess,
   type EngineStep,
 } from "@transpera-flow/engine";
+import { resolvePurpose, workspacePurposes, type PurposeSource } from "./purposes";
 import { engineRecurrence } from "./servicing";
 import type { DistParams, Distribution, EdgeRow, LeadSourceRow, ProcessBundle, ProcessPart, SeasonalityRow, StepRow, WorkspaceSettings } from "./types";
 
@@ -50,6 +52,11 @@ export interface ModelOptions {
    * for the whole run, as every other screen simulates it.
    */
   planned?: boolean;
+  /**
+   * Put each working step's purpose key on the model (sandbox phase 4, `EngineStep.purpose`): reporting only, no number changes.
+   * Off (the default): exactly the model as before. Needs `bundle.deleteCandidates` for the "Could be removed" rule.
+   */
+  purposes?: boolean;
 }
 
 export class ModelError extends Error {}
@@ -338,7 +345,8 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   };
   // Groups and child processes are a view: the engine's model is the leaf steps (a no-op without any).
   try {
-    return flattenModel(model);
+    const flat = flattenModel(model);
+    return options.purposes ? withStepPurposes(flat, bundle) : flat;
   } catch (err) {
     // A group with nowhere to go, or a loop of groups, is a problem with the process, as any other bad graph is.
     if (err instanceof NestingError) {
@@ -352,6 +360,50 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     }
     throw err;
   }
+}
+
+/** Each step of the bundle's processes (the one in view and any it carries) with its row and its process's kind. */
+function stepRowsOf(bundle: ProcessBundle): Map<string, { row: StepRow; kind: string }> {
+  const rows = new Map<string, { row: StepRow; kind: string }>();
+  for (const part of [{ process: bundle.process, steps: bundle.steps }, ...(bundle.otherProcesses ?? [])]) {
+    for (const row of part.steps) rows.set(row.id, { row, kind: part.process.kind });
+  }
+  return rows;
+}
+
+/** Every step's resolved purpose (`resolvePurpose`), given the pipeline steps from the sale on. Pure. */
+function resolveAll(bundle: ProcessBundle, saleSide: ReadonlySet<string>): Map<string, { key: string; source: PurposeSource }> {
+  const keys = new Set(workspacePurposes(bundle.workspace.settings).map((c) => c.key));
+  const candidates = new Map(Object.entries(bundle.deleteCandidates ?? {}).map(([id, steps]) => [id, new Set(steps)]));
+  const none = new Set<string>();
+  const out = new Map<string, { key: string; source: PurposeSource }>();
+  for (const [id, { row, kind }] of stepRowsOf(bundle)) {
+    out.set(id, resolvePurpose(row, kind, candidates.get(row.process_id) ?? none, keys, saleSide.has(id)));
+  }
+  return out;
+}
+
+/**
+ * The resolved purpose of every step the bundle carries, for the editor and MCP to show ("Automatic: Winning work"). The sale side
+ * comes from the engine model; a graph that can't be modelled yet (a draft half drawn) just has no sale side. Pure.
+ */
+export function resolveBundlePurposes(bundle: ProcessBundle): Map<string, { key: string; source: PurposeSource }> {
+  let saleSide: ReadonlySet<string> = new Set();
+  try {
+    saleSide = saleSideSteps(toEngineModel(bundle, { startDate: "2026-01-05" }));
+  } catch {
+    // Not a model yet.
+  }
+  return resolveAll(bundle, saleSide);
+}
+
+/**
+ * The model with a purpose key on every working step (`resolvePurpose`, with Austin's 29 Oct defaults): each step is looked up in
+ * the bundle's processes for its row and its process's kind, and the sale side of the pipeline comes from the engine. Pure.
+ */
+function withStepPurposes(model: EngineModel, bundle: ProcessBundle): EngineModel {
+  const resolved = resolveAll(bundle, saleSideSteps(model));
+  return { ...model, steps: model.steps.map((s) => (resolved.has(s.id) ? { ...s, purpose: resolved.get(s.id)!.key } : s)) };
 }
 
 /**

@@ -92,7 +92,7 @@ export const IMPORT_COLUMNS = {
   processes: cols("processes", "id", "parent_process_id", "name", "kind", "entity_name", "description"),
   steps: cols(
     "steps", "id", "assumption", "child_process_id", "conflict", "cost_override", "current_wip", "dropoff_benchmark", "expected_wait_hours", "entry_step_id",
-    "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "replaced_by", "rework_rate", "rework_to_step_id",
+    "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "purpose", "replaced_by", "rework_rate", "rework_to_step_id",
     "role_id", "sla_hours", "target_cycle_hours", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
   ),
   edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id"),
@@ -140,6 +140,7 @@ const SETTING_KEYS: Record<keyof WorkspaceSettings, true> = {
   client_health_benchmark_high: true,
   capacity_factor_enabled: true,
   overhead_monthly: true,
+  purposes: true,
 };
 export const WORKSPACE_SETTING_KEYS = Object.keys(SETTING_KEYS) as readonly (keyof WorkspaceSettings)[];
 

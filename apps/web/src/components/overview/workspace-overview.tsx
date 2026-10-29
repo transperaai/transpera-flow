@@ -5,7 +5,7 @@ import { Overview } from "@/components/overview/overview";
 import { StartOverview } from "@/components/overview/start-overview";
 import { setupChecklist } from "@/lib/overview/setup";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
-import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources, withDeleteCandidates } from "@/lib/data";
 import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
@@ -17,7 +17,8 @@ import { getDb } from "@/lib/auth/session";
 
 /** The Overview of a workspace (issue #100): the landing page, at `/w/[slug]` and `/w/[slug]/overview`. */
 export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
-  const live = await loadLiveProcess(slug);
+  const liveBare = await loadLiveProcess(slug);
+  const live = liveBare ? await withDeleteCandidates(liveBare) : null;
   if (!live) {
     // Nothing is published (a new client): the start page. Members and viewers get a plain sentence; counts only go to editors.
     const head = await loadWorkspaceHead(slug);

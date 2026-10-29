@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ProcessBundle } from "@transpera-flow/db";
+import { fakeTime } from "./fake-time";
+import { DEFAULT_PURPOSES, type ProcessBundle } from "@transpera-flow/db";
 import type { MonthBusy, MonthlyResult, Stat } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
@@ -15,6 +16,7 @@ const busy = (mean: number): MonthBusy => ({ ...stat(mean), capacity: 40, work: 
 function fake(n: number, level: number, c: number, m: number, extra: Partial<MonthlyResult> = {}): MonthlyResult {
   return {
     months: Array.from({ length: n }, (_, i) => ({ start: i * 100, end: (i + 1) * 100 })),
+    time: fakeTime(n, level),
     roles: { r: Array.from({ length: n }, () => busy(level)) },
     uncovered: { r: Array.from({ length: n }, () => null) },
     people: { p: Array.from({ length: n }, () => busy(level)) },
@@ -121,6 +123,37 @@ describe("compareSandbox", () => {
     expect(c.totals.lateTasks.values).toEqual([0.5, 0.9, 2]);
     expect(c.totals.lateTasks.diff[2]).toBeCloseTo(1.5);
     expect(c.months).toHaveLength(4);
+  });
+
+  it("compares where the time goes (sandbox phase 4): a row per category, then Idle and uncovered, hours a month and whole-run shares", () => {
+    const c = compareSandbox(model, [a, b, c3], { services }, START, cutoffs);
+    expect(c.time.rows.map((r) => r.id)).toEqual(["client_job", "client_upkeep", "required", "winning", "coordination", "fixing", "removable", "idle", "uncovered"]);
+    // fakeSplit(level): client job level * 10, winning level * 4, fixing's own level * 2 plus rework level, client hours level * 3, idle 10, hours the sum of those.
+    const row = (id: string) => c.time.rows.findIndex((r) => r.id === id);
+    const j = row("client_job");
+    expect(c.time.rows[j]!.values.map((col) => col[0]!.mean)).toEqual([5, 9, 7]);
+    expect(c.time.rows[j]!.diff[1]).toEqual([4, 4, 4, 4]);
+    const f = row("fixing");
+    expect(c.time.rows[f]!.values.map((col) => col[0]!.mean)).toEqual([1.5, 2.7, 2.1].map((v) => expect.closeTo(v, 9)));
+    expect(c.time.runHours[0]![f]).toBeCloseTo(6, 9);
+    // Shares are of the hours available, whole run; they add up to 100% with Idle (no uncovered inside it).
+    for (const col of c.time.shares.keys()) {
+      const inside = c.time.rows.reduce((sum, r, i) => (r.id === "uncovered" ? sum : sum + c.time.shares[col]![i]!), 0);
+      expect(inside, `column ${col}`).toBeCloseTo(1, 9);
+    }
+    expect(c.time.runHours[0]![row("uncovered")]).toBe(20);
+    // A custom list renames and reorders the rows without changing a number.
+    const custom = compareSandbox(model, [a, b], { services }, START, cutoffs, [], [{ key: "fixing", name: "Putting right", description: "" }, ...DEFAULT_PURPOSES.filter((p) => p.key !== "fixing")]);
+    expect(custom.time.rows[0]!.name).toBe("Putting right");
+    expect(custom.time.runHours[0]![0]).toBeCloseTo(6, 9);
+  });
+
+  it("has two tiles: hours fixing (its steps and all rework) and hours on steps that could be removed, over the run", () => {
+    const c = compareSandbox(model, [a, b, c3], { services }, START, cutoffs);
+    expect(c.totals.fixingHours.values).toEqual([6, 10.8, 8.4].map((v) => expect.closeTo(v, 9)));
+    expect(c.totals.fixingHours.diff[0]).toBeNull();
+    expect(c.totals.fixingHours.diff[1]).toBeCloseTo(4.8, 9);
+    expect(c.totals.removableHours.values).toEqual([0, 0, 0]);
   });
 
   it("has the price rises' net per column only when some column has a rise, null for the columns without one", () => {

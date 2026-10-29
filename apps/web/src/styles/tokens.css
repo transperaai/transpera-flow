@@ -41,6 +41,20 @@
   --rate-bad-soft: var(--warn-soft);
   --rate-risk: var(--crit);
   --rate-risk-soft: var(--crit-soft);
+  /* "Where the time goes" (sandbox phase 4): one colour per purpose category, mid-lightness so a bar reads on both themes. The default categories
+     have their own; categories a workspace adds take the spare ones. The client's job is --accent and Fixing is --rate-bad. */
+  --purpose-upkeep: oklch(0.75 0.08 205);
+  --purpose-winning: oklch(0.68 0.15 305);
+  --purpose-required: oklch(0.62 0.05 250);
+  --purpose-coordination: oklch(0.72 0.13 345);
+  --purpose-removable: oklch(0.55 0.02 250);
+  --purpose-unset: oklch(0.78 0.02 250);
+  --purpose-spare-1: oklch(0.7 0.13 40);
+  --purpose-spare-2: oklch(0.68 0.12 170);
+  --purpose-spare-3: oklch(0.62 0.12 270);
+  --purpose-spare-4: oklch(0.74 0.1 110);
+  --purpose-spare-5: oklch(0.66 0.13 15);
+  --purpose-spare-6: oklch(0.7 0.1 235);
   /* Work items in playback, and those heading to a lost end. */
   --token: oklch(0.609 0.126 221.723);
   --token-lost: oklch(0.7 0 0);

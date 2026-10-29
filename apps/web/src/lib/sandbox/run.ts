@@ -475,7 +475,7 @@ export function scenarioModel(
   edits?: { changes: readonly SandboxChange[]; d4Unhandled: ReadonlySet<string>; forcePriceDriver?: boolean },
 ): ScenarioModelResult | { model: null; monthStarts: null; problems: ChangeProblem[]; error: string } {
   try {
-    const base = toEngineModel(bundle, { startDate, planned: true });
+    const base = toEngineModel(bundle, { startDate, planned: true, purposes: true });
     const problems: ChangeProblem[] = [];
     let model = base;
     if (patches.length) {

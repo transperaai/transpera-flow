@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { PROCESS_TEMPLATES } from "@transpera-flow/db/process-import";
-import { listProcesses, loadLiveCompanyPart, loadProcessBundle, ModelError, toEngineModel } from "@transpera-flow/db";
+import { listProcesses, loadDeleteCandidates, loadLiveCompanyPart, loadProcessBundle, ModelError, resolveBundlePurposes, toEngineModel, workspacePurposes, type WorkspaceSettings } from "@transpera-flow/db";
 import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
@@ -137,7 +137,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "get_workspace_summary",
     {
       title: "Workspace summary",
-      description: "Company model overview: settings, processes, roles and people of the active workspace.",
+      description: "Company model overview: settings, processes, roles and people of the active workspace, and the workspace's purpose categories (what a step's hands-on time achieves).",
       inputSchema: { workspace: workspaceArg },
       annotations: { readOnlyHint: true },
     },
@@ -158,6 +158,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         assumptions.push("No runs are stored yet, so there are no baseline KPIs; call run_scenario for current numbers.");
         return {
           workspace: { id: ws.id, name: ws.name, slug: ws.slug, settings: ws.settings },
+          // The categories a step's purpose is chosen from, in order (the defaults while the workspace has none of its own).
+          purpose_categories: workspacePurposes(ws.settings as WorkspaceSettings),
           processes: processes.map((p) => ({
             id: p.id,
             name: p.name,
@@ -196,7 +198,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "get_process",
     {
       title: "Get process",
-      description: "A process graph (steps, edges, roles) at its live or draft revision.",
+      description:
+        "A process graph (steps, edges, roles) at its live or draft revision; each step's purpose (what its hands-on time achieves; null is Automatic) and the workspace's purpose categories.",
       inputSchema: { process: processArg, revision: revisionArg, workspace: workspaceArg },
       annotations: { readOnlyHint: true },
     },
@@ -211,11 +214,21 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         if (proc.is_company) {
           assumptions.push("This is the company map: each step holds a process (its child_process_id) at the position the map draws it; each edge is a handoff line between two of them. It is layout only: nothing here is simulated.");
         }
+        // What each working step's purpose comes to, with the process's first-principles delete list (Automatic reads it).
+        const categories = workspacePurposes(ws.settings as WorkspaceSettings);
+        const names = new Map(categories.map((c) => [c.key, c.name]));
+        const resolved = proc.is_company
+          ? new Map<string, { key: string; source: string }>()
+          : resolveBundlePurposes({ ...bundle, deleteCandidates: await loadDeleteCandidates(ctx.db, [{ processId: proc.id, revisionId: bundle.revision.id }]) });
         return {
           process: { ...bundle.process, draft_revision_id: proc.draft_revision_id },
           revision: bundle.revision,
           roles: bundle.roles,
-          steps: bundle.steps,
+          purpose_categories: categories,
+          steps: bundle.steps.map((st) => {
+            const r = st.kind === "task" || st.kind === "wait" || st.kind === "decision" ? resolved.get(st.id) : undefined;
+            return { ...st, purpose_resolved: r ? { key: r.key, name: names.get(r.key) ?? r.key, source: r.source } : null };
+          }),
           edges: bundle.edges,
         };
       }),

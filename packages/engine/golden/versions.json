@@ -82,5 +82,11 @@
     "date": "2026-10-29",
     "note": "Sandbox phase 3 review: entered churn-driver chances draw the warm-up's hits (brief Q11), so a client on the book starts the run as likely to be under a hit as later on; only northbeam-chances moves (its handoff and competitor chances). Also: a churn channel reaches every merged client's reported churn, and the overtime limit multiplies in its old order without a capacity channel (1.12.0 moved the last bit of overtime for some models outside the goldens). No other golden value moved.",
     "digest": "sha256:558da3d63f61959d89ee39f9ad6910816e65f433b51e9bcb7602d02e44fda50b"
+  },
+  {
+    "version": "1.14.0",
+    "date": "2026-10-29",
+    "note": "Time and what it achieves (sandbox phase 4): EngineStep.purpose and MonthlyResult.time (first-pass hands-on hours by purpose, rework, client hours, idle and hours available, per role, person and team); larkspur-time golden model. No existing simulated number moved.",
+    "digest": "sha256:c39ad8a186cddebcf53a6b34d6b27c0371604d07a18fe1c80100f28dbdbc713c"
   }
 ]

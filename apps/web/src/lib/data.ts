@@ -13,6 +13,7 @@ import {
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
+  loadDeleteCandidates,
   loadTeam,
   loadClients,
   loadMarket,
@@ -67,6 +68,7 @@ import {
   type StepRow,
   type WorkspaceRow,
   type WorkspaceSettings,
+  type PurposeCategory,
   loadWorkspaceLogoSha,
 } from "@transpera-flow/db";
 import type { HeadlineNumbers } from "./overview/headline";
@@ -164,6 +166,36 @@ export async function loadSourceLinking(workspaceId: string): Promise<{ links: S
   const db = await getDb();
   const [links, targets] = await Promise.all([loadSourceLinks(db, workspaceId), loadLinkTargets(db, workspaceId)]);
   return { links, targets };
+}
+
+/**
+ * The bundle with the steps its processes' first principles list to delete (`deleteCandidates`, sandbox phase 4), for the revisions it
+ * shows: what a step's Automatic purpose ("Could be removed") needs. One read; callers that show or run purposes use it.
+ */
+export async function withDeleteCandidates<B extends ProcessBundle>(bundle: B): Promise<B> {
+  const parts = [{ processId: bundle.process.id, revisionId: bundle.revision.id }, ...(bundle.otherProcesses ?? []).map((p) => ({ processId: p.process.id, revisionId: p.revision.id }))];
+  return { ...bundle, deleteCandidates: await loadDeleteCandidates(await getDb(), parts) };
+}
+
+/** The categories stored on the workspace as they are (null while it has none and uses the defaults), the base a save checks against. */
+export async function loadStoredPurposes(workspaceId: string): Promise<PurposeCategory[] | null> {
+  const row = await (await getDb()).selectFrom("workspaces").select(["settings"]).where("id", "=", workspaceId).executeTakeFirst();
+  return (row?.settings as WorkspaceSettings | undefined)?.purposes ?? null;
+}
+
+/**
+ * How many steps (in each process's live and draft version) have chosen each purpose category, by key: what Settings -> Purposes says
+ * before a category is deleted. Steps that chose none (Automatic) are not counted.
+ */
+export async function loadPurposeUse(workspaceId: string): Promise<Record<string, number>> {
+  const db = await getDb();
+  const processes = await db.selectFrom("processes").select(["live_revision_id", "draft_revision_id"]).where("workspace_id", "=", workspaceId).execute();
+  const revisions = processes.flatMap((p) => [p.live_revision_id, p.draft_revision_id].filter((id): id is string => id !== null));
+  if (!revisions.length) return {};
+  const rows = await db.selectFrom("steps").select(["purpose"]).where("revision_id", "in", revisions).where("purpose", "is not", null).execute();
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.purpose!] = (out[r.purpose!] ?? 0) + 1;
+  return out;
 }
 
 /** The workspace's first process at its live revision, or null if not visible. */

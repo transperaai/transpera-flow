@@ -69,6 +69,7 @@ export function newStepRow(bundle: ProcessBundle, kind: NewStepKind, outcome: St
     rework_rate: 0,
     rework_to_step_id: null,
     tool: null,
+    purpose: null,
     notes: null,
     sla_hours: null,
     expected_wait_hours: null,
@@ -156,6 +157,24 @@ export function moveSteps(bundle: ProcessBundle, positions: readonly { id: strin
   if (!changes.length) return null;
   const label = changes.length === 1 ? `Moved ${stepName(bundle, changes[0]!.id)}` : `Moved ${changes.length} steps`;
   return { label, ops: [{ kind: "update", changes }] };
+}
+
+/** Whether a step has hands-on time to say the purpose of: a task or wait that is not a group or a holder of a child process. */
+export const hasPurpose = (step: StepRow): boolean => step.kind !== "start" && step.kind !== "end" && step.kind !== "group" && !step.child_process_id;
+
+/**
+ * Set what several steps achieve (sandbox phase 4), as one edit with one undo: one change per working step whose value differs
+ * (as `moveSteps` batches). Holders, starts and ends have no hands-on time and are skipped. Null when nothing changes.
+ */
+export function setStepPurposes(bundle: ProcessBundle, ids: readonly string[], purpose: string | null): Edit | null {
+  const changes: RowChange[] = [];
+  for (const id of ids) {
+    const step = bundle.steps.find((s) => s.id === id);
+    if (!step || !hasPurpose(step) || (step.purpose ?? null) === purpose) continue;
+    changes.push({ table: "steps", id, before: { purpose: step.purpose ?? null }, after: { purpose } });
+  }
+  if (!changes.length) return null;
+  return { label: changes.length === 1 ? `Changed what ${stepName(bundle, changes[0]!.id)} achieves` : `Changed what ${changes.length} steps achieve`, ops: [{ kind: "update", changes }] };
 }
 
 function updateRow(bundle: ProcessBundle, table: "steps" | "edges", id: string, patch: Patch, label: string): Edit | null {
