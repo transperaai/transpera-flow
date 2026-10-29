@@ -130,6 +130,12 @@ describe("a shared view, People off and Financials off", () => {
         expect(await page.locator("[data-measure=labour] [data-money-hidden]").count()).toBe(1);
       }
       if (kind === "overview" || kind === "process" || kind === "issue") expect(text).toMatch(/Team member \d+/);
+      // Share links show no time split (sandbox phase 4): no "What the time achieves" on a shared Overview.
+      if (kind === "overview") {
+        expect(await page.locator('[data-chart="issues"]').count()).toBeGreaterThan(0);
+        expect(await page.locator('[data-chart="time-achieves"], [data-time-achieves]').count()).toBe(0);
+        expect(text).not.toContain("What the time achieves");
+      }
       if (kind === "issue") {
         // The issue's cost: "—" with the money (i), and its words carry the label and no money.
         expect(text).toContain("Audits take too long for Client");

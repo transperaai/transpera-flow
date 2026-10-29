@@ -671,6 +671,11 @@ export interface MonthlyReplication {
    */
   roleUncovered: Record<string, number[]>;
   /**
+   * Client hours of someone on leave that nobody else of the role was there that month to take (the role's `roleWork` counts
+   * them, no person's `personWork` does). Reporting only: `MonthlyResult.time` shows them as uncovered, not as the role's work.
+   */
+  roleAwayUnshared: Record<string, number[]>;
+  /**
    * Work per person id. Client hours that fall in someone's leave go to the others of the same role who are there
    * that month (not to them), by the hours each has, so a person's month is the work they actually face.
    */
@@ -737,13 +742,21 @@ export interface TimeSplit {
   purpose: Record<string, Stat[]>;
   /** Repeat-pass hands-on hours. */
   rework: Stat[];
-  /** Client hours not drawn as steps: max(0, work - sum of purpose - rework). */
+  /**
+   * Per purpose key, its first-pass hours plus all the repeat-pass hours, as one series per replication: the range of the sum (a
+   * category that also takes the rework, as the app's Fixing does), which adding the two ranges would not give.
+   */
+  withRework: Record<string, Stat[]>;
+  /** Client hours not drawn as steps: max(0, work - sum of purpose - rework). For a role, work leaves out `roleAwayUnshared`. */
   ongoing: Stat[];
   /** max(0, hours - work). */
   idle: Stat[];
   /** Hours available plus overtime worked: the 100%. */
   hours: Stat[];
-  /** Work nobody was there to do (roles and the team); null for people. */
+  /**
+   * Work nobody was there to do (roles and the team; null for people): `roleUncovered`, plus the client hours of someone on leave that
+   * no colleague of the role was there to take (`roleAwayUnshared`), which are not the role's work in this split.
+   */
   uncovered: Stat[] | null;
 }
 

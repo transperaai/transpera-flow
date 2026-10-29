@@ -16,6 +16,8 @@ const series = (...v: number[]): Stat[] => v.map((m) => stat(m));
 const split = (over: Partial<TimeSplit> = {}): TimeSplit => ({
   purpose: { client_job: series(30, 30, 30), winning: series(10, 10, 10), fixing: series(15, 15, 15), mystery: series(10, 0, 0) },
   rework: series(5, 5, 5),
+  // The engine's range of each key plus the rework, per replication: narrower than the two ranges added.
+  withRework: { client_job: series(35, 35, 35), winning: series(15, 15, 15), fixing: [stat(20, 0.5), stat(20, 0.5), stat(20, 0.5)], mystery: series(15, 5, 5) },
   ongoing: series(20, 20, 20),
   idle: series(10, 20, 20),
   hours: series(100, 100, 100),
@@ -37,6 +39,8 @@ describe("timeView", () => {
 
   it("counts rework as Fixing and the client hours that are not steps as Client upkeep", () => {
     expect(rowOf(view, "fixing").hours.map((s) => s.mean)).toEqual([20, 20, 20]);
+    // Its range is the engine's range of the sum, not the two ranges added (which would be 18 to 22).
+    expect(rowOf(view, "fixing").hours[0]).toEqual({ mean: 20, p10: 19.5, p90: 20.5 });
     expect(rowOf(view, "client_upkeep").hours.map((s) => s.mean)).toEqual([20, 20, 20]);
     expect(rowOf(view, "client_job").hours.map((s) => s.mean)).toEqual([30, 30, 30]);
     // Client hours are not folded into the client's job.
@@ -82,7 +86,7 @@ describe("timeView", () => {
 });
 
 describe("timeView scopes", () => {
-  const people = { ann: split({ uncovered: null, hours: series(40, 40, 40), idle: series(0, 0, 0), purpose: { client_job: series(20, 20, 20), winning: series(0, 0, 0), fixing: series(0, 0, 0) }, rework: series(5, 5, 5), ongoing: series(15, 15, 15) }) };
+  const people = { ann: split({ uncovered: null, hours: series(40, 40, 40), idle: series(0, 0, 0), purpose: { client_job: series(20, 20, 20), winning: series(0, 0, 0), fixing: series(0, 0, 0) }, rework: series(5, 5, 5), withRework: { client_job: series(25, 25, 25), winning: series(5, 5, 5), fixing: series(5, 5, 5) }, ongoing: series(15, 15, 15) }) };
   const roles = { design: split({ hours: series(60, 60, 60) }) };
   const m = monthly(split(), people, roles);
 

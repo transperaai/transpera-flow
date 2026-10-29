@@ -73,6 +73,11 @@ const CASES: [string, unknown, boolean][] = [
   ["a duplicate name ignoring case and spaces", [...defaults().slice(0, 6), { key: "c00000001", name: "  WINNING work ", description: "" }], false],
   ["a 60-character name", [...defaults(), { key: "c00000001", name: "n".repeat(60), description: "" }], true],
   ["a 61-character name", [...defaults(), { key: "c00000001", name: "n".repeat(61), description: "" }], false],
+  // The database counts characters (code points) and trims spaces only: a list it accepts must read back, not fall to the defaults.
+  ["a 60-emoji name", [...defaults(), { key: "c00000001", name: "🙂".repeat(60), description: "" }], true],
+  ["a 61-emoji name", [...defaults(), { key: "c00000001", name: "🙂".repeat(61), description: "" }], false],
+  ["a name that differs from another by a tab", [...without("coordination"), { key: "c00000001", name: "\tWinning work", description: "" }], true],
+  ["a 200-emoji description", [...defaults(), { key: "c00000001", name: "X", description: "🙂".repeat(200) }], true],
   ["an empty name", [...defaults(), { key: "c00000001", name: "   ", description: "" }], false],
   ["a 200-character description", [...defaults(), { key: "c00000001", name: "X", description: "d".repeat(200) }], true],
   ["a 201-character description", [...defaults(), { key: "c00000001", name: "X", description: "d".repeat(201) }], false],

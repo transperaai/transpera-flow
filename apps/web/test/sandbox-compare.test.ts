@@ -148,6 +148,22 @@ describe("compareSandbox", () => {
     expect(custom.time.runHours[0]![0]).toBeCloseTo(6, 9);
   });
 
+  it("lines the time rows up by id when one column has a row the others lack (a key not in the list: Not set)", () => {
+    const t = fakeTime(4, 0.9);
+    const mystery = Array.from({ length: 4 }, () => stat(3));
+    const withMystery = { ...b, time: { ...t, purposes: [...t.purposes, "mystery"], team: { ...t.team, purpose: { ...t.team.purpose, mystery }, withRework: { ...t.team.withRework, mystery } } } };
+    const c = compareSandbox(model, [a, withMystery], { services }, START, cutoffs);
+    expect(c.time.rows.map((r) => r.id)).toEqual(["client_job", "client_upkeep", "required", "winning", "coordination", "fixing", "removable", "not_set", "idle", "uncovered"]);
+    const at = (id: string) => c.time.rows.findIndex((r) => r.id === id);
+    // Column 0 has no Not set row: zero there. Idle and uncovered are each column's own, not a neighbour's.
+    expect(c.time.rows[at("not_set")]!.values.map((col) => col[0]!.mean)).toEqual([0, 3]);
+    expect(c.time.rows[at("idle")]!.values.map((col) => col[0]!.mean)).toEqual([10, 10]);
+    expect(c.time.runHours[0]![at("uncovered")]).toBe(20);
+    expect(c.time.runHours[1]![at("uncovered")]).toBe(20);
+    expect(c.time.shares[0]![at("not_set")]).toBe(0);
+    expect(c.time.shares[1]![at("idle")]).toBeCloseTo(10 / (0.9 * 20 + 10), 9);
+  });
+
   it("has two tiles: hours fixing (its steps and all rework) and hours on steps that could be removed, over the run", () => {
     const c = compareSandbox(model, [a, b, c3], { services }, START, cutoffs);
     expect(c.totals.fixingHours.values).toEqual([6, 10.8, 8.4].map((v) => expect.closeTo(v, 9)));
