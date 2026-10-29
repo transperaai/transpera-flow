@@ -233,3 +233,35 @@ describe("goal seek's levers and its note", () => {
     expect(goalNote("Short.", "2026-10-29")).toBe("Goal seek: Short. (2026-10-29)");
   });
 });
+
+describe("a run that fails releases the others", () => {
+  const model = forecastModel(bundle, 3, DEMO_FORECAST_START).model!;
+  const o = { cutoffs, categories: DEFAULT_PURPOSES };
+  it("the tornado: every other run is cancelled, and the error reaches the caller", async () => {
+    const variants = tornadoVariants(model, [], "lost");
+    let n = 0;
+    let released = 0;
+    const failing: Runner = (changes) => {
+      const i = ++n;
+      // The scenario's own run (asked first) finishes; then one variant fails while the rest are still running.
+      if (i === 1) return run(changes);
+      if (i === 3) return { promise: Promise.reject(new Error("bad variant")), cancel: () => {} };
+      return { promise: new Promise<never>(() => {}), cancel: () => void released++ };
+    };
+    const cancel = new Cancel();
+    await expect(runTornado(variants, failing, [], (r) => tornadoValue("lost", r.result.monthly!, o), cancel)).rejects.toThrow("bad variant");
+    expect(cancel.cancelled).toBe(true);
+    expect(released).toBe(n - 2);
+  });
+
+  it("goal seek: the other end's run is cancelled", async () => {
+    const d5 = GOAL_LEVERS.find((l) => l.id === "D5")!;
+    const choice: GoalChoice = { lever: d5, targetId: "", from: null, lo: 0, hi: 10 };
+    const t = targetSpec({ kind: "busy", roleId: null, roleName: null, limit: 0.85, nines: false }, "GBP");
+    let released = 0;
+    let n = 0;
+    const failing: Runner = () => (++n === 1 ? { promise: Promise.reject(new Error("bad probe")), cancel: () => {} } : { promise: new Promise<never>(() => {}), cancel: () => void released++ });
+    await expect(runGoalSeek(seekSpecFor(choice, t), failing, [], (x) => goalChange(choice, x), (r) => t.measure(r.result.monthly!), new Cancel())).rejects.toThrow("bad probe");
+    expect(released).toBe(1);
+  });
+});

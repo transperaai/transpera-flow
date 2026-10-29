@@ -92,6 +92,8 @@ export async function runGoalSeek(spec: SeekSpec, run: Runner, base: readonly Ef
           return { x, value: measure(await job.promise) };
         } catch (e) {
           if (e instanceof SimulationCancelled || cancel.cancelled) return null;
+          // The other end's run is released too: the search stops here.
+          cancel.cancel();
           throw e;
         }
       }),
@@ -133,6 +135,8 @@ export async function runTornado(variants: readonly TornadoVariant[], run: Runne
   try {
     // The scenario's own run first, so the bars have somewhere to start; the rest are already queued behind it.
     const jobs = asks.map((a) => ({ a, job: cancel.track(run(a.changes)) }));
+    // A variant may fail before the scenario's own run is in: noted here, handled below (not an unhandled rejection meanwhile).
+    for (const { job } of jobs) job.promise.catch(() => {});
     baseValue = measure(await own.promise);
     done++;
     emit();
@@ -150,6 +154,8 @@ export async function runTornado(variants: readonly TornadoVariant[], run: Runne
     );
   } catch (e) {
     if (e instanceof SimulationCancelled || cancel.cancelled) return { base: baseValue, bars: [], results: [...results.values()], runs: done, finished: false };
+    // One run failed: the tornado can't be drawn, so the runs still queued or running are released rather than left to finish for nobody.
+    cancel.cancel();
     throw e;
   }
   const bars = baseValue === null ? [] : rankTornado(baseValue, variants, [...results.values()]);
