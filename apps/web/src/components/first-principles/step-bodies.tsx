@@ -413,6 +413,9 @@ function DeleteStep({ doc, edit, ctx, disabled }: BodyProps) {
         onClick={() => unused && edit((d) => ({ ...d, deletes: [...d.deletes, { step_id: unused.id, breaks_if_removed: "", agreed_by: null, added_back: false }] }))}
       />
       <p className="text-xs text-fg-2">Rule of thumb from Musk: if you never have to add anything back, you didn&apos;t delete enough. Aim to add back about 1 in 10.</p>
+      <p className="text-xs text-fg-2" data-delete-purpose-note>
+        Steps listed here count as “Could be removed” in the Sandbox&apos;s time split, unless a step&apos;s purpose is chosen in the editor.
+      </p>
     </div>
   );
 }
