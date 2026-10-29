@@ -439,3 +439,7 @@ A step can hold its own steps: a group, or a child process. The engine flattens 
 as the same object). A nested model therefore gives exactly the numbers of the same model drawn flat, which `test/nesting.test.ts` and
 `packages/db/test/nested-model.test.ts` check, and the golden models (all flat) did not move: introducing groups needed no `ENGINE_VERSION` bump.
 Draw a group open or closed, or move a step into one, and no number changes; adding or removing steps still does, as before.
+
+### Goal seek and the tornado (sandbox phase 5b, 29 Oct 2026)
+
+No engine change: both are sets of ordinary Sandbox runs (30 replications, seed 1, the pinned warm-up), so no golden moved. `apps/web/test/sandbox-performance.test.ts`, seeded Northbeam, 12 months, one run after another on the calling thread (the page spreads them over three workers): a goal seek over 0 to 10 more PPC specialists that has to bisect: 6 runs, 2.2 s (limit 8 runs, 8 s); a tornado for profit: 9 levers, 20 runs, 7.0 to 7.5 s (limit 25 runs, 25 s); for peak busy: 8 levers, 18 runs, 5.7 to 6.0 s. The seeded workspace has no overheads, so the overheads lever is left out of its tornado (a model with overheads has 10 levers and 22 runs). Wall time on three workers is about a third of these. A run for a probe or a bar is asked of the pool with `cache: false`, so the page's own runs are not pushed out of its 48-run cache.

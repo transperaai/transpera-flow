@@ -196,3 +196,35 @@ saved). The "send your idea" step is gone (docs/plans/cut-list.md item 2): migra
 `public.submit_play_proposal`, `play_proposal_contacts`, `private.play_patch_problem` and the tables the ideas landed in, and `anon` no
 longer holds any EXECUTE beyond opening a link. The Share links table has no Ideas column. The "Play links" paragraphs above that
 describe the proposal, its rate limits, its held text and Build it are historical.
+
+## Amendment, 29 Oct 2026: scenario links (sandbox phase 5b)
+
+A saved Sandbox scenario can be shared read only (`kind = 'scenario'`, `target_id` the `sandbox_scenarios.id`; view mode only, a play link of one is refused
+by the same check as a play link of an Overview). Migration `20270116000000_scenario_share_links.sql`.
+
+- **Snapshot** (`ScenarioShare`, `packages/db/src/share.ts`): the Sandbox's bundle (the first live process with the servicing ones beside it, plus
+  `deleteCandidates` for the time split), `scenarios` (the shared scenario last and the scenarios it builds on before it, root first, 1 to 6: only
+  `id`, `name`, `description`, `parent_id`, `changes`, `horizon_months`), only the solutions its E6 changes name (and whose process is in the bundle),
+  `startDate` (the day the copy was made) and `months` (the scenario's horizon), frozen. The visitor's browser runs the scenario at that start and
+  horizon, so the numbers are the ones the copy was made with, today's engine aside; they cannot change either. **Update copy** rebuilds from today's model
+  and scenario with a new `startDate`.
+- **People off:** a D1 change keeps no `params.name` (a candidate's name; the visitor reads "New <role>"). **Financials off:** C1 (role cost) and C2
+  (overheads) changes are dropped, and the count is kept as `hiddenCostChanges` ("1 change about costs is hidden on this link."). Notes, names and
+  descriptions are free text, scrubbed like every string; a note that grows past 280 characters when a name or amount is swapped for a longer label is cut to
+  fit rather than refusing the link. The bundle is `payHidden` whatever the toggles: a visitor never sees profit or labour.
+- **Six more non-text keys, each checked by format at every depth** (like `hiddenLevers`, in `shareSnapshotLeaks` and `private.share_snapshot_problem`):
+  `lever` (`^[A-EX][0-9]$`), `target` (a uuid, `@busiest`, `@heaviest`, a health rule, a built-in churn driver id or `custom:<uuid>`), `from` (`YYYY-MM` or
+  `YYYY-MM-DD`), `parent_id` and `scenarioId` (a uuid), `startDate` (`YYYY-MM-DD`). An object or an array under one, or a string that isn't its shape,
+  makes the snapshot "not match the link"; a number, a boolean and null hold no words and pass (a first-principles measure has a numeric `target`). The SQL
+  uses STRICT jsonpath for this, because lax mode unwraps an array and would let an array of legal strings through. For kind `scenario` the database also
+  checks the shape: 1 to 6 scenarios, each the parent of the next, the last the one in `scenarioId`, their `changes` passing `private.is_sandbox_changes`,
+  `startDate` a date, `months` 1 to 24, `hiddenCostChanges` a whole number, no D1 name with People off and no C1 or C2 with Financials off. One case table
+  (`packages/db/test/scenario-share-cases.ts`) runs through both twins.
+- **Accepted limits.** `who` (B2's new/all) stays free text because it is free text in first principles: if a person's name token were "new" or "all", the
+  scrub would break the change and the link is refused (fail closed). A stored change whose `target` is not one of the shapes above (the change check
+  accepts any 1 to 100 characters without a dot or space) makes the scenario unshareable; the app writes only those shapes.
+- **What a visitor sees** (`ScenarioShareView`): the scenario's name and description, its changes with notes (a parent's tagged "from <parent>"), who gets too
+  busy and when (no acknowledging, no issues), the month by month by role (no per-person rows), "When" (the capacity line only), the time split for the team
+  and each role (no per-person scope), sales and money without costs or profit, the price-rise trade-off, "Compare with No changes", print and the numbers
+  CSV (no costs, no changes CSV). No scenario picker, goal seek, tornado, Settings or share links. The share dialog is on the scenario bar for Agency
+  admins and the Owner, on a saved scenario with no unsaved edits.

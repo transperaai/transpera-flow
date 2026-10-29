@@ -557,6 +557,8 @@ UI quality is a primary requirement, not a finish. The stack is chosen so every 
 
 *Update, 29 Oct 2026 (sandbox phase 5a).* A Sandbox scenario, or a comparison, exports as two CSVs (the numbers: one row per scenario, measure, group and month with the average and 10 to 90% range, then a "Whole run" row where a total means something, including the team's time by purpose; the changes with their notes) and prints to one A4 page: the browser's "Save as PDF" on a print stylesheet of the numbers already on screen, so nothing runs on the server. ADR 0010's server PDF stays removed. Nothing is ever exported by person, and labour only as one total (and only when the admin leaves "Include costs and profit" ticked: a Viewer's runs have none).
 
+*Update, 29 Oct 2026 (sandbox phase 5b).* A saved Sandbox scenario can be shared read only through the share-link machinery (ADR 0016, dated amendment): a frozen copy of the live model, the scenario and its parents, run in the visitor's browser at the copy's start date and horizon. People off hides a hire's candidate name; Financials off drops role-cost and overheads changes; a visitor never sees costs or profit. Visitors can print and download the numbers CSV.
+
 - PDF via server-side headless Chromium (`@sparticuz/chromium` in a Vercel function) rendering a print stylesheet of a report route. Fallback if function limits bite: the same print stylesheet via the browser's "Save as PDF". Sections: cover, executive summary (validated narration), company map, per-process map with bottleneck callouts, client health and retention, issues (grouped by severity, with owner and linked fix), scenario comparisons (before/after tables with ranges, utilisation charts, robustness verdict and sensitive inputs), assumptions/evidence/provenance appendix, methodology page.
 - PNG/SVG: canvas export at 2× with legend.
 - JSON bundle: full workspace, importable; this is also the backup/migration format.
@@ -639,6 +641,8 @@ Each milestone ends with something usable on its own. There is no fixed date; Mi
 - Open: warm-up heuristic may need tuning against the golden models.
 
 ---
+
+*Update, 29 Oct 2026 (sandbox phase 5b).* **Goal seek** ("Find a value" on the scenario bar): one target (every role or one under X% busy in every month, on the average or in 9 of 10 runs; monthly churn under X%; profit over the run or in a month at least Y, admins and the Owner) and one lever with a range (people in a role, hours available, a step's time, opportunities, a price rise, fees), searched on top of the scenario on screen by bisection in at most 8 runs. It says when the target is already met, not reachable, or when the measure doesn't move steadily with the lever (tolerance 1% of the span between the ends, half a point for a share), and lists every probe. Admins and the Owner can add the answer as a change; Viewers run it read only. **What matters most**: each of up to 12 levers moved down and up once (x0.9/x1.1, one person for headcount, a price of -10%/+10% against its own baseline), 30 runs each, ranked by the longer side for profit, clients at risk, peak busy, months too busy, clients lost or the share of hours on one purpose; it runs only when asked and can be cancelled. Effects under 1% of the scenario's value are greyed.
 
 ## 13. Appendix: metric definitions
 

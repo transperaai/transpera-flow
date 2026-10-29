@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { northbeamPersonIds, northbeamRoleIds, type SandboxChange } from "@transpera-flow/db";
+import { DEFAULT_PURPOSES, northbeamPersonIds, northbeamRoleIds, type SandboxChange } from "@transpera-flow/db";
+import { toRatingConfig } from "@transpera-flow/engine";
+import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
+import { forecastModel } from "@/lib/forecast/forecast";
+import { Cancel, runGoalSeek, runTornado, syncRunner } from "@/lib/sandbox/analysis-run";
+import { GOAL_LEVERS, goalChange, seekSpecFor, targetSpec } from "@/lib/sandbox/goal-targets";
+import { tornadoValue } from "@/lib/sandbox/measures";
+import { tornadoVariants } from "@/lib/sandbox/tornado";
 import { simulate } from "@transpera-flow/engine";
 import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_SOLUTION_ID, DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { spliceMonthly, prepareScenario, MAX_SEGMENTS } from "@transpera-flow/db/sandbox";
@@ -96,5 +103,46 @@ describe("a channel-heavy Sandbox scenario: one run", { tags: ["perf"] }, () => 
     const both = [main.each[0]!, pair!.each[0]!];
     console.info(`Sandbox, price rise, 2 runs at 12 months: ${both.map((e) => e.toFixed(0)).join(", ")} ms (limit 1000 each)`);
     for (const e of both) expect(e).toBeLessThan(1000);
+  });
+});
+
+// Goal seek and the tornado (sandbox phase 5b, docs/plans/sandbox-p5-brief.md section 13): sets of ordinary runs of the scenario at 30 replications,
+// one after the other here (the page spreads them over three workers, so its wall time is about a third). The numbers are recorded in
+// docs/engine-versioning.md.
+describe("goal seek and the tornado at 12 months", { tags: ["perf"] }, () => {
+  const ctx = { bundle, solutions: [DEMO_FORECAST_SOLUTION], months: 12, startDate: START };
+  const run = syncRunner(ctx);
+  const cutoffs = toRatingConfig(ANALYSIS_DEFAULTS, bundle.workspace.settings.hours_per_week).rules.busy.cutoffs;
+
+  it("a goal seek over headcount, 0 to 10 more people, is at most 8 runs and under 8 s sequentially", { timeout: 60_000 }, async () => {
+    const d5 = GOAL_LEVERS.find((l) => l.id === "D5")!;
+    const choice = { lever: d5, targetId: PPC, from: null, lo: 0, hi: 10 };
+    // A limit between what 0 and 10 more people give, so the target flips inside the range and the search has to bisect.
+    const at = async (x: number) => targetSpec({ kind: "busy", roleId: PPC, roleName: null, limit: 1, nines: false }, "GBP").measure((await run([{ change: goalChange(choice, x), scenarioId: "p", scenarioName: "", inherited: false }]).promise).result.monthly!)!;
+    const limit = ((await at(0)) + (await at(10))) / 2;
+    const target = targetSpec({ kind: "busy", roleId: PPC, roleName: null, limit, nines: false }, "GBP");
+    const t = performance.now();
+    const out = await runGoalSeek(seekSpecFor(choice, target), run, [], (x) => goalChange(choice, x), (r) => target.measure(r.result.monthly!), new Cancel());
+    const ms = performance.now() - t;
+    console.info(`Goal seek over D5 0 to 10 at 12 months: ${out.state.probes.length} runs, ${ms.toFixed(0)} ms (limit 8000); answer ${out.answer.kind}`);
+    expect(out.finished).toBe(true);
+    expect(out.answer.kind).toBe("boundary");
+    expect(out.state.probes.length).toBeGreaterThan(2);
+    expect(out.state.probes.length).toBeLessThanOrEqual(8);
+    expect(ms).toBeLessThan(8000);
+  });
+
+  it("the tornado on seeded Northbeam is at most 25 runs and under 25 s sequentially, for profit and for peak busy", { timeout: 120_000 }, async () => {
+    const model = forecastModel(bundle, 12, START).model!;
+    for (const measure of ["profit", "peakBusy"] as const) {
+      const variants = tornadoVariants(model, [], measure);
+      const t = performance.now();
+      const out = await runTornado(variants, run, [], (r) => tornadoValue(measure, r.result.monthly!, { cutoffs, categories: DEFAULT_PURPOSES }), new Cancel());
+      const ms = performance.now() - t;
+      console.info(`Tornado (${measure}) at 12 months: ${variants.length} levers, ${out.runs} runs, ${ms.toFixed(0)} ms (limit 25000), ${out.bars.length} bars`);
+      expect(out.finished).toBe(true);
+      expect(out.runs).toBeLessThanOrEqual(25);
+      expect(ms).toBeLessThan(25_000);
+    }
   });
 });
