@@ -15,7 +15,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { partOf, speedsNormalisedFor, type IssueRow, type ProcessBundle, type SandboxChange, type SandboxScenarioRow, type SolutionRow, type SourceRow } from "@transpera-flow/db";
 import { offeredLevers, sandboxLever, workspacePurposes } from "@transpera-flow/db";
-import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, CUSTOM_DRIVER_PREFIX, firstCrossing, toRatingConfig } from "@transpera-flow/engine";
+import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, CUSTOM_DRIVER_PREFIX, ENGINE_VERSION, firstCrossing, toRatingConfig } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { InsightsSection } from "@/components/insights";
@@ -46,12 +46,16 @@ import { laneMarkers } from "@/lib/sandbox/lane";
 import { parseSandboxInput } from "@/lib/sandbox/validate";
 import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { canSeePerson, namedForViewer, viewerOf } from "@/lib/viewer";
+import { capacityLine, capacityRunsOut } from "@/lib/sandbox/timing";
 import { forecastMoney } from "@/lib/forecast/money";
 import { ForecastMoney } from "@/components/forecast/forecast-money";
 import { TimeByPurpose } from "@/components/sandbox/time-by-purpose";
 import { ForecastTimeline, TimelineLegend, type PlanLane } from "@/components/forecast/forecast-timeline";
 import { ChangeDialog, type ChangeTarget } from "./change-dialog";
 import { ChangeList } from "./change-list";
+import { SandboxExportMenu, type ExportData } from "./export-menu";
+import { PrintSummary, type PrintColumn } from "./print-summary";
+import { Timing } from "./timing";
 import { PriceRise } from "./price-rise";
 import { SandboxCompare, MAX_COMPARE } from "./sandbox-compare";
 import { ConfirmDialog, NameDialog, NO_CHANGES, ParentDialog, ScenarioBar, UNSAVED_SCENARIO } from "./scenario-bar";
@@ -87,6 +91,7 @@ const NO_SOURCES: SourceRow[] = [];
 const NO_SCENARIOS: SandboxScenarioRow[] = [];
 const NO_SOLUTIONS: SolutionRow[] = [];
 const NO_HIDDEN: readonly string[] = [];
+const NO_EFFECTIVE: EffectiveChange[] = [];
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 const HORIZONS = [3, 6, 12, 24];
 const CUSTOM = { min: 1, max: 24 } as const;
@@ -148,6 +153,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   const [nameAsk, setNameAsk] = useState<NameAsk>(null);
   const [parentAsk, setParentAsk] = useState(false);
   const [saveNote, setSaveNote] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  /** The export's "Include costs and profit" (Agency admins and the Owner; a Viewer's runs have none). */
+  const [includeCosts, setIncludeCosts] = useState(true);
 
   const savedScenario = saved.find((p) => p.id === selected) ?? null;
   // The horizon: ?horizon=1..24, else the open scenario's own, else a year.
@@ -583,6 +590,27 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
     older: liveRevisions[s.process_id] !== undefined && s.base_revision_id !== liveRevisions[s.process_id],
   }));
   const purposeCategories = useMemo(() => workspacePurposes(live.workspace.settings), [live.workspace.settings]);
+  // What the Export menu and the printed summary hold: the live run, and the scenario on screen once its run has finished.
+  const exportMonths = useMemo(() => (shownRun?.result.monthly ? timelineMonths(start, shownRun.result.monthly.months, shownRun.model.hoursPerWeek) : null), [shownRun, start]);
+  const exportColumns: PrintColumn[] | null = useMemo(() => {
+    if (!built.model || !result?.monthly) return null;
+    const columns: PrintColumn[] = [{ name: NO_CHANGES, monthly: result.monthly, priceRise: null, changes: [] }];
+    if (working !== null && !scenarioError) {
+      if (plan.status !== "done" || !plan.run?.result.monthly) return null;
+      columns.push({ name: workingName, monthly: plan.run.result.monthly, priceRise: plan.priceRise, changes: effectiveList ?? [] });
+    }
+    return columns;
+  }, [built.model, result, working, scenarioError, plan.status, plan.run, plan.priceRise, workingName, effectiveList]);
+  const exportReason = comparing ? null : exportColumns ? null : working !== null && (plan.status === "running" || plan.status === "idle") ? "Wait for the run to finish." : "There is nothing to export yet.";
+  const exportData: ExportData | null = useMemo(
+    () => (exportColumns && exportMonths && shownRun ? { columns: exportColumns, months: exportMonths, model: shownRun.model, categories: purposeCategories, currency: live.workspace.settings.currency, ctx } : null),
+    [exportColumns, exportMonths, shownRun, purposeCategories, live.workspace.settings.currency, ctx],
+  );
+  const roleNames = useMemo(() => Object.fromEntries(Object.entries(shownRun?.model.roles ?? {}).map(([id, r]) => [id, r.name])), [shownRun]);
+  const timingLine = useMemo(
+    () => (shownRun?.result.monthly && exportMonths ? capacityLine(capacityRunsOut(shownRun.result.monthly, roleNames, cutoffs), exportMonths, horizonLabel(months)) : null),
+    [shownRun, exportMonths, roleNames, cutoffs, months],
+  );
   const people = namedForViewer(viewerOf(live), live.people.filter((p) => p.active))
     .map((p) => ({ id: p.id, name: p.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -599,7 +627,14 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
         eyebrow="Company"
         title="Sandbox"
         description={note ?? "Try a change before you make it: your live model run forward month by month, with scenarios of hires, price changes and solutions you can save and compare. Nothing here changes live data."}
-        actions={<HorizonPicker weeks={horizonWeeks(months)} onChange={pickHorizon} options={HORIZONS} custom={CUSTOM} />}
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {!comparing ? (
+              <SandboxExportMenu fileName={`${live.workspace.name} ${working !== null ? workingName : NO_CHANGES}`} disabledReason={exportReason} data={exportData} hasCosts={canEdit && (exportData?.columns.every((c) => c.monthly.money) ?? false)} includeCosts={includeCosts} onIncludeCosts={setIncludeCosts} onPrint={() => window.print()} />
+            ) : null}
+            <HorizonPicker weeks={horizonWeeks(months)} onChange={pickHorizon} options={HORIZONS} custom={CUSTOM} />
+          </div>
+        }
       />
 
       {built.error ? (
@@ -760,7 +795,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       </section>
 
       {comparing ? (
-        <SandboxCompare live={live} startDate={start} months={months} scenarios={saved} solutions={planSolutions} ids={comparing} cutoffs={cutoffs} onChange={changeCompare} onBack={closeCompare} />
+        <SandboxCompare live={live} startDate={start} months={months} scenarios={saved} solutions={planSolutions} ids={comparing} cutoffs={cutoffs} canEdit={canEdit} onChange={changeCompare} onBack={closeCompare} />
       ) : (
         <section className="flex min-w-0 flex-col gap-3" data-forecast-timeline-section>
           <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
@@ -841,6 +876,24 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           </Card>
         </section>
       )}
+      {!compare && shownRun?.result.monthly && exportMonths ? (
+        <Timing
+          monthly={shownRun.result.monthly}
+          months={exportMonths}
+          model={shownRun.model}
+          roleNames={roleNames}
+          cutoffs={cutoffs}
+          horizonMonths={months}
+          onLonger={pickHorizon}
+          changes={working !== null && !scenarioError ? (effectiveList ?? []) : NO_EFFECTIVE}
+          live={live}
+          solutions={planSolutions}
+          startDate={start}
+          ctx={ctx}
+          currency={live.workspace.settings.currency}
+          canSeeMoney={canEdit && Boolean(shownRun.result.monthly.money)}
+        />
+      ) : null}
       {!compare && shownRun?.result.monthly ? (
         <TimeByPurpose
           monthly={shownRun.result.monthly}
@@ -857,6 +910,26 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
         <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
       {!compare && working !== null && plan.priceRise && !scenarioError ? <PriceRise tradeoff={plan.priceRise} months={timelineMonths(start, plan.run!.result.monthly!.months, plan.run!.model.hoursPerWeek)} currency={live.workspace.settings.currency} /> : null}
+
+      {!comparing && built.model && exportColumns && exportMonths ? (
+        <PrintSummary
+          workspaceName={live.workspace.name}
+          title={working !== null ? workingName : "Live model"}
+          printedOn={today()}
+          startDate={start}
+          horizonMonths={months}
+          engineVersion={ENGINE_VERSION}
+          model={built.model}
+          bundle={live}
+          columns={exportColumns}
+          cutoffs={cutoffs}
+          categories={purposeCategories}
+          currency={live.workspace.settings.currency}
+          costs={includeCosts && exportColumns.every((c) => c.monthly.money)}
+          timingLine={timingLine}
+          ctx={ctx}
+        />
+      ) : null}
 
       {changeTarget && canEdit ? (
         <ChangeDialog

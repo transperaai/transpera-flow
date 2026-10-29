@@ -6,9 +6,9 @@
 // 10-90% range and its difference from "No changes". Every column runs with the same seed, so a difference comes from the changes,
 // not from chance. A column that fails shows its error and the others still show.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { workspacePurposes, type ProcessBundle, type SandboxScenarioRow, type SolutionRow } from "@transpera-flow/db";
-import type { Stat } from "@transpera-flow/engine";
+import { ENGINE_VERSION, type Stat } from "@transpera-flow/engine";
 import { Help, type HelpProps } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,6 +23,11 @@ import { useScenarioRun } from "@/lib/sandbox/use-scenario-run";
 import { COSTS_HIDDEN_NOTE } from "@/components/forecast/forecast-money";
 import { partMonthNote, type TimelineMonth } from "@/lib/forecast/timeline";
 import { CompareChart, SERIES_STYLES } from "./compare-chart";
+import { SandboxExportMenu, type ExportData } from "./export-menu";
+import { PrintSummary, type PrintColumn } from "./print-summary";
+import { capacityLine, capacityRunsOut } from "@/lib/sandbox/timing";
+import { horizonLabel } from "@/lib/horizon";
+import { today } from "@/lib/forecast/forecast";
 import { TimeBar } from "./time-chart";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -41,6 +46,8 @@ export interface SandboxCompareProps {
   /** Saved scenario ids to compare (1 to 3); "No changes" is always the first column. */
   ids: string[];
   cutoffs: readonly [number, number, number];
+  /** Agency admins and the Owner may include costs and profit in an export; a Viewer's runs have none. */
+  canEdit?: boolean;
   onChange: (ids: string[]) => void;
   onBack: () => void;
 }
@@ -55,7 +62,8 @@ interface Resolved {
 /** A column's changes by the saved scenarios they were worked out from (a module cache: the same scenarios give the same lists). */
 const RESOLVED = new WeakMap<SandboxScenarioRow[], Map<string, Resolved>>();
 
-export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, onChange, onBack }: SandboxCompareProps) {
+export function SandboxCompare({ live, startDate, months, scenarios, solutions, ids, cutoffs, canEdit = false, onChange, onBack }: SandboxCompareProps) {
+  const [includeCosts, setIncludeCosts] = useState(true);
   // One column's changes are worked out once per scenario and kept while the saved scenarios are the same, so a render, or a change to
   // the other columns' ids, hands a running column the same changes (a new list would restart its run).
   const resolved = useMemo(
@@ -101,6 +109,19 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
     [run0.run, run0.status, run1.run, run1.status, run2.run, run2.status, run3.run, run3.status, ids, scenarios, live, startDate, cutoffs],
   );
   const names = shown.map((c) => c.name);
+  // The files and the printed summary hold the columns on screen, each with its changes and price-rise trade-off.
+  const exportColumns: PrintColumn[] | null = useMemo(
+    () => (comparison && !columns.some((c) => c.error) ? shown.map((c): PrintColumn => ({ name: c.name, monthly: c.run!.result.monthly!, priceRise: columns[c.index]!.run.priceRise, changes: c.index === 0 ? [] : (resolved[c.index - 1]?.changes ?? []) })) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [comparison, run0.run, run1.run, run2.run, run3.run, run0.priceRise, run1.priceRise, run2.priceRise, run3.priceRise, resolved],
+  );
+  const exportData: ExportData | null = useMemo(() => {
+    if (!exportColumns || !comparison || !ready[0]) return null;
+    return { columns: exportColumns, months: comparison.months, model: ready[0].model, categories: workspacePurposes(live.workspace.settings), currency: live.workspace.settings.currency, ctx: { bundle: live, solutions } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportColumns, comparison, live, solutions]);
+  const exportReason = comparison && exportData ? null : columns.some((c) => c.error) ? "A column failed, so there is nothing whole to export." : "Wait for the runs to finish.";
+  const roleNames = Object.fromEntries(Object.entries(ready[0]?.model.roles ?? {}).map(([id, r]) => [id, r.name]));
   const running = columns.some((c) => c.run.status === "running" && !c.error);
   const last = comparison ? comparison.months[comparison.months.length - 1]!.long : "";
   const failed = columns.filter((c) => c.error);
@@ -148,9 +169,20 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
             </p>
           ) : null}
         </div>
-        <Button variant="outline" onClick={onBack}>
-          Back to the scenario
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <SandboxExportMenu
+            fileName={`${live.workspace.name} comparison`}
+            disabledReason={exportReason}
+            data={exportData}
+            hasCosts={canEdit && (exportData?.columns.every((c) => c.monthly.money) ?? false)}
+            includeCosts={includeCosts}
+            onIncludeCosts={setIncludeCosts}
+            onPrint={() => window.print()}
+          />
+          <Button variant="outline" onClick={onBack}>
+            Back to the scenario
+          </Button>
+        </div>
       </div>
 
       <Card className="gap-3 px-4 py-3">
@@ -178,6 +210,25 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
 
       {comparison && !unusable ? (
         <>
+          {exportColumns && ready[0] ? (
+            <PrintSummary
+              workspaceName={live.workspace.name}
+              title="Comparison"
+              printedOn={today()}
+              startDate={startDate}
+              horizonMonths={months}
+              engineVersion={ENGINE_VERSION}
+              model={ready[0].model}
+              bundle={live}
+              columns={exportColumns}
+              cutoffs={cutoffs}
+              categories={workspacePurposes(live.workspace.settings)}
+              currency={currency}
+              costs={includeCosts && exportColumns.every((c) => c.monthly.money)}
+              timingLine={ready[0].result.monthly ? capacityLine(capacityRunsOut(ready[0].result.monthly, roleNames, cutoffs), comparison.months, horizonLabel(months)) : null}
+              ctx={{ bundle: live, solutions }}
+            />
+          ) : null}
           <div className={comparison.totals.profit ? "grid gap-3 sm:grid-cols-2 lg:grid-cols-5" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"} data-compare-tiles>
             {comparison.totals.profit ? <Tile title="Profit over the run" names={names} tile={comparison.totals.profit} format={money} diff={(v) => signed(v, money)} /> : null}
             <Tile title={`Recurring revenue in ${last}`} names={names} tile={comparison.totals.mrr} format={money} diff={(v) => signed(v, money)} />

@@ -52,12 +52,14 @@ export interface CompareChartProps {
   reference?: { value: number; label: string };
   /** Smallest top of the scale (a busy share never draws flatter than the line). */
   minTop?: number;
+  /** Draw at this width instead of measuring the container (the print summary is hidden on screen, so has nothing to measure); it still shrinks to fit. */
+  fixedWidth?: number;
 }
 
-export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0 }: CompareChartProps) {
+export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0, fixedWidth }: CompareChartProps) {
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
-  const width = measured || 560;
+  const width = fixedWidth ?? (measured || 560);
   const compact = width < 480;
   const m = { l: compact ? 50 : 60, r: compact ? 12 : 16, t: 12, b: 28 };
   const n = months.length;
@@ -114,8 +116,9 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
   return (
     <div ref={ref} className="relative" data-compare-chart={title}>
       <svg
-        width={width}
-        height={HEIGHT}
+        width={fixedWidth ? undefined : width}
+        height={fixedWidth ? undefined : HEIGHT}
+        {...(fixedWidth ? { viewBox: `0 0 ${width} ${HEIGHT}`, style: { width: "100%", height: "auto" } } : {})}
         role="img"
         aria-label={summary}
         className="block overflow-visible"
