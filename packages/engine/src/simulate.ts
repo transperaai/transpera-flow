@@ -713,6 +713,8 @@ interface RosterClient {
   /** The next fee rise (by `risesFor(svcKey)`) it has not met yet, and whether its slow first delivery has been counted. */
   riseIdx: number;
   onbHit: boolean;
+  /** Whether its first tick in chance mode has been worked out (a client on the book at the start then gets the warm-up's hits: see `chanceClient`). */
+  hitPrimed: boolean;
 }
 
 /**
@@ -1767,6 +1769,7 @@ export function runOnce(
       hitRng: chanceCapable ? new Array<Rng | null>(nSlots).fill(null) : null,
       riseIdx: 0,
       onbHit: false,
+      hitPrimed: false,
     };
     if (isRoster) {
       rc.trajectory = [rc.health];
@@ -2013,6 +2016,11 @@ export function runOnce(
   /** One client in a tick where a driver is in chance mode: draw its hits and set the pressure of each chance-mode slot (1 under a hit, a price hit's size in 10% rises). */
   const chanceClient = (rc: RosterClient, t: number) => {
     const hu = rc.hitUntil!;
+    // Hits during the warm-up carry into the window (brief Q11): at its first tick, a client on the book from the start draws the warm-up's
+    // weekly ticks a hit could still last from, on its own stream before the window's, so it starts the run as likely to be under a hit
+    // as later on. Only when the driver is in chance mode from the start (a channel switching it on from a month starts it fresh).
+    const prime = !rc.hitPrimed && rc.since < 0 && chTick === 0;
+    rc.hitPrimed = true;
     for (let i = 0; i < chanceNow.length; i++) {
       const s = chanceNow[i]!;
       const e = curEv[s]!;
@@ -2043,6 +2051,14 @@ export function runOnce(
         if (e.chance >= 1) drawnHit(rc, s, t, e);
         else if (e.chance > 0) {
           const rng = (rc.hitRng![s] ??= streams.get(labels.join("hit", drivers[s - 1]!.id, rc.key)));
+          if (prime) {
+            // The warm-up's ticks before this one, oldest first: those whose hit would still last at this tick (a hit k weeks ago lasts while
+            // k < the hit's weeks), back no further than the warm-up. Not counted as hits of the run.
+            const back = Math.min(Math.ceil((e.months * monthHours) / hpw - 1e-9) - 1, Math.floor((t - Math.max(rc.since, -W)) / hpw + 1e-9) - 1);
+            for (let k = back; k >= 1; k--) {
+              if (rng() < pHit[s]!) extendHit(rc, s, t - k * hpw, e);
+            }
+          }
           if (rng() < pHit[s]!) drawnHit(rc, s, t, e);
         }
       }
@@ -2233,7 +2249,8 @@ export function runOnce(
         runCount++;
         weekly = runWeekly;
         rc.extraA = runExtra;
-        rc.lastB = multiplier;
+        // The run's multiplier (the market's, with a churn channel's factor): alike clients share one service, so one factor.
+        rc.lastB = prev.lastB;
         rc.causeRow = runRow;
       } else {
         flushRun();
@@ -3318,7 +3335,9 @@ export function runOnce(
     const cap = varies ? paid!.hours : staffing ? c * presentWeeks(p.person) : c * weeks;
     const ong = p.ongoingHours;
     const overC = varies ? p.overCapW : c * p.overWeeks;
-    const ot = overtimeCap > 0 ? Math.min(Math.max(0, p.overOngoing + p.overPipeline - overC), overtimeCap * overC) : 0;
+    // (Without a capacity channel the limit is multiplied in the order it always was, `cap × c × weeks`, so it rounds exactly as before.)
+    const overLimit = varies ? overtimeCap * overC : overtimeCap * c * p.overWeeks;
+    const ot = overtimeCap > 0 ? Math.min(Math.max(0, p.overOngoing + p.overPipeline - overC), overLimit) : 0;
     peopleOut[p.id] = {
       pipeline: cap ? p.busyHours / cap : 0,
       ongoing: cap ? ong / cap : 0,

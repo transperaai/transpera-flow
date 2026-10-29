@@ -157,6 +157,34 @@ today's price and tenure, and the pooled billing estimate still uses the won-mon
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
 
+## Warm-up hits and three review fixes (engine 1.13.0, sandbox phase 3 review)
+
+Added 29 Oct 2026, from the adversarial review of phase 3. **Only `northbeam-chances` moved** (its two entered chances: account manager
+changes and the competitor); every other golden value, and the full `simulate` output of eleven fixture models at two seeds, 52-week
+horizons, planned starts, leave, every market preset and calendar months, is 1.11.0's to the last bit, monthly on and off.
+
+- **Hits during the warm-up carry into the window** (brief Q11, which 1.12.0 missed: weekly ticks only run from week 1, so every
+  client started the run unhit and an entered chance ramped up over its first `months`). At its first tick in chance mode, a client on
+  the book from the start draws, on its own `hit:<driver>:<client>` stream and before the window's draw, one draw for each earlier
+  warm-up week whose hit would still last (at most the hit's weeks less one, at most the warm-up). It then starts as likely to be under
+  a hit as at any later tick: 1 - (1 - q)^(weeks a hit lasts), checked by hand in `chances-review.test.ts`. Those hits are not counted in
+  the reported chance. A driver a channel switches to chance mode from a month starts that month fresh, so the months before it stay
+  the run without it. Measured drivers have no warm-up events to draw from (touchpoints, visits and onboarding count from t = 0), so they
+  still start unhit.
+- **"Same expected churn" is about the same, not the same.** `equivalentEvents` gives the expected churn of a client on the book at the
+  start. Over a run a chance-mode driver comes out lower than its weight: hits fall on fewer clients, those clients leave sooner (so the
+  ones left are less often hit), and measured causes start unhit. On a 2,000-client group over 12 months with the warm-up's hits: results
+  and your own drivers at chance 1 match exactly, the price driver matches exactly, handoff (2.5% a month, +410% for 3 months) gives 82%
+  of the weight's extra churn, late work and team overload (measured) 85% and 79%. Settings says so.
+- **The price driver's equivalent** was the generic `weight × pressure / exposure`, about a third of the right effect (its pressure is
+  averaged over the whole run, its events last only after a rise). It is now `priceEffectOfWeight`: `weight × 2 × 0.1 × 13 / (months ×
+  52/12)` per 10% rise (0.2 at weight 1 for 3 months), and `projectChurn` converts a weight-mode price pressure the same way.
+- **A churn channel on merged clients:** clients worked out together (a group without servicing) took the market's multiplier for their
+  reported churn, not the run's with the channel's factor. Simulated churn was right; the per-client `churnMonthly` now is too.
+- **The overtime limit** was multiplied as `cap × (capacity × weeks)` for everyone in 1.12.0, which moves the last bit of overtime (and
+  profit) of some models outside the goldens (Northbeam's named roster at seed 7: P90 overtime 39.64915296714574 against 39.64915296714573).
+  Without a capacity channel it is `cap × capacity × weeks` again.
+
 ## Chances, fee ranges, price rises and channels (engine 1.12.0, sandbox phase 3)
 
 Added 28 Oct 2026 (`docs/plans/sandbox-p3-brief.md`). **No existing simulated number moved.** The approved diff of the seven existing golden models is `engineVersion` and added keys only (`mode`, `chance`, `exposure` on each churn cause, `rise` on the revenue series of `northbeam-money`); `northbeam-chances` and `northbeam-channels` are new. Approved with `golden:approve "Sandbox phase 3: ..."` (`golden/versions.json`). Nothing below changes a draw on a path a model without the new fields takes: new randomness has new stream labels, and every multiplier is applied after the draw.
@@ -175,7 +203,7 @@ Added 28 Oct 2026 (`docs/plans/sandbox-p3-brief.md`). **No existing simulated nu
 
 **The trade-off is measured, not modelled.** The Sandbox runs the scenario (R) and the same scenario without its B5 changes and without the forced price driver (B), with the same seed, the same pinned warm-up and the same segments. Per replication i and month m: gained G = rise_R, net N = revenue_R - revenue_B, lost L = G - N, extra leavers X = lost_R - lost_B (L includes everything the rise changed besides the higher fees: the work and fees a lost client would have brought). Each is shown as a mean and 10 to 90% range, per month and over the run (summed per replication, then the stat). Break-even = mean G / (sum L / sum X); with fewer than 0.05 extra leavers the loss per leaver is estimated (fee after the rise x half the months left) and labelled. A difference under a millionth of a unit is float noise and reads 0. (`apps/web/src/lib/sandbox/price-rise.ts`.)
 
-**The warm-up finding, and the pinned start.** A scenario's months before a timed change used to move: the automatic warm-up (`autoWarmupHours`) runs a pilot of the whole model, the change included, and sizes the warm-up from its P90 cycle, so a hire from January shifted every arrival of October by a different warm-up (live 1002.81 h, with the hire 1007.05 h). `SimulateOptions.initialState` lets the caller hand `simulate` the start to use; the Sandbox pins one per scenario, `initialState(model with only the scenario's whole-run changes)`, for every segment, the price-rise pair and the compare columns. Goldens do not pass it (`simulate(m, ...)` deep-equals `simulate(m, ..., { initialState: initialState(m) })` for every golden model). Months before any kind of timed change equal the live run (money to the last bits: a stay's fee is spread over a month as amount / length x overlap, so a run with a fee channel adds the weeks in a different order; tolerance 1e-9 relative).
+**The warm-up finding, and the pinned start.** A scenario's months before a timed change used to move: the automatic warm-up (`autoWarmupHours`) runs a pilot of the whole model, the change included, and sizes the warm-up from its P90 cycle, so a hire from January shifted every arrival of October by a different warm-up (live 1002.81 h, with the hire 1007.05 h). `SimulateOptions.initialState` lets the caller hand `simulate` the start to use; the Sandbox pins one per scenario, `initialState(model with only the scenario's whole-run changes)`, for every segment, the price-rise pair and the compare columns. Goldens do not pass it (`simulate(m, ...)` deep-equals `simulate(m, ..., { initialState: initialState(m) })` for every golden model). Months before any kind of timed change equal the live run (money to the last bits: a stay's fee is spread over its months as amount / length x overlap, so a client who leaves at another time after the change has early months that differ by a rounding; tolerance 1e-12 relative, every case measured under 1e-13 in the review).
 
 **Hiring delay (D9).** Runner only, no engine change: a D9 change delays every scenario hire (D1) by round(delay x the market's Time to hire in the hire's month) months, so Time to hire is now used (only through D9). Late payments (`pay`) are still stored and unused; "pay inflation" is the role-cost channel (C1 from a month), not the market.
 

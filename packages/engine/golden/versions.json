@@ -76,5 +76,11 @@
     "date": "2026-10-28",
     "note": "Sandbox phase 3: monthly channels, churn drivers as chances, fee ranges, price rises for existing clients with their churn, pinned warm-up option; northbeam-chances and northbeam-channels golden models. No existing simulated number moved.",
     "digest": "sha256:ea5be26a8f147e41bafb9965f2d26e2edc52f261c7930267a933ff74987c6a44"
+  },
+  {
+    "version": "1.13.0",
+    "date": "2026-10-29",
+    "note": "Sandbox phase 3 review: entered churn-driver chances draw the warm-up's hits (brief Q11), so a client on the book starts the run as likely to be under a hit as later on; only northbeam-chances moves (its handoff and competitor chances). Also: a churn channel reaches every merged client's reported churn, and the overtime limit multiplies in its old order without a capacity channel (1.12.0 moved the last bit of overtime for some models outside the goldens). No other golden value moved.",
+    "digest": "sha256:558da3d63f61959d89ee39f9ad6910816e65f433b51e9bcb7602d02e44fda50b"
   }
 ]

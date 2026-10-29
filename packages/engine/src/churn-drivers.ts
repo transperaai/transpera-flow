@@ -144,7 +144,10 @@ export const CHURN_DRIVER_SPECS: Record<BuiltinChurnDriverId, ChurnDriverSpec> =
 export const CHURN_EFFECT_MAX = 5;
 /** How long a hit lasts, in months. */
 export const EFFECT_MONTHS = { min: 1, max: 24, default: 3 } as const;
-/** A price driver's effect is per this much of rise: an effect of 1 is +100% churn for a 10% rise (the weight mode's "10% adds 20%" is effect 2). */
+/**
+ * A price driver's effect is per this much of rise: an effect of 1 is +100% churn for a 10% rise. The weight mode's "10% adds 20% for 13 weeks"
+ * at weight 1 is effect 0.2 for 3 months (`priceEffectOfWeight`).
+ */
 export const PRICE_EFFECT_PER = 0.1;
 
 /** The limits of a custom driver's value: the extra churn it causes at weight 1, in percent. */
@@ -558,7 +561,16 @@ export function projectChurn(causes: ChurnCauses, choices: readonly DriverWeight
       continue;
     }
     let v: number;
-    if (choice.effect !== undefined && choice.effect !== null && Number.isFinite(choice.effect)) {
+    if (c.id === "price" && choice.effect !== undefined && choice.effect !== null && Number.isFinite(choice.effect)) {
+      // The price driver as events: a rise hits a client once (with the chance, default 1) for `months`. A run in chance mode measured the
+      // hits' size times their share of client-weeks; a run by weight measured 2 per unit of rise over 13 weeks, which converts.
+      const months = choice.months ?? EFFECT_MONTHS.default;
+      const chance = choice.chance ?? 1;
+      v =
+        c.mode === "chance"
+          ? Math.max(0, choice.effect * c.pressure)
+          : Math.max(0, choice.effect * chance * (c.pressure / (PRICE_PRESSURE_PER_UNIT * PRICE_EFFECT_PER)) * ((months * (52 / 12)) / PRICE_WEIGHT_WEEKS));
+    } else if (choice.effect !== undefined && choice.effect !== null && Number.isFinite(choice.effect)) {
       // Chance mode: the chance of being under a hit's effect, times the effect. A run that was itself in chance mode with no new chance keeps its measured exposure.
       const months = choice.months ?? EFFECT_MONTHS.default;
       const chance = choice.chance ?? c.chance ?? 0;
@@ -588,12 +600,22 @@ export function projectChurn(causes: ChurnCauses, choices: readonly DriverWeight
  */
 export function equivalentEvents(cause: Pick<ChurnCause, "id" | "custom" | "pressure" | "chance" | "value">, weight: number, months: number = EFFECT_MONTHS.default): DriverEvents {
   const spec = cause.custom ? "entered" : (CHURN_DRIVER_SPECS[cause.id as BuiltinChurnDriverId]?.events ?? "none");
+  // The price driver: a rise's pressure in weight mode is 2 per unit for 13 weeks, as events it is effect per 10% for the months, so the
+  // effect that matches doesn't depend on the last run (which may have had no rise to measure).
+  if (cause.id === "price" && !cause.custom) return { chance: 1, effect: priceEffectOfWeight(weight, months), months };
   const target = Math.max(0, weight * cause.pressure);
   if (spec === "measured") {
     const exposure = eventExposure(cause.chance ?? 0, months);
-    return { chance: null, effect: exposure > 0 ? Math.min(CHURN_EFFECT_MAX, target / exposure) : target > 0 ? CHURN_EFFECT_MAX : 0, months };
+    // No hits measured: no effect can give the weight's churn (the cause would add nothing as a chance), so none is pre-filled.
+    return { chance: null, effect: exposure > 0 ? Math.min(CHURN_EFFECT_MAX, target / exposure) : 0, months };
   }
   const chance = defaultEventChance(cause.id, cause.value);
   const exposure = eventExposure(chance, months);
-  return { chance: cause.id === "handoff" ? chance : spec === "entered" ? 1 : null, effect: exposure > 0 ? Math.min(CHURN_EFFECT_MAX, target / exposure) : target > 0 ? CHURN_EFFECT_MAX : 0, months };
+  return { chance: cause.id === "handoff" ? chance : spec === "entered" ? 1 : null, effect: exposure > 0 ? Math.min(CHURN_EFFECT_MAX, target / exposure) : 0, months };
+}
+
+/** The price driver's effect (per 10% rise, for `months`) that gives a rise the churn the weight gives it: 2 × weight per unit of rise for 13 weeks. */
+export function priceEffectOfWeight(weight: number, months: number = EFFECT_MONTHS.default): number {
+  const effect = (Math.max(0, weight) * PRICE_PRESSURE_PER_UNIT * PRICE_EFFECT_PER * PRICE_WEIGHT_WEEKS) / (months * (52 / 12));
+  return Math.min(CHURN_EFFECT_MAX, effect);
 }

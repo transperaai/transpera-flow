@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeChannels,
   initialState,
+  northbeamWithClientGroups,
   northbeamWithMoney,
   northbeamWithServicing,
   northbeamWithServices,
@@ -26,24 +27,25 @@ const from = (month: number, value: number, base = 1): number[] => Array.from({ 
 /**
  * Equal, except that a decimal may differ in its last bits: a client's fee is spread over the months of its whole stay by
  * `amount / length × overlap`, so a client who leaves at another time after the change has early months that differ by a rounding
- * (1e-16 of the figure). Any real leak (another arrival, draw or wait) moves figures by far more than the 1e-9 allowed here.
+ * (1e-16 of the figure). Any real leak (another arrival, draw or wait) moves figures by far more than the 1e-12 allowed here (the review measured
+every case under 1e-13).
  */
-function expectSame(received: unknown, expected: unknown, path = "monthly"): void {
+function expectSame(received: unknown, expected: unknown, path = "monthly", everyFigure = false): void {
   if (typeof received === "number" && typeof expected === "number") {
-    // Only the money figures spread a stay's fee over its months, so only they can differ in the last bits.
-    const spreadFigure = /\.(revenue|money|mrr)(\.|\[|$)/.test(path);
-    const tolerance = spreadFigure ? 1e-9 * Math.max(1, Math.abs(received), Math.abs(expected)) : 0;
+    // Only the money figures spread a stay's fee over its months, so only they can differ in the last bits (`everyFigure`: see `merged`).
+    const spreadFigure = everyFigure || /\.(revenue|money|mrr)(\.|\[|$)/.test(path);
+    const tolerance = spreadFigure ? 1e-12 * Math.max(1, Math.abs(received), Math.abs(expected)) : 0;
     if (Math.abs(received - expected) > tolerance) throw new Error(`${path}: ${received} is not ${expected}`);
     return;
   }
   if (Array.isArray(received) && Array.isArray(expected)) {
     expect(received.length, path).toBe(expected.length);
-    received.forEach((v, i) => expectSame(v, expected[i], `${path}[${i}]`));
+    received.forEach((v, i) => expectSame(v, expected[i], `${path}[${i}]`, everyFigure));
     return;
   }
   if (received && expected && typeof received === "object" && typeof expected === "object") {
     expect(Object.keys(received).sort(), path).toEqual(Object.keys(expected).sort());
-    for (const key of Object.keys(received)) expectSame((received as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key], `${path}.${key}`);
+    for (const key of Object.keys(received)) expectSame((received as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key], `${path}.${key}`, everyFigure);
     return;
   }
   expect(received, path).toEqual(expected);
@@ -69,6 +71,21 @@ function monthsBefore(model: EngineModel, channels: EngineChannels, k = 3): { li
 const base = (): EngineModel => ({ ...northbeamWithMoney(), horizonWeeks: 52 });
 const named = (): EngineModel => ({ ...northbeamWithServicing(), horizonWeeks: 52 });
 const pooled = (): EngineModel => ({ ...northbeamWithServices(), horizonWeeks: 52 });
+/**
+ * Client groups without servicing: alike clients are worked out together (run merging), which chance mode turns off tick by tick. Its
+ * servicing steps go too (nothing runs them). Every figure is held to 1e-12 here, not only money: a capacity event at a month's start
+ * splits the people's load integrals there, so a utilisation of the month before can differ in its last bit (one ulp, measured).
+ */
+const merged = (): EngineModel => {
+  const { servicingProcesses: procs, ...m } = northbeamWithClientGroups();
+  const servicingSteps = new Set(Object.values(procs ?? {}).flatMap((p) => p.steps));
+  return {
+    ...m,
+    horizonWeeks: 52,
+    steps: m.steps.filter((st) => !servicingSteps.has(st.id)),
+    services: Object.fromEntries(Object.entries(m.services!).map(([id, { servicing: _s, ...sv }]) => [id, sv])),
+  };
+};
 
 function casesFor(model: EngineModel, roster: boolean): [string, EngineChannels, Partial<EngineModel>?][] {
   const heaviest = model.steps.filter((s) => s.role).sort((a, b) => b.work - a.work)[0]!;
@@ -110,12 +127,13 @@ describe.each([
   ["client groups with servicing and hourly PPC", base, true],
   ["a named roster", named, true],
   ["pooled clients", pooled, false],
-])("channels: the months before a change are exactly the run without it (%s)", (_name, make, roster) => {
+  ["client groups without servicing (alike clients worked out together)", merged, true, true],
+])("channels: the months before a change are exactly the run without it (%s)", (_name, make, roster, everyFigure = false) => {
   const model = make();
   for (const [name, channels, patch] of casesFor(model, roster)) {
     it(`${name}: months 0 to 2 equal the run without it, and the run differs`, () => {
       const { scenario, live, liveCut, scenarioCut } = monthsBefore({ ...model, ...patch }, channels);
-      expectSame(scenarioCut, liveCut);
+      expectSame(scenarioCut, liveCut, "monthly", everyFigure);
       // It does something: the whole run differs.
       expect(JSON.stringify(scenario)).not.toEqual(JSON.stringify(live));
     });
