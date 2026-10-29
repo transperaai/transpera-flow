@@ -562,3 +562,13 @@ Verified only against plain Postgres 16 (`packages/db/test/purpose-migration.tes
 - [ ] `select count(*), max(updated_at), count(purpose) from public.steps` gives the same count and timestamp as before applying, and 0 for `count(purpose)` (the migration writes no step row).
 - [ ] `select conname, convalidated from pg_constraint where conname in ('steps_purpose_key', 'workspaces_purposes')` shows both validated. `workspaces_purposes` calls `private.is_purpose_list` (an immutable SQL function with `set search_path = ''`) from a table check; plain Postgres allows it, and the constraint is validated in the same transaction after the clean-up `update`.
 - [ ] As an Agency admin, `save_fields('workspaces', ..., 'settings.purposes')` saves a valid list against a null base and refuses a list of 4 (23514).
+
+## Scenario share links and the 5b review fix (`20270116000000_scenario_share_links.sql`, `20270117000000_sandbox_p5b_fix.sql`)
+
+`20270116000000` is applied on the Preview database (a production copy); the review fix `20270117000000` was verified only against plain Postgres 16
+(`packages/db/test/scenario-share-migration.test.ts`, `share-links.test.ts`, `share-snapshot.test.ts`). Check on Neon, on a throwaway branch of Preview:
+
+- [ ] `strict $.**.<key> ? (...)` in `private.share_snapshot_problem` refuses an array of legal strings under `target` (lax would unwrap it) and raises no
+  structural error on a snapshot with arrays of arrays: the probes in the 20270116000000 header.
+- [ ] After `20270117000000`, the header's overheads probe returns "The snapshot contains costs or margins." and its `steps.x.work_hours` twin returns null.
+- [ ] The header's optional preflight query lists the Financials-off links whose stored copy holds an overheads patch (Update copy each, or revoke).

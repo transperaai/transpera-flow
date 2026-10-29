@@ -128,5 +128,7 @@ export function scenarioCases(names: { person: string; client: string; email: st
     { name: "Financials off: money in the description", edit: (s) => { rows(s)[0]!.description = "Budget 3,200 GBP"; }, expect: "costs" },
     { name: "Financials on: money in a note is fine", financials: true, edit: (s) => { at(s, 1, 1).note = "Costs about £4,100 a month"; }, expect: null },
     { name: "Financials off: a rate change inside a solution's lever changes", edit: (s) => { s.solutions = [{ id: A, lever_changes: [{ path: "roles.x.cost_rate", op: "set", value: 70 }] }]; }, expect: "costs" },
+    { name: "Financials off: an overheads change inside a solution's lever changes", edit: (s) => { s.solutions = [{ id: A, lever_changes: [{ path: "finances.overhead_monthly", op: "set", value: 9000 }] }]; }, expect: "costs" },
+    { name: "Financials on: an overheads change inside a solution's lever changes is fine", financials: true, edit: (s) => { s.solutions = [{ id: A, lever_changes: [{ path: "finances.overhead_monthly", op: "set", value: 9000 }] }]; }, expect: null },
   ];
 }

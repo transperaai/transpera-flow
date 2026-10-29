@@ -183,3 +183,24 @@ describe("a scenario link, built for real", () => {
     expect(second.startDate).toBe("2027-02-01");
   });
 });
+
+describe("an overheads change in a Financials-off link (review fix, 20270117000000)", () => {
+  const T0: ShareToggles = { people: false, financials: false };
+
+  it("a Sandbox scenario's whole-run C2 is a process link's scenario patch: the app drops the amount, and the database refuses it", async () => {
+    await q("insert into public.sandbox_scenarios (workspace_id, name, changes) values ($1, 'Dearer office', $2::jsonb)", [ws, JSON.stringify([{ id: "5c000000-0000-4000-8000-0000000000e1", lever: "C2", target: null, op: "set", value: 98765 }])]);
+    const workspace = await workspaceRow();
+    const snap = (await loadShareData(editor, workspace, { kind: "process", id: NORTHBEAM_PROCESS_ID }, T0)) as unknown as { scenarios: { name: string; patch: { path: string }[] }[] };
+    const office = snap.scenarios.find((s) => s.name === "Dearer office")!;
+    expect(office.patch).toEqual([]);
+    expect(JSON.stringify(snap)).not.toContain("98765");
+    expect(shareSnapshotLeaks(snap, await loadShareSecrets(editor, ws), T0)).toEqual([]);
+    const problem = async (s: unknown) => (await q("select private.share_snapshot_problem($1, 'process', $2::jsonb, false, false) as p", [ws, JSON.stringify(s)]))[0]!.p;
+    expect(await problem(snap)).toBeNull();
+    office.patch = [{ path: "finances.overhead_monthly", op: "set", value: 98765 } as never];
+    expect(await problem(snap)).toBe("The snapshot contains costs or margins.");
+    // With Financials on the scenario keeps its change.
+    const on = (await loadShareData(editor, workspace, { kind: "process", id: NORTHBEAM_PROCESS_ID }, { people: false, financials: true })) as unknown as { scenarios: { name: string; patch: { path: string; value: number }[] }[] };
+    expect(on.scenarios.find((s) => s.name === "Dearer office")!.patch).toEqual([{ path: "finances.overhead_monthly", op: "set", value: 98765 }]);
+  });
+});

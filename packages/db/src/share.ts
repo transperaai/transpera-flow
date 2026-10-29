@@ -431,8 +431,12 @@ function redactBundle(b: Obj, toggles: ShareToggles, secrets: ShareSecrets): Obj
 }
 
 /** Keys whose value never goes into a snapshot, and what stands in for it. */
-/** A role-rate change (`roles.<id>.cost_rate`) inside a scenario's patch or a solution's lever changes: the visitor's browser would price work at the real rate. */
-const isRatePatch = (v: unknown): boolean => isObj(v) && typeof v.path === "string" && /cost_rate$/.test(v.path);
+/**
+ * A cost change inside a scenario's patch or a solution's lever changes: a role's rate (`roles.<id>.cost_rate`, the visitor's browser would price
+ * work at the real rate) or the overheads (`finances.overhead_monthly`, a Sandbox scenario's whole-run C2 change becomes this patch). The
+ * database's twin is step 7's `path` rule (20270117000000).
+ */
+const isCostPatch = (v: unknown): boolean => isObj(v) && typeof v.path === "string" && /(cost_rate|overhead_monthly)$/.test(v.path);
 const BLANKED: Record<string, unknown> = {
   provenance: {},
   cost_rate: null,
@@ -465,8 +469,8 @@ export function redactShareSnapshot(input: ShareSnapshot, toggles: ShareToggles,
       else if (Object.hasOwn(BLANKED, k)) out[k] = structuredClone(BLANKED[k]);
       // A step's own cost figure: a money field, hidden with Financials off.
       else if (k === "cost_override" && !toggles.financials) out[k] = null;
-      // With Financials off, no role-rate change in a scenario's patch or a solution's lever changes.
-      else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isRatePatch(p)).map((x) => walk(x, k));
+      // With Financials off, no role-rate or overheads change in a scenario's patch or a solution's lever changes.
+      else if (!toggles.financials && (k === "patch" || k === "lever_changes") && Array.isArray(v)) out[k] = v.filter((p) => !isCostPatch(p)).map((x) => walk(x, k));
       else out[k] = walk(v, k);
     }
     return out;
@@ -652,7 +656,7 @@ export function shareSnapshotLeaks(snapshot: unknown, secrets: ShareSecrets, tog
         if (k === "margin" && v !== 0 && v != null) found.add("costs");
         if (k === "cost_override" && v !== null && v !== undefined) found.add("costs");
         if ((k === "overhead_monthly" || k === "target_margin") && v !== undefined) found.add("costs");
-        if ((k === "patch" || k === "lever_changes") && Array.isArray(v) && v.some(isRatePatch)) found.add("costs");
+        if ((k === "patch" || k === "lever_changes") && Array.isArray(v) && v.some(isCostPatch)) found.add("costs");
       }
       walk(v, k, depth + 1);
     }

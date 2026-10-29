@@ -500,10 +500,14 @@ describe("the leak check", () => {
     await refused({ ...clean(), roles: [{ default_cost_rate: "95" }] }, {}, msg);
     await refused({ ...clean(), scenarios: [{ patch: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }] }, {}, msg);
     await refused({ ...clean(), solutions: { solutions: [{ lever_changes: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }] } }, {}, msg);
+    // An overheads change (a Sandbox scenario's whole-run C2 as a patch, 20270117000000) too.
+    await refused({ ...clean(), scenarios: [{ patch: [{ path: "finances.overhead_monthly", op: "set", value: 9000 }] }] }, {}, msg);
+    await refused({ ...clean(), solutions: { solutions: [{ lever_changes: [{ path: "finances.overhead_monthly", op: "multiply", value: 1.1 }] }] } }, {}, msg);
     for (const text of ["costs £4,100 a month", "about $ 5k", "4,100 GBP", "GBP 4,100", "4.1k pounds", "EUR 40", "40 euros", "4,512€"]) await refused({ ...clean(), note: text }, {}, msg);
     // Other patches, and the same things with Financials on, are fine.
     await accepted({ ...clean(), scenarios: [{ patch: [{ path: "steps.s1.work_hours", op: "set", value: 2 }] }], note: "12 hours a week, 3 pages of notes" });
     await accepted({ ...clean("overview", false, true), scenarios: [{ patch: [{ path: "roles.r1.cost_rate", op: "set", value: 95 }] }], services: [{ margin: "0.4" }], note: "£4,100" }, { financials: true });
+    await accepted({ ...clean("overview", false, true), scenarios: [{ patch: [{ path: "finances.overhead_monthly", op: "set", value: 9000 }] }] }, { financials: true });
   });
 
   it("6c. text is checked on its normalised form: a soft hyphen, a zero-width space, a full-width letter, a curly apostrophe, a JSON escape", async () => {

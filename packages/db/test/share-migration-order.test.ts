@@ -30,7 +30,7 @@ describe("share links: the leak check's helpers and lists", () => {
     // money rule's and drops the keys of the AI and findings tables (dropped in 20270101000000); the step-purpose migration (20270114000000,
     // sandbox phase 4) copies that and adds one key, `purpose`.
     const read = (f: string) => readFileSync(join(__dirname, "..", "migrations", f), "utf8");
-    const lists = [migrationText, read("20261221000000_play_links.sql"), read("20261224500000_share_money_rule.sql"), read("20270104000000_strip_followups.sql"), read("20270114000000_step_purpose.sql"), read("20270116000000_scenario_share_links.sql")].map((text) => {
+    const lists = [migrationText, read("20261221000000_play_links.sql"), read("20261224500000_share_money_rule.sql"), read("20270104000000_strip_followups.sql"), read("20270114000000_step_purpose.sql"), read("20270116000000_scenario_share_links.sql"), read("20270117000000_sandbox_p5b_fix.sql")].map((text) => {
       const m = /^  non_text_keys constant text\[\] := array\[([^\]]*)\]/m.exec(text)!;
       return [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
     });
@@ -42,6 +42,8 @@ describe("share links: the leak check's helpers and lists", () => {
     const aiAndFindings = ["ai_key", "analysis_id", "decided_at", "decided_by", "input_hash", "key", "market_pending_at", "model", "model_hash", "origin", "proposed_via", "rating", "run_id", "started_at", "updated_by", "user_id"];
     const dropped = ["color", "plan"];
     for (const k of aiAndFindings) expect(SHARE_NON_TEXT_KEYS, k).not.toContain(k);
+    // The 5b review fix (20270117000000) copies the scenario-link migration's body and keeps its list.
+    expect([...lists[6]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
     expect([...lists[5]!].sort()).toEqual([...SHARE_NON_TEXT_KEYS].sort());
     expect([...lists[4]!].sort()).toEqual([...app, "purpose"].sort());
     expect([...lists[3]!].sort()).toEqual([...app].sort());

@@ -228,3 +228,6 @@ by the same check as a play link of an Overview). Migration `20270116000000_scen
   and each role (no per-person scope), sales and money without costs or profit, the price-rise trade-off, "Compare with No changes", print and the numbers
   CSV (no costs, no changes CSV). No scenario picker, goal seek, tornado, Settings or share links. The share dialog is on the scenario bar for Agency
   admins and the Owner, on a saved scenario with no unsaved edits.
+- **Review fix (29 Oct 2026, `20270117000000_sandbox_p5b_fix.sql`).** With Financials off an overheads change is dropped wherever a change is a patch, as
+  a role rate is: a Sandbox scenario whose changes are all whole-run patches is listed on the process page, so a process link carried its C2 change as
+  `{"path": "finances.overhead_monthly", "value": <amount>}` (`isCostPatch` in the app, step 7's `path` rule in the database).

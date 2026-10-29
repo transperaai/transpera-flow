@@ -418,6 +418,33 @@ describe("names with unusual white space, surnames and case, quotes, and role-ra
     for (const fine of [{}, null]) expect(shareSnapshotLeaks({ ...clean, x: { provenance: fine } }, w.secrets, off)).toEqual([]);
   });
 
+  it("with Financials off, an overheads change (a Sandbox scenario's whole-run C2, as a patch) in a scenario or a solution's lever changes is dropped too", () => {
+    const overheads = { path: "finances.overhead_monthly", op: "set", value: 9000 };
+    const hours = { path: "steps.s1.work_hours", op: "set", value: 2 };
+    const make = (toggles: ShareToggles) => {
+      const input = raw("process", w, toggles) as unknown as { scenarios: unknown[]; solutions: { solutions: SolutionRow[] } };
+      return {
+        ...input,
+        scenarios: [{ id: "sc", workspace_id: "w", name: "Dearer office", description: null, parent_scenario_id: null, patch: [overheads, hours] }],
+        solutions: { ...input.solutions, solutions: input.solutions.solutions.map((x) => ({ ...x, lever_changes: [overheads, hours] })) },
+      } as unknown as ShareSnapshot;
+    };
+    for (const toggles of [TOGGLES[0]!, TOGGLES[1]!]) {
+      const input = make(toggles);
+      const out = redactShareSnapshot(input, toggles, w.secrets) as unknown as { scenarios: { patch: unknown[] }[]; solutions: { solutions: { lever_changes: unknown[] }[] } };
+      expect(out.scenarios[0]!.patch).toEqual([hours]);
+      expect(out.solutions.solutions[0]!.lever_changes).toEqual([hours]);
+      expect(JSON.stringify(out)).not.toContain("overhead_monthly");
+      expect(shareSnapshotLeaks(input, w.secrets, toggles)).toContain("costs");
+      expect(shareSnapshotLeaks(out, w.secrets, toggles)).toEqual([]);
+    }
+    for (const toggles of [TOGGLES[2]!, TOGGLES[3]!]) {
+      const out = redactShareSnapshot(make(toggles), toggles, w.secrets) as unknown as { scenarios: { patch: unknown[] }[] };
+      expect(out.scenarios[0]!.patch).toEqual([overheads, hours]);
+      expect(shareSnapshotLeaks(make(toggles), w.secrets, toggles)).not.toContain("costs");
+    }
+  });
+
   it("with Financials off, a role-rate change in a scenario or a solution's lever changes is dropped; other changes stay; with it on, all stay", () => {
     const rate = { path: "roles.r1.cost_rate", op: "set", value: 95 };
     const hours = { path: "steps.s1.work_hours", op: "set", value: 2 };
