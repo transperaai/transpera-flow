@@ -47,7 +47,7 @@ export interface ScenarioBarProps {
   onNew: () => void;
   onAddChange: () => void;
   onSave: () => void;
-  /** Opens goal seek ("Find a value"); every role may run it, nothing it does is saved. */
+  /** Opens goal seek ("Find a value"); Agency admins and the Owner only (a Viewer gets no button); nothing it does is saved. */
   onFindValue?: () => void;
   /** The Share button for the saved scenario on screen (Agency admins and the Owner); null when the scenario can't be shared yet. */
   share?: React.ReactNode;

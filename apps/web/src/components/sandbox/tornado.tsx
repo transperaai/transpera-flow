@@ -36,6 +36,8 @@ export interface TornadoProps {
   currency: string;
   /** Profit needs costs (Agency admins and the Owner); the money levers C1 and C2 go with it. */
   canSeeMoney: boolean;
+  /** Agency admins and the Owner only (Austin, 30 Oct 2026). False renders nothing, whatever else is passed. */
+  canAnalyse: boolean;
   canAdd: boolean;
   /** Prefilled "Add change" (lever, target, how, value). */
   onUse: (preset: { lever: string; target: string; op: SandboxChange["op"]; value: number }) => void;
@@ -44,6 +46,10 @@ export interface TornadoProps {
 type Phase = "idle" | "running" | "done" | "cancelled" | "error";
 
 export function Tornado(p: TornadoProps) {
+  return p.canAnalyse ? <TornadoPanel {...p} /> : null;
+}
+
+function TornadoPanel(p: TornadoProps) {
   const measures = TORNADO_MEASURES.filter((m) => p.canSeeMoney || !TORNADO_MEASURE_INFO[m].needsMoney);
   const [measure, setMeasure] = useState<TornadoMeasureId>(p.canSeeMoney ? "profit" : "peakBusy");
   const [purposeKey, setPurposeKey] = useState("fixing");

@@ -7,7 +7,7 @@
 // forecast, and its insights, are never changed by a scenario, and nothing here changes live data.
 //
 // Who: the Owner and Agency admins (mode "live") add, move, save and delete; a Viewer (mode "readonly") opens, runs and compares
-// saved scenarios and sees the alerts without acknowledging them; the demo (mode "demo") keeps scenarios in the tab.
+// saved scenarios and sees the alerts without acknowledging them, with no goal seek and no "What matters most" (Agency admins and the Owner only); the demo (mode "demo") keeps scenarios in the tab.
 
 import { useIsPhone } from "@/hooks/use-mobile";
 import Link from "next/link";
@@ -627,7 +627,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
   ];
   const parentName = working?.parent_id ? (saved.find((s) => s.id === working.parent_id)?.name ?? null) : null;
 
-  // Goal seek and "What matters most" run on the scenario on screen, or on No changes: the same bundle, solutions, horizon and start.
+  // Goal seek and "What matters most" are for Agency admins and the Owner only (Austin, 30 Oct 2026); a Viewer gets neither. They run on the scenario on screen, or on No changes: the same bundle, solutions, horizon and start.
   const analysisRun = useMemo(() => ({ bundle: live, solutions: planSolutions, months, startDate: start }), [live, planSolutions, months, start]);
   const analysisBase = useMemo<EffectiveChange[]>(() => (working !== null && !scenarioError ? (effectiveList ?? NO_EFFECTIVE) : NO_EFFECTIVE), [working, scenarioError, effectiveList]);
 
@@ -722,7 +722,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onNew={newScenario}
           onAddChange={() => setChangeTarget({ mode: "add" })}
           onSave={onSave}
-          onFindValue={built.model && !scenarioError ? () => setGoalOpen(true) : undefined}
+          onFindValue={canEdit && built.model && !scenarioError ? () => setGoalOpen(true) : undefined}
           share={mode === "live" && savedScenario && !dirty && !horizonChanged ? <ShareButton slug={sharePath(pathname)} kind="scenario" targetId={savedScenario.id} what={savedScenario.name} /> : null}
           shareHint={mode === "live" && savedScenario && (dirty || horizonChanged) ? "Save first to share it." : null}
           onSaveAsNew={onSaveAsNew}
@@ -922,7 +922,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       {!compare && moneyView ? (
         <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
-      {!compare && built.model && !scenarioError ? (
+      {canEdit && !compare && built.model && !scenarioError ? (
         <Tornado
           key={`${selected ?? "none"}|${months}|${JSON.stringify(analysisBase.map((e) => e.change))}`}
           run={analysisRun}
@@ -933,6 +933,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           categories={purposeCategories}
           currency={live.workspace.settings.currency}
           canSeeMoney={canEdit && Boolean(result?.monthly?.money)}
+          canAnalyse={canEdit}
           canAdd={canEdit}
           onUse={(preset) => setChangeTarget({ mode: "add", preset })}
         />
@@ -1004,7 +1005,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onClose={() => setChangeTarget(null)}
         />
       ) : null}
-      {goalOpen && built.model ? (
+      {canEdit && goalOpen && built.model ? (
         <GoalSeekDialog
           run={analysisRun}
           base={analysisBase}
@@ -1015,6 +1016,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           months={monthOptions}
           currency={live.workspace.settings.currency}
           canSeeMoney={canEdit && Boolean(result?.monthly?.money)}
+          canAnalyse={canEdit}
           canAdd={canEdit && working !== null}
           onAdd={(preset) => setChangeTarget({ mode: "add", preset })}
           onClose={() => setGoalOpen(false)}

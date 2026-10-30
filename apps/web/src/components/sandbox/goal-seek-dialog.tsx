@@ -39,6 +39,8 @@ export interface GoalSeekDialogProps {
   /** Profit targets need costs (Agency admins and the Owner). */
   canSeeMoney: boolean;
   /** "Add as a change" is offered (Agency admins and the Owner on a scenario they can edit). */
+  /** Agency admins and the Owner only (Austin, 30 Oct 2026). False renders nothing, whatever else is passed. */
+  canAnalyse: boolean;
   canAdd: boolean;
   /** The change as a prefilled add (lever, target, month, how, value, note). */
   onAdd: (preset: { lever: string; target: string; month?: string; op: SandboxChange["op"]; value: number; note: string }) => void;
@@ -54,6 +56,10 @@ const num = (text: string, fallback: number) => {
 const percentText = (v: number) => String(Math.round(v * 1e4) / 100);
 
 export function GoalSeekDialog(p: GoalSeekDialogProps) {
+  return p.canAnalyse ? <GoalSeekPanel {...p} /> : null;
+}
+
+function GoalSeekPanel(p: GoalSeekDialogProps) {
   const [kind, setKind] = useState<GoalTarget["kind"]>("busy");
   const [roleId, setRoleId] = useState("");
   const [busyText, setBusyText] = useState(percentText(p.cutoffs[1]));

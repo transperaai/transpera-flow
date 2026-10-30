@@ -102,7 +102,7 @@ export const TornadoBarsChart: StoryObj = {
 export const TornadoIdle: StoryObj = {
   render: () => {
     const p = pair();
-    return <Tornado run={{ bundle: p.bundle, solutions: [], months: 12, startDate: DEMO_FORECAST_START }} base={[]} model={p.model} hiddenLevers={[]} cutoffs={p.cutoffs} categories={DEFAULT_PURPOSES} currency="GBP" canSeeMoney canAdd onUse={() => {}} />;
+    return <Tornado run={{ bundle: p.bundle, solutions: [], months: 12, startDate: DEMO_FORECAST_START }} base={[]} model={p.model} hiddenLevers={[]} cutoffs={p.cutoffs} categories={DEFAULT_PURPOSES} currency="GBP" canSeeMoney canAnalyse canAdd onUse={() => {}} />;
   },
 };
 
@@ -120,6 +120,7 @@ export const GoalSeek: StoryObj = {
         months={p.months.map((m, i) => ({ value: `2026-${String(i + 1).padStart(2, "0")}`, label: m.long }))}
         currency="GBP"
         canSeeMoney
+        canAnalyse
         canAdd
         onAdd={() => {}}
         onClose={() => {}}

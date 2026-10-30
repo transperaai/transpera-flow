@@ -1370,25 +1370,28 @@ describe("goal seek and what matters most", { timeout: 240_000 }, () => {
     await page.close();
   });
 
-  it("a Viewer can run goal seek and the tornado, with no profit and no 'Add as a change'", async () => {
-    const { page, errors } = await mount(1440, { mode: "readonly" });
-    await pick(page, "Hire in March");
-    await waitRuns(page, 1);
-    await page.locator("[data-goal-open]").click();
-    const dialog = page.locator("[data-goal-seek]");
-    await dialog.waitFor();
-    const kinds = await dialog.locator("[data-goal-kind] option").allInnerTexts();
-    expect(kinds).not.toContain("Profit");
-    await search(page);
-    expect(await dialog.locator("[data-goal-add]").count()).toBe(0);
-    await page.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached" });
-    const measures = await page.locator("[data-tornado-measure] option").allInnerTexts();
-    expect(measures).not.toContain("Profit over the run");
-    await page.locator("[data-tornado-start]").click();
-    await page.waitForSelector("[data-tornado][data-tornado-status=done]", { timeout: 180_000 });
-    expect(await page.locator("[data-tornado-use]").count()).toBe(0);
-    expect(errors).toEqual([]);
-    await page.close();
-  });
+  for (const width of [1440, 640, 400]) {
+    it(`gives a Viewer neither goal seek nor the tornado at ${width}px, and an admin both (Austin, 30 Oct: Agency admins and the Owner only)`, async () => {
+      const viewer = await mount(width, { mode: "readonly", url: "/demo/sandbox?goal=1&tornado=1" });
+      await pick(viewer.page, "Hire in March");
+      await waitRuns(viewer.page, 1);
+      // Saved scenarios still open and compare; the two analysis tools are not there, nor a keyboard way in.
+      expect(await viewer.page.locator("[data-scenario-compare]").count()).toBe(1);
+      await viewer.page.keyboard.press("g");
+      await viewer.page.keyboard.press("Control+k");
+      for (const sel of ["[data-goal-open]", "[data-goal-seek]", "[data-tornado]", "[data-tornado-start]"]) expect(await viewer.page.locator(sel).count(), sel).toBe(0);
+      expect(await viewer.page.getByText(/Find a value|What matters most/).count()).toBe(0);
+      expect(viewer.errors).toEqual([]);
+
+      const admin = await mount(width);
+      await pick(admin.page, "Hire in March");
+      await waitRuns(admin.page, 1);
+      expect(await admin.page.locator("[data-goal-open]").count()).toBe(1);
+      expect(await admin.page.locator("[data-tornado]").count()).toBe(1);
+      await admin.page.locator("[data-goal-open]").click();
+      await admin.page.locator("[data-goal-seek]").waitFor();
+      expect(admin.errors).toEqual([]);
+      await Promise.all([viewer.page.close(), admin.page.close()]);
+    });
+  }
 });

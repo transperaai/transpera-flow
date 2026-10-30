@@ -7,6 +7,9 @@ tornado chart, exports, the read-only share link, MCP `list_scenarios`/`run_scen
 `claude/supabase-migration-plan-mzchlf` **after phase 4 merges**; rebase on it, never hand-merge. Read `CLAUDE.md`,
 `apps/web/AGENTS.md`, `docs/adr/0016-share-links.md`, `docs/adr/0021-one-scenario-model.md` and the four earlier briefs first.
 
+**30 Oct 2026 note (Austin, 30 Oct: Agency admins and the Owner only):** goal seek (§9) and "What matters most" (§10) are not offered to
+Viewers. Wherever this brief has Viewers running them read-only (§9, §10, §12, §14, open question 1), read "not offered".
+
 **Phase 5 in one line:** the Sandbox's runner moves into `packages/db` so the web and MCP run identical code; MCP gains
 `list_scenarios` and runs saved scenarios (timed changes included); each change carries a note; a scenario or a comparison exports
 as CSV and prints to one A4 page; the Sandbox says when capacity runs out and when a hire pays for itself; goal seek and a "what
@@ -425,7 +428,7 @@ runs in flight).
 fixed by kind, threshold, average/9-in-10), lever (lever, target, whole run or from month, range), Start. Progress "Run 3 of at most 8"
 with a Cancel that releases every request (`runSegments(...).cancel`); closing the dialog or changing the scenario cancels. Result: the
 sentence, the probe table, and **"Add as a change"** (admins and the Owner): an ordinary change into the working draft, note pre-filled
-"Goal seek: <target sentence> (<date>)". Viewers see the result only (open question 1).
+"Goal seek: <target sentence> (<date>)". Viewers do not get goal seek (Austin, 30 Oct: Agency admins and the Owner only).
 
 ## 10. What matters most: the tornado chart (design suggestion 2)
 
@@ -559,8 +562,8 @@ kind "Scenario".
 | CSV / print | yes; costs optional; never per person or role labour | yes; no costs | yes; no costs |
 | Capacity runs out | yes | yes | yes |
 | Hire payback | yes | no (needs profit) | no |
-| Goal seek | yes, "Add as a change" | run only (open question 1) | no |
-| Tornado | yes | yes, no money measures or C1/C2 | no |
+| Goal seek | yes, "Add as a change" | no (Austin, 30 Oct) | no |
+| Tornado | yes | no (Austin, 30 Oct) | no |
 | MCP | everything the token user reads | `payHidden`: profit, labour null; people labelled | n/a |
 
 No phase 5 lever stores individual pay; C1 is a role rate (`pay: "role"`).
@@ -585,7 +588,7 @@ in `docs/engine-versioning.md` beside the Sandbox timings. The 5a move must leav
   `share-actions.test.ts` (scenario link made, refreshed, refused for an unsaved/missing scenario, Viewer refused);
   `sim-pool.test.ts` (`cache: false` neither stored nor evicting); stories for the dialog and chart.
 - **Browser:** `sandbox-browser.test.ts` (goal seek over D5 in the demo answers and "Add as a change" adds it; cancel stops runs; the
-  tornado draws and ranks; a Viewer sees goal seek without "Add"); `share-browser.test.ts` (a scenario link: changes and notes, the
+  tornado draws and ranks; a Viewer sees neither goal seek nor the tornado, an admin still does); `share-browser.test.ts` (a scenario link: changes and notes, the
   run, compare with No changes, no costs with Financials on, People off shows "New <role>" and labels); 1440/640/400 px, no console
   errors.
 
@@ -621,6 +624,8 @@ shares in goal seek; a "quick" tornado; play mode or editing on scenario links; 
 1. **Can Viewers run goal seek and the tornado?** They try values that aren't saved; phase 1 Q6 said Viewers "open, run and compare
    only". *Default: yes, as read-only analysis (nothing saved; play-link visitors already try levers), without money measures and
    without "Add as a change".* **For Austin**, since it widens what Viewers do.
+   **Decided, Austin, 30 Oct: Agency admins and the Owner only.** Viewers get neither tool (no button, no dialog, no chart); they still
+   open, run and compare saved scenarios. Scenario share visitors have neither either. The default above is reversed.
 2. **Where notes live.** *Default: a `note` key inside each change (≤ 280 characters),* not a column or a separate notes map.
 3. **Tornado precision.** *Default: 30 runs per bar, no quick mode;* run on demand, cancellable.
 4. **Tornado and goal seek around what?** *Default: the scenario on screen (its effective changes); "No changes" when none is open.*
