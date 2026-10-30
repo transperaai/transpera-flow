@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PURPOSES, type PurposeCategory } from "@transpera-flow/db";
 import { larkspurWithPurposes, simulate, type MonthlyResult, type Stat, type TimeSplit } from "@transpera-flow/engine";
 import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
-import { spliceMonthly } from "@transpera-flow/db/sandbox";
+import { SMALL_TEAM_NOTE, spliceMonthly } from "@transpera-flow/db/sandbox";
 import { timelineMonths } from "@/lib/forecast/timeline";
-import { IDLE, NOT_SET, UNCOVERED, stackOf, timeView } from "@/lib/sandbox/time";
+import { IDLE, NOT_SET, UNCOVERED, personChoices, stackOf, timeView } from "@/lib/sandbox/time";
 import { fakeSplit, fakeTime } from "./fake-time";
 
 // Where the time goes (sandbox phase 4): the engine's per-purpose hours read as rows of hours and shares. Pure.
@@ -170,5 +170,36 @@ describe("spliceMonthly splices time as flows", () => {
     expect(spliced.time.purposes).toEqual(["client_job", "winning", "fixing", "extra"]);
     expect(spliced.time.team.purpose.extra!.map((s) => s.mean)).toEqual([0, 0, 4, 4]);
     expect(spliced.time.team.uncovered!.map((s) => s.mean)).toEqual([0, 0, 5, 5]);
+  });
+});
+
+describe("personChoices: who a Viewer may see by person (Austin, 30 Oct)", () => {
+  const team = (ids: string[]) => monthly(split(), Object.fromEntries(ids.map((id) => [id, split()])));
+  const named = (ids: string[]) => ids.map((id) => ({ id, name: `Person ${id}` }));
+  const viewer = { seesEveryone: false, ownPersonId: "a" };
+  const admin = { seesEveryone: true, ownPersonId: null };
+
+  it("a Viewer in a team of 2 gets only You, and the note", () => {
+    const ids = ["a", "b"];
+    expect(personChoices(team(ids), named(ids), viewer)).toEqual({ options: [{ value: "a", label: "You" }], note: SMALL_TEAM_NOTE });
+    expect(SMALL_TEAM_NOTE).toBe("Everyone else isn't shown in a team this small.");
+  });
+  it("a Viewer in a team of 1 gets only You, and the note", () => {
+    expect(personChoices(team(["a"]), named(["a"]), viewer)).toEqual({ options: [{ value: "a", label: "You" }], note: SMALL_TEAM_NOTE });
+  });
+  it("a Viewer in a team of 3 gets You and Everyone else, and no note", () => {
+    const ids = ["a", "b", "c"];
+    expect(personChoices(team(ids), named(ids), viewer)).toEqual({ options: [{ value: "a", label: "You" }, { value: "others", label: "Everyone else" }], note: null });
+  });
+  it("counts the people the split covers in that run, not the people in the workspace", () => {
+    expect(personChoices(team(["a", "b"]), named(["a", "b", "c", "d"]), viewer).options).toEqual([{ value: "a", label: "You" }]);
+  });
+  it("a Viewer who is not in the run gets no names in a small team", () => {
+    expect(personChoices(team(["b", "c"]), named(["b", "c"]), viewer)).toEqual({ options: [], note: SMALL_TEAM_NOTE });
+  });
+  it("an admin or the Owner sees every person by name in a team of 2 and of 3, with no note and no Everyone else", () => {
+    for (const ids of [["a", "b"], ["a", "b", "c"]]) {
+      expect(personChoices(team(ids), named(ids), admin)).toEqual({ options: named(ids).map((p) => ({ value: p.id, label: p.name })), note: null });
+    }
   });
 });

@@ -603,3 +603,11 @@ default.
 2. **Ongoing client hours not drawn as steps** get **their own row, "Client upkeep"**, as a fixed category: renameable,
    not deletable. They are not counted under "Moves the client's job forward".
 3. **Viewers per person:** their own row by name plus **"Everyone else"** (today's rule).
+4. **Austin, 30 Oct: the deciding step counts as Winning work.** The step where the sale is decided (for example Northbeam's and
+   Larkspur's "Client decision") now defaults to **"Winning work"**; only steps **after** it on the won path default to "Moves the
+   client's job forward". Every other rule is unchanged (a chosen purpose wins; a first-principles delete gives "Could be removed";
+   no lost end means nothing is after the sale). This amends decision 1 above.
+5. **Austin, 30 Oct: no "Everyone else" for Viewers in teams of 2 or fewer.** When the run's split covers 2 or fewer people,
+   "Everyone else" would be one identifiable colleague, so a Viewer gets only "You" and the note "Everyone else isn't shown in a
+   team this small." Admins and the Owner are unchanged. This amends decision 3 above. (Compare, the Overview card, CSV, print and
+   MCP are team-level or role-level only for everyone, so nothing changes there.)

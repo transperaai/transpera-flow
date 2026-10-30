@@ -1,7 +1,7 @@
 "use client";
 
 // "Where the time goes" (sandbox G, phase 4): the working time of the run on screen by what the steps achieve, for the team, a role or a person,
-// as a 100% bar per month and a table of hours and shares. A Viewer sees their own row and "Everyone else", never another individual (B1).
+// as a 100% bar per month and a table of hours and shares. A Viewer sees their own row and "Everyone else" (not in a team of two or fewer), never another individual (B1).
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -14,7 +14,7 @@ import { TimeChart, TimeLegend } from "@/components/sandbox/time-chart";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
-import { timeView, type TimeScope } from "@/lib/sandbox/time";
+import { personChoices, timeView, type TimeScope } from "@/lib/sandbox/time";
 import { cn } from "@/lib/utils";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
@@ -45,11 +45,8 @@ export function TimeByPurpose({ monthly, months, categories, roles, people, view
   const [roleId, setRoleId] = useState<string | null>(null);
   const [personKey, setPersonKey] = useState<string | null>(null);
   const own = viewer.seesEveryone ? null : viewer.ownPersonId;
-  // A Viewer: their own row, and everyone else together. An Agency admin or the Owner: each person.
-  const personOptions = useMemo(
-    () => (viewer.seesEveryone ? people.map((p) => ({ value: p.id, label: p.name })) : [...(own && monthly.time.people[own] ? [{ value: own, label: "You" }] : []), { value: "others", label: "Everyone else" }]),
-    [viewer.seesEveryone, people, own, monthly],
-  );
+  // A Viewer: their own row, and everyone else together (not in a team of two or fewer). An Agency admin or the Owner: each person.
+  const { options: personOptions, note: smallTeamNote } = useMemo(() => personChoices(monthly, people, viewer), [monthly, people, viewer]);
   const role = roleId && withWork.some((r) => r.id === roleId) ? roleId : (withWork[0]?.id ?? null);
   const person = personKey && personOptions.some((o) => o.value === personKey) ? personKey : (personOptions[0]?.value ?? null);
   const scope: TimeScope =
@@ -65,7 +62,8 @@ export function TimeByPurpose({ monthly, months, categories, roles, people, view
   const scopeKey = JSON.stringify(scope);
   const view = useMemo(() => timeView(monthly, months, categories, JSON.parse(scopeKey) as TimeScope), [monthly, months, categories, scopeKey]);
   const who = scope.kind === "team" ? "the team" : scope.kind === "role" ? (roles.find((r) => r.id === scope.id)?.name ?? "the role") : scope.kind === "person" ? (people.find((p) => p.id === scope.id)?.name ?? "this person") : "everyone else";
-  const empty = !view.total.some((t) => t.mean > 0);
+  // A Viewer who is not in the run, in a small team, has nothing to pick by person (no "Everyone else"): show nothing rather than the team.
+  const empty = (kind === "person" && !person) || !view.total.some((t) => t.mean > 0);
   return (
     <section className="flex min-w-0 flex-col gap-3" data-time-section aria-label="Where the time goes">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
@@ -177,6 +175,7 @@ export function TimeByPurpose({ monthly, months, categories, roles, people, view
           {view.notes.map((n) => (
             <li key={n}>{n}</li>
           ))}
+          {!viewer.seesEveryone && kind === "person" && smallTeamNote ? <li data-small-team-note>{smallTeamNote}</li> : null}
           {!viewer.seesEveryone ? <li>Your own hours and everyone else&apos;s together: you don&apos;t see other people one by one. Numbers use the standard speed for everyone.</li> : null}
         </ul>
         <p className="text-xs text-muted-foreground">

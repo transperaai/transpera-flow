@@ -39,6 +39,14 @@ const ZERO: Stat = { mean: 0, p10: 0, p90: 0 };
 const add = (a: Stat, b: Stat): Stat => ({ mean: a.mean + b.mean, p10: a.p10 + b.p10, p90: a.p90 + b.p90 });
 const sub = (a: Stat, b: Stat): Stat => ({ mean: Math.max(0, a.mean - b.mean), p10: Math.max(0, a.p10 - b.mean), p90: Math.max(0, a.p90 - b.mean) });
 
+/** A team this size or smaller: "Everyone else" would be one identifiable colleague (Austin, 30 Oct). */
+export const SMALL_TEAM_MAX = 2;
+/** The people the split covers in this run (the team's size for "Everyone else"). */
+export const splitPeopleCount = (monthly: MonthlyResult): number => Object.keys(monthly.time.people).length;
+/** Whether a Viewer may be shown "Everyone else": not in a team of {@link SMALL_TEAM_MAX} or fewer. */
+export const everyoneElseShown = (monthly: MonthlyResult): boolean => splitPeopleCount(monthly) > SMALL_TEAM_MAX;
+export const SMALL_TEAM_NOTE = "Everyone else isn't shown in a team this small.";
+
 /** The split for a scope. `others` is the team less one person, month by month on the means (their range is the team's shifted by that person's mean). */
 function splitFor(time: MonthlyResult["time"], scope: TimeScope): TimeSplit | null {
   if (scope.kind === "team") return time.team;
