@@ -144,7 +144,7 @@ export function PurposesSettings({
     <Page
       title="Purposes"
       eyebrow="Settings"
-      description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the first principles (a step listed to delete is “Could be removed”) and then the process: sales pipelines are Winning work before the sale, and the sale and everything after it, and client work, move the client's job forward."
+      description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the first principles (a step listed to delete is “Could be removed”) and then the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward."
       actions={
         <>
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground" data-save-status>

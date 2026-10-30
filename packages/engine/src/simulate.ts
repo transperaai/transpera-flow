@@ -505,11 +505,11 @@ function signingEdges(targets: Target[], reach: Map<string, Reach>): EdgeKind[] 
 }
 
 /**
- * The pipeline steps from the sale on (sandbox G, Austin 29 Oct): the step where the sale is decided (its edges lead only
- * to a win and only to a loss) and every step after it, which can reach a win but no longer a loss. A model with no lost
- * end has no sale to decide: the set is empty. Pure; draws nothing and changes no run.
+ * The pipeline steps after the sale (sandbox G, Austin 29 Oct, amended 30 Oct): every step that can reach a win but no longer
+ * a loss. The step where the sale is decided (its edges lead only to a win and only to a loss) is not in the set: it counts as
+ * winning work. A model with no lost end has no sale to decide: the set is empty. Pure; draws nothing and changes no run.
  */
-export function saleSideSteps(model: EngineModel): Set<string> {
+export function afterSaleSteps(model: EngineModel): Set<string> {
   const flat = flattenModel(model);
   const states = new Map(flat.steps.map((s) => [s.id, { s }] as const));
   const ends = new Map<string, EngineEnd>([
@@ -520,14 +520,9 @@ export function saleSideSteps(model: EngineModel): Set<string> {
   const reach = outcomeReach(states, ends);
   const out = new Set<string>();
   if (![...states.keys()].some((id) => reach.get(id)?.lost)) return out;
-  for (const [id, { s }] of states) {
+  for (const id of states.keys()) {
     const r = reach.get(id)!;
-    if (r.won && !r.lost) {
-      out.add(id);
-      continue;
-    }
-    const kinds = s.next.map((n) => reach.get(n.to));
-    if (kinds.some((k) => k?.won && !k.lost) && kinds.some((k) => k?.lost && !k.won)) out.add(id);
+    if (r.won && !r.lost) out.add(id);
   }
   return out;
 }

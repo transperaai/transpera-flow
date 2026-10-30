@@ -672,10 +672,10 @@ describe("step purposes (sandbox phase 4)", () => {
     expect({ ...withPurposes, steps: withPurposes.steps.map(({ purpose: _p, ...s }) => s) }).toEqual(plain);
   });
 
-  it("pipeline steps before the sale are winning work; the sale and what follows, and servicing steps, move the client's job forward", () => {
+  it("pipeline steps up to and including the sale decision are winning work; what follows it, and servicing steps, move the client's job forward", () => {
     const m = toEngineModel(northbeamBundle(), { startDate: START, purposes: true });
-    for (const k of ["qualify", "discovery", "audit"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("winning");
-    for (const k of ["decision", "onboard", "kickoff"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("client_job");
+    for (const k of ["qualify", "discovery", "audit", "decision"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("winning");
+    for (const k of ["onboard", "kickoff"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("client_job");
     const servicing = m.steps.filter((s) => Object.values(northbeamServicingStepIds).includes(s.id));
     expect(servicing.length).toBeGreaterThan(0);
     for (const s of servicing) expect(s.purpose, s.name).toBe("client_job");

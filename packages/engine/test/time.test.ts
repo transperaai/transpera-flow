@@ -7,7 +7,7 @@ import {
   northbeamModel,
   northbeamWithMoney,
   northbeamWithServicing,
-  saleSideSteps,
+  afterSaleSteps,
   simulate,
   type EngineModel,
   type EngineStep,
@@ -182,16 +182,17 @@ describe("pay and structure", () => {
   });
 });
 
-describe("saleSideSteps", () => {
-  it("is the sale decision and the steps after it, on a pipeline that can lose", () => {
-    const set = saleSideSteps(larkspurModel());
-    expect([...set].sort()).toEqual(["decision", "launch", "onboard", "web_build", "web_design", "workshop", "content_plan", "social_setup"].sort());
+describe("afterSaleSteps", () => {
+  it("is the steps after the sale decision (not the decision itself), on a pipeline that can lose", () => {
+    const set = afterSaleSteps(larkspurModel());
+    expect([...set].sort()).toEqual(["launch", "onboard", "web_build", "web_design", "workshop", "content_plan", "social_setup"].sort());
   });
   it("is empty when no lost end is reachable", () => {
-    expect(saleSideSteps(tiny([step("a", [{ to: "done", p: 1 }])])).size).toBe(0);
+    expect(afterSaleSteps(tiny([step("a", [{ to: "done", p: 1 }])])).size).toBe(0);
   });
   it("leaves earlier steps out for Northbeam", () => {
-    const set = saleSideSteps(northbeamModel());
+    const set = afterSaleSteps(northbeamModel());
     expect(set.has("audit")).toBe(false);
+    expect(set.has("decision")).toBe(false);
   });
 });

@@ -20,9 +20,13 @@ describe("resolvePurpose", () => {
     expect(resolvePurpose(step(null), "servicing", new Set(["other"]), keys)).toEqual({ key: "client_job", source: "process_kind" });
     expect(resolvePurpose(step(null), "pipeline", none, keys)).toEqual({ key: "winning", source: "process_kind" });
   });
-  it("a pipeline step from the sale on moves the client's job forward", () => {
+  it("a pipeline step after the sale moves the client's job forward (the deciding step is not after, so it stays winning work)", () => {
     expect(resolvePurpose(step(null), "pipeline", none, keys, true)).toEqual({ key: "client_job", source: "process_kind" });
     expect(resolvePurpose(step(null), "pipeline", new Set(["s1"]), keys, true).key).toBe("removable");
+  });
+  it("the deciding step itself is not after the sale, so it is winning work (Austin, 30 Oct), and a delete still wins", () => {
+    expect(resolvePurpose(step(null), "pipeline", none, keys, false)).toEqual({ key: "winning", source: "process_kind" });
+    expect(resolvePurpose(step(null), "pipeline", new Set(["s1"]), keys, false).key).toBe("removable");
   });
   it("a stored key the list no longer has reads as Automatic, saying why", () => {
     expect(resolvePurpose(step("required"), "pipeline", none, new Set([...keys].filter((k) => k !== "required")))).toEqual({ key: "winning", source: "deleted_category" });

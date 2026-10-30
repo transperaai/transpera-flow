@@ -89,20 +89,20 @@ export type PurposeSource = "chosen" | "first_principles" | "process_kind" | "de
 /**
  * A step's purpose (Austin, 29 Oct): its own key when it is in the list; else "Could be removed" when its process's first
  * principles list it to delete (and it was not put back); else by where it sits: client work moves the client's job forward, and
- * so does a pipeline step from the sale on (`saleSide`: the step that decides the sale and every step after it on the won path);
- * a pipeline step before the sale is winning work. A stored key the list no longer has reads as Automatic (`deleted_category`).
+ * so does a pipeline step after the sale (`afterSale`: every step after the deciding step on the won path; Austin, 30 Oct: the
+ * deciding step itself counts as winning work, like every step before it). A stored key the list no longer has reads as Automatic (`deleted_category`).
  */
 export function resolvePurpose(
   step: { id: string; purpose: string | null },
   processKind: string,
   deleteCandidates: ReadonlySet<string>,
   keys: ReadonlySet<string>,
-  saleSide = false,
+  afterSale = false,
 ): { key: string; source: PurposeSource } {
   const stored = step.purpose;
   if (stored !== null && stored !== undefined && stored !== UPKEEP_PURPOSE && keys.has(stored)) return { key: stored, source: "chosen" };
   const gone = stored !== null && stored !== undefined;
   if (deleteCandidates.has(step.id)) return { key: "removable", source: gone ? "deleted_category" : "first_principles" };
-  const key = processKind === "servicing" || saleSide ? CLIENT_JOB_PURPOSE : "winning";
+  const key = processKind === "servicing" || afterSale ? CLIENT_JOB_PURPOSE : "winning";
   return { key, source: gone ? "deleted_category" : "process_kind" };
 }

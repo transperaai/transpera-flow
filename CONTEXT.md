@@ -39,7 +39,7 @@ What a step's hands-on time achieves, one of the workspace's categories (Setting
 _Avoid_: Category (that is the list a purpose is chosen from), tag, type (a step's kind is task, wait, decision)
 
 **Automatic (purpose)**:
-A step with no purpose chosen. It is worked out each time: a step the first principles list to delete is Could be removed; otherwise client work and a pipeline from the sale on move the client's job forward, and a pipeline before the sale is Winning work. Nothing is stored for it, so a step added to the delete list changes at once.
+A step with no purpose chosen. It is worked out each time: a step the first principles list to delete is Could be removed; otherwise client work and a pipeline after the sale decision move the client's job forward, and a pipeline up to and including the sale decision is Winning work. Nothing is stored for it, so a step added to the delete list changes at once.
 _Avoid_: Default (a chosen purpose is never overwritten by it), unset
 
 **Lever**:

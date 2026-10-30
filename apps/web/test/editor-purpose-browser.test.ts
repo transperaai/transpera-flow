@@ -52,10 +52,10 @@ describe("what a step achieves, in the Editor", { timeout: 120_000 }, () => {
   for (const width of [1440, 1024]) {
     it(`sets one step, then two at once, and undo puts each back (${width}px)`, async () => {
       const { page, errors } = await open(width);
-      // A step before the sale is Winning work until someone chooses; one after it moves the client's job forward.
+      // A step up to and including the sale decision is Winning work until someone chooses; one after it moves the client's job forward.
       await select(page, AUDIT);
       expect(await picker(page).locator("option").first().innerText()).toBe("Automatic: Winning work");
-      expect(await page.getByText("Sales pipeline process, before the sale").count()).toBe(1);
+      expect(await page.getByText("Sales pipeline process, up to and including the sale decision").count()).toBe(1);
       await select(page, KICKOFF);
       expect(await picker(page).locator("option").first().innerText()).toBe("Automatic: Moves the client's job forward");
       // The workspace's categories, in order, with no Client upkeep (not a step's purpose).

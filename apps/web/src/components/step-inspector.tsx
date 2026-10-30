@@ -70,8 +70,8 @@ function PurposeField({ bundle, step, save }: { bundle: ProcessBundle; step: Ste
           ? bundle.process.kind === "servicing"
             ? "Client work process"
             : resolved.key === "client_job"
-              ? "From the sale on in a sales pipeline"
-              : "Sales pipeline process, before the sale"
+              ? "After the sale in a sales pipeline"
+              : "Sales pipeline process, up to and including the sale decision"
           : null;
   return (
     <SelectField

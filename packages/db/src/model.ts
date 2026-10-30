@@ -5,7 +5,7 @@ import {
   isNeutralMarket,
   marketFromSchedule,
   NestingError,
-  saleSideSteps,
+  afterSaleSteps,
   type EngineMarket,
   type EngineDemand,
   type Distribution as EngineDistribution,
@@ -371,14 +371,14 @@ function stepRowsOf(bundle: ProcessBundle): Map<string, { row: StepRow; kind: st
   return rows;
 }
 
-/** Every step's resolved purpose (`resolvePurpose`), given the pipeline steps from the sale on. Pure. */
-function resolveAll(bundle: ProcessBundle, saleSide: ReadonlySet<string>): Map<string, { key: string; source: PurposeSource }> {
+/** Every step's resolved purpose (`resolvePurpose`), given the pipeline steps after the sale. Pure. */
+function resolveAll(bundle: ProcessBundle, afterSale: ReadonlySet<string>): Map<string, { key: string; source: PurposeSource }> {
   const keys = new Set(workspacePurposes(bundle.workspace.settings).map((c) => c.key));
   const candidates = new Map(Object.entries(bundle.deleteCandidates ?? {}).map(([id, steps]) => [id, new Set(steps)]));
   const none = new Set<string>();
   const out = new Map<string, { key: string; source: PurposeSource }>();
   for (const [id, { row, kind }] of stepRowsOf(bundle)) {
-    out.set(id, resolvePurpose(row, kind, candidates.get(row.process_id) ?? none, keys, saleSide.has(id)));
+    out.set(id, resolvePurpose(row, kind, candidates.get(row.process_id) ?? none, keys, afterSale.has(id)));
   }
   return out;
 }
@@ -388,13 +388,13 @@ function resolveAll(bundle: ProcessBundle, saleSide: ReadonlySet<string>): Map<s
  * comes from the engine model; a graph that can't be modelled yet (a draft half drawn) just has no sale side. Pure.
  */
 export function resolveBundlePurposes(bundle: ProcessBundle): Map<string, { key: string; source: PurposeSource }> {
-  let saleSide: ReadonlySet<string> = new Set();
+  let afterSale: ReadonlySet<string> = new Set();
   try {
-    saleSide = saleSideSteps(toEngineModel(bundle, { startDate: "2026-01-05" }));
+    afterSale = afterSaleSteps(toEngineModel(bundle, { startDate: "2026-01-05" }));
   } catch {
     // Not a model yet.
   }
-  return resolveAll(bundle, saleSide);
+  return resolveAll(bundle, afterSale);
 }
 
 /**
@@ -402,7 +402,7 @@ export function resolveBundlePurposes(bundle: ProcessBundle): Map<string, { key:
  * the bundle's processes for its row and its process's kind, and the sale side of the pipeline comes from the engine. Pure.
  */
 function withStepPurposes(model: EngineModel, bundle: ProcessBundle): EngineModel {
-  const resolved = resolveAll(bundle, saleSideSteps(model));
+  const resolved = resolveAll(bundle, afterSaleSteps(model));
   return { ...model, steps: model.steps.map((s) => (resolved.has(s.id) ? { ...s, purpose: resolved.get(s.id)!.key } : s)) };
 }
 

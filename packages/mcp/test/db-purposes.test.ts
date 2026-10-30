@@ -89,7 +89,7 @@ describe("purposes over the connector", () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.data.purpose_categories).toEqual(DEFAULT_PURPOSES);
     expect(byName(r.data.steps, "Qualify")).toMatchObject({ purpose: null, purpose_resolved: { key: "winning", name: "Winning work", source: "process_kind" } });
-    // From the sale on, the pipeline moves the client's job forward (Austin, 29 Oct).
+    // After the sale decision, the pipeline moves the client's job forward (Austin, 29 Oct; the deciding step is Winning work, 30 Oct).
     expect(byName(r.data.steps, "Onboard")).toMatchObject({ purpose: null, purpose_resolved: { key: "client_job", name: "Moves the client's job forward" } });
     expect(byName(r.data.steps, "Start").purpose_resolved).toBeNull();
     expect(byName(r.data.steps, "Won").purpose_resolved).toBeNull();
