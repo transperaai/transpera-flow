@@ -13,6 +13,10 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "calibrations": [
     "results"
   ],
+  "capacity_changes": [
+    "effects",
+    "provenance"
+  ],
   "capacity_factor_proposals": [
     "proposal"
   ],

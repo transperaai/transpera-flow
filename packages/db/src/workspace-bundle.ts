@@ -51,6 +51,8 @@ export const BUNDLE_TABLES = {
   tiers: T("tiers"),
   person_tiers: T("person_tiers", "person_id", "tier_id"),
   person_portfolio: T("person_portfolio", "person_id", "service_id"),
+  // Capacity changes (P7): automations and augmentations that act on parts of steps.
+  capacity_changes: T("capacity_changes"),
   clients: T("clients"),
   client_services: T("client_services", "client_id", "service_id"),
   client_assignments: T("client_assignments", "client_id", "role_id"),
@@ -288,7 +290,7 @@ export async function exportWorkspaceBundle(
   const companyKeys = [
     "roles", "people", "person_roles", "person_skills", "person_leave", "person_capacity_factors", "services", "service_servicing", "client_groups", "client_services",
     "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "lever_settings", "analysis_rules",
-    "departments", "tiers", "person_tiers", "person_portfolio",
+    "departments", "tiers", "person_tiers", "person_portfolio", "capacity_changes",
   ] as const;
   const company_model: Record<string, Row[]> = Object.fromEntries(companyKeys.map((k) => [k, data[k]]));
   // Named clients are hidden in the product (D27) and never deleted: the bundle keeps them, flagged, as a backup.
