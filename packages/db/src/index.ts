@@ -267,10 +267,15 @@ export {
 } from "./process-file-2";
 export { claudePrompt2, PROCESS_FILE_EXAMPLE_2, PROCESS_FILE_SCHEMA_2 } from "./process-file-2-schema";
 export {
+  blockersOf,
+  capacityBlockers,
+  capacityGaps,
+  capacityNotes,
   findGaps,
   gapInputFromBundle,
   gapInputFromFile,
   gapLines,
+  notesOf,
   SERVER_DEFAULT_NOTE_PREFIX,
   type GapInput,
   type GapKind,
