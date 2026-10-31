@@ -11,7 +11,6 @@ import {
   northbeamServicingStepIds,
   northbeamStepIds,
   toEngineModel,
-  NORTHBEAM_PROCESS_ID,
   DEFAULT_PURPOSES,
   speedsNormalisedFor,
   usesCapacityFactors,

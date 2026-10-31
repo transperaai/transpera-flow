@@ -4,7 +4,6 @@ import type { DB } from "./db-types";
 import { rpc, rpcRows } from "./rpc";
 import { columns } from "./columns";
 import { pgCode } from "./pg-error";
-import { shareToggles } from "./share-reader";
 import type { Json } from "./db-types";
 import type { CompanyModel, SnapshotProcess } from "./company";
 import type { CitingRow } from "./evidence";
@@ -161,7 +160,7 @@ export interface TeamInputs {
   personSkills: PersonSkillRow[];
   personLeave: PersonLeaveRow[];
   clientAssignments: ClientAssignmentRow[];
-  /** Per-person times (C6): everyone's for those who see everyone, only the caller's own person's otherwise; none from `share_team_capacity`. */
+  /** Per-person times (C6): everyone's for those who see everyone, only the caller's own person's otherwise. */
   personCapacityFactors: PersonCapacityFactorRow[];
 }
 
@@ -170,12 +169,10 @@ export interface TeamInputs {
  * editors and agency admins; for members and viewers, "Team member N" labels (their own person keeps their name) and a null cost rate for everyone but
  * themselves: no pay, and no average of it. Never email, notes, leave notes or skill efficiency. Per-person times (C6) come the same
  * way: everyone's for those who see everyone, only the caller's own otherwise. A bundle's per-person times must come only from
- * here: reading `person_capacity_factors` directly would bypass `shareReaderDb` and put an editor's times into a share snapshot.
+ * here: reading `person_capacity_factors` directly would show an editor's times to everyone.
  */
 export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs> {
-  // A share link reads through `shareReaderDb`, which swaps in `share_team_capacity` (labels or names, no pay, no times).
-  const toggles = shareToggles.get(db);
-  const data = toggles ? await rpc(db, "share_team_capacity", { ws: workspaceId, show_people: toggles.people }) : await rpc(db, "team_capacity", { ws: workspaceId });
+  const data = await rpc(db, "team_capacity", { ws: workspaceId });
   // The function's documented shape (migration 20261207500000): sees_everyone, own_person_id and one array per table, in
   // the columns of PersonRow, PersonRoleRow, PersonSkillRow, PersonLeaveRow and ClientAssignmentRow.
   const t = data as unknown as {
@@ -195,7 +192,7 @@ export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs>
     personSkills: t.person_skills,
     personLeave: t.person_leave,
     clientAssignments: t.client_assignments,
-    // numeric comes back as a number from jsonb; `share_team_capacity` has no such key, so a link's team has none.
+    // numeric comes back as a number from jsonb.
     personCapacityFactors: (t.person_capacity_factors ?? []).map((r) => ({ ...r, factor: Number(r.factor), items: r.items == null ? null : Number(r.items) })),
   };
 }
@@ -451,7 +448,7 @@ export async function loadSetupCounts(db: Db, workspaceId: string): Promise<Setu
 /**
  * Every process of the workspace at its live revision, for the Overview's company map (issue #100): the pipelines, the
  * servicing processes and the child processes, in creation order. Processes never published aren't on the map. As the
- * caller of `db` (RLS decides what is visible); a share link's snapshot (B3) builds it with the same function.
+ * caller of `db` (RLS decides what is visible).
  */
 export async function loadLiveParts(db: Db, workspaceId: string): Promise<ProcessPart[]> {
   const live = (await listProcesses(db, workspaceId)).filter((p) => p.live_revision_id);
@@ -616,7 +613,7 @@ export async function loadSandboxScenarios(db: Db, workspaceId: string): Promise
 }
 
 /**
- * A workspace's saved whole-run scenarios, oldest first: the ones the process page, the issues register, share snapshots and MCP
+ * A workspace's saved whole-run scenarios, oldest first: the ones the process page, the issues register and MCP
  * understand. These are the Sandbox scenarios with no parent whose every change is a patch with no `from`; a scenario with a hire,
  * a change from a month or a parent runs only in the Sandbox. `patch` is the changes as patches.
  */
@@ -738,9 +735,6 @@ export async function loadIssues(db: Db, workspaceId: string): Promise<IssueRow[
  * "no", so the caller gets the less revealing view.
  */
 export async function readerSeesPeople(db: Db, workspaceId: string): Promise<boolean> {
-  // A share link answers with its People toggle (see `shareReaderDb`).
-  const toggles = shareToggles.get(db);
-  if (toggles) return toggles.people;
   try {
     return (await rpc(db, "can_see_people", { ws: workspaceId })) === true;
   } catch {
@@ -924,7 +918,7 @@ export interface WorkspaceLogo {
   sha256: string;
 }
 
-/** The logo `public.workspace_logo` returns for a workspace (callable signed out, for share links), or null when it has none. */
+/** The logo `public.workspace_logo` returns for a workspace (callable signed out), or null when it has none. */
 export async function loadWorkspaceLogo(db: Db, workspaceId: string): Promise<WorkspaceLogo | null> {
   const { rows } = await sql<WorkspaceLogo>`select mime, bytes, sha256 from public.workspace_logo(${workspaceId}::uuid)`.execute(db);
   return rows[0] ?? null;

@@ -19,9 +19,6 @@ const assumed = {
   description: 'Why the value is an assumption: nobody said it, so say where the guess comes from ("Typical for a proposal; Sam confirmed the order of magnitude").',
 } as const;
 const evidence = { ...citations, description: "Quotes that back this, word for word, each from one of the file's sources." } as const;
-/** The two ways to say where something came from. Leave both out when the file just states it. */
-const backing = { evidence, assumed } as const;
-
 const rangeHours = (what: string) =>
   ({ type: "object", required: ["min", "max"], properties: { min: { type: "number", minimum: 0 }, max: { type: "number", minimum: 0 } }, description: `The lowest and highest ${what} in hours. The typical value is the number beside it.` }) as const;
 

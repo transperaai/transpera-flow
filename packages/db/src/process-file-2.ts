@@ -23,7 +23,6 @@ const MAX_QUOTE = 2000;
 const MAX_CITATIONS = 10;
 const MAX_REASON = 2000;
 const MAX_BODY = 500_000;
-const MAX_TEXT = 2000;
 
 /** The step fields that can carry evidence, as the file names them. */
 export const EVIDENCE_FIELDS = ["hands_on_hours", "wait_hours", "rework_rate", "waiting_now", "sla_hours"] as const;
@@ -248,7 +247,7 @@ export function readAssumed(raw: unknown, where: string, env: Env): string | und
   return raw.trim();
 }
 
-/** `evidence` and `assumed` of an item (company, proposal, first principles). */
+/** `evidence` and `assumed` of an item (a source's own items). */
 export function readBacking(raw: Record<string, unknown>, where: string, env: Env, opts: { warnIfBare?: boolean } = {}): Backing {
   const evidence = readCitations(raw.evidence, where, env);
   const assumed = readAssumed(raw.assumed, where, env);

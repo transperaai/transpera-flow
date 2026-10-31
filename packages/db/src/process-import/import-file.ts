@@ -138,7 +138,7 @@ export interface ImportFileResult {
   to_confirm: number;
   /** Things worth a look: graph warnings, steps left without a role or person, a change-log entry that couldn't be written. */
   warnings: string[];
-  /** A /2 file: what was written beside the process (sources, first principles). */
+  /** A /2 file: what was written beside the process (sources). */
   bundle?: ImportBundleResult;
 }
 
@@ -205,7 +205,7 @@ export function fileToProcessJson(
     source: string;
     roleFor: (role: string) => string | undefined;
     personFor: (person: string) => string | undefined;
-    /** A /2 upload's ids (steps and sources), so evidence, proposals and first principles can point at them. */
+    /** A /2 upload's ids (steps and sources), so evidence can point at them. */
     ids?: FileIds;
   },
 ): ProcessJson {
@@ -288,7 +288,7 @@ export async function importProcessFile(ctx: ImportContext, file: ProcessFile, o
     if (!found) unknownPeople.add(person);
     return found?.id;
   };
-  // A /2 file: ids are chosen here so evidence, proposals and first principles can point at the sources, steps and process that
+  // A /2 file: ids are chosen here so evidence can point at the sources, steps and process that
   // are written together with them (`import_process_bundle`, one transaction).
   const v2 = file.format === PROCESS_FILE_FORMAT_2;
   const ids: FileIds | undefined = v2 ? previewIds(file) : undefined;

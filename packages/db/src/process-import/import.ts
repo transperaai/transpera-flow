@@ -322,7 +322,7 @@ export interface ImportOutcome {
   draft: { revision_id: string; number: number; opened_now: boolean };
   checklist: ReturnType<typeof checklist>;
   warnings: string[];
-  /** A /2 upload: what was written beside the process (sources, first principles). */
+  /** A /2 upload: what was written beside the process (sources). */
   bundle?: ImportBundleResult;
   text: string;
 }
@@ -366,7 +366,7 @@ interface ImportScope {
 /**
  * What a `transpera-process/2` upload carries beyond the process itself (issue #167). Everything is written by one call to
  * `import_process_bundle`, so it is all there afterwards or none of it is. Ids are chosen by the caller so rows that point at
- * each other (a step's evidence cites a source, first principles point at the process) can be built before anything is written.
+ * each other (a step's evidence cites a source) can be built before anything is written.
  */
 export interface ImportBundle {
   /** The new process's id. */

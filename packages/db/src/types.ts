@@ -5,7 +5,7 @@
 
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
 import type { Selectable } from "kysely";
-import type { DB, Json } from "./db-types";
+import type { DB } from "./db-types";
 import type { Viewer } from "./queries";
 import type { SandboxChange } from "./sandbox-levers";
 

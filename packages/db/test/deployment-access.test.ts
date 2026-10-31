@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -468,67 +468,5 @@ describe("private.sync_deployment_access", () => {
       await sync(id, [], [{ provider: "google", provider_id: "g-none", hd: "elsewhere.org" }]);
       expect(await identityData(id)).toEqual([]);
     });
-  });
-});
-
-describe("guests: outsiders listed on a live restricted share link (B3)", () => {
-  const sha = (t: string) => createHash("sha256").update(t).digest("hex");
-  let ws = "";
-  async function link(emails: string[], over: { people?: boolean; expires?: string | null; revoked?: boolean } = {}) {
-    const people = over.people ?? true;
-    const { rows } = await db.client.query(
-      `insert into share_links (workspace_id, token_hash, kind, show_people, allowed_emails, expires_at, snapshot, engine_version)
-       values ($1, $2, 'overview', $3, $4, $5, $6::jsonb, '1') returning id`,
-      [ws, sha(randomUUID()), people, emails, over.expires === undefined ? new Date(Date.now() + 86400_000).toISOString() : over.expires,
-        JSON.stringify({ v: 1, kind: "overview", toggles: { people, financials: false } })],
-    );
-    if (over.revoked) await db.client.query("update share_links set revoked_at = now() where id = $1", [rows[0].id]);
-    return rows[0].id as string;
-  }
-  const maySignIn = async (email: string, verified = true, admins: string[] = []) =>
-    (await db.client.query("select private.may_sign_in($1, $2, $3) as r", [email, verified, admins])).rows[0].r as string | null;
-
-  beforeAll(async () => {
-    [ws] = await workspaceIds();
-    await link(["guest@outside.org", "lead@client.com"]);
-    await link(["open@outside.org"], { people: false, expires: null });
-    await link(["revoked@outside.org"], { revoked: true });
-  });
-
-  it("lets a listed, verified outsider in as a guest, and nobody else", async () => {
-    expect(await maySignIn("Guest@Outside.org")).toBe("guest");
-    expect(await maySignIn("guest@outside.org", false)).toBeNull();
-    expect(await maySignIn("other@outside.org")).toBeNull();
-    // An open link (no toggle) asks for no sign-in, so its list lets no one in; nor does a revoked link.
-    expect(await maySignIn("open@outside.org")).toBeNull();
-    expect(await maySignIn("revoked@outside.org")).toBeNull();
-    // A deployment role wins over guest.
-    expect(await maySignIn("lead@client.com")).toBe("agency_admin");
-    expect(await maySignIn("guest@outside.org", true, ["guest@outside.org"])).toBe("owner");
-  });
-
-  it("stops letting them in when the link expires", async () => {
-    const id = await link(["brief@outside.org"]);
-    expect(await maySignIn("brief@outside.org")).toBe("guest");
-    // The before-write trigger refuses a past expiry, so age the row with triggers off.
-    await db.client.query("alter table share_links disable trigger user");
-    try {
-      await db.client.query("update share_links set expires_at = now() - interval '1 minute' where id = $1", [id]);
-    } finally {
-      await db.client.query("alter table share_links enable trigger user");
-    }
-    expect(await maySignIn("brief@outside.org")).toBeNull();
-  });
-
-  it("gives a guest no memberships and no agency admin, but records the identity the share link checks", async () => {
-    const id = await signUp("guest@outside.org");
-    await db.client.query(`update auth.users set raw_app_meta_data = '{"agency_admin": true}' where id = $1`, [id]);
-    // Nothing is applied: the membership sync doesn't run for a guest.
-    await db.client.query("delete from memberships where user_id = $1", [id]);
-    expect(await sync(id, [], [{ provider: "google", provider_id: "g-guest", email: "guest@outside.org" }])).toBe("guest");
-    expect(await memberships(id)).toEqual([]);
-    expect(await agencyFlag(id)).toBe(false);
-    const ident = (await db.client.query("select provider, identity_data ->> 'email' as e from auth.identities where user_id = $1", [id])).rows;
-    expect(ident).toEqual([{ provider: "google", e: "guest@outside.org" }]);
   });
 });

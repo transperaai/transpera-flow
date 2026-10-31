@@ -109,7 +109,7 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
   "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "process_revisions", "steps", "edges", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
   "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
@@ -202,7 +202,7 @@ const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, im
 const OLD_MIGRATION = "20261207000000_import_workspace_bundle.sql";
 const NEW_MIGRATION = "20261215000000_bigger_restores.sql";
 /** The latest migration that defines `import_workspace_bundle` (#228 replaced B21's body, which NEW_MIGRATION still holds). */
-const LATEST_MIGRATION = "20270114000000_step_purpose.sql";
+const LATEST_MIGRATION = "20270118000000_capacity_cuts.sql";
 const OLD_MD5 = "968cbd0034a0bb1479b8ee0c9eaf7962";
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */
@@ -320,7 +320,6 @@ describe("every limit at once", () => {
     expect(result.counts.processes).toBe(L.processes);
     expect(result.counts.steps).toBe(L.steps);
     expect(result.counts.edges).toBe(L.edges);
-    expect(await count("first_principles", ws)).toBe(L.processes);
     expect(await count("processes", ws, "archived_at is not null")).toBeGreaterThan(0);
     expect(Number((await q("select count(*) from public.steps where workspace_id = $1 and person_id is not null", [ws]))[0]!.count)).toBeGreaterThan(0);
     expect(Number((await q("select count(*) from public.steps where workspace_id = $1 and child_process_id is not null and process_id in (select id from public.processes where not is_company)", [ws]))[0]!.count)).toBe(1);
