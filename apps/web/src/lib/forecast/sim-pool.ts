@@ -17,8 +17,8 @@ const CACHE_LIMIT = 48;
 const IDLE_MS = 20_000;
 
 /** What a run was run from: the model, the months' edges, the reps and the seed. */
-export const runKey = (model: EngineModel, monthStarts: readonly number[], start?: InitialState | null): string =>
-  `${JSON.stringify(model)}|${monthStarts.join(",")}|${REPS}|${SEED}${start ? `|w=${start.kind}:${start.kind === "warmup" ? start.hours : start.kind === "wip" ? start.items : 0}` : ""}`;
+export const runKey = (model: EngineModel, monthStarts: readonly number[], start?: InitialState | null, reps: number = REPS): string =>
+  `${JSON.stringify(model)}|${monthStarts.join(",")}|${reps}|${SEED}${start ? `|w=${start.kind}:${start.kind === "warmup" ? start.hours : start.kind === "wip" ? start.items : 0}` : ""}`;
 
 /** A request for a run: its result, and a way to say it isn't wanted any more. */
 export interface RunRequest {
@@ -55,6 +55,8 @@ export class SimPool {
   constructor(
     private readonly createWorker: () => WorkerLike,
     private readonly size = POOL_SIZE,
+    /** Replications of each run (the Sandbox's 30; the free-play Sandbox uses the Capacity page's count for a year). */
+    private readonly reps = REPS,
   ) {}
 
   /** Keep a result that is already known (the live forecast's own run), so nobody runs it again. */
@@ -67,7 +69,7 @@ export class SimPool {
    * touched, and the finished run is not stored, so the page's own runs aren't pushed out of the cache. Runs in flight are still shared.
    */
   request(model: EngineModel, monthStarts: number[], start: InitialState | null = null, opts: { cache?: boolean } = {}): RunRequest {
-    const key = runKey(model, monthStarts, start);
+    const key = runKey(model, monthStarts, start, this.reps);
     const keep = opts.cache !== false;
     const hit = this.cache.get(key);
     if (hit) {
@@ -141,7 +143,7 @@ export class SimPool {
       entry.client = client;
       this.started++;
       client
-        .run(entry.model, { reps: REPS, seed: SEED, monthly: true, monthStarts: entry.monthStarts, ...(entry.start ? { initialState: entry.start } : {}) })
+        .run(entry.model, { reps: this.reps, seed: SEED, monthly: true, monthStarts: entry.monthStarts, ...(entry.start ? { initialState: entry.start } : {}) })
         .then((run) => {
           if (entry.keep) this.remember(entry.key, run.result);
           entry.resolve(run.result);

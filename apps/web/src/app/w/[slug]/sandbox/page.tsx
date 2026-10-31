@@ -1,5 +1,10 @@
 import { notFound } from "next/navigation";
+import { loadCapacityChanges, loadCapacitySetup } from "@transpera-flow/db";
+import { PlayPage } from "@/components/sandbox/play-page";
 import { SandboxView } from "@/components/sandbox/sandbox-view";
+import { SANDBOX_SCENARIOS_SHOWN } from "@/lib/sandbox/scenarios-shown";
+import { getDb } from "@/lib/auth/session";
+import { loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
@@ -8,9 +13,10 @@ import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
- * The Sandbox: who gets too busy, and when, from the live model run forward month by month, and scenarios of changes to try, save,
- * run and compare. Everyone who can read the workspace sees the saved scenarios and runs and compares them; Agency admins and the
- * Owner also add, move, save and delete.
+ * The Sandbox (capacity build P7, D38): free play. The company's processes on top (the map, a map version per process, a block per step), the levers on
+ * the left and the results on the right: a verdict and four charts against today's path. Nothing is saved; the levers reset when you leave. Everyone who
+ * can read the workspace plays; Agency admins and the Owner also add, edit and remove the list of changes. Stored scenarios stay in the database, and
+ * the old scenario page is behind SANDBOX_SCENARIOS_SHOWN.
  */
 export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/sandbox">) {
   const { slug } = await props.params;
@@ -33,6 +39,24 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     );
   }
   const ws = live.workspace.id;
+  if (!SANDBOX_SCENARIOS_SHOWN) {
+    const db = await getDb();
+    const [setup, library, parts, company, issues, canEdit, solutions] = await Promise.all([
+      loadCapacitySetup(db, ws),
+      loadCapacityChanges(db, ws),
+      loadLiveParts(ws),
+      loadLiveCompany(ws),
+      loadWorkspaceIssues(ws),
+      canEditWorkspace(ws),
+      loadWorkspaceSolutions(ws),
+    ]);
+    if (!setup) notFound();
+    return (
+      <Page title="Sandbox" eyebrow="Company" description="Swap process blocks and pull the levers, then watch the next 12 months change. Nothing here touches live data." width="max-w-6xl">
+        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} />
+      </Page>
+    );
+  }
   const [issues, sources, canEdit, scenarios, solutions] = await Promise.all([
     loadWorkspaceIssues(ws),
     loadWorkspaceSources(ws),

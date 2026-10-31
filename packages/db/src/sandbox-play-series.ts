@@ -29,7 +29,7 @@ export interface PlayCharts {
   /** DLER by department (D24). */
   dler: PlayLine[];
   dlerWhole: (number | null)[];
-  /** The five busiest teams over the run, busiest first, each with its line. */
+  /** Every team, the busiest over the run first, each with its line (the chart shows the first five). */
   teams: PlayTeamLine[];
   /** Clients lost to a price rise over the run, from the churn causes (D36); 0 with no rise. */
   lostToPrice: number;
@@ -139,8 +139,7 @@ export function playSeries(setup: CapacitySetup, play: Pick<PlayState, "leavers"
   const teams: PlayTeamLine[] = setup.roles
     .filter((r) => r.active !== false && monthly.roles[r.id])
     .map((r) => ({ id: r.id, name: r.name, line: r.line, values: range.map((m) => monthly.roles[r.id]![m]?.mean ?? null) }))
-    .sort((a, b) => Math.max(0, ...b.values.map((v) => v ?? 0)) - Math.max(0, ...a.values.map((v) => v ?? 0)))
-    .slice(0, 5);
+    .sort((a, b) => Math.max(0, ...b.values.map((v) => v ?? 0)) - Math.max(0, ...a.values.map((v) => v ?? 0)));
 
   const lostToPrice = result.churnCauses?.causes.find((c) => c.id === "price")?.clients ?? 0;
   return {
