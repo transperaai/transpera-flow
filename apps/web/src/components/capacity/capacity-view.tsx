@@ -82,7 +82,12 @@ export function CapacityView(props: CapacityViewProps) {
 
   const todayRun = runs.today.status === "done" ? runs.today.run.result : null;
   return (
-    <div className="flex min-w-0 flex-col gap-6" data-capacity>
+    <div
+      className="flex min-w-0 flex-col gap-6"
+      data-capacity
+      data-today-ms={runs.today.status === "done" ? Math.round(runs.today.run.durationMs) : undefined}
+      data-year-ms={runs.year.status === "done" ? Math.round(runs.year.run.durationMs) : undefined}
+    >
       {props.modelError && (
         <div data-model-error role="alert" className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
           {props.modelError}
