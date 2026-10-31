@@ -40,6 +40,10 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D3 | **Client count per tier** is entered later by the Founder. The app must have a place for it. | 31 Oct, Austin |
 | D4 | **Each employee's portfolio ("patch")** is entered later. The app must have a place for it. | 31 Oct, Austin |
 | D5 | **Tier 1 clients are named one by one**, each with its own values: hand-holding hours, ad-hoc requests, meeting cadence, assigned people. The Founder keys them in. Tier 2 and 3 can stay as counts. | 31 Oct, Austin |
+| D6 | Step work split has **three parts**: automatable / augmentable / manual. | 31 Oct, Austin |
+| D7 | Tier multipliers live **on each step**. | 31 Oct, Austin |
+| D8 | Adoption is set **per change**. | 31 Oct, Austin |
+| D9 | DLER's "money under management" is **retainer revenue only** (no ad spend). | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
@@ -65,20 +69,22 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 
 ## 1. Questions the app will answer
 
-These define what to build. Priority is our recommendation (Must / Should / Later); Austin decides.
+Written as the Founder will ask them. Each one is one screen or one result in the app. Priority is our
+recommendation (Must / Should / Later); Austin decides.
 
-| # | Question | The answer looks like | Inputs needed | Status | Priority |
+| # | The Founder asks | The answer looks like | Inputs | Status | Priority |
 |---|---|---|---|---|---|
-| A1 | **Are we at capacity?** Which people, roles and departments are over? | Busy share per person, role and department (10–90% range), with anyone over the threshold flagged (default 85%) | people, hours, portfolios (D4), tier counts (D3), servicing times | Have (busy share). The single view is New (Capacity page) | Must |
-| A2 | **How many clients does each employee manage today?** | Clients (and channels in Performance) per person, per client-facing role and per department, with the tier mix | portfolios (D4) | Small for named clients (assignments exist). New with counted clients (D4) | Must |
-| A3 | **How many more clients can we take before anyone is overloaded?** | "About N more Tier 2 clients (or M Tier 1) before anyone passes 85%", and who breaks first | A1 inputs | New: goal seek over the client count | Must |
-| A4 | **With automation X or augmentation Y, how many clients can each employee manage? How many more?** | Clients per employee now against with the change, plus hours freed per person a month, side by side for up to 3 changes | A1 inputs + step baselines and changes (section 7) | New | Must |
-| A5 | **What does that do to DLER and revenue per employee?** Can we get from 3:1 to 4.5:1? | DLER per department now, at max clients, and with each change; the clients needed to reach 4.5:1 | salaries, fees, portfolios | New | Must |
-| A6 | **Which change frees the most capacity?** | Changes ranked by hours freed, or by extra clients per employee | changes (section 8) | Have ("what matters most"), once the new levers exist | Should |
-| A7 | **Where does the time go?** | Hours per client per month by tier (and per named Tier 1 client), split by task and role | servicing times | Have (time by purpose). Small: by tier and per client | Must |
-| A8 | **Where is the bottleneck?** Client managers or shared teams (content editors, link vetting, tech)? | The busiest role or person, and the work waiting on them | as A1 | Have | Should |
-| A9 | **If we win N clients a month, when must we hire, and whom?** | The month each role passes the threshold, given lead flow, market and the hiring delay | lead flow, market (section 5) | Have (lead flow, market, hiring delay). Small: hiring-trigger readout | Should |
-| A10 | **What happens to retention if we push clients per person up?** | Clients at risk and churn as load rises (overload, late work, slow responses) | churn drivers | Have | Later |
+| A1 | **"If I add 5 new clients, what will that do?"** Joe chooses the number, the tier of each, the department (Organic, Performance or both) and timing (all at once or spread) | Month by month: busy share per person through **onboarding**, then **month-to-month servicing**; who takes each client; who goes over 85% and when it settles; the **time needed to serve them** (hours a month by tier, task and role); DLER before and after | tier counts (D3), portfolios (D4), step baselines | Have (a run with more clients). New: pick-and-add form, assignment to the least-busy person, per-person timeline on the Capacity page | Must |
+| A2 | **"Are we at capacity, or can we still fit new clients? How many?"** (the reverse of A1) | Busy share per person, role and department, with anyone over 85% flagged; "about N more Tier 2 (or M Tier 1) before anyone passes 85%", and who breaks first | as A1 | Have (busy share). New: goal seek over the client count, Capacity page | Must |
+| A3 | **"Where are the bottlenecks in my business?"** | The person or role that fills first, and the work waiting on them. Likely candidates: content editors, link vetting (one person), directors' team time | as A1 | Have (busy share, waits, queues). Small: a named "bottleneck" readout | Must |
+| A4 | **"What takes the most time in managing clients?"** | Hours per client a month by task, tier and role, plus each named Tier 1 client, shown with ranges and where each number came from (no timesheets) | step baselines | Have (time by purpose). Small: by tier and per client | Must |
+| A5 | **"With automation X or augmentation Y, how many more clients can each person take?"** | Clients per employee now against with the change; hours freed per person a month; side by side for up to 3 changes | A1 + changes (section 7) | New | Must |
+| A6 | **"What does that do to DLER? Can we get from 3:1 to 4.5:1?"** | DLER per department (retainer ÷ salaries) now, at max clients, and with each change; clients needed to reach 4.5:1 | salaries, fees, portfolios | New | Must |
+| A7 | **"Which change frees the most time?"** | Changes ranked by hours freed, or by extra clients per employee | changes | Have ("what matters most"), once changes exist | Should |
+| A8 | **"When do I need to hire, and whom?"** | The month each role passes 85%, given expected wins, market and hiring delay | lead flow, market | Have. Small: hiring-trigger readout | Should |
+| A9 | **"What if someone leaves?"** (suggested: a 19-client manager just resigned; key relationships sit with two directors) | Whose clients go where; who goes over; how long until a hire ramps up (90 days) | portfolios, end dates | Have (end dates). Small: reassignment readout | Should |
+| A10 | **"Which tier earns the most per hour of effort?"** (suggested) | Retainer ÷ hours to serve, per tier and per named Tier 1 client: DLER per client | fees, step baselines | Small | Should |
+| A11 | "What happens to retention if we push clients per person up?" | Clients at risk and churn as load rises | churn drivers | Have | Later |
 
 **Definition of "clients per employee"** (needs Austin's sign-off):
 
@@ -88,27 +94,28 @@ These define what to build. Priority is our recommendation (Must / Should / Late
 | Per role | clients in the role's portfolios ÷ people in the role |
 | Per department | the department's clients ÷ its client-facing head count. Shared-team people (content, links, tech) are shown separately as capacity, not counted as "clients per employee" |
 
-**"Max clients"** is found by adding clients until the first person or role passes the threshold. Added clients are
-spread by the current tier mix, or held to one tier. Each new client goes to the least-busy person in the role who
-can serve that tier.
+**How new clients are placed** (A1, A2): each one goes to the least-busy person in the role who can serve that tier,
+unless the Founder picks the person. For A2, clients are added until the first person or role passes 85%, spread by
+the current tier mix or held to one tier.
 
 ## 2. Stats to show
 
 | Stat | Why / who asked | Value today | Status | Priority |
 |---|---|---|---|---|
-| **Busy share** per person, role and department (with a 10–90% range) | A1; Founder brief | unknown (no timesheets) | Have | Must |
+| **Busy share** per person, role and department (with a 10–90% range) | A1, A2; Founder brief | unknown (no timesheets) | Have | Must |
 | **Clients per employee** (person, role, department), with tier mix | A2; Founder brief | 4–20 per person (section 3) | New | Must |
 | **Channels per employee** (Performance) | PD: cap of 10 | Director 18; SP2 24 for 14 clients | New | Must |
-| **Headroom**: extra clients per tier before the threshold | A3 | — | New | Must |
-| **With-change comparison**: clients per employee, hours freed, busy share, side by side | A4 | — | New (scenario compare exists: Have) | Must |
-| **DLER** per department, and **revenue per employee** | A5; Founder | min 3:1; 2.75 and 3.2; goal 4.5:1 | New | Must |
-| **Hours per client per month** by tier and per named Tier 1 client, split by task and role | A7; LB wants allocation against actual | calculator example only | Small | Must |
-| **Where the time goes** by purpose (client service, onboarding, management, admin, sales support) | A7; SD 60/40, PD 50/50 | — | Have | Must |
+| **Headroom**: extra clients per tier before the threshold | A2 | — | New | Must |
+| **With-change comparison**: clients per employee, hours freed, busy share, side by side | A5 | — | New (scenario compare exists: Have) | Must |
+| **DLER** per department (retainer ÷ salaries, D9), and **revenue per employee** | A6; Founder | min 3:1; 2.75 and 3.2; goal 4.5:1 | New | Must |
+| **Hours per client per month** by tier and per named Tier 1 client, split by task and role | A1, A4; LB wants allocation against actual | calculator example only | Small | Must |
+| **Where the time goes** by purpose (client service, onboarding, management, admin, sales support) | A4; SD 60/40, PD 50/50 | — | Have | Must |
+| **Retainer per hour of effort** by tier and per named Tier 1 client | A10 | — | Small | Should |
 | **MRR per person against target** (the "share of MRR = share of time" rule) | Head of Client Services (SC) | $11k ≈ 30–33% of one manager's book | Small | Should |
-| **Bottleneck** (busiest role and its queue) | A8 | — | Have | Should |
-| **Onboardings in flight** and their hours | SC: "the most common cause of stretch" | 0–3 at once | Small | Should |
+| **Bottleneck** (busiest person or role and the work waiting on them) | A3 | — | Have. Small: readout | Must |
+| **Onboardings in flight** and their hours | A1; SC: "the most common cause of stretch" | 0–3 at once | Small | Must |
 | **Late work and SLA misses** (24h email, turnaround) | SP1 | — | Have | Should |
-| **Clients at risk and churn** | A10 | rate unknown | Have | Later |
+| **Clients at risk and churn** | A11 | rate unknown | Have | Later |
 | Live client health and red flags (rankings, CPL, pacing) | asked most by staff (SD, SP2, PM, MC) | — | Out of scope: live ops tooling, not simulation. **Austin to decide** | — |
 
 ## 3. Employee levers and values
@@ -338,13 +345,7 @@ future. A scenario lists its changes, not edited steps.
 - **Calibration** compares the baselines with measured times if the client ever exports Monday.com ticket times. That
   is the only measured source they have.
 
-**Questions for Austin on this design**
-
-| # | Question |
-|---|---|
-| N1 | Three parts, or two (automatable / manual) with augmentation as a speed factor on the whole step? |
-| N2 | Should tier multipliers live on each step, or once per process? |
-| N3 | Is adoption a lever per change, or one workspace-wide setting? Austin noted non-autonomous tools tend not to get used (MC). |
+**Settled** (D6–D8): three parts; tier multipliers on each step; adoption per change.
 
 ## 8. Changes the client wants to test
 
@@ -403,8 +404,8 @@ These are the starting scenario library. Each becomes a change (section 7) or a 
 
 **Still to ask**
 
-4. **DLER definition:** is "money under management" retainer MRR only, or does it include ad spend managed? Which
-   department is at 2.75 and which at 3.2?
+4. **DLER:** retainer only (D9). Which department is at 2.75 and which at 3.2, and what salary base is used (do
+   directors and management count)?
 5. Hours a week per person; leave; salaries or bands. Is head count 22 or 24, and are the 4 offshore included? Which
    org-chart boxes are contractors or open roles?
 6. The **pricing calculator** (fee → words, links, tech hours, manager hours), and the SEO Director's capacity model.
@@ -433,16 +434,16 @@ These are the starting scenario library. Each becomes a change (section 7) or a 
 
 | Item | Size | Serves |
 |---|---|---|
-| Capacity page: busy share, clients and channels per employee, headroom, MRR against target, DLER, with-change comparison | New | A1–A5 |
-| Goal seek over the client count (per tier or by mix, least-busy assignment) | New | A3, A4 |
+| Capacity page: busy share, clients and channels per employee, headroom, bottleneck, MRR against target, DLER, with-change comparison | New | A1–A6 |
+| "Add N clients" form (tier, department, timing) and goal seek over the client count, with least-busy assignment | New | A1, A2, A5 |
 | Named Tier 1 clients alongside tier counts in one run | Small–New | D3, D5 |
 | Per-client overrides for named clients (hand-holding, ad-hoc, cadence, deliverables) | New | D5 |
 | Portfolio counts per person for counted clients | New | D4, A2 |
 | Step base values: work split, tier multiplier, source and confidence | New | section 7 |
-| Changes (automation / augmentation) as objects acting on step parts, with adoption and ramp | New | A4, A6 |
+| Changes (automation / augmentation) as objects acting on step parts, with adoption and ramp | New | A5, A7 |
 | Channels as a load driver (Performance) | New | A2 |
-| Reserved management share per person; ramp for new starters; salary input | Small | A1, A5 |
-| Words → content tasks; freelancer capacity in words | Small | A8 |
+| Reserved management share per person; ramp for new starters; salary input | Small | A2, A6, A9 |
+| Words → content tasks; freelancer capacity in words | Small | A3 |
 | Work priority by tier; recurrence pinned to week of month | New | realism (Should) |
 
 **Keep:** the map editor, the engine and animation, people, roles, servicing, lead flow, market, churn drivers,
