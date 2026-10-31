@@ -4,6 +4,29 @@ Process-map simulator: turns a company's workflows into a runnable
 discrete-event Monte Carlo model. Product spec and decisions: [`docs/PRD.md`](docs/PRD.md).
 Work is tracked as GitHub issues (milestone parents #1–#3). Picking this up? Start with [`docs/HANDOVER.md`](docs/HANDOVER.md).
 
+## The app
+
+Transpera Flow answers one question for an agency: are we at capacity, and how many more clients per employee could automation or
+augmentation allow? Each client has their own deployment. The screens, in the order the menu shows them:
+
+| Screen | Path | What it is |
+|---|---|---|
+| **Overview** | `/w/<slug>` | The company map, the headline numbers and the department cards, with what is still missing to get a number. |
+| **Set up** | `/w/<slug>/setup/clients`, `/setup/people` | Where the capacity figures' inputs are keyed in. *Tiers & clients*: tiers, what a client of each tier gets, counted and named clients, other services and the client health benchmark. *People & roles*: roles (department, kind, line, leadership flag), shared teams, people (hours, salary, tiers served, portfolios). Every field is edited in one place, and each shows where its value came from (interview, calculator, measured, estimate). |
+| **Processes** | `/w/<slug>/processes`, `/p/<id>` | The process maps and the Editor. A step's base values (work split, tier multiplier, who it goes to) are set in the Editor and read on the process page; `/p/<id>?step=<step id>` opens a process with that step selected. |
+| **Capacity** | `/w/<slug>/capacity` | Today's busy share by person and role, DLER, clients and revenue per employee, the bottleneck, and when to hire (the next 12 months). |
+| **Sandbox** | `/w/<slug>/sandbox` | Free play: change anything (a hire, a price, a tier, automation of a step), see the capacity and money result, and keep the changes you like. |
+| **Settings** | `/w/<slug>/settings` | The workspace, simulation limits, churn drivers, client health rules, demand and market. Services, clients, roles and people moved to Set up. |
+
+A new client's Set up pages start empty. Two loaders fill a workspace for a first look; both refuse a workspace that has anything in it:
+
+```sh
+pnpm --filter @transpera-flow/db capacity:starter --workspace <slug>   # the client's start: departments, tiers, roles, example numbers marked "estimate". For a real deployment.
+pnpm --filter @transpera-flow/db capacity:example --workspace <slug>   # the prototype's made-up agency, to build and test with. Never on a client's deployment.
+```
+
+Add `--driver neon-ws` from a cloud container, where Neon's port 5432 is closed.
+
 ## Layout
 
 | Path | What |
@@ -45,6 +68,7 @@ request sees (`packages/db/src/client.ts`, ADR [0019](docs/adr/0019-neon-and-bet
 
 ```sh
 pnpm --filter @transpera-flow/db migrate [--dry-run]   # apply new migrations to DATABASE_URL (--dry-run lists them)
+bash packages/db/scripts/neon-preview-migrate.sh [--dry-run]   # the same for the Neon PREVIEW database (never production); the connection comes from the Neon API and is never printed
 bash packages/db/scripts/db-sql.sh -c "select 1"    # psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"
 bash packages/db/scripts/db-sql.sh -v app_password="$APP_PASSWORD" -f packages/db/scripts/create-app-login.sql
 pnpm --filter @transpera-flow/db gen:types          # db-types.ts, json-columns.ts, function-types.ts (needs local Postgres)
