@@ -67,13 +67,15 @@ export function modelHasServicing(model: EngineModel): boolean {
 
 /** Tasks a week one client generates from a recurrence (0 for a malformed one). */
 export function tasksPerWeek(r: Recurrence): number {
+  // A driver recurrence needs the client's deliverables, which this can't see: see `tasksPerMonth` (capacity-inputs.ts).
+  if ("driver" in r) return 0;
   const n = "poissonPerMonth" in r ? r.poissonPerMonth / WEEKS_PER_MONTH : r.every === "week" ? r.times : r.times / WEEKS_PER_MONTH;
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /** Hours between tasks of a fixed recurrence; null for Poisson requests. */
 export function recurrenceInterval(r: Recurrence, hoursPerWeek: number): number | null {
-  if ("poissonPerMonth" in r) return null;
+  if ("poissonPerMonth" in r || "driver" in r) return null;
   return hoursPerWeek / tasksPerWeek(r);
 }
 
@@ -85,6 +87,7 @@ export function poissonMeanGap(r: Recurrence, hoursPerWeek: number): number {
 /** "monthly", "twice a week", "fortnightly", "about 3 a month (ad hoc)". */
 export function recurrenceLabel(r: Recurrence): string {
   const n = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1).replace(/\.0$/, ""));
+  if ("driver" in r) return `${n(r.perMonth)} a month per ${r.per && r.per !== 1 ? `${n(r.per)} ` : ""}${r.driver}`;
   if ("poissonPerMonth" in r) return `ad hoc, about ${n(r.poissonPerMonth)} a month`;
   const unit = r.every;
   if (r.times === 1) return unit === "week" ? "weekly" : "monthly";

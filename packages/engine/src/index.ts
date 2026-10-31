@@ -419,3 +419,18 @@ export {
   type ServicingLinkInput,
   type ServicingRow,
 } from "./client-calibration";
+export {
+  CAPACITY_WEEKS_PER_MONTH,
+  DELIVERABLE_KEYS,
+  availableShare,
+  changeRamp,
+  effectiveDeliverables,
+  rampShare,
+  stepParts,
+  stepTimeFactor,
+  tasksPerMonth,
+  type EffectiveDeliverables,
+  type StepParts,
+} from "./capacity-inputs";
+export { SPLIT_TOLERANCE, checkCapacityInputs, type CapacityProblem, type CapacityProblemCode } from "./capacity-check";
+export { capacityModel, capacityServiceId } from "./fixtures/capacity";
