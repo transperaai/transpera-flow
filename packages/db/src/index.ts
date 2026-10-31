@@ -27,6 +27,7 @@ export {
   type ModelOptions,
 } from "./model";
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
+export * from "./capacity-setup";
 export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
 export {
   FIRST_PRINCIPLES_COLUMNS,
