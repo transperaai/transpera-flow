@@ -34,7 +34,7 @@ pnpm lint && pnpm typecheck && pnpm test
 - Never skip, loosen or delete a test to get green. A test that covers removed code goes with the code.
 
 **Generated files.** Other packages run in parallel, so `db-types.ts`, the seed and the bootstrap will conflict. Run
-`gen:types` / `gen:seed` / `gen:bootstrap` and commit their output anyway. The orchestrator regenerates them on merge.
+`gen:types` / `gen:seed` / `gen:import-schema` and commit their output anyway. The orchestrator regenerates them on merge.
 
 **Wording.** Plain English, copied from the prototype `docs/prototypes/client-capacity-app.PROTOTYPE.html` where it
 has a screen. Use they/them in docs. The prototype is a reference only: never import from it.
