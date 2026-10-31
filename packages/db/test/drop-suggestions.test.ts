@@ -109,9 +109,9 @@ describe("what it keeps and rewrites", () => {
     });
   });
 
-  it("the function is called by 21 enabled triggers (18 before the suggestions table went, 17 after, and the four Set up tables added 4)", async () => {
+  it("the function is called by 22 enabled triggers (18 before the suggestions table went, 17 after, the four Set up tables added 4, and capacity_changes 1)", async () => {
     const rows = (await db.client.query("select t.tgenabled::text as enabled from pg_trigger t where t.tgfoid = 'private.audit_company_write()'::regprocedure and not t.tgisinternal")).rows;
-    expect(rows).toHaveLength(21);
+    expect(rows).toHaveLength(22);
     expect(new Set(rows.map((r) => r.enabled))).toEqual(new Set(["O"]));
   });
 

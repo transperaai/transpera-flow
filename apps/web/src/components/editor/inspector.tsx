@@ -16,6 +16,7 @@ import type { ProcessEditor } from "@/lib/editor/editor";
 import { membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
 import type { BlockTools } from "./use-blocks";
 import type { TierSetup } from "@/lib/tier-setup";
+import type { ChangesOnSteps } from "@/components/step-base-values";
 
 export function Inspector({
   bundle,
@@ -31,9 +32,11 @@ export function Inspector({
   blocks,
   company = false,
   tierSetup,
+  changesOnSteps,
   settingsHref,
 }: {
   tierSetup?: TierSetup;
+  changesOnSteps?: ChangesOnSteps;
   settingsHref?: string;
   bundle: ProcessBundle;
   editor: ProcessEditor;
@@ -75,6 +78,7 @@ export function Inspector({
             sourcesHref={sourcesHref}
             draft={draft ? draft(step) : null}
             tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
             settingsHref={settingsHref}
           />
           <LinkedSources
