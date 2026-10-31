@@ -127,8 +127,8 @@ the app should say which of the two a figure comes from.
 - **Not done: changes to rework or waiting.** Section 7's optional "also changes rework or waiting" is later; changes act on hands-on time only, and
   rework, waits and routing are as before.
 - **Added to `capacity-inputs.ts`:** `stepPartsDetail`, `StepFreed` and `StepPartsDetail`, which `stepParts` now shares a loop with (its numbers are
-  unchanged). `stepParts` and `stepTimeFactor` are otherwise as defined. `plannedHours` (the busy share used to place a won client) still uses the
-  step's plain `work` × the client's factor and does not yet include the tier multiplier or the split's changes.
+  unchanged). `stepParts` and `stepTimeFactor` are otherwise as defined. `plannedHours` (the busy share used to place a won client) used the
+  step's plain `work` × the client's factor; since 1.17.0 (P2b) it uses `work` × the full step-time factor too (tier multiplier and changes).
 
 ## Consequences
 

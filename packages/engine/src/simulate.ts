@@ -1935,10 +1935,13 @@ export function runOnce(
    * The servicing hours a week a client is expected to bring and who they fall on: its tasks a week (its own deliverables) times
    * each step's mean time (with its ad-hoc hours and step factor), to the step's person, the client's manager for a `toClientManager`
    * step, or its assignee in the step's role. Work for a shared pool falls on no one in particular and is left out.
+   * A step with a split or a tier multiplier counts its full time (`capacityEntry`: the service's tier multiplier and the changes in
+   * force in the month `t` falls in, as the run applies them to a drawn time), so the placement sees what the work will take.
    */
   const plannedHours = (
     client: { services: string[]; overrides?: ClientOverrides },
     rc: { manager: PersonState | null; assignees: Map<string, PersonState>; stepFactor: number | Record<string, number> | null },
+    t: number,
   ): [PersonState, number][] => {
     const out = new Map<PersonState, number>();
     for (const sid of client.services) {
@@ -1955,7 +1958,11 @@ export function runOnce(
           const who = step.person ? personById.get(step.person) : step.role ? ((step.toClientManager ? rc.manager : null) ?? rc.assignees.get(step.role)) : undefined;
           if (!who) continue;
           const own = rc.stepFactor === null ? 1 : typeof rc.stepFactor === "number" ? rc.stepFactor : (rc.stepFactor[stepId] ?? 1);
-          out.set(who, (out.get(who) ?? 0) + weekly * step.work * scale * own);
+          const cs = stepStates.get(stepId)?.cap;
+          if (cs) {
+            const f = capacityEntry(cs, capChanges, svcTierKey[svc], svcTierSlot[svc]!, capMonth(t), scale).f;
+            out.set(who, (out.get(who) ?? 0) + weekly * step.work * scale * (f * own));
+          } else out.set(who, (out.get(who) ?? 0) + weekly * step.work * scale * own);
         }
       }
     }
@@ -2086,7 +2093,7 @@ export function runOnce(
       for (let i = 0; i < shape.uncovered.length; i += 2) uncoveredRate[shape.uncovered[i]!]! += shape.uncovered[i + 1]!;
     }
     if (leastBusy) {
-      rc.planned = plannedHours(client, rc);
+      rc.planned = plannedHours(client, rc, t);
       for (const [p, h] of rc.planned) p.planned += h;
     }
     rosterClients.push(rc);

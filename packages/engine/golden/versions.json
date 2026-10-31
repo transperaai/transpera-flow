@@ -100,5 +100,11 @@
     "date": "2026-10-31",
     "note": "step splits, tier multipliers and changes (P3)",
     "digest": "sha256:baed2c35822ad1572c596e77d70716fefc22bb5cae2d58263b8d323842a7e7ce"
+  },
+  {
+    "version": "1.17.0",
+    "date": "2026-10-31",
+    "note": "least-busy placement counts tier multipliers and changes",
+    "digest": "sha256:0870ac2e961b076c29af03c23387e98f572e9e6c678516a91d717a5e43b3aa68"
   }
 ]
