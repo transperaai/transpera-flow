@@ -56,6 +56,13 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D19 | **No data request to the client.** Joe keys in his own data once he has the app, so the build provides the fields and screens (section 4), with sensible defaults from section 3–6 until he does. | 31 Oct, Austin |
 | D20 | **Clickable HTML prototypes** of the new screens before the build briefs: Capacity page, "Add N clients", client entry, step baselines and changes. | 31 Oct, Austin |
 | D21 | **Cut all share links** and the older process-level lever system; **keep Issues** (solutions and changes anchor to them); **hide Sources**; **remove `/demo`**. See `docs/plans/keep-cut-build.md`. | 31 Oct, Austin |
+| D22 | **Overview is per department** (Organic and Performance in separate widgets), plus a whole-business row. Shows clients, **clients per employee = department clients ÷ everyone in the department** (not only client-facing), **revenue per employee** (retainers ÷ everyone in the department; contractors and leadership left out), DLER, people over their line, room for more. | 31 Oct, Austin |
+| D23 | **Capacity has no total ÷ headcount averages.** Each person's own client count and their **max at the line**; the headline shows **clients with Organic services, with Performance services, and taking both**. New data point: which clients take both (a box on named clients; a count per tier for counted clients). | 31 Oct, Austin |
+| D24 | **DLER** is shown per department and for the whole business (**all retainers ÷ all salaries**), without ":1". | 31 Oct, Austin |
+| D25 | **The company map keeps all its current controls** (play, speed, scrubber, horizon, click through). | 31 Oct, Austin |
+| D26 | **Tiers can be added and removed.** Ad-hoc requests per tier (overridable per named client) are **chance a client asks in a month × requests when they ask × size of each**. | 31 Oct, Austin |
+| D27 | **Shared teams work in their own unit and rate**: content in words (writing and editing words an hour), link outreach in links, tech in ticket hours, Performance specialists in tasks (campaign builds, creative sets, PPC hygiene), tracking in set-ups and incidents. Full role list to confirm. | 31 Oct, Austin |
+| D28 | **Every baseline in Set up (lead flow, market, churn and the rest) is also a Sandbox lever.** The Sandbox design is to be agreed in a dedicated session. | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
