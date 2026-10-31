@@ -12,6 +12,7 @@
 //
 // Time runs from -warmup to H; everything reported is measured over [0, H].
 
+import { withAvailability, availabilityBase } from "./availability";
 import { activeChannels, capacityFactors, channelMonth, keyFactors, planChannels, withMaxRework, type FeeRise } from "./channels";
 import {
   AWAY_PRESSURE,
@@ -846,7 +847,8 @@ export function runOnce(
   sampleMonthly: boolean | readonly number[] = false,
 ): ReplicationResult {
   // Groups and child processes are only a view: runs see leaf steps (a no-op for flat models).
-  model = withClientGroups(flattenModel(model));
+  // (Team time and ramp become a capacity channel on the run's months: availability.ts.)
+  model = withAvailability(withClientGroups(flattenModel(model)), typeof sampleMonthly === "object" ? sampleMonthly : undefined);
   const streams = new Streams(seed);
   let labels = streamLabels.get(model);
   if (!labels) streamLabels.set(model, (labels = new StreamLabels()));
@@ -863,6 +865,9 @@ export function runOnce(
   let peopleModel = resolvePeople(model);
   // Capacity channel: each person's factor per month. The people are copied (their capacity changes during the run), month 0's factor applies from the start.
   const capPlan = ch?.capacity ? capacityFactors(ch, Object.keys(peopleModel), plan!.n) : null;
+  // Team time and ramp lower the hours for client work, not the hours paid for: paid hours come from the model's own capacity channel alone.
+  const avail = model.channels ? availabilityBase(model.channels) : null;
+  const paidPlan = avail ? (avail.base?.capacity ? capacityFactors(avail.base, Object.keys(peopleModel), plan!.n) : null) : capPlan;
   const baseCapacity = new Map<string, number>();
   if (capPlan) {
     peopleModel = { ...peopleModel };
@@ -3355,13 +3360,19 @@ export function runOnce(
     const f = capPlan?.byPerson.get(p.id);
     return f ? baseCapacity.get(p.id)! * f[m]! : p.person.capacity;
   };
+  /** A person's paid hours a week in channel month `m`: their capacity times the model's own capacity channel, not team time or ramp. */
+  const paidAt = (p: PersonState, m: number): number => {
+    const f = paidPlan?.byPerson.get(p.id);
+    return f ? baseCapacity.get(p.id)! * f[m]! : (baseCapacity.get(p.id) ?? p.person.capacity);
+  };
   /** Whether a capacity or role-cost channel makes this person's paid hours or cost change during the run. */
   const paidVaries = (p: PersonState): boolean => Boolean(capPlan?.byPerson.has(p.id) || (plan && plan.roleCost.size));
   /** Contracted hours and what they cost over [a, b] of the window (inside the person's time on the team), month by month as the channels change them. */
-  const paidOver = (p: PersonState, a: number, b: number): { hours: number; cost: number } => {
+  const paidOver = (p: PersonState, a: number, b: number): { hours: number; cost: number; payHours: number } => {
     let hours = 0;
     let cost = 0;
-    if (!(b > a)) return { hours, cost };
+    let payHours = 0;
+    if (!(b > a)) return { hours, cost, payHours };
     const starts = plan!.starts;
     for (let m = chM(a); m < plan!.n; m++) {
       const lo = m === 0 ? a : Math.max(a, starts[m - 1]!);
@@ -3369,11 +3380,14 @@ export function runOnce(
       if (hi > lo) {
         const h = (capacityAt(p, m) * (hi - lo)) / hpw;
         hours += h;
-        cost += h * rateOf(p, m);
+        // (Without team time or ramp the hours worked and the hours paid are the same number.)
+        const pay = avail ? (paidAt(p, m) * (hi - lo)) / hpw : h;
+        payHours += pay;
+        cost += pay * rateOf(p, m);
       }
       if (hi >= b) break;
     }
-    return { hours, cost };
+    return { hours, cost, payHours };
   };
   /**
    * The month-by-month sums as this replication's result: hours available less leave (and before a planned start or
@@ -3424,7 +3438,7 @@ export function runOnce(
           const present = Math.max(0, Math.min(b, own2) - Math.max(a, own1));
           const rate = plan && plan.roleCost.size ? rateOf(p, m) : rate0;
           overtimeCostM[m]! += ot[m]! * rate;
-          return (capM(m) * present * rate) / hpw;
+          return ((avail ? paidAt(p, m) : capM(m)) * present * rate) / hpw;
         });
         labourByPerson[p.id] = mine;
         for (let m = 0; m < nM; m++) labour[m]! += mine[m]!;
@@ -3605,7 +3619,7 @@ export function runOnce(
     if (ot > 0) {
       overtimeHours += ot;
       // Overtime is costed at the person's rate (with a role-cost channel, the mean of the run's rates over their paid hours).
-      overtimeCost += ot * (paid && paid.hours > 0 ? paid.cost / paid.hours : rateOf(p));
+      overtimeCost += ot * (paid && paid.payHours > 0 ? paid.cost / paid.payHours : rateOf(p));
     }
     // Paid hours: contracted capacity while on the team. Leave is paid (it only reduces the hours available).
     if (!model.payHidden) labourCost += paid ? paid.cost : cap * rateOf(p);
@@ -4067,7 +4081,7 @@ export function monthBounds(H: number, monthHours: number, starts?: readonly num
 }
 
 export function simulate(model: EngineModel, reps = 30, seed = 1, options: SimulateOptions = {}): SimulationResult {
-  model = withClientGroups(flattenModel(model));
+  model = withAvailability(withClientGroups(flattenModel(model)), options.monthly ? options.monthStarts : undefined);
   const runs: ReplicationResult[] = [];
   let trace: TraceEntity[] | null = null;
   const ch = activeChannels(model);

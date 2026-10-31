@@ -354,4 +354,66 @@ describe("item 4: per-client overrides", () => {
   });
 });
 
+describe("item 5: team time and ramp", () => {
+  const solo = (ann: Partial<EnginePerson>, o: Opts = {}): EngineModel =>
+    model({ c: client() }, { people: { ann: { name: "Ann", roles: ["r"], capacity: HPW, ...ann } }, work: 1, ...o });
+  const monthly = (m: EngineModel) => simulate(m, 1, 1, { monthly: true }).monthly!;
+  const hours = (m: EngineModel) => monthly(m).people.ann!.map((x) => x?.capacity ?? null);
+
+  it("no team time and no ramp: the model runs as it did", () => {
+    expect(hours(solo({}))).toEqual([40, 40, 40, 40, 40, 40]);
+  });
+
+  it("team time takes its share off every month's hours", () => {
+    for (const h of hours(solo({ reservedShare: 0.25 }))) expect(h).toBeCloseTo(30, 9);
+  });
+
+  it("a ramp of [0.4, 0.6, 0.8] lowers the hours in the first three months only", () => {
+    const h = hours(solo({ ramp: [0.4, 0.6, 0.8] }));
+    expect(h.map((v) => Math.round(v! * 1000) / 1000)).toEqual([16, 24, 32, 40, 40, 40]);
+  });
+
+  it("a ramp starts in the month the person's start date falls in, and team time multiplies it", () => {
+    const monthHours = (52 / 12) * HPW;
+    // Starts in month 2 (the third): zero hours before, then 0.4, 0.6, 0.8 of the hours left after 25% team time.
+    const h = hours(solo({ from: 2.5 * monthHours, ramp: [0.4, 0.6, 0.8], reservedShare: 0.25 }, { weeks: 52 }));
+    // (Hours a week they have: half of month 2 is before the start date, so month 2 is half of 0.4 x 30 = 12.)
+    expect(h[0]).toBeCloseTo(0, 9);
+    expect(h[1]).toBeCloseTo(0, 9);
+    expect(h[2]).toBeCloseTo(6, 9);
+    expect(h[3]).toBeCloseTo(0.6 * 30, 9);
+    expect(h[4]).toBeCloseTo(0.8 * 30, 9);
+    expect(h[5]).toBeCloseTo(30, 9);
+  });
+
+  it("composes with the capacity channel: both factors apply", () => {
+    const m = solo({ reservedShare: 0.25 });
+    // (A model with channels is run on the channels' own months: the run's month starts.)
+    const starts = [1, 2, 3, 4, 5].map((k) => k * (52 / 12) * HPW);
+    m.channels = { starts, capacity: { ann: [1, 1, 1, 0.5, 0.5, 0.5] } };
+    const h = simulate(m, 1, 1, { monthly: true, monthStarts: starts }).monthly!.people.ann!.map((x) => x?.capacity ?? null);
+    expect(h.slice(0, 3).every((v) => Math.abs(v! - 30) < 1e-9)).toBe(true);
+    expect(h.slice(3).every((v) => Math.abs(v! - 15) < 1e-9)).toBe(true);
+  });
+
+  it("the utilisation denominator is the reduced hours: the same work reads as a bigger share", () => {
+    const plain = runOnce(solo({}), 1, false).people.ann!;
+    const reserved = runOnce(solo({ reservedShare: 0.25 }), 1, false).people.ann!;
+    expect(plain.servicingHours).toBeGreaterThan(0);
+    expect(reserved.servicingHours).toBeCloseTo(plain.servicingHours, 9);
+    expect(reserved.servicing).toBeCloseTo(plain.servicing / 0.75, 9);
+  });
+
+  it("paid hours (the cost of labour) are not reduced by team time or a ramp", () => {
+    const labour = (m: EngineModel) => runOnce(m, 1, false).labourCost;
+    expect(labour(solo({ reservedShare: 0.25, ramp: [0.4, 0.6] }))).toBeCloseTo(labour(solo({})) as number, 9);
+  });
+
+  it("availabilityFloor keeps its own meaning: a person with no hours left still gets the floor share for work", () => {
+    const r = runOnce(solo({ ramp: [0] }, { weeks: 4 }), 1, false);
+    // Month 0 has no hours for client work; tasks still finish, stretched by the floor (8% of a week by default).
+    expect(r.steps.task!.departures).toBeGreaterThan(0);
+  });
+});
+
 // (later items append below)
