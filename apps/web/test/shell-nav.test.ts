@@ -22,7 +22,7 @@ describe("workspaceNav: groups and order", () => {
       ["overview", "processes"],
       ["issues", "solutions", "library"],
       ["setup-clients", "setup-people"],
-      ["people", "sandbox", "settings", "access"],
+      ["capacity", "sandbox", "settings", "access"],
     ]);
   });
   it("labels the items as the prototype does", () => {
@@ -34,7 +34,7 @@ describe("workspaceNav: groups and order", () => {
       "Block library",
       "Tiers & clients",
       "People & roles",
-      "People",
+      "Capacity",
       "Sandbox",
       "Settings",
       "Access",
@@ -69,9 +69,9 @@ describe("workspaceNav: the active item", () => {
     ] as const)
       expect(active(nav(path))).toEqual([key]);
   });
-  it("is People on its own page, and not on Settings", () => {
-    expect(active(nav("/w/s/people"))).toEqual(["people"]);
-    for (const p of ["/w/s", "/w/s/settings", `/w/s/p/${PID}`]) expect(item(nav(p), "people")?.active).toBe(false);
+  it("is Capacity on its own page, and not on Settings", () => {
+    expect(active(nav("/w/s/capacity"))).toEqual(["capacity"]);
+    for (const p of ["/w/s", "/w/s/settings", `/w/s/p/${PID}`]) expect(item(nav(p), "capacity")?.active).toBe(false);
   });
   it("marks at most one item", () => {
     for (const p of ["/w/s", "/w/s/issues", "/w/s/settings", "/w/s/settings/access", "/w/s/nowhere"]) expect(active(nav(p)).length).toBeLessThanOrEqual(1);
@@ -92,7 +92,7 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/blocks",
       "/w/s/setup/clients",
       "/w/s/setup/people",
-      "/w/s/people",
+      "/w/s/capacity",
       "/w/s/sandbox",
       "/w/s/settings",
       "/w/s/settings/access",
@@ -118,7 +118,7 @@ describe("workspaceNav: counts", () => {
   });
   it("has no count where nothing is counted", () => {
     const g = nav("/w/s", { counts });
-    for (const key of ["overview", "library", "people", "settings", "access"]) expect(item(g, key)?.count).toBeUndefined();
+    for (const key of ["overview", "library", "capacity", "settings", "access"]) expect(item(g, key)?.count).toBeUndefined();
   });
   it("leaves the count off when none is given", () => {
     for (const i of flatItems(nav("/w/s"))) expect(i.count).toBeUndefined();
