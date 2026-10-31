@@ -104,7 +104,7 @@ export const GOLDEN_MODELS: GoldenModel[] = [
   {
     name: "capacity",
     description:
-      "The client capacity app's example agency (capacityModel, from the prototype; engine 1.15.0): two departments of three tiers, 26 people with team time and portfolios, 13 named clients beside the counted ones, servicing steps driven by what each tier gets (words, links, channels, ad hoc by chance and requests), a named client's own overrides and hand-holding, and won clients placed on the least busy person who serves the tier. Run month by month, with where each person's time goes by step and their clients by service.",
+      "The client capacity app's example agency (capacityModel, from the prototype; engine 1.16.0): two departments of three tiers, 26 people with team time and portfolios, 13 named clients beside the counted ones, servicing steps driven by what each tier gets (words, links, channels, ad hoc by chance and requests), a named client's own overrides and hand-holding, and won clients placed on the least busy person who serves the tier. Run month by month, with where each person's time goes by step (and by part of the step, before and after the changes, with the hours each change freed) and their clients by service.",
     model: capacityModel,
     seed: 1,
     reps: 30,

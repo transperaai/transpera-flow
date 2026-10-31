@@ -425,12 +425,12 @@ export interface EngineStep {
   /**
    * Shares of the step's hands-on time (D6) that can be automated, augmented or only done by hand; they sum to 1. Changes
    * act on the first two (`stepParts`). Omitted: the whole time is manual and no change touches it, as before this field
-   * existed. Not read by the simulation yet (P3).
+   * existed. Read by the simulation from engine 1.16.0.
    */
   split?: { automatable: number; augmentable: number; manual: number };
   /**
    * × on the step's time for a client of that tier key (D7), e.g. `{ T1: 1.5, T3: 0.7 }`. A tier not listed is 1. Omitted: 1
-   * for every tier, as before this field existed. Not read by the simulation yet (P3).
+   * for every tier, as before this field existed. Read by the simulation from engine 1.16.0.
    */
   tierMultiplier?: Record<string, number>;
   /** Where each base value came from (requirements section 7). Reporting only: never changes the run. */
@@ -447,7 +447,7 @@ export type StepChangeEffect =
 
 /**
  * An automation or augmentation that acts on parts of steps (D8; requirements section 7): never a new time. The future time
- * is worked out from the step's base time and split (`stepParts`). Not read by the simulation yet (P3).
+ * is worked out from the step's base time and split (`stepParts`). Read by the simulation from engine 1.16.0.
  */
 export interface EngineStepChange {
   id: string;
@@ -669,7 +669,7 @@ export interface EngineModel {
   placeNewClients?: "round-robin" | "least-busy";
   /**
    * Automations and augmentations acting on steps' parts (`EngineStepChange`). Omitted or empty: no step's time is changed,
-   * as before this field existed. Not read by the simulation yet (P3).
+   * as before this field existed. Read by the simulation from engine 1.16.0.
    */
   changes?: EngineStepChange[];
   entry: string;
