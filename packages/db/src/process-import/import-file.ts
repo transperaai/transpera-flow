@@ -166,6 +166,12 @@ function v2StepFields(s: ProcessFile["steps"][number], ids: FileIds, assumptions
   if (s.tool) out.tool = s.tool;
   if (s.sla_hours !== undefined) out.sla_hours = s.sla_hours;
   if (s.waiting_now !== undefined) out.current_wip = s.waiting_now;
+  // Capacity base values (P4): the same meanings in the file and in the step.
+  if (s.split) out.split = s.split;
+  if (s.split_notes) out.split_notes = s.split_notes;
+  if (s.tier_multiplier) out.tier_multiplier = s.tier_multiplier;
+  if (s.to_client_manager) out.to_client_manager = true;
+  if (s.sources) out.sources = s.sources;
   const evidence: NonNullable<ImportStepJson["evidence"]> = [];
   const values: Record<EvidenceField, number | undefined> = { hands_on_hours: s.hands_on_hours, wait_hours: s.wait_hours, rework_rate: s.rework_rate, waiting_now: s.waiting_now, sla_hours: s.sla_hours };
   for (const field of Object.keys(COLUMN) as EvidenceField[]) {

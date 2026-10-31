@@ -51,7 +51,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     return { ...fields, href: `${base}${path}`, active: active ?? matches(rest, path) };
   };
   const company: NavItem[] = [
-    item({ key: "people", label: "People", path: "/people", icon: "people" }),
+    item({ key: "capacity", label: "Capacity", path: "/capacity", icon: "people" }),
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];

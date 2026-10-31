@@ -79,7 +79,7 @@ const html = async (page: Page, p: unknown = props()) => renderToStaticMarkup((a
 const PAGES: [string, () => Promise<Page>][] = [
   ["/issues", async () => (await import("@/app/w/[slug]/issues/page")).default as Page],
   ["/solutions", async () => (await import("@/app/w/[slug]/solutions/page")).default as Page],
-  ["/people", async () => (await import("@/app/w/[slug]/people/page")).default as Page],
+  ["/capacity", async () => (await import("@/app/w/[slug]/capacity/page")).default as Page],
   ["/sandbox", async () => (await import("@/app/w/[slug]/sandbox/page")).default as Page],
   ["/settings/calibration", async () => (await import("@/app/w/[slug]/settings/calibration/page")).default as Page],
   ["/overview", async () => (await import("@/app/w/[slug]/overview/page")).default as Page],
@@ -117,8 +117,8 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
 
     it.each(PAGES)("%s gives an edit button to editors and none to readers", async (path, load) => {
       const out = await html(await load());
-      // The People page has no action to call (role-gating.test.ts), so with no draft to open its editors get links only.
-      if (canEdit && path === "/people" && variant === "company map only") {
+      // The Capacity page has no action to call (role-gating.test.ts), so with no draft to open its editors get links only.
+      if (canEdit && path === "/capacity" && variant === "company map only") {
         expect(out).not.toContain("data-edit-entry");
         expect(out).toContain(`href="/w/${FRESH_SLUG}/processes"`);
       } else if (canEdit) expect(out).toContain("data-edit-entry");
@@ -156,16 +156,23 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
   });
 });
 
-describe("People with nothing published", () => {
+describe("People redirects to Capacity", () => {
+  it("sends the old People address to the Capacity page", async () => {
+    const people = (await import("@/app/w/[slug]/people/page")).default as unknown as Page;
+    await expect(html(people)).rejects.toThrow(`REDIRECT /w/${FRESH_SLUG}/capacity`);
+  });
+});
+
+describe("Capacity with nothing published", () => {
   it("points an editor to Set up, People & roles and shows a reader nothing more than the sentence", async () => {
-    const people = (await import("@/app/w/[slug]/people/page")).default as Page;
+    const people = (await import("@/app/w/[slug]/capacity/page")).default as Page;
     const editor = await html(people);
     expect(editor).toContain("Add people in Set up");
-    expect(editor).toContain(`href="/w/${FRESH_SLUG}/setup/people#people-heading"`);
+    expect(editor).toContain(`href="/w/${FRESH_SLUG}/setup/people"`);
     state.canEdit = false;
     const reader = await html(people);
     expect(reader).not.toContain("Add people in Set up");
-    expect(reader).toContain("How busy each person is, and how healthy your clients are, come from a simulation of a published process.");
+    expect(reader).toContain("Capacity, and who has room for more clients, comes from a simulation of a published process.");
   });
 });
 

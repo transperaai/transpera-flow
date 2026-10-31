@@ -24,7 +24,7 @@ import {
 import { resolvePurpose, workspacePurposes, type PurposeSource } from "./purposes";
 import { engineClientCapacity, enginePersonCapacity, engineRoleUnit, engineTierClientGroups, engineTierService, tierContext, type TierContext } from "./capacity-model";
 import { engineRecurrence } from "./servicing";
-import type { DistParams, Distribution, EdgeRow, LeadSourceRow, ProcessBundle, ProcessPart, SeasonalityRow, StepRow, WorkspaceSettings } from "./types";
+import { STEP_SOURCE_LABELS, type DistParams, type Distribution, type EdgeRow, type LeadSourceRow, type ProcessBundle, type ProcessPart, type SeasonalityRow, type StepRow, type StepSourceLabel, type WorkspaceSettings } from "./types";
 
 const WORKING_DAYS_PER_WEEK = 5;
 const DAY_MS = 86_400_000;
@@ -176,6 +176,7 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
         work: Number(step.work_hours),
         wait: Number(step.wait_hours),
         rework: Number(step.rework_rate),
+        ...stepBaseValues(step),
         ...optional("workDist", engineDistribution(step.work_dist, step.work_params, Number(step.work_hours))),
         ...optional("waitDist", engineDistribution(step.wait_dist, step.wait_params, Number(step.wait_hours))),
         // Entered WIP (0 included) makes the run start from it instead of a warm-up.
@@ -801,6 +802,44 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
     };
   }
   return people;
+}
+
+/**
+ * A step's base values for the engine (capacity P4, ADR 0022): `split`, `tierMultiplier`, `toClientManager` and the `sources` of
+ * each value. Every one is left out when the column is null or false (and `sources` when no label is stored), so a step with none of
+ * them maps exactly as it did before the columns existed. Never an empty object.
+ */
+export function stepBaseValues(step: Pick<StepRow, "split" | "tier_multiplier" | "to_client_manager" | "provenance">): Partial<
+  Pick<EngineStep, "split" | "tierMultiplier" | "toClientManager" | "sources">
+> {
+  const out: Partial<Pick<EngineStep, "split" | "tierMultiplier" | "toClientManager" | "sources">> = {};
+  const sp = step.split;
+  if (sp && typeof sp === "object") {
+    const a = num(sp.automatable);
+    const g = num(sp.augmentable);
+    const m = num(sp.manual);
+    if (a !== null && g !== null && m !== null) out.split = { automatable: a, augmentable: g, manual: m };
+  }
+  const tm = step.tier_multiplier;
+  if (tm && typeof tm === "object") {
+    const entries = Object.entries(tm).flatMap(([k, v]) => (num(v) !== null ? [[k, num(v)!] as const] : []));
+    if (entries.length) out.tierMultiplier = Object.fromEntries(entries);
+  }
+  if (step.to_client_manager === true) out.toClientManager = true;
+  const prov = step.provenance as Record<string, { source?: unknown } | undefined> | null;
+  const label = (key: string) => {
+    const src = prov?.[key]?.source;
+    return typeof src === "string" && (STEP_SOURCE_LABELS as readonly string[]).includes(src) ? (src as StepSourceLabel) : undefined;
+  };
+  const sources: NonNullable<EngineStep["sources"]> = {};
+  const work = label("work");
+  const split = label("split");
+  const tier = label("tier_multiplier");
+  if (work) sources.work = work;
+  if (split) sources.split = split;
+  if (tier) sources.tierMultiplier = tier;
+  if (Object.keys(sources).length) out.sources = sources;
+  return out;
 }
 
 const optional = <K extends string, V>(key: K, value: V | undefined) =>

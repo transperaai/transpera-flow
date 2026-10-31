@@ -22,6 +22,10 @@
   --crit-soft: #fbe1e0;
   --warn-soft: #fdf0d1;
   --good-soft: #d8f3e8;
+  /* The work split's three parts (capacity P4, from the prototype): the share that can be automated, augmented, or stays manual. */
+  --auto: #1f5f8b;
+  --aug: #6a9fc6;
+  --man: #c9cfd8;
   /* The Editor's colour (issue #104): a screen in this purple is always an editing screen. */
   --edit: #6d3fc4;
   --edit-soft: #ece4fa;
@@ -118,6 +122,9 @@
     --crit-soft: #4a2424;
     --warn-soft: #45360f;
     --good-soft: #153f30;
+    --auto: #6fb0de;
+    --aug: #3f6f93;
+    --man: #3a4554;
     --edit: #a37ef0;
     --edit-soft: #2e2248;
     --edit-fg: #140a26;
@@ -158,6 +165,9 @@
   --crit-soft: #4a2424;
   --warn-soft: #45360f;
   --good-soft: #153f30;
+  --auto: #6fb0de;
+  --aug: #3f6f93;
+  --man: #3a4554;
   --edit: #a37ef0;
   --edit-soft: #2e2248;
   --edit-fg: #140a26;

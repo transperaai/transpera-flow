@@ -1,6 +1,7 @@
 // Field values as words, for conflict prompts and draft changes.
 
-import { workspacePurposes, type ProcessBundle } from "@transpera-flow/db";
+import { workspacePurposes, type ProcessBundle, type StepSplit, type StepSplitNotes, type TierMultiplier } from "@transpera-flow/db";
+import { describeSplit } from "./base-values";
 import { formatHours } from "@/lib/format";
 import { KIND_LABELS, OUTCOME_LABELS } from "./commands";
 import { FIELD_LABELS } from "./labels";
@@ -24,7 +25,13 @@ export const fieldLabel = (field: string): string => FIELD_LABELS[field] ?? fiel
 export function describeValue(field: string, v: Value, names: Map<string, string>): string {
   if (field === "purpose") return v === null || v === "" ? "Automatic" : (names.get(String(v)) ?? "a removed category");
   if (v === null || v === "") return field === "rework_to_step_id" ? "the step itself" : "blank";
-  if (typeof v === "object") return v.source;
+  if (typeof v === "object") {
+    if (field === "split") return describeSplit(v as StepSplit);
+    if (field === "tier_multiplier") return Object.entries(v as TierMultiplier).map(([tier, m]) => `${tier} ×${m}`).join(", ") || "blank";
+    if (field === "split_notes") return Object.values(v as StepSplitNotes).filter(Boolean).join(" · ") || "blank";
+    return String((v as { source?: unknown }).source ?? "");
+  }
+  if (field === "to_client_manager") return v ? "the client's manager" : "the role or person";
   if (field === "probability" || field === "rework_rate" || field === "lost_per_day_waiting" || field === "dropoff_benchmark") return `${Math.round(Number(v) * 1000) / 10}%`;
   if (field.endsWith("_id")) return names.get(String(v)) ?? "a removed item";
   if (field === "kind") return KIND_LABELS[v as keyof typeof KIND_LABELS] ?? String(v);

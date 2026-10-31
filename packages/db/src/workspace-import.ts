@@ -106,7 +106,7 @@ export const IMPORT_COLUMNS = {
   steps: cols(
     "steps", "id", "assumption", "child_process_id", "conflict", "cost_override", "current_wip", "dropoff_benchmark", "expected_wait_hours", "entry_step_id",
     "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "purpose", "replaced_by", "rework_rate", "rework_to_step_id",
-    "role_id", "sla_hours", "target_cycle_hours", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
+    "role_id", "sla_hours", "split", "split_notes", "target_cycle_hours", "tier_multiplier", "to_client_manager", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
   ),
   edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id"),
   sandbox_scenarios: cols("sandbox_scenarios", "id", "parent_id", "name", "description", "changes", "horizon_months", "start_date", "created_at"),

@@ -57,6 +57,10 @@ brief has a default: use it.
 | `p23-interface-brief.md` | `claude/cap-p23-interface` | none (engine types only). Merged in #251 |
 | `p2-engine-inputs-brief.md` | `claude/cap-p2-engine` | none (engine only). Merged in #252 |
 | `p3-engine-changes-brief.md` | `claude/cap-p3-changes` | none (engine only). Merged in #254 |
-| `p4-editor-brief.md` | `claude/cap-p4-editor` | `20270120000000`–`20270120009999` |
+| `p4-editor-brief.md` | `claude/cap-p4-editor` | `20270120000000`–`20270120009999`. Merged in #258 |
 | `p2b-mapping-brief.md` | `claude/cap-p2b-mapping` | `20270121000000`–`20270121009999` |
-| `p5-capacity-brief.md` | `claude/cap-p5-capacity` | `20270122000000`–`20270122009999` |
+| `p5-capacity-brief.md` | `claude/cap-p5-capacity` | `20270122000000`–`20270122009999`. Merged in #257 |
+| `p6-overview-brief.md` | `claude/cap-p6-overview` | none |
+| `p7-sandbox-brief.md` | `claude/cap-p7-sandbox` | `20270123000000`–`20270123009999` |
+| `p8-issues-brief.md` | `claude/cap-p8-issues` | `20270124000000`–`20270124009999` |
+| `p9-cleanup-brief.md` | `claude/cap-p9-cleanup` | `20270125000000`–`20270125009999` |

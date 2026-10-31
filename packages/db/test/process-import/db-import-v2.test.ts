@@ -111,6 +111,36 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues);
   });
 
+  it("a step's work split, split notes, tier multipliers, manager routing and source labels land in the draft; a file without them leaves the columns empty", async () => {
+    const file = v2((f) => {
+      const proposal = f.steps.find((s: { id: string }) => s.id === "proposal");
+      proposal.tier_multiplier = { T1: 1.3, T3: 0.8 };
+      proposal.to_client_manager = true;
+      proposal.sources = { ...proposal.sources, tier_multiplier: "calculator" };
+    });
+    const r = await importProcessFile(editorCtx, file, { workspaceId, source: "v2-base.json" });
+    const steps = Object.fromEntries((await q("select * from steps where revision_id = $1", [r.revision_id])).map((s) => [s.name, s]));
+    const proposal = steps["Write proposal"];
+    expect(proposal.split).toEqual({ automatable: 0.2, augmentable: 0.5, manual: 0.3 });
+    expect(proposal.split_notes).toEqual({
+      automatable: "Pull the scope and prices from the template",
+      augmentable: "Draft the approach",
+      manual: "Check it fits what the client asked for",
+    });
+    expect(proposal.tier_multiplier).toEqual({ T1: 1.3, T3: 0.8 });
+    expect(proposal.to_client_manager).toBe(true);
+    // The source labels sit beside the evidence marks in the step's provenance, stamped by the upload's user.
+    expect(proposal.provenance.work).toMatchObject({ source: "interview", by: editorId });
+    expect(proposal.provenance.split).toMatchObject({ source: "estimate", by: editorId });
+    expect(proposal.provenance.tier_multiplier).toMatchObject({ source: "calculator" });
+    expect(proposal.provenance.work_hours.evidence).toHaveLength(1);
+    // Every other step has none.
+    for (const [name, step] of Object.entries(steps) as [string, Record<string, unknown>][]) {
+      if (name === "Write proposal") continue;
+      expect([name, step.split, step.split_notes, step.tier_multiplier, step.to_client_manager]).toEqual([name, null, null, null, false]);
+    }
+  });
+
   it("the preview says what each section would make, and writes nothing", async () => {
     const before = await counts();
     const file = v2((f) => {

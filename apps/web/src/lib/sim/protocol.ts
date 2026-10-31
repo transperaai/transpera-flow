@@ -9,6 +9,8 @@ export interface SimRequest {
   monthly?: boolean;
   /** With `monthly`: where each month after the first starts, in working hours (calendar months; see `calendarMonthStarts`). */
   monthStarts?: number[];
+  /** Also report where each person's time goes by step, and their clients by service (`SimulationResult.personTime`; the Capacity page). */
+  personTime?: boolean;
   /** Start from this state instead of sizing a warm-up from the model (the Sandbox pins a scenario's warm-up to the live model's). */
   initialState?: InitialState;
 }

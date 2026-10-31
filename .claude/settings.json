@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(bash packages/db/scripts/prod-sql.sh *)",
-      "Bash(packages/db/scripts/prod-sql.sh *)"
+      "Bash(packages/db/scripts/prod-sql.sh *)",
+      "Bash(packages/db/scripts/neon-preview-migrate.sh)",
+      "Bash(packages/db/scripts/neon-preview-migrate.sh --dry-run)"
     ]
   }
 }

@@ -58,7 +58,7 @@ async function as<T>(claims: Record<string, unknown>, fn: (c: pg.Client) => Prom
 }
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows as Row[];
 const rpc = (c: pg.Client, fn: string, ...args: unknown[]) => c.query(`select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) as r`, args).then((r) => r.rows[0].r);
-const allSteps = () => q("select to_jsonb(s) - 'purpose' as j, to_jsonb(s) -> 'purpose' as purpose, updated_at from public.steps s order by revision_id, id");
+const allSteps = () => q("select to_jsonb(s) - 'purpose' - 'split' - 'split_notes' - 'tier_multiplier' - 'to_client_manager' as j, to_jsonb(s) -> 'purpose' as purpose, updated_at from public.steps s order by revision_id, id");
 
 async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; message: string }> {
   try {

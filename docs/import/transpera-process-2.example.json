@@ -86,6 +86,20 @@
       "hands_on_hours": 3,
       "wait_hours": 24,
       "waiting_now": 2,
+      "split": {
+        "automatable": 0.2,
+        "augmentable": 0.5,
+        "manual": 0.3
+      },
+      "split_notes": {
+        "automatable": "Pull the scope and prices from the template",
+        "augmentable": "Draft the approach",
+        "manual": "Check it fits what the client asked for"
+      },
+      "sources": {
+        "work": "interview",
+        "split": "estimate"
+      },
       "evidence": {
         "hands_on_hours": [
           {
