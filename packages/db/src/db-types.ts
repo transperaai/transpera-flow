@@ -709,7 +709,23 @@ export interface Steps {
   rework_to_step_id: string | null;
   role_id: string | null;
   sla_hours: Numeric | null;
+  /**
+   * Shares {automatable, augmentable, manual} of the step's hands-on time, summing to 1 (null: all manual). Capacity P4, ADR 0022.
+   */
+  split: Json | null;
+  /**
+   * One line of words for each part of the split. Capacity P4.
+   */
+  split_notes: Json | null;
   target_cycle_hours: Numeric | null;
+  /**
+   * x on the step's time per tier key, e.g. {"T1": 1.5}; a tier not listed is 1. Capacity P4.
+   */
+  tier_multiplier: Json | null;
+  /**
+   * The step goes to the client's manager (D32), falling back to its role. Capacity P4.
+   */
+  to_client_manager: Generated<boolean>;
   tool: string | null;
   updated_at: Generated<string>;
   wait_dist: Generated<string>;

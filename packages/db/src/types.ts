@@ -190,6 +190,12 @@ export interface ProcessRevisionRow {
   status: "draft" | "published" | "superseded";
 }
 
+/** The three parts of a step's hands-on time (`EngineStep.split`). Type aliases, so they stay assignable to the jsonb columns. */
+export type StepSplit = { automatable: number; augmentable: number; manual: number };
+export type StepSplitNotes = { automatable?: string; augmentable?: string; manual?: string };
+/** Tier key → × on the step's time. */
+export type TierMultiplier = { [tier: string]: number };
+
 export interface StepRow {
   id: string;
   revision_id: string;
@@ -212,6 +218,14 @@ export interface StepRow {
   tool: string | null;
   /** What the step achieves: a key of the workspace's `settings.purposes`; null is Automatic (`resolvePurpose`). Sandbox phase 4. */
   purpose: string | null;
+  /** Shares of the step's hands-on time that can be automated, augmented or only done by hand; sum to 1. Null: all manual (capacity P4). */
+  split: StepSplit | null;
+  /** One line of words for each part of the split. */
+  split_notes: StepSplitNotes | null;
+  /** × on the step's time per tier key; a tier not listed is 1. Null: 1 for every tier. */
+  tier_multiplier: TierMultiplier | null;
+  /** The step goes to the client's manager (D32), falling back to its role. */
+  to_client_manager: boolean;
   notes: string | null;
   /** Target hours for one visit to the step (queue + hands-on + wait); visits over it are SLA breaches. */
   sla_hours: number | null;
@@ -326,12 +340,18 @@ export type FallbackLoad = { [roleId: string]: number };
 /** Where a parameter's value came from (docs/PRD.md §3 Parameter provenance). */
 export type ProvenanceSource = "estimated" | "entered" | "measured";
 
+/** The source labels a step's base values carry (requirements section 7), in `steps.provenance.{work|split|tier_multiplier}.source`. */
+export type StepSourceLabel = "interview" | "calculator" | "measured" | "estimate";
+export const STEP_SOURCE_LABELS: readonly StepSourceLabel[] = ["interview", "calculator", "measured", "estimate"];
+/** The step values that carry a source label. `work` is the time per occurrence (`work_hours`). */
+export type StepSourcedValue = "work" | "split" | "tier_multiplier";
+
 /**
  * One value's provenance (the §5 `provenance jsonb` shape). A type alias, not
  * an interface, so it stays assignable to the jsonb column.
  */
 export type Provenance = {
-  source: ProvenanceSource;
+  source: ProvenanceSource | StepSourceLabel;
   /** When it was set (ISO timestamp). */
   at?: string;
   /** User who set it. */
@@ -612,7 +632,14 @@ export interface MarketScheduleRow {
  * week or month, or ad-hoc requests at random, `poisson_per_month` a month on
  * average. A type alias, so it stays assignable to the jsonb column.
  */
-export type RecurrenceJson = { every: "week" | "month"; times: number } | { poisson_per_month: number };
+export type RecurrenceJson =
+  | { every: "week" | "month"; times: number }
+  | { poisson_per_month: number }
+  /** Follows what the client's tier gets: `perMonth × value ÷ (per ?? 1)` tasks a month (`Recurrence` in the engine). */
+  | { perMonth: number; driver: RecurrenceDriver; per?: number };
+
+/** What a driver recurrence follows: a tier deliverable, or "adhoc" (the chance of a request × how many). */
+export type RecurrenceDriver = "words" | "links" | "techHours" | "meetings" | "builds" | "creativeSets" | "channels" | "adhoc";
 
 /**
  * A servicing process a service's clients run, and how often (docs/PRD.md

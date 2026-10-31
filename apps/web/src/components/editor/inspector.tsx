@@ -15,6 +15,7 @@ import { deleteSelection, hasPurpose, setStepPurposes, stepWarnings } from "@/li
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
 import type { BlockTools } from "./use-blocks";
+import type { TierSetup } from "@/lib/tier-setup";
 
 export function Inspector({
   bundle,
@@ -29,7 +30,11 @@ export function Inspector({
   draft,
   blocks,
   company = false,
+  tierSetup,
+  settingsHref,
 }: {
+  tierSetup?: TierSetup;
+  settingsHref?: string;
   bundle: ProcessBundle;
   editor: ProcessEditor;
   selected: Selection;
@@ -69,6 +74,8 @@ export function Inspector({
             stamp={stamp}
             sourcesHref={sourcesHref}
             draft={draft ? draft(step) : null}
+            tierSetup={tierSetup}
+            settingsHref={settingsHref}
           />
           <LinkedSources
             className="flex flex-col gap-1.5 border-t border-line pt-3"

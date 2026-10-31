@@ -271,7 +271,27 @@ export function citationConflict(label: string, field: EvidenceField, cites: rea
 // ---------------------------------------------------------------------------
 
 /** The step fields /2 reads on top of /1's. */
-export const STEP_FIELDS_2 = ["hands_on_range", "wait_range", "rework_to", "tool", "sla_hours", "waiting_now", "evidence", "assumed"];
+export const STEP_FIELDS_2 = [
+  "hands_on_range", "wait_range", "rework_to", "tool", "sla_hours", "waiting_now", "evidence", "assumed",
+  "split", "split_notes", "tier_multiplier", "to_client_manager", "sources",
+];
+
+/** The parts of a step's hands-on time (capacity P4): the work of gathering, of judging, of checking. */
+export const SPLIT_PARTS = ["automatable", "augmentable", "manual"] as const;
+export type SplitPart = (typeof SPLIT_PARTS)[number];
+/** What each part is in the interviews' words (the process-file skill's gather / judge / check). */
+export const SPLIT_PART_WORDS: Record<SplitPart, string> = { automatable: "automatable (gather)", augmentable: "augmentable (judge)", manual: "manual (check)" };
+/** The shares of a split must add up to 1 within this (the database checks the same). */
+export const SPLIT_SUM_TOLERANCE = 0.001;
+/** Where a base value came from (requirements section 7); the engine's `SourceLabel`. A test keeps the lists equal. */
+export const SOURCE_LABELS = ["interview", "calculator", "measured", "estimate"] as const;
+export type FileSourceLabel = (typeof SOURCE_LABELS)[number];
+/** The step values that carry a source label. */
+export const SOURCED_VALUES = ["work", "split", "tier_multiplier"] as const;
+export type SourcedValue = (typeof SOURCED_VALUES)[number];
+export const MAX_SPLIT_NOTE = 300;
+export const MAX_TIER_MULTIPLIER = 100;
+export const MAX_TIERS = 50;
 
 export interface StepExtras {
   hands_on_range?: FileRange;
@@ -282,6 +302,16 @@ export interface StepExtras {
   waiting_now?: number;
   evidence?: Partial<Record<EvidenceField, FileCitation[]>>;
   assumed?: Partial<Record<EvidenceField, string>>;
+  /** Shares of the step's hands-on time that can be automated, augmented or only done by hand; they add up to 1. */
+  split?: Record<SplitPart, number>;
+  /** One line of words for each part of the split. */
+  split_notes?: Partial<Record<SplitPart, string>>;
+  /** × on the step's time by tier key (a tier not listed is 1). */
+  tier_multiplier?: Record<string, number>;
+  /** The step goes to the client's manager, falling back to its role. */
+  to_client_manager?: boolean;
+  /** Where each base value came from. */
+  sources?: Partial<Record<SourcedValue, FileSourceLabel>>;
 }
 
 /** The numbers /1 already read for the step (hours, wait, rework), which the new fields are checked against. */
@@ -309,6 +339,86 @@ function readRange(v: unknown, label: string, what: string, max: number, given: 
   return { min: v.min, max: v.max };
 }
 
+/** The step's work split, tier multipliers, manager routing and source labels (capacity P4), with problems in plain words. */
+function readBaseValues(raw: Record<string, unknown>, label: string, env: Env, out: StepExtras): void {
+  if (raw.split !== undefined && raw.split !== null) {
+    const sp = raw.split;
+    if (!isObject(sp)) env.errors.push(`${label}: "split" should be {"automatable": 0.5, "augmentable": 0.3, "manual": 0.2}: the share of the step's time that can be automated, augmented, or only done by hand.`);
+    else {
+      unknownFields(sp, SPLIT_PARTS, `${label}, split`, env);
+      const missing = SPLIT_PARTS.filter((p) => sp[p] === undefined || sp[p] === null);
+      const bad = SPLIT_PARTS.filter((p) => !missing.includes(p) && (typeof sp[p] !== "number" || !Number.isFinite(sp[p]) || (sp[p] as number) < 0 || (sp[p] as number) > 1));
+      if (missing.length) env.errors.push(`${label}: the split needs a share for ${SPLIT_PARTS.map((p) => `"${p}"`).join(", ")}; ${missing.map((p) => `"${p}"`).join(" and ")} ${missing.length === 1 ? "is" : "are"} missing. Use 0 for a part that doesn't exist.`);
+      for (const p of bad) env.errors.push(`${label}: the split's ${p} share is ${typeof sp[p] === "number" ? sp[p] : "not a number"}, but a share runs from 0 to 1 (0.5 is half).`);
+      if (!missing.length && !bad.length) {
+        const parts = SPLIT_PARTS.map((p) => sp[p] as number);
+        const total = parts.reduce((a, b) => a + b, 0);
+        if (Math.abs(total - 1) > SPLIT_SUM_TOLERANCE) env.errors.push(`${label}: the split's shares add up to ${Math.round(total * 1000) / 10}%, but they must add up to 100%.`);
+        else out.split = { automatable: parts[0]!, augmentable: parts[1]!, manual: parts[2]! };
+      }
+    }
+  }
+  if (raw.split_notes !== undefined && raw.split_notes !== null) {
+    if (!isObject(raw.split_notes)) env.errors.push(`${label}: "split_notes" should be a line of words for each part, like {"automatable": "Pull spend and budgets"}.`);
+    else {
+      unknownFields(raw.split_notes, SPLIT_PARTS, `${label}, split_notes`, env);
+      const notes: Partial<Record<SplitPart, string>> = {};
+      for (const part of SPLIT_PARTS) {
+        const v = raw.split_notes[part];
+        if (v === undefined || v === null) continue;
+        if (typeof v !== "string") env.errors.push(`${label}: the split note for ${part} should be text.`);
+        else if (/[\r\n]/.test(v.trim())) env.errors.push(`${label}: the split note for ${part} should be one line.`);
+        else if (v.trim().length > MAX_SPLIT_NOTE) env.errors.push(`${label}: the split note for ${part} is ${v.trim().length} characters long; the most is ${MAX_SPLIT_NOTE}.`);
+        else if (v.trim()) notes[part] = v.trim();
+      }
+      if (Object.keys(notes).length) out.split_notes = notes;
+      if (Object.keys(notes).length && raw.split === undefined) env.warnings.push(`${label} has split_notes but no split, so the notes won't be used until the shares are given.`);
+    }
+  }
+  if (raw.tier_multiplier !== undefined && raw.tier_multiplier !== null) {
+    const tm = raw.tier_multiplier;
+    if (!isObject(tm)) env.errors.push(`${label}: "tier_multiplier" should give a number for each tier, like {"T1": 1.3, "T2": 1, "T3": 0.8}.`);
+    else {
+      const entries = Object.entries(tm);
+      if (entries.length > MAX_TIERS) env.errors.push(`${label}: tier_multiplier lists ${entries.length} tiers; the most is ${MAX_TIERS}.`);
+      const mult: Record<string, number> = {};
+      for (const [tier, v] of entries.slice(0, MAX_TIERS)) {
+        if (!tier.trim() || tier.trim().length > 40) env.errors.push(`${label}: a tier in tier_multiplier needs a name of 1 to 40 characters.`);
+        else if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > MAX_TIER_MULTIPLIER) env.errors.push(`${label}: the multiplier for tier ${q(tier)} should be a number from 0 to ${MAX_TIER_MULTIPLIER} (1 means the base time, 1.3 means 30% longer).`);
+        else mult[tier.trim()] = v;
+      }
+      if (Object.keys(mult).length) out.tier_multiplier = mult;
+    }
+  }
+  if (raw.to_client_manager !== undefined && raw.to_client_manager !== null) {
+    if (typeof raw.to_client_manager !== "boolean") env.errors.push(`${label}: to_client_manager should be true or false.`);
+    else if (raw.to_client_manager) {
+      out.to_client_manager = true;
+      if (typeof raw.role !== "string" || !raw.role.trim()) env.warnings.push(`${label} goes to the client's manager but has no role, so it has no one to fall back to when a client has no manager. Give it a role.`);
+    }
+  }
+  if (raw.sources !== undefined && raw.sources !== null) {
+    if (!isObject(raw.sources)) env.errors.push(`${label}: "sources" should say where each value came from, like {"work": "interview", "split": "estimate"}.`);
+    else {
+      const sources: Partial<Record<SourcedValue, FileSourceLabel>> = {};
+      for (const [key, v] of Object.entries(raw.sources)) {
+        if (!(SOURCED_VALUES as readonly string[]).includes(key)) {
+          env.warnings.push(`${label} has a source for ${q(key)}, which Transpera doesn't label (it labels ${SOURCED_VALUES.join(", ")}). It was ignored.`);
+          continue;
+        }
+        if (typeof v !== "string" || !(SOURCE_LABELS as readonly string[]).includes(v)) {
+          env.errors.push(`${label}: the source of ${key} is ${typeof v === "string" ? q(v) : "not text"}; use ${SOURCE_LABELS.join(", ")}.`);
+          continue;
+        }
+        sources[key as SourcedValue] = v as FileSourceLabel;
+      }
+      if (Object.keys(sources).length) out.sources = sources;
+      if (sources.split && raw.split === undefined) env.warnings.push(`${label} gives a source for the split but no split.`);
+      if (sources.tier_multiplier && raw.tier_multiplier === undefined) env.warnings.push(`${label} gives a source for the tier multipliers but no tier_multiplier.`);
+    }
+  }
+}
+
 /** What /2 adds to a step: ranges, where rework goes, the tool, the SLA, items waiting now, and the evidence for each value. */
 export function readStepExtras(raw: Record<string, unknown>, label: string, env: Env, given: GivenNumbers): StepExtras {
   const out: StepExtras = {};
@@ -329,6 +439,8 @@ export function readStepExtras(raw: Record<string, unknown>, label: string, env:
     if (!Number.isInteger(now)) env.errors.push(`${label}: waiting_now should be a whole number of items.`);
     else out.waiting_now = now;
   }
+
+  readBaseValues(raw, label, env, out);
 
   const stated: Record<EvidenceField, number | undefined> = {
     hands_on_hours: given.hands_on_hours,

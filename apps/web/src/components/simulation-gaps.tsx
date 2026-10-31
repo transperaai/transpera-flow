@@ -5,7 +5,7 @@
 // top of the process page and the Editor, and as a note on simulation results while any gap remains. It never blocks anything.
 
 import { TriangleAlert } from "lucide-react";
-import type { SimulationGap } from "@transpera-flow/db/simulation-gaps";
+import { blockersOf, notesOf, type SimulationGap } from "@transpera-flow/db/simulation-gaps";
 import { Help } from "@/components/help";
 import { cn } from "@/lib/utils";
 
@@ -67,17 +67,27 @@ export function MissingForSimulation({
   className?: string;
 }) {
   if (!gaps.length) return null;
+  // Notes (capacity P4: no work split, no source) are worth adding but nothing is wrong without them: they are listed apart and
+  // never counted in the title.
+  const blockers = blockersOf(gaps);
+  const notes = notesOf(gaps);
   return (
-    <details data-missing-for-simulation className={cn("group rounded-token border border-warn bg-warn-soft px-3 py-2 text-sm", className)}>
+    <details data-missing-for-simulation className={cn("group rounded-token border px-3 py-2 text-sm", blockers.length ? "border-warn bg-warn-soft" : "border-line bg-panel-2", className)}>
       <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
         <TriangleAlert aria-hidden className="size-4 shrink-0" />
-        <span>Missing for simulation ({gaps.length})</span>
+        <span>{blockers.length ? `Missing for simulation (${blockers.length})` : `Worth adding for capacity (${notes.length})`}</span>
         <span className="text-xs font-normal text-fg-2 group-open:hidden">Show</span>
         <span className="hidden text-xs font-normal text-fg-2 group-open:inline">Hide</span>
         <Help {...GAPS_HELP} />
       </summary>
-      <div className="mt-2">
-        <GapList gaps={gaps} onSelectStep={onSelectStep} settingsHref={settingsHref} />
+      <div className="mt-2 flex flex-col gap-2">
+        {blockers.length > 0 && <GapList gaps={blockers} onSelectStep={onSelectStep} settingsHref={settingsHref} />}
+        {notes.length > 0 && (
+          <div data-gap-notes>
+            {blockers.length > 0 && <p className="mb-1 text-xs font-semibold text-fg-2">Worth adding ({notes.length})</p>}
+            <GapList gaps={notes} onSelectStep={onSelectStep} settingsHref={settingsHref} />
+          </div>
+        )}
       </div>
     </details>
   );

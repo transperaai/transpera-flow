@@ -32,7 +32,7 @@ Every number carries evidence or an assumed reason. A stated number is kept, how
 - **Evidence** is the shortest verbatim stretch of one line that states the number, with `source`, `speaker` (the label as written), `time` (`00:03:12`, `page 3`, `cell B7`, `arrow from Review to Call`) and `value` in the field's units. Case and punctuation may differ; the words match.
 - **Assumed** is any reason a value is not a plain quote: a conversion (naming the day length Austin gave), a ceiling, a number the interviewer proposed, an approximation, a future date. A **guess** (a value no material states) is written only when Austin says "skip" or "use your best guess" for it, and its reason ends `(Austin said to assume)`.
 - **Silence.** A value nobody stated and Austin did not supply is left out, never invented. The app marks it missing, and the gap shows in the summary.
-- **Shapes.** A step's `evidence` and `assumed` are objects keyed by field, and only `hands_on_hours`, `wait_hours`, `rework_rate`, `waiting_now` and `sla_hours` take them: `"evidence": {"wait_hours": [{...}]}`, `"assumed": {"wait_hours": "reason"}`. A link's `evidence` is a list of quotes and its `assumed` a string. Every company, proposal and first-principles item takes `evidence` (a list) and `assumed` (a string).
+- **Shapes.** A step's `split`, `split_notes`, `tier_multiplier` and `sources` are plain objects (see "Base values for capacity"); they take no `evidence` of their own, so quote the line that gives the proportion in `notes` and label it in `sources`. A step's `evidence` and `assumed` are objects keyed by field, and only `hands_on_hours`, `wait_hours`, `rework_rate`, `waiting_now` and `sla_hours` take them: `"evidence": {"wait_hours": [{...}]}`, `"assumed": {"wait_hours": "reason"}`. A link's `evidence` is a list of quotes and its `assumed` a string. Every company, proposal and first-principles item takes `evidence` (a list) and `assumed` (a string).
 - **Units.** Everything is hours per item; shares run 0 to 1; minutes divide by 60 (twenty minutes is 0.33). A "day" converts at the company's day (7.5 hours when it works a 37.5-hour week), asked once in step 3 when no material says. Keep the speaker's words in the quote and the converted number in `value`, with the day length in `assumed`.
 - **Ranges.** A symmetric hedge ("two, three hours") is the midpoint in `hands_on_hours`, the bounds in `hands_on_range`, and the midpoint as the quote's `value`. A typical value with a tail ("usually an hour, sometimes a half-day") is the typical value, with the tail in `notes`. A **ceiling** ("within two weeks", "up to an hour") is the number to use: put it in `wait_hours` (or `hands_on_hours`) with an assumed reason that quotes it and says it is a maximum, and add the range when a minimum is known too ("some come back in a day").
 - **Conflict.** When sources give different numbers and Austin does not settle them, leave the value out and give each source's quote with its own `value`; when he settles one, use his number with both quotes kept. The checker reports the disagreement, and the app flags it on the draft and logs a perception gap when the largest is at least twice the smallest. For odds, give each branch both quotes, so the branches still add to 1 (one in three win: 0.33 for won, 0.67 for lost).
@@ -56,6 +56,20 @@ Every number carries evidence or an assumed reason. A stated number is kept, how
 - **Loops.** Work sent back to be redone is `rework_rate` with `rework_to` (the step it returns to; its own step when omitted), never a link back. A loop in the links exists only when a decision step decides when it stops.
 - **Order.** A step a speaker describes that another source omits is a step ("Tom does a pricing check Grace never mentions"). Say so in `notes` and in the summary's conflicts.
 - Leave `x` and `y` out. Names and ids are unique; ids are short (`first-look`).
+
+## Base values for capacity
+
+Three optional step fields feed the capacity app. Add one only when a material supports it; a step the sources are silent on gets none, and the summary lists it under **Missing for simulation**. Ask about each in step 3, with a suggested answer and its quote, like any other gap.
+
+- **`split`**: how the step's hands-on time divides, as shares from 0 to 1 that add up to 1. Read each step as **gather / judge / check**:
+  - `automatable` is the gathering: pulling, collating, flagging, formatting, a first pre-screen. A tool could do all of it.
+  - `augmentable` is the judging: working something out, drafting commentary, research. A tool helps; a person still owns it.
+  - `manual` is the checking and deciding: the decision, the narrative, the client call, the final look.
+  - Use what the speakers said ("I pull the numbers, that's most of it, then I decide the budget" is a large automatable share, a small manual one). Give the shares as the speaker's own proportions where they gave them; otherwise ask, and do not guess a split from the step's name. A step whose speakers say it is all one kind is `{"automatable": 0, "augmentable": 0, "manual": 1}`.
+  - `split_notes` is one line for each part saying what it is, in the speaker's words ("pull spend and budgets, spot under-pacing"). Section 7 of `docs/plans/client-requirements.md` has a table of worked examples (pacing, monthly report, meeting prep, content brief) to match against.
+- **`tier_multiplier`**: when an interview says a tier takes longer or shorter ("Tier 1 clients take about a third longer"), give a number for each tier it names, as × on the base time (`{"T1": 1.3, "T2": 1, "T3": 0.8}`). A tier not listed is 1. Never fill tiers nobody mentioned. Tier names are the company's own; ask when a speaker says "the big clients" and not which tier.
+- **`to_client_manager`**: `true` when a speaker says the client's own manager does the step, whatever their title. Keep the `role` as well; it is the fallback.
+- **`sources`**: where each of `work` (the hands-on time), `split` and `tier_multiplier` came from: `interview` (a person said it), `calculator` (worked out from a sheet or the client's calculator), `measured` (taken from tracked data) or `estimate` (a best guess, or Austin said to assume). Give it for every one of these values the step has. The quote still goes in `evidence`; the label says how far to trust it.
 
 ## One file per process
 
@@ -83,6 +97,7 @@ Run the checker's rules over each file before showing it; the upload preview app
 - One `start`; it leads to one step. Nothing leaves an `end`; no link into the start or from a step to itself; no link twice.
 - Branch odds add to 1. No loop without a decision. A step with `rework_to` has a rework rate, stated or quoted.
 - A quote's `value` is in the field's units; `hands_on_range` surrounds `hands_on_hours`.
+- A `split` has all three parts and they add up to 1; a `tier_multiplier` is a number for each tier named; a `sources` label is one of the four and sits beside a value the step has.
 - Each quote is a stretch of one line at its time, said by its speaker, and each assumed reason says why.
 - Count the **gaps** (the useful minimum):
   1. a role on every work step;

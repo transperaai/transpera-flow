@@ -17,7 +17,7 @@ const NAME_MAX = 200;
 /** The columns of a step a block keeps; anything else in a stored document is ignored. */
 const STEP_KEYS = [
   "id", "name", "kind", "outcome", "role_id", "person_id", "work_hours", "work_dist", "work_params", "wait_hours", "wait_dist", "wait_params",
-  "rework_rate", "rework_to_step_id", "tool", "purpose", "notes", "sla_hours", "expected_wait_hours", "lost_per_day_waiting", "dropoff_benchmark",
+  "rework_rate", "rework_to_step_id", "tool", "purpose", "split", "split_notes", "tier_multiplier", "to_client_manager", "notes", "sla_hours", "expected_wait_hours", "lost_per_day_waiting", "dropoff_benchmark",
   "target_cycle_hours", "current_wip", "x", "y", "parent_step_id", "entry_step_id", "child_process_id", "assumption", "conflict", "provenance",
 ] as const;
 const EDGE_KEYS = ["id", "from_step_id", "to_step_id", "probability", "condition_tag", "label"] as const;
@@ -174,6 +174,11 @@ function materialize(
       child_process_id: null,
       // A purpose from another workspace's list that this one lacks reads as Automatic; an older block has none.
       purpose: typeof s.purpose === "string" && STEP_PURPOSE_KEY.test(s.purpose) ? s.purpose : null,
+      // Base values (capacity P4) travel with the block; an older block has none.
+      split: s.split ? { ...s.split } : null,
+      split_notes: s.split_notes ? { ...s.split_notes } : null,
+      tier_multiplier: s.tier_multiplier ? { ...s.tier_multiplier } : null,
+      to_client_manager: s.to_client_manager === true,
       // A role or person deleted since the block was saved would fail the foreign key.
       role_id: s.role_id && roles.has(s.role_id) ? s.role_id : null,
       person_id: s.person_id && people.has(s.person_id) ? s.person_id : null,

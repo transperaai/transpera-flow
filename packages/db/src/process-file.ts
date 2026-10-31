@@ -18,6 +18,7 @@ import {
   type FileCitation,
   type FileRange,
   type FileSource,
+  type FileSourceLabel,
   type Env,
 } from "@transpera-flow/db/process-file-2";
 import { isObject, MAX_ID, MAX_SUGGESTIONS, norm, plural, q, round, suggest } from "@transpera-flow/db/process-file-util";
@@ -67,6 +68,16 @@ export interface ProcessFileStep {
   evidence?: Partial<Record<EvidenceField, FileCitation[]>>;
   /** Why a value is an assumption, by field. */
   assumed?: Partial<Record<EvidenceField, string>>;
+  /** Capacity base values (P4): the shares of the step's time that can be automated, augmented or only done by hand (add up to 1). */
+  split?: { automatable: number; augmentable: number; manual: number };
+  /** One line of words for each part of the split. */
+  split_notes?: { automatable?: string; augmentable?: string; manual?: string };
+  /** × on the step's time by tier key. */
+  tier_multiplier?: Record<string, number>;
+  /** The step goes to the client's manager. */
+  to_client_manager?: boolean;
+  /** Where each base value came from: interview, calculator, measured or estimate. */
+  sources?: { work?: FileSourceLabel; split?: FileSourceLabel; tier_multiplier?: FileSourceLabel };
 }
 
 export interface ProcessFileLink {
