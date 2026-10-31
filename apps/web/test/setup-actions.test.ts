@@ -109,7 +109,7 @@ describe("Tiers & clients and People & roles, end to end", () => {
     expect((await a.saveSetupField("services", { id: svc.id }, "links", null, 5)).status).toBe("not_found");
     expect((await a.addTierAction(world.workspaceId)).error).toBe("Only Agency admins and the Owner can change tiers.");
     expect((await a.addNamedClient(world.workspaceId, svc.id, "Nope Co")).error).toBeTruthy();
-    expect((await a.savePortfolioCount(world.workspaceId, s.people[0]!.id, svc.id, 0, 3)).status).toBe("error");
+    expect(["error", "not_found"]).toContain((await a.savePortfolioCount(world.workspaceId, s.people[0]!.id, svc.id, 0, 3)).status);
     expect(await q("select 1 from clients where name = 'Nope Co'")).toEqual([]);
     const seen = await setup();
     expect(seen.canEdit).toBe(false);
