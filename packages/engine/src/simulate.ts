@@ -13,6 +13,7 @@
 // Time runs from -warmup to H; everything reported is measured over [0, H].
 
 import { withAvailability, availabilityBase } from "./availability";
+import { capacityEntry, capacityStep, cleanChanges, type CapacityEntry, type CapacityStep } from "./capacity-time";
 import { activeChannels, capacityFactors, channelMonth, keyFactors, planChannels, withMaxRework, type FeeRise } from "./channels";
 import {
   AWAY_PRESSURE,
@@ -356,6 +357,8 @@ interface StepState {
   chRework: number[] | null;
   /** `wait` draws unit-mean waits that the channel scales (the step has no wait of its own). */
   waitUnit: boolean;
+  /** The capacity view of the step (split, tier multiplier; capacity-time.ts); null for a step that has neither, which is nearly all of them. */
+  cap: CapacityStep | null;
 }
 
 /** The edges an entity picks from at a step, and their total probability. */
@@ -902,6 +905,11 @@ export function runOnce(
     staffing ? Object.fromEntries(Object.entries(peopleModel).filter(([, p]) => presentAt(p, t))) : peopleModel;
   const services = resolveServices(model);
   const hasServices = services[0]!.id !== null;
+  // Step splits, tier multipliers and changes (capacity-time.ts): a servicing task scales by its service's tier. Slot 0 is no tier.
+  const capChanges = cleanChanges(model.changes);
+  const tierSlots = new Map<string, number>();
+  const svcTierKey = services.map((sv) => sv.s.tier);
+  const svcTierSlot = svcTierKey.map((k) => (k === undefined ? 0 : (tierSlots.get(k) ?? (tierSlots.set(k, tierSlots.size + 1), tierSlots.size))));
   // Market conditions (market.ts); null when the model has none or they are all Stable, which leaves every path below as it was.
   const market = activeMarket(model);
   // The month the factors come from is looked up per event, so the checks and the month length are done once here.
@@ -1004,6 +1012,7 @@ export function runOnce(
       chWait: plan?.wait.get(s.id) ?? null,
       chRework: plan?.rework.get(s.id) ?? null,
       waitUnit: !(s.wait || waitDist.kind === "triangular") && Boolean(plan?.wait.get(s.id)?.some((v) => v > 0)),
+      cap: capacityStep(s),
     });
   }
   // End steps: the two sinks, then any further ones (which may override them).
@@ -1261,6 +1270,11 @@ export function runOnce(
     }
     return lo;
   };
+  /**
+   * The run's month `t` falls in, for changes (0-based; the warm-up and month 1 are month 0): the model's channel months when it
+   * has channels (team time and ramp use them), else the calendar months of a monthly run, else 52/12 weeks from the start.
+   */
+  const capMonth = (t: number): number => (plan ? chM(t) : bounds ? monthOf(t) : t > 0 ? Math.floor(t / monthHours) : 0);
   /** Where month m ends, cut at `hi`. */
   const monthEnd = (m: number, hi: number) => (m === nM - 1 ? hi : Math.min(hi, bounds![m + 1]!));
   /** Add `amount`, spread evenly over [a, b], to row `row`'s months, keeping only the part inside [0, H]. */
@@ -2974,16 +2988,26 @@ export function runOnce(
         const f = st.chWork[chM(t)]!;
         if (f !== 1) handsOn *= f;
       }
-      // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves).
+      // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves). That
+      // replaces the step's base time, so it comes before the split (docs/adr/0022-capacity-inputs.md note 7).
+      const scale = e.task ? e.task.scale : 1;
+      if (scale !== 1) handsOn *= scale;
+      // The client's own time factor on the step (`stepFactor`): a number for every step, or one per step id.
+      let own = 1;
       if (e.task) {
-        if (e.task.scale !== 1) handsOn *= e.task.scale;
-        // ...and so does the client's own time factor on the step (`stepFactor`): a number for every step, or one per step id.
         const sf = e.task.client.stepFactor;
         if (sf !== null) {
           const f = typeof sf === "number" ? sf : sf[st.s.id];
-          if (f !== undefined && Number.isFinite(f) && f > 0 && f !== 1) handsOn *= f;
+          if (f !== undefined && Number.isFinite(f) && f > 0) own = f;
         }
       }
+      // A step with a split or a tier multiplier: `stepTimeFactor` (the tier's multiplier, the changes in force that month, and the client's factor). Pipeline work has no tier.
+      let cap: CapacityEntry | null = null;
+      if (st.cap) {
+        cap = capacityEntry(st.cap, capChanges, e.task ? svcTierKey[e.svc] : undefined, e.task ? svcTierSlot[e.svc]! : 0, capMonth(t), scale);
+        const f = cap.f * own;
+        if (f !== 1) handsOn *= f;
+      } else if (own !== 1) handsOn *= own;
       dur = handsOn / frac;
       st.stat.handsOnSum += handsOn;
       st.stat.handsOnN++;
