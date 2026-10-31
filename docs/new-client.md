@@ -112,3 +112,16 @@ Export anything the client wants first. Then, with Austin's explicit yes:
 1. Vercel → project → Settings → General → **Delete Project** (removes its variables and domains). Remove the domain's DNS records.
 2. Neon: Vercel → Storage → the database → delete it (or console.neon.tech → project → Settings → Delete). This destroys all the client's data and cannot be undone.
 3. Google Cloud → the OAuth client → remove that client's origins and redirect URIs. If they had their own OAuth client or Entra app, delete it (the client's admin removes the Entra registration).
+
+## 12. Capacity starter (optional, once, on an empty workspace)
+
+A new client's Set up pages start empty. This gives them something to edit instead of a blank page: the two departments, tiers T1 to T3 with the prototype's example numbers (every one marked **estimate**, so Set up shows it until the client keys their own), and the nine roles with their department, kind, line, rule of thumb and the shared teams' units (words, links, ticket hours, tasks, set-ups and incidents). **No people and no clients**: the client keys those in (decision D19).
+
+Claude runs it from a session that has the client's `DATABASE_URL` (over Neon's WebSocket route from a cloud container, as for migrations):
+
+```bash
+pnpm --filter @transpera-flow/db capacity:starter --workspace <slug>          # add --driver neon-ws from a cloud container
+```
+
+It runs in one transaction and is safe to run twice: it changes nothing, and says why, when the workspace already has tiers, roles, people, clients, services or counted clients. **Never run it on a workspace in use** (it refuses, but don't try). Why these defaults and where they come from: `packages/db/src/capacity-starter.ts`.
+
