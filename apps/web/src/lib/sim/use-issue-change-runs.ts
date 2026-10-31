@@ -23,16 +23,12 @@ const IDLE: IssueChangeRuns = { status: "idle", done: 0, total: 0, figures: {}, 
 export function useIssueChangeRuns(setup: CapacitySetup | null, model: EngineModel | null, changes: readonly CapacityChangeRow[]): IssueChangeRuns {
   const [state, setState] = useState<IssueChangeRuns>(IDLE);
   useEffect(() => {
-    if (!setup || !model || !changes.length) {
-      setState(IDLE);
-      return;
-    }
+    if (!setup || !model || !changes.length) return;
     let active = true;
     const client = new SimulationClient(() => new Worker(new URL("../../workers/simulate.worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike);
-    setState({ status: "running", done: 0, total: changes.length, figures: {}, error: null });
     runIssueChanges(client, setup, model, changes, {
       isCancelled: () => !active,
-      onProgress: (p) => active && setState((s) => ({ ...s, done: p.done, total: p.total })),
+      onProgress: (p) => active && setState((s) => ({ ...s, status: s.status === "idle" ? "running" : s.status, done: p.done, total: p.total })),
       onFigure: (f) => active && setState((s) => ({ ...s, figures: { ...s.figures, [f.changeId]: f } })),
     })
       .then(() => active && setState((s) => ({ ...s, status: "done" })))

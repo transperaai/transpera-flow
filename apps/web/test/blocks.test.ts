@@ -351,7 +351,7 @@ describe("base values travel with a block", () => {
   const SPLIT = { automatable: 0.4, augmentable: 0.35, manual: 0.25 };
   const NOTES = { automatable: "Pull the data", augmentable: "Draft the notes", manual: "Talk to the client" };
   const MULT = { T1: 1.5, T3: 0.5 };
-  const PROV = { work: { source: "interview", at: "2027-01-05", by: "someone" }, split: { source: "measured", at: "2027-01-06", by: "someone" } };
+  const PROV = { work: { source: "interview", at: "2027-01-05", by: "someone" }, split: { source: "measured", at: "2027-01-06", by: "someone" } } as unknown as ProcessBundle["steps"][number]["provenance"];
 
   /** The nested demo with base values on the Sales conversation's steps. */
   function withBase(): ProcessBundle {

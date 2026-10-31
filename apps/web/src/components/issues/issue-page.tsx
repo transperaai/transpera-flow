@@ -264,7 +264,7 @@ export function IssuePage(props: IssuePageProps) {
           </section>
 
           {props.capacity && (
-            <IssueChanges changes={changesForIssue(props.capacity.changes, issue.id)} setup={props.capacity.setup} bundle={props.capacity.bundle ?? bundle} base={base} />
+            <IssueChanges changes={changesForIssue(props.capacity.changes, issue.id)} setup={props.capacity.setup} bundle={props.capacity.bundle ?? bundle} base={base} help={<Help {...ISSUE_PAGE_HELP.changes} />} />
           )}
 
           <section className="flex flex-col gap-2" data-section="history">

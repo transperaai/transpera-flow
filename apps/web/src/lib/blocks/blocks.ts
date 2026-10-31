@@ -173,7 +173,7 @@ function materialize(
     name: name.trim().slice(0, NAME_MAX) || "Block",
     entry_step_id: entry ? (ids.get(entry) ?? null) : null,
     // The insertion record (P8): which library block this group came from. A solution's map carries it, so the library can count the solutions using a block.
-    ...(blockId ? { provenance: { ...(base.provenance ?? {}), [BLOCK_MARK]: blockId } } : {}),
+    ...(blockId ? { provenance: { ...(base.provenance ?? {}), [BLOCK_MARK]: blockId } as unknown as StepRow["provenance"] } : {}),
   };
   const steps = parentsFirst(block.steps).map(
     (s): StepRow => ({

@@ -3,13 +3,11 @@
 // "Changes anchored to this issue" on the issue page (capacity build P8, prototype `pageIssue`): the Sandbox changes that name this issue, with the
 // hours each frees a month and how many more clients the department can hold. One run per change, in the worker, only while this page is open.
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { CapacityChangeRow, CapacitySetup, ProcessBundle } from "@transpera-flow/db";
-import { Help } from "@/components/help";
 import { Card } from "@/components/ui/card";
 import { capacityBaseModel } from "@/lib/capacity/model";
 import { formatNumber } from "@/lib/format";
-import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
 import { useIssueChangeRuns } from "@/lib/sim/use-issue-change-runs";
 
 const KIND_WORDS: Record<CapacityChangeRow["kind"], string> = { automation: "Automation", augmentation: "Augmentation" };
@@ -21,7 +19,7 @@ export const signedWhole = (v: number): string => {
   return r === 0 ? "0" : `${r > 0 ? "+" : "−"}${formatNumber(Math.abs(r), 0)}`;
 };
 
-export function IssueChanges({ changes, setup, bundle, base }: { changes: CapacityChangeRow[]; setup: CapacitySetup; bundle: ProcessBundle; base: string }) {
+export function IssueChanges({ changes, setup, bundle, base, help }: { changes: CapacityChangeRow[]; setup: CapacitySetup; bundle: ProcessBundle; base: string; /** The (i) beside the heading. */ help?: ReactNode }) {
   const built = useMemo(() => (changes.length ? capacityBaseModel(bundle) : { model: null, error: null }), [bundle, changes.length]);
   const runs = useIssueChangeRuns(setup, built.model, changes);
   return (
@@ -29,7 +27,7 @@ export function IssueChanges({ changes, setup, bundle, base }: { changes: Capaci
       <div>
         <h2 className={`${CARD_TITLE} flex items-center`}>
           Changes anchored to this issue
-          <Help {...ISSUE_PAGE_HELP.changes} />
+          {help}
         </h2>
         <p className="text-sm text-muted-foreground">
           Sandbox automations and augmentations that name this issue, each run on its own against today.{" "}
