@@ -7,6 +7,10 @@ new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
+**31 Oct 2026: the direction changed again. Read `docs/plans/client-refocus-handover.md` first.** The app is being
+refocused, not rebuilt, on the client's real question: are they at capacity, and how many more clients per employee
+would automation or augmentation allow? The next chat writes the requirements from the client's interview transcripts.
+
 **26 Oct 2026: the direction changed. Read `docs/plans/rework-direction.md` first.** Each client gets its own
 deployment (not multi-tenant). The app moves off Supabase to Neon with Better Auth: Google now, Microsoft later, with
 company-domain and named-email roles. Uploads are dropped for reference links, live editing is dropped, and hosting stays
