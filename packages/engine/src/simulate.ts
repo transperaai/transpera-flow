@@ -13,6 +13,7 @@
 // Time runs from -warmup to H; everything reported is measured over [0, H].
 
 import { withAvailability, availabilityBase } from "./availability";
+import { capacityEntry, capacityStep, cleanChanges, type CapacityEntry, type CapacityStep } from "./capacity-time";
 import { activeChannels, capacityFactors, channelMonth, keyFactors, planChannels, withMaxRework, type FeeRise } from "./channels";
 import {
   AWAY_PRESSURE,
@@ -55,6 +56,7 @@ import { flattenModel } from "./flatten";
 import { detectLoops, type Loop } from "./loops";
 import type {
   ClientOverrides,
+  PartHours,
   PersonTime,
   ClientReplication,
   ClientResult,
@@ -356,6 +358,8 @@ interface StepState {
   chRework: number[] | null;
   /** `wait` draws unit-mean waits that the channel scales (the step has no wait of its own). */
   waitUnit: boolean;
+  /** The capacity view of the step (split, tier multiplier; capacity-time.ts); null for a step that has neither, which is nearly all of them. */
+  cap: CapacityStep | null;
 }
 
 /** The edges an entity picks from at a step, and their total probability. */
@@ -902,6 +906,11 @@ export function runOnce(
     staffing ? Object.fromEntries(Object.entries(peopleModel).filter(([, p]) => presentAt(p, t))) : peopleModel;
   const services = resolveServices(model);
   const hasServices = services[0]!.id !== null;
+  // Step splits, tier multipliers and changes (capacity-time.ts): a servicing task scales by its service's tier. Slot 0 is no tier.
+  const capChanges = cleanChanges(model.changes);
+  const tierSlots = new Map<string, number>();
+  const svcTierKey = services.map((sv) => sv.s.tier);
+  const svcTierSlot = svcTierKey.map((k) => (k === undefined ? 0 : (tierSlots.get(k) ?? (tierSlots.set(k, tierSlots.size + 1), tierSlots.size))));
   // Market conditions (market.ts); null when the model has none or they are all Stable, which leaves every path below as it was.
   const market = activeMarket(model);
   // The month the factors come from is looked up per event, so the checks and the month length are done once here.
@@ -1004,6 +1013,7 @@ export function runOnce(
       chWait: plan?.wait.get(s.id) ?? null,
       chRework: plan?.rework.get(s.id) ?? null,
       waitUnit: !(s.wait || waitDist.kind === "triangular") && Boolean(plan?.wait.get(s.id)?.some((v) => v > 0)),
+      cap: capacityStep(s),
     });
   }
   // End steps: the two sinks, then any further ones (which may override them).
@@ -1261,6 +1271,11 @@ export function runOnce(
     }
     return lo;
   };
+  /**
+   * The run's month `t` falls in, for changes (0-based; the warm-up and month 1 are month 0): the model's channel months when it
+   * has channels (team time and ramp use them), else the calendar months of a monthly run, else 52/12 weeks from the start.
+   */
+  const capMonth = (t: number): number => (plan ? chM(t) : bounds ? monthOf(t) : t > 0 ? Math.floor(t / monthHours) : 0);
   /** Where month m ends, cut at `hi`. */
   const monthEnd = (m: number, hi: number) => (m === nM - 1 ? hi : Math.min(hi, bounds![m + 1]!));
   /** Add `amount`, spread evenly over [a, b], to row `row`'s months, keeping only the part inside [0, H]. */
@@ -1882,6 +1897,21 @@ export function runOnce(
   const ptCount = samplePersonTime ? new Float64Array(people.length * nSvc) : null;
   const ptSum = samplePersonTime ? new Float64Array(people.length * nSvc) : null;
   const ptLast = samplePersonTime ? new Float64Array(people.length).fill(-W) : null;
+  // ...and by part of the step's split, before and after the changes, and the hours each change freed (only with a split somewhere).
+  const changeIds = [...new Set(capChanges.map((c) => c.id))];
+  const changeIndex = new Map(changeIds.map((id, i) => [id, i] as const));
+  const nChg = changeIds.length;
+  const ptParts =
+    ptHours && stepList.some((st) => st.cap?.view.split)
+      ? {
+          actual: new Float64Array(people.length * nStepsAll * 3),
+          before: new Float64Array(people.length * nStepsAll * 3),
+          freed: new Float64Array(people.length * nChg),
+          mActual: mon ? new Float64Array(nM * 3) : null,
+          mBefore: mon ? new Float64Array(nM * 3) : null,
+          mFreed: mon ? new Float64Array(nChg * nM) : null,
+        }
+      : null;
   /** Add a person's client counts since they last changed to the window's client-weeks. */
   const ptAdvance = (p: PersonState, t: number) => {
     const a = Math.max(ptLast![p.idx]!, 0);
@@ -2974,16 +3004,27 @@ export function runOnce(
         const f = st.chWork[chM(t)]!;
         if (f !== 1) handsOn *= f;
       }
-      // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves).
+      // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves). That
+      // replaces the step's base time, so it comes before the split (docs/adr/0022-capacity-inputs.md note 7).
+      const scale = e.task ? e.task.scale : 1;
+      if (scale !== 1) handsOn *= scale;
+      // The client's own time factor on the step (`stepFactor`): a number for every step, or one per step id.
+      let own = 1;
       if (e.task) {
-        if (e.task.scale !== 1) handsOn *= e.task.scale;
-        // ...and so does the client's own time factor on the step (`stepFactor`): a number for every step, or one per step id.
         const sf = e.task.client.stepFactor;
         if (sf !== null) {
           const f = typeof sf === "number" ? sf : sf[st.s.id];
-          if (f !== undefined && Number.isFinite(f) && f > 0 && f !== 1) handsOn *= f;
+          if (f !== undefined && Number.isFinite(f) && f > 0) own = f;
         }
       }
+      // A step with a split or a tier multiplier: `stepTimeFactor` (the tier's multiplier, the changes in force that month, and the client's factor). Pipeline work has no tier.
+      let cap: CapacityEntry | null = null;
+      const drawn1 = handsOn;
+      if (st.cap) {
+        cap = capacityEntry(st.cap, capChanges, e.task ? svcTierKey[e.svc] : undefined, e.task ? svcTierSlot[e.svc]! : 0, capMonth(t), scale);
+        const f = cap.f * own;
+        if (f !== 1) handsOn *= f;
+      } else if (own !== 1) handsOn *= own;
       dur = handsOn / frac;
       st.stat.handsOnSum += handsOn;
       st.stat.handsOnN++;
@@ -3001,7 +3042,45 @@ export function runOnce(
       if (ptHours) {
         // Only the part inside the measured window counts (a job straddling t = 0 or the horizon), as for hourly work.
         const share = t >= 0 && t + dur <= H ? 1 : dur > 0 ? Math.max(0, Math.min(t + dur, H) - Math.max(t, 0)) / dur : t >= 0 && t < H ? 1 : 0;
-        if (share > 0) ptHours[p.idx * nStepsAll + st.mi]! += handsOn * share;
+        if (share > 0) {
+          ptHours[p.idx * nStepsAll + st.mi]! += handsOn * share;
+          if (ptParts) {
+            // Parts: the draw (before the capacity factor, with the client's factor) per hour of the step's mean time, times the mean parts.
+            const row = (p.idx * nStepsAll + st.mi) * 3;
+            const mo = mon && t >= 0 && t < H ? monthOf(t) : -1;
+            if (cap) {
+              const unit = cap.work > 0 ? (drawn1 * own * share) / cap.work : 0;
+              const { actual: a, before: b } = cap;
+              ptParts.actual[row]! += unit * a.automatable;
+              ptParts.actual[row + 1]! += unit * a.augmentable;
+              ptParts.actual[row + 2]! += unit * a.manual;
+              ptParts.before[row]! += unit * b.automatable;
+              ptParts.before[row + 1]! += unit * b.augmentable;
+              ptParts.before[row + 2]! += unit * b.manual;
+              if (ptParts.mActual && mo >= 0) {
+                ptParts.mActual[mo * 3]! += unit * a.automatable;
+                ptParts.mActual[mo * 3 + 1]! += unit * a.augmentable;
+                ptParts.mActual[mo * 3 + 2]! += unit * a.manual;
+                ptParts.mBefore![mo * 3]! += unit * b.automatable;
+                ptParts.mBefore![mo * 3 + 1]! += unit * b.augmentable;
+                ptParts.mBefore![mo * 3 + 2]! += unit * b.manual;
+              }
+              for (const f of cap.freed) {
+                const ci = changeIndex.get(f.change)!;
+                ptParts.freed[p.idx * nChg + ci]! += unit * f.hours;
+                if (ptParts.mFreed && mo >= 0) ptParts.mFreed[ci * nM + mo]! += unit * f.hours;
+              }
+            } else {
+              // No split (or no capacity view): all manual, and nothing to free.
+              ptParts.actual[row + 2]! += handsOn * share;
+              ptParts.before[row + 2]! += handsOn * share;
+              if (ptParts.mActual && mo >= 0) {
+                ptParts.mActual[mo * 3 + 2]! += handsOn * share;
+                ptParts.mBefore![mo * 3 + 2]! += handsOn * share;
+              }
+            }
+          }
+        }
       }
       const over = overloaded(p);
       if (over) p.overPipeline += handsOn;
@@ -3883,6 +3962,40 @@ export function runOnce(
       }
     }
     personTime = { stepHours, clients: clientCounts };
+    if (ptParts) {
+      const part = (arr: Float64Array, row: number, div: number): PartHours => ({ automatable: arr[row]! / div, augmentable: arr[row + 1]! / div, manual: arr[row + 2]! / div });
+      const actual: NonNullable<PersonTime["partHours"]>["actual"] = {};
+      const before: NonNullable<PersonTime["partHours"]>["before"] = {};
+      const byPerson: Record<string, Record<string, number>> = {};
+      const byChange: Record<string, number> = Object.fromEntries(changeIds.map((id) => [id, 0]));
+      let total = 0;
+      for (const p of people) {
+        for (const st of stepList) {
+          const row = (p.idx * nStepsAll + st.mi) * 3;
+          const any = ptParts.actual[row]! || ptParts.actual[row + 1]! || ptParts.actual[row + 2]! || ptParts.before[row]! || ptParts.before[row + 1]! || ptParts.before[row + 2]!;
+          if (!any) continue;
+          (actual[p.id] ??= {})[st.s.id] = part(ptParts.actual, row, monthsInRun);
+          (before[p.id] ??= {})[st.s.id] = part(ptParts.before, row, monthsInRun);
+        }
+        for (let ci = 0; ci < nChg; ci++) {
+          const h = ptParts.freed[p.idx * nChg + ci]! / monthsInRun;
+          if (h === 0) continue;
+          (byPerson[p.id] ??= {})[changeIds[ci]!] = h;
+          byChange[changeIds[ci]!]! += h;
+          total += h;
+        }
+      }
+      personTime.partHours = { actual, before };
+      personTime.freed = { total, byChange, byPerson };
+      if (ptParts.mActual) {
+        const months = Array.from({ length: nM }, (_, m) => m);
+        personTime.monthly = {
+          actual: months.map((m) => part(ptParts.mActual!, m * 3, 1)),
+          before: months.map((m) => part(ptParts.mBefore!, m * 3, 1)),
+          freed: Object.fromEntries(changeIds.map((id, ci) => [id, months.map((m) => ptParts.mFreed![ci * nM + m]!)])),
+        };
+      }
+    }
   }
   const toTrace = ({ seg: _seg, svc, task: _task, rate: _rate, lp: _lp, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
@@ -4221,7 +4334,24 @@ function personTimeMeans(parts: PersonTime[]): PersonTime {
     for (const pid of Object.keys(sums)) for (const id of Object.keys(sums[pid]!)) sums[pid]![id]! /= parts.length;
     return sums;
   };
-  return { stepHours: mean((p) => p.stepHours), clients: mean((p) => p.clients) };
+  const out: PersonTime = { stepHours: mean((p) => p.stepHours), clients: mean((p) => p.clients) };
+  // The capacity parts (P3): the same mean over the replications, whatever the shape (an entry a run doesn't have is 0).
+  if (parts.every((p) => p.partHours)) out.partHours = meanTree(parts.map((p) => p.partHours)) as NonNullable<PersonTime["partHours"]>;
+  if (parts.every((p) => p.freed)) out.freed = meanTree(parts.map((p) => p.freed)) as NonNullable<PersonTime["freed"]>;
+  if (parts.every((p) => p.monthly)) out.monthly = meanTree(parts.map((p) => p.monthly)) as NonNullable<PersonTime["monthly"]>;
+  return out;
+}
+
+/** The mean of same-shaped trees of numbers, arrays and records; a key or index a tree doesn't have counts as 0. */
+function meanTree(trees: readonly unknown[]): unknown {
+  const shape = trees.find((t) => t !== undefined);
+  if (typeof shape === "number" || shape === undefined) return trees.reduce<number>((sum, t) => sum + ((t as number | undefined) ?? 0), 0) / trees.length;
+  if (Array.isArray(shape)) {
+    const n = Math.max(...trees.map((t) => (t as unknown[] | undefined)?.length ?? 0));
+    return Array.from({ length: n }, (_, i) => meanTree(trees.map((t) => (t as unknown[] | undefined)?.[i])));
+  }
+  const keys = new Set(trees.flatMap((t) => (t === undefined ? [] : Object.keys(t as object))));
+  return Object.fromEntries([...keys].map((k) => [k, meanTree(trees.map((t) => (t as Record<string, unknown> | undefined)?.[k]))]));
 }
 
 /**

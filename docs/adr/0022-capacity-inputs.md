@@ -12,8 +12,8 @@ apart, so they need one agreed shape and one agreed meaning before either starts
 ## Decision
 
 - **Types in `model.ts`, meanings in `capacity-inputs.ts`.** Every new field is optional; unset, the engine behaves as it did.
-  `simulate.ts` and `flatten.ts` read nothing new, `ENGINE_VERSION` stays 1.14.0 and no golden moves. P2 and P3 make the engine read
-  the fields, and then bump the version.
+  at the time of this ADR `simulate.ts` and `flatten.ts` read nothing new and no golden moved. P2 (1.15.0) and P3 (1.16.0) made the engine read
+  the fields and bumped the version.
 - **Pure functions define each field**, so the engine and the web's derived figures (busy share, "can take", hiring advice) can't
   drift apart: `effectiveDeliverables`, `tasksPerMonth`, `rampShare`, `availableShare`, `stepParts`, `stepTimeFactor`.
 - **`checkCapacityInputs(model)`** names bad inputs in plain English (`CapacityProblem`: code, path, message). It isn't wired into
@@ -103,6 +103,32 @@ the app should say which of the two a figure comes from.
 8. **Time reserved for the pipeline.** `availabilityFloor` (8% of a person's time kept for pipeline work) is a separate engine rule and isn't `reservedShare`.
 9. **Tier fallback.** The prototype uses the last tier's values for an unknown tier; the engine has no tier fallback, and a service with no `deliverables` makes no driver tasks (the check names it).
 10. **Onboarding load** is in the prototype's busy share and, in the engine, is the pipeline's own work after a win.
+
+## Engine 1.16.0 (P3): what the run reads, and what the changes free
+
+`docs/plans/capacity/p3-engine-changes-brief.md`; the full account is in `docs/engine-versioning.md`.
+
+- **What P3 reads.** `EngineStep.split`, `EngineStep.tierMultiplier` and `EngineModel.changes`. Each drawn hands-on time is multiplied, after the
+  draw, by `stepTimeFactor`: the tier multiplier of the task's service tier, the split with the changes in force in the month the work starts
+  in, and the client's own `stepFactor` (inside the factor, so applied once). `adhocHours` replaces the base time before the split (note 7). Pipeline
+  work and work with no client uses no tier (multiplier 1) and no client factor; its split and unfiltered changes still act. With none of the fields
+  set the factor is exactly 1 and the path is skipped. A split with no change in force gives exactly 1 too (the engine uses the base time, not the
+  sum of the three shares, which can differ in the last digit).
+- **Months.** The model's channel months when it has channels, else the calendar months of a monthly run, else 52/12 weeks; the warm-up is month 1.
+- **Hours freed.** For a draw `d` of a step, `PersonTime.partHours.before` is the same draw split by the base split (tier multiplier kept, no change),
+  `partHours.actual` is after the changes, and hours freed is `before − actual`, exactly, by person, by step and in total. `freed.byChange` credits each
+  change. **Ordering rule: changes act in the order of the model's `changes` list, and a change's effects in their order; a change is credited with what
+  it takes off a part given the changes before it have already acted.** So the savings add up to the total, and when two changes act on one part the
+  earlier one in the list is credited first (an automation with checking time listed first saves more than the same one listed after another that
+  already took most of the part). A change can free a negative number of hours (its checking time above the time it removes). The monthly series
+  carries the same figures by month.
+- **Bad inputs.** The run repairs what `checkCapacityInputs` names rather than throw: a bad split is no split (all manual), adoption is held to 0-1, a
+  start month below 1 is 1 (not a number: never starts), a bad ramp is none, `remove` is held to 0-1, a bad residual is 0, a speed-up below 1 is 1.
+- **Not done: changes to rework or waiting.** Section 7's optional "also changes rework or waiting" is later; changes act on hands-on time only, and
+  rework, waits and routing are as before.
+- **Added to `capacity-inputs.ts`:** `stepPartsDetail`, `StepFreed` and `StepPartsDetail`, which `stepParts` now shares a loop with (its numbers are
+  unchanged). `stepParts` and `stepTimeFactor` are otherwise as defined. `plannedHours` (the busy share used to place a won client) still uses the
+  step's plain `work` × the client's factor and does not yet include the tier multiplier or the split's changes.
 
 ## Consequences
 

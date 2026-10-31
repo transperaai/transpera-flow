@@ -2,7 +2,7 @@
 //
 // Pure functions, so the engine (P2, P3) and the app's derived figures share one definition of each new field. Since
 // engine 1.15.0 the run reads `effectiveDeliverables`, `tasksPerMonth` and `availableShare` (P2); `stepParts` and
-// `stepTimeFactor` are P3's and are not read yet. The fields are optional, and with all of them unset every function here
+// `stepTimeFactor` are P3's, read since 1.16.0 (capacity-time.ts). The fields are optional, and with all of them unset every function here
 // gives the answer the engine already gives (a factor of exactly 1, full availability, the old recurrences).
 //
 // Time: a month is 52/12 weeks, as in demand.ts and market.ts. Hours are working hours, as everywhere in the engine; a step's
@@ -136,6 +136,49 @@ function applies(change: EngineStepChange, tierKey: string | undefined, monthInd
  * As in the prototype, an effect acts only on a part that has time left (automatable and augmentable above 0).
  */
 export function stepParts(step: Pick<EngineStep, "id" | "work" | "split" | "tierMultiplier">, tierKey: string | undefined, changes: readonly EngineStepChange[] | undefined, monthIndex: number): StepParts {
+  return walkParts(step, tierKey, changes, monthIndex, null);
+}
+
+/** One change's saving on one step, in hours of the step's mean time. */
+export interface StepFreed {
+  /** The change's id. */
+  change: string;
+  /** Hours the change takes off the step's mean time, given the changes before it in the list. Can be negative (a residual above the time it removes). */
+  hours: number;
+}
+
+/** `stepParts` and where the saving came from (engine 1.16.0, P3). */
+export interface StepPartsDetail extends StepParts {
+  /** The three parts before any change: `work` × the tier multiplier × the split. */
+  before: { automatable: number; augmentable: number; manual: number };
+  /** What each change that acted on this step saved, in the order the changes apply (see `stepPartsDetail`). `total` is `base` less their sum. */
+  freed: StepFreed[];
+  /** Whether any change acted on a part. When none did, `total` is the base time (up to rounding in the split). */
+  acted: boolean;
+}
+
+/**
+ * `stepParts` with the saving split by change. The ordering rule (P3, ADR 0022 "Engine 1.16.0"): changes act in the order of the
+ * `changes` list, and within a change its effects in their order; each change's saving is the time its effects take off a part
+ * given the changes before it have already acted. So when two changes act on one part the earlier one is credited with what it
+ * would save alone, the later one with what it adds on top, and the savings add up to `base − total`.
+ */
+export function stepPartsDetail(step: Pick<EngineStep, "id" | "work" | "split" | "tierMultiplier">, tierKey: string | undefined, changes: readonly EngineStepChange[] | undefined, monthIndex: number): StepPartsDetail {
+  const freed: StepFreed[] = [];
+  const parts = walkParts(step, tierKey, changes, monthIndex, freed);
+  const base = parts.base;
+  const before = step.split ? { automatable: base * step.split.automatable, augmentable: base * step.split.augmentable, manual: base * step.split.manual } : { automatable: 0, augmentable: 0, manual: base };
+  return { ...parts, before, freed, acted: freed.length > 0 };
+}
+
+/** The one loop behind `stepParts` and `stepPartsDetail`, so they can't drift apart. `freed` collects each change's saving when given. */
+function walkParts(
+  step: Pick<EngineStep, "id" | "work" | "split" | "tierMultiplier">,
+  tierKey: string | undefined,
+  changes: readonly EngineStepChange[] | undefined,
+  monthIndex: number,
+  freed: StepFreed[] | null,
+): StepParts {
   const mult = tierKey !== undefined ? step.tierMultiplier?.[tierKey] : undefined;
   const base = step.work * (mult !== undefined && Number.isFinite(mult) ? mult : 1);
   if (!step.split) return { automatable: 0, augmentable: 0, manual: base, total: base, base };
@@ -145,12 +188,25 @@ export function stepParts(step: Pick<EngineStep, "id" | "work" | "split" | "tier
   for (const c of changes ?? []) {
     if (!applies(c, tierKey, monthIndex)) continue;
     const ad = c.adoption * changeRamp(c, monthIndex);
+    let saved = 0;
+    let acted = false;
     for (const e of c.effects) {
       if (e.step !== step.id) continue;
       if (e.part === "automatable") {
-        if (a > 0) a = a * (1 - e.remove * ad) + (e.residualHours ?? 0) * ad;
-      } else if (g > 0) g = g / (1 + (e.factor - 1) * ad);
+        if (a > 0) {
+          const next = a * (1 - e.remove * ad) + (e.residualHours ?? 0) * ad;
+          saved += a - next;
+          a = next;
+          acted = true;
+        }
+      } else if (g > 0) {
+        const next = g / (1 + (e.factor - 1) * ad);
+        saved += g - next;
+        g = next;
+        acted = true;
+      }
     }
+    if (freed && acted) freed.push({ change: c.id, hours: saved });
   }
   return { automatable: a, augmentable: g, manual: n, total: a + g + n, base };
 }

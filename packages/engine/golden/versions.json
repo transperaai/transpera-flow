@@ -94,5 +94,11 @@
     "date": "2026-10-31",
     "note": "capacity inputs (P2): new golden; no existing number moved",
     "digest": "sha256:5f7a97009474b5944f15ce81c34b76df412d8219a455b2034275c63f90983078"
+  },
+  {
+    "version": "1.16.0",
+    "date": "2026-10-31",
+    "note": "step splits, tier multipliers and changes (P3)",
+    "digest": "sha256:baed2c35822ad1572c596e77d70716fefc22bb5cae2d58263b8d323842a7e7ce"
   }
 ]
