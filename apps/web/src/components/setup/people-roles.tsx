@@ -28,7 +28,7 @@ const field =
 
 export function PeopleAndRoles({ setup, data }: { setup: CapacitySetup; data: WorkspaceSettingsData }) {
   return (
-    <div className="flex flex-col gap-6" data-setup="people">
+    <div className="flex min-w-0 flex-col gap-6" data-setup="people">
       <RolesTable setup={setup} data={data} />
       <SharedTeams setup={setup} />
       <PeopleTable setup={setup} data={data} />

@@ -95,7 +95,7 @@ export function TiersAndClients({ setup, data, roster }: Props) {
   const { canEdit } = setup;
   const tierServiceIds = new Set(setup.services.filter((s) => s.tier_id).map((s) => s.id));
   return (
-    <div className="flex flex-col gap-6" data-setup="clients">
+    <div className="flex min-w-0 flex-col gap-6" data-setup="clients">
       <TierControls setup={setup} />
       {setup.departments.map((d) => (
         <DepartmentTable key={d.id} setup={setup} data={data} department={d} />
@@ -559,7 +559,9 @@ function ClientLine({ setup, client: c, tierService, open, onMore }: { setup: Ca
         )}
       </TableCell>
       <TableCell>
-        {alsoService && other ? (
+        {alsoService && other && !canEdit ? (
+          <span>{also ? plainName(other.name) : "–"}</span>
+        ) : alsoService && other ? (
           <label className="flex items-center gap-1.5">
             <input
               type="checkbox"

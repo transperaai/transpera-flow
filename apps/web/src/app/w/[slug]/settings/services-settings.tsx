@@ -59,7 +59,9 @@ export function ServicesSettings({ data, tierServiceIds = new Set<string>() }: {
       ) : (
         <p className="mb-3 text-fg-2">You can view services here; Agency admins can change them.</p>
       )}
-      {services.length === 0 ? (
+      {services.length === 0 && tierServiceIds.size > 0 ? (
+        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Every service is a tier of a department: edit them on the tier tables above.</p>
+      ) : services.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
           No services yet. Until you add one, every win is priced at the workspace&apos;s retainer of{" "}
           {formatCurrency(data.workspace.settings.retainer, currency)} a month.

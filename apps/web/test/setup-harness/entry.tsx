@@ -91,7 +91,7 @@ function build(who: "owner" | "viewer", extraTiers: number) {
     clients,
     roles,
     people,
-    portfolio: [{ person_id: people[0]!.id, service_id: services[2]!.id, client_count: 6, provenance: {} }],
+    portfolio: [{ person_id: people[0]!.id, service_id: services[2]!.id, client_count: 6, provenance: {} }], // Organic Tier 2
     rampDefault: [0.4, 0.6, 0.8],
     rampDefaultProvenance: null,
     dlerIncludesLeadership: true,
@@ -100,7 +100,7 @@ function build(who: "owner" | "viewer", extraTiers: number) {
     payHidden: who !== "owner",
   };
   const data = {
-    workspace: { id: WS, name: "Acme", slug: "acme", settings: { currency: "AUD", hours_per_week: 38 } },
+    workspace: { id: WS, name: "Acme", slug: "acme", settings: { currency: "AUD", hours_per_week: 38, retainer: 2500 } },
     canEdit: who === "owner",
     canManage: who === "owner",
     roles: roles.map((r) => ({ id: r.id, name: r.name, color: null, active: true })),
@@ -134,6 +134,6 @@ function build(who: "owner" | "viewer", extraTiers: number) {
 window.mountSetup = ({ page, who, extraTiers = 0 }) => {
   const { setup, data, roster } = build(who, extraTiers);
   createRoot(document.getElementById("root")!).render(
-    <div className="flex flex-col gap-6 p-4">{page === "clients" ? <TiersAndClients setup={setup} data={data} roster={roster} /> : <PeopleAndRoles setup={setup} data={data} />}</div>,
+    <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-4 py-4">{page === "clients" ? <TiersAndClients setup={setup} data={data} roster={roster} /> : <PeopleAndRoles setup={setup} data={data} />}</div>,
   );
 };
