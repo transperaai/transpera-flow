@@ -376,7 +376,7 @@ function Bottleneck({ setup, model, result, base, stepProcess }: { setup: Capaci
           <span key={s.stepId}>
             {i > 0 && ", "}
             {s.stepId !== "hand" && stepProcess[s.stepId] ? (
-              <Link href={`${base}/p/${stepProcess[s.stepId]}#step-${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
+              <Link href={`${base}/p/${stepProcess[s.stepId]}?step=${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
                 {s.name}
               </Link>
             ) : (

@@ -935,6 +935,10 @@ interface CanvasProps {
   stepExtras?: (stepId: string) => StepExtras | null;
   /** Titles of the workspace's sources by id, for the sources a step's detail lists. */
   sourceTitles?: Readonly<Record<string, string>>;
+  /** A step whose detail is open when the map first shows (`?step=<id>` on the process page). Read-only maps only. */
+  initialStepId?: string | null;
+  /** The step's base values for capacity, shown in its detail (read only on the process page). */
+  stepBaseValues?: (step: StepRow) => ReactNode;
   /** The first run is still computing: shows FirstRunStatus over the map. */
   computing?: boolean;
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
@@ -947,6 +951,14 @@ export function ProcessCanvas(props: CanvasProps) {
       <Canvas {...props} />
     </ReactFlowProvider>
   );
+}
+
+/** The groups a step sits inside, nearest first. */
+function ancestorGroups(steps: readonly StepRow[], id: string | null): string[] {
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const out: string[] = [];
+  for (let at = id ? byId.get(id)?.parent_step_id : null; at && !out.includes(at); at = byId.get(at)?.parent_step_id) out.push(at);
+  return out;
 }
 
 function Canvas({
@@ -981,6 +993,8 @@ function Canvas({
   stepDetail = true,
   stepExtras,
   sourceTitles,
+  initialStepId = null,
+  stepBaseValues,
   computing = false,
   emptyAction,
 }: CanvasProps) {
@@ -988,7 +1002,8 @@ function Canvas({
   // A read-only map with nothing between start and end has nothing to draw. (The Editor keeps its empty canvas: a new block starts there.)
   const nothingToDraw = !editable && !bundle.steps.some((s) => s.kind !== "start" && s.kind !== "end");
   // Groups open in place (issue #102): to edit inside one, open it; to read the map, close it for the roll-up.
-  const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(() => (editor ? new Set(groupIds(bundle.steps)) : new Set()));
+  // A linked step (`?step=`) inside closed groups opens them, so the map shows where it is.
+  const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(() => (editor ? new Set(groupIds(bundle.steps)) : new Set(ancestorGroups(bundle.steps, initialStepId))));
   const expanded = expandedProp ?? ownExpanded;
   const expandedNow = useRef(expanded);
   useEffect(() => {
@@ -1630,7 +1645,7 @@ function Canvas({
   }, [lit, flow]);
 
   // A step's detail, on a read-only map.
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(initialStepId ?? null);
   const detailStep = useMemo(() => {
     const st = !editable && detailId ? bundle.steps.find((x) => x.id === detailId) : undefined;
     return st && !isGroup(st) && !st.child_process_id && st.kind !== "start" && st.kind !== "end" ? st : null;
@@ -1817,6 +1832,7 @@ function Canvas({
               reworkTo={reworkToOf(bundle.steps, detailStep)}
               extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
               sources={sourcesOf(detailStep, sourceTitles)}
+              baseValues={stepBaseValues?.(detailStep)}
               onClose={closeDetail}
             />
           )}
