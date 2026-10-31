@@ -24,8 +24,8 @@ import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { ServiceMore } from "@/app/w/[slug]/settings/services-settings";
 import { ServicesSettings } from "@/app/w/[slug]/settings/services-settings";
 import { ClientHealthBenchmark, ClientGroupsSettings, GroupFields } from "@/app/w/[slug]/settings/client-groups-settings";
-import { ClientMore, ClientsSettings, type ClientOps, type ClientsSettingsProps } from "@/app/w/[slug]/settings/clients-settings";
-import { addClient, saveClientAssignment, saveClientField, saveClientServices } from "@/app/w/[slug]/settings/client-actions";
+import { ClientMore, type ClientOps, type ClientsSettingsProps } from "@/app/w/[slug]/settings/clients-settings";
+import { saveClientAssignment, saveClientField, saveClientServices } from "@/app/w/[slug]/settings/client-actions";
 import { addNamedClient, addTierAction, removeTierAction, saveClientLookedAfter, saveSetupField } from "@/app/w/[slug]/setup/actions";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
-import { clientSources } from "@/lib/clients";
+import { clientSources, clientsRuleSentence } from "@/lib/clients";
 import { HeadHelp, NumberCell, Note, TextCell } from "./cells";
 
 type Scalar = string | number | boolean | null;
@@ -72,7 +72,7 @@ interface Props {
   roster: { clients: ClientRow[]; clientServices: ClientServiceRow[]; clientAssignments: ClientAssignmentRow[] };
 }
 
-const OPS: ClientOps = { add: addClient, saveField: saveClientField, saveServices: saveClientServices, saveAssignment: saveClientAssignment };
+const OPS: ClientOps = { saveField: saveClientField, saveServices: saveClientServices, saveAssignment: saveClientAssignment };
 
 function moreProps(setup: CapacitySetup, data: WorkspaceSettingsData, roster: Props["roster"]): ClientsSettingsProps {
   return {
@@ -86,7 +86,6 @@ function moreProps(setup: CapacitySetup, data: WorkspaceSettingsData, roster: Pr
     people: data.people.map((p) => ({ id: p.id, name: p.name, active: p.active })),
     personRoles: data.personRoles,
     canEdit: setup.canEdit,
-    sources: clientSources(data.processes, data.services, data.clientGroups),
     ops: OPS,
   };
 }
@@ -102,16 +101,12 @@ export function TiersAndClients({ setup, data, roster }: Props) {
       ))}
       <BothServices setup={setup} />
       <NamedClients setup={setup} data={data} roster={roster} />
-      <SettingsSection id="more" title="More" description="Everything else about services and counted clients that used to live in Settings.">
-        <details className="rounded-lg border border-line p-2">
-          <summary className="cursor-pointer font-medium">Other services, every named client in full, counted clients and the client health benchmark</summary>
-          <div className="mt-3 flex flex-col gap-6">
-            <ServicesSettings data={data} tierServiceIds={tierServiceIds} />
-            <ClientGroupsSettings data={data} onlyServiceIds={new Set(data.services.filter((s) => !tierServiceIds.has(s.id)).map((s) => s.id))} benchmark={false} />
-            <ClientsSettings {...moreProps(setup, data, roster)} />
-            <ClientHealthBenchmark data={data} />
-          </div>
-        </details>
+      <SettingsSection id="other-services" title="Other services and the client health benchmark" description="Services that aren't on a tier, the clients counted for them, and the benchmark client health is compared with.">
+        <div className="flex flex-col gap-6">
+          <ServicesSettings data={data} tierServiceIds={tierServiceIds} />
+          <ClientGroupsSettings data={data} onlyServiceIds={new Set(data.services.filter((s) => !tierServiceIds.has(s.id)).map((s) => s.id))} benchmark={false} />
+          <ClientHealthBenchmark data={data} />
+        </div>
         {!canEdit && <p className="text-xs text-fg-2">Agency admins and the Owner can change these.</p>}
       </SettingsSection>
     </div>
@@ -331,7 +326,7 @@ function NamedClients({ setup, data, roster }: { setup: CapacitySetup; data: Wor
     <SettingsSection
       id="clients"
       title="Named clients"
-      description={'Blank = use the tier\'s value. Hand-holding is unplanned time each month: reassurance, extra calls, same-day turnarounds. Any tier can have named clients.'}
+      description={`Blank = use the tier's value. Hand-holding is unplanned time each month: reassurance, extra calls, same-day turnarounds. Any tier can have named clients. ${clientsRuleSentence(clientSources(data.processes, data.services, data.clientGroups))}`}
     >
       {setup.canEdit && <AddNamedClient setup={setup} />}
       <Table>
@@ -411,6 +406,8 @@ function AddNamedClient({ setup }: { setup: CapacitySetup }) {
   const [name, setName] = useState("");
   const [dept, setDept] = useState(setup.departments[0]?.id ?? "");
   const [tier, setTier] = useState(setup.tiers[0]?.id ?? "");
+  const [mrr, setMrr] = useState("");
+  const [startDate, setStartDate] = useState("");
   const service = setup.services.find((s) => s.department_id === dept && s.tier_id === tier && s.active);
   return (
     <form
@@ -420,9 +417,13 @@ function AddNamedClient({ setup }: { setup: CapacitySetup }) {
         e.preventDefault();
         if (!service) return setError("Add a tier first.");
         start(async () => {
-          const r = await addNamedClient(setup.workspaceId, service.id, name);
+          const r = await addNamedClient(setup.workspaceId, service.id, name, { mrr, start_date: startDate });
           setError(r.error);
-          if (!r.error) setName("");
+          if (!r.error) {
+            setName("");
+            setMrr("");
+            setStartDate("");
+          }
         });
       }}
     >
@@ -449,6 +450,14 @@ function AddNamedClient({ setup }: { setup: CapacitySetup }) {
             </option>
           ))}
         </NativeSelect>
+      </label>
+      <label className="flex flex-col gap-1">
+        <HelpLabel label={`MRR (${setup.currency})`} description="What the client pays you each month, in total. Optional: you can enter it later under More." example="3,600 a month for SEO." />
+        <Input value={mrr} onChange={(e) => setMrr(e.target.value)} type="number" min={0} step="any" inputMode="decimal" className="w-32" aria-label="New client MRR" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <HelpLabel label="Start date" description="When they became a client. A client who starts after a run's start date is left out of that run. Optional." example="1 March 2025." />
+        <Input value={startDate} onChange={(e) => setStartDate(e.target.value)} type="date" aria-label="New client start date" />
       </label>
       <Button type="submit" disabled={pending || !service}>
         + Add a client

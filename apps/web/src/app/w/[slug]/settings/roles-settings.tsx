@@ -6,8 +6,6 @@ import { TextField, ToggleField } from "@/components/fields";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsSection } from "./section";
-import type { WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { inUse, type RoleField, type RoleUsage } from "@/lib/roles";
 import { createRole, removeRole, saveRoleField, type ActionResult } from "./actions";
@@ -20,33 +18,7 @@ const roleSaver =
   (base, next) =>
     saveRoleField(roleId, field, base, next) as Promise<SaveOutcome<T>>;
 
-const noUsage: RoleUsage = { steps: 0, people: 0, clients: 0, services: 0 };
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-export function RolesSettings({ data }: { data: WorkspaceSettingsData }) {
-  const { roles, canEdit } = data;
-  return (
-    <SettingsSection id="roles" title="Roles" description={<>Kinds of work. Steps, people and client assignments name roles. A role that is in use can&apos;t be removed; make it
-          inactive to hide it from pickers.</>}>
-      {canEdit ? (
-        <AddRole workspaceId={data.workspace.id} />
-      ) : (
-        <p className="mb-3 text-fg-2">You can view roles here; Agency admins can change them.</p>
-      )}
-      {roles.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">No roles yet. Add the kinds of work your team does.</p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-line border-y border-line">
-          {roles.map((r) => (
-            <li key={r.id}>
-              <RoleItem role={r} usage={data.roleUsage[r.id] ?? noUsage} canEdit={canEdit} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </SettingsSection>
-  );
-}
 
 export function AddRole({ workspaceId }: { workspaceId: string }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), {});
@@ -65,21 +37,6 @@ export function AddRole({ workspaceId }: { workspaceId: string }) {
         </p>
       )}
     </form>
-  );
-}
-
-function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">; usage: RoleUsage; canEdit: boolean }) {
-  return (
-    <details className="group py-2">
-      <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
-        <span aria-hidden className="text-fg-3 transition-transform group-open:rotate-90">
-          ›
-        </span>
-        <span className={`font-semibold ${role.active ? "" : "text-fg-3 line-through"}`}>{role.name}</span>
-        {!role.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
-      </summary>
-      <RoleMore role={role} usage={usage} canEdit={canEdit} />
-    </details>
   );
 }
 

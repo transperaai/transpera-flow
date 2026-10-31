@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField, saveLinks } from "@/lib/fields/server";
-import { CLIENT_FIELDS, isBase, isClientField, isId, parseNewClient, type ClientField } from "@/lib/clients";
+import { CLIENT_FIELDS, isBase, isClientField, isId, type ClientField } from "@/lib/clients";
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
@@ -18,26 +18,6 @@ const signedOut = { status: "error", message: "Your session has ended. Sign in a
 
 async function signedIn(): Promise<boolean> {
   return Boolean(await getSessionUser());
-}
-
-export interface AddClientResult {
-  error?: string;
-}
-
-/** Add a client from the form: a name, and optionally MRR and a start date. */
-export async function addClient(workspaceId: string, _prev: AddClientResult, form: FormData): Promise<AddClientResult> {
-  if (!isId(workspaceId)) return { error: "Couldn't save. Try again." };
-  const parsed = parseNewClient({ name: form.get("name"), mrr: form.get("mrr"), start_date: form.get("start_date") });
-  if (!parsed.ok) return { error: parsed.error };
-  if (!(await signedIn())) return { error: signedOut.message };
-  const db = await getDb();
-  try {
-    await db.insertInto("clients").values({ workspace_id: workspaceId, ...parsed.value }).execute();
-  } catch (e) {
-    return { error: pgCode(e) === "42501" ? "You don't have permission to add clients." : "Couldn't save. Try again." };
-  }
-  refresh();
-  return {};
 }
 
 /** One field of a client: its name, MRR, start date, or whether it is active. */

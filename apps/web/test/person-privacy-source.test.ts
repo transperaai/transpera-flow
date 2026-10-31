@@ -55,7 +55,7 @@ describe("per-person screens use the viewer helpers", () => {
     const data = read("lib/data.ts");
     expect(data).toContain("loadTeam(db, ws)");
     expect(data).toContain("roleUsage(roleSteps, team.personRoles, team.clientAssignments,");
-    expect(read("app/w/[slug]/settings/people-settings.tsx")).toContain("Your record. Agency admins see the whole team.");
+    expect(read("components/setup/people-roles.tsx")).toContain("Your record. Agency admins see the whole team.");
     expect(read("app/w/[slug]/settings/clients-settings.tsx")).toContain("A_TEAM_MEMBER");
   });
 });

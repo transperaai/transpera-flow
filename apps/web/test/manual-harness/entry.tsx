@@ -1,4 +1,4 @@
-// Clients, workspace details and deleting a solution on a bare page, for ../manual-entry-browser.test.ts
+// A named client's fields (the part of a Set up row under "More"), workspace details and deleting a solution on a bare page, for ../manual-entry-browser.test.ts
 // (issue #182, B19). Bundled by esbuild and driven through `window.mountManual`; nothing here ships. The server is stood in
 // for by an in-memory store that answers as the server actions do (and, as `refresh()` does, re-renders with what was saved).
 // The writes themselves are tested over PostgREST in packages/mcp/test/postgrest-manual-entry.test.ts.
@@ -6,14 +6,14 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ClientAssignmentRow, ClientRow, ClientServiceRow } from "@transpera-flow/db";
-import { ClientsSettings, type ClientOps } from "@/app/w/[slug]/settings/clients-settings";
+import { ClientMore, type ClientOps } from "@/app/w/[slug]/settings/clients-settings";
 import { WorkspaceDetails } from "@/app/w/[slug]/settings/workspace-details";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
-import { parseNewClient, type ClientSources } from "@/lib/clients";
+import { formatWholeCurrency } from "@/lib/format";
 
 declare global {
   interface Window {
-    mountManual: (opts: { canEdit: boolean; canManage: boolean; sources?: ClientSources }) => void;
+    mountManual: (opts: { canEdit: boolean; canManage: boolean }) => void;
     /** Every write the page asked for, as the server action would have received it. */
     calls: unknown[][];
     deleted: string[];
@@ -21,7 +21,6 @@ declare global {
 }
 
 const WS = "00000000-0000-4000-8000-000000000001";
-let added = 100;
 const SEO = "10000000-0000-4000-8000-000000000001";
 const PPC = "10000000-0000-4000-8000-000000000002";
 const AD = "20000000-0000-4000-8000-000000000001";
@@ -42,7 +41,7 @@ const client = (id: string, name: string, over: Partial<ClientRow> = {}): Client
   ...over,
 });
 
-function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] } }: { canEdit: boolean; canManage: boolean; sources?: ClientSources }) {
+function Harness({ canEdit, canManage }: { canEdit: boolean; canManage: boolean }) {
   const [clients, setClients] = useState<ClientRow[]>([
     client("40000000-0000-4000-8000-000000000001", "Harbour Lane Dental"),
     client("40000000-0000-4000-8000-000000000002", "Old Mill Bakery", { active: false, mrr: 1200 }),
@@ -54,13 +53,6 @@ function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] 
   const log = (...args: unknown[]) => window.calls.push(args);
 
   const ops: ClientOps = {
-    async add(workspaceId, _prev, form) {
-      log("add", workspaceId, form.get("name"), form.get("mrr"), form.get("start_date"));
-      const parsed = parseNewClient({ name: form.get("name"), mrr: form.get("mrr"), start_date: form.get("start_date") });
-      if (!parsed.ok) return { error: parsed.error };
-      setClients((list) => [...list, client(`40000000-0000-4000-8000-${String(++added).padStart(12, "0")}`, parsed.value.name, { mrr: parsed.value.mrr, start_date: parsed.value.start_date })]);
-      return {};
-    },
     async saveField(id, field, _base, value) {
       log("field", id, field, value);
       setClients((list) => list.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
@@ -100,32 +92,42 @@ function Harness({ canEdit, canManage, sources = { groups: ["Sales"], named: [] 
           return { status: "saved", value: next };
         }}
       />
-      <ClientsSettings
-        workspaceId={WS}
-        currency={currency}
-        clients={clients}
-        clientServices={services}
-        clientAssignments={assignments}
-        services={[
-          { id: SEO, name: "SEO", active: true },
-          { id: PPC, name: "PPC", active: true },
-        ]}
-        roles={[
-          { id: AD, name: "Account director", active: true },
-          { id: AM, name: "Account manager", active: true },
-        ]}
-        people={[
-          { id: MAYA, name: "Maya Collins", active: true },
-          { id: TOM, name: "Tom Reid", active: true },
-        ]}
-        personRoles={[
-          { person_id: MAYA, role_id: AD },
-          { person_id: TOM, role_id: AM },
-        ]}
-        canEdit={canEdit}
-        sources={sources}
-        ops={ops}
-      />
+      <section role="region" aria-labelledby="clients-heading">
+        <h2 id="clients-heading">Clients</h2>
+        {clients.map((c) => (
+          <details key={c.id} data-client={c.name}>
+            <summary>
+              {c.name} {formatWholeCurrency(Number(c.mrr), currency)} a month
+            </summary>
+            <ClientMore
+              client={c}
+              workspaceId={WS}
+              currency={currency}
+              clients={clients}
+              clientServices={services}
+              clientAssignments={assignments}
+              services={[
+                { id: SEO, name: "SEO", active: true },
+                { id: PPC, name: "PPC", active: true },
+              ]}
+              roles={[
+                { id: AD, name: "Account director", active: true },
+                { id: AM, name: "Account manager", active: true },
+              ]}
+              people={[
+                { id: MAYA, name: "Maya Collins", active: true },
+                { id: TOM, name: "Tom Reid", active: true },
+              ]}
+              personRoles={[
+                { person_id: MAYA, role_id: AD },
+                { person_id: TOM, role_id: AM },
+              ]}
+              canEdit={canEdit}
+              ops={ops}
+            />
+          </details>
+        ))}
+      </section>
       {canEdit && (
         <DeleteSolution
           name="Second check"

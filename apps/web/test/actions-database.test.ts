@@ -477,9 +477,15 @@ describe("settings", () => {
 
   it("adds a client, assigns people to it, and links servicing", async () => {
     const c = await import("@/app/w/[slug]/settings/client-actions");
+    const setup = await import("@/app/w/[slug]/setup/actions");
     const sv = await import("@/app/w/[slug]/settings/servicing-actions");
-    expect(await c.addClient(WS, {}, form({ name: "Test Client Ltd", mrr: "1200", start_date: "2026-09-01" }))).toEqual({});
-    const client = await one("select id from clients where workspace_id = $1 and name = 'Test Client Ltd'", [WS]);
+    expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "Test Client Ltd", { mrr: "1200", start_date: "2026-09-01" })).toEqual({ id: expect.any(String) });
+    expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "   ")).toEqual({ error: "Enter the client's name." });
+    expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "Bad MRR", { mrr: "-5" })).toEqual({ error: "Enter MRR as a number, 0 or more." });
+    const client = await one("select id, mrr, start_date::text as start_date from clients where workspace_id = $1 and name = 'Test Client Ltd'", [WS]);
+    expect(Number(client.mrr)).toBe(1200);
+    expect(client.start_date).toBe("2026-09-01");
+    expect((await q("select 1 from client_services where client_id = $1 and service_id = $2", [client.id, northbeamServiceIds.seo])).rowCount).toBe(1);
     const person = northbeamPersonIds["Maya Collins"]!;
     expect(await c.saveClientAssignment(client.id, WS, northbeamRoleIds.strat, null, person)).toEqual({ status: "saved", value: person });
     expect(await c.saveClientAssignment(client.id, WS, northbeamRoleIds.strat, null, person)).toEqual({ status: "saved", value: person });

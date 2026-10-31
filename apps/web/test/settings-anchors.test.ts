@@ -21,7 +21,7 @@ describe("links into Settings", () => {
 
   it("finds the sections", () => {
     expect(sections).toContain("workspace-heading");
-    expect(sections).toContain("people-heading");
+    expect(sections).toContain("simulation-heading");
   });
 
   it("point at a section heading that exists", () => {
@@ -35,8 +35,8 @@ describe("links into Settings", () => {
 // the Settings parts they reuse. A link to `/setup/people#roles-heading` must land on a heading of that page.
 describe("links into Set up", () => {
   const PAGES: Record<string, string[]> = {
-    clients: ["components/setup/tiers-clients.tsx", "app/w/[slug]/settings/services-settings.tsx", "app/w/[slug]/settings/client-groups-settings.tsx", "app/w/[slug]/settings/clients-settings.tsx"],
-    people: ["components/setup/people-roles.tsx", "app/w/[slug]/settings/roles-settings.tsx", "app/w/[slug]/settings/people-settings.tsx"],
+    clients: ["components/setup/tiers-clients.tsx", "app/w/[slug]/settings/services-settings.tsx", "app/w/[slug]/settings/client-groups-settings.tsx"],
+    people: ["components/setup/people-roles.tsx"],
   };
   const sectionsOf = (page: string) =>
     new Set(PAGES[page]!.flatMap((f) => [...readFileSync(join(SRC, f), "utf8").matchAll(/<SettingsSection\s+(?:\n\s*)?id=(?:"([^"]+)"|\{`([^`$]+)`)/g)].map((m) => `${m[1] ?? m[2]}-heading`)));

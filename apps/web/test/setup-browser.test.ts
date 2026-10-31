@@ -105,6 +105,38 @@ describe("Tiers & clients", { timeout: 120_000 }, () => {
     await page.close();
   });
 
+  it("adds a named client with its tier, MRR and start date; the form asks the server once and clears", async () => {
+    const { page } = await mount({ page: "clients", who: "owner" });
+    const form = page.locator("[data-add-named-client]");
+    await form.getByLabel("New client name", { exact: true }).fill("Bright Smile Ortho");
+    await form.getByLabel("New client tier", { exact: true }).selectOption({ label: "T2" });
+    await form.getByLabel("New client MRR", { exact: true }).fill("2400");
+    await form.getByLabel("New client start date", { exact: true }).fill("2026-09-01");
+    await form.getByRole("button", { name: "+ Add a client" }).click();
+    await page.waitForFunction(() => (window.__serverActions?.length ?? 0) > 0);
+    // Organic (the first department) T2: its service id (b...2).
+    expect((await calls(page))[0]).toEqual({ name: "addNamedClient", args: ["00000000-0000-4000-8000-000000000001", "b0000000-0000-4000-8000-000000000002", "Bright Smile Ortho", { mrr: "2400", start_date: "2026-09-01" }] });
+    await page.close();
+  });
+
+  it("inactive clients are hidden until asked for; an inactive role says so; and the page says which clients drive the simulation", async () => {
+    const { page } = await mount({ page: "clients", who: "owner" });
+    expect(await page.locator("tr[data-client='Old Mill Bakery']").count()).toBe(0);
+    await page.getByRole("button", { name: "Show 1 inactive client" }).click();
+    expect(await page.locator("tr[data-client='Old Mill Bakery']").count()).toBe(1);
+    await page.getByRole("button", { name: "Hide inactive clients" }).click();
+    expect(await page.locator("tr[data-client='Old Mill Bakery']").count()).toBe(0);
+    // The one-line rule that used to head the full Clients list now sits under Named clients.
+    expect(await page.locator("[data-setup=clients]").innerText()).toMatch(/A process whose services have clients counted/);
+    // Nothing is folded away any more.
+    expect(await page.locator("[data-setup=clients] details").count()).toBe(0);
+    await page.close();
+    const people = await mount({ page: "people", who: "owner" });
+    expect(await people.page.locator("tr[data-role='Old analyst']").innerText()).toContain("Inactive");
+    expect(await people.page.locator("[data-setup=people] details").count()).toBe(0);
+    await people.page.close();
+  });
+
   it("+ Add a tier is there, and Remove shows only past three tiers", async () => {
     const three = await mount({ page: "clients", who: "owner" });
     expect(await three.page.getByRole("button", { name: "+ Add a tier" }).count()).toBe(1);
