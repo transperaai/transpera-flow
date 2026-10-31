@@ -23,13 +23,13 @@ build briefs are written.**
 | Overview | Change | Its health strip is about issues; it becomes a capacity headline |
 | First principles | Cut | D12 |
 | Scenario share links | Cut | D12 |
-| Other share links and the older process-level lever system | **Ask** | Only reached through share links (see Q1 below) |
-| Issues | **Ask** | Doesn't serve A1–A9 (see Q2) |
+| Other share links and the older process-level lever system | Cut | Q1: cut all share links |
+| Issues | Keep | Q2: where Austin anchors solutions and changes |
 | Solutions, block library | Keep | D12 (routing changes) |
-| Sources | **Ask** | Could back "source and confidence" per value, or be hidden (see Q3) |
+| Sources | Hide | Q3: a simple source label on each value instead |
 | Calibration | Keep | The only route to measured times (Monday.com export) |
 | MCP, API tokens, backup and restore, access, branding, change log, purposes | Keep | Low cost, and useful |
-| Demo (`/demo`) | **Ask** | Fixtures don't model tiers, portfolios or work splits (see Q4) |
+| Demo (`/demo`) | Cut | Q4: rebuild one client-shaped demo later |
 
 ## Page by page
 
@@ -40,7 +40,7 @@ build briefs are written.**
 | Company map + play + horizon | Keep | |
 | Health strip (process health, open issues, flow efficiency, improvement delivered) | Change | Replace with a capacity headline: clients per employee, busiest role and its busy share, headroom, DLER against 4.5:1. Each card links to the Capacity page |
 | By-process rows | Keep | |
-| Trend charts (issues donut, where the time goes) | Change | Keep "where the time goes" (A4). The issues charts follow Q2 |
+| Trend charts (issues donut, where the time goes) | Keep | "Where the time goes" serves A4 |
 | Empty-workspace start | Change | The checklist adds: tiers, tier counts, named Tier 1 clients, portfolios, baselines |
 
 ### Processes and process pages
@@ -50,7 +50,7 @@ build briefs are written.**
 | Processes list, new process, upload process (`transpera-process/2`) | Keep | Upload is how interview maps get in. The file format later gains the work split and tier multipliers (`process-file` skill) |
 | Process page sections: About, Map, Facts from the run, Supporting data | Keep | |
 | Process page: first principles card | Cut | D12 |
-| Process page: issues & solutions, insights → acknowledge | Follows Q2 | |
+| Process page: issues & solutions, insights → acknowledge | Keep | Q2 |
 | Missing-for-simulation | Change | Also lists steps with no work split or source (section 7) |
 | Editor (draft, solution and block modes, palette, tour) | Keep | |
 | Editor step inspector | **Change** | Adds the work split (automatable / augmentable / manual, with a line each), tier multipliers (D7), and source and confidence per value |
@@ -81,7 +81,7 @@ build briefs are written.**
 | Churn drivers, client health (servicing), demand, market | Keep | |
 | Access, branding, change log, purposes | Keep | |
 | Calibration (historical data imports) | Keep | Later: a Monday.com ticket-time import to measure step times |
-| Levers (`settings/levers`) | Follows Q1 | Controls only the older process-level levers |
+| Levers (`settings/levers`) | Cut | Q1: only controls the older process-level levers |
 
 ### Sandbox (`w/[slug]/sandbox`)
 
@@ -105,7 +105,7 @@ build briefs are written.**
 
 | Feature | Verdict | Note |
 |---|---|---|
-| Issues list and issue page | **Ask (Q2)** | |
+| Issues list and issue page | Keep | Q2. **Change:** a Sandbox automation/augmentation change can name the issue it addresses, as solutions do, so the issue shows what each change would free |
 | Solutions list and page | Keep | D12: for routing changes. Its MRR projection and market stress test stay |
 | Block library | Keep | D12. The "used in N solutions" count is always 0: a known gap |
 
@@ -113,15 +113,15 @@ build briefs are written.**
 
 | Feature | Verdict | Note |
 |---|---|---|
-| Source library and linking | **Ask (Q3)** | |
+| Source library and linking | Hide | Q3: off the menu; values carry a source label (interview / calculator / measured / estimate) |
 
 ### Sharing
 
 | Feature | Verdict | Note |
 |---|---|---|
 | Scenario share links | Cut | D12 |
-| Share links on the overview, process, issue and solution, plus the visitor page `s/[token]` and the link list `w/[slug]/share` | **Ask (Q1)** | |
-| Older process-level levers (scenario panel, lever panel, compare view, robustness check, bottleneck panel) | **Ask (Q1)** | Reached only through process play links and `/demo/larkspur`. The bottleneck panel could be reused for A3 |
+| Share links on the overview, process, issue and solution, plus the visitor page `s/[token]` and the link list `w/[slug]/share` | Cut | Q1 |
+| Older process-level levers (scenario panel, lever panel, compare view, robustness check, bottleneck panel) | Cut | Q1. Reuse the bottleneck panel's logic for A3 before removing it |
 
 ### Plumbing
 
@@ -130,16 +130,16 @@ build briefs are written.**
 | MCP server (15 read-only tools), API tokens | Keep | Cut `get_first_principles`. Later: a capacity tool (clients per employee, headroom) |
 | Backup export and restore | Keep | |
 | Map image export | Keep | |
-| Demo (`/demo`, Northbeam and Larkspur fixtures) | **Ask (Q4)** | |
+| Demo (`/demo`, Northbeam and Larkspur fixtures) | Cut | Q4. Check which tests import the fixtures before removing them |
 
-## Open questions for Austin
+## Decided (31 Oct, Austin)
 
-| # | Question | Our recommendation |
+| # | Question | Decision |
 |---|---|---|
-| Q1 | **Cut all share links, not just scenario links?** The client has its own deployment and everyone signs in. Share links (overview, process, issue, solution, visitor page, link list) are for people outside it. Cutting them also removes the older process-level lever system and `settings/levers`, which are only used through play links. | Cut all. Keep the bottleneck panel's logic for A3 |
-| Q2 | **Issues: keep, hide or cut?** Issues log problems on the map and track solutions against them. None of A1–A9 needs them. | Hide for v1. Bring them back if Joe wants to track the automation projects |
-| Q3 | **Sources: keep or hide?** It holds transcripts and evidence linked to values. The new "source and confidence" per value could use it, but Joe will key in his own numbers, and the transcripts are confidential. | Hide. Use a simple source label on each value instead |
-| Q4 | **Demo: update, freeze or remove?** Its fixtures don't have tiers, named Tier 1 clients, portfolios, channels or work splits. | Remove from the client's deployment. Later, rebuild one demo fixture shaped like this client (anonymised) for prototypes and tests |
+| Q1 | Cut all share links, not just scenario links? | **Cut all**, with the older process-level lever system and `settings/levers` |
+| Q2 | Issues: keep, hide or cut? | **Keep**: it's where solutions (and now changes) are anchored |
+| Q3 | Sources: keep or hide? | **Hide**; values carry a simple source label |
+| Q4 | Demo: update, freeze or remove? | **Remove**; rebuild one client-shaped, anonymised demo later |
 
 ## Build list (in order)
 
@@ -154,5 +154,5 @@ Each part is useful on its own. Prototypes come first (D20).
 | 4 | **Step base values:** work split, tier multipliers, source and confidence; editor inspector; upload format | Section 7 | New (engine: ENGINE bump, goldens unchanged when the split is unused) |
 | 5 | **Changes:** automation / augmentation as Sandbox changes acting on step parts, with adoption, start and ramp; compare gains clients per employee, hours freed, DLER; library presets from the client's change list | A5–A7 | New |
 | 6 | Small engine items: reserved management share per person, ramp for new starters, salary for DLER, words → content tasks | A2, A6 | Small |
-| 7 | **Cuts:** first principles, scenario share links, then Q1–Q4 as decided | D12 | Small |
+| 7 | **Cuts and hides:** first principles; all share links and the older lever system; hide Sources; remove `/demo` | D12, Q1, Q3, Q4 | Small–Medium |
 | Later | Work priority by tier, week-of-month recurrence (D14); earnings per hour by tier (A10); retention under load (A11); Monday.com time import | | |

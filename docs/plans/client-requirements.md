@@ -55,6 +55,7 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D18 | **The Owner and Agency admins** key in and edit clients, tier counts, portfolios and baselines. Viewers view. | 31 Oct, Austin |
 | D19 | **No data request to the client.** Joe keys in his own data once he has the app, so the build provides the fields and screens (section 4), with sensible defaults from section 3–6 until he does. | 31 Oct, Austin |
 | D20 | **Clickable HTML prototypes** of the new screens before the build briefs: Capacity page, "Add N clients", client entry, step baselines and changes. | 31 Oct, Austin |
+| D21 | **Cut all share links** and the older process-level lever system; **keep Issues** (solutions and changes anchor to them); **hide Sources**; **remove `/demo`**. See `docs/plans/keep-cut-build.md`. | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
