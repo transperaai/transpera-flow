@@ -147,3 +147,12 @@ export function checkCapacityInputs(model: EngineModel): CapacityProblem[] {
 }
 
 const round = (v: number) => Math.round(v * 1000) / 1000;
+
+/**
+ * What the web layer shows before a run (P5): everything wrong with the model's capacity inputs, in plain English. `simulate`
+ * doesn't throw on these and doesn't call this: a run with a problem still runs, on the value the engine can use (a malformed
+ * number counts as 0, a portfolio above the count is cut off at the count). The web layer decides what to do with them.
+ */
+export function capacityProblems(model: EngineModel): CapacityProblem[] {
+  return checkCapacityInputs(model);
+}

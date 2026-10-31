@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   runOnce,
   simulate,
+  capacityProblems,
+  checkCapacityInputs,
   groupServiceOf,
   withClientGroups,
   type EngineClient,
@@ -516,6 +518,24 @@ describe("item 7: where each person's time goes, by step", () => {
     expect(pt.clients.dora).toEqual({ svc: 1 });
     expect(pt.clients.ann!.svc).toBeCloseTo(2, 9);
     expect(pt.stepHours.bob?.task ?? 0).toBeLessThan(0.1);
+  });
+});
+
+describe("item 8: check before run", () => {
+  it("capacityProblems is checkCapacityInputs, and simulate runs on a model with problems without throwing", () => {
+    const m = model({}, {
+      svc: { deliverables: undefined },
+      extra: { clientGroups: { svc: { count: 2, fee: 1000, churnMonthly: 0, stayMonths: 12, health: 70 } } },
+      people: { ann: { name: "Ann", roles: ["r"], capacity: HPW, portfolio: { svc: 5 }, reservedShare: 2 } },
+    });
+    const problems = capacityProblems(m);
+    expect(problems).toEqual(checkCapacityInputs(m));
+    expect(problems.map((p) => p.code).sort()).toEqual(["bad_number", "driver_without_deliverables", "portfolio_over_count"]);
+    expect(() => simulate(m, 2, 1)).not.toThrow();
+  });
+
+  it("a clean model has none", () => {
+    expect(capacityProblems(model({ c: client() }))).toEqual([]);
   });
 });
 
