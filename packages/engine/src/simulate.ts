@@ -679,6 +679,13 @@ interface PersonState {
   teamMark: number;
   /** Their busy share so far in the measured window, as of the last weekly churn tick (the team-overload driver). */
   util: number;
+  /**
+   * Steps they take only for the clients they manage (`toClientManager`), though their role isn't the step's: they never take from
+   * the step's shared queue, and the hours count to `ownAcc`, their own role's. Null for nearly everyone.
+   */
+  mgrOnly: Set<StepState> | null;
+  /** Their own (first) role's hour counters; null when none is in the model. */
+  ownAcc: RoleAcc | null;
 }
 
 /** The people who look after some clients, shared by every client with the same services and assignees: their busy share and leave are read once a tick. */
@@ -706,6 +713,8 @@ interface RosterClient {
   assigned: PersonState[];
   /** Its assigned person per role id, for servicing tasks. */
   assignees: Map<string, PersonState>;
+  /** Its manager: the person `toClientManager` steps queue for; null when it has none the model knows. */
+  manager: PersonState | null;
   active: boolean;
   health: number;
   touch: Touchpoints;
@@ -753,7 +762,7 @@ interface RosterClient {
   /** What it shares with clients of the same services and assignees (see `shapeFor`). */
   shape: ClientShape;
   /** Its services and assignees, to work its shape out again when the team changes (a planned start or end date). */
-  spec: { services: string[]; assignments: Record<string, string> };
+  spec: { services: string[]; assignments: Record<string, string>; manager?: string };
   /**
    * Churn drivers run as chances (B4): by driver slot, when the hit lasts to (hours; 0 = not hit), how many times a 10% rise's effect it
    * is (a price hit), and its own random stream (created at its first draw). All null unless the run has a driver that can be in
@@ -779,6 +788,7 @@ interface ClientShape {
   carriers: [PersonState, string, number][];
   assigned: PersonState[];
   assignees: Map<string, PersonState>;
+  manager: PersonState | null;
   svcKey: string;
   serviced: boolean;
   team: Team;
@@ -1076,8 +1086,23 @@ export function runOnce(
     overCapW: 0,
     teamMark: 0,
     util: 0,
+    mgrOnly: null,
+    ownAcc: person.roles.map((rid) => (Object.hasOwn(roleAcc, rid) ? roleAcc[rid]! : null)).find((a) => a !== null) ?? null,
   }));
   for (const st of stepList) st.people = people.filter((p) => p.steps.includes(st));
+  // A client's manager takes its `toClientManager` steps whatever their role (D32): the step joins their list for those clients' tasks only.
+  if (servicing) {
+    const managerIds = new Set(Object.values(model.clients ?? {}).flatMap((c) => (c.manager !== undefined ? [c.manager] : [])));
+    for (const p of people) {
+      if (!managerIds.has(p.id)) continue;
+      for (const st of stepList) {
+        if (st.s.toClientManager && st.assigned && !st.s.person && st.s.role && !p.steps.includes(st)) {
+          p.steps.push(st);
+          (p.mgrOnly ??= new Set()).add(st);
+        }
+      }
+    }
+  }
 
   // Capacity per role: each person's capacity split evenly across their roles.
   const roleCapacity: Record<string, number> = {};
@@ -1724,7 +1749,7 @@ export function runOnce(
   };
   /** The team that looks after a client (see `Team`). */
   const teamFor = (
-    client: { services: string[]; assignments: Record<string, string> },
+    client: { services: string[]; assignments: Record<string, string>; manager?: string },
     rc: { assigned: PersonState[]; carriers: [PersonState, string, number][] },
   ): Team => {
     // Who looks after it (for the churn drivers): its carriers and assignees, and the people of the roles that work its servicing
@@ -1734,6 +1759,7 @@ export function runOnce(
     if (rc.assigned.length > 0) {
       // (Assignees in the order they were given: another order only means another cache entry.)
       for (const rid in client.assignments) teamKey += `|${rid}=${client.assignments[rid]}`;
+      if (client.manager !== undefined) teamKey += `|m=${client.manager}`;
     }
     let shared = teamOf.get(teamKey);
     if (!shared) {
@@ -1767,9 +1793,10 @@ export function runOnce(
   };
   /** Client shapes by their services and assignees (see `ClientShape`). */
   const shapes = new Map<string, ClientShape>();
-  const shapeFor = (client: { services: string[]; assignments: Record<string, string> }): ClientShape => {
+  const shapeFor = (client: { services: string[]; assignments: Record<string, string>; manager?: string }): ClientShape => {
     let key = client.services.length === 1 ? client.services[0]! : client.services.join("\u0000");
     for (const rid in client.assignments) key += `\u0001${rid}\u0002${client.assignments[rid]}`;
+    if (client.manager !== undefined) key += `\u0003${client.manager}`;
     let shape = shapes.get(key);
     if (shape) return shape;
     const carriers: [PersonState, string, number][] = [];
@@ -1788,6 +1815,9 @@ export function runOnce(
       const p = personById.get(pid);
       if (p) assigned.push(p);
     }
+    // The manager looks after the client too (their busy share and client count; the churn drivers' team).
+    const manager = client.manager !== undefined ? (personById.get(client.manager) ?? null) : null;
+    if (manager && !assigned.includes(manager)) assigned.push(manager);
     const assignees = new Map<string, PersonState>();
     if (servicing) {
       for (const [rid, pid] of Object.entries(client.assignments)) {
@@ -1811,6 +1841,7 @@ export function runOnce(
       carriers,
       assigned,
       assignees,
+      manager,
       svcKey: client.services[0] ?? "",
       serviced: client.services.some((sid) => (linksBySvc[serviceIndex.get(sid) ?? -1]?.length ?? 0) > 0),
       team: NO_TEAM,
@@ -1824,7 +1855,7 @@ export function runOnce(
   };
   const addClient = (
     key: string,
-    client: { services: string[]; assignments: Record<string, string>; health?: number; mrr?: number; overrides?: ClientOverrides },
+    client: { services: string[]; assignments: Record<string, string>; health?: number; mrr?: number; overrides?: ClientOverrides; manager?: string },
     t: number,
     isRoster: boolean,
     weeklyBill: number,
@@ -1839,6 +1870,7 @@ export function runOnce(
       carriers: shape.carriers,
       assigned: shape.assigned,
       assignees: shape.assignees,
+      manager: shape.manager,
       active: true,
       health: client.health !== undefined && Number.isFinite(client.health) ? clampHealth(client.health) : rules.initial,
       touch: { onTime: 0, late: 0, missed: 0 },
@@ -2713,7 +2745,11 @@ export function runOnce(
     setQ(st.stat, t, 1);
     // A servicing task whose client has an assigned person for the step's
     // role, who can do the step, queues for them only (docs/PRD.md §6.3.3).
-    const assignee = st.assigned && e.task && !st.s.person && st.s.role ? e.task.client.assignees.get(st.s.role) : undefined;
+    // A step with `toClientManager` goes to the client's manager, whatever their role; a client with none falls back to its assignee in the role, then the pool.
+    const assignee =
+      st.assigned && e.task && !st.s.person && st.s.role
+        ? ((st.s.toClientManager ? e.task.client.manager : null) ?? e.task.client.assignees.get(st.s.role))
+        : undefined;
     if (assignee && assignee.steps.includes(st)) {
       const assigned = st.assigned!;
       let k = assigned.people.indexOf(assignee);
@@ -2752,7 +2788,8 @@ export function runOnce(
     const steps = p.steps;
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i]!;
-      const c = st.queue.peek();
+      // (A client's manager from another role takes only the clients' tasks assigned to them, never the step's shared queue.)
+      const c = p.mgrOnly !== null && p.mgrOnly.has(st) ? undefined : st.queue.peek();
       if (c && (!best || c.seg!.tQ < bestTQ)) {
         best = c;
         bestTQ = c.seg!.tQ;
@@ -2822,7 +2859,8 @@ export function runOnce(
       else p.busyHours += handsOn;
       const over = overloaded(p);
       if (over) p.overPipeline += handsOn;
-      const acc = st.acc;
+      // A manager from another role does the step as their own role's work.
+      const acc = p.mgrOnly !== null && p.mgrOnly.has(st) ? p.ownAcc : st.acc;
       if (acc) {
         if (svc) acc.svc += handsOn;
         else acc.busy += handsOn;

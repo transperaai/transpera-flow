@@ -198,4 +198,91 @@ describe("item 2: named and counted clients together", () => {
   });
 });
 
+describe("item 3: portfolios and the client's manager", () => {
+  const dora: EnginePerson = { name: "Dora", roles: ["dir"], capacity: HPW };
+  const ann: EnginePerson = { name: "Ann", roles: ["r"], capacity: HPW };
+  const bob: EnginePerson = { name: "Bob", roles: ["r"], capacity: HPW };
+  /** Role r's step goes to the client's manager; Dora is a director, not in role r. */
+  const managed = (clients: Record<string, EngineClient>, o: Opts = {}): EngineModel => {
+    const m = model(clients, { people: { ann, bob, dora }, ...o });
+    m.roles = { ...m.roles, dir: { name: "Director", count: 1, cost: 80, ongoing: 0 } };
+    m.steps = m.steps.map((s) => (s.id === "task" ? { ...s, toClientManager: true } : s));
+    return m;
+  };
+  const personsOf = (entities: TraceEntity[] | null, clientId: string) => new Set(tasksOf(entities, clientId).flatMap((e) => e.trace.map((seg) => seg.person)));
+
+  it("a step with toClientManager queues for the client's manager whatever their role", () => {
+    const r = runOnce(managed({ c1: client({ manager: "dora" }), c2: client() }), 1, true);
+    expect(personsOf(r.entities, "c1")).toEqual(new Set(["dora"]));
+    // No manager: the role's pool, as today.
+    const pool = personsOf(r.entities, "c2");
+    expect(pool.has("dora")).toBe(false);
+    expect([...pool].every((p) => p === "ann" || p === "bob")).toBe(true);
+  });
+
+  it("the manager's busy share counts the work as theirs and as their own role's", () => {
+    const r = runOnce(managed({ c1: client({ manager: "dora" }) }), 1, false);
+    // 4 tasks a month x 0.1 h over 26 weeks (about 24 tasks): 2.4 h, which is 2.4 / 26 a week.
+    expect(r.people.dora!.servicingHours).toBeCloseTo((24 * 0.1) / 26, 1);
+    expect(r.people.dora!.servicing).toBeGreaterThan(0);
+    expect(r.people.ann!.servicingHours + r.people.bob!.servicingHours).toBe(0);
+    // ...and it is the director role's work, not role r's.
+    expect(r.roles.dir!.servicingHours).toBeCloseTo(r.people.dora!.servicingHours, 12);
+    expect(r.roles.r!.servicingHours).toBe(0);
+  });
+
+  it("without the manager (on leave all run) the work falls to the role's pool", () => {
+    const away: EnginePerson = { ...dora, leave: [[0, 26 * HPW]] };
+    const r = runOnce(managed({ c1: client({ manager: "dora" }) }, { people: { ann, bob, dora: away } }), 1, true);
+    const who = personsOf(r.entities, "c1");
+    expect(who.has("dora")).toBe(false);
+    expect(who.size).toBeGreaterThan(0);
+  });
+
+  it("an end date hands the client's work back to the pool", () => {
+    const leaves: EnginePerson = { ...dora, until: 13 * HPW };
+    const r = runOnce(managed({ c1: client({ manager: "dora" }) }, { people: { ann, bob, dora: leaves } }), 1, true);
+    const early = tasksOf(r.entities, "c1").filter((e) => e.t0 < 12 * HPW);
+    const late = tasksOf(r.entities, "c1").filter((e) => e.t0 > 14 * HPW);
+    expect(early.every((e) => e.trace.every((seg) => seg.person === "dora"))).toBe(true);
+    expect(late.length).toBeGreaterThan(0);
+    expect(late.every((e) => e.trace.every((seg) => seg.person === "ann" || seg.person === "bob"))).toBe(true);
+  });
+
+  it("portfolio counts land on the right people, in people order, and the remainder stays unassigned", () => {
+    const m = managed({}, {
+      extra: { clientGroups: { svc: { count: 6, fee: 1000, churnMonthly: 0, stayMonths: 12, health: 70 } }, clientMix: "groups-replace" },
+      people: { ann: { ...ann, portfolio: { svc: 2 } }, bob: { ...bob, portfolio: { svc: 1 } }, dora: { ...dora, portfolio: { svc: 2 } } },
+    });
+    const expanded = withClientGroups(m).clients!;
+    const owner = (n: number) => expanded[`group:svc:${n}`]!;
+    expect([1, 2].map((n) => owner(n).manager)).toEqual(["ann", "ann"]);
+    expect(owner(1).assignments).toEqual({ r: "ann" });
+    expect(owner(3).manager).toBe("bob");
+    expect([4, 5].map((n) => owner(n).manager)).toEqual(["dora", "dora"]);
+    // Dora's role isn't one the service's steps use, so she has no assignment, only the clients to manage.
+    expect(owner(4).assignments).toEqual({});
+    expect(owner(6).manager).toBeUndefined();
+    expect(owner(6).assignments).toEqual({});
+  });
+
+  it("portfolio work shows in the manager's busy share and client count", () => {
+    const m = managed({}, {
+      extra: { clientGroups: { svc: { count: 4, fee: 1000, churnMonthly: 0, stayMonths: 12, health: 70 } } },
+      people: { ann, bob, dora: { ...dora, portfolio: { svc: 3 } } },
+    });
+    const r = runOnce(m, 1, false);
+    // 3 of the 4 clients are Dora's: 3 x 24 tasks x 0.1 h; the fourth's go to Ann or Bob.
+    expect(r.people.dora!.clients).toBeCloseTo(3, 9);
+    expect(r.people.dora!.servicingHours).toBeCloseTo((3 * 24 * 0.1) / 26, 1);
+    expect(r.people.ann!.servicingHours + r.people.bob!.servicingHours).toBeCloseTo((24 * 0.1) / 26, 1);
+  });
+
+  it("a client's manager from another role never takes the step's shared queue", () => {
+    // c2 has no manager: Dora is idle but must not take its tasks.
+    const r = runOnce(managed({ c1: client({ manager: "dora" }), c2: client(), c3: client(), c4: client() }), 2, true);
+    for (const id of ["c2", "c3", "c4"]) expect(personsOf(r.entities, id).has("dora")).toBe(false);
+  });
+});
+
 // (later items append below)
