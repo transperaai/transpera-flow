@@ -34,7 +34,8 @@ saying why.
    - Where tests render screens in demo mode, give them a plain test mode or fixture instead. Don't lose coverage.
    - The old `lever_settings` table: drop it in a migration (with rollback; check `copy-from-supabase`), since P0
      stopped reading it.
-8. **Docs.** Update `README.md`, `docs/HANDOVER.md` and `docs/new-client.md` so they describe the capacity app as it
+8. **Unused Overview health strip.** Delete `components/overview/health-cards.tsx` (unused since P6), its tests in `overview-b15.test.ts`, and the by-path reads in `process-help.test.ts` and `settings-help.test.ts`. Keep whatever those help tests check for the files that remain.
+9. **Docs.** Update `README.md`, `docs/HANDOVER.md` and `docs/new-client.md` so they describe the capacity app as it
    now is: Set up, Capacity, Overview, the free-play Sandbox, the starter and example loaders, and the preview
    migration script.
 

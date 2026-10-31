@@ -43,8 +43,8 @@ const count = (list: string[], file: string) => list.filter((f) => f === file).l
 describe("the Overview page's runs", () => {
   it("simulates each solution's before and after once: changing the horizon runs the horizon again, not the solutions", async () => {
     const { page, errors } = await mount();
-    // The implemented solution is measured: the card shows what it saved.
-    await page.waitForFunction(() => /a month (saved|added)/.test(document.querySelector('[data-card="improvement"]')?.textContent ?? ""), null, { timeout: 90_000 });
+    // The implemented solution is measured: the before and after chart has its row (the health strip's card went with P6).
+    await page.waitForFunction(() => /Faster audits/.test(document.querySelector('[data-chart="before-after"]')?.textContent ?? ""), null, { timeout: 90_000 });
     await page.waitForFunction(() => /Playing 3 months/.test(document.querySelector("[data-horizon-note]")?.textContent ?? ""), null, { timeout: 60_000 });
     const before = await posts(page);
     expect(count(before, "impact.worker.ts")).toBe(1);
@@ -54,9 +54,9 @@ describe("the Overview page's runs", () => {
 
     await page.getByRole("button", { name: "12 months" }).click();
     await page.waitForFunction(() => /Playing 12 months/.test(document.querySelector("[data-horizon-note]")?.textContent ?? ""), null, { timeout: 90_000 });
-    // The cards have caught up with the new run, and the improvement card still shows its numbers.
-    await page.waitForFunction(() => /over the next 12 months/.test(document.querySelector('[data-card="flow-efficiency"]')?.textContent ?? ""), null, { timeout: 30_000 });
-    expect(await page.locator('[data-card="improvement"]').textContent()).toMatch(/a month (saved|added)/);
+    // The charts have caught up with the new run, and the before and after chart still shows its row.
+    await page.waitForFunction(() => /over the next 12 months/.test(document.querySelector('[data-chart="time-split"]')?.textContent ?? ""), null, { timeout: 30_000 });
+    expect(await page.locator('[data-chart="before-after"]').textContent()).toMatch(/Faster audits/);
 
     const after = await posts(page);
     // One more run, at the new horizon; the run the findings come from and the solutions' runs aren't asked for again.
