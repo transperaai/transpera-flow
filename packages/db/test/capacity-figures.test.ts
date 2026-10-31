@@ -5,7 +5,9 @@ import {
   busyShares,
   capacitySetupFromModel,
   departmentCeiling,
+  departmentTime,
   dler,
+  dlerSalariesMissing,
   hiringAdvice,
   leaver,
   perEmployee,
@@ -14,6 +16,7 @@ import {
   serviceLines,
   timeToServe,
   todayModel,
+  wholeBusiness,
 } from "../src";
 
 // A small agency, small enough to check by hand. Ids follow the prototype's example (capacitySetupFromModel knows their departments).
@@ -375,5 +378,49 @@ describe("on the engine's own results (capacityModel, 4 replications)", () => {
     expect(res.received.karl).toBeUndefined();
     expect(Object.values(res.received).reduce((a, b) => a + b, 0) + res.unplaced).toBe(res.clients);
     expect(res.clients).toBe(10 + 2 - 0); // Karl's 5 + 5 counted, plus his 2 named clients (n4, n5)
+  });
+});
+
+describe("the Overview's figures (P6)", () => {
+  test("whole business: unique clients, revenue per employee over everyone but contractors and leaders, DLER over all salaries", () => {
+    const setup = capacitySetupFromModel(tinyModel());
+    setup.tiers[0]!.both_count = 3;
+    const w = wholeBusiness(setup);
+    expect(w.unique).toBe(17);
+    expect(w.both).toBe(3);
+    // Ann, Bo and Cy are the employees; Dee leads and the freelancer is a contractor.
+    expect(w.employees).toBe(3);
+    expect(w.revenuePerEmployee).toBeCloseTo(20000 / 3, 10);
+    expect(w.dler.ratio).toBeCloseTo(20000 / 35000, 10);
+  });
+  test("DLER follows the leadership switch; per-employee does not", () => {
+    const withLead = wholeBusiness(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: true }));
+    const without = wholeBusiness(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false }));
+    expect(withLead.dler.ratio).toBeCloseTo(20000 / 35000, 10);
+    expect(without.dler.ratio).toBeCloseTo(20000 / 22500, 10);
+    expect(without.employees).toBe(withLead.employees);
+  });
+  test("a missing salary of someone in DLER is flagged; a contractor's is not; hidden pay is never flagged", () => {
+    const setup = capacitySetupFromModel(tinyModel());
+    expect(dlerSalariesMissing(setup, "org")).toBe(false);
+    setup.people.find((p) => p.name === "Freelancer")!.salary_monthly = null;
+    expect(dlerSalariesMissing(setup, "org")).toBe(false);
+    setup.people.find((p) => p.name === "Ann")!.salary_monthly = null;
+    expect(dlerSalariesMissing(setup, "org")).toBe(true);
+    expect(dlerSalariesMissing(setup, null)).toBe(true);
+    expect(dlerSalariesMissing({ ...setup, payHidden: true }, "org")).toBe(false);
+  });
+  test("where the time goes: hours by purpose for the department's people, with shares", () => {
+    const model = tinyModel();
+    const setup = capacitySetupFromModel(model);
+    // Ann (SEO) does 30 h and Bo 10 h of step r2 (purpose "Content"); the freelancer's hours (Content team, no department) are not Organic's.
+    const result = fakeResult({ a: 0.5, b: 0.4 }, {}, { a: 30, b: 10 }, {}, model);
+    const t = departmentTime(setup, model, result, "org", { Content: "Making content" });
+    expect(t.total).toBe(40);
+    expect(t.parts).toEqual([{ name: "Making content", hours: 40, share: 1 }]);
+    (result.personTime!.stepHours as Record<string, Record<string, number>>).a!.hand = 10;
+    const u = departmentTime(setup, model, result, "org");
+    expect(u.parts.map((x) => x.name)).toEqual(["Content", "Hand-holding"]);
+    expect(u.parts[1]!.share).toBeCloseTo(10 / 50, 10);
   });
 });

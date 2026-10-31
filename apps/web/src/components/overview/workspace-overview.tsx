@@ -12,6 +12,7 @@ import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
 import { getDb } from "@/lib/auth/session";
+import { loadCapacitySetup } from "@transpera-flow/db";
 
 /** The Overview of a workspace (issue #100): the landing page, at `/w/[slug]` and `/w/[slug]/overview`. */
 export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
@@ -43,13 +44,15 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     );
   }
   const ws = live.workspace.id;
-  const [parts, company, issues, sources, canEdit, solutions] = await Promise.all([
+  const [parts, company, issues, sources, canEdit, solutions, capacitySetup] = await Promise.all([
     loadLiveParts(ws),
     loadLiveCompany(ws),
     loadWorkspaceIssues(ws),
     loadWorkspaceSources(ws),
     canEditWorkspace(ws),
     loadWorkspaceSolutions(ws),
+    // Set up's data for the department cards (P6), loaded as the viewer: pay a role can't see never arrives.
+    getDb().then((db) => loadCapacitySetup(db, ws)),
   ]);
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
@@ -79,6 +82,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}
       issuesHref={`${base}/issues`}
       forecastHref={`${base}/sandbox`}
+      capacity={capacitySetup ? { setup: capacitySetup, base } : null}
     />
     </SourceLinkingScope>
   );

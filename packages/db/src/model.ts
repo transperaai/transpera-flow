@@ -22,6 +22,7 @@ import {
   type EngineStep,
 } from "@transpera-flow/engine";
 import { resolvePurpose, workspacePurposes, type PurposeSource } from "./purposes";
+import { engineClientCapacity, enginePersonCapacity, engineRoleUnit, engineTierClientGroups, engineTierService, tierContext, type TierContext } from "./capacity-model";
 import { engineRecurrence } from "./servicing";
 import { STEP_SOURCE_LABELS, type DistParams, type Distribution, type EdgeRow, type LeadSourceRow, type ProcessBundle, type ProcessPart, type SeasonalityRow, type StepRow, type StepSourceLabel, type WorkspaceSettings } from "./types";
 
@@ -286,7 +287,9 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   }
 
   const servicing = engineServicing(bundle, baseServices, held);
-  const services = servicing.services;
+  // A workspace with a tier service feeds the capacity Set up data to the engine (capacity-model.ts); any other is mapped as before.
+  const tier = tierContext(bundle);
+  const services = tier && servicing.services ? withTierServices(servicing.services, tier) : servicing.services;
   const working = [...pipelineSteps, ...servicing.steps];
   const groups = { ...pipelineGroups, ...servicing.groups };
   Object.assign(ends, servicing.ends);
@@ -298,15 +301,16 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
       count: role.headcount,
       cost: Number(role.default_cost_rate),
       ongoing: Number(role.ongoing_hours_per_client_week),
+      ...(tier && engineRoleUnit(tier, role.id) ? { unit: engineRoleUnit(tier, role.id)! } : {}),
     };
   }
 
   const startDate = options.startDate ?? new Date().toISOString().slice(0, 10);
-  const people = resolvePeopleRows(bundle, working, startDate, options.planned === true);
+  const people = resolvePeopleRows(bundle, working, startDate, options.planned === true, tier, services);
   const demand = engineDemand(bundle, startDate);
-  // Client groups replace the named roster, which stays stored but is not simulated.
-  const clientGroups = engineClientGroups(bundle, services);
-  const clients = clientGroups ? undefined : engineClients(bundle, services, startDate);
+  // Client groups replace the named roster, which stays stored but is not simulated. In a tier workspace they are added to it instead.
+  const clientGroups = tier && services ? engineTierClientGroups(tier, bundle.clientGroups ?? [], services) : engineClientGroups(bundle, services);
+  const clients = clientGroups && !tier ? undefined : engineClients(bundle, services, startDate, tier);
   const market = engineMarket(bundle);
   const churnDrivers = engineChurnDrivers(bundle);
 
@@ -319,11 +323,13 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     ...(demand ? { demand } : {}),
     ...(market ? { market } : {}),
     ...(churnDrivers ? { churnDrivers } : {}),
-    activeClients: clientGroups
-      ? Object.values(clientGroups).reduce((a, g) => a + Math.round(g.count), 0)
-      : clients
-        ? Object.keys(clients).length
-        : s.active_clients,
+    activeClients: tier
+      ? (clients ? Object.keys(clients).length : 0) + (clientGroups ? Object.values(clientGroups).reduce((a, g) => a + Math.round(g.count), 0) : 0) || s.active_clients
+      : clientGroups
+        ? Object.values(clientGroups).reduce((a, g) => a + Math.round(g.count), 0)
+        : clients
+          ? Object.keys(clients).length
+          : s.active_clients,
     churnMonthly: s.churn_monthly,
     retainer: s.retainer,
     roles: engineRoles,
@@ -335,6 +341,8 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     ...((num(s.overhead_monthly) ?? 0) > 0 ? { overheadMonthly: num(s.overhead_monthly)! } : {}),
     ...(clients ? { clients } : {}),
     ...(clientGroups ? { clientGroups } : {}),
+    // Capacity (P2b): counted clients come on top of the named ones, and a won client goes to the least busy person who serves its tier.
+    ...(tier ? { placeNewClients: "least-busy" as const, ...(clientGroups ? { clientMix: "groups-add" as const } : {}) } : {}),
     ...(Object.keys(servicing.processes).length ? { servicingProcesses: servicing.processes } : {}),
     ...optional("health", healthRules(s)),
     ...(targetCycleHours !== null ? { targetCycleHours } : {}),
@@ -537,6 +545,13 @@ function engineServicing(
   return { services: withLinks, steps, ends, processes, groups };
 }
 
+/** The services with their tier fields (department, tier, deliverables, ad-hoc rule) in a tier workspace; a service that isn't a tier service is as it was. */
+function withTierServices(services: Record<string, EngineService>, tier: TierContext): Record<string, EngineService> {
+  const out: Record<string, EngineService> = {};
+  for (const [id, sv] of Object.entries(services)) out[id] = { ...sv, ...engineTierService(tier, id) };
+  return out;
+}
+
 /** Health rules from the workspace settings; undefined when none is set, so the engine's estimated defaults apply. */
 function healthRules(s: WorkspaceSettings): EngineHealthRules | undefined {
   const pick = (v: unknown) => (v !== undefined && v !== null && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined);
@@ -564,6 +579,7 @@ function engineClients(
   bundle: ProcessBundle,
   services: Record<string, EngineService> | undefined,
   startDate: string,
+  tier?: TierContext,
 ): Record<string, EngineClient> | undefined {
   const rows = bundle.clients ?? [];
   if (!rows.length) return undefined;
@@ -586,6 +602,8 @@ function engineClients(
       mrr: Number(c.mrr),
       ...(c.health !== null && c.health !== undefined ? { health: Number(c.health) } : {}),
       assignments,
+      // A tier workspace: its own values, its manager and its hand-holding hours (capacity-model.ts).
+      ...(tier ? engineClientCapacity(tier, c.id, assignments) : {}),
     };
   }
   return clients;
@@ -720,7 +738,7 @@ function engineDemand(bundle: ProcessBundle, startDate: string): EngineDemand | 
  * steps of this process they are skilled for, and leave as simulation hours.
  * Returns undefined when the workspace has no people, so head-counts apply.
  */
-function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string, planned = false) {
+function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string, planned = false, tier?: TierContext, services?: Record<string, EngineService>) {
   const s = bundle.workspace.settings;
   const hoursPerDay = s.hours_per_week / WORKING_DAYS_PER_WEEK;
   const roleIds = new Set(bundle.roles.map((r) => r.id));
@@ -773,6 +791,14 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
         : {}),
       ...(planned && p.start_date && p.start_date > startDate ? { from: hoursTo(p.start_date) } : {}),
       ...(planned && p.end_date ? { until: hoursTo(nextDay(p.end_date)) } : {}),
+      // A tier workspace: team time, the new-starter ramp (only for someone who starts during the run), the tiers they serve and their counted clients.
+      ...(tier
+        ? enginePersonCapacity(tier, p.id, {
+            rampStarts: planned && !!p.start_date && p.start_date > startDate,
+            rampDefault: bundle.workspace.settings.ramp_default,
+            serviceIds: new Set(Object.keys(services ?? {})),
+          })
+        : {}),
     };
   }
   return people;

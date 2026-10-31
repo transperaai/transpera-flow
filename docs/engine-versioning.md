@@ -17,7 +17,7 @@ which every run records.
 | `northbeam-chances` | `northbeamWithChances()` | `northbeam-drivers` with `late` measured as events (effect 0.6, 3 months), `handoff` entered (chance 0.05, effect 1, 2 months), the custom driver at chance 0.1 effect 0.5, a PPC fee range 3,000 to 6,000 and a `fee` channel of PPC +8% from month 4 with the price driver on, run month by month (engine 1.12.0). |
 | `northbeam-channels` | `northbeamWithChannels()` | `northbeam-money` with monthly channels from month 3: leads x1.2, conversion x0.9, hands-on time x0.7 on the heaviest step, a wait of 0 to 8 h, rework 0 to 0.1, role cost x1.1, overheads x1.25, one person's capacity x0.9 and base churn x1.3 (engine 1.12.0). |
 | `larkspur-time` | `larkspurWithPurposes()` | Larkspur with a purpose on every step (a mapping by step id: `LARKSPUR_PURPOSES`), run month by month for six months of its week-26 horizon: where working time goes (engine 1.14.0), first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is `larkspur`'s. |
-| `capacity` | `capacityModel()` | The client capacity app's example agency (engine 1.16.0; re-baselined from 1.15.0 for step splits, tier multipliers and changes, below): six tier services in two departments with driver-based servicing steps, 26 people with team time, portfolios and tiers, 13 named clients (with overrides and hand-holding) beside 145 counted ones, won clients placed on the least busy person who serves the tier. Run month by month with where each person's time goes. |
+| `capacity` | `capacityModel()` | The client capacity app's example agency (engine 1.17.0; re-baselined from 1.16.0 for least-busy placement counting the full step time, and from 1.15.0 for step splits, tier multipliers and changes, below): six tier services in two departments with driver-based servicing steps, 26 people with team time, portfolios and tiers, 13 named clients (with overrides and hand-holding) beside 145 counted ones, won clients placed on the least busy person who serves the tier. Run month by month with where each person's time goes. |
 | `larkspur` | `larkspurModel()` | Larkspur Creative, the "second, messier sample agency" (§6.9): overloaded designers, a copywriter past her week on overtime, an 18-client named roster whose health drives churn, and the corners Northbeam leaves alone (below). |
 
 Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money`, `northbeam-chances`, `northbeam-channels`, `larkspur-time` and `capacity` also ask for the monthly series; `capacity` also asks for `personTime`). The outputs kept (`keyOutputs` in
@@ -187,6 +187,14 @@ Added 31 Oct 2026 (`docs/plans/capacity/p3-engine-changes-brief.md`, ADR 0022 "E
 - **Not in scope.** Changes act on hands-on time only. Rework, waits and routing stay as they are; "also changes rework or waiting" is later.
 
 **Timing** (`capacity`, 30 replications, month by month with `personTime`, same container, load average about 8): 4.6 to 4.9 s before, 4.85 to 5.06 s after (within the noise; the changes also shorten the work the run does).
+
+## Least-busy placement uses the full step time (engine 1.17.0, capacity P2b)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p2b-mapping-brief.md`). **Only the `capacity` golden moved**: the approved diff of the ten other golden models is `engineVersion` and nothing else (checked by running the golden test unapproved first, when `capacity` alone failed). Approved with `golden:approve --bump "least-busy placement counts tier multipliers and changes"`.
+
+- **What changed.** `plannedHours` (the busy share used to place a won client with `placeNewClients: "least-busy"`) took a step's plain `work` times the client's factor. For a step with a split or a tier multiplier it now takes `work` times `capacityEntry(...).f` (the tier multiplier of the service's tier and the changes in force in the month the client is placed) times the client's factor, the same number the run scales a drawn time by. A step with neither takes exactly the old expression.
+- **Months.** The month is the one the client is added in, fixed when it is placed (the planned hours are taken off again by the same amount when it leaves).
+- **Scope.** Only models with `placeNewClients: "least-busy"` and a step with `split` or `tierMultiplier` are affected.
 
 ## Time by purpose (engine 1.14.0, sandbox phase 4)
 
