@@ -5,7 +5,7 @@
 
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
 import type { Selectable } from "kysely";
-import type { DB, Json } from "./db-types";
+import type { DB } from "./db-types";
 import type { Viewer } from "./queries";
 import type { SandboxChange } from "./sandbox-levers";
 
@@ -443,31 +443,6 @@ export interface ClientGroupRow {
   provenance: ProvenanceMap;
 }
 
-/**
- * A process revision's first principles (issue #119, A54): the job and root cause as text, the lists the rule checks
- * read as jsonb arrays. `FirstPrinciples` (engine) is the app-side shape of the whole, read with
- * `firstPrinciplesFromRow`.
- */
-export interface FirstPrinciplesRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  revision_id: string;
-  job_who: string;
-  job_progress: string;
-  job_situation: string;
-  job_done: string;
-  statements: Json;
-  requirements: Json;
-  deletes: Json;
-  improvements: Json;
-  why_problem: string;
-  why_chain: Json;
-  root_cause: string;
-  measures: Json;
-  updated_at: string;
-}
-
 export type SourceKind = "transcript" | "notes" | "sop" | "spreadsheet" | "data" | "screenshot" | "other";
 
 /**
@@ -726,12 +701,6 @@ export interface ProcessBundle {
    */
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
-  /**
-   * Steps each process's first principles list to delete (`added_back` left out), by process id, for the revisions this bundle
-   * shows (`loadDeleteCandidates`). Optional and not loaded by `loadProcessBundle`: only callers that show purposes add it.
-   * Without it a step's purpose skips the "Could be removed" rule.
-   */
-  deleteCandidates?: Record<string, string[]>;
 }
 
 /**
@@ -994,7 +963,6 @@ export type _SchemaDriftChecks = [
   Assert<Matches<ClientServiceRow, "client_services">>,
   Assert<Matches<ClientAssignmentRow, "client_assignments">>,
   Assert<Matches<ClientGroupRow, "client_groups">>,
-  Assert<Matches<FirstPrinciplesRow, "first_principles">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.
   Assert<Matches<Omit<ServiceServicingRow, "recurrence">, "service_servicing">>,
   Assert<Matches<LeadSourceRow, "lead_sources">>,

@@ -324,7 +324,7 @@ describe("the Upload process dialog with a transpera-process/2 file", () => {
     const { page, errors } = await mount();
     await choose(page, file("v2.json", json(v2())));
     expect(await page.locator("[data-upload-counts]").innerText()).toBe("8 steps · 7 links · a pipeline");
-    expect(await page.locator("[data-upload-extra-counts]").innerText()).toBe("3 sources · first principles: 3 parts");
+    expect(await page.locator("[data-upload-extra-counts]").innerText()).toBe("3 sources");
     const extras = await page.locator("[data-upload-extras]").innerText();
     expect(extras).toContain("Interview with Maya Chen, managing director");
     expect(await page.locator("[data-upload-problems=error]").count()).toBe(0);

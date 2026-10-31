@@ -5,7 +5,6 @@ import {
   CardGridSkeleton,
   ChartSkeleton,
   EditorSkeleton,
-  FirstPrinciplesSkeleton,
   FormSkeleton,
   HistorySkeleton,
   IssuePageSkeleton,
@@ -145,15 +144,6 @@ export const History: StoryObj = {
   render: () => (
     <Shell>
       <HistorySkeleton />
-    </Shell>
-  ),
-};
-
-export const FirstPrinciples: StoryObj = {
-  tags: ["visual-phone"],
-  render: () => (
-    <Shell>
-      <FirstPrinciplesSkeleton />
     </Shell>
   ),
 };

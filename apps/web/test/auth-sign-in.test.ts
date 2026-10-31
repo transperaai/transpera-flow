@@ -57,14 +57,14 @@ describe("proxy", () => {
 
   it("keeps the public paths, Better Auth, and the MCP bypass open", () => {
     stubAuthEnv(true);
-    for (const path of ["/login", "/demo", "/privacy", "/auth/signout", "/api/auth/sign-in/social", "/api/auth/callback/google", "/api/mcp", "/s/abc"]) {
+    for (const path of ["/login", "/privacy", "/auth/signout", "/api/auth/sign-in/social", "/api/auth/callback/google", "/api/mcp"]) {
       expect(passes(visit(path)), path).toBe(true);
     }
   });
 
   it("does not open a look-alike of a public path", () => {
     stubAuthEnv(true);
-    for (const path of ["/loginx", "/api/authx", "/sx", "/api/mcp/extra"]) expect(visit(path).status, path).toBe(307);
+    for (const path of ["/loginx", "/api/authx", "/sx", "/api/mcp/extra", "/s/abc", "/demo"]) expect(visit(path).status, path).toBe(307);
   });
 
   it("guards nothing in demo mode (no sign-in settings)", () => {

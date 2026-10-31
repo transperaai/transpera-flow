@@ -7,33 +7,25 @@ import { createTestDb, type TestDb } from "./harness";
 
 const keys = new Set(DEFAULT_PURPOSES.map((c) => c.key));
 const step = (purpose: string | null, id = "s1") => ({ id, purpose });
-const none = new Set<string>();
 
 describe("resolvePurpose", () => {
-  it("a chosen key in the list wins, even over the delete list", () => {
-    expect(resolvePurpose(step("coordination"), "pipeline", new Set(["s1"]), keys)).toEqual({ key: "coordination", source: "chosen" });
+  it("a chosen key in the list wins", () => {
+    expect(resolvePurpose(step("coordination"), "pipeline", keys)).toEqual({ key: "coordination", source: "chosen" });
   });
-  it("a step listed to delete is removable", () => {
-    expect(resolvePurpose(step(null), "servicing", new Set(["s1"]), keys)).toEqual({ key: "removable", source: "first_principles" });
-  });
-  it("a step not in the delete list (put back or never listed) follows its process", () => {
-    expect(resolvePurpose(step(null), "servicing", new Set(["other"]), keys)).toEqual({ key: "client_job", source: "process_kind" });
-    expect(resolvePurpose(step(null), "pipeline", none, keys)).toEqual({ key: "winning", source: "process_kind" });
+  it("a step with no chosen key follows its process", () => {
+    expect(resolvePurpose(step(null), "servicing", keys)).toEqual({ key: "client_job", source: "process_kind" });
+    expect(resolvePurpose(step(null), "pipeline", keys)).toEqual({ key: "winning", source: "process_kind" });
   });
   it("a pipeline step after the sale moves the client's job forward (the deciding step is not after, so it stays winning work)", () => {
-    expect(resolvePurpose(step(null), "pipeline", none, keys, true)).toEqual({ key: "client_job", source: "process_kind" });
-    expect(resolvePurpose(step(null), "pipeline", new Set(["s1"]), keys, true).key).toBe("removable");
-  });
-  it("the deciding step itself is not after the sale, so it is winning work (Austin, 30 Oct), and a delete still wins", () => {
-    expect(resolvePurpose(step(null), "pipeline", none, keys, false)).toEqual({ key: "winning", source: "process_kind" });
-    expect(resolvePurpose(step(null), "pipeline", new Set(["s1"]), keys, false).key).toBe("removable");
+    expect(resolvePurpose(step(null), "pipeline", keys, true)).toEqual({ key: "client_job", source: "process_kind" });
+    expect(resolvePurpose(step(null), "pipeline", keys, false)).toEqual({ key: "winning", source: "process_kind" });
   });
   it("a stored key the list no longer has reads as Automatic, saying why", () => {
-    expect(resolvePurpose(step("required"), "pipeline", none, new Set([...keys].filter((k) => k !== "required")))).toEqual({ key: "winning", source: "deleted_category" });
-    expect(resolvePurpose(step("c0000abcd"), "servicing", none, keys)).toEqual({ key: "client_job", source: "deleted_category" });
+    expect(resolvePurpose(step("required"), "pipeline", new Set([...keys].filter((k) => k !== "required")))).toEqual({ key: "winning", source: "deleted_category" });
+    expect(resolvePurpose(step("c0000abcd"), "servicing", keys)).toEqual({ key: "client_job", source: "deleted_category" });
   });
   it("client upkeep is never a step's purpose", () => {
-    expect(resolvePurpose(step("client_upkeep"), "pipeline", none, keys).source).toBe("deleted_category");
+    expect(resolvePurpose(step("client_upkeep"), "pipeline", keys).source).toBe("deleted_category");
   });
 });
 

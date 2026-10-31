@@ -6,7 +6,6 @@ import {
   NORTHBEAM_WORKSPACE_ID,
   SANDBOX_LEVERS,
   SANDBOX_LIBRARY,
-  LEVER_KIND_IDS,
   changesFromPatch,
   northbeamBundle,
   parseChanges,
@@ -286,8 +285,7 @@ describe("the lever table", () => {
     for (const l of SANDBOX_LIBRARY) for (const c of l.changes) expect(c.id.startsWith("00000000-0000-4000-8000-")).toBe(false);
   });
 
-  it("every lever's kind is a real Settings, Levers kind, and the pay flags are as the brief says", () => {
-    for (const l of SANDBOX_LEVERS) if (l.kind !== null) expect(LEVER_KIND_IDS, l.id).toContain(l.kind);
+  it("the pay flags are as the brief says", () => {
     // C1 is a role's rate, which every member reads: offered from phase 3 (ADR 0021).
     expect(SANDBOX_LEVERS.filter((l) => l.pay !== "none").map((l) => [l.id, l.pay, l.offered])).toEqual([["C1", "role", true]]);
     expect(SANDBOX_LEVERS.filter((l) => l.pay === "individual")).toEqual([]);

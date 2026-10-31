@@ -8,7 +8,7 @@ import type { IssueRow, SolutionIssueRow, SolutionRow, StepRow } from "@transper
 import { AboutProcess } from "@/components/about-process";
 import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
-import { aboutLine, citedNumbers, ownerOf, type About } from "@/lib/process-page/about";
+import { aboutLine, citedNumbers, type About } from "@/lib/process-page/about";
 import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, otherImprovements, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
 
@@ -122,7 +122,6 @@ describe("the issue status track", () => {
 describe("About this process", () => {
   const about: About = {
     type: "Pipeline",
-    owner: "Maya Collins",
     steps: 6,
     roles: 3,
     trail: ["Sales"],
@@ -135,7 +134,6 @@ describe("About this process", () => {
   it("reads as plain attributes", () => {
     expect(aboutLine(about)).toEqual([
       { label: "Type", value: "Pipeline" },
-      { label: "Requirements owner", value: "Maya Collins" },
       { label: "Size", value: "6 steps, 3 roles" },
       { label: "On the company map", value: "Inside Sales" },
       { label: "Version", value: "Live is version 4, draft open" },
@@ -144,8 +142,8 @@ describe("About this process", () => {
     ]);
   });
   it("says so when things are missing", () => {
-    const rows = aboutLine({ ...about, owner: null, trail: [], version: null, draft: false, sources: 0, cited: null, lastChange: null, steps: 1, roles: 1 });
-    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "Not named yet", "1 step, 1 role", "Top level", "Not published yet", "None linked", "Not published yet"]);
+    const rows = aboutLine({ ...about, trail: [], version: null, draft: false, sources: 0, cited: null, lastChange: null, steps: 1, roles: 1 });
+    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "1 step, 1 role", "Top level", "Not published yet", "None linked", "Not published yet"]);
     expect(aboutLine({ ...about, sources: null }).some((r) => r.label === "Sources")).toBe(false);
     expect(aboutLine({ ...about, lastChange: null }).at(-1)).toEqual({ label: "Last published", value: "Not recorded" });
   });
@@ -166,14 +164,6 @@ describe("About this process", () => {
     const split = [st("a", { branch_odds: { source: "measured" } })];
     expect(citedNumbers(split, [{ from_step_id: "a" }, { from_step_id: "a" }])).toEqual({ cited: 1, of: 4 });
     expect(citedNumbers(split, [{ from_step_id: "a" }])).toEqual({ cited: 0, of: 3 });
-  });
-  it("names the owner most requirements name, both when two tie, and shared when more", () => {
-    const req = (id: string | null, text = "") => ({ text: "", owner_person_id: id, owner_text: text, why: "", verdict: "keep" as const, step_id: null });
-    const who = (id: string) => ({ a: "Rosa Diaz", b: "Maya Collins", c: "Priya Shah" })[id] ?? null;
-    expect(ownerOf({ requirements: [req("a"), req(null, "Finance"), req("a")] } as never, who)).toBe("Rosa Diaz");
-    expect(ownerOf({ requirements: [req("a"), req("b")] } as never, who)).toBe("Maya Collins and Rosa Diaz");
-    expect(ownerOf({ requirements: [req("a"), req("b"), req("c")] } as never, who)).toBe("Shared");
-    expect(ownerOf(null, () => null)).toBeNull();
   });
   it("renders in a labelled section with no (i)", () => {
     const html = renderToStaticMarkup(createElement(AboutProcess, { about }));
@@ -302,8 +292,8 @@ describe("the supporting data panels", () => {
 describe("the process page layout", () => {
   const page = read("components/process-page.tsx");
   const at = (s: string) => page.indexOf(s);
-  it("runs About, First principles, Map, Facts, Issues and solutions, Supporting data, then Sources", () => {
-    const order = ["<AboutProcess", 'id="first-principles"', 'id="map"', 'id="facts"', 'id="issues"', 'id="supporting-data"', "<ProcessSources"].map(at);
+  it("runs About, Map, Facts, Issues and solutions, Supporting data, then Sources", () => {
+    const order = ["<AboutProcess", 'id="map"', 'id="facts"', 'id="issues"', 'id="supporting-data"', "<ProcessSources"].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(page).toContain("Other improvements");

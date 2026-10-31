@@ -1,6 +1,5 @@
 // Where the process page and Editor save drafts: the database through Server
-// Actions when signed in, memory on the public demo, and memory with nothing
-// saved for block mode and share links.
+// Actions when signed in, and memory with nothing saved for block mode.
 
 import type { ProcessBundle } from "@transpera-flow/db";
 import type { ScreenMode } from "@/lib/mode";
@@ -13,8 +12,6 @@ export function connectScratch(live: ProcessBundle): DraftBackend {
 }
 
 export function connect(mode: ScreenMode, live: ProcessBundle): DraftBackend {
-  // A share link's page (B3) makes no server call at all.
-  if (mode === "share") return connectScratch(live);
   if (mode === "demo") return new MemoryDraftBackend(live);
   return serverDraftBackend(live.process.id);
 }

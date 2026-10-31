@@ -38,7 +38,8 @@ import type { TargetVerdict } from "@/lib/solutions/verdict";
 import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
-import { SaveProblems, useEngineModel, type EditMode } from "@/components/process-view";
+import { SaveProblems } from "@/components/save-problems";
+import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
 import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
 import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
@@ -69,7 +70,6 @@ export function EditorView({
   settingsHref,
   exitHref,
   horizonMonths = null,
-  extraChanges = 0,
   issue = null,
   tourDismissed = false,
   historyHref,
@@ -99,8 +99,6 @@ export function EditorView({
   exitHref: string;
   /** The horizon picked on the map, in months; null runs the model at its own length. */
   horizonMonths?: number | null;
-  /** Changes the draft has that aren't steps or edges (its first principles differ from live's), which Publish counts too. */
-  extraChanges?: number;
   /** Solution mode: the issue the solution is built for, whose steps are outlined and whose target the verdict is checked against. */
   issue?: SolutionIssue | null;
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
@@ -336,7 +334,7 @@ export function EditorView({
         subject={live.process.name}
         session={session}
         drafts={drafts}
-        changes={publishableChanges(diff, hasDraft, extraChanges)}
+        changes={publishableChanges(diff)}
         saving={state.saving}
         blocked={blocked}
         unresolved={unresolved}
@@ -410,7 +408,6 @@ export function EditorView({
             sources={sources}
             stamp={stamp}
             sourcesHref={sourcesHref}
-            mode={editorMode}
             blocks={blockTools}
             company={company}
             draft={

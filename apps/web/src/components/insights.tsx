@@ -13,7 +13,6 @@ import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help } from "@/components/help";
 import { IssueCostText, visibleCostMethod } from "@/components/money-hidden";
-import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
@@ -81,7 +80,6 @@ export function Insights(props: InsightsProps) {
   const [open, setOpen] = useState<string | null>(null);
   const [acking, setAcking] = useState<string | null>(null);
   const [all, setAll] = useState(false);
-  const hideMoney = useShareFinancialsHidden();
   const counts = useMemo(() => ratingCountsOf(insights ?? []), [insights]);
 
   if (!insights) {
@@ -149,7 +147,7 @@ export function Insights(props: InsightsProps) {
                   <b className="font-semibold break-words">{i.title}</b>
                   <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
                     <RatingPill rating={i.rating} />
-                    <span className="tabular-nums" data-cost title={visibleCostMethod(i.cost, hideMoney)}>
+                    <span className="tabular-nums" data-cost title={visibleCostMethod(i.cost)}>
                       <IssueCostText cost={i.cost} currency={currency} />
                     </span>
                     <span className="min-w-0">{i.number}</span>

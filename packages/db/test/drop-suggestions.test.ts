@@ -135,10 +135,10 @@ describe("what it keeps and rewrites", () => {
     expect(after.find((r) => r.proname === "audit_company_write")).toMatchObject({ anon: false, auth: false });
   });
 
-  it("play links stay: lever_kind_ids and open_share_link are still there, and the mode column still takes 'play'", async () => {
-    expect(await names("select proname n from pg_proc where pronamespace = 'private'::regnamespace and proname = 'lever_kind_ids'")).toEqual(["lever_kind_ids"]);
-    expect(await names("select proname n from pg_proc where pronamespace = 'public'::regnamespace and proname = 'open_share_link'")).toEqual(["open_share_link"]);
-    expect(await names("select pg_get_constraintdef(oid) n from pg_constraint where conrelid = 'public.share_links'::regclass and pg_get_constraintdef(oid) ilike '%play%'")).not.toEqual([]);
+  it("the play-link and share-link objects it left are gone after the capacity cuts (20270118000000)", async () => {
+    expect(await names("select proname n from pg_proc where pronamespace = 'private'::regnamespace and proname = 'lever_kind_ids'")).toEqual([]);
+    expect(await names("select proname n from pg_proc where pronamespace = 'public'::regnamespace and proname = 'open_share_link'")).toEqual([]);
+    expect(await names("select relname n from pg_class where relname = 'share_links'")).toEqual([]);
   });
 
   it("applies again without effect", async () => {

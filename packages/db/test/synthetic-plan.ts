@@ -77,8 +77,7 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     for (const skip of [2, 3, 4]) {
       for (let i = 0; edges.length < edgesPer && i + skip < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + skip], probability: 0 });
     }
-    const first_principles = { job_who: `Who ${p}`, job_progress: "Progress", job_situation: "Situation", job_done: "Done", statements: [], requirements: [], deletes: [], improvements: [], measures: [], why_problem: "", why_chain: [], root_cause: "" };
-    return { id: pid, parent_process_id: null, name: `Process ${p}`, kind: kindOf(p), entity_name: "item", description: null, archived: p % 20 === 0 && p > 1, layout: {}, steps, edges, first_principles };
+    return { id: pid, parent_process_id: null, name: `Process ${p}`, kind: kindOf(p), entity_name: "item", description: null, archived: p % 20 === 0 && p > 1, layout: {}, steps, edges };
   });
 
   const issues = Array.from({ length: L.issues }, (_, i) => ({

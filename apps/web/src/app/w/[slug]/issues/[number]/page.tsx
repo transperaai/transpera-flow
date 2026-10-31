@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { buildSolutionHref, solutionEditorHref } from "@/lib/solutions/links";
 import { isUnpublished } from "@transpera-flow/db";
 import { IssuePage } from "@/components/issues/issue-page";
-import { ShareButton } from "@/components/share/share-dialog";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { Page } from "@/components/shell/page";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
@@ -55,7 +54,6 @@ export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/iss
         liveRevisions={liveRevisions}
         solutions={solutions}
         memberNames={memberNames}
-        share={canEdit && issue.number != null ? <ShareButton slug={slug} kind="issue" targetId={issue.id} what={`Issue #${issue.number}`} /> : undefined}
       />
       </SourceLinkingScope>
     </Page>

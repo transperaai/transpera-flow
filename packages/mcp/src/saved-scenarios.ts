@@ -6,7 +6,6 @@
 import {
   canSeePerson,
   A_TEAM_MEMBER,
-  loadDeleteCandidates,
   loadProcessBySlug,
   loadScenarios,
   loadSandboxScenarios,
@@ -49,14 +48,13 @@ export interface SandboxInputs {
   scenarios: SandboxScenarioRow[];
 }
 
-/** The page's inputs: the first live process of the workspace with its servicing processes and delete candidates, the solutions, the scenarios. */
+/** The page's inputs: the first live process of the workspace with its servicing processes, the solutions, the scenarios. */
 export async function loadSandboxInputs(ctx: ToolContext, ws: WorkspaceRef): Promise<SandboxInputs> {
   const loaded = await loadProcessBySlug(ctx.db, ws.slug, { draft: false });
   if (!loaded || loaded.live.revision.number === 0) throw new ToolError("not_found", `Nothing is published in '${ws.name}' yet, so there is no live model to run scenarios on. Publish a process first.`);
   const live = loaded.live;
-  const parts = [{ processId: live.process.id, revisionId: live.revision.id }, ...(live.otherProcesses ?? []).map((p) => ({ processId: p.process.id, revisionId: p.revision.id }))];
-  const [deleteCandidates, solutions, scenarios] = await Promise.all([loadDeleteCandidates(ctx.db, parts), loadSolutions(ctx.db, ws.id), loadSandboxScenarios(ctx.db, ws.id)]);
-  return { bundle: { ...live, deleteCandidates }, solutions, scenarios };
+  const [solutions, scenarios] = await Promise.all([loadSolutions(ctx.db, ws.id), loadSandboxScenarios(ctx.db, ws.id)]);
+  return { bundle: live, solutions, scenarios };
 }
 
 // ---------------------------------------------------------------------------
