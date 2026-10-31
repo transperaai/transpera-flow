@@ -75,7 +75,8 @@ beforeAll(async () => {
   expect((await q("select private.may_sign_in('guest@outside.org', true) r"))[0]!.r).toBe("guest");
   beforeCounts = Object.fromEntries(await Promise.all(TABLES_THAT_STAY.map(async (t) => [t, await count(t)] as const)));
   const applied = await applyMigrations(db.client, {});
-  expect(applied.files).toEqual(["20270118000000_capacity_cuts.sql"]);
+  // P0's migration first; later ones (Set up, 20270119000000) follow.
+  expect(applied.files[0]).toBe("20270118000000_capacity_cuts.sql");
 }, 120_000);
 
 afterAll(async () => {
