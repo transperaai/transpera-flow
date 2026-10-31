@@ -33,7 +33,7 @@ import {
   type ChurnReplication,
   type DriverEvents,
 } from "./churn-drivers";
-import { carriersFor, clientChurnMonthly, clientHandHolding, clientRoleLoads, managerRoles, rolePools, withClientGroups } from "./clients";
+import { carriersFor, clientChurnMonthly, clientHandHolding, clientRoleLoads, managerRoles, rolePools, withClientGroups, type Carrier } from "./clients";
 import { effectiveDeliverables } from "./capacity-inputs";
 import {
   AT_RISK_HEALTH,
@@ -687,6 +687,8 @@ interface PersonState {
   mgrOnly: Set<StepState> | null;
   /** Their own (first) role's hour counters; null when none is in the model. */
   ownAcc: RoleAcc | null;
+  /** With `placeNewClients: "least-busy"`: the servicing hours a week their clients are expected to bring (see `plannedHours`). */
+  planned: number;
 }
 
 /** The people who look after some clients, shared by every client with the same services and assignees: their busy share and leave are read once a tick. */
@@ -716,6 +718,8 @@ interface RosterClient {
   assignees: Map<string, PersonState>;
   /** Its manager: the person `toClientManager` steps queue for; null when it has none the model knows. */
   manager: PersonState | null;
+  /** With "least-busy" placement: who its expected servicing hours a week fall on, as [person, hours]; null otherwise. */
+  planned: [PersonState, number][] | null;
   active: boolean;
   health: number;
   touch: Touchpoints;
@@ -1094,6 +1098,7 @@ export function runOnce(
     teamMark: 0,
     util: 0,
     mgrOnly: null,
+    planned: 0,
     ownAcc: person.roles.map((rid) => (Object.hasOwn(roleAcc, rid) ? roleAcc[rid]! : null)).find((a) => a !== null) ?? null,
   }));
   for (const st of stepList) st.people = people.filter((p) => p.steps.includes(st));
@@ -1867,6 +1872,39 @@ export function runOnce(
     shapes.set(key, shape);
     return shape;
   };
+  /** "least-busy" placement (`placeNewClients`); anything else is today's round-robin. */
+  const leastBusy = model.placeNewClients === "least-busy";
+  const stepById = new Map(model.steps.map((s) => [s.id, s] as const));
+  /**
+   * The servicing hours a week a client is expected to bring and who they fall on: its tasks a week (its own deliverables) times
+   * each step's mean time (with its ad-hoc hours and step factor), to the step's person, the client's manager for a `toClientManager`
+   * step, or its assignee in the step's role. Work for a shared pool falls on no one in particular and is left out.
+   */
+  const plannedHours = (
+    client: { services: string[]; overrides?: ClientOverrides },
+    rc: { manager: PersonState | null; assignees: Map<string, PersonState>; stepFactor: number | Record<string, number> | null },
+  ): [PersonState, number][] => {
+    const out = new Map<PersonState, number>();
+    for (const sid of client.services) {
+      const svc = serviceIndex.get(sid);
+      if (svc === undefined) continue;
+      for (const link of linksBySvc[svc]!) {
+        const r = link.recurrence;
+        const weekly = clientTasksPerWeek(model, client, sid, r);
+        if (!(weekly > 0)) continue;
+        const scale = "driver" in r && r.driver === "adhoc" ? adhocScale(link.process, effectiveDeliverables(model, client, sid).adhocHours) : 1;
+        for (const stepId of processes[link.process]!.steps) {
+          const step = stepById.get(stepId);
+          if (!step) continue;
+          const who = step.person ? personById.get(step.person) : step.role ? ((step.toClientManager ? rc.manager : null) ?? rc.assignees.get(step.role)) : undefined;
+          if (!who) continue;
+          const own = rc.stepFactor === null ? 1 : typeof rc.stepFactor === "number" ? rc.stepFactor : (rc.stepFactor[stepId] ?? 1);
+          out.set(who, (out.get(who) ?? 0) + weekly * step.work * scale * own);
+        }
+      }
+    }
+    return [...out];
+  };
   const addClient = (
     key: string,
     client: {
@@ -1893,6 +1931,7 @@ export function runOnce(
       assigned: shape.assigned,
       assignees: shape.assignees,
       manager: shape.manager,
+      planned: null,
       stepFactor: client.overrides?.stepFactor ?? null,
       active: true,
       health: client.health !== undefined && Number.isFinite(client.health) ? clampHealth(client.health) : rules.initial,
@@ -1989,6 +2028,10 @@ export function runOnce(
       advanceUncovered(t);
       for (let i = 0; i < shape.uncovered.length; i += 2) uncoveredRate[shape.uncovered[i]!]! += shape.uncovered[i + 1]!;
     }
+    if (leastBusy) {
+      rc.planned = plannedHours(client, rc);
+      for (const [p, h] of rc.planned) p.planned += h;
+    }
     rosterClients.push(rc);
     active = rosterClients.length;
     return rc;
@@ -2022,6 +2065,7 @@ export function runOnce(
   };
   const removeClient = (rc: RosterClient, t: number) => {
     rc.active = false;
+    if (rc.planned) for (const [p, h] of rc.planned) p.planned -= h;
     bill(rc, t);
     billHourly(rc, t);
     for (const p of rc.assigned) {
@@ -2120,6 +2164,28 @@ export function runOnce(
     svc.drawn = true;
     return triangular(rng, Math.min(r.low, price), price, Math.max(r.high, price));
   };
+  /**
+   * The person of `pool` (a role's members) with the lowest busy share who serves `tier`: expected servicing hours a week of their
+   * clients plus their ongoing load, over their hours a week now. Ties go to the first in people order. Not someone on leave now unless
+   * everyone is. Null when no one serves the tier.
+   */
+  const leastBusyOf = (pool: Carrier[], tier: string | undefined, t: number): string | null => {
+    let best: string | null = null;
+    let bestShare = Infinity;
+    let bestAway = true;
+    for (const c of pool) {
+      const p = personById.get(c.person)!;
+      if (tier !== undefined && p.person.tiers && !p.person.tiers.includes(tier)) continue;
+      const away = onLeave(p, t);
+      const share = p.person.capacity > 0 ? (p.planned + p.load) / p.person.capacity : Infinity;
+      if ((bestAway && !away) || (away === bestAway && share < bestShare)) {
+        best = c.person;
+        bestShare = share;
+        bestAway = away;
+      }
+    }
+    return best;
+  };
   /** A retainer won during the run: a synthetic client, assigned per role by round-robin among the role's members. */
   const addWonClient = (svc: ServiceState, t: number, price: number) => {
     const services = svc.id !== null ? [svc.id] : [];
@@ -2132,6 +2198,12 @@ export function runOnce(
     for (const rid of roles) {
       const pool = pools[rid] ?? [];
       if (!pool.length) continue;
+      if (leastBusy) {
+        // The least busy person of the role who serves the service's tier (`EnginePerson.tiers`); nobody serves it: the role stays shared.
+        const pick = leastBusyOf(pool, svc.s.tier, t);
+        if (pick) assignments[rid] = pick;
+        continue;
+      }
       const i = nextAssignee[rid] ?? 0;
       assignments[rid] = pool[i % pool.length]!.person;
       nextAssignee[rid] = i + 1;
@@ -2140,7 +2212,17 @@ export function runOnce(
     const nf = newFeeAt(svc, t);
     if (nf !== 1) fee *= nf;
     const weeklyBill = svc.s.pricingModel === "retainer" ? fee / WEEKS_PER_MONTH : 0;
-    const rc = addClient(`won:${++wonClients}`, { services, assignments }, t, false, weeklyBill);
+    // With least-busy placement the client's manager is the person placed in the role of its `toClientManager` steps.
+    let manager: string | undefined;
+    if (leastBusy) {
+      for (const link of linksBySvc[serviceIndex.get(svc.id)!] ?? []) {
+        for (const stepId of processes[link.process]!.steps) {
+          const step = stepById.get(stepId);
+          if (manager === undefined && step?.toClientManager && step.role && assignments[step.role] !== undefined) manager = assignments[step.role];
+        }
+      }
+    }
+    const rc = addClient(`won:${++wonClients}`, manager !== undefined ? { services, assignments, manager } : { services, assignments }, t, false, weeklyBill);
     // A client won on an hourly service bills the hours worked for it (ongoing here, servicing and onboarding in `startService`).
     if (svc.s.pricingModel === "hourly") {
       rc.hourlyRate = fee;

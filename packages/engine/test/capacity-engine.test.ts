@@ -416,4 +416,68 @@ describe("item 5: team time and ramp", () => {
   });
 });
 
+describe("item 6: placing won clients", () => {
+  const people = (): Record<string, EnginePerson> => ({
+    ann: { name: "Ann", roles: ["r"], capacity: HPW, tiers: ["T1"] },
+    bob: { name: "Bob", roles: ["r"], capacity: HPW, tiers: ["T2"] },
+    cat: { name: "Cat", roles: ["r"], capacity: HPW },
+  });
+  const winning = (extra: Partial<EngineModel>, ppl = people()): EngineModel =>
+    model({}, { weeks: 40, people: ppl, svc: { tier: "T1" }, extra: { leadsPerWeek: 1.5, ...extra } });
+  /** Won clients' first person, by client. */
+  const placed = (r: ReturnType<typeof runOnce>) => {
+    const out = new Map<string, string>();
+    for (const e of tasksOf(r.entities)) {
+      const c = e.servicing!.client;
+      const person = e.trace.find((seg) => seg.person)?.person;
+      if (c.startsWith("won:") && person && !out.has(c)) out.set(c, person);
+    }
+    return out;
+  };
+  const counts = (m: Map<string, string>) => {
+    const out: Record<string, number> = {};
+    for (const p of m.values()) out[p] = (out[p] ?? 0) + 1;
+    return out;
+  };
+
+  it("never picks someone who doesn't serve the tier", () => {
+    const r = runOnce(winning({ placeNewClients: "least-busy" }), 3, true);
+    const who = placed(r);
+    expect(who.size).toBeGreaterThan(8);
+    expect(counts(who).bob).toBeUndefined();
+    expect(Object.keys(counts(who)).sort()).toEqual(["ann", "cat"]);
+  });
+
+  it("picks the person with the lowest busy share, so equal people end up with about equal clients", () => {
+    const r = runOnce(winning({ placeNewClients: "least-busy" }), 4, true);
+    const c = counts(placed(r));
+    expect(Math.abs(c.ann! - c.cat!)).toBeLessThanOrEqual(1);
+  });
+
+  it("a person already carrying clients is skipped until the others catch up", () => {
+    const ppl = people();
+    const m = winning({ placeNewClients: "least-busy", clients: { old1: client({ assignments: { r: "ann" } }), old2: client({ assignments: { r: "ann" } }) } }, ppl);
+    const c = counts(placed(runOnce(m, 4, true)));
+    // Ann starts with two clients, so Cat takes the first wins.
+    expect(c.cat!).toBeGreaterThan(c.ann!);
+  });
+
+  it("round-robin (or omitted) is unchanged: it deals out to everyone in the role, tiers or not", () => {
+    const omitted = runOnce(winning({}), 3, true);
+    const explicit = runOnce(winning({ placeNewClients: "round-robin" }), 3, true);
+    expect(counts(placed(omitted)).bob).toBeGreaterThan(0);
+    expect(counts(placed(explicit))).toEqual(counts(placed(omitted)));
+  });
+
+  it("the won client's manager is the person placed in the role of its toClientManager steps", () => {
+    const m = winning({ placeNewClients: "least-busy" });
+    m.steps = m.steps.map((s) => (s.id === "task" ? { ...s, toClientManager: true } : s));
+    const r = runOnce(m, 3, false);
+    // Every won client is managed by someone in the role: ann or cat.
+    expect(r.people.bob!.servicingHours).toBe(0);
+    expect(r.people.ann!.servicingHours + r.people.cat!.servicingHours).toBeGreaterThan(0);
+    expect(r.people.ann!.clients! + r.people.cat!.clients!).toBeGreaterThan(0);
+  });
+});
+
 // (later items append below)
