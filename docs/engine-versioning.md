@@ -410,6 +410,18 @@ and the seven together under 7 s. Measured on a quiet 4-core container, engine 1
 Each run is about 0.7 s, inside the 1 s limit but not by a wide margin: with another process using the CPU one segment reached
 1.2 s and the test failed, so re-run it alone before concluding. Spliced numbers cost about 4 ms.
 
+## Won clients and a named client leaving (P7, no version bump)
+
+Two optional fields for the free-play Sandbox (`docs/plans/capacity/p7-sandbox-brief.md` section 3). Unset or empty, the code paths are not taken, no random stream is
+touched and every golden is byte-identical, so `ENGINE_VERSION` did not move (`packages/engine/test/won-clients.test.ts`, and the goldens run unapproved).
+
+- `EngineModel.wonClients: { service, month, count }[]` (1-based month). Each client is its own `inject` event, spread evenly through the month (nothing drawn).
+  It skips the sales steps: it enters the first step after the sale (`afterSaleSteps`, the onboarding hand-off) if the pipeline has one, else becomes a won client
+  at once. It is then an ordinary won client (`addWonClient`, `placeNewClients`), counts in `won` and `clientsWon`, and stays out of the cycle times (it has no time to win).
+  Entries for an unknown service, a month past the end or a count under 1 are ignored; a count is capped at 500 an entry.
+- `EngineClient.leavesMonth` (1-based). At the first weekly churn tick on or after that month's start the named client is removed as a churned client (lost, with its
+  fee). Its churn draw is still made, so no other client's draws move. Counted clients have no such field.
+
 ## Where the version goes
 
 - `SimulationResult.engineVersion` on every run, in the browser worker and on the server.
