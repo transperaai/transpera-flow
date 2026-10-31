@@ -433,3 +433,4 @@ export {
   type StepParts,
 } from "./capacity-inputs";
 export { SPLIT_TOLERANCE, checkCapacityInputs, type CapacityProblem, type CapacityProblemCode } from "./capacity-check";
+export { capacityModel, capacityServiceId } from "./fixtures/capacity";
