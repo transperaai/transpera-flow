@@ -67,6 +67,11 @@ export const ISSUE_PAGE_HELP = {
     description: "Every solution built for this issue, with an automatic pass or fail against its target, how often that holds across the simulated runs, and your own verdict. You make the final call.",
     example: "“Lead scoring”: automatic pass, holds in 92% of runs, your verdict pass.",
   },
+  changes: {
+    label: "Changes anchored to this issue",
+    description: "Sandbox automations and augmentations that name this issue as the one they fix. Each is run on its own against today: the hours it frees a month, and how many more clients the department could then hold.",
+    example: "“Auto-collate reports”: 40 hours freed a month, +3 clients.",
+  },
   history: {
     label: "History",
     description: "Everything that happened to this issue, oldest first: when it was logged, each edit, each solution tested, and when it was resolved or reopened. It stays after the issue is resolved.",

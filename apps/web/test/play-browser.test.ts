@@ -261,6 +261,20 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     expect(await admin.page.locator("[data-changes-list] li").count()).toBe(n + 1);
     expect(await text(admin.page, "[data-changes-list]")).toContain("Auto QA");
     expect(await admin.page.evaluate(() => window.__saved.map((r) => r.name))).toEqual(["Auto QA"]);
+    // It can name the issue it fixes (by number and title), and the name can be cleared again.
+    const ISSUE = "00000000-0000-4000-8000-0000000000e1";
+    await admin.page.locator('[aria-label="Edit Auto QA"]').click();
+    expect(await admin.page.locator('[aria-label="Issue it fixes"] option').allTextContents()).toEqual(["None", "#3 Reporting takes too long"]);
+    await admin.page.locator('[aria-label="Issue it fixes"]').selectOption(ISSUE);
+    await admin.page.locator("[data-change-save]").click();
+    await admin.page.waitForSelector("[data-change-dialog]", { state: "detached" });
+    expect(await admin.page.evaluate(() => window.__saved.at(-1)?.issue_id)).toBe(ISSUE);
+    await admin.page.locator('[aria-label="Edit Auto QA"]').click();
+    expect(await admin.page.locator('[aria-label="Issue it fixes"]').inputValue()).toBe(ISSUE);
+    await admin.page.locator('[aria-label="Issue it fixes"]').selectOption("");
+    await admin.page.locator("[data-change-save]").click();
+    await admin.page.waitForSelector("[data-change-dialog]", { state: "detached" });
+    expect(await admin.page.evaluate(() => window.__saved.at(-1)?.issue_id)).toBeNull();
     // A bad one is refused in words.
     await admin.page.locator("[data-change-add]").click();
     await admin.page.locator("[data-change-name]").fill("");

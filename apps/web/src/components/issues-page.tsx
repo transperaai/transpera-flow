@@ -49,6 +49,7 @@ export function IssuesPage({
   base,
   liveRevisions,
   solutions,
+  changeCounts,
 }: {
   bundle: ProcessBundle;
   issues: IssueRow[];
@@ -62,6 +63,8 @@ export function IssuesPage({
   liveRevisions?: Record<string, string>;
   /** The workspace's solutions and which issues they solve, for the "Solutions" column (the demo keeps its own in this tab). */
   solutions?: SolutionsData;
+  /** How many Sandbox changes name each issue, by issue id, for the "Changes" column (absent in the demo). */
+  changeCounts?: Record<string, number>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -185,6 +188,7 @@ export function IssuesPage({
                     <Help {...LIST_HELP.solutions} />
                   </span>
                 </th>
+                {changeCounts && <th className="px-3 py-2.5">Changes</th>}
               </tr>
             </thead>
             <tbody>
@@ -226,6 +230,17 @@ export function IssuesPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
+                    {changeCounts && (
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-changes>
+                        {changeCounts[i.id] ? (
+                          <Link href={href} className="font-medium text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+                            {changeCounts[i.id]} change{changeCounts[i.id] === 1 ? "" : "s"} →
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

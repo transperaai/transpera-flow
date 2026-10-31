@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { northbeamStepIds as ids, toEngineModel, type BlockBundle, type ProcessBundle } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
-import { blockFromGroup, blockFromSteps, blockProblem, blockStepCount, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
+import { blockFromGroup, blockFromSteps, blockOfStep, blockProblem, blockStepCount, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
+import { blockUsage } from "@/lib/blocks/usage";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { BlockSteps } from "@/components/blocks/block-library";
 import { stepWarnings } from "@/lib/editor/commands";
 import { diffBundles } from "@/lib/drafts/diff";
 import { openGroupSize } from "@/lib/map/groups";
@@ -339,5 +343,115 @@ describe("replacing the selection with a block", () => {
     expect(replaceProblem(b, ids.discovery)).toBeNull();
     expect(replaceWithBlock(b, ids.start, sales(), "X")).toBeNull();
     expect(replaceWithBlock(b, "ghost", sales(), "X")).toBeNull();
+  });
+});
+
+// Capacity P8: a block carries each step's base values, and a solution's map says which blocks it holds.
+describe("base values travel with a block", () => {
+  const SPLIT = { automatable: 0.4, augmentable: 0.35, manual: 0.25 };
+  const NOTES = { automatable: "Pull the data", augmentable: "Draft the notes", manual: "Talk to the client" };
+  const MULT = { T1: 1.5, T3: 0.5 };
+  const PROV = { work: { source: "interview", at: "2027-01-05", by: "someone" }, split: { source: "measured", at: "2027-01-06", by: "someone" } } as unknown as ProcessBundle["steps"][number]["provenance"];
+
+  /** The nested demo with base values on the Sales conversation's steps. */
+  function withBase(): ProcessBundle {
+    const b = nested();
+    return {
+      ...b,
+      steps: b.steps.map((s) =>
+        s.id === ids.qualify
+          ? { ...s, split: { ...SPLIT }, split_notes: { ...NOTES }, tier_multiplier: { ...MULT }, to_client_manager: true, provenance: { ...PROV } }
+          : s.id === ids.discovery
+            ? { ...s, split: { automatable: 0, augmentable: 0.5, manual: 0.5 } }
+            : s,
+      ),
+    };
+  }
+
+  it("keeps the split, notes, tier multipliers, client-manager flag and sources when a group is saved, stored as JSON and put back in", () => {
+    const saved = blockFromGroup(withBase(), DEMO_GROUP_IDS.conversation)!;
+    // What the database holds is a JSON document: it comes back through readBlock.
+    const block = readBlock(JSON.parse(JSON.stringify(saved)));
+    const q = block.steps.find((x) => x.id === ids.qualify)!;
+    expect(q.split).toEqual(SPLIT);
+    expect(q.split_notes).toEqual(NOTES);
+    expect(q.tier_multiplier).toEqual(MULT);
+    expect(q.to_client_manager).toBe(true);
+    expect(q.provenance).toEqual(PROV);
+
+    const live = flat();
+    const after = applyEdit(live, insertBlock(live, ids.audit, block, "Sales conversation")!.edit);
+    const added = after.steps.filter((x) => !live.steps.some((o) => o.id === x.id) && x.kind !== "group");
+    const copy = added.find((x) => x.name === "Qualify lead")!;
+    expect(copy.id).not.toBe(ids.qualify);
+    expect(copy.split).toEqual(SPLIT);
+    expect(copy.split_notes).toEqual(NOTES);
+    expect(copy.tier_multiplier).toEqual(MULT);
+    expect(copy.to_client_manager).toBe(true);
+    expect(copy.provenance).toEqual(PROV);
+    expect(added.find((x) => x.name === "Discovery call")!.split).toEqual({ automatable: 0, augmentable: 0.5, manual: 0.5 });
+    // It is a copy: changing the inserted step's split leaves the block alone.
+    copy.split!.automatable = 0.9;
+    expect(block.steps.find((x) => x.id === ids.qualify)!.split).toEqual(SPLIT);
+  });
+
+  it("keeps them when a block replaces a step, and when the whole map is saved from block mode", () => {
+    const whole = blockFromSteps(withBase());
+    expect(whole.steps.find((x) => x.id === ids.qualify)!.split).toEqual(SPLIT);
+    const block = blockFromGroup(withBase(), DEMO_GROUP_IDS.conversation)!;
+    const live = flat();
+    const after = applyEdit(live, replaceWithBlock(live, ids.discovery, block, "Sales conversation")!.edit);
+    expect(after.steps.find((x) => x.name === "Qualify lead" && x.id !== ids.qualify)!.tier_multiplier).toEqual(MULT);
+  });
+
+  it("an older block with no base values puts in steps with none", () => {
+    const old = sales();
+    const live = flat();
+    const after = applyEdit(live, insertBlock(live, ids.audit, old, "Old")!.edit);
+    const copy = after.steps.find((x) => x.name === "Discovery call" && x.id !== ids.discovery)!;
+    expect(copy.split ?? null).toBeNull();
+    expect(copy.to_client_manager === true).toBe(false);
+  });
+
+  it("the block page draws each step's split bar", () => {
+    const block = readBlock(JSON.parse(JSON.stringify(blockFromGroup(withBase(), DEMO_GROUP_IDS.conversation)!)));
+    const html = renderToStaticMarkup(createElement(BlockSteps, { block }));
+    expect((html.match(/data-split-bar/g) ?? []).length).toBe(2);
+    expect(html).toContain("Automatable 40%");
+    expect(html).toContain("T1 ×1.5");
+    expect(html).toContain("the client&#x27;s manager");
+  });
+});
+
+describe("used in N solutions", () => {
+  const BLOCK = { id: "b0000000-0000-4000-8000-000000000001" };
+  const OTHER = { id: "b0000000-0000-4000-8000-000000000002" };
+  /** A solution holding the map the Editor leaves after inserting the block `times` times. */
+  function solutionWith(block: { id: string } | null, times = 1) {
+    let map = flat();
+    for (let i = 0; i < times; i++) map = applyEdit(map, insertBlock(map, ids.audit, sales(), "Sales conversation", block?.id ?? null)!.edit);
+    return { steps: { steps: map.steps, edges: map.edges, entry_step_id: null } } as never;
+  }
+
+  it("marks the group an insert makes with the block it came from", () => {
+    const live = flat();
+    const made = insertBlock(live, ids.audit, sales(), "S", BLOCK.id)!;
+    const group = applyEdit(live, made.edit).steps.find((x) => x.id === made.id)!;
+    expect(blockOfStep(group)).toBe(BLOCK.id);
+    const plain = insertBlock(live, ids.audit, sales(), "S")!;
+    expect(blockOfStep(applyEdit(live, plain.edit).steps.find((x) => x.id === plain.id)!)).toBeNull();
+    const replaced = replaceWithBlock(live, ids.discovery, sales(), "S", BLOCK.id)!;
+    expect(blockOfStep(applyEdit(live, replaced.edit).steps.find((x) => x.id === replaced.id)!)).toBe(BLOCK.id);
+  });
+
+  it("is 0 with no solutions, 1 with one, 2 with two (a block put in twice in one solution counts once)", () => {
+    expect(blockUsage([])).toEqual({});
+    expect(blockUsage([solutionWith(BLOCK)])[BLOCK.id]).toBe(1);
+    expect(blockUsage([solutionWith(BLOCK), solutionWith(BLOCK, 2)])[BLOCK.id]).toBe(2);
+  });
+
+  it("counts each block on its own, and not a solution that holds none of them", () => {
+    const usage = blockUsage([solutionWith(BLOCK), solutionWith(OTHER), solutionWith(null), { steps: { steps: [], edges: [], entry_step_id: null } } as never]);
+    expect(usage).toEqual({ [BLOCK.id]: 1, [OTHER.id]: 1 });
   });
 });

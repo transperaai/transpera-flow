@@ -14,8 +14,13 @@ import type { PlayProcess } from "./play-types";
 
 export interface IssueOption {
   id: string;
+  /** The issue's number in the workspace, shown before its title. */
+  number?: number | null;
   title: string;
 }
+
+/** An open issue as the picker shows it: "#3 Meeting prep is data hunting". */
+export const issueLabel = (i: IssueOption): string => (i.number ? `#${i.number} ${i.title}` : i.title);
 
 const SOURCE_WORDS: Record<SourceLabel, string> = { interview: "An interview", calculator: "The calculator", measured: "Measured", estimate: "An estimate" };
 
@@ -217,7 +222,7 @@ export function PlayChangeDialog({
                 <option value="">None</option>
                 {issues.map((i) => (
                   <option key={i.id} value={i.id}>
-                    {i.title}
+                    {issueLabel(i)}
                   </option>
                 ))}
               </NativeSelect>
