@@ -1,20 +1,21 @@
 # Client requirements: capacity and clients per employee
 
-Written 31 Oct 2026 from nine discovery sessions with the client (a digital marketing agency with an Organic/SEO team
-and a Performance marketing team). Follows `docs/plans/client-refocus-handover.md`. **Austin decides scope: mark this up
-before anything is built.**
+Written 31 Oct 2026 from the client's nine discovery sessions. Follows `docs/plans/client-refocus-handover.md`.
+**Austin decides scope: mark this up before anything is built.**
 
-The transcripts and the per-transcript extracts are not in the repo. People are named by role. Quotes are short and
-from the transcripts; a few from source SP2 were paraphrased by the reader, so check before quoting to the client.
+This is the product spec for the refocused app:
+- what it answers;
+- what it shows;
+- what people key in or toggle;
+- how a step captures current and future state.
 
-## How to read this
+Values come from the transcripts and become the defaults. Each lever has a status against the engine and app today:
 
-Every item has a **value** (or "unknown, ask") and an **engine** verdict against "What the engine already models" in
-the handover:
-
-- **Have:** the engine models it today; it just needs data entered.
-- **Small:** a small change to the engine, the database or a page.
+- **Have:** works today; it just needs data entered.
+- **Small:** a small change to the engine, database or a page.
 - **New:** new to build.
+
+The transcripts and per-transcript extracts are not in the repo. People are named by role.
 
 **Sources**
 
@@ -24,402 +25,429 @@ the handover:
 | PD | Discovery interview | 28 Oct | Performance Marketing Director |
 | SD | Discovery interview | 28 Oct | SEO Director |
 | LB | Workflow interview | 29 Oct | Senior SEO Manager & Linkbuilding Lead |
-| SP1 | Workflow interview | 29 Oct | Senior Performance Marketing Manager (the newer one, 5 months in) |
+| SP1 | Workflow interview | 29 Oct | Senior Performance Marketing Manager (5 months in) |
 | CM | Workflow interview | 29 Oct | Content Manager |
 | SP2 | Workflow interview | 30 Oct | Senior Performance Marketing Manager (14 clients) |
 | PM | Workflow interview | 30 Oct | Performance Marketing Manager |
-| MC | Mid-point check-in | 30 Oct | Founder (Austin presenting early findings) |
+| MC | Mid-point check-in | 30 Oct | Founder |
 
-## The short version
+## Decisions recorded
 
-1. **Nobody tracks time, and leadership doesn't want timesheets** ("Big Brother. Not much gain.", Founder, SC). So
-   there are no measured hours to calibrate against. The client measures capacity with proxies:
-   - **DLER** (money under management ÷ salaries per department): 3:1 minimum, recent readings 2.75 and 3.2 (SC).
-   - **"Share of portfolio MRR = share of time":** an $11k retainer that is about a third of a manager's book should
-     take about a third of their time (Head of Client Services, SC).
-   - **Directors carry about 55% of a standard manager's MRR,** because about half their time goes on running the team
-     (SC).
-   - **The SEO Director's capacity model** uses monthly retainer, clients per person, and whether a client is part of
-     a group (SD).
-   - **Channels per person in Performance:** "My max would be like 10 channels" (PD).
+| # | Decision | Date |
+|---|---|---|
+| D1 | The Founder's goal is **DLER from 3:1 to 4.5:1** (said as "3:1 to 4:5"). DLER = money under management ÷ salaries, per department. | 31 Oct, Austin |
+| D2 | There are no more transcripts. Missing values are keyed in later by the Founder (D3–D5), or asked of the client (section 9). | 31 Oct, Austin |
+| D3 | **Client count per tier** is entered later by the Founder. The app must have a place for it. | 31 Oct, Austin |
+| D4 | **Each employee's portfolio ("patch")** is entered later. The app must have a place for it. | 31 Oct, Austin |
+| D5 | **Tier 1 clients are named one by one**, each with its own values: hand-holding hours, ad-hoc requests, meeting cadence, assigned people. The Founder keys them in. Tier 2 and 3 can stay as counts. | 31 Oct, Austin |
 
-   **Implication:** the Capacity page should speak these units (MRR per person, DLER, channels) next to hours, and
-   the hours baseline must come from deliverables and interview ranges, not timesheets.
-2. **Retainers buy deliverables, not hours.** A pricing calculator turns the retainer into words, links, technical
-   hours and manager hours. Example: a 6K client gets 5 links, 3,000 words, about 5 tech hours and about 5 SEO-manager
-   hours (LB). Another example: 2,000 words, 5 links, 8 tech hours (SD). **The calculator is the single most useful
-   artefact to get:** it defines the per-tier workload directly.
-3. **The two departments need different load models.**
-   - **Organic:** client managers hold 9–19 clients, with a rule of thumb of about 10. They feed shared pools: content
-     (about 100,000 words a month), links (about 300 a month) and technical.
-   - **Performance:** load scales with channels as much as clients. Managers hold 12–20 clients (14 clients = 24
-     channels for SP2), and every manager interviewed says they are at or near full.
-4. **Everyone's #1 automation is the same per department.**
-   - **Performance:** pacing (budget against spend across all channels) plus alerts. It came up in 5 of 9 sessions.
-   - **Organic:** onboarding (LB), content briefs and handoff (SD, CM), and link vetting and monitoring (LB, SC).
-   - **Writing, strategy, client relationships and QA stay human** (all speakers).
-5. **What is still missing to answer the client's two questions:**
-   - total client count by tier;
-   - the retainer range per tier;
-   - each person's portfolio (clients, tier, channels);
-   - hours per week.
+## What the transcripts tell us, in five lines
 
-   See Gaps.
+1. **There are no timesheets, and leadership won't add them** ("Big Brother. Not much gain.", Founder, SC). The client
+   measures capacity with DLER (3:1 minimum; recent readings 2.75 and 3.2), with "share of a person's portfolio MRR =
+   share of their time" (SC), and with channels per person in Performance ("My max would be like 10 channels", PD). The
+   app should speak these units next to hours.
+2. **Retainers buy deliverables.** A pricing calculator turns the fee into words, links, tech hours and manager hours.
+   For example, a 6K client gets 5 links, 3,000 words, about 5 tech hours and about 5 SEO-manager hours (LB). The
+   calculator defines per-tier workload.
+3. **Organic and Performance load differently.**
+   - **Organic:** client managers hold 9–19 clients (rule of thumb about 10). They feed shared teams: content (about
+     100k words a month), links (about 300 a month) and technical.
+   - **Performance:** load grows with channels too. Managers hold 12–20 clients, and all say they are at or near full.
+4. **Steps split into gather / judge / check.** Staff want the gathering automated and the judgement kept. The base
+   values on each step should capture that split (section 7).
+5. **The top automations:**
+   - **Performance:** pacing and alerts (raised in 5 of 9 sessions).
+   - **Organic:** onboarding, content briefs and handoff, and link vetting and monitoring.
+   - **Writing, strategy, relationships and QA stay human.**
 
 ---
 
-## 1. Questions the client wants answered
+## 1. Questions the app will answer
 
-**As asked**
+These define what to build. Priority is our recommendation (Must / Should / Later); Austin decides.
 
-| # | Question | Who | Engine |
-|---|---|---|---|
-| Q1 | Based on workflows and client numbers, are we at capacity? Which people and roles are? | Founder (handover brief); SEO Director: "we're getting to capacity with the current client-facing managers" | Small: busy share per person and role exists. A single "at capacity" view (the Capacity page) is New |
-| Q2 | With automation or augmentation, how many more clients can each employee manage? | Founder (brief); Austin frames it as "another 15" per consultant (MC) | New: needs an automation/augmentation model (section 6) and goal seek over the client count (known gap) |
-| Q3 | Raise DLER: "My goal is to try to push it from 3:1 to 4:5" (garbled; probably 3:1 to 4.5:1) | Founder (MC) | New: DLER per department (revenue under management ÷ salaries) |
-| Q4 | How do we stop pacing errors and overspend? (A $10K overspend came from a stale budget in the pacing sheet) | Founder (MC) | Out of scope for the simulator; it's an ops tool. Relevant as a rework/error rate |
-| Q5 | Can Performance cope with channel growth without more people? (Director's channels went from about 10 to 18 since July) | Performance Director (PD) | New: channels as a load driver |
-| Q6 | Will content hold as volume grows? It went from 40k to 100k words a month: "it's not going to be sustainable anymore" | Content Manager (CM) | Have: content pool utilisation, once words are mapped to tasks |
-| Q7 | Can we take on more clients without hurting retention or NPS? Retention is "the metric" | Founder, Head of Client Services, PD | Have: client health and churn drivers (overload, late work, slow responses) |
+| # | Question | The answer looks like | Inputs needed | Status | Priority |
+|---|---|---|---|---|---|
+| A1 | **Are we at capacity?** Which people, roles and departments are over? | Busy share per person, role and department (10–90% range), with anyone over the threshold flagged (default 85%) | people, hours, portfolios (D4), tier counts (D3), servicing times | Have (busy share). The single view is New (Capacity page) | Must |
+| A2 | **How many clients does each employee manage today?** | Clients (and channels in Performance) per person, per client-facing role and per department, with the tier mix | portfolios (D4) | Small for named clients (assignments exist). New with counted clients (D4) | Must |
+| A3 | **How many more clients can we take before anyone is overloaded?** | "About N more Tier 2 clients (or M Tier 1) before anyone passes 85%", and who breaks first | A1 inputs | New: goal seek over the client count | Must |
+| A4 | **With automation X or augmentation Y, how many clients can each employee manage? How many more?** | Clients per employee now against with the change, plus hours freed per person a month, side by side for up to 3 changes | A1 inputs + step baselines and changes (section 7) | New | Must |
+| A5 | **What does that do to DLER and revenue per employee?** Can we get from 3:1 to 4.5:1? | DLER per department now, at max clients, and with each change; the clients needed to reach 4.5:1 | salaries, fees, portfolios | New | Must |
+| A6 | **Which change frees the most capacity?** | Changes ranked by hours freed, or by extra clients per employee | changes (section 8) | Have ("what matters most"), once the new levers exist | Should |
+| A7 | **Where does the time go?** | Hours per client per month by tier (and per named Tier 1 client), split by task and role | servicing times | Have (time by purpose). Small: by tier and per client | Must |
+| A8 | **Where is the bottleneck?** Client managers or shared teams (content editors, link vetting, tech)? | The busiest role or person, and the work waiting on them | as A1 | Have | Should |
+| A9 | **If we win N clients a month, when must we hire, and whom?** | The month each role passes the threshold, given lead flow, market and the hiring delay | lead flow, market (section 5) | Have (lead flow, market, hiring delay). Small: hiring-trigger readout | Should |
+| A10 | **What happens to retention if we push clients per person up?** | Clients at risk and churn as load rises (overload, late work, slow responses) | churn drivers | Have | Later |
 
-**What we think they should be asking**
+**Definition of "clients per employee"** (needs Austin's sign-off):
 
-| # | Question | Why | Engine |
-|---|---|---|---|
-| R1 | At what clients-per-person, by tier mix, does quality or retention break? | The rule of thumb (about 10 clients) is "depends on the mix"; managers range from 9 to 20 | Have: overload and late-work churn drivers. Small: sweep the client count |
-| R2 | Is the constraint the client-facing managers, or the shared pools (content editors, link vetting, tech)? | The content editors are a 2-person gate on 100k words; link vetting runs through one senior person | Have: busy share per role/person shows the bottleneck |
-| R3 | How much capacity does onboarding eat, and how many can run at once? | "Onboarding too many clients at once is the most common cause of stretch" (SC); 0–3 at once (SP2); 5 site onboardings in one month forced overtime (LB) | Have: onboarding process plus lead flow. Small: show onboarding hours as a purpose |
-| R4 | What does management and mentoring load cost, and does it scale with juniors hired? | Directors spend 40–50% on the team; the ramp is 90 days | Small: reserved non-client share per person (see section 3) |
-| R5 | Which single automation frees the most hours per client per month? | Needed to rank the change list | Have: "what matters most" (tornado), once the levers exist |
-| R6 | What is the cost of Tier 1 priority on Tier 2/3 service? | "tier 1 is non-negotiable" (SP2); Tier 2/3 "take a hit" first | New: the engine has no work priority by tier |
+| Measure | Formula |
+|---|---|
+| Per person | clients in their portfolio |
+| Per role | clients in the role's portfolios ÷ people in the role |
+| Per department | the department's clients ÷ its client-facing head count. Shared-team people (content, links, tech) are shown separately as capacity, not counted as "clients per employee" |
+
+**"Max clients"** is found by adding clients until the first person or role passes the threshold. Added clients are
+spread by the current tier mix, or held to one tier. Each new client goes to the least-busy person in the role who
+can serve that tier.
 
 ## 2. Stats to show
 
-| Stat | Asked by | Value today | Engine |
-|---|---|---|---|
-| **Clients per employee** (per person, role, department) | Founder brief | 4–20 per person (section 3) | New (known gap) |
-| **Channels per employee** (Performance) | PD ("My max would be like 10 channels") | Director 18 (cap 10); SP2 24 for 14 clients | New |
-| **Busy share per person and role** | Founder brief | unknown, ask (no timesheets) | Have |
-| **Headroom before overload** ("about 3 more Tier 2 clients before anyone goes over 85%") | Founder brief | — | New: goal seek over the client count |
-| **DLER per department** | Founder (SC, MC) | min 3:1; readings 2.75 and 3.2 (which department is which: ask) | New. Needs clients assigned to people and salaries; revenue and labour exist |
-| **MRR per person against a target** ("MRR is a loose indicator of the kind of capacity they should be at") | Head of Client Services (SC) | example: $11k ≈ 30–33% of one manager's book, so a book of about $33–37k | Small: the roster has assignments and fees |
-| **Hours per client per month by tier**, split by task and role | recommended; LB wants the calculator allocation compared with actuals | calculator example only | Have: time by purpose. Small: by tier |
-| **Where the time goes** (client work, onboarding, management, admin, sales support) | recommended; SD, PD give time splits | SD 60/40, PD 50/50, Head of Client Services about 70/30 | Have: time by purpose |
-| **Retention and churn by portfolio, department and agency** | Founder (SC, already automated monthly) | rate unknown, ask | Have: clients and clients at risk per service. Small: per person |
-| **Client health / red flags roll-up** ("which clients have seen a drop this month") | SD, SP2, PM, PD, MC | — | Partly Have (health from late work). Performance-based health (rankings, CPL) is out of the simulator: ops tooling |
-| **Content words per month against capacity** (KPI 20,000 words per writer per month) | CM | 100k/month total | Small: words to tasks |
-| **Link pipeline** (ordered, vetted, live, late) and link volume per month | LB, SC | about 300/month | Have: WIP and waits per step |
-| **Onboardings in flight** and their hours | LB, SP2 | 0–3 at once | Small |
-
-**Recommendation.** A Capacity page with three blocks:
-1. **Today:** clients and channels per person, busy share, MRR per person against target, DLER per department.
-2. **Headroom:** extra Tier 1/2/3 clients before anyone passes 85%.
-3. **With change X:** the same figures side by side.
-
-Health and red-flag dashboards are what the staff asked for most, but they are live ops tools, not simulator outputs.
-**Austin to decide whether they're in scope.**
+| Stat | Why / who asked | Value today | Status | Priority |
+|---|---|---|---|---|
+| **Busy share** per person, role and department (with a 10–90% range) | A1; Founder brief | unknown (no timesheets) | Have | Must |
+| **Clients per employee** (person, role, department), with tier mix | A2; Founder brief | 4–20 per person (section 3) | New | Must |
+| **Channels per employee** (Performance) | PD: cap of 10 | Director 18; SP2 24 for 14 clients | New | Must |
+| **Headroom**: extra clients per tier before the threshold | A3 | — | New | Must |
+| **With-change comparison**: clients per employee, hours freed, busy share, side by side | A4 | — | New (scenario compare exists: Have) | Must |
+| **DLER** per department, and **revenue per employee** | A5; Founder | min 3:1; 2.75 and 3.2; goal 4.5:1 | New | Must |
+| **Hours per client per month** by tier and per named Tier 1 client, split by task and role | A7; LB wants allocation against actual | calculator example only | Small | Must |
+| **Where the time goes** by purpose (client service, onboarding, management, admin, sales support) | A7; SD 60/40, PD 50/50 | — | Have | Must |
+| **MRR per person against target** (the "share of MRR = share of time" rule) | Head of Client Services (SC) | $11k ≈ 30–33% of one manager's book | Small | Should |
+| **Bottleneck** (busiest role and its queue) | A8 | — | Have | Should |
+| **Onboardings in flight** and their hours | SC: "the most common cause of stretch" | 0–3 at once | Small | Should |
+| **Late work and SLA misses** (24h email, turnaround) | SP1 | — | Have | Should |
+| **Clients at risk and churn** | A10 | rate unknown | Have | Later |
+| Live client health and red flags (rankings, CPL, pacing) | asked most by staff (SD, SP2, PM, MC) | — | Out of scope: live ops tooling, not simulation. **Austin to decide** | — |
 
 ## 3. Employee levers and values
 
-**Agency-wide**
+**Per person** (keyed in on the People page)
 
-| Lever | Value | Source | Engine |
+| Lever | Unit | Value from transcripts | Status |
 |---|---|---|---|
-| Head count | about 22 + 4 offshore, or 24 in total (conflict) | Founder, Austin (SC) | Have |
-| Hours per week | unknown, ask (8-hour days mentioned) | MC | Have |
-| Billing rate / cost | bill $120–150/h by seniority; cost $80/h | Founder (SC) | Have (cost per hour). Price is per retainer, not hourly |
-| Gross margin | about 30% ("roughly") | Founder (SC) | Have (profit) |
-| New-starter ramp | 90 days to about 80% of expected capacity | Founder (SC) | Small: a speed factor that rises over the first 90 days. Today speed is fixed per person; timed Sandbox changes could approximate it |
-| Hiring lag | "Takes time to hire"; winning faster than hiring causes stretch | Founder (SC) | Have (market hiring-delay factor) |
-| Leave | unknown, ask | — | Have |
-| Overtime | happens in heavy onboarding months | LB | Have (overtime cap) |
-| Management and mentoring share | Directors 40–50% on team work | SC, PD, SD | Small: a reserved non-client share per person. Today the availability floor is workspace-wide |
+| Role(s) | — | org chart | Have |
+| Hours a week (or FTE) | h/week | unknown, ask (8-hour days mentioned, MC) | Have |
+| Leave | days/year | unknown, ask | Have |
+| Start / end date | date | one SEO manager has resigned; Head of Performance vacant | Have |
+| Cost | $/h or salary | cost about $80/h; billing $120–150/h (SC) | Have (cost per hour). Small: salary input for DLER |
+| Speed factor (overall or per step) | × (0.5–2) | seniors faster (inferred); no numbers | Have |
+| Skills (which steps) | — | e.g. link vetting is the Senior SEO Manager only | Have |
+| **Tiers they can serve** | Tier 1/2/3 | Tier 1 contractually needs senior people (SC) | New (could be done with skills per tier process) |
+| **Portfolio (patch)**: their clients, by name (Tier 1) or count per tier (Tier 2/3) | clients | D4: keyed in later | Small for named (assignments exist). New for counts per person |
+| **Reserved management share** (team leading, mentoring, reviews) | % of hours | SEO Director 40% (SD); Performance Director 50% (PD); directors carry about 55% of a manager's MRR (SC) | Small (today the availability floor is workspace-wide) |
+| **Max-clients rule of thumb** (shown as a line, not enforced) | clients | about 10 for SEO client managers (SD); none stated elsewhere | Small |
+| **Channel cap** | channels | 10 (PD) | New |
+| **Ramp for new starters** | days to % | 90 days to about 80% (SC) | Small |
+| Offshore / contractor flag | — | 4 offshore (SC); link team of 2 (LB) | Small (label only) |
 
-**Per role.** Clients are per person; "Tier" is the client's tier.
+**Freelancers** (content)
 
-| Role | Clients | Time split | Tier mix / notes | Self-assessed load | Source |
-|---|---|---|---|---|---|
-| Founder | some legacy Tier 1s; joins Tier 1 WIPs | mostly sales, finance and firefighting | Tier 1 relationships rely on him | stretched | SC, MC |
-| Head of Client Services | — | about 70% operations, 30–40% client work | escalations; covering the vacant Head of Performance role | stretched | SC |
-| SEO Director | **12** | **60% own clients / 40% team** (first said 70/30) | wants just 3 enterprise clients, smaller ones handed over ("a couple of hires away") | "nearing capacity" | SD |
-| SEO client managers | **9–19** each | — | rule of thumb **about 10**, "depends on the mix"; one with 19 (many small clients) has resigned | at capacity | SD |
-| Senior SEO Manager & Linkbuilding Lead | **12–13**, bigger retainers | clients, deliverables, team (1 SEO specialist + link team) | also does link vetting and pays link invoices | "close to" cap | LB |
-| SEO Specialist (junior) | 1+ (new client 2 months ago) | — | onboarding is "pretty demoralizing" for juniors | stretched | LB |
-| Technical SEO team | about 3 people (2 new) | audits + monthly tech tickets | "Tech just got two new people, so we're covered there" | OK | SD, LB |
-| Content Manager | 1–2 Tier 1 clients directly | allocation, editing, writing | edits all freelancer work with 1 other editor | OK, not overwhelmed | CM |
-| Writers | in-house 2 copywriters + content specialist (org chart) + **4 freelancers** (2 on contract, fixed monthly words) | — | KPI **20,000 words per person per month**; freelancer turnaround at most 2 weeks; hiring a junior writer to cut freelancer spend (SD) | — | CM, SD |
-| Link team (offshore) | 2 people | outreach, domain sourcing, publisher negotiation | — | — | LB |
-| Performance Marketing Director | **4 clients / about 18 channels** (about 10 in July) | **50 / 50** | mostly Tier 1; ideal cap **10 channels** | stretched | PD |
-| Senior PMM (SP1) | **about 12** | strategy, client comms, briefing, copy review dominate | 1 Tier 1, 1 near-Tier 1, about 10 Tier 2/3; +7–10 clients "would be a lot" | busy | SP1 |
-| Senior PMM (SP2) | **14 clients / 24 channels** | 60–70% "on the tools" | Tier 1 "non-negotiable"; Tier 2/3 take the hit | "working at full capacity" | SP2 |
-| PMM | **about 20**, mostly Tier 2/3 | data analysis is the biggest sink | does small changes herself because "briefing requires another time" | overwhelmed "sometimes" | PM |
-| Performance Specialists / Coordinator (implementers) | one has her own clients, one doesn't | builds, creative and landing-page briefs | 1–2 days turnaround per implementation task | unknown, ask | SP1, SP2, PM |
-| Pacing helper (role unclear) | — | pacing checks Mon/Wed/Fri, mid-month check | — | — | SP2, PM |
-| Conversion Tracking Specialist | — | tracking troubleshooting on request | — | — | SP1 |
-| Head of Performance | **vacant** (Oct 2026) | — | a senior Performance hire is wanted | — | SC, PD |
-| Business Development | 1 (started 1 Oct) + Founder; Head of Client Services closes some | — | — | — | SC |
+| Lever | Value | Status |
+|---|---|---|
+| Number of freelancers | 4; 2 on contract with fixed monthly words (CM) | Have (as people) |
+| Words a month each | unknown, ask | Small (capacity in words, not hours) |
+| Turnaround | at most 2 weeks (CM) | Have (wait) |
+| Cost per word | unknown, ask | Small |
 
-**Engine.** Roles, people, capacity, skills, leave, start and end dates, speed factor, and per-person assignment via
-the named roster are all **Have**. Channels per person are **New**. The client's own max-clients rule (about 10, or a
-channel cap of 10) is **Small**: a per-role limit, shown on the Capacity page.
+**Workspace**
 
-## 4. Lead flow and market levers
+| Lever | Value | Status |
+|---|---|---|
+| Overload threshold | 85% (default) | Small |
+| Overtime cap | some overtime in heavy onboarding months (LB) | Have |
+| Hiring delay | "Takes time to hire" (SC); unknown, ask | Have |
 
-| Lever | Value | Source | Engine |
+**Portfolios today** (defaults until the Founder keys in the real ones, D4)
+
+| Role | Clients | Time on own clients | Load | Source |
+|---|---|---|---|---|
+| SEO Director | 12 | 60% (first said 70%) | nearing capacity | SD |
+| SEO client managers | 9–19 each | — | at capacity; rule about 10 | SD |
+| Senior SEO Manager & Linkbuilding Lead | 12–13 (bigger retainers) | — | "close to" cap | LB |
+| Performance Marketing Director | 4 clients / about 18 channels, mostly Tier 1 | 50% | stretched (cap 10 channels) | PD |
+| Senior PMM (SP1) | about 12 (1 Tier 1, 1 near-Tier 1, rest Tier 2/3) | — | +7–10 "would be a lot" | SP1 |
+| Senior PMM (SP2) | 14 clients / 24 channels | 60–70% on the tools | "working at full capacity" | SP2 |
+| PMM | about 20, mostly Tier 2/3 | — | overwhelmed "sometimes" | PM |
+| Content Manager | 1–2 Tier 1 directly; edits all freelance work | — | OK | CM |
+
+**Shared teams** (capacity, not clients)
+
+| Team | Make-up | Throughput | Source |
 |---|---|---|---|
-| New clients a month | unknown, ask. Signals: "a bit quiet" lately (SD); onboardings come lumpy, 0–3 at once (SP2); one strategist took 2 new clients (5 sites) in one month (LB) | SD, SP2, LB | Have (lead sources × conversion) |
-| Lead sources | partner referrals, Meta ads, inbound; outbound "used to work really well" in 2024, now noise | Founder (SC) | Have |
-| Lead response | call within 5 minutes (auto-assigned in HubSpot) | Founder (SC) | Have (as a sales step) |
-| Win rate | **about 1 in 10** now (was 1 in 3); exact stage unclear | Founder (SC): "now... it might be one in ten" | Have |
-| Sales cycle | **6–8 weeks** | Founder (SC) | Have |
-| New-client value | **about $4.9k–5k MRR** on average (range up to $6k) | Founder (SC) | Have (fee range per tier) |
-| Project work | under 10% of revenue | Founder (SC) | Have (one-off pricing) |
-| Seasonality | November busy; otherwise "I can't say like a pattern" (PM) | SC, PM | Have (12 monthly multipliers) |
-| Growth / market | "cash flow and the state of the world" driving churn (SD); economy "really bad right now" (PM); AI eroding "bread-and-butter offerings" (SC) | SD, PM, SC | Have (24-month market schedule) |
-| Sales support from delivery | 1–2 prospect decks a month (LB) | LB | Have (a sales step on a delivery role) |
-| Sales over-promising | scoping that "doesn't add up" and may be unprofitable (MC) | MC | Out of scope |
+| Content | 2 copywriters + content specialist + Content Manager + 4 freelancers; 2 editors | 100k words a month; KPI 20k words per writer a month | CM |
+| Links | 2 offshore; link vetting by the Senior SEO Manager | about 300 links a month | LB |
+| Technical | about 3 (2 new) | — | SD |
+| Performance implementers | 2–3 specialists / coordinator | 1–2 days per implementation task | SP2, PM |
 
-## 5. Client behaviour levers, per tier
+## 4. Client levers: what the Founder keys in (D3–D5)
 
-**Tiers:** Tier 1 is the best client and needs the most effort, then Tier 2, then Tier 3 (Austin). "Enterprise" (SD)
-probably means Tier 1. **Confirm.**
+Three places to enter clients. All three must work together in one workspace.
 
-**Price and deliverables**
+| Entry | Fields | Where | Status |
+|---|---|---|---|
+| **Tier counts** (D3), for Tier 2 and 3, and Tier 1 if not named yet | per tier: client count, fee per client a month (or range), churn a month, typical stay, starting health | Settings → client groups | **Have** |
+| **Named Tier 1 clients** (D5) | name; tier; fee a month; start date; health; assigned person per role. **Plus per-client overrides:** extra hand-holding hours a month (per role); ad-hoc request rate a month and size; meeting cadence and length; channels; deliverables (words, links, tech hours); bespoke recurring tasks (e.g. weekly localisation work) | People → clients (roster) | Partly Have (name, fee, health, start, assignments). **New:** per-client overrides |
+| **Portfolios** (D4) | per person: named clients (from the roster), and counts per tier for counted clients | People page | Small for named; **New** for counts per person |
 
-| Lever | Tier 1 | Tier 2 | Tier 3 | Source | Engine |
+**Two changes make this work:**
+1. **Named and counted clients in the same run.** Today a workspace uses one or the other: once any tier has a count,
+   the named roster is ignored (`clientGroups` in `packages/db/src/model.ts`). Needed: named clients run alongside the
+   counts, and a tier's count means "unnamed clients in addition to the named ones". This is the main structural
+   change, size **Small–New**.
+2. **Per-client overrides on top of the tier's defaults.** A named client inherits everything from its tier, and any
+   field the Founder fills replaces it. **New.**
+
+Every keyed-in value records who entered it and whether it is a real figure or an estimate (provenance exists: Have).
+
+## 5. Lead flow and market levers
+
+| Lever | Unit | Value from transcripts | Status |
+|---|---|---|---|
+| Lead sources and volume | leads/month per source | sources: partner referrals, Meta ads, inbound; outbound weak since 2024 (SC). Volume unknown, ask | Have |
+| Win rate | % | about 1 in 10 now (was 1 in 3); stage unclear (SC) | Have |
+| Sales cycle | weeks | 6–8 (SC) | Have |
+| New-client fee | $/month | average about $4.9k–5k, up to $6k (SC) | Have (fee range per tier) |
+| Tier mix of new wins | % per tier | unknown, ask | Have (traffic share) |
+| New clients a month | clients/month | unknown, ask. Lumpy: 0–3 onboardings at once (SP2); "a bit quiet" (SD) | Have (from leads × win rate) |
+| Seasonality | 12 multipliers | November busy (SC); otherwise "I can't say like a pattern" (PM) | Have |
+| Growth | %/month | unknown, ask | Have |
+| Market swings | 24-month schedule on leads, win rate, cycle, price, churn, hiring delay | macro and cash-flow churn (SD, SP1); economy "really bad right now" (PM); AI eroding core services (SC) | Have |
+| Project work share | % revenue | under 10% (SC) | Have (one-off pricing) |
+| Sales support from delivery | decks/month | 1–2 prospect decks a month (LB) | Have |
+
+## 6. Client behaviour levers and values
+
+**Tier 1 is the best client and the most effort, then Tier 2, then Tier 3.** Tier values are the defaults; a named
+Tier 1 client can override any of them (section 4).
+
+**Price and deliverables (per client a month)**
+
+| Lever | Tier 1 | Tier 2 | Tier 3 | Source | Status |
 |---|---|---|---|---|---|
-| Retainer a month | unknown, ask. Example: an $11k client (tier not stated) | unknown, ask | unknown, ask | SC | Have (fee range per service) |
-| Retainer range seen | about **$3k–6k** across one strategist's book; new clients average about $5k | | | LB, SC | Have |
-| Content words a month | unknown, ask by tier. Examples: 3,000 (6K client), 2,000 | | | LB, SD | Small: words to tasks (e.g. 1 task per article) |
-| Links a month | unknown, ask by tier. Examples: 5 (6K client), 5 | | | LB, SD | Have (recurrence: month × 5) |
-| Tech hours a month | about 5 (6K client); 8 (example) | | | LB, SD | Have (ongoing hours per role, or a tech task) |
-| SEO-manager hours a month | about 5 (6K client) | | | LB | Have |
-| Clients in groups / multi-site | some clients are "part of groups"; one client had 4 websites | | | SD, LB | Small: a multiplier on onboarding and servicing |
-| Performance channels per client | unknown, ask (SP2 averages 24 ÷ 14 ≈ 1.7) | | | SP2 | New |
-| Creative production | agency produces assets for higher tiers, otherwise the client supplies | | | SP1 | Have (routing by service) |
+| Fee | unknown, ask (one $11k client seen) | unknown, ask | unknown, ask | SC | Have |
+| Fee range seen across tiers | $3k–6k in one book; new clients average about $5k | | | LB, SC | Have |
+| Content words | unknown, ask (3,000 in the 6K example) | | | LB | Small: words to tasks |
+| Links | unknown, ask (5 in the 6K example) | | | LB, SD | Have (recurrence) |
+| Tech hours | unknown, ask (about 5–8) | | | LB, SD | Have |
+| SEO-manager hours | unknown, ask (about 5) | | | LB | Have |
+| Performance channels | unknown, ask (SP2 averages about 1.7) | | | SP2 | New |
+| Creative production | agency makes assets for higher tiers | client supplies | client supplies | SP1 | Have (routing by service) |
 
-**Recurring work**
+**Time to serve (recurring)**
 
-| Task | Tier 1 | Tier 2 | Tier 3 | Source | Engine |
+| Task | Tier 1 | Tier 2 | Tier 3 | Source | Status |
 |---|---|---|---|---|---|
-| Client meeting (WIP) | **weekly** (PD, SP2); fortnightly, some weekly (SP1); Founder joins some | monthly (SP1, SP2); "every so often" (PD) | monthly | PD, SP1, SP2, MC | Have (recurrence) |
+| Client meeting (WIP) | weekly (fortnightly for some) | monthly ("every so often", PD) | monthly | PD, SP1, SP2 | Have |
 | Meeting length | 30–45 min | 30–45 min | 30–45 min | SP1, SP2 | Have |
-| Meeting prep | about 1h15 prep + notes around a 30-min call (SP2) | 30 min (PM); 30–40 min for a 5-channel client (SP2) | 30 min | SP2, PM | Have |
-| Monthly report + commentary | due in the first 2 weeks; commentary **about 30 min a client** | same | quicker for small clients | PM, SP2, LB | Have |
-| Performance pacing | day 1: about **2h across all accounts**; then about **30 min a day**; **15–20 min per underspending account** (SP2). Fortnightly, or weekly for new clients (PM) | | | SP2, PM | Have (recurrence; per-account time) |
-| Monthly deliverable tickets (tech, content, links, report) | raised on the 1st, closed by month end | | | SC, LB | Have. **New** if they must be pinned to week of month (briefs at month end, reports in week 1, meetings in the first 2 weeks) |
-| Strategy review | quarterly (enterprise, 3–4 months) | 6-monthly (SEO); quarterly decks (Performance) | 6-monthly | SD, PD | Have (month × 1/3 or 1/6) |
-| Weekly ecommerce reporting (one client: 4 sheets every Monday before 11am) | client-specific | | | SP1 | Have |
-| Bespoke Tier 1 extras (one client: 5–10 localisations a week at 15–20 min each; half-day monthly deck; trend checks every 2–3 days) | client-specific | | | LB | Have (named-roster client with its own process) |
-| Email response expectation | **24 h**, all tiers | 24 h | 24 h | SP1 | Have (SLA) |
-| Turnaround on asks | same day for the biggest client: "I'll drop everything" | | next week for a small client, agreed with them | LB | Have (SLA per service) |
+| Meeting prep + notes | up to 1h15 a call | 30–40 min | 30 min | SP2, PM | Have |
+| Monthly report commentary | about 30 min+ | about 30 min | quicker | PM | Have |
+| Pacing (Performance) | about 50–60 min a client a month (inferred from SP2's day-1 2h + 30 min/day + 15–20 min per flagged account, across 14 clients) | same | same | SP2 | Have |
+| Monthly deliverables (tech, content, links, report tickets) | from the calculator | | | SC, LB | Have. **New**: pinned to week of month (briefs at month end, reports in week 1, meetings in the first 2 weeks) |
+| Strategy review | quarterly | 6-monthly (SEO); quarterly (Performance) | 6-monthly | SD, PD | Have |
+| Hand-holding (unplanned contact, reassurance) | per named client (D5) | — | — | Austin | New (per-client override) |
 
 **Ad-hoc requests**
 
-| Lever | Value | Source | Engine |
+| Lever | Value | Source | Status |
 |---|---|---|---|
-| Rate | unknown, ask. Tier 1 has "most ad hoc requests" (SP2); "keep having a lot" | SP2 | Have (Poisson per month) |
-| New campaign (Performance) | strategy **1–2 days**; client creatives about **2 days** wait; build **1–2 days**; Meta build **45–60 min** (10–15 min if simple); **brief to launch about 1 week** | SP2, SP1 | Have |
-| Budget change | about 20 seconds: "don't model budget edits as a big time sink" | SP1, PD | Have |
-| Migrations (SEO) | one-off spikes outside the retainer | LB | Have (one-off) |
+| Rate per tier | unknown, ask. Tier 1 has "most ad hoc requests" (SP2) | SP2 | Have (Poisson a month) |
+| Rate and size per named Tier 1 client | keyed in (D5) | — | New |
+| Request types and size | new campaign: strategy 1–2 days + build 1–2 days, about 1 week brief to launch (SP2); Meta build 45–60 min, 10–15 min if simple (SP1); quick ask or budget change about 20 seconds (SP1); one-off migrations (LB) | | Have (one ad-hoc process per type) |
+| Response expectation | 24h email, all tiers (SP1); same-day for the biggest client, next week for small ones (LB) | | Have (SLA) |
 
 **Onboarding (per new client)**
 
-| Department | Duration and content | Source | Engine |
+| Department | Duration and content | Source | Status |
 |---|---|---|---|
-| Organic | strategy month: 3 weeks of work, presented in week 4 (SD). Covers the technical audit, keyword mapping ("very time-consuming"), content and link plans, roadmap and deck; large sites are split over months. Hands-on hours unknown, ask | SD, LB, SC | Have (onboarding process) |
-| Performance | access (instant to "a lot of following up"); audit + strategy at least **1 week**; conversion tracking **3–4 days**; build **3–5 days**; first month has fortnightly check-ins | SP2, SP1 | Have |
-| Handover from sales | about 15-min internal meeting; often a pre-call brief only about 10 min before the client call; repeated questions | SC, PD, SP1 | Have (as a step); quality is out of scope |
+| Organic | 3 weeks of work, presented in week 4. Audit, keyword mapping, content and link plans, roadmap and deck. Hours unknown, ask | SD, LB | Have |
+| Performance | access (instant to weeks); audit + strategy at least 1 week; tracking 3–4 days; build 3–5 days; fortnightly check-ins in month one | SP2, SP1 | Have |
 
-**Approvals and waiting on the client**
-- Content needs client approval every time: "sometimes... you need to follow up a few times" (LB). Links run "in the
-  background".
-- Meta ads need a separate preview approval (PM). Some clients want approval even of small optimisations.
-- Some clients stall on internal approvals; one has paused content (SD).
-- No durations given: **unknown, ask**. **Engine:** Have (external waiting time).
+**Waiting on clients and third parties**
 
-**Links (the longest wait)**
-- One link takes **1–2 months** end to end, mostly waiting on publishers: "at least a month, sometimes like over a
-  month" (LB, SD).
-- Volume conflicts: about 200 a month (SC), 250 in January to 312 now (SD), 300–350 (LB). Probably growth over the
-  year. **Use about 310, range 250–350.**
-- Links should stay live 12 months; about 100 dead links in 10 months (LB, MC).
-- **Engine:** Have (wait distribution; rework for replacements).
-
-**Churn**
-
-| Lever | Value | Source | Engine |
+| Wait | Value | Source | Status |
 |---|---|---|---|
-| Churn rate | unknown, ask (retention is tracked automatically each month) | SC | Have (base churn per service) |
-| Warnings | **about 5 a week**, graded by severity | Head of Client Services (SC) | Have (clients at risk) |
-| Reasons | cash flow / macro (SD, SP1); white-label reseller agencies taking work in-house (2–3 resellers) (SD); performance (SD, MC); a new marketing manager at the client (SC, MC); feeling we're "going through the motions" (SD) | | Have: market, results, your own, slow responses, late work |
-| Leading signs | rankings trending down (SD); conversions dropping; contract requests; "haven't seen you in a while" (SC) | | Have (health). Rankings are out of scope |
-| Upsells | rare; commission exists; retention is the priority | SD, SC | Unknown whether the engine has a tier-move lever. **Ask whether it's in scope** |
-| Moves between tiers | not discussed: unknown, ask | — | — |
+| Content approval | unknown, ask; "follow up a few times" | LB | Have (external wait) |
+| Meta preview approval | unknown, ask | PM | Have |
+| Creatives from the client | about 2 days | SP2 | Have |
+| Link from publisher | 1–2 months end to end | LB, SD | Have |
 
-## 6. Current state vs future state: how the nodes capture the change
+**Churn and moves**
 
-**What the transcripts say about the shape of a step.** Almost every step described splits the same way: gather
-data, apply judgement, then check. Speakers want the gathering automated and the judgement kept.
+| Lever | Value | Source | Status |
+|---|---|---|---|
+| Churn rate per tier | unknown, ask (tracked monthly by the client) | SC | Have |
+| Warnings | about 5 a week | SC | Have (clients at risk) |
+| Reasons → churn drivers | macro / cash flow → market; performance → results; comms and "going through the motions" → slow responses / late work; new client-side contact → your own; resellers taking work in-house → your own | SD, SP1, SC, MC | Have |
+| Moves between tiers, upsells | rare upsells; tier moves not discussed: ask | SD, SC | unknown whether wanted |
+
+## 7. Current and future state: base values on each step
+
+**The problem.** Today a future state is a copy of the map with new numbers typed in. It is only as good as the
+guess, and it doesn't move when the baseline is corrected. We need **base values on each step that capture what a
+change acts on**, so the future state is derived, never typed.
+
+**What the transcripts show.** Steps split into gather / judge / check, and staff want the gathering automated and the
+judgement kept:
 
 | Step | Automatable part | Augmentable part | Stays manual | Source |
 |---|---|---|---|---|
-| Pacing | pull spend and budgets into one place; flag under- and overspend | compute the new budget | the budget change decision: "I need to be on top of what is happening" | PD, SP1, SP2, PM |
-| Monthly report | data pull, the "work completed / planned" page | commentary draft | narrative, so you "know what you're talking about" in front of the client | SD, PM, SP1 |
-| Pre-call prep | collate data across platforms | summary and talking points | the "so what" | SP2, SP1, PM |
-| Content brief | split the plan into briefs, intake, handoff to freelancers | research bank (stats, compliance) | — | SD, CM |
-| Content writing | — | research only | **all writing**: "Content writing stays human" | SD, CM, LB |
-| Link domain vetting | Ahrefs pull + AI spam pre-screen | — | final human look | LB |
-| Link health | weekly scan for dropped links, notices to publishers | — | — | LB, SC, MC |
-| SEO onboarding | prefilled keyword research and metadata, first-draft deck | strategy with Claude | strategy judgement, the client call. **Target: about 1/3 of today's effort** | LB |
-| Forecasting | — | **already done**: hours to about 15 minutes with Gemini | review of inputs | PD |
-| Quarterly / 6-month review deck | draft | — | review; the SEO Director wants it manual except for small clients | PD, SD |
-| Meta ad QA (20–30 ads a launch) | format and spelling checks | — | — | PM |
-| Strategy (both departments) | — | keyword review with guardrails | "the strategic thinking... is important for the team to do" | SD, SP2 |
-| QA of delegated work | — | — | all of it: money is at risk | SP1, SP2 |
+| Pacing | pull spend and budgets; flag under- and overspend | work out the new budget | the budget decision | PD, SP1, SP2, PM |
+| Monthly report | data pull; "work completed / planned" page | commentary draft | the narrative | SD, PM |
+| Meeting prep | collate data across platforms | talking points | the "so what" | SP1, SP2, PM |
+| Content brief | split the plan into briefs; intake; freelancer handoff | research bank | — | SD, CM |
+| Content writing | — | research only | all writing | SD, CM, LB |
+| Link domain vetting | metrics pull + AI spam pre-screen | — | final look | LB |
+| Link health | weekly dead-link scan; publisher notices | — | — | LB, SC, MC |
+| SEO onboarding | prefilled keyword research, metadata, deck draft | strategy with AI | judgement; client call | LB |
+| Forecasting | — | **done already: hours to about 15 min** | review inputs | PD |
+| Meta ad QA | format and spelling checks | — | — | PM |
+| QA of delegated work | — | — | all of it | SP1, SP2 |
 
-**Recommendation: Option A (split each step's time into parts), held as shares of one time distribution.**
-- Each step keeps **one time distribution**, as today (a triangular low/likely/high from interviews).
-- Each step gets three **shares**: automatable %, augmentable %, manual %, summing to 100%.
-- A change is written against the parts, not as a new time:
-  - "automate 80% of pacing's automatable part" or "augment the augmentable part ×1.5";
-  - automation also gets a **residual** (review time left after automating), so automation never drops a step to
-    zero by accident.
-- **When the baseline is corrected, every future state moves with it.**
-- This is Option C generalised to three parts. It fits what the interviews describe (gather / judge / check) without
-  modelling tasks inside steps (Option B), which the interviews can't populate.
+**Proposed design** (Option A from the handover: split a step's time into parts, held as shares of one distribution)
 
-**Does step time vary by tier?** Yes, for some steps. Evidence:
-- Tier 1 meetings and prep are longer.
-- Tier 1 strategy is "a lot comes from this strategy thinking".
-- Reporting and commentary are "quicker for small clients".
+**1. Base values on each step.** Keyed in once and corrected over time.
 
-**Recommendation:** a **per-tier multiplier on the step's time** (default 1) rather than a distribution per tier.
-Frequency per tier is already handled by servicing recurrence.
+| Field | Meaning | Example (pacing, per client a month) |
+|---|---|---|
+| Time | low / likely / high hands-on time (as today) | 30 / 55 / 90 min |
+| **Work split** | automatable % / augmentable % / manual %, summing to 100, each with a one-line description of what that part is | 70% "pull spend and budgets, spot under-pacing" / 20% "work out new budgets" / 10% "decide and change" |
+| **Tier multiplier** | × on time for Tier 1 / 2 / 3 (default 1) | 1.3 / 1 / 0.8 |
+| Per-client override | × or extra time for a named Tier 1 client (section 4) | e.g. 1.5 for a demanding client |
+| Waiting, rework, routing | as today | — |
+| **Source and confidence** per value | interview / calculator / measured / estimate | interview (SP2), medium |
 
-**How confident are the baselines?** No timesheets, so every baseline is an interview range. **Recommendation:**
-- record a **source and confidence per value** (interview / calculator / measured);
-- show the ranges in results;
-- use Calibration if the client ever exports Monday.com ticket times. Monday.com is now the ticketing hub, so ticket
-  open-to-close times are the best measured source available.
-- A useful real before/after already exists: forecasting dropped from hours to 15 min with Gemini (PD).
+**2. A change is a separate object that points at parts of steps.** It is never a new time.
 
-**Engine:** New. This is the node design the handover flags.
+| Field | Meaning | Example: "Unified pacing tool" |
+|---|---|---|
+| Kind | automation or augmentation | automation |
+| Acts on | step(s) and part | Pacing: automatable part |
+| Effect, automation | removes X% of that part and leaves a residual check time | removes 90%; residual 3 min |
+| Effect, augmentation | speeds that part by a factor | (e.g. budget calculation ×1.5) |
+| Also changes (optional) | rework chance, waiting time, or adds or removes a step | fewer overspend reworks |
+| Adoption | share of people or time actually using it | 80% |
+| Start and ramp | month it starts; months to full effect | month 2; 1 month |
+| Cost (optional) | $ a month, so savings can be weighed | unknown |
 
-## 7. Changes the client wants to test
+**3. The future time is worked out, never typed.** Worked example, using illustrative shares:
+- Pacing at 55 min = 38.5 automatable + 11 augmentable + 5.5 manual.
+- With the change, the automatable part becomes 38.5 × 10% plus a 3-min residual, about 7 min. With 80% adoption the
+  step is about 23 min.
+- That saves about 32 min a client a month, about **7.5 h a month for a 14-client manager**.
+- **If the baseline is later corrected to 70 min, the saving moves with it.**
 
-**Automation and augmentation, Performance**
+**4. Display.** On the map, each step shows a stacked bar (automatable / augmentable / manual) with now against
+future. A scenario lists its changes, not edited steps.
 
-| Change | Who wants it | Acts on | Engine |
-|---|---|---|---|
-| Unified pacing across all channels, with per-campaign budgets and alerts that create tasks | PD, SP1, SP2 ("Pacing?" "100%"), PM, Founder | pacing step: day-1 2h, 30 min a day, 15–20 min per flagged account | New (share model) |
-| Anomaly and threshold alerts (frequency over 3, CPL over 2× last month, conversion drops) | PD, SP2, PM, MC | performance review steps; fewer late fixes | New |
-| Auto-generated implementation briefs | SP1 | briefing step | New |
-| Pre-call data collation and talking points | SP1, SP2 | prep: 30 min to 1h15 a call | New |
-| Report commentary drafts | PM, SP1 | about 30 min a client a month | New |
-| Quarterly review deck generation | PD | quarterly deck | New |
-| Meta ad QA checker | PM | QA of 20–30 ads a launch | New |
-| Better forecasting tool | PD | already at about 15 min | New |
-| Website / tracking-change monitor | SP1 (Austin's idea) | tracking incidents | New |
+**5. How it fits what exists.**
+- **Solutions** (copied maps) stay for changes in routing, such as removed or added steps.
+- **Changes** handle time.
+- **Process levers** (step time ×) and **speed factors** stay as blunt tools.
+- **Calibration** compares the baselines with measured times if the client ever exports Monday.com ticket times. That
+  is the only measured source they have.
 
-**Automation and augmentation, Organic**
+**Questions for Austin on this design**
 
-| Change | Who wants it | Acts on | Engine |
-|---|---|---|---|
-| Onboarding to about 1/3 of today's effort | LB (#1 wish) | SEO onboarding month | New |
-| Content brief automation, central intake, freelancer handoff | SD, CM | briefs and allocation | New |
-| Link domain pre-vetting (AI) | LB, already started | vetting: about 60 domains in 1–2h, about 2 days lag | New |
-| Link health monitor + publisher CRM + invoice chasing | SC, LB, MC | link admin, dead links | New |
-| Report "work completed / planned" page | SD | monthly report | New |
-| 6-month review slides for small clients | Founder keen; SD reluctant | review deck | New |
-| Prospect deck automation | LB | 1–2 a month | New |
-| Page-build QA (mobile and desktop) | LB | rework on page builds | New (reduced rework chance: Have) |
+| # | Question |
+|---|---|
+| N1 | Three parts, or two (automatable / manual) with augmentation as a speed factor on the whole step? |
+| N2 | Should tier multipliers live on each step, or once per process? |
+| N3 | Is adoption a lever per change, or one workspace-wide setting? Austin noted non-autonomous tools tend not to get used (MC). |
+
+## 8. Changes the client wants to test
+
+These are the starting scenario library. Each becomes a change (section 7) or a people/mix lever.
+
+**Automation and augmentation: Performance**
+
+| Change | Wanted by | Acts on |
+|---|---|---|
+| Unified pacing with per-campaign budgets and auto-tasks | PD, SP1, SP2, PM, Founder | pacing |
+| Anomaly and threshold alerts (frequency over 3, CPL over 2×, conversion drops) | PD, SP2, PM, MC | performance review; fewer late fixes |
+| Auto-generated implementation briefs | SP1 | briefing |
+| Pre-call data collation and talking points | SP1, SP2 | meeting prep |
+| Report commentary drafts | PM, SP1 | monthly report |
+| Quarterly review deck generation | PD | quarterly deck |
+| Meta ad QA checker | PM | ad QA |
+| Website / tracking-change monitor | SP1 | tracking incidents |
+
+**Automation and augmentation: Organic**
+
+| Change | Wanted by | Acts on |
+|---|---|---|
+| Onboarding cut to about 1/3 of today's effort | LB (#1) | SEO onboarding |
+| Content brief automation, central intake, freelancer handoff | SD, CM | briefs and allocation |
+| AI link-domain pre-vetting | LB (started) | vetting: about 60 domains in 1–2h, about 2 days lag |
+| Link health monitor + publisher CRM + invoice chasing | SC, LB, MC | link admin; dead links |
+| Report "work completed / planned" page | SD | monthly report |
+| Review slides for small clients | Founder keen; SD reluctant | 6-month review |
+| Prospect deck automation | LB | 1–2 decks a month |
+| Page-build QA (mobile and desktop) | LB | page-build rework |
 
 **People and mix**
 
-| Change | Source | Engine |
-|---|---|---|
-| Replace the resigned SEO manager (19 clients) | SD | Have |
-| 1–2 hires so the SEO Director hands over small clients and keeps 3 enterprise ones | SD | Have |
-| Senior Performance lead (vacant Head of Performance) | SC, PD | Have |
-| Junior writer to cut freelancer spend (SD) **vs** more freelancers rather than hires (CM) | SD, CM | Have |
-| Second business developer later | SC | Have |
-| Fewer, higher-quality links per client | SD | Have (recurrence) |
-| Tier-mix or pricing changes | none raised | Have (fee range, traffic share) |
+| Change | Source |
+|---|---|
+| Replace the resigned SEO manager | SD |
+| 1–2 hires so the SEO Director keeps only 3 enterprise clients | SD |
+| A senior Performance lead | SC, PD |
+| Junior writer (SD) **vs** more freelancers (CM) | SD, CM |
+| Second business developer later | SC |
+| Fewer, higher-quality links per client | SD |
+| Tier mix or price changes (none raised; available) | — |
 
-**Attitudes that constrain the model**
+**Constraints from the interviews**
 - No timesheets.
-- Writing, strategy, client relationships and QA stay human: "You can't automate a relationship, nor should you"
-  (SP1).
 - No automatic budget changes (PD).
-- Change fatigue: three tools rolled out in 50 days, and "too many changes" (SC).
-- Austin: "if it's not autonomous things, I don't think it's going to get used" (MC). So weight **automation**
-  (no adoption needed) above **augmentation** (needs adoption) in the model, perhaps with an adoption-rate lever.
+- Writing, strategy, relationships and QA stay human.
+- Change fatigue: 3 tools rolled out in 50 days drew "too many changes" (SC).
 
-## 8. Gaps: questions for the client
+## 9. Gaps: questions for the client
 
-**Needed to answer Q1 and Q2 at all**
-1. How many active clients are there in total, and how many in Tier 1, 2 and 3? What is the total MRR?
-2. What is each tier's retainer range? Can we have **the pricing calculator** (retainer to words, links, tech hours,
-   manager hours)?
-3. Each person's portfolio: clients, tier of each and channels per client (Performance). Can we have **the SEO
-   Director's capacity model**?
-4. Contracted hours per week per person, and leave. Which org-chart roles are offshore, contractors or open (the grey
-   boxes)? Is head count 22 or 24, and are the 4 offshore inside it?
-5. Salaries by role or band, for DLER and cost. (Billing is $120–150/h, cost $80/h.)
+**Keyed in later by the Founder** (D3–D5; the app needs the entry points in section 4)
+1. Client count per tier, and fee per tier.
+2. Each employee's portfolio.
+3. Named Tier 1 clients with their hand-holding hours, ad-hoc requests, cadence and assigned people.
 
-**Baseline times** (ranges are fine: low / likely / high)
+**Still to ask**
 
-6. Hands-on hours to onboard one client, Organic and Performance.
-7. Minutes per: monthly report and commentary; WIP prep; pacing check per account per channel; content brief; 1,000
-   words written; 1,000 words edited; link (brief, outreach, vetting, invoice); tech hour delivered against a ticket.
-8. How many client emails and ad-hoc requests a week per tier?
-9. How long do client approvals take (content, ad copy, Meta previews)? How many rounds?
-10. Rework rates: content edits from client feedback, page-build errors, link replacements, overspend incidents.
-11. Can we export Monday.com ticket open/close times? That is the only measured time source.
-
-**Lead flow and churn**
-
-12. New clients a month over the last 12 months, by tier. Lead volume and the funnel stage the "1 in 10" refers to.
-13. Logo and MRR churn rate per quarter, by tier and reason. How many of the about 5 weekly warnings become churn?
-14. Do clients move between tiers? How often are upsells won?
+4. **DLER definition:** is "money under management" retainer MRR only, or does it include ad spend managed? Which
+   department is at 2.75 and which at 3.2?
+5. Hours a week per person; leave; salaries or bands. Is head count 22 or 24, and are the 4 offshore included? Which
+   org-chart boxes are contractors or open roles?
+6. The **pricing calculator** (fee → words, links, tech hours, manager hours), and the SEO Director's capacity model.
+7. Channels per Performance client.
+8. Baseline times (low / likely / high):
+   - onboarding hours (Organic, Performance);
+   - minutes per report, meeting prep, pacing check, content brief, 1,000 words written and edited;
+   - minutes per link step;
+   - client email and ad-hoc requests per week per tier.
+9. Waits and rework: client approval times and rounds; page-build errors; link replacements; overspend incidents.
+10. New clients a month over the last 12 months, by tier; lead volume; which stage "1 in 10" is measured at.
+11. Churn rate per tier and by reason; how many of the about 5 weekly warnings become churn; tier moves and upsells.
+12. Can Monday.com ticket open/close times be exported? That is the only measured time source.
 
 **Conflicts to resolve**
 
-15. **"3:1 to 4:5":** is the goal DLER from 3:1 to 4.5:1? What is the baseline per department (2.75 and 3.2: which is
-    which)?
-16. **Link volume:** 200 (SC), 250 in January to 312 now (SD), 300–350 (LB). What is the current monthly figure, and
-    links per client per tier? (5 links for a 6K client doesn't obviously add up to 300+ without more clients or tiers.)
-17. **Gross margin about 30%** against a cost of $80/h and billing of $120–150/h, which implies more. What is in the
-    30%?
-18. **Tier 2 meeting cadence:** monthly (SP1, SP2) or "every so often" (PD)?
-19. **SEO Director split:** 70/30 or 60/40? And the Senior SEO Manager says he is "close to" cap yet "not really"
-    overstretched: what is the true ceiling?
-20. **Writers:** hire a junior (SD) or add freelancers (CM)? How much of the 100k words is freelance, and what are the
-    2 contracted freelancers' monthly words?
-21. Does "enterprise" mean Tier 1? Is the about 6K retainer Tier 1 and the about 3K one Tier 3?
+13. Link volume: 200 (SC), 250 in January to 312 now (SD), 300–350 (LB). Default about 310, range 250–350.
+14. Gross margin about 30% against $80/h cost and $120–150/h billing, which implies more.
+15. Tier 2 meeting cadence: monthly (SP1, SP2) or "every so often" (PD).
+16. Writers: hire a junior (SD) or add freelancers (CM)?
+17. Does "enterprise" mean Tier 1? Is the about 6K retainer Tier 1 and the about 3K one Tier 3?
 
-**People still to interview** (named by interviewees)
+## What to build (first draft of the keep / cut / build list)
 
-- Technical SEO Specialist / Technical SEO Director: audits and tech-ticket times.
-- Link team lead: outreach time per link.
-- The Performance implementers and the pacing helper: their capacity and roles.
-- Conversion Tracking Specialist: incident frequency.
-- Business development: funnel numbers.
+**Build**
 
-## Next step
+| Item | Size | Serves |
+|---|---|---|
+| Capacity page: busy share, clients and channels per employee, headroom, MRR against target, DLER, with-change comparison | New | A1–A5 |
+| Goal seek over the client count (per tier or by mix, least-busy assignment) | New | A3, A4 |
+| Named Tier 1 clients alongside tier counts in one run | Small–New | D3, D5 |
+| Per-client overrides for named clients (hand-holding, ad-hoc, cadence, deliverables) | New | D5 |
+| Portfolio counts per person for counted clients | New | D4, A2 |
+| Step base values: work split, tier multiplier, source and confidence | New | section 7 |
+| Changes (automation / augmentation) as objects acting on step parts, with adoption and ramp | New | A4, A6 |
+| Channels as a load driver (Performance) | New | A2 |
+| Reserved management share per person; ramp for new starters; salary input | Small | A1, A5 |
+| Words → content tasks; freelancer capacity in words | Small | A8 |
+| Work priority by tier; recurrence pinned to week of month | New | realism (Should) |
 
-Once Austin has marked this up, map each item to keep / cut / build. The engine verdicts above are the first draft
-of that list. The builds they imply:
+**Keep:** the map editor, the engine and animation, people, roles, servicing, lead flow, market, churn drivers,
+Sandbox scenarios and compare, and "what matters most".
 
-| Build | Size |
-|---|---|
-| Capacity page (clients and channels per person, busy share, MRR against target, DLER, headroom) | New |
-| Goal seek over the client count per tier | Small/New |
-| Step time shares (automatable / augmentable / manual) with changes written against them | New |
-| Per-tier time multiplier on steps | Small |
-| Channels as a load driver | New |
-| Reserved management share per person | Small |
-| Ramp-up of new starters | Small |
-| Work priority by tier | New |
-| Recurrence pinned to week of month | New |
+**Candidates to cut** (from the handover's lightly validated list, now checked against this spec): price rises,
+profit detail beyond DLER, client value ranges, share links, first principles, the block library, and solutions
+(if changes replace them). **Austin to confirm.**
