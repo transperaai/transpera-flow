@@ -953,6 +953,21 @@ export interface TimeSplit {
   uncovered: Stat[] | null;
 }
 
+/**
+ * Where each person's time goes, by step (the Capacity page links each item to its step, D32). Asked for with
+ * `simulate(…, { personTime: true })`; not asked for, nothing is allocated and no other output changes. Only the non-zero
+ * entries are listed.
+ */
+export interface PersonTime {
+  /** Mean hands-on hours a month per person id per step id, over the measured window (pipeline and servicing work both). */
+  stepHours: Record<string, Record<string, number>>;
+  /**
+   * Mean clients per person id per service id over the window: the clients who have them assigned in any role, or as their
+   * manager, counted under each service the client takes.
+   */
+  clients: Record<string, Record<string, number>>;
+}
+
 /** One month of a role's or person's busy share across replications. */
 export interface MonthBusy extends Stat {
   /** Hours a week they have that month (capacity less leave, and before a start or after an end date). */
@@ -1077,6 +1092,8 @@ export interface ReplicationResult {
   weekly?: WeeklySamples;
   /** Present only when the run was asked for month-by-month numbers (see `MonthlyReplication`). */
   monthly?: MonthlyReplication;
+  /** Present only when the run was asked for where each person's time goes (see `PersonTime`). */
+  personTime?: PersonTime;
   H: number;
   /** Warm-up simulated before t = 0 and discarded. */
   warmupHours: number;
@@ -1299,6 +1316,8 @@ export interface SimulationResult {
   churnCauses?: ChurnCauses;
   /** Month by month, only when the run was asked for it (`simulate(…, { monthly: true })`). */
   monthly?: MonthlyResult;
+  /** Where each person's time goes, by step, and their clients by service: only when asked for (`simulate(…, { personTime: true })`). Means over the replications. */
+  personTime?: PersonTime;
   /**
    * With `monthly`: each replication's own months (replication × month), for paired comparisons such as the price-rise
    * trade-off (the same seed and warm-up give the same random numbers, so two runs' replications pair up).

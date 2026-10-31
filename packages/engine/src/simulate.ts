@@ -55,6 +55,7 @@ import { flattenModel } from "./flatten";
 import { detectLoops, type Loop } from "./loops";
 import type {
   ClientOverrides,
+  PersonTime,
   ClientReplication,
   ClientResult,
   Distribution,
@@ -849,6 +850,8 @@ export function runOnce(
    * starts, e.g. the 1st of each calendar month (see `monthBounds`).
    */
   sampleMonthly: boolean | readonly number[] = false,
+  /** Keep where each person's time goes by step, and their clients by service (`PersonTime`). Read off the run; changes nothing in it. */
+  samplePersonTime = false,
 ): ReplicationResult {
   // Groups and child processes are only a view: runs see leaf steps (a no-op for flat models).
   // (Team time and ramp become a capacity channel on the run's months: availability.ts.)
@@ -1872,6 +1875,29 @@ export function runOnce(
     shapes.set(key, shape);
     return shape;
   };
+  // Where each person's time goes (`PersonTime`), only when asked for: hands-on hours by person and step, and client-weeks by person and service.
+  const nStepsAll = stepList.length;
+  const nSvc = services.length;
+  const ptHours = samplePersonTime ? new Float64Array(people.length * nStepsAll) : null;
+  const ptCount = samplePersonTime ? new Float64Array(people.length * nSvc) : null;
+  const ptSum = samplePersonTime ? new Float64Array(people.length * nSvc) : null;
+  const ptLast = samplePersonTime ? new Float64Array(people.length).fill(-W) : null;
+  /** Add a person's client counts since they last changed to the window's client-weeks. */
+  const ptAdvance = (p: PersonState, t: number) => {
+    const a = Math.max(ptLast![p.idx]!, 0);
+    const b = Math.min(t, H);
+    ptLast![p.idx] = t;
+    if (!(b > a)) return;
+    for (let s = 0; s < nSvc; s++) ptSum![p.idx * nSvc + s]! += (ptCount![p.idx * nSvc + s]! * (b - a)) / hpw;
+  };
+  /** A client of these services starts (+1) or stops (-1) counting for a person. */
+  const ptTrack = (p: PersonState, services_: readonly string[], t: number, by: number) => {
+    ptAdvance(p, t);
+    for (const sid of services_) {
+      const s = serviceIndex.get(sid);
+      if (s !== undefined) ptCount![p.idx * nSvc + s]! += by;
+    }
+  };
   /** "least-busy" placement (`placeNewClients`); anything else is today's round-robin. */
   const leastBusy = model.placeNewClients === "least-busy";
   const stepById = new Map(model.steps.map((s) => [s.id, s] as const));
@@ -2022,6 +2048,7 @@ export function runOnce(
     for (const p of rc.assigned) {
       advance(p, t);
       p.clients++;
+      if (ptCount) ptTrack(p, client.services, t, 1);
     }
     for (let i = 0; i < touched.length; i++) addRosterLoad(touched[i]!, parts[i]!, t);
     if (mon && shape.uncovered.length) {
@@ -2071,6 +2098,7 @@ export function runOnce(
     for (const p of rc.assigned) {
       advance(p, t);
       p.clients--;
+      if (ptCount) ptTrack(p, rc.spec.services, t, -1);
     }
     for (const p of rc.shape.touched) {
       p.contrib.delete(rc);
@@ -2970,6 +2998,11 @@ export function runOnce(
       const svc = e.task !== undefined;
       if (svc) p.svcHours += handsOn;
       else p.busyHours += handsOn;
+      if (ptHours) {
+        // Only the part inside the measured window counts (a job straddling t = 0 or the horizon), as for hourly work.
+        const share = t >= 0 && t + dur <= H ? 1 : dur > 0 ? Math.max(0, Math.min(t + dur, H) - Math.max(t, 0)) / dur : t >= 0 && t < H ? 1 : 0;
+        if (share > 0) ptHours[p.idx * nStepsAll + st.mi]! += handsOn * share;
+      }
       const over = overloaded(p);
       if (over) p.overPipeline += handsOn;
       // A manager from another role does the step as their own role's work.
@@ -3832,6 +3865,25 @@ export function runOnce(
     if (sv.id !== null && sv.s.pricingModel === "hourly") hourlyOut[sv.id] = { hours: hourlyHours[i]!, revenue: hourlyRev[i]! };
   });
   const monthly = mon ? monthlyOut(mon) : null;
+  let personTime: PersonTime | null = null;
+  if (ptHours) {
+    const monthsInRun = H / monthHours;
+    const stepHours: PersonTime["stepHours"] = {};
+    const clientCounts: PersonTime["clients"] = {};
+    for (const p of people) {
+      ptAdvance(p, H);
+      for (const st of stepList) {
+        const h = ptHours[p.idx * nStepsAll + st.mi]!;
+        if (h > 0) (stepHours[p.id] ??= {})[st.s.id] = h / monthsInRun;
+      }
+      for (let s = 0; s < nSvc; s++) {
+        const id = services[s]!.id;
+        const weeks = ptSum![p.idx * nSvc + s]!;
+        if (id !== null && weeks > 0) (clientCounts[p.id] ??= {})[id] = weeks / model.horizonWeeks;
+      }
+    }
+    personTime = { stepHours, clients: clientCounts };
+  }
   const toTrace = ({ seg: _seg, svc, task: _task, rate: _rate, lp: _lp, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
     return id !== null ? { ...entity, service: id } : entity;
@@ -3862,6 +3914,7 @@ export function runOnce(
     entities: keepTrace ? entities.map(toTrace) : null,
     ...(weekly ? { weekly } : {}),
     ...(monthly ? { monthly } : {}),
+    ...(personTime ? { personTime } : {}),
     H,
     warmupHours: W,
     activeEnd: active,
@@ -4147,6 +4200,28 @@ export interface SimulateOptions {
    * sizes a different automatic warm-up, which shifts every arrival and draw (sandbox phase 3, §1). `SimulationResult.initialState` echoes it.
    */
   initialState?: InitialState;
+  /**
+   * Also report where each person's time goes by step, and their clients by service (`SimulationResult.personTime`). Read off the
+   * run, so no other number changes; not asked for, nothing is allocated.
+   */
+  personTime?: boolean;
+}
+
+/** The replications' `PersonTime` averaged (an entry a run doesn't have is 0 in it). */
+function personTimeMeans(parts: PersonTime[]): PersonTime {
+  const mean = (pick: (p: PersonTime) => Record<string, Record<string, number>>): Record<string, Record<string, number>> => {
+    const sums: Record<string, Record<string, number>> = {};
+    for (const part of parts) {
+      const rows = pick(part);
+      for (const pid of Object.keys(rows)) {
+        const row = (sums[pid] ??= {});
+        for (const id of Object.keys(rows[pid]!)) row[id] = (row[id] ?? 0) + rows[pid]![id]!;
+      }
+    }
+    for (const pid of Object.keys(sums)) for (const id of Object.keys(sums[pid]!)) sums[pid]![id]! /= parts.length;
+    return sums;
+  };
+  return { stepHours: mean((p) => p.stepHours), clients: mean((p) => p.clients) };
 }
 
 /**
@@ -4174,7 +4249,7 @@ export function simulate(model: EngineModel, reps = 30, seed = 1, options: Simul
   }
   const start = options.initialState ?? initialState(model);
   for (let i = 0; i < reps; i++) {
-    const r = runOnce(model, seed + i * SEED_STRIDE, i === 0, start, false, options.monthly ? (options.monthStarts ?? true) : false);
+    const r = runOnce(model, seed + i * SEED_STRIDE, i === 0, start, false, options.monthly ? (options.monthStarts ?? true) : false, Boolean(options.personTime));
     if (i === 0) trace = r.entities;
     runs.push(r);
   }
@@ -4303,6 +4378,7 @@ export function simulate(model: EngineModel, reps = 30, seed = 1, options: Simul
     ...(model.clients ? { clients: clientResults(model, runs) } : {}),
     ...(runs[0]?.churn ? { churnCauses: summariseChurn(model, resolveChurnDrivers(model), runs.map((r) => r.churn!)) } : {}),
     ...(options.monthly && runs[0]?.monthly ? { monthly: monthlyResult(model, runs.map((r) => r.monthly!)) } : {}),
+    ...(options.personTime && runs[0]?.personTime ? { personTime: personTimeMeans(runs.map((r) => r.personTime!)) } : {}),
     ...(options.monthly && runs[0]?.monthly
       ? {
           monthlySamples: {

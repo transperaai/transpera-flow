@@ -480,4 +480,43 @@ describe("item 6: placing won clients", () => {
   });
 });
 
+describe("item 7: where each person's time goes, by step", () => {
+  const two = () => {
+    const dora: EnginePerson = { name: "Dora", roles: ["dir"], capacity: HPW };
+    const m = model({ c1: client({ manager: "dora" }), c2: client({ assignments: { r: "ann" } }), c3: client({ assignments: { r: "ann" } }) }, {
+      people: { ann: { name: "Ann", roles: ["r"], capacity: HPW }, bob: { name: "Bob", roles: ["r"], capacity: HPW }, dora },
+      work: 0.1,
+    });
+    m.roles = { ...m.roles, dir: { name: "Director", count: 1, cost: 80, ongoing: 0 } };
+    m.steps = m.steps.map((s) => (s.id === "task" ? { ...s, toClientManager: true } : s));
+    return m;
+  };
+
+  it("not asked for: nothing is added and no other number moves", () => {
+    const plain = simulate(two(), 3, 1);
+    const asked = simulate(two(), 3, 1, { personTime: true });
+    expect(plain.personTime).toBeUndefined();
+    const { personTime: _drop, ...rest } = asked;
+    expect(JSON.stringify(rest.kpi)).toBe(JSON.stringify(plain.kpi));
+    expect(JSON.stringify(rest.people)).toBe(JSON.stringify(plain.people));
+    expect(JSON.stringify(rest.steps)).toBe(JSON.stringify(plain.steps));
+  });
+
+  it("gives mean hands-on hours a month per person per step, and clients per person per service", () => {
+    const r = simulate(two(), 4, 1, { personTime: true });
+    const pt = r.personTime!;
+    const months = 26 / MONTH_WEEKS;
+    // Dora is c1's manager (about 24 tasks over 6 months = 4 a month at 0.1 h); Ann has c2 and c3 (8 a month).
+    expect(pt.stepHours.dora!.task!).toBeGreaterThan(0.35);
+    expect(pt.stepHours.dora!.task!).toBeLessThan(0.45);
+    expect(pt.stepHours.ann!.task!).toBeGreaterThan(0.75);
+    expect(pt.stepHours.ann!.task!).toBeLessThan(0.85);
+    // It adds up to what the run says each person worked.
+    for (const pid of ["ann", "dora"]) expect(pt.stepHours[pid]!.task! * months).toBeCloseTo(r.people[pid]!.servicingHours * 26, 6);
+    expect(pt.clients.dora).toEqual({ svc: 1 });
+    expect(pt.clients.ann!.svc).toBeCloseTo(2, 9);
+    expect(pt.stepHours.bob?.task ?? 0).toBeLessThan(0.1);
+  });
+});
+
 // (later items append below)
