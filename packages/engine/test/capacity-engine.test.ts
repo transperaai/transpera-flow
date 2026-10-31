@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   runOnce,
   simulate,
+  groupServiceOf,
   withClientGroups,
   type EngineClient,
   type EngineModel,
@@ -157,6 +158,44 @@ describe("item 1: driver recurrences", () => {
   });
 });
 
+describe("item 2: named and counted clients together", () => {
+  const withGroups = (mix?: EngineModel["clientMix"], named: Record<string, EngineClient> = { n1: client({ name: "Named 1" }), n2: client({ name: "Named 2" }) }): EngineModel =>
+    model(named, {
+      extra: {
+        clientGroups: { svc: { count: 3, fee: 1000, churnMonthly: 0, stayMonths: 12, health: 70 } },
+        ...(mix ? { clientMix: mix } : {}),
+      },
+    });
+
+  it("groups-add keeps the named clients and adds the counted ones, with unique keys", () => {
+    const m = withClientGroups(withGroups("groups-add"));
+    expect(Object.keys(m.clients!).sort()).toEqual(["group:svc:1", "group:svc:2", "group:svc:3", "n1", "n2"]);
+    expect(m.activeClients).toBe(5);
+    expect(m.clients!.n1!.name).toBe("Named 1");
+    expect(m.clients!["group:svc:2"]).toMatchObject({ name: "Retainer 2", mrr: 1000, health: 70 });
+    expect(groupServiceOf("group:svc:2")).toBe("svc");
+    expect(groupServiceOf("n1")).toBeNull();
+  });
+
+  it("a named client that already has a group-style key is kept and the group clients take the next free numbers", () => {
+    const m = withClientGroups(withGroups("groups-add", { "group:svc:1": client({ name: "Odd" }) }));
+    expect(Object.keys(m.clients!)).toHaveLength(4);
+    expect(m.clients!["group:svc:1"]!.name).toBe("Odd");
+    expect(Object.keys(m.clients!).sort()).toEqual(["group:svc:1", "group:svc:2", "group:svc:3", "group:svc:4"]);
+  });
+
+  it("groups-replace and an omitted mix are today's rule: the groups replace the named roster, exactly", () => {
+    const replace = withClientGroups(withGroups("groups-replace"));
+    const omitted = withClientGroups(withGroups());
+    expect(Object.keys(replace.clients!).sort()).toEqual(["group:svc:1", "group:svc:2", "group:svc:3"]);
+    expect(replace.clients).toEqual(omitted.clients);
+    expect(replace.activeClients).toBe(3);
+  });
+
+  it("simulates both kinds together: the run reports named and counted clients", () => {
+    const r = simulate(withGroups("groups-add"), 2, 1);
+    expect(Object.keys(r.clients ?? {}).sort()).toEqual(["group:svc:1", "group:svc:2", "group:svc:3", "n1", "n2"]);
+  });
+});
+
 // (later items append below)
-void simulate;
-void withClientGroups;

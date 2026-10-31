@@ -174,22 +174,71 @@ export function withClientGroups(model: EngineModel): EngineModel {
     return model;
   }
   const services = { ...model.services };
-  const clients: Record<string, EngineClient> = {};
-  let total = 0;
+  // "groups-add" (docs/adr/0022-capacity-inputs.md): the counted clients sit beside the named ones. Anything else is today's rule: they replace them.
+  const add = model.clientMix === "groups-add";
+  const clients: Record<string, EngineClient> = add ? { ...model.clients } : {};
+  let total = add ? Object.keys(clients).length : 0;
+  const portfolios = portfolioHolders(model);
   for (const sid of Object.keys(groups).sort()) {
     const g = groups[sid]!;
     const service = model.services?.[sid];
     if (!service) continue;
     services[sid] = { ...service, churnMonthly: g.churnMonthly, tenureMonths: g.stayMonths };
     const n = counted(sid);
-    for (let i = 1; i <= n; i++) {
-      clients[groupClientKey(sid, i)] = { name: `${service.name} ${i}`, services: [sid], mrr: g.fee, health: g.health, assignments: {} };
+    const holders = portfolios.length ? portfolioFill(model, sid, n, portfolios) : [];
+    // (Keys stay unique beside named clients: a number whose key a named client already has is skipped.)
+    for (let i = 1, k = 1; i <= n; i++, k++) {
+      while (clients[groupClientKey(sid, k)]) k++;
+      const holder = holders[i - 1];
+      const c: EngineClient = { name: `${service.name} ${i}`, services: [sid], mrr: g.fee, health: g.health, assignments: holder?.assignments ?? {} };
+      if (holder) c.manager = holder.manager;
+      clients[groupClientKey(sid, k)] = c;
     }
     total += n;
   }
   const out: EngineModel = { ...model, services, clients, activeClients: total };
   expanded.add(out);
   memo.set(model, out);
+  return out;
+}
+
+/** People with a portfolio, in people order (the order counted clients are dealt out in). */
+function portfolioHolders(model: EngineModel): string[] {
+  return Object.entries(model.people ?? {})
+    .filter(([, p]) => p.portfolio && Object.values(p.portfolio).some((n) => Number.isFinite(n) && n > 0))
+    .map(([id]) => id);
+}
+
+/** The roles a service's servicing steps use (the roles whose steps its clients' tasks queue for). */
+function serviceRoles(model: EngineModel, sid: string): Set<string> {
+  const out = new Set<string>();
+  const stepRole = new Map(model.steps.map((s) => [s.id, s.role] as const));
+  for (const link of model.services?.[sid]?.servicing ?? []) {
+    for (const stepId of model.servicingProcesses?.[link.process]?.steps ?? []) {
+      const role = stepRole.get(stepId);
+      if (role) out.add(role);
+    }
+  }
+  return out;
+}
+
+/**
+ * Who looks after each of a group's `n` unnamed clients, in client order (docs/adr/0022-capacity-inputs.md): people with a
+ * portfolio for the service take their count each, in people order. A client is assigned to its person in each of their roles
+ * that the service's servicing steps use, and its manager is that person. The remainder (count less what people hold) is
+ * left out, so it stays unassigned and shared as before. A sum above the count is cut off at the count (the check names it).
+ */
+function portfolioFill(model: EngineModel, sid: string, n: number, holders: string[]): { assignments: Record<string, string>; manager: string }[] {
+  const out: { assignments: Record<string, string>; manager: string }[] = [];
+  const roles = serviceRoles(model, sid);
+  for (const pid of holders) {
+    const person = model.people![pid]!;
+    const want = Math.max(0, Math.round(person.portfolio?.[sid] ?? 0));
+    if (!(want > 0)) continue;
+    const assignments: Record<string, string> = {};
+    for (const rid of person.roles) if (roles.has(rid)) assignments[rid] = pid;
+    for (let i = 0; i < want && out.length < n; i++) out.push({ assignments, manager: pid });
+  }
   return out;
 }
 
