@@ -72,6 +72,7 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D35 | **Shared teams start with the D27 list and no rates.** Set up flags a missing rate until Joe keys it in. | 31 Oct, Austin |
 | D36 | **Price rises carry a churn rate.** Each tier has an editable "extra churn for each 10% rise, for 3 months", prefilled with an estimate and flagged as one. The Sandbox's Barely / Normally / Strongly are presets for it, and results show the clients lost to the rise on their own line. | 31 Oct, Austin (our recommendation) |
 | D37 | **Unconfirmed client figures are made-up placeholders, flagged as estimates and editable later.** This covers D10 (directors and managers in DLER salaries: a workspace setting, on by default, marked "to confirm") and which department reads 2.75 and which 3.2 (not hard-coded: DLER is computed from the data). | 31 Oct, Austin |
+| D38 | **No saved scenarios.** The Sandbox is free play: levers reset when you leave. In their place, the Sandbox lets you **pick a map version per process**: today's map or one of its solutions (a copied, edited map), from a chosen month. Results show today's path and the changed path side by side, with the "What happens" verdict. Replaces D34. | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
