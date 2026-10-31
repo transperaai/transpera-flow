@@ -53,8 +53,13 @@ brief has a default: use it.
 | Brief | Branch | Migration versions |
 |---|---|---|
 | `p0-cuts-brief.md` | `claude/cap-p0-cuts` | `20270118000000`–`20270118009999`. Merged in #253 |
-| `p1-setup-brief.md` | `claude/cap-p1-setup` | `20270119000000`–`20270119009999` |
+| `p1-setup-brief.md` | `claude/cap-p1-setup` | `20270119000000`–`20270119009999`. Merged in #256 |
 | `p23-interface-brief.md` | `claude/cap-p23-interface` | none (engine types only). Merged in #251 |
 | `p2-engine-inputs-brief.md` | `claude/cap-p2-engine` | none (engine only). Merged in #252 |
 | `p3-engine-changes-brief.md` | `claude/cap-p3-changes` | none (engine only). Merged in #254 |
 | `p4-editor-brief.md` | `claude/cap-p4-editor` | `20270120000000`–`20270120009999` |
+| `p2b-mapping-brief.md` | `claude/cap-p2b-mapping` | `20270121000000`–`20270121009999` |
+| `p5-capacity-brief.md` | `claude/cap-p5-capacity` | `20270122000000`–`20270122009999` |
+| `p6-overview-brief.md` | `claude/cap-p6-overview` | none |
+| `p7-sandbox-brief.md` | `claude/cap-p7-sandbox` | `20270123000000`–`20270123009999` |
+| `p8-issues-brief.md` | `claude/cap-p8-issues` | `20270124000000`–`20270124009999` |
