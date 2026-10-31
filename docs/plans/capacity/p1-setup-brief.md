@@ -33,7 +33,7 @@ tests don't move. P2 wires the new columns into the engine.
   current role check that `clients` and `client_groups` writes use, and reuse it.
 - Every editable number keeps provenance as `client_groups.provenance` does (`{column: {source, at, by}}`), with a
   source label of `interview | calculator | measured | estimate`. Seeded defaults are `estimate`.
-- If you redefine `save_fields`, copy the latest definition, in `20261230000000_references_and_logos.sql` or later,
+- If you redefine `save_fields`, copy the latest definition (`20261111000000_client_groups.sql`; check nothing later redefines it)
   and append to its allow-list.
 
 | Table / column | What it holds |
@@ -66,7 +66,7 @@ Tests (`packages/db/test/capacity-setup.test.ts`):
 - `copy-from-supabase.test.ts` still passes;
 - a bundle export and restore round-trips the new tables and columns (`workspace-bundle.ts`, `workspace-import.ts`).
 
-Run `gen:types`, `gen:seed` and `gen:bootstrap`.
+Run `gen:types`, `gen:seed` and `gen:import-schema`.
 
 ## 2. `packages/db` read and write functions
 

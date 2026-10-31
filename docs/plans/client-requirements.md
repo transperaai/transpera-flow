@@ -358,9 +358,11 @@ judgement kept:
 
 **3. The future time is worked out, never typed.** Worked example, using illustrative shares:
 - Pacing at 55 min = 38.5 automatable + 11 augmentable + 5.5 manual.
-- With the change, the automatable part becomes 38.5 × 10% plus a 3-min residual, about 7 min. With 80% adoption the
-  step is about 23 min.
-- That saves about 32 min a client a month, about **7.5 h a month for a 14-client manager**.
+- With the change at full adoption, the automatable part becomes 38.5 × 10% plus a 3-min residual, about 7 min, and
+  the step is about 23 min: about 32 min saved a client a month, about **7.4 h a month for a 14-client manager**.
+- At 80% adoption the automatable part is 38.5 × (1 − 0.9 × 0.8) + 3 × 0.8, about 13 min, so the step is about 30 min:
+  about 25 min saved, about 5.9 h a month for 14 clients. (Corrected 31 Oct: the first draft gave the full-adoption
+  figures as the 80% ones.)
 - **If the baseline is later corrected to 70 min, the saving moves with it.**
 
 **4. Display.** On the map, each step shows a stacked bar (automatable / augmentable / manual) with now against
